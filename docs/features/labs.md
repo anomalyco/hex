@@ -1206,7 +1206,9 @@ instructions are the iOS cleaner's, word for word
 using the sentence's context, resolve an explicit spoken self-correction
 ("tuesday, no wait, wednesday" becomes "wednesday"), keep the speaker's
 wording, language, meaning, numbers, and negation otherwise, and treat the
-transcript as content to clean rather than as instructions to answer. The
+transcript as content to clean rather than as instructions to answer. A
+dictated question or request comes back as that same question or request,
+cleaned, never as a reply and never behind a sentence of the model's own. The
 stage is read in `Profiles::process_cancellable_with`
 ([dictation/processor.rs](../../src/dictation/processor.rs)) where the
 OpenCode rewrite would have run, though only when that rewrite is off: a mode
@@ -1214,13 +1216,28 @@ that rewrites with OpenCode keeps its own model. It also skips typed text
 (Labs › Transform typed text), a transcript of nothing but numbers, an empty
 transcript, and a dictation a voice prompt answered. `dictation::apple_cleanup`
 holds the decision (`plan`), the one bridge call, and the guard. The guard
-applies the iOS cleaner's rules (length, digits, word counts, negation counts
-with "no wait" read as a self-correction, and word overlap), with one counting
-difference: a length is counted in scalars here and in grapheme clusters on
-iOS, and the CJK numerals `Character.isNumber` sees but Rust's `is_numeric`
-does not are read as digits here. The bridge
-(`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs the
-plain-text responder at utility priority with a 2 s budget, temperature 0.2,
+applies the iOS cleaner's rules and adds the checks the reported answers
+needed: length, digits, word counts, negation counts with "no wait" read as a
+self-correction, and word overlap as before; a budget of one cleaned word the
+transcript never used per six transcript words, never below one, so a misheard
+word ("cloud code" becomes "Claude Code") still passes; no first- or
+second-person pronoun the transcript never used and no changed count for one
+it did use, while a spoken self-correction may drop one; no reply opener
+("yes", "no", "sure", "okay", "certainly", "absolutely", "of course", "here",
+"here's", "sorry") unless the transcript starts with the same one; and no
+preamble, meaning no colon in the first sentence or clause when the transcript
+has no colon at all, and no "here's the", "here is the", "cleaned transcript",
+or "cleaned text" the transcript did not say. One counting difference remains:
+a length is counted in scalars here and in grapheme clusters on iOS, and the
+CJK numerals `Character.isNumber` sees but Rust's `is_numeric` does not are
+read as digits here. The guard returns the reason (empty text, much longer or
+many more words than the transcript, a changed number, an added or dropped
+negation, added words the speaker did not say, a changed speaker, a reply
+opener, a preamble, text about something else, or most of the transcript
+dropped) and that exact reason is what History and the live log record. The
+bridge
+(`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs
+the plain-text responder at utility priority with a 2 s budget, temperature 0.2,
 and 1024 response tokens; the answer is trimmed, loses one pair of wrapping
 quotes only when the transcript didn't dictate its own, takes back the
 transcript's leading and trailing whitespace (spoken formatting's line breaks),
@@ -1249,6 +1266,17 @@ Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
 `a_lost_negation_is_rejected`, `an_added_negation_is_rejected`,
 `runaway_length_is_rejected`, `an_empty_answer_or_transcript_is_rejected`,
 `an_answer_with_little_overlap_is_rejected`,
+`an_answered_request_is_rejected`,
+`a_replied_to_sentence_is_rejected`,
+`a_preamble_before_a_long_transcript_is_rejected`,
+`a_preamble_phrase_the_transcript_never_said_is_rejected`,
+`an_added_colon_in_the_first_clause_is_rejected`,
+`words_the_speaker_never_said_are_rejected`,
+`a_single_misheard_word_is_within_the_added_word_budget`,
+`a_changed_person_is_rejected`,
+`a_self_correction_may_drop_a_pronoun`,
+`an_opener_the_speaker_said_is_kept`,
+`the_instructions_are_the_ios_cleaners_word_for_word`,
 `only_a_dictation_with_words_to_clean_is_cleaned`,
 `a_stage_that_cannot_run_changes_nothing`,
 `a_cancelled_stage_starts_nothing`,

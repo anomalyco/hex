@@ -82,6 +82,156 @@ final class TranscriptCleanupGuardTests: XCTestCase {
         )
     }
 
+    /// The reported shape: a dictated request comes back answered, with the responder as
+    /// the speaker.
+    func testRejectsAnAnsweredRequest() {
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "can you find that article about the quarterly report and send it to me",
+                cleaned: "I found one article about the quarterly report and sent it to you."
+            ),
+            "the cleaned text added words the speaker did not say"
+        )
+    }
+
+    /// The reported shape: a dictated fragment comes back answered.
+    func testRejectsARepliedToSentence() {
+        XCTAssertFalse(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "would you say",
+                cleaned: "Yes, I would say."
+            )
+        )
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "sure, would you say",
+                cleaned: "Yes, would you say."
+            ),
+            "the cleaned text starts with a reply"
+        )
+    }
+
+    /// The reported shape: a long transcript comes back behind a preamble.
+    func testRejectsAPreambleBeforeALongTranscript() {
+        XCTAssertFalse(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "the quarterly report needs a short summary for the sales team before the meeting on monday",
+                cleaned: "Sure, I can help with that. Here's the cleaned transcript: The quarterly report needs a short summary for the sales team before the meeting on Monday."
+            )
+        )
+    }
+
+    /// A preamble phrase the transcript never said is refused on its own, even when the
+    /// words around it stay within the added-word budget.
+    func testRejectsAPreamblePhraseTheTranscriptNeverSaid() {
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "sure here is the plan for the launch and i can help with that",
+                cleaned: "Sure, I can help with that. Here's the plan for the launch."
+            ),
+            "the cleaned text starts with a preamble"
+        )
+    }
+
+    /// A colon in the first clause is a preamble's shape when the speaker said no colon
+    /// at all.
+    func testRejectsAnAddedColonInTheFirstClause() {
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "bring these to the meeting",
+                cleaned: "Bring these: notes."
+            ),
+            "the cleaned text starts with a preamble"
+        )
+    }
+
+    /// The reported shape: the answer gained words the speaker never said.
+    func testRejectsWordsTheSpeakerNeverSaid() {
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "i will call you tomorrow",
+                cleaned: "I will definitely call you tomorrow morning."
+            ),
+            "the cleaned text added words the speaker did not say"
+        )
+    }
+
+    /// One misheard word is exactly what the pass is for, so the budget leaves room for
+    /// it.
+    func testAcceptsASingleMisheardWordWithinTheAddedWordBudget() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "we should use cloud code on tuesday, no wait, wednesday",
+                cleaned: "We should use Claude Code on Wednesday."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "open the file in vs code",
+                cleaned: "Open the file in VS Code."
+            )
+        )
+    }
+
+    /// Who is speaking may not change: an answer or a preamble adds a pronoun the
+    /// transcript never used.
+    func testRejectsAChangedPerson() {
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "send the notes to me",
+                cleaned: "Send the notes to you."
+            ),
+            "the cleaned text changed who is speaking"
+        )
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "we should ship it",
+                cleaned: "We should ship it, we should."
+            ),
+            "the cleaned text changed who is speaking"
+        )
+    }
+
+    /// A spoken self-correction may drop a pronoun, since the corrected phrase is the one
+    /// the speaker settled on.
+    func testASelfCorrectionMayDropAPronoun() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i said tuesday, no wait, wednesday",
+                cleaned: "Wednesday."
+            )
+        )
+    }
+
+    /// The transcript may itself start with an opener; only a new one is a reply.
+    func testKeepsAnOpenerTheSpeakerSaid() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "yes, ship it on friday",
+                cleaned: "Yes, ship it on Friday."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "no, do not delete the file",
+                cleaned: "No, do not delete the file."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "of course we should ship it",
+                cleaned: "Of course we should ship it."
+            )
+        )
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "of the course we should ship it",
+                cleaned: "Of course we should ship it."
+            ),
+            "the cleaned text starts with a reply"
+        )
+    }
+
     func testCleanupSettingIsOffByDefaultAndPersists() {
         let suite = "AppleIntelligenceCleanupSettingsTests-\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
