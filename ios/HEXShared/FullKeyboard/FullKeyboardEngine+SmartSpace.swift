@@ -45,10 +45,33 @@ extension FullKeyboardEngine {
         return held == textBefore && textAfterSeparates
     }
 
-    /// Holds the space after the word just finished, until the next key.
-    func holdSpaceAfterWord() {
+    /// The text before the cursor as the strip reads it: with a held space, as after a typed
+    /// one, so the strip offers the next word rather than the word just finished.
+    var stripBefore: String? {
+        spacePending ? textBefore.map { $0 + " " } : textBefore
+    }
+
+    /// Holds the space after the word just finished, until the next key. The space bar's
+    /// counts as a space for the keys' page too: 123 goes back to ABC.
+    func holdSpaceAfterWord(spaceBar: Bool = false) {
         suggestionSpaceBefore = textBefore
+        if spaceBar {
+            layerState.didInsert(" ")
+            rebuildLayoutIfNeeded()
+        }
         refreshSuggestions()
+    }
+
+    /// Types the held space before a pick from the strip, which then offers the next word:
+    /// the pick goes in after it, as after a typed space, never in the finished word's place.
+    func typeHeldSpace(before suggestion: KeyboardSuggestion) {
+        guard spacePending, suggestion.kind != .revert, suggestions.contains(suggestion) else { return }
+        suggestionSpaceBefore = nil
+        typingLog?.edit("insert", [
+            TypingLogField("inserted", .string(" ")),
+            TypingLogField("src", .string("held_space")),
+        ])
+        target.insertText(" ")
     }
 
     /// Types a picked suggestion's word and the space after it, held where the text after the
@@ -61,6 +84,7 @@ extension FullKeyboardEngine {
         } else {
             suggestionSpaceBefore = textBefore
         }
+        typingLog?.context("suggestion")
     }
 
     /// Types the held space before `text`, the next key, when it starts another word (anything

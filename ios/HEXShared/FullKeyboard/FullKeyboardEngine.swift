@@ -79,7 +79,7 @@ final class FullKeyboardEngine {
     static let languageSwipeDistance: CGFloat = 24
 
     private(set) var shift = ShiftStateMachine()
-    private(set) var layerState = KeyboardLayerState()
+    var layerState = KeyboardLayerState()
     private(set) var field: KeyboardFieldKind = .text
     private(set) var touches: [Int: ActiveTouch] = [:]
     /// Touch ids in the order they went down.
@@ -360,13 +360,13 @@ final class FullKeyboardEngine {
         } else {
             autocorrect.decoderTaps = currentTokenTaps
             next = displayed(offeringRevert(autocorrect.suggestions(
-                beforeInput: textBefore,
+                beforeInput: stripBefore,
                 field: field,
                 autocorrectionType: target.autocorrectionType,
                 predictionModel: letterOdds,
                 capitalizesNext: AutoCapitalization.shouldCapitalize(
                     mode: autoCapitalizationMode,
-                    before: textBefore,
+                    before: stripBefore,
                     hasText: target.hasText,
                     language: layout.language
                 )
@@ -380,6 +380,7 @@ final class FullKeyboardEngine {
     }
 
     func acceptSuggestion(_ suggestion: KeyboardSuggestion) {
+        typeHeldSpace(before: suggestion)
         // A queued tap on a prediction must not replace a word started in the meantime.
         if suggestion.kind == .nextWord,
            AutocorrectEngine.currentToken(in: textBefore) != nil
@@ -438,7 +439,6 @@ final class FullKeyboardEngine {
             }
         }
         insertPicked(suggestion.replacement)
-        typingLog?.context("suggestion")
     }
 
     /// Types an emoji from the emoji panel: no spacing or autocorrect around it.
@@ -1238,7 +1238,7 @@ final class FullKeyboardEngine {
             return
         }
         let ending = holdsTypedSpace ? "" : " "
-        defer { if ending.isEmpty { holdSpaceAfterWord() } }
+        defer { if ending.isEmpty { holdSpaceAfterWord(spaceBar: true) } }
         let token = AutocorrectEngine.currentToken(in: textBefore)
         let taps = currentTokenTaps
         learning?.didFinish(word: token, language: autocorrect.language.rawValue)
@@ -1471,7 +1471,7 @@ final class FullKeyboardEngine {
 
     // MARK: - Layout
 
-    private func rebuildLayoutIfNeeded() {
+    func rebuildLayoutIfNeeded() {
         if layout.layer != layerState.layer {
             rebuildLayout(cause: "layer_auto")
         }
