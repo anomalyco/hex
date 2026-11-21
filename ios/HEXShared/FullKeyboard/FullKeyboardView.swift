@@ -52,11 +52,31 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     static let fullAccessHintDuration: TimeInterval = 8
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     /// Every key's touch-down tick (letters, space, delete and its repeats, shift, 123,
-    /// return, suggestions): Apple's is a light, crisp tick, nearest to a soft rigid impact.
-    /// The Hex key's hold and its menu keep `haptics`' fuller thud.
-    static let keyTickStyle: UIImpactFeedbackGenerator.FeedbackStyle = .rigid
-    static let keyTickIntensity: CGFloat = 0.6
-    private let keyTicks = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle)
+    /// return, suggestions), as hard as Settings › Keyboard › Strength asks. The Hex key's hold
+    /// and its menu keep `haptics`' fuller thud.
+    var hapticStrength: KeyHapticStrength = .medium {
+        didSet {
+            guard hapticStrength != oldValue else { return }
+            keyTicks = UIImpactFeedbackGenerator(style: Self.keyTickStyle(hapticStrength))
+            if allowsHaptics() { keyTicks.prepare() }
+        }
+    }
+    private var keyTicks = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(.medium))
+
+    /// Apple's key haptic is a crisp tick, so every strength is a rigid impact (the sharpest
+    /// style) but Strong, a fuller medium one. Medium, the default, is 0.8 of a rigid tap;
+    /// Hex's was a 0.65 light impact, which testers found much weaker than Apple's.
+    static func keyTickStyle(_ strength: KeyHapticStrength) -> UIImpactFeedbackGenerator.FeedbackStyle {
+        strength == .strong ? .medium : .rigid
+    }
+
+    static func keyTickIntensity(_ strength: KeyHapticStrength) -> CGFloat {
+        switch strength {
+        case .light: 0.5
+        case .medium: 0.8
+        case .strong: 1
+        }
+    }
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
     /// What the strip's Paste chip offers now.
@@ -411,6 +431,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
+        hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
         refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
@@ -1052,7 +1073,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     func keyFeedback() {
         if allowsHaptics() {
-            keyTicks.impactOccurred(intensity: Self.keyTickIntensity)
+            keyTicks.impactOccurred(intensity: Self.keyTickIntensity(hapticStrength))
             keyTicks.prepare()
         }
         UIDevice.current.playInputClick()
