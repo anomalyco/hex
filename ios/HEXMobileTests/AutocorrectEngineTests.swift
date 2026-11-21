@@ -1089,13 +1089,27 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "what the fuck you bitch ")
     }
 
-    func testTurningAutocorrectSettingOffKeepsSuggestionsWithoutAutoReplacing() {
+    /// Apple's keyboard with Auto-Correction off (black box, iOS 27.2) offers what you typed,
+    /// your text replacements and completions ("th": The, This; "beau": Beautiful, Beauty;
+    /// "im": Imagine), but no fix: nothing for "teh" or "dont", no "I'm" for "im".
+    func testTurningAutocorrectSettingOffKeepsCompletionsWithoutFixes() {
         engine.autocorrect.isEnabled = false
         typeWord("dont")
-        XCTAssertFalse(engine.suggestions.isEmpty)
-        XCTAssertFalse(engine.suggestions[1].willAutoReplace)
+        XCTAssertEqual(engine.suggestions.first?.replacement, "dont")
+        XCTAssertFalse(engine.suggestions.contains { $0.replacement == "don't" }, "no contraction")
         tap(.space)
         XCTAssertEqual(target.text, "dont ")
+        typeWord("teh")
+        XCTAssertFalse(engine.suggestions.contains { $0.replacement == "the" }, "no spelling guess")
+        tap(.space)
+        typeWord("th")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "the", "completions stay")
+        XCTAssertFalse(engine.suggestions.contains { $0.willAutoReplace })
+
+        engine.autocorrect.isEnabled = true
+        tap(.space)
+        typeWord("teh")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "the", "on: the fix")
     }
 
     /// A TestFlight tester (build 56) kept Autocorrect on only for text replacements. Apple's
@@ -1125,6 +1139,25 @@ final class AutocorrectEngineTests: XCTestCase {
         engine.configureForField()
         typeWord("addr ")
         XCTAssertEqual(target.text, "addr ", "a field without autocorrection gets none, as with Apple's")
+    }
+
+    /// Chat shorthand Hex leaves alone ("brb", "idk") still takes your own text replacement,
+    /// as Apple's keyboard applies every text replacement, with Autocorrect on or off.
+    func testYourTextReplacementWinsOverShorthand() {
+        engine.autocorrect.loadLexiconEntries([("brb", "be right back"), ("omg", "oh my god")])
+        typeWord("brb")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "be right back")
+        XCTAssertTrue(engine.suggestions.dropFirst().first?.willAutoReplace == true)
+        typeWord(" idk ")
+        XCTAssertEqual(target.text, "be right back idk ", "shorthand without a replacement stays")
+
+        engine.autocorrect.isEnabled = false
+        typeWord("omg")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "oh my god")
+        tap(.space)
+        XCTAssertEqual(target.text, "be right back idk oh my god ")
+        tap(.delete)
+        XCTAssertEqual(target.text, "be right back idk omg", "one backspace puts back the shortcut")
     }
 }
 
