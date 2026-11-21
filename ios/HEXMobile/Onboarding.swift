@@ -16,6 +16,9 @@ struct OnboardingModel: Equatable {
     /// What Hex's own model is doing ("Optimizing for this iPhone… about a minute"), while it
     /// prepares.
     var detail: String?
+    /// Whether Hex downloads a model for it: not for Apple's on-device recognizer before iOS 26,
+    /// which only needs Speech Recognition allowed.
+    var downloads = true
 
     var isReady: Bool { stage == .ready }
 
@@ -55,6 +58,7 @@ struct OnboardingModel: Equatable {
         case .checking: .starting
         }
         stage = Self.combine(app, keys)
+        downloads = dictation.engineDownloads
         let id: String
         if dictation.isModelReady {
             id = dictation.transcriptionLanguageID
@@ -187,8 +191,9 @@ struct OnboardingView: View {
 
     /// The model starts downloading as onboarding opens, as on the desktop. Launch already
     /// prepares a cached Parakeet or Apple Speech; this starts the Parakeet download that home's
-    /// Set up used to wait for. A launch that found Parakeet ended mid-load stays failed
-    /// (ParakeetLoadGuard): only Try again loads it again.
+    /// Set up used to wait for, or, before iOS 26, gets Apple's on-device recognizer ready,
+    /// which asks for Speech Recognition here. A launch that found Parakeet ended mid-load
+    /// takes Apple's engine instead (SpeechEngineChoice), or stays failed where there's none.
     private func startModelDownload() async {
         guard !OnboardingFixture.isSnapshot else { return }
         // Launch decides Apple Speech or Parakeet in a task of its own; let it answer first.
@@ -287,7 +292,7 @@ private struct OnboardingSetupPage: View {
                 OnboardingTitle("Setting up Hex")
                     .onboardingStagger(1)
                 HStack(spacing: 6) {
-                    Text(model.isReady ? "Ready" : "Downloading")
+                    Text(model.isReady ? "Ready" : model.downloads ? "Downloading" : "Preparing")
                     OnboardingLanguageCapsule(language: model.language)
                     Text("speech model")
                 }
@@ -632,7 +637,7 @@ struct OnboardingModelWait: View {
             if model.isFailed || stalled {
                 VStack(spacing: 6) {
                     OnboardingQuietButton(title: "Continue without a model", action: onWithoutModel)
-                    Text("Dictation won't work until the speech model downloads.")
+                    Text(model.downloads ? "Dictation won't work until the speech model downloads." : "Dictation won't work until speech recognition is ready.")
                         .font(.system(size: 13))
                         .foregroundStyle(HexTheme.textFaint)
                         .multilineTextAlignment(.center)

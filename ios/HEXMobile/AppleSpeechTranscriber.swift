@@ -122,9 +122,10 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     }
 
     /// Never asks for Speech Recognition access: that permission is for `SFSpeechRecognizer`,
-    /// which Hex doesn't use. `SpeechAnalyzer` runs on the iPhone without it, in the app as
-    /// in the keyboard, for `SpeechTranscriber` and `DictationTranscriber` alike, so a
-    /// person who turned it off still dictates (TestFlight build 51, iOS 27.0.1).
+    /// which Hex uses only before iOS 26 (`OnDeviceSpeechTranscriber`). `SpeechAnalyzer` runs
+    /// on the iPhone without it, in the app as in the keyboard, for `SpeechTranscriber` and
+    /// `DictationTranscriber` alike, so a person who turned it off still dictates (TestFlight
+    /// build 51, iOS 27.0.1).
     init(language: SpeechLanguage) {
         self.language = language
     }

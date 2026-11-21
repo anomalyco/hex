@@ -5,7 +5,10 @@
 (`HEXWidgets`). The containing app records a generation-scoped temporary WAV,
 transcribes on-device with Apple Speech on iOS 26+ (`SpeechTranscriber`, or
 `DictationTranscriber` for the languages it lacks, such as Norwegian, Danish,
-Swedish and Hebrew) or FluidAudio Parakeet V2 (iOS 18+, English), and removes
+Swedish and Hebrew) or FluidAudio Parakeet V2 (iOS 18+, English). Before iOS 26,
+every other language, and English on 3 GB iPhones (iPhone XR, SE 2nd generation)
+or after Parakeet couldn't load, goes to Apple's `SFSpeechRecognizer` on device
+only (`OnDeviceSpeechTranscriber`, chosen by `SpeechEngineChoice`). Hex removes
 each capture's file after inference, cancellation, or failure. During a warm session the keyboard
 extension sends commands and inserts completed text over the shared App Group
 (`group.anomaly.hex.mobile`). Otherwise it dictates by itself (in-keyboard
@@ -22,10 +25,12 @@ nothing transcribed (its orange dot shows for that moment). iOS ends a keyboard 
 its memory limit (about 60–90 MB depending on the model), so while less is left
 than starting needs (`os_proc_available_memory`: 32 MB for the first
 dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key
-open Hex instead, as before iOS 26. Audio never leaves the iPhone. Hex never asks
-for Speech Recognition access: that permission covers `SFSpeechRecognizer`, which Hex
-doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard alike
-(a TestFlight tester who turned it off dictated, iOS 27.0.1, build 51).
+open Hex instead, as before iOS 26. Audio never leaves the iPhone. From iOS 26 Hex
+never asks for Speech Recognition access: that permission covers `SFSpeechRecognizer`,
+which Hex uses only before iOS 26, and `SpeechAnalyzer` runs without it in the app and
+the keyboard alike (a TestFlight tester who turned it off dictated, iOS 27.0.1, build 51).
+Before iOS 26 Hex asks for it as it gets `SFSpeechRecognizer` ready (setup, or Set up),
+never at a launch by itself.
 
 ## Capabilities
 
