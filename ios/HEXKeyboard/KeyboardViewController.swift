@@ -1153,20 +1153,16 @@ final class KeyboardViewController: UIInputViewController {
         // No interface style override: iOS already gives the keyboard the field's appearance
         // (a field that asks for a dark keyboard gets dark traits in light mode, like the system
         // keyboard), while the document proxy's `keyboardAppearance` can go stale.
-        let nextReturn: String = switch textDocumentProxy.returnKeyType {
-        case .send: "Send"
-        case .google, .yahoo, .search: "Search"
-        case .go: "Go"
-        case .done: "Done"
-        case .join: "Join"
-        case .next: "Next"
-        case .route: "Route"
-        case .continue: "Continue"
-        case .emergencyCall: "SOS"
-        default: "Return"
+        let nextReturn = ReturnKeyStyle(textDocumentProxy.returnKeyType)
+        if viewModel.returnKey != nextReturn {
+            viewModel.returnKey = nextReturn
         }
-        if viewModel.returnKeyLabel != nextReturn {
-            viewModel.returnKeyLabel = nextReturn
+        let returnOn = ReturnKeyStyle.isEnabled(
+            automatically: textDocumentProxy.enablesReturnKeyAutomatically,
+            hasText: textDocumentProxy.hasText
+        )
+        if viewModel.returnKeyEnabled != returnOn {
+            viewModel.returnKeyEnabled = returnOn
         }
         // As the full keyboard's emoji key: fields that take any text, on an iPhone.
         let takesEmoji: Bool = {

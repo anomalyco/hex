@@ -109,15 +109,25 @@ private struct KeyboardChromePalette {
     var keyShadow: Color {
         Color.black.opacity(isDark ? 0.24 : 0.14)
     }
+
+    /// The return key's colours, as the full keyboard's (`FullKeyboardPalette`).
+    var actionFill: Color { Color(red: 0, green: 0x7A / 255.0, blue: 1) }
+    var actionPressedFill: Color { Color(red: 0, green: 0x62 / 255.0, blue: 0xCC / 255.0) }
+    var actionDisabledFill: Color {
+        isDark ? Color.white.opacity(0.39) : Color(red: 0xBF / 255.0, green: 0xC0 / 255.0, blue: 0xC5 / 255.0)
+    }
+    var returnDisabledInk: Color { textBase.opacity(0.1) }
 }
 
 private struct KeyboardKeyButtonStyle: ButtonStyle {
     let palette: KeyboardChromePalette
+    /// Another keycap colour, idle and pressed: the return key's blue.
+    var fill: (idle: Color, pressed: Color)?
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .background(
-                configuration.isPressed ? palette.keyPressedFill : palette.keyFill,
+                configuration.isPressed ? fill?.pressed ?? palette.keyPressedFill : fill?.idle ?? palette.keyFill,
                 in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
             )
             .shadow(color: palette.keyShadow, radius: 0.5, x: 0, y: 1)
@@ -1255,15 +1265,30 @@ struct KeyboardSurfaceView: View {
                 model.onKeyFeedback?()
                 model.onReturn?()
             } label: {
-                Image(systemName: "return")
+                Image(systemName: model.returnKey.symbol)
                     .font(.system(size: 15, weight: .medium))
-                    .foregroundStyle(p.textBase)
+                    .foregroundStyle(returnInk(p))
                     .opacity(glyphOpacity)
                     .frame(width: 48, height: 42)
                     .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }
-            .buttonStyle(KeyboardKeyButtonStyle(palette: p))
-            .accessibilityLabel(model.returnKeyLabel)
+            .buttonStyle(KeyboardKeyButtonStyle(palette: p, fill: returnFill(p)))
+            .disabled(!model.returnKeyEnabled)
+            .accessibilityLabel(model.returnKey.accessibilityLabel)
         }
+    }
+
+    /// Send, go, search and the other acting types are blue, grey while the field is empty and
+    /// the host turns them off; plain while the space bar is a trackpad, as on the full keyboard.
+    private func returnFill(_ p: KeyboardChromePalette) -> (idle: Color, pressed: Color)? {
+        guard model.returnKey.isAction, !isTrackpadActive else { return nil }
+        return model.returnKeyEnabled
+            ? (p.actionFill, p.actionPressedFill)
+            : (p.actionDisabledFill, p.actionDisabledFill)
+    }
+
+    private func returnInk(_ p: KeyboardChromePalette) -> Color {
+        if !model.returnKeyEnabled { return p.returnDisabledInk }
+        return model.returnKey.isAction ? .white : p.textBase
     }
 }

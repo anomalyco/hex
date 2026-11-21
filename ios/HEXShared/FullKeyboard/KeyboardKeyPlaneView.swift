@@ -13,9 +13,7 @@ final class KeyboardKeyPlaneView: UIView {
             setNeedsDisplay()
         }
     }
-    var returnLabel = "return" { didSet { if returnLabel != oldValue { setNeedsDisplay() } } }
-    var returnSymbol: String? = "return" { didSet { if returnSymbol != oldValue { setNeedsDisplay() } } }
-    var returnIsAction = false { didSet { if returnIsAction != oldValue { setNeedsDisplay() } } }
+    var returnStyle = ReturnKeyStyle(.default) { didSet { if returnStyle != oldValue { setNeedsDisplay() } } }
     var returnIsEnabled = true { didSet { if returnIsEnabled != oldValue { setNeedsDisplay() } } }
     /// Drawn faintly on the space bar: the keyboard's language while it switches between two
     /// or more ("Français"), else the dictation language's name ("English", "Norsk"), with
@@ -147,12 +145,17 @@ final class KeyboardKeyPlaneView: UIView {
                 )
             case .returnKey:
                 let isPressed = pressed.contains(.returnKey) && returnIsEnabled
-                let activeAction = returnIsAction && returnIsEnabled && !hideGlyphs
-                let fill: UIColor = activeAction
-                    ? (isPressed ? palette.actionPressedFill : palette.actionFill)
-                    : (isPressed ? palette.functionHeldFill : palette.keyFill)
+                let isAction = returnStyle.isAction && !hideGlyphs
+                let activeAction = isAction && returnIsEnabled
+                let fill: UIColor = if activeAction {
+                    isPressed ? palette.actionPressedFill : palette.actionFill
+                } else if isAction {
+                    palette.actionDisabledFill
+                } else {
+                    isPressed ? palette.functionHeldFill : palette.keyFill
+                }
                 let ink: UIColor = if !returnIsEnabled {
-                    palette.textMuted
+                    palette.returnDisabledInk
                 } else if activeAction {
                     .white
                 } else {
@@ -160,18 +163,14 @@ final class KeyboardKeyPlaneView: UIView {
                 }
                 context.fillKeycap(frame, fill: fill, radius: radius)
                 guard showGlyphs() else { continue }
-                if let symbol = returnSymbol {
-                    drawSymbol(
-                        symbol,
-                        in: labelFrame,
-                        color: ink,
-                        pointSize: isLandscape ? 18 : 19,
-                        weight: activeAction ? .medium : .regular,
-                        yOffset: isLandscape ? -0.5 : -0.33
-                    )
-                } else {
-                    drawText(returnLabel, in: labelFrame, font: .systemFont(ofSize: isLandscape ? 14.5 : 15.5), color: ink)
-                }
+                drawSymbol(
+                    returnStyle.symbol,
+                    in: labelFrame,
+                    color: ink,
+                    pointSize: isLandscape ? 18 : 19,
+                    weight: activeAction ? .medium : .regular,
+                    yOffset: isLandscape ? -0.5 : -0.33
+                )
             case .shift:
                 let shift = engine.shift
                 let isPressed = pressed.contains(.shift) && !shift.pressShowsOff
