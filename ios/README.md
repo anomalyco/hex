@@ -655,8 +655,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
   emoji for the text before the cursor, then a grid that scrolls sideways through
-  Frequently used and the eight categories, with ABC, the categories and delete
-  below. The row reads the last eight words (the newest counts most), their plurals
+  Frequently used (eight columns: your emoji, then common ones) and the eight
+  categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
+  delete below, drawn without keycaps as the system's are; a tap anywhere under the
+  grid goes to the key under it. The row reads the last eight words (the newest counts most), their plurals
   and endings, letters held down ("lmaooo"), phrases ("new year") and the word still
   being typed, matched against Unicode's CLDR names and keywords for the layout's
   language and English and against Hex's own chat words ("congrats", "bday"), one
