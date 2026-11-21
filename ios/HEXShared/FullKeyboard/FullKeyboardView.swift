@@ -50,6 +50,10 @@ final class FullKeyboardView: UIView {
     private(set) var showsRecording = false
     /// The Hex key's last tap or hold started a dictation here (not by opening Hex).
     private var dictatingFromHexKey = false
+    /// A finger on the bar where no word is: holding it dictates as holding the Hex key does.
+    private var barHold = HexKeyGesture()
+    private var barHoldTouch: UITouch?
+    private var barHoldWork: DispatchWorkItem?
     private var lastDictation: String?
     /// A word you typed whose slot you held: the strip offers Add to vocabulary until the text
     /// changes (`FullKeyboardView+Vocabulary`).
@@ -1132,8 +1136,8 @@ final class FullKeyboardView: UIView {
         }
     }
 
-    /// A tap or still hold on the Hex key.
-    private func hexKeyHeld() {
+    /// A tap or still hold on the Hex key, or a hold on the bar where no word is (`from`).
+    private func hexKeyHeld(from source: String = "hex_key") {
         if allowsHaptics() { haptics.impactOccurred() }
         dismissStyleMenu()
         guard model.hasFullAccess else {
@@ -1144,15 +1148,15 @@ final class FullKeyboardView: UIView {
             return
         }
         if hexKey.isWarm {
-            typingLog?.ui("hex_key", [TypingLogField("dictation", .string("warm"))])
+            typingLog?.ui(source, [TypingLogField("dictation", .string("warm"))])
             dictatingFromHexKey = true
             model.onDictateTap?()
         } else if let local = model.onLocalDictateTap {
-            typingLog?.ui("hex_key", [TypingLogField("dictation", .string("keyboard"))])
+            typingLog?.ui(source, [TypingLogField("dictation", .string("keyboard"))])
             dictatingFromHexKey = true
             local()
         } else {
-            typingLog?.ui("hex_key", [TypingLogField("dictation", .string("open_hex"))])
+            typingLog?.ui(source, [TypingLogField("dictation", .string("open_hex"))])
             dictatingFromHexKey = false
             model.onOpenURL?(model.coldStartURL)
         }
@@ -1160,11 +1164,89 @@ final class FullKeyboardView: UIView {
 
     /// Push to talk: lifting the finger after a hold finishes the dictation the hold started,
     /// as Done does. A hold that opened Hex has nothing to finish here.
-    private func hexKeyReleased() {
+    private func hexKeyReleased(from source: String = "hex_key_release") {
         guard dictatingFromHexKey else { return }
         dictatingFromHexKey = false
-        typingLog?.ui("dictation_stop", [TypingLogField("from", .string("hex_key_release"))])
+        typingLog?.ui("dictation_stop", [TypingLogField("from", .string(source))])
         model.onStopTap?()
+    }
+
+    // MARK: - Holding the bar
+
+    /// Apple's long press: a still finger this long on the bar where no word is dictates.
+    static let barHoldDuration: TimeInterval = 0.4
+
+    /// Whether a finger at `point` may hold the bar to dictate. Only touches nothing else took
+    /// reach here (an empty slot, beside the Hex key, a bar with no words); a word's slot,
+    /// the Hex key and the keys take their own. Not while the bar shows the Full Access hint
+    /// or a notice, or a dictation, the emoji panel or the style menu is up.
+    private func takesBarHold(at point: CGPoint) -> Bool {
+        let m = engine.layout.metrics
+        let bar = CGRect(x: 0, y: appliedLift, width: bounds.width, height: m.stripTop + m.stripHeight)
+        guard bar.contains(point), !showsRecording, emojiPanel == nil, styleMenu == nil,
+              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil
+        else { return false }
+        return model.stagePhase == .idle || model.stagePhase == .failed
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard barHoldTouch == nil, let touch = touches.first, takesBarHold(at: touch.location(in: self)) else {
+            super.touchesBegan(touches, with: event)
+            return
+        }
+        barHoldTouch = touch
+        barHold.touchDown(at: touch.location(in: self))
+        let work = DispatchWorkItem { [weak self] in self?.barHoldElapsed() }
+        barHoldWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.barHoldDuration, execute: work)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = barHoldTouch, touches.contains(touch) else {
+            super.touchesMoved(touches, with: event)
+            return
+        }
+        // A slide before the hold is no hold (the bar has no menu); after it, moves don't matter.
+        if barHold.touchMoved(to: touch.location(in: self)) == .openMenu { endBarHold() }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = barHoldTouch, touches.contains(touch) else {
+            super.touchesEnded(touches, with: event)
+            return
+        }
+        // A tap does nothing; lifting after the hold finishes the dictation it started.
+        let output = barHold.touchUp()
+        endBarHold()
+        if output == .release { hexKeyReleased(from: "bar_release") }
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = barHoldTouch, touches.contains(touch) else {
+            super.touchesCancelled(touches, with: event)
+            return
+        }
+        // As the Hex key's: a hold that already fired keeps dictating (Done finishes it).
+        endBarHold()
+    }
+
+    private func barHoldElapsed() {
+        barHoldWork = nil
+        guard barHoldTouch != nil, barHold.holdElapsed() == .hold else { return }
+        guard let touch = barHoldTouch, takesBarHold(at: touch.location(in: self)) else {
+            endBarHold()
+            return
+        }
+        // The Hex key's own path: its press (in-keyboard dictation arms) then its hold.
+        model.onHexKeyPress?(Date().timeIntervalSince1970)
+        hexKeyHeld(from: "bar_hold")
+    }
+
+    private func endBarHold() {
+        barHoldWork?.cancel()
+        barHoldWork = nil
+        barHold.cancel()
+        barHoldTouch = nil
     }
 
     /// Hold and slide: light the row under the finger, and pick it on release.
