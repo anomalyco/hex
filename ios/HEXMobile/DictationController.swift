@@ -263,8 +263,7 @@ final class DictationController {
             } else if #available(iOS 26.0, *) {
                 Task { [weak self] in
                     guard let self else { return }
-                    if let language = await AppleSpeechTranscriber.preferredLanguage(),
-                       AppleSpeechTranscriber.shouldUse(language) {
+                    if await Self.appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) != nil {
                         self.engineName = "Apple Speech"
                         self.prepareModel()
                     } else {
@@ -746,11 +745,31 @@ final class DictationController {
 
     private static func defaultTranscriber() async -> any LocalTranscribing {
         if #available(iOS 26.0, *),
-           let language = await AppleSpeechTranscriber.preferredLanguage(),
-           AppleSpeechTranscriber.shouldUse(language) {
+           let language = await appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) {
             return AppleSpeechTranscriber(language: language)
         }
         return ParakeetTranscriber()
+    }
+
+    /// The language Apple Speech dictates in, or nil for Parakeet V2, which knows only
+    /// English: Apple Speech's pick, unless it is English that Parakeet takes
+    /// (`AppleSpeechTranscriber.shouldUse`). With no pick (Speech not answering), English goes
+    /// to Parakeet and any other language (`wanted`: the one set, else the keyboard's
+    /// Automatic follows, else the iPhone's) stays on Apple Speech, which says it can't
+    /// dictate it rather than Parakeet hearing Spanish as English words.
+    @available(iOS 26.0, *)
+    nonisolated static func appleSpeechLanguage(
+        picked: SpeechLanguage?,
+        wanted: String? = LanguageSettings().dictationLanguage
+            ?? LanguageSettings().keyboardDictationLanguage()
+            ?? Locale.preferredLanguages.first,
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+    ) -> SpeechLanguage? {
+        if let picked {
+            return AppleSpeechTranscriber.shouldUse(picked, parakeetFits: parakeetFits) ? picked : nil
+        }
+        guard let wanted, !SpeechLanguagePicker.isEnglish(wanted) else { return nil }
+        return SpeechLanguage(locale: Locale(identifier: wanted), module: .dictation)
     }
 
     // MARK: - Capture & Generation-Scoped Transcription

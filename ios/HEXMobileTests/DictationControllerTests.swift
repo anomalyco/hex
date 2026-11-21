@@ -1149,6 +1149,25 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(languages.effectiveDictationLanguage, "es-MX")
     }
 
+    /// Parakeet V2 knows only English: Spanish goes to Apple Speech whatever happens, even when
+    /// Apple Speech doesn't answer, rather than Parakeet hearing it as English words.
+    func testSpanishNeverGoesToEnglishOnlyParakeet() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech arrived in iOS 26") }
+        func language(_ identifier: String, _ module: SpeechModuleKind) -> SpeechLanguage {
+            SpeechLanguage(locale: Locale(identifier: identifier), module: module)
+        }
+        typealias Controller = DictationController
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: language("es-ES", .speech), wanted: "es-ES", parakeetFits: true)?.identifier, "es-ES")
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: language("es-MX", .dictation), wanted: "es-MX", parakeetFits: true)?.identifier, "es-MX")
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: language("en-US", .speech), wanted: nil, parakeetFits: true)?.identifier, "en-US")
+        XCTAssertNil(Controller.appleSpeechLanguage(picked: language("en-US", .dictation), wanted: nil, parakeetFits: true), "English on DictationTranscriber: Parakeet, as before")
+        // Speech not answering: English may go to Parakeet, Spanish never.
+        XCTAssertNil(Controller.appleSpeechLanguage(picked: nil, wanted: "en-US", parakeetFits: true))
+        XCTAssertNil(Controller.appleSpeechLanguage(picked: nil, wanted: nil, parakeetFits: true))
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: nil, wanted: "es-ES", parakeetFits: true)?.identifier, "es-ES")
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: nil, wanted: "es-US", parakeetFits: true)?.identifier, "es-US")
+    }
+
     func testErrorsShowShortMessagesNeverCodesOrTypeNames() {
         // 560557684 is '!int', AVAudioSession's cannotInterruptOthers.
         let cannotInterrupt = NSError(domain: NSOSStatusErrorDomain, code: 560_557_684)

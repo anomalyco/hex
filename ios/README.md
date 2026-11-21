@@ -507,7 +507,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   An iPhone without `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation, all
   3–4 GB) dictates English with `DictationTranscriber` on iOS 26+: loading
   Parakeet there sat at 50% (Core ML's compile) until iOS ended Hex, at every
-  launch. Parakeet stays where it fits (6 GB) and before iOS 26. After Hex ended
+  launch. Parakeet stays where it fits (6 GB) and before iOS 26, for English only: when
+  Apple Speech doesn't answer, any other language stays on Apple Speech, which says it can't
+  dictate it, rather than going to Parakeet as English
+  (`DictationController.appleSpeechLanguage`). After Hex ended
   while loading Parakeet, the next launch waits for Set up instead of loading it
   again (`ParakeetLoadGuard`), and a Parakeet download that sits at one fraction
   for 90 s ends with a message. **When a model won't install**
@@ -927,8 +930,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   for `DictationTranscriber`; Hex sets them on both modules, and Parakeet's
   batch path gets no hint.
 - **Dictation languages:** `SpeechLanguagePickerTests` cover the picking rule
-  and `DictationControllerTests` a language change during a dictation and Automatic
-  following the keyboard's language. The
+  and `DictationControllerTests` a language change during a dictation, Automatic
+  following the keyboard's language, and Spanish never reaching Parakeet. The
   simulator can't transcribe: `SpeechTranscriber.isAvailable` is false there
   and `DictationTranscriber` fails with "Model not available", so
   `AppleSpeechClipTests` (skipped unless `HEX_SPEECH_CLIPS` names a folder of
