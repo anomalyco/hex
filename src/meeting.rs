@@ -49,6 +49,7 @@ pub(crate) use os::{
     system_audio_authorization, system_audio_ready,
 };
 pub(crate) use os::{open_folder, reveal};
+mod delete;
 mod delta;
 mod echo;
 mod export_name;
@@ -79,6 +80,9 @@ pub use chapters::chapters_file;
 #[cfg(target_os = "macos")]
 pub use chapters::section_for_id;
 pub use chapters::{Chapter, chapter_entries, section_markdown};
+#[cfg(test)]
+pub use delete::DeleteRefusal;
+pub use delete::{DeleteError, TrashedMeeting, delete, trash};
 pub use delta::*;
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
 #[cfg(all(debug_assertions, target_os = "macos"))]
@@ -1218,33 +1222,6 @@ fn explorer_open(path: &Path) -> std::ffi::OsString {
     open.push(path.as_os_str());
     open.push("\"");
     open
-}
-
-/// Moves a finished meeting to the Trash: its exported Markdown first, then
-/// its recording folder. Refuses while it records, transcribes, or writes
-/// notes. A missing Markdown file is skipped.
-pub fn trash(id: &str) -> Result<()> {
-    trash_meeting(&root()?.join(id), os::move_to_trash)
-}
-
-fn trash_meeting(
-    directory: &Path,
-    mut move_to_trash: impl FnMut(&Path) -> Result<()>,
-) -> Result<()> {
-    let manifest = read_manifest(directory)?;
-    if meeting_is_active(directory) != Some(false) {
-        return Err(eyre!("Stop the recording before deleting it"));
-    }
-    if notes_in_progress(&manifest.id) {
-        return Err(eyre!("Wait for the notes to finish before deleting"));
-    }
-    if let Some(path) = exported_markdown(&manifest) {
-        move_to_trash(&path)?;
-    }
-    if let Some(path) = notes_file::tracked(&manifest) {
-        move_to_trash(&path)?;
-    }
-    move_to_trash(directory)
 }
 
 /// The lowercase hex SHA-256 of a file, `None` when it can't be read.

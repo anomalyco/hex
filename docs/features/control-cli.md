@@ -86,10 +86,18 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Runs here: no running Hex, no /control request
 │   └── The script on stdout and nothing else, generated from the same clap
 │       tree every command parses
-├── hex meetings record [--title] | stop | copy-last
+├── hex meetings record [--title] | stop | copy-last | delete <id>
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
-│   └── No meetings cancel: Hex cannot discard a recording
+│   ├── No meetings cancel: Hex cannot discard a recording
+│   └── delete -> the pane's Delete for the exact `meetings list --json` id:
+│       Markdown, tracked notes file, then recording folder to the Trash,
+│       never `rm`; works with Meetings off, asks no confirmation
+│       ├── unknown id -> not-found; recording | transcribing | notes |
+│       │   final.pending -> meeting-recording | -transcribing | -notes |
+│       │   -final-pending, exit 1, nothing moved
+│       └── done -> "Deleted “<title>”; moved to the Trash", the open Meetings
+│           window drops the row at its next 1 s scan
 ├── hex settings list | get <key|prefix> | set <key> <value>
 │   ├── The window's save, then ReloadSettings -> live, no restart
 │   ├── Unknown key, bad value, read-only key -> refused, nothing written
@@ -166,7 +174,8 @@ dictation, paste-last, and Linux's typed-text go to the listener's own queue
 reload as the window's do, and `settings set` refuses a key whose capability
 the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
-go to the meeting recorder (`meeting/runtime`) as the tray's items do;
+go to the meeting recorder (`meeting/runtime`) as the tray's items do, and
+`meetings delete` calls the pane's own delete (`meeting/delete`);
 `window story` answers `unsupported`; Windows sends every `annotate`
 command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 `hex mcp` read files on every OS.

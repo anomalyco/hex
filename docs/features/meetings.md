@@ -1831,7 +1831,23 @@ Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   / Cancel, under the title in place of the icons until answered
   -> exported Markdown, then its tracked notes file, then
      Application Support/meetings/<id>, to the Trash
-  -> refused while recording, transcribing, or writing notes   // meetings.delete
+  -> refused while recording, transcribing, writing notes, or waiting
+     for its final transcript (final.pending)      // meetings.delete
+  // checks: deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording,
+  // deleting_refuses_a_transcribing_meeting_and_one_still_awaiting_its_final_transcript,
+  // deleting_refuses_ids_that_are_not_one_meeting_folder
+
+Agents -> hex meetings delete <id>                 // exact `meetings list --json` id
+  -> the same delete_meeting path the pane uses, through the running Hex
+     (control host; docs/cli.md), so both refuse and trash identically
+  -> unknown id -> not-found; recording/transcribing/notes/final.pending ->
+     meeting-recording/meeting-transcribing/meeting-notes/meeting-final-pending,
+     exit 1, nothing moved
+  -> no interactive confirmation in the CLI; the companion asks first
+  -> done -> "Deleted “<title>”; moved to the Trash"; an open pane drops the
+     row at its next 1 s rescan
+  // checks: deleting_a_meeting_answers_its_refusal_code; JSON shape
+  // {"version":4,"command":"meeting-delete","id":"…"} (control.rs)
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;
@@ -1839,7 +1855,9 @@ a separate notes file Hex tracks goes with it, and all stay recoverable from
 the Trash. Sources:
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs), the requests in
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `RevealTarget` /
-`trash` / `rename` in [meeting.rs](../../src/meeting.rs). Checks:
+`rename` in [meeting.rs](../../src/meeting.rs) with `delete` / `trash` in
+[meeting/delete.rs](../../src/meeting/delete.rs) (the pane's Delete and
+`hex meetings delete` share it). Checks:
 `deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording`,
 `deleting_trashes_a_tracked_notes_file_after_the_transcript`,
 `renaming_updates_the_manifest_and_an_unedited_markdown_heading`,

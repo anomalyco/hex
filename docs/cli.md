@@ -44,6 +44,7 @@ hex
 │   ├── record [--title T]         as the menu bar's Record Meeting; needs meetings.enabled
 │   ├── stop                       Stop & Transcribe
 │   ├── copy-last                  copy the last meeting transcript to the clipboard
+│   ├── delete <id>                move a finished meeting's Markdown and recording to the Trash
 │   └── list | show | search       read-only (docs/transcript-cli.md)
 ├── settings
 │   ├── list                       every setting: key, value, kind, choices, writable, about
@@ -325,6 +326,18 @@ state, the recording capsule, and Stop & Transcribe all apply to it.
 `meetings record` replies once the recording has started (or after 8 s);
 `meetings stop` replies once transcription has begun.
 
+`meetings delete <id>` is the Meetings pane's Delete, carried out by the
+running Hex on every OS: it moves the meeting's exported Markdown, any
+separate notes file Hex tracks, and then its recording folder to the Trash,
+never removing anything outright, so an open Meetings window drops the row at
+its next scan and the files stay recoverable from the Trash. The id is
+exactly the one `hex meetings list --json` prints (no prefixes). An unknown
+id, or a meeting that is recording, transcribing, writing notes, or waiting for
+the final transcript of a run Hex quit during, is refused with its own code
+(see Error codes) and exit 1, and nothing moves. It asks no confirmation and
+works whether or not Meetings is on, so a caller should ask the person first
+and offer the same two-step confirmation the pane does.
+
 ## Exit codes
 
 ```ts
@@ -390,7 +403,7 @@ dictation {action, print?, raw?}                 action: start | stop | toggle |
                                                  print (start and stop) answers `transcript`
 paste-last
 typed-text
-meeting-record {title?} | meeting-stop | meeting-copy-last
+meeting-record {title?} | meeting-stop | meeting-copy-last | meeting-delete {id}
 settings-get {key?} | settings-set {key, value}
 model-list | model-use {model, language?} | model-install {model, language?} | model-cancel
 window-show {pane?} | window-hide | window-story {story, variant?, play}
@@ -492,7 +505,12 @@ read-only              the key can't be set here (the message says where)
 invalid-value          the value doesn't parse or is out of range
 confirmation-required  clears history; pass --yes
 shortcut-in-use        another Hex shortcut already uses that binding
-not-found              no such capture, or it has no scrawl.json yet
+not-found              no such capture (or it has no scrawl.json yet), or no meeting with that id
+meeting-recording      deleting a meeting that is still recording
+meeting-transcribing   deleting a meeting that is still transcribing
+meeting-notes          deleting a meeting while Hex writes its notes
+meeting-final-pending  deleting a meeting that is waiting for its final transcript
+                       (Hex quit during it; the next launch finishes it)
 unknown-model          no such model id (`hex model list`)
 model-unavailable      an imported model that is missing, changed, or behind its Labs toggle,
                        or one `hex transcribe` named that isn't downloaded or ready

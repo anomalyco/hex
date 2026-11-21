@@ -162,6 +162,16 @@ pub enum MeetingsCommand {
         #[command(flatten)]
         output: crate::control::cli::Output,
     },
+    /// Delete a finished meeting: move its exported Markdown and its recording
+    /// folder to the Trash, as the Meetings pane's Delete does. Nothing is
+    /// removed outright, and Hex asks for no confirmation; ask the person
+    /// first.
+    Delete {
+        /// The exact id `hex meetings list --json` prints.
+        id: String,
+        #[command(flatten)]
+        output: crate::control::cli::Output,
+    },
 }
 
 #[derive(Serialize)]
@@ -765,7 +775,8 @@ pub fn meetings(command: &MeetingsCommand) -> Result<()> {
         // `main` sends these to the running Hex.
         MeetingsCommand::Record { .. }
         | MeetingsCommand::Stop { .. }
-        | MeetingsCommand::CopyLast { .. } => Err(eyre!("this command needs the running Hex")),
+        | MeetingsCommand::CopyLast { .. }
+        | MeetingsCommand::Delete { .. } => Err(eyre!("this command needs the running Hex")),
     }
 }
 

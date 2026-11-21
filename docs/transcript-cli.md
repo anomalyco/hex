@@ -154,6 +154,11 @@ it (0.3) unless they are common. Neither ever counts as an exact match.
 Debug builds retain `meeting record`, `watch`, `probe`, `transcribe`, and other
 developer commands. Their `meeting list/show` commands use the read-only query
 path too. The plural `meetings` commands are available in release builds.
+`meetings delete <id>` is the one that writes: it moves nothing itself but
+asks the running Hex to move the meeting's exported Markdown and its recording
+folder to the Trash, as the pane's Delete does, and refuses while the meeting
+still records, transcribes, writes notes, or waits for its final transcript
+([cli.md](cli.md#commands)). Everything above only reads.
 
 ## JSON version 1
 

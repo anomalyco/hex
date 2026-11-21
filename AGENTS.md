@@ -580,6 +580,11 @@ substitute for source inspection or a second roadmap.
   Rust deciding topic changes, the per-boundary fix-up after publication,
   chapter-extended titles that never touch a user-typed one, and section
   Markdown for Copy section.
+- `meeting/delete`: the one deletion path the Meetings pane's Delete and
+  `hex meetings delete` share: the exported Markdown, the tracked notes file,
+  then the recording folder to the Trash, with a typed refusal (unknown,
+  recording, transcribing, notes, final pending) the control reply turns into
+  its own code.
 - `meeting/query`: read-only meeting queries for agents (`meeting::query`):
   lock-aware listing, in-memory BM25 full-text search with stemming and fuzzy
   matching, transcript paging, stored notes, and Markdown rendering. It never
@@ -1133,9 +1138,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   owner; searches never return expired entries while waiting for disk cleanup.
   The hard caps are 10,000 entries and 16 MiB of raw + final text (oldest evicted
   first), with existing per-entry metadata and text limits. There is no archive.
-- `hex history` and `hex meetings` are read-only, release-available on every OS,
-  independent of feature opt-ins. Dispatch before process
-  logging, the instance lock, local API, GUI, permissions, or Hex Microphone.
+- `hex history` and `hex meetings list|show|chapters|search` are read-only,
+  release-available on every OS, independent of feature opt-ins. Dispatch
+  before process logging, the instance lock, local API, GUI, permissions, or Hex
+  Microphone. `hex meetings delete <id>` is the one writing command: a control
+  command the running Hex carries out through the pane's own delete
+  (`meeting::delete`), refusing while the meeting records, transcribes, writes
+  notes, or waits for its final transcript.
   History reads one open
   file through concurrent atomic replacements, applies the saved retention at
   query time, and reports malformed files/settings without repairing them.
@@ -1358,8 +1367,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   out, so rewrites near the live edge and the switch to the final transcript
   neither repeat nor drop turns.
 - Deleting a meeting moves its exported Markdown and then its recording folder
-  to the Trash (never `rm`), after a two-step confirmation, and is refused while
-  it records, transcribes, or writes notes. Renaming rewrites the manifest and
+  to the Trash (never `rm`), after a two-step confirmation in the pane (the CLI
+  `hex meetings delete` asks none; its callers do), and is refused while
+  it records, transcribes, writes notes, or waits for its final transcript.
+  Renaming rewrites the manifest and
   only a Markdown heading that still reads the previous title; files keep
   their names unless Export › Descriptive meeting file names is on, which renames
   the exported Markdown to the new title, keeping its date and time prefix and

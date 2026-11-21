@@ -176,6 +176,9 @@ impl Pump {
             ControlCommand::Screenshot { pick } => screenshot(pick, reply),
             ControlCommand::MeetingRecord { title } => self.meeting(false, title, reply),
             ControlCommand::MeetingStop => self.meeting(true, None, reply),
+            ControlCommand::MeetingDelete { id } => {
+                Some(control::meeting_deleted(crate::meeting::delete(&id)))
+            }
             ControlCommand::MeetingCopyLast => Some(
                 crate::meeting::latest_transcript_markdown()
                     .and_then(|markdown| {
