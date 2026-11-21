@@ -68,6 +68,54 @@ internal class SpatialDecoder(val model: TypingModel) {
         return spaceTapCost + SPACE_TAP_WEIGHT * maxOf(0.0, .5 * (toBar * toBar - toRow * toRow))
     }
 
+    /** How much likelier the space bar than the bottom letter row a space tap at (x, y) was, in nats
+     * (0 when the row is likelier); infinity when the bar is unknown or the tap isn't above it. */
+    fun rowCost(grid: KeyGrid, x: Double, y: Double): Double {
+        val bar = grid.space ?: return Double.POSITIVE_INFINITY
+        val slack = grid.pitchX / 2
+        if (bar.right <= bar.left || x < bar.left - slack || x > bar.right + slack) return Double.POSITIVE_INFINITY
+        val toBar = (y - bar.centreY) / grid.verticalSpread
+        val toRow = (y - grid.bottomY) / grid.verticalSpread
+        return maxOf(0.0, .5 * (toRow * toRow - toBar * toBar))
+    }
+
+    /** One word in place of two, where the space between them was tapped for a letter on the row
+     * above ("deli ate" -> "delicate"): the likeliest reading of all the taps, the space read as a
+     * letter, when it beats the two words as they read by the margin and the space tap was near
+     * enough the row (`reach`, from `rowCost`). Null to keep both. Lowercase spellings. */
+    fun merge(first: String, firstTaps: List<Tap>, space: Tap, reach: Double, second: String, secondTaps: List<Tap>,
+              previous: Int, firstValid: Boolean, secondValid: Boolean, swears: Boolean): String? {
+        if (reach > MERGE_REACH || first.isEmpty() || second.isEmpty() || firstTaps.size != first.length ||
+            secondTaps.size != second.length || (first + second).any { model.code(it) == 0 || it == '\'' }) return null
+        val taps = firstTaps + space + secondTaps
+        // Each word as space would leave it: as typed, or its likeliest reading ("i dkdnt" is "I didn't").
+        fun reading(spelling: String, from: Int, before: Int, valid: Boolean): Pair<Double, Int> {
+            val typed = model.index(spelling)
+            var spatial = 0.0
+            for (i in spelling.indices) spatial += taps[from + i].cost[model.code(spelling[i])]
+            var best = spatial + lmWeight * (if (typed >= 0) model.languageCost(before, typed) else if (valid) 15.0 else 22.0)
+            var word = typed
+            for (f in search(taps, from, from + spelling.length, 1, swears, before).sortedWith(spatialOrder).take(3)) {
+                val cost = f.cost + lmWeight * model.languageCost(before, f.word)
+                if (cost < best) { best = cost; word = f.word }
+            }
+            return best to word
+        }
+        val (firstCost, firstWord) = reading(first, 0, previous, firstValid)
+        val split = firstCost + reading(second, first.length + 1, firstWord, secondValid).first
+        if (!split.isFinite()) return null
+        var best = -1
+        var bestCost = Double.POSITIVE_INFINITY
+        for (f in search(taps, 0, taps.size, 1, swears, previous).sortedWith(spatialOrder).take(3)) {
+            if (model.length(f.word) <= maxOf(first.length, second.length) ||
+                model.neverSuggest.blocksFollowing(f.word, swears, previous)) continue
+            val cost = f.cost + lmWeight * model.languageCost(previous, f.word) + reach
+            if (cost < bestCost) { best = f.word; bestCost = cost }
+        }
+        if (best < 0) return null
+        return if (split - bestCost >= if (firstValid && secondValid) 7.0 else 2.0) model.text(best) else null
+    }
+
     private class State(val lo: Int, val hi: Int, val tap: Int, val edits: Int, val cost: Double)
     private data class Found(val word: Int, val cost: Double)
     // Keep at most 48 promising prefixes at each spelling depth. One extra, missing or
@@ -189,6 +237,8 @@ internal class SpatialDecoder(val model: TypingModel) {
         // An accented letter typed as its base letter's key (é from e).
         const val ACCENT_COST = 1.0
         const val SPACE_TAP_WEIGHT = .25
+        // A space tap reads as a letter only within about the bar's top fifth.
+        const val MERGE_REACH = 3.0
     }
     private fun foldAccents(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD).filter { it !in '\u0300'..'\u0308' || it == '\u0303' }
 }

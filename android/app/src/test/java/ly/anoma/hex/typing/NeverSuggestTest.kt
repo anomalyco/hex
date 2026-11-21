@@ -226,4 +226,75 @@ class NeverSuggestTest {
         for (c in "madchen") g.tap(de, c)
         assertEquals("mädchen", g.replacement())
     }
+
+    // Types `text` at the key centres as the keyboard would: a space or closing mark finishes the
+    // word (`finish`) and its correction goes in before it. `spaces` moves the space tap at an index.
+    private fun TypingWord.typed(g: KeyGrid, text: String, spaces: Map<Int, KeyPoint> = emptyMap()): String {
+        val out = StringBuilder()
+        reset("")
+        for ((i, c) in text.withIndex()) {
+            if (c == ' ' || TypingWord.endsWord(c)) {
+                val fix = if (c == ' ') finish(' ', spaces[i] ?: KeyPoint(183.93, 234.5), g) else finish(c)
+                if (fix != null) {
+                    assertTrue(text, out.endsWith(fix.original))
+                    out.setLength(out.length - fix.original.length); out.append(fix.replacement)
+                }
+                out.append(c); reset(out.toString())
+            } else if (c == '\'') { explicit("'"); out.append(c) }
+            else { tap(g, c); out.append(c) }
+        }
+        return out.toString()
+    }
+
+    // iOS testContractionsWithoutTheApostropheFollowTheWordsAroundThem and
+    // testSoundAlikeWordsFollowTheWordsAroundThem: the word before decides at the word's own space,
+    // else the next word revises it.
+    @Test fun wordsTheContextDecides() {
+        val g = layout("en")
+        for ((typed, expected) in listOf(
+            "id like to go " to "I'd like to go ", "yes id love to " to "yes I'd love to ",
+            "i think id help " to "I think I'd help ", "the id in this " to "the id in this ",
+            "my id is here " to "my id is here ", "ill be there " to "I'll be there ",
+            "shell be here " to "she'll be here ", "the shell is " to "the shell is ",
+            "wed love to " to "we'd love to ", "lets go " to "let's go ", "well see " to "we'll see ",
+            "well done " to "well done ", "as well as " to "as well as ",
+            "till hell freezes over " to "till hell freezes over ", "hell be here " to "he'll be here ",
+            "were going home " to "were going home ",
+            "its a nice day " to "it's a nice day ", "i think its broken " to "I think it's broken ",
+            "the dog wagged its tail " to "the dog wagged its tail ", "winter is on its way " to "winter is on its way ",
+            "your welcome " to "you're welcome ", "i like your car " to "I like your car ",
+            "there going home " to "they're going home ", "their is a dog " to "there is a dog ",
+            "they lost there keys " to "they lost their keys ", "more then that " to "more than that ",
+            "and than we left " to "and then we left ", "youre mother loves you " to "your mother loves you ",
+            "you're mother " to "you're mother ",
+        )) {
+            for (spatial in listOf(false, true)) assertEquals("$typed spatial=$spatial", expected, word(spatial = spatial).typed(g, typed))
+        }
+        // Only English decides by context.
+        assertEquals("es ill ", word("es", spatial = false).typed(layout("es"), "es ill "))
+    }
+
+    // iOS testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords: a space tapped at the bar's top
+    // edge, under a letter the word needed, joins the words at the next word's space.
+    @Test fun aSpaceTappedAtTheBarsEdgeForALetterJoinsTheWords() {
+        val g = layout("en")
+        fun edge(letter: Char) = KeyPoint(g.centres.getValue(letter).x, 207.5)
+        assertEquals("the delicate ", word().typed(g, "the deli ate ", mapOf(8 to edge('c'))))
+        assertEquals("so handed ", word().typed(g, "so ha ded ", mapOf(5 to edge('n'))))
+        assertEquals("a space inside the bar", "deli ate ", word().typed(g, "deli ate "))
+        // Two words space fixes on their own stay two.
+        assertEquals("I didn't ", word().typed(g, "i didnt ", mapOf(1 to edge('b'))))
+        // Without the bar's place, nothing joins.
+        assertEquals("the deli ate ", word().typed(KeyGrid(g.centres, g.pitchX, g.pitchY), "the deli ate ", mapOf(8 to edge('c'))))
+    }
+
+    // iOS testPunctuationAfterATypoFixesItFirst and the "iwant" case: a closing mark corrects the
+    // word as space does, never after an abbreviation's period; a split "i" is "I".
+    @Test fun aClosingMarkCorrectsTheWordFirst() {
+        val g = layout("en")
+        for (mark in ",.!?;:)\"") assertEquals("$mark", "see the$mark ok", word().typed(g, "see teh$mark ok"))
+        assertEquals("a receive. approx. a,", word().typed(g, "a recieve. approx. a,"))
+        assertEquals("I want ", word().typed(g, "iwant "))
+        assertEquals("look at ", word().typed(g, "lookat "))
+    }
 }

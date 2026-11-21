@@ -55,13 +55,27 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
     fun frequencyCost(word: Int) = u8(uni + word)
     fun languageCost(prev: Int, word: Int): Double {
         val backoff = 0.92 + frequencyCost(word) * 0.125
-        if (prev < 0) return backoff
+        val pair = pair(prev, word)
+        return if (pair >= 0) minOf(backoff, u8(bi + pair) * 0.125) else backoff
+    }
+    // The stored pair's slot, or -1.
+    private fun pair(prev: Int, word: Int): Int {
+        if (prev < 0) return -1
         var a = int(rows + 4 * prev); val end = int(rows + 4 * (prev + 1)); var b = end
         while (a < b) {
             val m = (a + b) ushr 1
             if (int(seconds + 4 * m) < word) a = m + 1 else b = m
         }
-        return if (a < end && int(seconds + 4 * a) == word) minOf(backoff, u8(bi + a) * 0.125) else backoff
+        return if (a < end && int(seconds + 4 * a) == word) a else -1
+    }
+    /** -ln P(word | previous) with the unigram backoff, or null when the model lacks the word. */
+    fun cost(word: String, previous: String?): Double? {
+        val w = index(word)
+        return if (w < 0) null else languageCost(previous?.let(::index) ?: -1, w)
+    }
+    fun hasPair(first: String, second: String): Boolean {
+        val a = index(first); val b = index(second)
+        return a >= 0 && b >= 0 && pair(a, b) >= 0
     }
     fun bound(lo: Int, hi: Int, depth: Int, target: Int): Int {
         var a = lo; var b = hi
