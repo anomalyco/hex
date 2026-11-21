@@ -38,8 +38,20 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     override fun showPage(page: KeyboardPage) = keys.showPage(page)
     override fun suggestions(slots: List<Suggestion>) = strip.suggestions(slots)
 
+    /** Emoji in place of the strip and the keys, the window's height unchanged (Gboard's panel
+     * replaces its toolbar too); ABC brings both back. */
+    fun openEmoji() {
+        if (strip.recording) return
+        closeMenu(); ime.engine.clearForDictation()
+        strip.visibility = GONE; keys.openEmoji(strip.stripHeight)
+    }
+    fun closeEmoji() {
+        if (!keys.emojiOpen) return
+        keys.closeEmoji(); strip.visibility = VISIBLE; strip.update()
+    }
     fun openMenu() {
         if (strip.recording) return
+        closeEmoji()
         keys.visibility = GONE; menu.visibility = VISIBLE
         strip.choosing = true; strip.menuOpened(); menu.home(); strip.update()
     }
@@ -64,4 +76,6 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     }
     fun setLevel(value: Float) = strip.setLevel(value)
     fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
+    /** The editor went away: the next one starts on the letters. */
+    fun reset() { closeMenu(); closeEmoji() }
 }

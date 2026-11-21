@@ -36,6 +36,12 @@ internal class DeleteSlide(private val target: KeyboardTextTarget, private val c
     }
 
     companion object {
+        /** The UTF-16 length of the last character of [before] as people see it (a grapheme cluster). */
+        fun lastCharacter(before: String): Int {
+            if (before.isEmpty()) return 0
+            val it = java.text.BreakIterator.getCharacterInstance().apply { setText(before) }
+            return before.length - it.preceding(before.length)
+        }
         /** Cumulative UTF-16 lengths of the last words of [before], nearest first. */
         fun wordLengths(before: String): IntArray {
             val out = ArrayList<Int>()

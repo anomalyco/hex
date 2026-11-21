@@ -146,5 +146,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.material3:material3")
+    // The keyboard's emoji panel (Apache 2.0): categories, recents and skin tones, all kept on the device.
+    implementation("androidx.emoji2:emoji2-emojipicker:1.7.0")
     testImplementation("junit:junit:4.13.2")
 }

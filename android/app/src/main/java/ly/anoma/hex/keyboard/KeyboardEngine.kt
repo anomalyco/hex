@@ -151,6 +151,8 @@ internal class KeyboardEngine(
         if (was != shift.uppercase) showPlane()
     }
     fun mode() { resetTyping(); clearSpaces(); surface?.suggestions(emptyList()); symbols = !symbols; more = false; shift.forgetTap(); showPlane() }
+    /** Back to the letters page from wherever (the emoji panel's ABC). */
+    fun letters() { if (symbols) mode() }
     private fun resetTyping() {
         cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
@@ -365,7 +367,9 @@ internal class KeyboardEngine(
             (!secure && target.selected()?.isNotEmpty() == true)
         if (selected) { target.commit(""); resetTyping() }
         else {
-            if (!target.deleteCodePointsBefore(1)) target.sendKey(KeyEvent.KEYCODE_DEL)
+            // A whole character as people see it: 👍🏽, a flag or a family is one, as on Gboard.
+            val cluster = if (track || secure) 1 else DeleteSlide.lastCharacter(target.before(32).orEmpty())
+            if (!(if (cluster > 1) target.deleteBefore(cluster) else target.deleteCodePointsBefore(1))) target.sendKey(KeyEvent.KEYCODE_DEL)
             if (track) { w!!.pop(); if (expectedCaret >= 0) expectedCaret-- } else resetTyping()
         }
         if (w != null && w.token.isNotEmpty()) showSuggestions(w) else surface?.suggestions(emptyList())

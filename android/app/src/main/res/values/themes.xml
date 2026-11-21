@@ -14,4 +14,13 @@
         <item name="android:navigationBarColor">@color/keyboard</item>
         <item name="android:windowBackground">@color/keyboard</item>
     </style>
+    <!-- The emoji picker's colours in Hex's flat keyboard look: ink for the chosen category, quiet icons and labels. -->
+    <style name="HexEmoji" parent="HexIme">
+        <item name="android:colorAccent">@color/ink</item>
+        <item name="android:colorControlNormal">@color/quiet</item>
+        <item name="android:colorControlActivated">@color/ink</item>
+        <item name="android:colorControlHighlight">@color/emoji_pressed</item>
+        <item name="android:textColorPrimary">@color/quiet</item>
+        <item name="android:colorButtonNormal">@color/sheet</item>
+    </style>
 </resources>

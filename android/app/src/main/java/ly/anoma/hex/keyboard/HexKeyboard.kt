@@ -112,7 +112,7 @@ class HexKeyboard : InputMethodService() {
         val options = dictating
         engine.insertDictation(text, if (options?.translate == true) "en" else options?.spoken?.code)
     }
-    private fun leaveEditor() { view?.closeMenu(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }
+    private fun leaveEditor() { view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }

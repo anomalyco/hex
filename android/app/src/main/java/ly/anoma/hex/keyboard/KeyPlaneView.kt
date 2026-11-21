@@ -4,7 +4,9 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.media.AudioManager
+import android.view.ContextThemeWrapper
 import android.view.Gravity
+import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
@@ -12,6 +14,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import androidx.emoji2.emojipicker.EmojiPickerView
 import ly.anoma.hex.R
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
@@ -52,7 +55,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val spaceKey: KeyCap
     private var deleteKey: KeyCap? = null
     private val comma: KeyCap
+    private val emojiKey: KeyCap
     private val period: KeyCap
+    // The emoji panel: AndroidX's picker where the strip and the letter rows are, then ABC, space and delete.
+    private var picker: EmojiPickerView? = null
+    private val emojiBottom = KeyRowLayout(context, 10f, side, gap, insetTop, insetBottom + bottomExtra)
+    var emojiOpen = false
+        private set
     private var commaText = ","
     private val roll = Rollover()
     // A slide from ?123 or shift types the key it lifts on: the keys it can type, and the one under it.
@@ -107,6 +116,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         comma = caps.cap(",", context.getString(R.string.keyboard_comma), modifier) { ime.engine.type(commaText) }
         typesOnLift(comma, preview = { null }, holds = { emptyList() }, type = { comma.performClick() })
         bottomSlides[comma] = { ime.engine.type(commaText) }
+        emojiKey = caps.icon(R.drawable.ic_emoji, context.getString(R.string.keyboard_emoji), caps.key, { host.openEmoji() })
+        typesOnLift(emojiKey, preview = { null }, holds = { emptyList() }, type = { emojiKey.performClick() })
         spaceKey = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) {
             ime.engine.space(spacePoint, if (current?.symbols == false) geometry() else null); spacePoint = null
         }
@@ -157,8 +168,20 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         enterIcon.imageTintList = ColorStateList.valueOf(ink)
         enterKey.face.addView(enterIcon, FrameLayout.LayoutParams(dp(24), dp(24), Gravity.CENTER))
         var at = 0f
-        for ((key, width) in listOf(modeKey to KeyboardMetrics.MODE, comma to KeyboardMetrics.COMMA, spaceKey to KeyboardMetrics.SPACE,
-                period to KeyboardMetrics.PERIOD, enterKey to KeyboardMetrics.ENTER)) { bottom.add(key, at, width); at += width }
+        for ((key, width) in listOf(modeKey to KeyboardMetrics.MODE, comma to KeyboardMetrics.COMMA, emojiKey to KeyboardMetrics.EMOJI,
+                spaceKey to KeyboardMetrics.SPACE, period to KeyboardMetrics.PERIOD, enterKey to KeyboardMetrics.ENTER)) { bottom.add(key, at, width); at += width }
+        // Gboard's emoji panel ends with ABC and delete; Hex puts a space bar between them.
+        val letters = caps.cap(context.getString(R.string.keyboard_letters_label), context.getString(R.string.keyboard_letters),
+            modifier, 17f) { host.closeEmoji(); ime.engine.letters() }
+        typesOnLift(letters, preview = { null }, holds = { emptyList() }, type = { letters.performClick() })
+        val emojiSpace = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) { ime.engine.space() }
+        emojiSpace.sound = AudioManager.FX_KEYPRESS_SPACEBAR
+        typesOnLift(emojiSpace, preview = { null }, holds = { emptyList() }, type = { emojiSpace.performClick() })
+        emojiBottom.add(letters, 0f, KeyboardMetrics.MODE)
+        emojiBottom.add(emojiSpace, KeyboardMetrics.MODE, 10f - 2 * KeyboardMetrics.MODE)
+        emojiBottom.add(newDeleteKey(), 10f - KeyboardMetrics.MODE, KeyboardMetrics.MODE)
+        emojiBottom.visibility = GONE
+        addView(emojiBottom, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + bottomExtra))
     }
 
     private fun cased(c: Char) = if (current?.let { !it.symbols && it.shifted } == true) c.uppercaseChar().toString() else c.toString()
@@ -240,48 +263,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     },
                     done = { touch = null; downText = null })
             }
-            if (index == 2) {
-                deleteKey = caps.icon(R.drawable.ic_delete, context.getString(R.string.keyboard_delete), modifier, ime.engine::delete).also { k ->
-                    k.sound = AudioManager.FX_KEYPRESS_DELETE
-                    row.add(k, columns - side, side)
-                    // A lifted press deletes once; held still it repeats, slid left it selects words.
-                    fun lift(typing: Boolean) {
-                        removeCallbacks(repeatDelete); val pressed = k.isPressed; k.isPressed = false
-                        val slide = deleteSlide
-                        when {
-                            slide != null -> if (slide.words > 0) ime.engine.deleteSelection()
-                            typing && deleting && !repeated && deleteGesture.tap -> k.performClick()
-                        }
-                        if (typing && pressed) k.typedOnLift()
-                        deleting = false; deleteSlide = null
-                    }
-                    k.setOnTouchListener { v, e ->
-                        when (e.actionMasked) {
-                            MotionEvent.ACTION_DOWN -> {
-                                roll.down(v) { lift(typing = true) }
-                                repeated = false; deleting = true; v.isPressed = true; deleteSlide = null
-                                deleteGesture.down(e.x)
-                                postDelayed(repeatDelete, KeyboardMetrics.DELETE_REPEAT_DELAY)
-                            }
-                            MotionEvent.ACTION_MOVE -> if (deleting) {
-                                val words = deleteGesture.move(e.x)
-                                if (words > 0 && deleteSlide == null && !repeated) {
-                                    removeCallbacks(repeatDelete)
-                                    deleteSlide = ime.engine.deleteSlide()
-                                }
-                                if (!deleteGesture.still) removeCallbacks(repeatDelete)
-                                deleteSlide?.select(words)
-                            }
-                            MotionEvent.ACTION_UP -> if (roll.up(v)) lift(typing = true)
-                            MotionEvent.ACTION_CANCEL -> {
-                                roll.up(v); removeCallbacks(repeatDelete); deleting = false; v.isPressed = false
-                                deleteSlide?.select(0); deleteSlide = null
-                            }
-                        }
-                        true
-                    }
-                }
-            }
+            if (index == 2) deleteKey = newDeleteKey().also { row.add(it, columns - side, side) }
         }
         modeKey.label?.text = context.getString(if (symbols) R.string.keyboard_letters_label else R.string.keyboard_numbers_label)
         modeKey.contentDescription = context.getString(if (symbols) R.string.keyboard_letters else R.string.keyboard_numbers)
@@ -295,6 +277,82 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         enterIcon.setImageResource(actionIcon(page.enter.action))
         enterIcon.visibility = if (label == null) View.VISIBLE else View.GONE
         enterKey.contentDescription = label ?: actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return)
+    }
+
+    /** Delete: a lifted press deletes once; held still it repeats, slid left it selects words to delete. */
+    private fun newDeleteKey(): KeyCap = caps.icon(R.drawable.ic_delete, context.getString(R.string.keyboard_delete), modifier, ime.engine::delete).also { k ->
+        k.sound = AudioManager.FX_KEYPRESS_DELETE
+        fun lift(typing: Boolean) {
+            removeCallbacks(repeatDelete); val pressed = k.isPressed; k.isPressed = false
+            val slide = deleteSlide
+            when {
+                slide != null -> if (slide.words > 0) ime.engine.deleteSelection()
+                typing && deleting && !repeated && deleteGesture.tap -> k.performClick()
+            }
+            if (typing && pressed) k.typedOnLift()
+            deleting = false; deleteSlide = null
+        }
+        k.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    roll.down(v) { lift(typing = true) }
+                    repeated = false; deleting = true; v.isPressed = true; deleteSlide = null
+                    deleteGesture.down(e.x)
+                    postDelayed(repeatDelete, KeyboardMetrics.DELETE_REPEAT_DELAY)
+                }
+                MotionEvent.ACTION_MOVE -> if (deleting) {
+                    val words = deleteGesture.move(e.x)
+                    if (words > 0 && deleteSlide == null && !repeated) {
+                        removeCallbacks(repeatDelete)
+                        deleteSlide = ime.engine.deleteSlide()
+                    }
+                    if (!deleteGesture.still) removeCallbacks(repeatDelete)
+                    deleteSlide?.select(words)
+                }
+                MotionEvent.ACTION_UP -> if (roll.up(v)) lift(typing = true)
+                MotionEvent.ACTION_CANCEL -> {
+                    roll.up(v); removeCallbacks(repeatDelete); deleting = false; v.isPressed = false
+                    deleteSlide?.select(0); deleteSlide = null
+                }
+            }
+            true
+        }
+    }
+
+    /** The emoji panel opens in place of the letter rows and the strip above them ([extra]), and grows as
+     * Gboard's does (124 dp above the keys), as long as the keyboard stays within 60% of the screen. A new
+     * picker each time: it reads its recents and skin tones as it starts (its own preferences, on this
+     * device), and only refreshes them later once its Recently used row scrolls away. */
+    fun openEmoji(extra: Int) {
+        cancelGestures()
+        val keyboard = height + extra // the keys' and the strip's height as they are
+        val grow = minOf(px(KeyboardMetrics.EMOJI_GROW), (resources.displayMetrics.heightPixels * 0.6f).toInt() - keyboard).coerceAtLeast(0)
+        val height = 3 * rowHeight + reach + extra + grow
+        picker?.let(::removeView)
+        val p = EmojiPickerView(ContextThemeWrapper(context, R.style.HexEmoji))
+        p.setOnEmojiPickedListener { item ->
+            // Gboard's tap as an emoji is chosen; the picker's own view plays the click.
+            if (vibrates(context, ime.feedback.haptics)) p.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            ime.engine.type(item.emoji)
+        }
+        picker = p; addView(p, 0, LayoutParams(LayoutParams.MATCH_PARENT, height))
+        // Square cells about Gboard's size: nine across in portrait, more when turned. The picker sizes its rows
+        // from what its grid has left after two category titles.
+        val columns = maxOf(9, (resources.displayMetrics.widthPixels / (KeyboardMetrics.EMOJI_CELL * density)).toInt())
+        p.emojiGridColumns = columns
+        p.emojiGridRows = ((height - (KeyboardMetrics.EMOJI_HEADER + 2 * KeyboardMetrics.EMOJI_TITLE) * density) /
+            (resources.displayMetrics.widthPixels.toFloat() / columns)).coerceAtLeast(1f)
+        p.layoutParams.height = height
+        rows.visibility = GONE; bottom.visibility = GONE
+        p.visibility = VISIBLE; emojiBottom.visibility = VISIBLE
+        emojiOpen = true
+    }
+    fun closeEmoji() {
+        if (!emojiOpen) return
+        cancelGestures()
+        picker?.let(::removeView); picker = null; emojiBottom.visibility = GONE
+        rows.visibility = VISIBLE; bottom.visibility = VISIBLE
+        emojiOpen = false
     }
 
     /** Touches for a key that types as it lifts: pressed, its pop-up, after [KeyboardMetrics.HOLD_MS] its held
