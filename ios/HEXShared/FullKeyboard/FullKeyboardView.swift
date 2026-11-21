@@ -624,6 +624,7 @@ final class FullKeyboardView: UIView {
         stripView.frame = layout.stripFrame.offsetBy(dx: 0, dy: lift)
         stripView.slotFrames = layout.stripSlotFrames.map { $0.offsetBy(dx: -layout.stripFrame.minX, dy: -layout.stripFrame.minY) }
         stripView.pillInset = layout.metrics.stripInset
+        stripView.textCenterY = layout.metrics.stripTextCenter
         stripView.hexOnLeading = layout.hexOnLeading
 
         hexKey.cornerRadius = layout.metrics.cornerRadius

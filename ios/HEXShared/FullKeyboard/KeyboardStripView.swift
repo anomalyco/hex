@@ -4,7 +4,8 @@ import UIKit
 /// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
 /// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
 /// capsule with the divider beside it hidden. iOS's band above the keyboard takes the top of
-/// Apple's bar, so everything here is centred in the 27 pt below it. The centred
+/// Apple's bar, so the words and dividers sit on Apple's line high in the 27 pt below it
+/// (`KeyboardMetrics.stripTextCenter`) and the pills fill it. The centred
 /// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {
@@ -21,6 +22,15 @@ final class KeyboardStripView: UIView {
     /// Each slot's frame in this view, from `KeyboardLayout.stripSlotFrames`; thirds of the
     /// view until the keyboard lays it out.
     var slotFrames: [CGRect]? { didSet { if slotFrames != oldValue { setNeedsLayout(); setNeedsDisplay() } } }
+    /// Where the words and dividers centre, from the strip's top (`KeyboardMetrics.stripTextCenter`).
+    var textCenterY: CGFloat? {
+        didSet {
+            guard textCenterY != oldValue else { return }
+            for button in slotButtons { button.textCenterY = textCenterY }
+            setNeedsLayout()
+            setNeedsDisplay()
+        }
+    }
     /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
     var pillInset: CGFloat = 0.5 {
         didSet {
@@ -309,7 +319,7 @@ final class KeyboardStripView: UIView {
     }
 
     private var contentCenterY: CGFloat {
-        bounds.height * 0.5
+        textCenterY ?? bounds.height * 0.5
     }
 
     override func layoutSubviews() {
@@ -382,9 +392,11 @@ final class KeyboardStripView: UIView {
         guard !primaryHighlighted else { return }
         let reverting = currentSuggestions.first?.kind == .revert
 
-        // Apple's dividers: 1 pt wide, ending on the slot boundary, 24 pt tall on the text's centre.
-        let lineH: CGFloat = min(24, bounds.height - 2)
-        let y = contentCenterY - lineH / 2
+        // Apple's dividers: 1 pt wide, ending on the slot boundary, 24 pt tall on the text's centre
+        // (in the phone's portrait strip their top 4 pt fall in iOS's band, so they start at 0).
+        let fullH: CGFloat = min(24, bounds.height - 2)
+        let y = max(0, contentCenterY - fullH / 2)
+        let lineH = contentCenterY + fullH / 2 - y
         palette.stripDivider.setFill()
         // Only between two filled slots: nothing to show, no dividers (as Apple's bar in a
         // field it offers nothing for).
@@ -411,6 +423,7 @@ final class KeyboardStripView: UIView {
     private final class SlotButton: UIControl {
         var inSystemPlatter = true { didSet { if inSystemPlatter != oldValue { setNeedsDisplay() } } }
         var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
+        var textCenterY: CGFloat? { didSet { if textCenterY != oldValue { setNeedsDisplay() } } }
         /// Room the Logging mark takes at the slot's outer end: the word centres in the rest.
         var leadingRoom: CGFloat = 0 { didSet { if leadingRoom != oldValue { setNeedsDisplay() } } }
         var trailingRoom: CGFloat = 0 { didSet { if trailingRoom != oldValue { setNeedsDisplay() } } }
@@ -496,7 +509,7 @@ final class KeyboardStripView: UIView {
         }
 
         private func layout(_ suggestion: KeyboardSuggestion, ink: UIColor) -> Word {
-            let midY = bounds.height * 0.5
+            let midY = textCenterY ?? bounds.height * 0.5
             // Apple's words are all SF 17 pt regular, the one in the capsule included.
             let font = UIFont.systemFont(ofSize: suggestion.kind == .emoji ? 22 : 17, weight: .regular)
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
@@ -561,7 +574,7 @@ final class KeyboardStripView: UIView {
                 .withTintColor(ink, renderingMode: .alwaysOriginal) else { return }
             let textWidth = word.truncatedRect?.width ?? (word.text as NSString).size(withAttributes: word.attributes).width
             let x = word.origin.x + textWidth + Self.revertArrowGap
-            arrow.draw(at: CGPoint(x: x, y: bounds.height * 0.5 - arrow.size.height / 2))
+            arrow.draw(at: CGPoint(x: x, y: (textCenterY ?? bounds.height * 0.5) - arrow.size.height / 2))
         }
 
         override func draw(_ rect: CGRect) {
@@ -570,7 +583,7 @@ final class KeyboardStripView: UIView {
             if pilled {
                 // Like Apple's, the highlight is a capsule as wide as its slot.
                 let pillH = max(22, bounds.height - 2 * pillInset)
-                let pill = CGRect(x: 0, y: max(0.5, midY - pillH / 2), width: bounds.width, height: pillH)
+                let pill = CGRect(x: 0, y: max(0, midY - pillH / 2), width: bounds.width, height: pillH)
                 (isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill).setFill()
                 UIBezierPath(roundedRect: pill, cornerRadius: pillH / 2).fill()
             }

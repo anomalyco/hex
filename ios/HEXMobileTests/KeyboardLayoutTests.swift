@@ -66,7 +66,7 @@ final class KeyboardLayoutTests: XCTestCase {
                 let m = KeyboardMetrics.for(orientation, posture: posture)
                 XCTAssertEqual(m.stripTop, 0, "\(posture) \(orientation)")
                 let cover = posture == .cover && orientation == .portrait
-                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (27, 35, 26) : (42, 50, 36)
+                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (27, 35, 27) : (42, 50, 36)
                 let expected = posture == .phone ? phone : cover ? (32, 40, 31) : (44, 44, 36)
                 XCTAssertEqual(m.stripHeight, expected.0, "\(posture) \(orientation)")
                 XCTAssertEqual(m.stripArea, expected.1, "\(posture) \(orientation)")
