@@ -627,18 +627,10 @@ impl Editor {
             return;
         }
         self.export_size = size;
-        #[cfg(all(target_os = "macos", hex_capture))]
-        std::thread::Builder::new()
-            .name("hex-export-size".into())
-            .spawn(move || {
-                if let Err(error) = crate::rune_ui::host::save_settings(|settings| {
-                    settings.screenshots.export_size = size;
-                }) {
-                    tracing::warn!(%error, "could not save the export size");
-                }
-            })
-            .map(drop)
-            .unwrap_or_else(|error| tracing::warn!(%error, "could not save the export size"));
+        #[cfg(target_os = "macos")]
+        crate::rune_ui::capture_capsule::toolbar::remember("export size", move |settings| {
+            settings.export_size = size;
+        });
     }
 
     /// About how large the recording's span kept is, exported at `size`.

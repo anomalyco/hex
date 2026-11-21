@@ -565,24 +565,8 @@ mod tests {
                         rune_theme_opencode::FAMILIES,
                     ),
                 );
-                rt.settle_all();
-                rt.frame(0.0);
                 let (w, h) = ((SIZE.0 * 2.0) as u32, (SIZE.1 * 2.0) as u32);
-                let mut renderer = crate::rune_ui::offscreen::renderer(&gpu.device);
-                let target = crate::rune_ui::offscreen::target(&gpu.device, w, h);
-                renderer.upload_images(&gpu.device, &gpu.queue, &mut rt.images);
-                renderer.prepare(
-                    &gpu.device,
-                    &gpu.queue,
-                    &mut rt.text.atlas,
-                    &rt.instances,
-                    (w, h),
-                );
-                let mut encoder = gpu.device.create_command_encoder(&Default::default());
-                renderer.draw(&mut encoder, &target.view, rt.clear_color());
-                target.copy(&mut encoder);
-                gpu.queue.submit([encoder.finish()]);
-                let pixels = target.read(&gpu.device);
+                let pixels = crate::rune_ui::offscreen::draw(&gpu, &mut rt, w, h);
                 let path = folder.join(format!("toolbar-{name}-{theme}.png"));
                 rune::render::write_png(&path, w, h, &pixels).unwrap();
             }

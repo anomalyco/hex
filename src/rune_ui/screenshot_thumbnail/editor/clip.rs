@@ -195,25 +195,29 @@ impl Clip {
             return false;
         }
         let last = self.ticked.replace(now).unwrap_or(now);
-        let end = self.trim[1];
-        let at = match self.player.as_ref().map(|player| (player.state(), player)) {
+        let [from, to] = self.trim;
+        let at = match self
+            .player
+            .as_ref()
+            .map(|player| (player.state(), player.time()))
+        {
             Some((rune::PlayerState::Failed(error), _)) => {
                 tracing::warn!(%error, "could not play the recording");
                 self.live = false;
                 self.pause();
                 return true;
             }
-            Some((rune::PlayerState::Ended, _)) => end,
-            Some((_, player)) => (player.time() * 1000.0).round() as u64,
+            Some((rune::PlayerState::Ended, _)) => to,
+            Some((_, seconds)) => (seconds * 1000.0).round() as u64,
             None => self.at_ms + ((now - last).max(0.0) * 1000.0).round() as u64,
-        };
-        let at = at.max(self.trim[0]);
-        if at >= end {
+        }
+        .clamp(from, to);
+        if at == to {
             self.pause();
         }
-        let moved = at.min(end) != self.at_ms;
-        self.at_ms = at.min(end);
-        self.shown = self.frame_at(self.at_ms);
+        let moved = at != self.at_ms;
+        self.at_ms = at;
+        self.shown = self.frame_at(at);
         moved
     }
 
