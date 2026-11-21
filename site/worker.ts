@@ -3,7 +3,8 @@
 // 2.3.1 feeds and artifacts in the read-only files bucket), and
 // /hex/download/dev, the latest dev channel Mac download, /hex/dev, the dev
 // builds' changelog, and
-// /hex/download/<target>, the release every download button names. Other hosts and
+// /hex/download/<target>, the release every download button names, and /hex/ios,
+// Hex for iPhone on the App Store. Other hosts and
 // plain HTTP redirect to the canonical host. `cf dev` with ANY_HOST set turns
 // the redirect off for local testing.
 import { BASE_PATH, DEV_DOWNLOAD_PATH, DEV_NOTES_PATH, DEV_NOTES_URL, DOWNLOAD_PATH, FILES_PATH, RELEASE_SERVICE, stripBase, withBase } from "./src/base"
@@ -29,6 +30,7 @@ export default {
       url.pathname = `${BASE_PATH}/`
       return Response.redirect(url.toString(), 301)
     }
+    if (url.pathname === IOS_PATH || url.pathname === `${IOS_PATH}/`) return Response.redirect(APP_STORE_URL, 302)
     if (url.pathname.startsWith(`${FILES_PATH}/`)) return file(request, env, decodeURIComponent(url.pathname.slice(FILES_PATH.length + 1)))
     if (url.pathname === DEV_DOWNLOAD_PATH) return devDownload(request)
     if (url.pathname === DEV_NOTES_PATH || url.pathname === `${DEV_NOTES_PATH}/`) return devNotes(request, env)
@@ -60,6 +62,10 @@ export default {
     })
   },
 }
+
+// /hex/ios, the short link to Hex for iPhone on the App Store.
+const IOS_PATH = withBase("/ios")
+const APP_STORE_URL = "https://apps.apple.com/us/app/hex-voice-dictation-keyboard/id6836837368"
 
 const DOCS = new Map([
   ["/docs/transforms", "/docs/transforms.md"],
