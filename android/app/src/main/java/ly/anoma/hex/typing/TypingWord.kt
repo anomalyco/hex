@@ -80,9 +80,23 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             } else cased(it) }
         }
         if (allCaps || !spatial) return null
-        val fix = decision().replace?.let(::cased) ?: return null
+        // A name, day or place typed in lowercase takes its capital ("mary" -> "Mary"), and so does a
+        // German noun ("haus" -> "Haus"), as the capitals list beside the model says.
+        val fix = decision().replace?.let(::cased) ?: return capitalised(token)
         // A missed space after English "i" ("iwant") gives "I want", as "i" alone does.
-        return if (model.language == "en" && ' ' in fix) fix.split(' ').joinToString(" ") { if (it == "i") "I" else it } else fix
+        if (model.language == "en" && ' ' in fix) return fix.split(' ').joinToString(" ") { if (it == "i") "I" else it }
+        // German's model is lowercase: a noun it corrects to takes its capital ("hsus" -> "Haus").
+        return if (model.language == "de" && ' ' !in fix) capitalised(fix) ?: fix else fix
+    }
+
+    // `word` with its capital when it is all lowercase and the books nearly always write it with one
+    // (95%), or, in German, half the time after an article or determiner ("das leben"); else null.
+    private fun capitalised(word: String): String? {
+        if (word.length < 2 || word != word.lowercase()) return null
+        val share = model.capitals?.percent(word) ?: return null
+        if (share < 95 && !(model.language == "de" && share >= 50 && previousText in germanDeterminers)) return null
+        val first = word.first().uppercase()
+        return if (first.length == 1) first + word.drop(1) else null
     }
 
     /** What a space (or a closing mark, [ending]) does as it finishes the word: the word's own fix,
@@ -125,7 +139,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return choice.takeUnless { model.neverSuggest.blocks(it.lowercase(), suggestSwearWords, model.context(prev.orEmpty())) }
     }
 
-    private fun knows(spelling: String) = spelling.lowercase().let { model.index(it) >= 0 || model.validLiteral(it) || it in shorthand }
+    private fun knows(spelling: String) = spelling.lowercase().let { model.index(it) >= 0 || model.known(it) || it in shorthand }
 
     // Keeps the word this space finished for the next word's revision or join. After a split or a
     // join it reads other letters than were typed: kept as it reads, without taps.
@@ -168,6 +182,13 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             rest = rest.trimEnd { it in "\"')]\u201D\u2019" }
             return rest.lastOrNull()?.let { it in ".!?" } ?: false
         }
+        // After these German writes the noun with a capital ("das Haus", "im Haus", "mein Haus"), so
+        // a word the books write both ways is a noun here (iOS GermanCapitals.determiners).
+        private val germanDeterminers = ("der die das den dem des ein eine einen einem einer eines kein keine keinen keinem " +
+            "keiner keines mein meine meinen meinem meiner meines dein deine deinen deinem deiner deines sein seine " +
+            "seinen seinem seiner seines ihre ihren ihrem ihrer ihres unser unsere unseren unserem unserer unseres euer " +
+            "eure euren eurem eurer eures dies dieser diese dieses diesem diesen jeder jede jedes jedem jeden im in am " +
+            "zum zur vom beim ins ans").split(' ').toSet()
         // Hosts give a window of the text: compare its last 64 characters once both are that long.
         private fun sameText(a: String, b: String) =
             if (a.length >= 64 && b.length >= 64) a.takeLast(64) == b.takeLast(64) else a == b

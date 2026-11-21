@@ -19,6 +19,8 @@ mkdir -p "$T/outputs"
 for lang in en es de nb; do
     [ -f "$T/bench/$lang.jsonl" ] || continue
     adb push "app/src/main/assets/typing/$lang.hextm" "$dev/$lang.hextm" >/dev/null
+    adb shell rm -f "$dev/$lang.capitals"
+    [ ! -f "app/src/main/assets/typing/$lang.capitals" ] || adb push "app/src/main/assets/typing/$lang.capitals" "$dev/$lang.capitals" >/dev/null
     adb push "$T/bench/$lang.jsonl" "$dev/$lang.jsonl" >/dev/null
     adb shell "CLASSPATH=$dev/replay.jar:$apk app_process /system/bin local.hex.bench.Replay $dev/$lang.hextm $dev/$lang.jsonl $lang $dev/$lang.out"
     adb pull "$dev/$lang.out" "$T/outputs/$lang.tsv" >/dev/null

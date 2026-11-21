@@ -12,6 +12,7 @@ The same 2,000 held-out English and Spanish sentences, typed by today's iOS engi
 | Android before the parity work | 1,028 (7.41%) | 1,374 (10.33%) | 825 (6.09%) | 692 (5.54%) |
 | Aimed taps, accents from the base key, a space read on the bottom row | 913 (6.58%) | 1,373 (10.32%) | 812 (5.99%) | 678 (5.43%) |
 | Words the context decides, the word before revised, a space tapped as a letter | 818 (5.90%) | 1,342 (10.09%) | 774 (5.71%) | 654 (5.24%) |
+| Names kept as typed, and capitals from the books | 770 (5.55%) | 1,133 (8.52%) | 774 (5.71%) | 654 (5.24%) |
 
 ## Same-model results
 
@@ -80,6 +81,8 @@ The [shared iOS builder](build-typing-model.py), SHA-256 `cba009fe227632d9f8d176
 - [SCOWL](https://wordlist.aspell.net/) permits commercial redistribution subject to its [included notices](../../app/src/main/assets/licenses/scowl.txt). The English literal-validity list contains 45,303 unique spellings absent from the frequency model (440,142 bytes). It is built from the same public SCOWL archive, not from benchmark outputs or personal data. It cannot supply scored candidates or word probabilities.
 - [RLA-ES es_ES/es_MX sources](https://github.com/LibreOffice/dictionaries/tree/762abe74008b94b2ff06db6f4024b59a8254c467/es) use their **MPL 1.1** option. [APK credits, source links and modification notices](../../app/src/main/assets/licenses/credits.txt) · [full licence texts](../../app/src/main/assets/licenses/).
 
+**Capitals lists** (`en.capitals`, `es.capitals`, `de.capitals`) record how often the books write a word with a capital first letter, from the same Google Books v3 1-grams (1980–2019) as each model. A word typed in lowercase takes its capital when the books nearly always write it so (95%), as iOS does where its dictionary knows a word only capitalised: "mary" → "Mary", "monday" → "Monday", German "haus" → "Haus". A word that is also an ordinary lowercase word is held below that (English: one SCOWL spells in lowercase, such as "united" or "china"; Spanish: a model word under 98%). The English and Spanish lists also hold names outside the model, three letters or more, capitalised 90% of the time and used at least once per million words ("tom" in Spanish, "sami" in English): typed as they are, they count as real words, as iOS's spelling dictionary takes them, instead of being corrected into "toma" or "swami". Two model words run together whose pair is ten times as common ("iwant", "apartir") are left out. German's list is iOS's `de.capitals` (#2169), byte for byte; [build-capitals.py](build-capitals.py) builds the other two (en: 10,984 words, 121 KB; es: 7,586 words, 85 KB).
+
 The separate [never-suggest list](../../app/src/main/assets/typing/never-suggest.tsv) is
 adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13),
 **CC BY 4.0**. Hex reviewed the English, Spanish, German and Norwegian lists for keyboard use:
@@ -129,4 +132,7 @@ adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOB
    curl -fsSL https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz -o "$T/source/scowl.tar.gz"
    python3 benchmark/typing/build-valid-words.py "$T/source/scowl.tar.gz" \
      app/src/main/assets/typing/en.hextm "$T/models/en.valid"
+   python3 benchmark/typing/build-capitals.py en app/src/main/assets/typing/en.hextm "$T/capitals/en" \
+     "$T/models/en.capitals" "$T/source/scowl.tar.gz"
+   python3 benchmark/typing/build-capitals.py es app/src/main/assets/typing/es.hextm "$T/capitals/es" "$T/models/es.capitals"
    ```

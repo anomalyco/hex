@@ -179,7 +179,7 @@ internal class SpatialDecoder(val model: TypingModel) {
         if (typed.length !in 2..32 || taps.size != typed.length || model.neverSuggest.blocks(typed, swears, previous) ||
             typed.any { model.code(it) == 0 || it == '\'' }) return none
         val literal = model.index(typed)
-        val knownLiteral = literal >= 0 || model.validLiteral(typed)
+        val knownLiteral = literal >= 0 || model.known(typed)
         var cost = lmWeight * when {
             literal >= 0 -> model.languageCost(previous, literal)
             knownLiteral -> 15.0
