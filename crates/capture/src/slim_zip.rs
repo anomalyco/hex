@@ -548,7 +548,7 @@ mod tests {
         let text = std::str::from_utf8(&summary.data).unwrap();
         let absolute = bundle.canonicalize().unwrap().display().to_string();
         assert!(!text.contains(&absolute), "{text}");
-        assert!(text.contains("[scrawl 0:02 · Display · .]"), "{text}");
+        assert!(text.contains("[hex-annotate 0:02 · Display · .]"), "{text}");
         // The bundle keeps the summary it wrote.
         assert_eq!(
             fs::read_to_string(bundle.join("summary.md")).unwrap(),

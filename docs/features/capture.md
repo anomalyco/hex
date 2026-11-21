@@ -16,7 +16,9 @@ the clipboard, and sends it to an OpenCode session with Scrawl's router
 (`crates/router`), run in Hex's process. Settings › Annotate (under Labs in
 the sidebar) holds its settings. Scrawl's capsule (switch chips, the
 on-screen picker, route chips) and its ink and laser overlay are Rune
-overlays.
+overlays. A capture's `summary.md` and the text pasted into an agent start
+with `[hex-annotate <clock> · <target> · <folder>]`; older captures say
+`[scrawl …]`.
 
 ```ts
 Turn it on                               // capture.gate
@@ -295,7 +297,7 @@ On Windows                               // capture.windows
     a Windows machine
 
 Settings › Annotate                      // capture.pane
-├── Capture with Hex (capture.enabled, default off) -> off: no host, shortcut,
+├── Capture with Hex (capture.enabled, default on) -> off: no host, shortcut,
 │   input, retention, or folder
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux and Windows) -> same keycap and recorder as dictation;
