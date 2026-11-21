@@ -305,5 +305,7 @@ enum SettingsSnapshotFixture {
         TypingLogSettings().isEnabled = on
         HinglishSettings().isEnabled = on
         AdaptiveTouchSettings().isEnabled = on
+        // Settings scenes skip preparing a model, so this only draws the switch.
+        MultilingualParakeetSettings().isEnabled = on
     }
 }

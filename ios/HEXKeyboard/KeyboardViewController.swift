@@ -984,6 +984,8 @@ final class KeyboardViewController: UIInputViewController {
     /// The same while the keyboard couldn't get its speech model ("Open Hex to download
     /// English."): Hex downloads it, and the keyboard dictates again once it installs.
     /// Without Full Access it is nil too, and the Hex key says dictation needs Full Access.
+    /// The same while Experiments › Multilingual model (Parakeet) dictates the language: only
+    /// Hex can load that model, so Dictate and the Hex key open Hex.
     private func syncLocalDictationAvailability(access: Bool) {
         guard KeyboardLocalDictation.isSupported else { return }
         guard access || localDictation.isActive else {
@@ -991,7 +993,9 @@ final class KeyboardViewController: UIInputViewController {
             localDictationAvailable = nil
             return
         }
-        let needsHex = !localDictation.isActive && LanguageSettings().keyboardNeedsHex()
+        let multilingual = MultilingualParakeetSettings()
+        let multilingualOpensHex = multilingual.isEnabled && multilingual.language() != nil
+        let needsHex = !localDictation.isActive && (LanguageSettings().keyboardNeedsHex() || multilingualOpensHex)
         let available = localDictation.isActive || (!needsHex && localDictation.hasMemoryToStart)
         guard available != localDictationAvailable else { return }
         // Noted at most every 5 s, as the footprint can hover at the line.
@@ -1000,6 +1004,7 @@ final class KeyboardViewController: UIInputViewController {
             lastAvailabilityNote = now
             let change = available
                 ? "dictating in the keyboard"
+                : multilingualOpensHex ? "multilingual model on, Dictate opens Hex"
                 : needsHex ? "speech model missing here, Dictate opens Hex" : "short of memory, Dictate opens Hex"
             KeyboardProbeLog.shared.write("\(change) \(KeyboardProbeLog.memory())")
         }

@@ -62,7 +62,7 @@ struct OnboardingModel: Equatable {
         let id: String
         if dictation.isModelReady {
             id = dictation.transcriptionLanguageID
-        } else if dictation.engineName.hasPrefix("Parakeet") {
+        } else if dictation.engineName == "Parakeet V2" {
             id = "en-US"
         } else {
             id = LanguageSettings().effectiveDictationLanguage ?? Locale.preferredLanguages.first ?? "en-US"

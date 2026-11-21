@@ -3354,6 +3354,86 @@
           }
         }
       }
+    },
+    "Parakeet Ultra is not ready." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet Ultra 尚未就绪。"
+          }
+        }
+      }
+    },
+    "Parakeet Ultra didn't download. Check your connection and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet Ultra 未能下载。请检查网络连接后重试。"
+          }
+        }
+      }
+    },
+    "Downloading %@ · Wi-Fi recommended" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载 %@ · 建议使用 Wi-Fi"
+          }
+        }
+      }
+    },
+    "Multilingual model (Parakeet)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型（Parakeet）"
+          }
+        }
+      }
+    },
+    "25 languages, even mixed in a sentence. %@ download. Keyboard dictation opens Hex." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@。键盘听写会打开 Hex。"
+          }
+        }
+      }
+    },
+    "Needs an iPhone with 6 GB of memory or more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要内存为 6 GB 或以上的 iPhone"
+          }
+        }
+      }
+    },
+    "Parakeet Ultra needs more memory than Hex has here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet Ultra 需要的内存比 Hex 在这台 iPhone 上可用的更多。"
+          }
+        }
+      }
+    },
+    "Parakeet Ultra needs more memory than Hex has here. Hex uses its usual speech model instead." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet Ultra 需要的内存比 Hex 在这台 iPhone 上可用的更多，Hex 改用平时的语音模型。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

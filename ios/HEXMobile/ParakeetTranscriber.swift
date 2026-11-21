@@ -209,6 +209,8 @@ nonisolated struct ParakeetPreparationProgress: Sendable, Equatable {
 
     let downloads: Bool
     let compiledBefore: Bool
+    /// What the bar says while the download runs.
+    let downloadDetail: String
     private(set) var downloaded = 0.0
     private(set) var loadStartedAt: TimeInterval?
     private(set) var modelsLoaded = 0
@@ -217,9 +219,14 @@ nonisolated struct ParakeetPreparationProgress: Sendable, Equatable {
     private var segmentStartedAt: TimeInterval = 0
     private(set) var isFinished = false
 
-    init(downloads: Bool, compiledBefore: Bool) {
+    init(
+        downloads: Bool,
+        compiledBefore: Bool,
+        downloadDetail: String = String(localized: "Downloading the speech model")
+    ) {
         self.downloads = downloads
         self.compiledBefore = compiledBefore
+        self.downloadDetail = downloadDetail
     }
 
     mutating func download(_ fraction: Double) {
@@ -269,7 +276,7 @@ nonisolated struct ParakeetPreparationProgress: Sendable, Equatable {
             if downloads, downloaded > 0 {
                 return ModelPreparationProgress(
                     fractionCompleted: downloadShare * downloaded,
-                    detail: String(localized: "Downloading the speech model")
+                    detail: downloadDetail
                 )
             }
             return ModelPreparationProgress(fractionCompleted: 0, detail: String(localized: "Checking the speech model"))
@@ -289,7 +296,7 @@ nonisolated struct ParakeetPreparationProgress: Sendable, Equatable {
 
 /// Feeds `ParakeetPreparationProgress` to the handler, at most ten times a second (the
 /// download alone reports thousands of times) and whenever its words change.
-private nonisolated final class ParakeetProgressFeed: @unchecked Sendable {
+nonisolated final class ParakeetProgressFeed: @unchecked Sendable {
     private let lock = NSLock()
     private var state: ParakeetPreparationProgress
     private var lastEmit: TimeInterval = 0
@@ -325,21 +332,27 @@ private nonisolated final class ParakeetProgressFeed: @unchecked Sendable {
 /// Neural Engine between launches, so only the first load (and the first after an iOS
 /// update) is slow; this picks the words and estimate. In the app's own defaults.
 nonisolated struct ParakeetCompileRecord {
-    private static let key = "parakeet.compiledForSystem"
+    static let v2Key = "parakeet.compiledForSystem"
+    private let key: String
     private let defaults: UserDefaults
     private let system: String
 
-    init(defaults: UserDefaults = .standard, system: String = ProcessInfo.processInfo.operatingSystemVersionString) {
+    init(
+        key: String = v2Key,
+        defaults: UserDefaults = .standard,
+        system: String = ProcessInfo.processInfo.operatingSystemVersionString
+    ) {
+        self.key = key
         self.defaults = defaults
         self.system = system
     }
 
     var isCurrent: Bool {
-        defaults.string(forKey: Self.key) == system
+        defaults.string(forKey: key) == system
     }
 
     func markCurrent() {
-        defaults.set(system, forKey: Self.key)
+        defaults.set(system, forKey: key)
     }
 }
 
@@ -349,44 +362,52 @@ nonisolated struct ParakeetCompileRecord {
 /// another engine (`SpeechEngineChoice`): Apple's, where it has the language, else it waits
 /// for a tap on Set up instead of loading Parakeet at launch. In the app's own defaults.
 nonisolated struct ParakeetLoadGuard {
-    private static let loadingKey = "parakeet.loadStartedAt"
-    private static let interruptedKey = "parakeet.loadInterrupted"
-
     static let message = String(localized: "Hex closed while loading the speech model, likely short of memory. Close other apps, then tap Set up to try again.")
 
+    private let loadingKey: String
+    private let interruptedKey: String
     private let defaults: UserDefaults
 
-    init(defaults: UserDefaults = .standard) {
+    /// `model` names the keys: "parakeet" for V2, as before, "parakeetUltra" for Ultra.
+    init(model: String = "parakeet", defaults: UserDefaults = .standard) {
+        loadingKey = "\(model).loadStartedAt"
+        interruptedKey = "\(model).loadInterrupted"
         self.defaults = defaults
     }
 
     /// Once per launch: a load still marked as running belonged to a process that ended.
     func noteLaunch() {
-        guard defaults.object(forKey: Self.loadingKey) != nil else { return }
-        defaults.removeObject(forKey: Self.loadingKey)
-        defaults.set(true, forKey: Self.interruptedKey)
+        guard defaults.object(forKey: loadingKey) != nil else { return }
+        defaults.removeObject(forKey: loadingKey)
+        defaults.set(true, forKey: interruptedKey)
     }
 
     var lastLoadWasInterrupted: Bool {
-        defaults.bool(forKey: Self.interruptedKey)
+        defaults.bool(forKey: interruptedKey)
     }
 
     func begin() {
-        defaults.set(Date().timeIntervalSince1970, forKey: Self.loadingKey)
+        defaults.set(Date().timeIntervalSince1970, forKey: loadingKey)
     }
 
     /// Too little memory left to load Parakeet: counts as an interrupted load, so Hex picks
     /// another engine (`SpeechEngineChoice`) instead of loading it.
     func setAside() {
-        defaults.set(true, forKey: Self.interruptedKey)
+        defaults.set(true, forKey: interruptedKey)
     }
 
     /// A load that returned, loaded or not; only a loaded one clears the interruption.
     func end(loaded: Bool) {
-        defaults.removeObject(forKey: Self.loadingKey)
+        defaults.removeObject(forKey: loadingKey)
         if loaded {
-            defaults.removeObject(forKey: Self.interruptedKey)
+            defaults.removeObject(forKey: interruptedKey)
         }
+    }
+
+    /// Forgets an interrupted load, for a person who asks to try again.
+    func forget() {
+        defaults.removeObject(forKey: loadingKey)
+        defaults.removeObject(forKey: interruptedKey)
     }
 }
 

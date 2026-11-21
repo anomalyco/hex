@@ -537,6 +537,8 @@ struct ExperimentsSettingsPage: View {
     @State private var confirmingTouchReset = false
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
+    @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
+    private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
 
     var body: some View {
         SettingsPageScaffold(title: "Experiments") {
@@ -612,6 +614,19 @@ struct ExperimentsSettingsPage: View {
                     detail: String(localized: "Keeps learned words and fixes with the language you used them in."),
                     isOn: $learnPerLanguage
                 )
+
+                SettingsDivider()
+
+                // Off by default: Parakeet Ultra (ParakeetUltraTranscriber) for its 25 languages,
+                // downloaded when turned on and deleted when turned off.
+                SettingsToggleRow(
+                    title: String(localized: "Multilingual model (Parakeet)"),
+                    detail: multilingualParakeetFits
+                        ? String(localized: "25 languages, even mixed in a sentence. \(Self.multilingualParakeetSize) download. Keyboard dictation opens Hex.")
+                        : String(localized: "Needs an iPhone with 6 GB of memory or more"),
+                    isOn: $multilingualParakeet
+                )
+                .disabled(!multilingualParakeetFits)
             }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
@@ -631,6 +646,17 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: learnPerLanguage) { _, enabled in
             TypingJournalSettings().learnsPerLanguage = enabled
         }
+        .onChange(of: multilingualParakeet) { _, enabled in
+            guard enabled != MultilingualParakeetSettings().isEnabled else { return }
+            MultilingualParakeetSettings().isEnabled = enabled
+            if enabled {
+                // Turning it on is the way to try again after a load that ended Hex.
+                ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).forget()
+            } else {
+                ParakeetUltraModel.remove()
+            }
+            DictationController.shared.multilingualParakeetChanged()
+        }
         .onAppear {
             hinglish = HinglishSettings().isEnabled
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
@@ -639,7 +665,12 @@ struct ExperimentsSettingsPage: View {
             refreshAdaptiveTouchStatus()
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
             learnPerLanguage = TypingJournalSettings().learnsPerLanguage
+            multilingualParakeet = MultilingualParakeetSettings().isEnabled
         }
+    }
+
+    private static var multilingualParakeetSize: String {
+        ParakeetUltraTranscriber.downloadSize
     }
 
     private var adaptiveTouchStatusText: String {
