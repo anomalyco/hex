@@ -374,6 +374,7 @@ enum SelectedFallback {
     /// Other opens retry briefly first.
     AfterRetries,
     /// Never: only the named input opens (a Screenshots recording's own).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Never,
 }
 

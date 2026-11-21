@@ -466,6 +466,7 @@ pub(super) fn write_span(
 
 /// Where `out` is written until it's whole: a hidden sibling that keeps its
 /// extension, which tells the helper the container.
+#[cfg(target_os = "macos")]
 fn partial_path(out: &std::path::Path) -> std::path::PathBuf {
     let name = out
         .file_name()
