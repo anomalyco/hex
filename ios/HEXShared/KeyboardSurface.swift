@@ -134,8 +134,45 @@ private struct KeyboardKeyButtonStyle: ButtonStyle {
     }
 }
 
+/// The top row's tap band: the 26 pt pills keep their size and centre in it.
+private enum TopBarMetrics {
+    static let height: CGFloat = 40
+    static let hitWidth: CGFloat = 44
+    /// The surface's side inset, owned by the end controls so taps reach the edges.
+    static let sideInset: CGFloat = 10
+    /// The Hex mark's label before its side inset.
+    static let hexMarkWidth: CGFloat = 22
+    /// How far the mark's tap area reaches into the status group's slot.
+    static let hexMarkOverlap = hitWidth - sideInset - hexMarkWidth
+}
+
+/// The row's full height and at least 44 pt of width, without drawing any of it:
+/// apply after the control's 26 pt visual so the visual keeps its size.
+private struct TopBarHitTarget: ViewModifier {
+    var alignment: Alignment = .center
+
+    func body(content: Content) -> some View {
+        content
+            .frame(
+                minWidth: TopBarMetrics.hitWidth,
+                minHeight: TopBarMetrics.height,
+                alignment: alignment
+            )
+            .contentShape(Rectangle())
+    }
+}
+
+private extension View {
+    func topBarHitTarget(alignment: Alignment = .center) -> some View {
+        modifier(TopBarHitTarget(alignment: alignment))
+    }
+}
+
 private struct TopBarTriggerButtonStyle: ButtonStyle {
     let palette: KeyboardChromePalette
+    /// The side inset belongs to the tap area, drawn after the pressed capsule.
+    var leadingHitInset: CGFloat = 0
+    var trailingHitInset: CGFloat = 0
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
@@ -143,6 +180,17 @@ private struct TopBarTriggerButtonStyle: ButtonStyle {
                 configuration.isPressed ? palette.topBarPressedFill : Color.clear,
                 in: Capsule()
             )
+            .padding(.leading, leadingHitInset)
+            .padding(.trailing, trailingHitInset)
+            .topBarHitTarget()
+    }
+}
+
+/// A tray chip: its capsule keeps its size and the row's tap area surrounds it.
+private struct TopBarChipButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .topBarHitTarget()
     }
 }
 
@@ -497,7 +545,9 @@ struct KeyboardSurfaceView: View {
 
     var body: some View {
         let showsMore = model.activeTray == .moreLanguages
-        VStack(spacing: 8) {
+        // The top row spans the bar, its controls reaching the screen's edges;
+        // everything under it keeps the surface's side inset.
+        VStack(spacing: 2) {
             topBar
             ZStack {
                 VStack(spacing: 8) {
@@ -512,19 +562,19 @@ struct KeyboardSurfaceView: View {
                         .transition(.opacity)
                 }
             }
+            .padding(.horizontal, TopBarMetrics.sideInset)
         }
         .onChange(of: model.activeTray) { _, _ in
             removeTookPress = false
         }
-        .padding(.horizontal, 10)
-        .padding(.top, isHostedExtension ? 4 : 6)
+        .padding(.top, 4)
         .padding(.bottom, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(isHostedExtension ? Color.clear : HexTheme.bgDeep)
         .preferredColorScheme(isHostedExtension ? nil : .dark)
     }
 
-    // MARK: - Top Bar (26 pt, permanently mounted ZStack)
+    // MARK: - Top Bar (40 pt around 26 pt visuals, permanently mounted ZStack)
 
     private var topBar: some View {
         let p = palette
@@ -541,7 +591,7 @@ struct KeyboardSurfaceView: View {
             moreLanguagesBar(palette: p)
                 .hexTrayReveal(model.activeTray == .moreLanguages, reduceMotion: reduceMotion, offsetY: 3.5)
         }
-        .frame(height: 26)
+        .frame(height: TopBarMetrics.height)
     }
 
     private func defaultTopBar(palette p: KeyboardChromePalette) -> some View {
@@ -559,21 +609,27 @@ struct KeyboardSurfaceView: View {
                     size: 16,
                     color: isStageActive && p.isDark ? HexTheme.warmPearl : p.textBase
                 )
-                .frame(width: 22, height: 26, alignment: .leading)
-                .contentShape(Rectangle())
+                .frame(width: TopBarMetrics.hexMarkWidth, height: 26, alignment: .leading)
+                .padding(.leading, TopBarMetrics.sideInset)
+                .topBarHitTarget(alignment: .leading)
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Open Hex")
 
-            if let target = model.translatingTo {
-                TranslationBadge(target: target, palette: p)
-            }
+            // The mark's tap area reaches past its pill into this group's slot: the
+            // outdent keeps the badge, the logging mark, and the status where they were.
+            HStack(spacing: 8) {
+                if let target = model.translatingTo {
+                    TranslationBadge(target: target, palette: p)
+                }
 
-            if model.isLoggingTyping {
-                TypingLogMark(textColor: p.textMuted)
-            }
+                if model.isLoggingTyping {
+                    TypingLogMark(textColor: p.textMuted)
+                }
 
-            leadingAccessory(palette: p)
+                leadingAccessory(palette: p)
+            }
+            .padding(.leading, -TopBarMetrics.hexMarkOverlap)
 
             Spacer(minLength: 4)
 
@@ -585,7 +641,7 @@ struct KeyboardSurfaceView: View {
             styleTrigger(palette: p)
                 .hexTrayReveal(model.hasFullAccess && model.translationNote == nil, reduceMotion: reduceMotion, offsetY: 0)
         }
-        .frame(height: 26)
+        .frame(height: TopBarMetrics.height)
     }
 
     private func styleTrayBar(palette p: KeyboardChromePalette) -> some View {
@@ -604,12 +660,13 @@ struct KeyboardSurfaceView: View {
                         .frame(height: 26)
                         .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(TopBarChipButtonStyle())
             }
             Spacer(minLength: 4)
             closeTrayButton(palette: p)
         }
-        .frame(height: 26)
+        .padding(.leading, TopBarMetrics.sideInset)
+        .frame(height: TopBarMetrics.height)
     }
 
     private func leadingAccessory(palette p: KeyboardChromePalette) -> some View {
@@ -713,9 +770,8 @@ struct KeyboardSurfaceView: View {
             .foregroundStyle(p.textMuted)
             .padding(.horizontal, 8)
             .frame(height: 26)
-            .contentShape(Capsule())
         }
-        .buttonStyle(TopBarTriggerButtonStyle(palette: p))
+        .buttonStyle(TopBarTriggerButtonStyle(palette: p, trailingHitInset: TopBarMetrics.sideInset))
         .accessibilityLabel("Style: \(model.style.label)")
     }
 
@@ -738,7 +794,6 @@ struct KeyboardSurfaceView: View {
             .foregroundStyle(p.textMuted)
             .padding(.horizontal, 8)
             .frame(height: 26)
-            .contentShape(Capsule())
         }
         .buttonStyle(TopBarTriggerButtonStyle(palette: p))
         // "Español → English" before the status beside the Hex mark, which is short whenever
@@ -776,12 +831,17 @@ struct KeyboardSurfaceView: View {
             .hexScrollEdgeEffectHidden()
             .hexHorizontalEdgeFade(leading: 4, trailing: 14)
 
-            if model.showsTranslationSwitch, let target = model.translationLanguage {
-                translationChip(target: target, palette: p)
+            // The close's 44 pt tap area ends on the screen's edge; it overlaps the
+            // chip's last 4 pt so the chip and the scroll view keep today's place.
+            HStack(spacing: -4) {
+                if model.showsTranslationSwitch, let target = model.translationLanguage {
+                    translationChip(target: target, palette: p)
+                }
+                closeTrayButton(palette: p)
             }
-            closeTrayButton(palette: p)
         }
-        .frame(height: 26)
+        .padding(.leading, TopBarMetrics.sideInset)
+        .frame(height: TopBarMetrics.height)
     }
 
     /// Translate to <language>: lit while dictations paste translated; a tap turns
@@ -802,7 +862,7 @@ struct KeyboardSurfaceView: View {
                 .frame(height: 26)
                 .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TopBarChipButtonStyle())
         .accessibilityLabel(title)
         .accessibilityValue(active ? "On" : "Off")
         .accessibilityAddTraits(active ? .isSelected : [])
@@ -834,7 +894,7 @@ struct KeyboardSurfaceView: View {
                 .frame(height: 26)
                 .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TopBarChipButtonStyle())
         .simultaneousGesture(
             LongPressGesture(minimumDuration: Self.removeHoldDuration).onEnded { _ in
                 guard let id, model.removingLanguage != id else { return }
@@ -875,7 +935,7 @@ struct KeyboardSurfaceView: View {
                 .frame(height: 26)
                 .background(p.chipIdleFill, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TopBarChipButtonStyle())
         .transition(.opacity)
         .accessibilityLabel(Text("Remove \(label)"))
     }
@@ -893,7 +953,7 @@ struct KeyboardSurfaceView: View {
                 .frame(height: 26)
                 .background(p.chipIdleFill, in: Capsule())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(TopBarChipButtonStyle())
     }
 
     /// More languages…'s bar: back to the language chips, and close.
@@ -913,14 +973,13 @@ struct KeyboardSurfaceView: View {
                 .foregroundStyle(p.textMuted)
                 .padding(.horizontal, 8)
                 .frame(height: 26)
-                .contentShape(Capsule())
             }
-            .buttonStyle(TopBarTriggerButtonStyle(palette: p))
+            .buttonStyle(TopBarTriggerButtonStyle(palette: p, leadingHitInset: TopBarMetrics.sideInset))
             .accessibilityLabel("Back")
             Spacer(minLength: 4)
             closeTrayButton(palette: p)
         }
-        .frame(height: 26)
+        .frame(height: TopBarMetrics.height)
     }
 
     /// Every other language Apple Speech has, in place of the keys; a tap picks it, which puts
@@ -964,6 +1023,8 @@ struct KeyboardSurfaceView: View {
                 .foregroundStyle(p.textMuted)
                 .frame(width: 26, height: 26)
                 .background(p.chipIdleFill, in: Circle())
+                .padding(.trailing, TopBarMetrics.sideInset)
+                .topBarHitTarget(alignment: .trailing)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("Close")
