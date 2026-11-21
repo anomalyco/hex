@@ -664,6 +664,42 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(view.engine.switchesLanguage)
     }
 
+    /// A Spanish variant picked by hand survives the space bar switching away and back:
+    /// Switch dictation too puts Automatic back at each switch, and dictation returns to the
+    /// Spanish picked last (es-US here), not Spain's.
+    func testAPickedSpanishVariantSurvivesTheSpaceBar() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .spanish]
+        settings.supportedDictationLanguages = ["en-US", "es-ES", "es-MX", "es-US"]
+        settings.automaticDictationLanguage = "en-US"
+        settings.dictationFollowsKeyboard = true
+        let model = KeyboardViewModel()
+        model.onLanguageSelected = { settings.chooseDictationLanguage($0) }
+        let view = FullKeyboardView(model: model, target: target)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.engine.language, .english)
+
+        settings.chooseDictationLanguage("es-US")
+        XCTAssertEqual(settings.dictationLanguage, "es-US")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertNil(settings.dictationLanguage, "Switch dictation too: back on Automatic")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES"), "es-US")
+
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertEqual(
+            settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES"),
+            "es-US",
+            "back to the variant picked"
+        )
+        XCTAssertEqual(settings.effectiveDictationLanguage, "es-US")
+    }
+
     /// With English and Spanish on one keyboard, both type on the first one's layout as chosen
     /// in Settings › Keyboard › Languages › Layout (`KeyboardLanguageList.layout`).
     func testTheSharedKeysTakeTheFirstLanguagesLayout() {

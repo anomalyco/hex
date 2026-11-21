@@ -69,7 +69,8 @@ nonisolated struct LanguageSettings {
     /// Settings › Dictation alike.
     func keyboardLanguageChoices(
         preferred: [String] = Locale.preferredLanguages,
-        hinglish: Bool = HinglishSettings().isEnabled
+        hinglish: Bool = HinglishSettings().isEnabled,
+        region: String? = Locale.current.region?.identifier
     ) -> [String] {
         DictationLanguageSwitch.choices(
             current: dictationLanguage,
@@ -77,7 +78,8 @@ nonisolated struct LanguageSettings {
             preferred: preferred,
             supported: supportedDictationLanguages,
             hinglish: hinglish,
-            removed: removedDictationLanguages
+            removed: removedDictationLanguages,
+            region: region
         )
     }
 
@@ -159,11 +161,15 @@ nonisolated struct LanguageSettings {
     /// the one the space bar shows now, in the iPhone's region where Apple Speech has it
     /// (`KeyboardLanguage.dictationLanguage`), as the iPhone's own keyboards take dictation
     /// with them, so Spanish speech is never transcribed as English, nor English as Spanish.
-    /// Nil with a dictation language picked by hand, with one keyboard language, and while
-    /// the iPhone's own language (what Automatic picks otherwise) has no layout to type it
-    /// (Hebrew), where dictating is how that language gets written, unless Switch dictation
-    /// too asks for it.
-    func keyboardDictationLanguage(preferred: [String] = Locale.preferredLanguages) -> String? {
+    /// A variant picked by hand for that language's keyboard wins over the preferred
+    /// languages, so swiping back to Español returns to the Spanish picked last. Nil with a
+    /// dictation language picked by hand, with one keyboard language, and while the iPhone's
+    /// own language (what Automatic picks otherwise) has no layout to type it (Hebrew), where
+    /// dictating is how that language gets written, unless Switch dictation too asks for it.
+    func keyboardDictationLanguage(
+        preferred: [String] = Locale.preferredLanguages,
+        region: String? = Locale.current.region?.identifier
+    ) -> String? {
         guard dictationLanguage == nil else { return nil }
         let chosen = keyboardLanguages
         guard chosen.count > 1 else { return nil }
@@ -173,7 +179,28 @@ nonisolated struct LanguageSettings {
             return nil
         }
         let list = KeyboardLanguageList.resolve(chosen: chosen, stored: currentKeyboardLanguage, automatic: .english)
-        return list.current.dictationLanguage(supported: supportedDictationLanguages, preferred: preferred)
+        return dictationLanguage(for: list.current, preferred: preferred, region: region)
+    }
+
+    /// What a keyboard language dictates in on Automatic: the variant picked for that
+    /// language's keyboard last (`recentDictationLanguages`) ahead of the preferred languages,
+    /// so swiping back to Español returns to the Spanish picked by hand.
+    func dictationLanguage(
+        for language: KeyboardLanguage,
+        preferred: [String] = Locale.preferredLanguages,
+        region: String? = Locale.current.region?.identifier
+    ) -> String? {
+        var preferred = preferred
+        if let picked = recentDictationLanguages.first(where: {
+            KeyboardLanguage.matching($0)?.baseLanguage == language.baseLanguage
+        }) {
+            preferred.insert(picked, at: 0)
+        }
+        return language.dictationLanguage(
+            supported: supportedDictationLanguages,
+            preferred: preferred,
+            region: region
+        )
     }
 
     /// The language dictation uses, when known: the one set, else the keyboard's it follows
@@ -244,12 +271,20 @@ nonisolated struct LanguageSettings {
         return now.timeIntervalSince1970 - at < Self.setAsideDuration
     }
 
-    /// A choice made in Hex or the keyboard: the setting, and the front of the recents.
+    /// A choice made in Hex or the keyboard: the setting, and the front of the recents. The
+    /// other variants of that language leave the recents, so es-US and es-ES never both take
+    /// a chip (`DictationLanguageSwitch.choices` offers one per language); Norwegian's
+    /// nb/nn/no aliases are one language, as Hinglish's Hindi is one.
     func chooseDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
         clearKeyboardNeedsHex()
         if let identifier {
-            recentDictationLanguages = [identifier] + recentDictationLanguages.filter { $0 != identifier }
+            let code = DictationLanguageSwitch.languageCode(of: identifier)
+            recentDictationLanguages = [identifier] + recentDictationLanguages.filter {
+                guard $0 != identifier else { return false }
+                guard let code else { return true }
+                return DictationLanguageSwitch.languageCode(of: $0) != code
+            }
             let match = DictationLanguageSwitch.supportedMatch(for: identifier, in: supportedDictationLanguages)
             let removed = removedDictationLanguages
             if removed.contains(where: { $0 == identifier || $0 == match }) {
@@ -286,7 +321,14 @@ nonisolated struct SpeechLanguageOption: Equatable, Identifiable, Sendable {
 nonisolated enum SpeechLanguagePicker {
     /// What Automatic tries, in order: the iPhone's preferred languages, its own locale, then
     /// US English. Norwegian Nynorsk also tries Bokmål, the only Norwegian Apple transcribes.
-    static func automaticCandidates(preferred: [String], current: String) -> [String] {
+    /// Spanish tries its variants (`DictationLanguageSwitch.spanishCandidates`) in order:
+    /// es-US and es-MX before Spain's for a Latin American, United States or other region, and
+    /// the iPhone's `region`'s variant when the preferred Spanish names none.
+    static func automaticCandidates(
+        preferred: [String],
+        current: String,
+        region: String? = Locale.current.region?.identifier
+    ) -> [String] {
         var result: [String] = []
         var seen = Set<String>()
         func add(_ identifier: String) {
@@ -296,6 +338,12 @@ nonisolated enum SpeechLanguagePicker {
             }
         }
         for identifier in preferred + [current, "en-US"] {
+            if Locale(identifier: identifier).language.languageCode?.identifier == "es" {
+                for candidate in DictationLanguageSwitch.spanishCandidates(for: identifier, region: region) {
+                    add(candidate)
+                }
+                continue
+            }
             add(identifier)
             if Locale(identifier: identifier).language.languageCode?.identifier == "nn" {
                 add("nb-NO")
@@ -308,38 +356,48 @@ nonisolated enum SpeechLanguagePicker {
     /// `DictationTranscriber`. Automatic takes the first candidate either module has,
     /// preferring `SpeechTranscriber` for the same language, so a Norwegian iPhone gets
     /// Norwegian from `DictationTranscriber` rather than English from `SpeechTranscriber`.
-    /// `speech` and `dictation` return each module's equivalent locale, or nil. Automatic
-    /// passes over a language `skip` names (one whose model wouldn't install here), so it
-    /// lands on the next working one; an explicit choice is tried as it is. When every
-    /// language either module has was set aside (an English-only iPhone whose English model
-    /// failed once), Automatic tries the first of them again: nil means neither module has
-    /// any of them, never that Hex gave up on the only one there is.
+    /// `speech` and `dictation` return each module's equivalent locale, or nil. An explicit
+    /// Spanish choice tries its variants in order too (`spanishCandidates`), and a module's
+    /// Spanish answer must name the region asked for, so a module resolving es-419 to Spain's
+    /// is passed over for es-US. Automatic passes over a language `skip` names (one whose
+    /// model wouldn't install here), so it lands on the next working one; an explicit choice
+    /// is tried as it is. When every language either module has was set aside (an English-only
+    /// iPhone whose English model failed once), Automatic tries the first of them again: nil
+    /// means neither module has any of them, never that Hex gave up on the only one there is.
     static func pick(
         explicit: String?,
         candidates: [String],
+        region: String? = Locale.current.region?.identifier,
         speech: (Locale) async -> Locale?,
         dictation: (Locale) async -> Locale?,
         skip: (Locale) -> Bool = { _ in false }
     ) async -> SpeechLanguage? {
         if let explicit, !explicit.isEmpty {
-            let wanted = Locale(identifier: explicit)
-            if let found = await speech(wanted), sameLanguage(found, wanted) {
-                return SpeechLanguage(locale: found, module: .speech)
-            }
-            if let found = await dictation(wanted) {
-                return SpeechLanguage(locale: found, module: .dictation)
+            let spanish = Locale(identifier: explicit).language.languageCode?.identifier == "es"
+            let wanted = spanish
+                ? DictationLanguageSwitch.spanishCandidates(for: explicit, region: region)
+                : [explicit]
+            for identifier in wanted {
+                let candidate = Locale(identifier: identifier)
+                if let found = await speech(candidate), sameLanguage(found, candidate) {
+                    return SpeechLanguage(locale: found, module: .speech)
+                }
+                if let found = await dictation(candidate), !spanish || sameLanguage(found, candidate) {
+                    return SpeechLanguage(locale: found, module: .dictation)
+                }
             }
         }
         var setAside: SpeechLanguage?
         for identifier in candidates {
             let candidate = Locale(identifier: identifier)
-            if let found = await speech(candidate) {
+            let spanish = Locale(identifier: identifier).language.languageCode?.identifier == "es"
+            if let found = await speech(candidate), !spanish || sameLanguage(found, candidate) {
                 let language = SpeechLanguage(locale: found, module: .speech)
                 guard skip(found) else { return language }
                 setAside = setAside ?? language
                 continue
             }
-            if let found = await dictation(candidate) {
+            if let found = await dictation(candidate), !spanish || sameLanguage(found, candidate) {
                 let language = SpeechLanguage(locale: found, module: .dictation)
                 guard skip(found) else { return language }
                 setAside = setAside ?? language
@@ -360,6 +418,15 @@ nonisolated enum SpeechLanguagePicker {
         display.localizedString(forIdentifier: identifier)
             ?? Locale(identifier: identifier).localizedString(forIdentifier: identifier)
             ?? identifier
+    }
+
+    /// "English (US)", "Spanish (US)": one language's name with its region code, short enough
+    /// for Settings' line naming each keyboard language's dictation language.
+    static func shortName(for identifier: String, in display: Locale = .current) -> String {
+        let name = shortNames(for: [identifier], in: display)[identifier]
+            ?? displayName(for: identifier, in: display)
+        guard let region = Locale(identifier: identifier).region?.identifier else { return name }
+        return "\(name) (\(region))"
     }
 
     /// Short names for a list of locales: the language alone where it has one region in the

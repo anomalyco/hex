@@ -631,7 +631,7 @@ final class KeyboardBridgeTests: XCTestCase {
 
 /// The keyboard's quick dictation-language switch.
 final class DictationLanguageSwitchTests: XCTestCase {
-    private let supported = ["en-US", "en-GB", "es-ES", "es-MX", "de-DE", "nb-NO", "he-IL", "fr-FR"]
+    private let supported = ["en-US", "en-GB", "es-ES", "es-US", "es-MX", "de-DE", "nb-NO", "he-IL", "fr-FR"]
 
     func testOffersTheCurrentThenRecentThenPreferredLanguages() {
         XCTAssertEqual(
@@ -650,11 +650,104 @@ final class DictationLanguageSwitchTests: XCTestCase {
             current: nil,
             recent: [],
             preferred: ["nn-NO", "es-419", "es", "en-AU", "tlh", "fr-CA", "en-GB", "de-AT"],
-            supported: supported
+            supported: supported,
+            region: "US"
         )
-        // Nynorsk is Bokmål; "es-419" and "es" find Spain's Spanish; Klingon has none.
-        XCTAssertEqual(choices, ["nb-NO", "es-ES", "en-US", "fr-FR", "en-GB"])
+        // Nynorsk is Bokmål; "es-419" finds the Americas' Spanish (es-US); "es" adds no
+        // second Spanish; Klingon has none; one variant per language.
+        XCTAssertEqual(choices, ["nb-NO", "es-US", "en-US", "fr-FR", "de-DE"])
         XCTAssertEqual(choices.count, DictationLanguageSwitch.maxChoices)
+    }
+
+    /// Apple Speech has three Spanish variants: Spain's es-ES, and es-US and es-MX for the
+    /// Americas. A Latin American or US iPhone that speaks Spanish speaks Latin American
+    /// Spanish, so its dictation is es-US where Apple has it, es-MX next, and never Spain's.
+    func testSpanishFindsTheAmericasVariant() {
+        let all = ["en-US", "es-ES", "es-MX", "es-US"]
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-419", in: all), "es-US")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-CO", in: all), "es-US")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-AR", in: all), "es-US")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-US", in: all), "es-US", "exact")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-MX", in: all), "es-MX", "exact")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-ES", in: all), "es-ES", "exact")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-GQ", in: all), "es-ES", "Equatorial Guinea is Spain's")
+        XCTAssertEqual(
+            DictationLanguageSwitch.supportedMatch(for: "es-419", in: ["en-US", "es-ES", "es-MX"]),
+            "es-MX",
+            "es-US missing"
+        )
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-419", in: ["en-US", "es-ES"]), "es-ES")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es-419", in: []), "es-419", "not listed yet")
+    }
+
+    /// Plain "es" names no region, so Spanish follows the iPhone's Region: Mexico's own
+    /// Spanish, the United States' and Latin America's es-US, and Spain's es-ES elsewhere.
+    func testPlainSpanishFollowsTheIPhonesRegion() {
+        let all = ["en-US", "es-ES", "es-MX", "es-US"]
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: "MX"), "es-MX")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: "US"), "es-US")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: "PR"), "es-US")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: "CO"), "es-US")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: "ES"), "es-ES")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: "FR"), "es-ES")
+        XCTAssertEqual(DictationLanguageSwitch.supportedMatch(for: "es", in: all, region: nil), "es-ES")
+        XCTAssertEqual(
+            DictationLanguageSwitch.supportedMatch(for: "es", in: ["en-US", "es-MX"], region: "US"),
+            "es-MX",
+            "es-US missing"
+        )
+    }
+
+    /// One chip per language: the current variant first, then the first of the recents, then
+    /// the preferred languages, so es-US and es-ES never both appear.
+    func testOneVariantPerLanguageInTheChoices() {
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(
+                current: "es-MX",
+                recent: ["es-US", "en-GB", "es-ES"],
+                preferred: ["fr-FR", "en-US"],
+                supported: ["en-US", "en-GB", "es-ES", "es-MX", "es-US", "fr-FR"],
+                region: "US"
+            ),
+            ["es-MX", "en-GB", "fr-FR"]
+        )
+    }
+
+    /// A picked variant drops its siblings from the recents; Norwegian's nb/nn/no aliases and
+    /// Hinglish's Hindi stay one language each.
+    func testPickingAVariantDropsItsSiblingsFromTheRecents() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        settings.chooseDictationLanguage("es-US")
+        settings.chooseDictationLanguage("en-GB")
+        settings.chooseDictationLanguage("es-MX")
+        XCTAssertEqual(settings.recentDictationLanguages, ["es-MX", "en-GB"])
+        settings.chooseDictationLanguage("nn-NO")
+        settings.chooseDictationLanguage("nb-NO")
+        XCTAssertEqual(settings.recentDictationLanguages, ["nb-NO", "es-MX", "en-GB"])
+        settings.chooseDictationLanguage("hi-IN")
+        XCTAssertEqual(settings.recentDictationLanguages, ["hi-IN", "nb-NO", "es-MX", "en-GB"])
+    }
+
+    /// A language with more than one variant in Apple Speech names its region, as Apple's own
+    /// keyboards do; one with a single variant keeps its plain name.
+    func testNamesTheRegionOnlyWhereAppleHasMoreThanOneVariant() {
+        let supported = ["en-US", "en-GB", "es-ES", "es-MX", "es-US", "nb-NO", "fr-FR"]
+        XCTAssertEqual(
+            DictationLanguageSwitch.nativeNames(for: ["es-US", "en-GB", "nb-NO"], supported: supported),
+            ["es-US": "Español (US)", "en-GB": "English (GB)", "nb-NO": "Norsk"]
+        )
+        XCTAssertEqual(
+            DictationLanguageSwitch.nativeName(for: "es-ES", supported: supported),
+            "Español (ES)"
+        )
+        XCTAssertEqual(
+            DictationLanguageSwitch.nativeNames(for: ["es-US", "en-GB", "nb-NO"]),
+            ["es-US": "Español", "en-GB": "English", "nb-NO": "Norsk"],
+            "without Apple's list, one variant each"
+        )
     }
 
     func testWithoutAListEveryLanguageIsOffered() {
@@ -734,19 +827,28 @@ final class DictationLanguageSwitchTests: XCTestCase {
         let settings = LanguageSettings(defaults: defaults)
         settings.supportedDictationLanguages = supported
         settings.chooseDictationLanguage("he-IL")
-        settings.chooseDictationLanguage("es")
+        settings.chooseDictationLanguage("es-ES")
         let preferred = ["zh-Hans-CN", "nb-NO", "en-US"]
-        XCTAssertEqual(settings.keyboardLanguageChoices(preferred: preferred, hinglish: false), ["es-ES", "he-IL", "nb-NO", "en-US"])
+        XCTAssertEqual(
+            settings.keyboardLanguageChoices(preferred: preferred, hinglish: false, region: "ES"),
+            ["es-ES", "he-IL", "nb-NO", "en-US"]
+        )
 
         settings.removeDictationLanguage("es-ES")
         XCTAssertNil(settings.dictationLanguage, "the one set goes back to Automatic")
         XCTAssertEqual(settings.recentDictationLanguages, ["he-IL"])
         settings.removeDictationLanguage("nb-NO")
-        XCTAssertEqual(settings.keyboardLanguageChoices(preferred: preferred, hinglish: false), ["he-IL", "en-US"])
+        XCTAssertEqual(
+            settings.keyboardLanguageChoices(preferred: preferred, hinglish: false, region: "ES"),
+            ["he-IL", "en-US"]
+        )
 
         settings.chooseDictationLanguage("nb-NO")
         XCTAssertEqual(settings.removedDictationLanguages, ["es-ES"])
-        XCTAssertEqual(settings.keyboardLanguageChoices(preferred: preferred, hinglish: false), ["nb-NO", "he-IL", "en-US"])
+        XCTAssertEqual(
+            settings.keyboardLanguageChoices(preferred: preferred, hinglish: false, region: "ES"),
+            ["nb-NO", "he-IL", "en-US"]
+        )
         XCTAssertEqual(
             DictationLanguageSwitch.choices(current: "es-ES", recent: [], preferred: [], supported: supported, removed: ["es-ES"]),
             ["es-ES"],

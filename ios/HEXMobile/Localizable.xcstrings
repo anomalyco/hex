@@ -1270,6 +1270,16 @@
         }
       }
     },
+    "Follows keyboard: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跟随键盘：%@"
+          }
+        }
+      }
+    },
     "For dictation" : {
       "localizations" : {
         "zh-Hans" : {

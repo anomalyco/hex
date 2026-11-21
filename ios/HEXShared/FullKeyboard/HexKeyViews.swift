@@ -523,6 +523,9 @@ final class HexStyleMenuView: UIView {
     }
 
     private func rebuild() {
+        // Apple Speech's languages here, for labels: More languages holds every one the
+        // switch doesn't, so the two together name a language's region where it has several.
+        let supported = languageChoices + moreLanguages
         panel.backgroundColor = palette.popupFill
         panel.layer.borderColor = palette.popupBorder.cgColor
         panel.layer.borderWidth = 1 / max(1, traitCollection.displayScale)
@@ -537,7 +540,9 @@ final class HexStyleMenuView: UIView {
                 })
             }
             if !languageChoices.isEmpty || !moreLanguages.isEmpty {
-                let current = (dictationLanguage ?? automaticLanguage).map(DictationLanguageSwitch.nativeName(for:))
+                let current = (dictationLanguage ?? automaticLanguage).map {
+                    DictationLanguageSwitch.nativeName(for: $0, supported: supported)
+                }
                 rows.append(makeRow(title: String(localized: "Language"), detail: current ?? String(localized: "Automatic"), chevron: true, selected: false, showsTopDivider: true) { [weak self] in
                     self?.show(page: .languages)
                 })
@@ -558,11 +563,13 @@ final class HexStyleMenuView: UIView {
                 }
             }
         case .languages:
-            let automatic = automaticLanguage.map(DictationLanguageSwitch.nativeName(for:))
+            let automatic = automaticLanguage.map {
+                DictationLanguageSwitch.nativeName(for: $0, supported: supported)
+            }
             rows.append(makeRow(title: String(localized: "Automatic"), detail: automatic, selected: dictationLanguage == nil) { [weak self] in
                 self?.onLanguage?(nil)
             })
-            let names = DictationLanguageSwitch.nativeNames(for: languageChoices)
+            let names = DictationLanguageSwitch.nativeNames(for: languageChoices, supported: supported)
             for id in languageChoices {
                 let name = names[id] ?? id
                 let removing = id == removingLanguage
@@ -602,7 +609,7 @@ final class HexStyleMenuView: UIView {
                 })
             }
         case .moreLanguages:
-            let names = DictationLanguageSwitch.nativeNames(for: languageChoices + moreLanguages)
+            let names = DictationLanguageSwitch.nativeNames(for: languageChoices + moreLanguages, supported: supported)
             for id in moreLanguages {
                 rows.append(makeRow(title: names[id] ?? id, selected: false) { [weak self] in
                     self?.onLanguage?(id)
