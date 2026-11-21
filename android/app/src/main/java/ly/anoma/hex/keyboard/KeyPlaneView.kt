@@ -53,6 +53,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     private val spaceGesture = SpaceGesture(KeyboardMetrics.CURSOR_START * density, KeyboardMetrics.CURSOR_STEP * density, slop.toFloat())
     private var cursorSlide: CursorSlide? = null
+    private var spacePoint: KeyPoint? = null
+    // The page the keys show; a change of shift alone relabels them in place, so a held shift key
+    // stays mounted and its own finger-up ends a chord.
+    private var current: KeyboardPage? = null
+    private val caseKeys = ArrayList<Pair<Char, KeyCap>>()
+    private var shiftIcon: ImageView? = null
     private val switchLanguage = Runnable {
         if (spaceKey.isPressed && spaceGesture.still) { spaceKey.isPressed = false; spaceKey.performLongClick() }
     }
@@ -73,7 +79,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         modeKey = caps.cap(context.getString(R.string.keyboard_numbers_label), context.getString(R.string.keyboard_numbers),
             modifier, 17f, ime.engine::mode)
         val comma = caps.cap(",", context.getString(R.string.keyboard_comma), modifier) { ime.engine.type(",") }
-        spaceKey = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) { ime.engine.type(" ") }
+        spaceKey = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) {
+            ime.engine.space(spacePoint, if (current?.symbols == false) geometry() else null); spacePoint = null
+        }
         spaceKey.label?.setTextColor(quiet)
         spaceKey.setOnLongClickListener { host.openLanguageMenu(); true }
         // A press that leaves the key still types its space on lifting: a quick tap that drifts must
@@ -82,6 +90,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             when (e.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     v.isPressed = true; cursorSlide = null; spaceGesture.down(e.x, e.y, e.eventTime)
+                    spacePoint = KeyPoint((v.left + e.x).toDouble(), (bottom.top - rows.top + e.y).toDouble())
                     postDelayed(switchLanguage, ViewConfiguration.getLongPressTimeout().toLong())
                 }
                 MotionEvent.ACTION_MOVE -> if (v.isPressed) {
@@ -108,8 +117,15 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 period to KeyboardMetrics.PERIOD, enterKey to KeyboardMetrics.ENTER)) { bottom.add(key, at, width); at += width }
     }
 
+    private fun cased(c: Char) = if (current?.let { !it.symbols && it.shifted } == true) c.uppercaseChar().toString() else c.toString()
+
     fun showPage(page: KeyboardPage) {
-        clearCallout(); grid = null; letters.clear()
+        val shown = current
+        if (shown != null && !page.symbols && page.copy(shifted = shown.shifted, locked = shown.locked) == shown) {
+            current = page; relabel(page); return
+        }
+        current = page
+        clearCallout(); grid = null; letters.clear(); caseKeys.clear(); shiftIcon = null
         rows.removeAllViews()
         val language = page.language
         val symbols = page.symbols
@@ -125,31 +141,45 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             val width = if (index < 2) 1f else (columns - 2 * side) / line.length
             if (index == 2) {
                 val switch = if (symbols) caps.cap(context.getString(if (page.more) R.string.keyboard_page_numbers else R.string.keyboard_page_symbols),
-                    context.getString(R.string.keyboard_more_symbols), modifier, 15f, ime.engine::shift)
-                else caps.icon(when { page.locked -> R.drawable.ic_caps_lock; page.shifted -> R.drawable.ic_shift_on; else -> R.drawable.ic_shift },
-                    context.getString(if (page.locked) R.string.keyboard_caps_lock else R.string.keyboard_shift), modifier, ime.engine::shift)
+                    context.getString(R.string.keyboard_more_symbols), modifier, 15f, ime.engine::shiftUp)
+                else caps.icon(shiftIconFor(page), shiftDescription(page), modifier, { ime.engine.shiftDown(); ime.engine.shiftUp() }).also { key ->
+                    shiftIcon = key.face.getChildAt(0) as ImageView
+                    // Shift acts as it goes down and again as it lifts: a chord types capitals.
+                    key.setOnTouchListener { v, e ->
+                        when (e.actionMasked) {
+                            MotionEvent.ACTION_DOWN -> { v.isPressed = true; ime.engine.shiftDown() }
+                            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> { if (v.isPressed) { v.isPressed = false; ime.engine.shiftUp() } }
+                        }
+                        true
+                    }
+                }
                 row.add(switch, 0f, side); at = side
             }
             for (c in line) {
-                val text = if (!symbols && page.shifted) c.uppercaseChar().toString() else c.toString()
                 var touch: KeyPoint? = null
-                val k = caps.cap(text, text) {
+                // The letter as it was when the finger went down, so shift lifting mid-press can't change it.
+                var downText: String? = null
+                val k = caps.cap(cased(c), cased(c)) {
+                    val text = downText ?: cased(c)
                     val g = if (symbols) null else geometry()
                     val p = touch ?: g?.centres?.get(c)
                     if (g != null && p != null) ime.engine.letter(text, p.x, p.y, g) else ime.engine.type(text)
                 }
                 row.add(k, at, width); at += width
-                if (!symbols) letters[c] = k
-                val accents = if (symbols) emptyList() else LetterFeedback.options(text.single(), language.layoutCode)
-                if (accents.isNotEmpty()) k.setOnLongClickListener {
-                    host.openAccents(accents); true
+                if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
+                fun accents() = if (symbols) emptyList() else LetterFeedback.options(cased(c).single(), language.layoutCode)
+                if (accents().isNotEmpty()) k.setOnLongClickListener {
+                    host.openAccents(accents()); true
                 }
                 k.setOnTouchListener { v, e ->
+                    val text = downText ?: cased(c)
                     when (e.actionMasked) {
                         MotionEvent.ACTION_DOWN -> {
                             clearCallout(); v.isPressed = true
+                            downText = cased(c)
                             touch = KeyPoint((v.left + e.x).toDouble(), (row.top + e.y).toDouble())
-                            if (ime.feedback.popups && ime.previewAllowed) feedback.present(k.face, listOf(text))
+                            if (ime.feedback.popups && ime.previewAllowed) feedback.present(k.face, listOf(cased(c)))
+                            val accents = accents()
                             if (accents.isNotEmpty()) {
                                 pendingAccents = Runnable { if (v.isPressed) feedback.present(k.face, accents) }
                                 postDelayed(pendingAccents!!, 400L)
@@ -168,9 +198,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                                 val g = geometry(); val p = touch
                                 if (g != null && p != null) ime.engine.letter(selected, p.x, p.y, g, explicit = true) else ime.engine.type(selected)
                             } else if (pressed) v.performClick()
-                            touch = null
+                            touch = null; downText = null
                         }
-                        MotionEvent.ACTION_CANCEL -> { v.isPressed = false; clearCallout(); touch = null }
+                        MotionEvent.ACTION_CANCEL -> { v.isPressed = false; clearCallout(); touch = null; downText = null }
                     }
                     true
                 }
@@ -219,6 +249,15 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         enterKey.label?.text = action.orEmpty()
         enterIcon.visibility = if (action == null) View.VISIBLE else View.GONE
         enterKey.contentDescription = action ?: context.getString(R.string.keyboard_return)
+    }
+
+    private fun shiftIconFor(page: KeyboardPage) = when { page.locked -> R.drawable.ic_caps_lock; page.shifted -> R.drawable.ic_shift_on; else -> R.drawable.ic_shift }
+    private fun shiftDescription(page: KeyboardPage) = context.getString(if (page.locked) R.string.keyboard_caps_lock else R.string.keyboard_shift)
+    /** Shift changed and nothing else: new labels on the same keys. */
+    private fun relabel(page: KeyboardPage) {
+        for ((c, key) in caseKeys) { val text = cased(c); key.label?.text = text; key.contentDescription = text }
+        shiftIcon?.setImageResource(shiftIconFor(page))
+        (shiftIcon?.parent?.parent as? View)?.contentDescription = shiftDescription(page)
     }
 
     private fun actionLabel(action: Int) = when (action) {
