@@ -166,7 +166,7 @@ final class DictationController {
     @ObservationIgnored private var lastPublishedSnapshotAt: TimeInterval = -100
     var warmDuration: WarmSessionDuration
     private(set) var style: DictationStyle
-    private(set) var allowBluetoothMic: Bool
+    private(set) var microphone: MicrophoneChoice
     private(set) var handoffNotice: String?
     var engineName = "Local speech"
     var transcriptionLanguage = "English"
@@ -241,7 +241,7 @@ final class DictationController {
         self.followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
-        self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
+        self.microphone = resolvedBridge.microphone
 
         let hasCachedModel = ParakeetTranscriber.hasCachedModel
         resolvedBridge.publish(.offline)
@@ -393,13 +393,12 @@ final class DictationController {
         }
     }
 
-    func setAllowBluetoothMic(_ allow: Bool) {
-        guard allowBluetoothMic != allow else { return }
-        allowBluetoothMic = allow
-        keyboardBridge.allowBluetoothMic = allow
-        if keyboardSessionEnabled, phase == .ready {
-            try? audio.startKeepalive(allowBluetooth: allow)
-        }
+    /// The next dictation records from the new choice's input; the warm keepalive stays on
+    /// the iPhone's microphone whatever the choice.
+    func setMicrophone(_ choice: MicrophoneChoice) {
+        guard microphone != choice else { return }
+        microphone = choice
+        keyboardBridge.microphone = choice
     }
 
     // MARK: - Standalone & System Actions
@@ -669,7 +668,7 @@ final class DictationController {
             }
 
             do {
-                try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
+                try audio.startKeepalive()
                 enableWarmSessionBookkeeping()
                 phase = .ready
                 startKeyboardSessionLoop()
@@ -865,7 +864,7 @@ final class DictationController {
                 let capture = try audio.beginCapture(
                     at: captureURL,
                     maxDuration: Self.maxCaptureDuration,
-                    allowBluetooth: allowBluetoothMic
+                    microphone: microphone
                 )
                 guard self.jobGeneration == captureGeneration else {
                     capture.stop()
@@ -1080,7 +1079,7 @@ final class DictationController {
                 return
             }
             do {
-                try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
+                try audio.startKeepalive()
             } catch {
                 keyboardSessionEnabled = false
                 keyboardSessionRemaining = 0
@@ -1172,7 +1171,7 @@ final class DictationController {
                     } else if self.phase == .ready && !self.suspendedWarmSessionOnInterruption,
                               self.keepaliveRestartIsDue() {
                         do {
-                            try self.audio.startKeepalive(allowBluetooth: self.allowBluetoothMic)
+                            try self.audio.startKeepalive()
                         } catch {
                             self.endWarmSession()
                             return
@@ -1365,7 +1364,7 @@ final class DictationController {
             }
             if shouldResume || UIApplication.shared.applicationState == .active {
                 do {
-                    try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
+                    try audio.startKeepalive()
                     publishKeyboardSnapshot()
                 } catch {
                     endWarmSession()
@@ -1384,7 +1383,7 @@ final class DictationController {
                 }
             } else if keyboardSessionEnabled && phase == .ready {
                 do {
-                    try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
+                    try audio.startKeepalive()
                     publishKeyboardSnapshot()
                 } catch {
                     endWarmSession()
@@ -1392,8 +1391,10 @@ final class DictationController {
             }
 
         case .routeNewDeviceAvailable:
-            if keyboardSessionEnabled && phase == .ready && allowBluetoothMic {
-                try? audio.startKeepalive(allowBluetooth: allowBluetoothMic)
+            // A headset or car that just connected can take the input: the keepalive goes back
+            // to the iPhone's microphone, on a fresh engine for the route's format.
+            if keyboardSessionEnabled && phase == .ready {
+                try? audio.startKeepalive()
                 publishKeyboardSnapshot()
             }
 
@@ -1403,7 +1404,7 @@ final class DictationController {
             }
             if keyboardSessionEnabled {
                 do {
-                    try audio.startKeepalive(allowBluetooth: allowBluetoothMic)
+                    try audio.startKeepalive()
                     publishKeyboardSnapshot()
                 } catch {
                     endWarmSession()

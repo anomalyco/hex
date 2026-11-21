@@ -417,6 +417,9 @@ struct KeyboardBridge {
         static let snapshot = "keyboard.snapshot"
         static let warmDuration = "settings.warmDuration"
         static let style = "settings.dictationStyle"
+        static let microphone = "settings.microphone"
+        /// Before Settings › Microphone: true allowed Bluetooth microphones (Always use iPhone
+        /// microphone off). Read only while Microphone is unset.
         static let allowBluetoothMic = "settings.allowBluetoothMic"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
@@ -490,12 +493,17 @@ struct KeyboardBridge {
         }
     }
 
-    var allowBluetoothMic: Bool {
+    /// Settings › Microphone. Unset, it is Automatic, or Bluetooth for someone who turned off
+    /// Always use iPhone microphone (the switch it replaced).
+    var microphone: MicrophoneChoice {
         get {
-            defaults?.bool(forKey: Key.allowBluetoothMic) ?? false
+            if let raw = defaults?.string(forKey: Key.microphone), let choice = MicrophoneChoice(rawValue: raw) {
+                return choice
+            }
+            return defaults?.bool(forKey: Key.allowBluetoothMic) == true ? .bluetooth : .automatic
         }
         nonmutating set {
-            defaults?.set(newValue, forKey: Key.allowBluetoothMic)
+            defaults?.set(newValue.rawValue, forKey: Key.microphone)
         }
     }
 

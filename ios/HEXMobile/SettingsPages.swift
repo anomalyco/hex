@@ -115,14 +115,32 @@ struct DictationSettingsPage: View {
 
                 SettingsDivider()
 
-                SettingsToggleRow(
-                    title: String(localized: "Always use iPhone microphone"),
-                    detail: String(localized: "Keeps music playing and starts faster"),
-                    isOn: Binding(
-                        get: { !dictation.allowBluetoothMic },
-                        set: { dictation.setAllowBluetoothMic(!$0) }
+                // With a car, headset or headphones connected (`MicrophoneRoute`).
+                HStack(spacing: 12) {
+                    SettingsRowLabel(
+                        title: String(localized: "Microphone"),
+                        detail: dictation.microphone.detail
                     )
-                )
+                    Spacer(minLength: 8)
+                    Menu {
+                        ForEach(MicrophoneChoice.allCases, id: \.self) { candidate in
+                            Button {
+                                dictation.setMicrophone(candidate)
+                            } label: {
+                                if dictation.microphone == candidate {
+                                    Label(candidate.label, systemImage: "checkmark")
+                                } else {
+                                    Text(candidate.label)
+                                }
+                            }
+                        }
+                    } label: {
+                        SettingsMenuValue(value: dictation.microphone.label)
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .frame(minHeight: 50)
             }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: customVocabulary)

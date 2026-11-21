@@ -39,6 +39,8 @@ private final class FakeAudioManager: AudioManaging {
     var deactivateCount = 0
     var createdCaptures: [FakeAudioCapture] = []
     var keepaliveStarts = 0
+    /// The Settings › Microphone choice each capture was asked to record from.
+    var captureMicrophones: [MicrophoneChoice] = []
     /// An engine that stops again by itself as soon as it starts.
     var keepaliveStopsRightAway = false
 
@@ -49,7 +51,7 @@ private final class FakeAudioManager: AudioManaging {
         permissionGranted
     }
 
-    func startKeepalive(allowBluetooth: Bool) throws {
+    func startKeepalive() throws {
         keepaliveStarts += 1
         if keepaliveShouldThrow {
             isKeepaliveRunning = false
@@ -70,8 +72,9 @@ private final class FakeAudioManager: AudioManaging {
     func beginCapture(
         at url: URL,
         maxDuration: TimeInterval,
-        allowBluetooth: Bool
+        microphone: MicrophoneChoice
     ) throws -> any ActiveAudioCapture {
+        captureMicrophones.append(microphone)
         isKeepaliveRunning = false
         if captureShouldThrow {
             throw CocoaError(.fileWriteUnknown)
@@ -248,6 +251,37 @@ final class DictationControllerTests: XCTestCase {
 
         controller.cancelCurrentJob()
         XCTAssertFalse(FileManager.default.fileExists(atPath: secondCaptureURL.path))
+    }
+
+    func testDictationRecordsFromTheMicrophoneChosenInSettings() async throws {
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 1_500 },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(controller.microphone, .automatic)
+
+        controller.startRecording(keyboardJobID: "job-a")
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        controller.cancelCurrentJob()
+
+        controller.setMicrophone(.bluetooth)
+        XCTAssertEqual(bridge.microphone, .bluetooth, "the keyboard's capture page follows it too")
+        controller.startRecording(keyboardJobID: "job-b")
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        controller.cancelCurrentJob()
+
+        XCTAssertEqual(audio.captureMicrophones, [.automatic, .bluetooth])
     }
 
     func testAcceptedJobDeliversTranscriptEvenWhenWarmSessionCloses() async throws {
@@ -2205,13 +2239,19 @@ final class AppleSpeechClipTests: XCTestCase {
 private final class FakeAudioSession: AudioSessionControlling {
     enum Call: Equatable {
         case category(AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)
-        case preferredInput
+        case preferredInput(AVAudioSession.Port?)
         case active(Bool, AVAudioSession.SetActiveOptions)
     }
 
     var calls: [Call] = []
     var isOtherAudioPlaying = false
-    var availableInputs: [AVAudioSessionPortDescription]? { nil }
+    /// What iOS offers: Bluetooth hands-free inputs only in a category that allows them.
+    var connected: [Microphone] = []
+    private var allowsBluetooth = false
+
+    var microphones: [Microphone] {
+        connected.filter { allowsBluetooth || ($0.port != .bluetoothHFP && $0.port != .bluetoothLE) }
+    }
 
     func setCategory(
         _ category: AVAudioSession.Category,
@@ -2219,10 +2259,11 @@ private final class FakeAudioSession: AudioSessionControlling {
         options: AVAudioSession.CategoryOptions
     ) throws {
         calls.append(.category(category, mode, options))
+        allowsBluetooth = options.contains(.allowBluetoothHFP)
     }
 
-    func setPreferredInput(_ inPort: AVAudioSessionPortDescription?) throws {
-        calls.append(.preferredInput)
+    func prefer(_ microphone: Microphone?) throws {
+        calls.append(.preferredInput(microphone?.port))
     }
 
     func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {
@@ -2230,13 +2271,20 @@ private final class FakeAudioSession: AudioSessionControlling {
     }
 }
 
+private let iPhoneMic = Microphone(uid: "Built-In Microphone", name: "iPhone Microphone", port: .builtInMic)
+private let airPods = Microphone(uid: "A0:B1:C2:D3:E4:F5-tsco", name: "AirPods Pro", port: .bluetoothHFP)
+private let bluetoothCar = Microphone(uid: "10:20:30:40:50:60-tsco", name: "My Car", port: .bluetoothHFP)
+private let carPlay = Microphone(uid: "CarPlay-mic", name: "CarPlay", port: .carAudio)
+private let wiredHeadset = Microphone(uid: "Wired Headset Microphone", name: "Headset Microphone", port: .headsetMic)
+
 @MainActor
 final class AudioSessionSetupTests: XCTestCase {
-    func testRecordingMixesWithOtherAppsAudioWithOrWithoutTheBluetoothMicrophone() throws {
-        for allowBluetooth in [false, true] {
+    func testRecordingMixesWithOtherAppsAudioWhateverTheMicrophone() throws {
+        let choices: [MicrophoneChoice?] = [nil] + MicrophoneChoice.allCases.map { $0 }
+        for choice in choices {
             let session = FakeAudioSession()
             let audio = SystemAudioManager(session: session)
-            try audio.configureAudioSession(allowBluetooth: allowBluetooth)
+            try audio.configureAudioSession(recordingFrom: choice)
 
             guard case .category(let category, let mode, let options)? = session.calls.first else {
                 return XCTFail("the category is set first")
@@ -2246,9 +2294,63 @@ final class AudioSessionSetupTests: XCTestCase {
             XCTAssertTrue(options.contains(.mixWithOthers), "never interrupts another app's video or music")
             XCTAssertFalse(options.contains(.duckOthers))
             XCTAssertTrue(options.contains(.allowBluetoothA2DP))
-            XCTAssertEqual(options.contains(.allowBluetoothHFP), allowBluetooth, "the Bluetooth microphone only when allowed")
-            XCTAssertEqual(session.calls.last, .active(true, []))
+            XCTAssertEqual(
+                options.contains(.allowBluetoothHFP), choice == .bluetooth,
+                "Bluetooth hands-free microphones only for a dictation with Bluetooth chosen, never the keepalive"
+            )
+            XCTAssertEqual(session.calls[1], .active(true, []))
         }
+    }
+
+    /// Ryan's car: in CarPlay, Automatic (the default) records from the car's microphone, not
+    /// the iPhone in its cupholder hearing the speakers. AirPods keep the iPhone's microphone
+    /// (music stays at full quality, nothing waits for call audio); Bluetooth takes theirs.
+    func testEachChoiceRecordsFromItsMicrophoneForTheRoute() {
+        let routes: [(String, [Microphone], [MicrophoneChoice: Microphone])] = [
+            ("nothing connected", [iPhoneMic], [.automatic: iPhoneMic, .iPhone: iPhoneMic, .bluetooth: iPhoneMic]),
+            ("CarPlay", [iPhoneMic, carPlay], [.automatic: carPlay, .iPhone: iPhoneMic, .bluetooth: carPlay]),
+            ("AirPods", [iPhoneMic, airPods], [.automatic: iPhoneMic, .iPhone: iPhoneMic, .bluetooth: airPods]),
+            ("a Bluetooth car kit", [iPhoneMic, bluetoothCar], [.automatic: iPhoneMic, .iPhone: iPhoneMic, .bluetooth: bluetoothCar]),
+            ("a wired headset", [iPhoneMic, wiredHeadset], [.automatic: wiredHeadset, .iPhone: iPhoneMic, .bluetooth: wiredHeadset]),
+        ]
+        for (route, inputs, expected) in routes {
+            for (choice, input) in expected {
+                XCTAssertEqual(MicrophoneRoute.capture(choice, from: inputs), input, "\(choice) with \(route)")
+            }
+            XCTAssertEqual(MicrophoneRoute.keepalive(from: inputs), iPhoneMic, "the keepalive with \(route)")
+        }
+    }
+
+    func testTheSessionPrefersTheChosenInputAndTheKeepaliveTheIPhones() throws {
+        let cases: [(MicrophoneChoice?, [Microphone], AVAudioSession.Port)] = [
+            (.automatic, [iPhoneMic, carPlay], .carAudio),
+            (.iPhone, [iPhoneMic, carPlay], .builtInMic),
+            (.bluetooth, [iPhoneMic, airPods], .bluetoothHFP),
+            (.automatic, [iPhoneMic, airPods], .builtInMic),
+            // A warm session between dictations never holds the car or headset in call audio.
+            (nil, [iPhoneMic, carPlay], .builtInMic),
+            (nil, [iPhoneMic, airPods], .builtInMic),
+        ]
+        for (choice, connected, port) in cases {
+            let session = FakeAudioSession()
+            session.connected = connected
+            try SystemAudioManager(session: session).configureAudioSession(recordingFrom: choice)
+            XCTAssertEqual(session.calls.last, .preferredInput(port), "\(String(describing: choice)) with \(connected.map(\.name))")
+        }
+    }
+
+    func testTheMicrophoneChoiceDefaultsToAutomaticAndKeepsAnOldBluetoothSwitch() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        XCTAssertEqual(bridge.microphone, .automatic, "Always use iPhone microphone left on, its default")
+
+        defaults.set(true, forKey: "settings.allowBluetoothMic")
+        XCTAssertEqual(bridge.microphone, .bluetooth, "Always use iPhone microphone turned off")
+
+        bridge.microphone = .iPhone
+        XCTAssertEqual(KeyboardBridge(defaults: defaults).microphone, .iPhone)
     }
 
     /// `.playAndRecord` runs the microphone and the output at one rate: a preferred 16 kHz
@@ -2256,16 +2358,17 @@ final class AudioSessionSetupTests: XCTestCase {
     /// 16 kHz while Hex held the session (the simulator went from 48 kHz to 16 kHz).
     func testRecordingLeavesTheHardwareAtItsOwnSampleRate() throws {
         let session = FakeAudioSession()
-        try SystemAudioManager(session: session).configureAudioSession(allowBluetooth: false)
+        try SystemAudioManager(session: session).configureAudioSession(recordingFrom: .automatic)
         XCTAssertEqual(session.calls, [
             .category(.playAndRecord, .measurement, [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]),
             .active(true, []),
+            .preferredInput(nil),
         ], "no preferred sample rate")
 
         let shared = AVAudioSession.sharedInstance()
         let before = shared.sampleRate
         do {
-            try SystemAudioManager().configureAudioSession(allowBluetooth: false)
+            try SystemAudioManager().configureAudioSession(recordingFrom: .automatic)
         } catch {
             throw XCTSkip("No audio session to activate here: \(error)")
         }

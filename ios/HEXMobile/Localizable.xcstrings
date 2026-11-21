@@ -527,6 +527,16 @@
         }
       }
     },
+    "AirPods and car mics, in call quality" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "也用 AirPods 和车载麦克风（通话音质）"
+          }
+        }
+      }
+    },
     "Alex" : {
       "shouldTranslate" : false
     },
@@ -566,16 +576,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已在列表中"
-          }
-        }
-      }
-    },
-    "Always use iPhone microphone" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "始终使用 iPhone 麦克风"
           }
         }
       }
@@ -720,6 +720,16 @@
         }
       }
     },
+    "Bluetooth" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "蓝牙"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -746,6 +756,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "句首字母自动大写"
+          }
+        }
+      }
+    },
+    "Car mic in CarPlay, else iPhone mic" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "CarPlay 中用车载麦克风，其余用 iPhone"
           }
         }
       }
@@ -1419,6 +1439,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已中断"
+          }
+        }
+      }
+    },
+    "iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone"
           }
         }
       }

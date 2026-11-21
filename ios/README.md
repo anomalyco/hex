@@ -487,7 +487,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
   - **Dictation:** Style, Lowercase, Format lists, Dictation language, Translate what I say, Clean up
     what I say, Custom vocabulary (its list below the switch), Keep mic warm,
-    and Always use iPhone microphone.
+    and Microphone.
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
@@ -883,14 +883,27 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     itself, and the keepalive is input only (an `AVAudioEngine` input tap, no
     output node: its output element is off). A keepalive that keeps stopping by
     itself is restarted at once, then after 1 s, 2 s, … up to 30 s, not every
-    100 ms. **Always use iPhone
-    microphone** (on by default) records from the built-in microphone, so a car
-    or headphones never drop into call audio; turning it off also allows a
-    Bluetooth HFP microphone (still mixing). In-keyboard dictation records
-    through WebKit, whose capture session (`playAndRecord`, `videoChat`, no
-    `mixWithOthers`) no app can change: other apps' video and music pause while
-    it records and WebKit ends it without telling them, so once it has ended the
-    keyboard activates and deactivates its own session with
+    100 ms. **Microphone** (`MicrophoneChoice`, `MicrophoneRoute`) picks each
+    dictation's input: **Automatic** (the default) a wired or USB headset's
+    microphone, the car's in CarPlay (the driver's microphone Siri uses, where
+    the iPhone's hears the speakers and the road), else the iPhone's, so AirPods
+    and other Bluetooth headphones keep playing at full quality and nothing
+    waits for call audio; **iPhone** always the built-in one; **Bluetooth** also
+    Bluetooth hands-free microphones (AirPods, Bluetooth car kits, which iOS
+    can't tell from headphones), in call audio (8–16 kHz) and still mixing. Only
+    Bluetooth adds `allowBluetoothHFP`, and the input is always set
+    explicitly. The warm keepalive stays on the iPhone's microphone whatever the
+    choice, so a warm session never holds a car or headset in call audio between
+    dictations; a dictation moves to its input as it starts (a Bluetooth
+    headset's call link can take 0.5–2 s, unmeasured here). The setting replaced
+    Always use iPhone microphone: left on it reads as Automatic, turned off as
+    Bluetooth. In-keyboard dictation asks WebKit for the same input by name
+    (`deviceId`), read from the keyboard's own session; left to itself WebKit
+    takes the input of the route already playing, the iPhone's while a car or
+    headphones play over A2DP. Its capture session (`playAndRecord`,
+    `videoChat`, no `mixWithOthers`) no app can change: other apps' video and
+    music pause while it records and WebKit ends it without telling them, so
+    once it has ended the keyboard activates and deactivates its own session with
     `notifyOthersOnDeactivation` (`InterruptedAudio`), for players that resume
     on `.shouldResume`. Unverified on an iPhone: the simulator has no audio
     interruptions.
