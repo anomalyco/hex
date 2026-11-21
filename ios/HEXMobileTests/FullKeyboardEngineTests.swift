@@ -1080,7 +1080,9 @@ final class FullKeyboardEngineTests: XCTestCase {
                 view.plane.began(id: id + 10, sample: sample)
                 view.plane.ended(id: id + 10, sample: sample)
             }
-            view.debugHoldAccent(language == .ukrainian ? "ʼ" : cyrillic ? "е" : "e", selectIndex: 1)
+            // Serbian's e holds nothing, as on the system keyboard; its c holds č and ć.
+            let held = language == .ukrainian ? "ʼ" : cyrillic ? "е" : language == .serbianLatin ? "c" : "e"
+            view.debugHoldAccent(held, selectIndex: 1)
             counts[language] = asked
         }
         XCTAssertGreaterThanOrEqual(counts[.english] ?? 0, 4, "three keys and an accent step")
