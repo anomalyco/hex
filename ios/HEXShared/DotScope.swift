@@ -1172,6 +1172,17 @@ final class DotScopeMetalPipeline {
     }
 }
 
+extension CAMetalLayer {
+    /// Keeps the Metal Performance HUD (Settings › Developer › Graphics HUD) off Hex's dot
+    /// layers. It draws inside a layer, at its top right: on the home well its frame-rate
+    /// readout sat under the Dictate pill, which looked like a second label (TestFlight build
+    /// 56, "UI bug"). A launch with `MTL_HUD_ENABLED=1`, as from Xcode, keeps it.
+    func hidesDeveloperHUD() {
+        guard ProcessInfo.processInfo.environment["MTL_HUD_ENABLED"] != "1" else { return }
+        developerHUDProperties = ["mode": "disabled"]
+    }
+}
+
 final class DisplayLinkProxy: NSObject {
     var tickHandler: ((CADisplayLink) -> Void)?
 
@@ -1258,6 +1269,7 @@ final class DotScopeHostView: UIView {
             metalLayer.isOpaque = false
             metalLayer.framebufferOnly = true
             metalLayer.allowsNextDrawableTimeout = false
+            metalLayer.hidesDeveloperHUD()
             metalLayer.maximumDrawableCount = max(2, min(3, maximumDrawableCount))
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }

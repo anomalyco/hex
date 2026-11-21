@@ -110,7 +110,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     fresh keyboard process builds no Metal device, pipeline, layer, display
     link, or idle pre-roll before its first frame; the app's docked keyboard
     preview keeps the live scope. The home-indicator swipe cue's pipeline is
-    compiled on first use, which only the app shows. Lock Screen / Dynamic
+    compiled on first use, which only the app shows. Both layers turn off the Metal
+    Performance HUD (Settings › Developer › Graphics HUD), which would draw its frame
+    rate under the home well's Dictate pill, unless launched with `MTL_HUD_ENABLED=1`. Lock Screen / Dynamic
     Island Live Activities render a
     matching `Canvas` dot-matrix badge (`HexDotMatrixBadge`) because WidgetKit
     archives static view snapshots rather than hosting live `CAMetalLayer`s.
