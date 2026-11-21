@@ -919,6 +919,57 @@ final class KeyboardLayoutTests: XCTestCase {
         layout.keys.filter { $0.row == 3 }.sorted { $0.frame.minX < $1.frame.minX }.map(\.kind)
     }
 
+    // MARK: - Backdrop
+
+    /// The keyboard's backdrop is opaque either way, so a layout iOS leaves behind the
+    /// keyboard can't show through its translucent keys (TestFlight build 56, iOS 27.0.1).
+    func testBackdropIsOpaqueInLightAndDark() {
+        for isDark in [false, true] {
+            var alpha: CGFloat = 0
+            KeyboardBackdropView.fill(isDark: isDark).getRed(nil, green: nil, blue: nil, alpha: &alpha)
+            XCTAssertEqual(alpha, 1, "dark \(isDark)")
+        }
+    }
+
+    /// Every key, the strip's Hex key included, sits on the backdrop on every iPhone width,
+    /// so nothing behind the keyboard shows through a key.
+    func testBackdropCoversEveryKey() {
+        for width in portraitWidths {
+            let layout = KeyboardLayout(width: width)
+            let outline = KeyboardBackdropView.outline(in: CGRect(x: 0, y: 0, width: width, height: layout.totalHeight))
+            for key in layout.keys {
+                let frame = key.frame.insetBy(dx: 0.01, dy: 0.01)
+                for corner in [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY),
+                               CGPoint(x: frame.minX, y: frame.maxY), CGPoint(x: frame.maxX, y: frame.maxY)] {
+                    XCTAssertTrue(outline.contains(corner), "width \(width) key \(key.kind) corner \(corner)")
+                }
+            }
+        }
+    }
+
+    /// The backdrop stays inside Apple's panel, which starts 17.5 pt above the keyboard with
+    /// 26 pt top corners (iOS 27.0 and 27.2, every iPhone measured), and inside its 1 pt rim:
+    /// it never draws over the app beside the panel's rounded corners.
+    func testBackdropStaysInsideThePanelsCornersAndRim() {
+        let width: CGFloat = 402
+        let outline = KeyboardBackdropView.outline(in: CGRect(x: 0, y: 0, width: width, height: 270))
+        let radius: CGFloat = 26, panelTop: CGFloat = -17.5
+        func panelInset(atY y: CGFloat) -> CGFloat {
+            let rise = radius + panelTop - y
+            return rise > 0 ? radius - sqrt(radius * radius - rise * rise) : 0
+        }
+        for step in 0 ..< 60 {
+            let y = CGFloat(step) * 0.25 + 0.01
+            let edge = panelInset(atY: y) + 1
+            XCTAssertFalse(outline.contains(CGPoint(x: edge - 0.05, y: y)), "left, y \(y)")
+            XCTAssertFalse(outline.contains(CGPoint(x: width - edge + 0.05, y: y)), "right, y \(y)")
+            XCTAssertTrue(outline.contains(CGPoint(x: edge + 1.5, y: y)), "covers the left, y \(y)")
+            XCTAssertTrue(outline.contains(CGPoint(x: width - edge - 1.5, y: y)), "covers the right, y \(y)")
+        }
+        XCTAssertTrue(outline.contains(CGPoint(x: 1.05, y: 269.9)), "down to the bottom")
+        XCTAssertTrue(outline.contains(CGPoint(x: width / 2, y: 0.05)), "up to the top")
+    }
+
     private func describe(_ layout: KeyboardLayout) -> String {
         "\(layout.width)pt \(layout.orientation) \(layout.layer) \(layout.field) globe=\(layout.showsGlobe) \(layout.language) \(layout.posture)"
     }
