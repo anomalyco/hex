@@ -97,6 +97,62 @@ final class KeyboardBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testFullAccessReportsAreStoredInTheAppGroup() {
+        let suiteName = "hex.tests.fullAccessReports.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+
+        XCTAssertNil(bridge.fullAccessOnReport)
+        XCTAssertNil(bridge.fullAccessOffReport)
+        bridge.fullAccessSeenAt = 50
+        XCTAssertEqual(
+            bridge.fullAccessOnReport,
+            KeyboardFullAccessReport(isOn: true, at: 50, launchedAt: 0),
+            "an earlier keyboard's word counts, as from the oldest process"
+        )
+
+        let on = KeyboardFullAccessReport(isOn: true, at: 100, launchedAt: 90)
+        let off = KeyboardFullAccessReport(isOn: false, at: 200, launchedAt: 190)
+        bridge.recordFullAccess(on)
+        bridge.recordFullAccess(off)
+        let reread = KeyboardBridge(defaults: defaults)
+        XCTAssertEqual(reread.fullAccessOnReport, on)
+        XCTAssertEqual(reread.fullAccessOffReport, off)
+        XCTAssertEqual(reread.fullAccessSeenAt, 100, "an on still sets the key earlier builds read")
+    }
+
+    func testFullAccessTrustsTheNewestReportFromANewerKeyboard() {
+        func report(_ isOn: Bool, at: TimeInterval, launched: TimeInterval) -> KeyboardFullAccessReport {
+            KeyboardFullAccessReport(isOn: isOn, at: at, launchedAt: launched)
+        }
+        let resolve = KeyboardFullAccess.resolve
+        XCTAssertEqual(resolve(nil, nil, 0), .unconfirmed)
+        XCTAssertEqual(resolve(report(true, at: 10, launched: 5), nil, 1_000), .on, "an on stays on")
+        XCTAssertEqual(resolve(nil, report(false, at: 120, launched: 110), 100), .off, "seen off since Hex came back")
+        XCTAssertEqual(
+            resolve(nil, report(false, at: 80, launched: 70), 100), .unconfirmed,
+            "seen off before Hex came back from Settings: Full Access may have been turned on since"
+        )
+        XCTAssertEqual(
+            resolve(report(true, at: 150, launched: 140), report(false, at: 120, launched: 110), 100), .on,
+            "the grant is newer"
+        )
+        XCTAssertEqual(
+            resolve(report(true, at: 150, launched: 140), report(false, at: 160, launched: 110), 100), .on,
+            "a keyboard started before the grant still says off: stale"
+        )
+        XCTAssertEqual(
+            resolve(report(true, at: 150, launched: 140), report(false, at: 160, launched: 140), 100), .off,
+            "the same keyboard saw it turned off"
+        )
+        XCTAssertEqual(
+            resolve(report(true, at: 50, launched: 40), report(false, at: 80, launched: 70), 100), .unconfirmed,
+            "turned off after the last on, then Hex went to the background: it may be on again"
+        )
+    }
+
+    @MainActor
     func testEmptyKeyboardDictationIsNotedInTheAppGroup() {
         let suiteName = "hex.tests.emptyDictation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
