@@ -679,19 +679,31 @@ private struct OnboardingPracticePage: View {
     @State private var lastSwitchAt: Date?
     @State private var keyboardCameUpAt = Date.distantPast
     @State private var fullAccessLooksOff = OnboardingFixture.current == .tryOff
+    /// A keyboard switch by hand (not the keyboard coming up) since the page opened.
+    @State private var switchedKeyboards = false
+    /// Since when Hex's keyboard has been off screen after a switch.
+    @State private var hexKeyboardAwaySince: Date?
+    /// Hex's keyboard didn't come on screen after a switch: the page says how to bring it up.
+    @State private var hexKeyboardMissing = false
+    /// Words that arrived while Hex's keyboard was on screen: only these count as typed.
+    @State private var hexWords = 0
+    /// The last text that arrived came from iOS's dictation or another keyboard.
+    @State private var otherInput = false
     @FocusState private var fieldFocused: Bool
 
     /// How long the keyboard gets to report Full Access after a switch or new text.
     private static let fullAccessGrace: Duration = .seconds(4)
     /// The keyboard coming up (focus, or back from Settings) also posts an input mode change.
     private static let keyboardSettle: TimeInterval = 1.5
+    /// How long Hex's keyboard gets to come on screen after a switch.
+    private static let hexKeyboardGrace: TimeInterval = 2
 
     private var hasText: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var complete: Bool {
-        OnboardingPractice.isDone(text: text, dictated: dictated, fullAccessOn: monitor.fullAccessOn)
+        OnboardingPractice.isDone(text: text, dictated: dictated, typedWithHex: hexWords, fullAccessOn: monitor.fullAccessOn)
     }
 
     var body: some View {
@@ -736,16 +748,19 @@ private struct OnboardingPracticePage: View {
                         .onboardingStagger(3)
 
                     if heardNothing && !complete {
-                        HStack(alignment: .top, spacing: 8) {
-                            Image(systemName: "waveform")
-                                .font(.system(size: 13, weight: .medium))
-                                .padding(.top, 1)
-                            Text("Hex didn't hear any words. Try again a little louder.")
-                        }
-                        .font(.system(size: 13))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .padding(.horizontal, 4)
-                        .transition(.opacity)
+                        practiceNote(icon: "waveform", Text("Hex didn't hear any words. Try again a little louder."))
+                    }
+
+                    if otherInput && !complete && monitor.fullAccessOn {
+                        practiceNote(
+                            icon: "hand.raised",
+                            Text("That came from iOS dictation or another keyboard, not Hex. Tap the Hex key on Hex's keyboard.")
+                        )
+                    } else if hexKeyboardMissing && !complete {
+                        practiceNote(
+                            icon: "keyboard",
+                            Text("Don't see the Hex key? Tap \(Image(systemName: "globe")) until Hex's keyboard comes up.")
+                        )
                     }
 
                     if fullAccessLooksOff && !monitor.fullAccessOn {
@@ -767,6 +782,8 @@ private struct OnboardingPracticePage: View {
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: complete)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: fullAccessLooksOff)
         .animation(HexMotion.reducedFade, value: heardNothing)
+        .animation(HexMotion.reducedFade, value: hexKeyboardMissing)
+        .animation(HexMotion.reducedFade, value: otherInput)
         .onAppear {
             guard OnboardingFixture.current != .tryDone else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -776,6 +793,7 @@ private struct OnboardingPracticePage: View {
         .task { await watchKeyboardDictations() }
         .onReceive(NotificationCenter.default.publisher(for: UITextInputMode.currentInputModeDidChangeNotification)) { _ in
             lastSwitchAt = Date()
+            if Date().timeIntervalSince(keyboardCameUpAt) >= Self.keyboardSettle { switchedKeyboards = true }
             noteKeyboardActivity()
         }
         .onChange(of: fieldFocused) { _, focused in
@@ -789,11 +807,12 @@ private struct OnboardingPracticePage: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { fieldFocused = true }
             }
         }
-        .onChange(of: text) { _, _ in
+        .onChange(of: text) { old, new in
             if hasText {
                 heardNothing = false
                 noteKeyboardActivity()
             }
+            attributeText(from: old, to: new)
         }
         .onChange(of: monitor.fullAccessOn) { _, on in
             if on { fullAccessLooksOff = false }
@@ -822,6 +841,7 @@ private struct OnboardingPracticePage: View {
         var emptyAtStart = bridge.lastEmptyDictationAt
         while !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(250))
+            followHexKeyboard(bridge)
             if bridge.lastInsertedResultID != insertedAtStart {
                 dictated = true
                 heardNothing = false
@@ -832,6 +852,56 @@ private struct OnboardingPracticePage: View {
                 if !dictated { heardNothing = true }
             }
         }
+    }
+
+    /// After a keyboard switch, Hex's keyboard has `hexKeyboardGrace` to come on screen (it says
+    /// so in the App Group, `KeyboardPresence`); if it doesn't, another keyboard is up, or Hex's
+    /// never drew, and the page says to switch again. Only with Full Access, which the keyboard
+    /// needs to write there; without it the Full Access note shows instead.
+    private func followHexKeyboard(_ bridge: KeyboardBridge) {
+        guard switchedKeyboards, monitor.fullAccessOn, !bridge.isKeyboardShown() else {
+            hexKeyboardAwaySince = nil
+            if hexKeyboardMissing { hexKeyboardMissing = false }
+            return
+        }
+        let since = hexKeyboardAwaySince ?? Date()
+        hexKeyboardAwaySince = since
+        let missing = Date().timeIntervalSince(since) >= Self.hexKeyboardGrace
+        if hexKeyboardMissing != missing { hexKeyboardMissing = missing }
+    }
+
+    /// New words count only while Hex's keyboard is on screen (`KeyboardPresence`): iOS's
+    /// dictation and other keyboards take it off screen, so what they type never finishes the
+    /// practice, and the page says to use the Hex key. Text Hex's keyboard adds clears that.
+    private func attributeText(from old: String, to new: String) {
+        let total = OnboardingPractice.words(in: new)
+        guard total > 0 else {
+            hexWords = 0
+            otherInput = false
+            return
+        }
+        hexWords = min(hexWords, total)
+        guard new.count > old.count else { return }
+        if OnboardingFixture.isSnapshot || KeyboardBridge().isKeyboardShown() {
+            hexWords = min(total, hexWords + OnboardingPractice.wordsAdded(from: old, to: new))
+            otherInput = false
+        } else {
+            otherInput = true
+        }
+    }
+
+    private func practiceNote(icon: String, _ text: Text) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .medium))
+                .padding(.top, 1)
+            text
+        }
+        .font(.system(size: 13))
+        .foregroundStyle(HexTheme.textMuted)
+        .padding(.horizontal, 4)
+        .transition(.opacity)
+        .accessibilityElement(children: .combine)
     }
 
     private func noteKeyboardActivity() {

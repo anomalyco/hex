@@ -35,9 +35,16 @@ enum OnboardingPage: String, CaseIterable {
 enum OnboardingPractice {
     static let wordsToCount = 3
 
-    static func isDone(text: String, dictated: Bool, fullAccessOn: Bool) -> Bool {
+    /// A dictation Hex's keyboard inserted, or `wordsToCount` words typed while Hex's keyboard
+    /// was on screen (`typedWithHex`): never words from iOS's dictation or another keyboard.
+    static func isDone(text: String, dictated: Bool, typedWithHex: Int, fullAccessOn: Bool) -> Bool {
         if dictated { return true }
-        return fullAccessOn && words(in: text) >= wordsToCount
+        return fullAccessOn && min(typedWithHex, words(in: text)) >= wordsToCount
+    }
+
+    /// The words a change of the field's text added (none for a deletion).
+    static func wordsAdded(from old: String, to new: String) -> Int {
+        max(0, words(in: new) - words(in: old))
     }
 
     /// Words as the language splits them, so Chinese counts without spaces.

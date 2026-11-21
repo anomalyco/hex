@@ -426,12 +426,37 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertNil(KeyboardBridge(defaults: defaults).lastEmptyDictationAt)
     }
 
+    func testHexKeyboardIsShownFromAppearingUntilItHides() {
+        XCTAssertFalse(KeyboardPresence.isShown(shownAt: nil, hiddenAt: nil, heartbeat: nil, now: 1_000), "never shown")
+        XCTAssertTrue(KeyboardPresence.isShown(shownAt: 999, hiddenAt: 990, heartbeat: nil, now: 1_000))
+        XCTAssertFalse(KeyboardPresence.isShown(shownAt: 990, hiddenAt: 999, heartbeat: nil, now: 1_000), "another keyboard or iOS's dictation took over")
+        XCTAssertFalse(KeyboardPresence.isShown(shownAt: 980, hiddenAt: nil, heartbeat: 985, now: 1_000), "no sign of life: the process ended")
+        XCTAssertTrue(KeyboardPresence.isShown(shownAt: 900, hiddenAt: 890, heartbeat: 995, now: 1_000), "the Full Access report it repeats while shown")
+
+        let suiteName = "hex.tests.presence.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        let now = Date().timeIntervalSince1970
+        XCTAssertFalse(bridge.isKeyboardShown(now: now))
+        bridge.recordKeyboardShown(at: now - 1)
+        XCTAssertTrue(KeyboardBridge(defaults: defaults).isKeyboardShown(now: now))
+        bridge.recordKeyboardHidden(at: now)
+        XCTAssertFalse(KeyboardBridge(defaults: defaults).isKeyboardShown(now: now))
+    }
+
     func testOnboardingPracticeCountsADictationOrAFewTypedWords() {
-        XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, fullAccessOn: true), "one letter")
-        XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, fullAccessOn: true))
-        XCTAssertTrue(OnboardingPractice.isDone(text: "See you at", dictated: false, fullAccessOn: true))
-        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, fullAccessOn: false), "not the Hex keyboard")
-        XCTAssertTrue(OnboardingPractice.isDone(text: "", dictated: true, fullAccessOn: false), "a dictation arrived")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, typedWithHex: 1, fullAccessOn: true), "one letter")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, typedWithHex: 2, fullAccessOn: true))
+        XCTAssertTrue(OnboardingPractice.isDone(text: "See you at", dictated: false, typedWithHex: 3, fullAccessOn: true))
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, typedWithHex: 4, fullAccessOn: false), "not the Hex keyboard")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, typedWithHex: 0, fullAccessOn: true), "iOS's dictation or another keyboard typed it")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, typedWithHex: 2, fullAccessOn: true), "two words from Hex, the rest from elsewhere")
+        XCTAssertTrue(OnboardingPractice.isDone(text: "", dictated: true, typedWithHex: 0, fullAccessOn: false), "a dictation arrived")
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "See yo", to: "See you"), 0, "a letter inside a word")
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "See you ", to: "See you a"), 1)
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "", to: "See you at ten"), 4, "a dictation's words at once")
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "See you at", to: "See you"), 0, "a deletion")
         XCTAssertGreaterThanOrEqual(OnboardingPractice.words(in: "我们十点见"), 2, "Chinese splits into words without spaces")
     }
 

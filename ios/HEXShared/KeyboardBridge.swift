@@ -421,6 +421,21 @@ nonisolated struct KeyboardFullAccessReport: Codable, Equatable, Sendable {
     var launchedAt: TimeInterval
 }
 
+/// Whether Hex's keyboard is on screen, from what it writes to the App Group: shown since its
+/// view last appeared (after its first frame) and not hidden since, with a sign of life less
+/// than `heartbeatWindow` old (that appearance, or the Full Access report it repeats every 5 s
+/// while shown), so a keyboard process that ended without hiding doesn't count. Another
+/// keyboard, or iOS's dictation, takes Hex's keyboard off screen.
+nonisolated enum KeyboardPresence {
+    static let heartbeatWindow: TimeInterval = 7
+
+    static func isShown(shownAt: TimeInterval?, hiddenAt: TimeInterval?, heartbeat: TimeInterval?, now: TimeInterval) -> Bool {
+        guard let shownAt else { return false }
+        if let hiddenAt, hiddenAt >= shownAt { return false }
+        return now - max(shownAt, heartbeat ?? 0) < heartbeatWindow
+    }
+}
+
 /// Full Access as Hex can know it: on once a keyboard ran with it, off only when a keyboard
 /// said so since Hex last came to the foreground, and unconfirmed otherwise.
 nonisolated enum KeyboardFullAccess: Equatable, Sendable {
@@ -470,6 +485,8 @@ struct KeyboardBridge {
         static let appMicrophoneAllowed = "app.microphoneAllowed"
         static let lastEmptyDictationAt = "keyboard.lastEmptyDictationAt"
         static let heldDictation = "keyboard.heldDictation"
+        static let shownAt = "keyboard.shownAt"
+        static let hiddenAt = "keyboard.hiddenAt"
     }
 
     private let defaults: UserDefaults?
@@ -676,6 +693,30 @@ struct KeyboardBridge {
                 defaults?.removeObject(forKey: Key.heldDictation)
             }
         }
+    }
+
+    /// Only the keyboard writes these: when its view last appeared and last went away
+    /// (`KeyboardPresence`).
+    func recordKeyboardShown(at time: TimeInterval) {
+        defaults?.set(time, forKey: Key.shownAt)
+    }
+
+    func recordKeyboardHidden(at time: TimeInterval) {
+        defaults?.set(time, forKey: Key.hiddenAt)
+    }
+
+    /// Hex's keyboard is on screen now (`KeyboardPresence`).
+    func isKeyboardShown(now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+        func time(_ key: String) -> TimeInterval? {
+            let value = defaults?.double(forKey: key) ?? 0
+            return value > 0 ? value : nil
+        }
+        return KeyboardPresence.isShown(
+            shownAt: time(Key.shownAt),
+            hiddenAt: time(Key.hiddenAt),
+            heartbeat: fullAccessOnReport?.at,
+            now: now
+        )
     }
 
     func publish(_ snapshot: KeyboardSnapshot) {
