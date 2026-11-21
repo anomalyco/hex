@@ -265,6 +265,10 @@ enum SettingsSnapshotFixture {
         let keyboard = FullKeyboardSettings()
         keyboard.isEnabled = on || opensKeyboardLanguages
         keyboard.autoCapitalization = true
+        // `--hex-key left` renders the page with the Hex key on the left.
+        let args = ProcessInfo.processInfo.arguments
+        keyboard.hexKeyOnLeft = args.firstIndex(of: FullKeyboardSettings.hexKeyLaunchArgument)
+            .flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } == "left"
         keyboard.autocorrect = true
         keyboard.spatialAutocorrect = true
         keyboard.suggestSwearWords = on

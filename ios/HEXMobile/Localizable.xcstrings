@@ -1163,6 +1163,16 @@
         }
       }
     },
+    "Hex key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 键"
+          }
+        }
+      }
+    },
     "Hex Keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1329,6 +1339,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "从你的轻点和修正的词中学习"
+          }
+        }
+      }
+    },
+    "Left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左侧"
           }
         }
       }
@@ -1785,6 +1805,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "需要 iOS 26"
+          }
+        }
+      }
+    },
+    "Right" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右侧"
           }
         }
       }

@@ -163,6 +163,10 @@ final class FullKeyboardEngine {
     var posture: KeyboardPosture = .phone { didSet { if posture != oldValue { rebuildLayout() } } }
     /// How far iOS set the keyboard in from each side of the screen (the Duo).
     var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
+    /// Settings › Keyboard › Hex key: the strip's trailing (Right) or leading (Left) end.
+    var hexPlacement: HexKeyPlacement = .stripTrailing {
+        didSet { if hexPlacement != oldValue { rebuildLayout(cause: "hex_placement") } }
+    }
     /// The letters, accents and spelling dictionary (Settings › Keyboard › Languages).
     var language: KeyboardLanguage = .english {
         didSet {
@@ -1254,7 +1258,8 @@ final class FullKeyboardEngine {
             horizontalInset: horizontalInset,
             language: language,
             posture: posture,
-            windowInset: windowInset
+            windowInset: windowInset,
+            hexPlacement: hexPlacement
         )
         syncDecoderKeys()
         logState(cause)

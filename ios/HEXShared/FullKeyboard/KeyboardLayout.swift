@@ -215,7 +215,9 @@ nonisolated enum HexKeyPlacement: String, CaseIterable, Sendable {
     case stripLeading
     case stripTrailing
 
-    /// The snapshot stage's `--hex-placement` can render the others for comparison.
+    /// The keyboard's, for typing logs: `FullKeyboardView` keeps Settings › Keyboard › Hex key
+    /// (`FullKeyboardSettings.hexKeyPlacement`) here; layouts take theirs as a parameter. The
+    /// snapshot stage's `--hex-placement` can render the others for comparison.
     nonisolated(unsafe) static var current: HexKeyPlacement = .stripTrailing
 
     var isInStrip: Bool { self == .stripLeading || self == .stripTrailing }
@@ -237,6 +239,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     let horizontalInset: CGFloat
     let language: KeyboardLanguage
     let posture: KeyboardPosture
+    /// Where the Hex key sits: Settings › Keyboard › Hex key picks the strip's trailing
+    /// (Right) or leading (Left) end.
+    let hexPlacement: HexKeyPlacement
     let metrics: KeyboardMetrics
     let keys: [KeyboardKey]
     /// The two halves' inner edges while the keyboard is split (the Duo unfolded upright, as
@@ -253,9 +258,11 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         horizontalInset: CGFloat = 0,
         language: KeyboardLanguage = .english,
         posture: KeyboardPosture = .phone,
-        windowInset: CGFloat = 0
+        windowInset: CGFloat = 0,
+        hexPlacement: HexKeyPlacement = .stripTrailing
     ) {
         self.width = width
+        self.hexPlacement = hexPlacement
         self.orientation = orientation
         self.layer = layer
         self.field = field
@@ -276,7 +283,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 showsGlobe: showsGlobe,
                 showsEmoji: showsEmoji,
                 inset: self.horizontalInset,
-                language: language
+                language: language,
+                hexPlacement: hexPlacement
             )
             self.keys = built.keys
             self.split = built.split
@@ -289,13 +297,18 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 showsGlobe: showsGlobe,
                 showsEmoji: showsEmoji,
                 inset: self.horizontalInset,
-                language: language
+                language: language,
+                hexPlacement: hexPlacement
             )
             self.split = nil
         }
     }
 
     var isSplit: Bool { split != nil }
+
+    /// The Hex key sits at the strip's leading (left) end, so what grows from it or points at
+    /// it (the recording bar's ✕ and ✓, its menu, the Full Access hint's Open Hex) mirrors.
+    var hexOnLeading: Bool { hexPlacement == .stripLeading }
 
     static func height(for orientation: KeyboardOrientation, posture: KeyboardPosture = .phone) -> CGFloat {
         KeyboardMetrics.for(orientation, posture: posture).totalHeight
@@ -307,13 +320,19 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     var stripFrame: CGRect {
         var full = CGRect(x: horizontalInset, y: metrics.stripTop, width: width - 2 * horizontalInset, height: metrics.stripHeight)
         if let split {
-            // Over the right half, where Apple's split keyboard puts its predictions.
-            let minX = split.rightEdge - SplitGeometry.stripLead
-            full = CGRect(x: minX, y: full.minY, width: full.maxX - minX, height: full.height)
+            if hexOnLeading {
+                // Over the left half with the Hex key, for the left thumb, mirroring the right.
+                let maxX = split.leftEdge + SplitGeometry.stripLead
+                full = CGRect(x: full.minX, y: full.minY, width: maxX - full.minX, height: full.height)
+            } else {
+                // Over the right half, where Apple's split keyboard puts its predictions.
+                let minX = split.rightEdge - SplitGeometry.stripLead
+                full = CGRect(x: minX, y: full.minY, width: full.maxX - minX, height: full.height)
+            }
         }
         guard let hex = key(.hex), hex.row < 0 else { return full }
         let reserved = hex.frame.width + metrics.side + metrics.gap
-        return HexKeyPlacement.current == .stripLeading
+        return hexOnLeading
             ? CGRect(x: full.minX + reserved, y: full.minY, width: full.width - reserved, height: full.height)
             : CGRect(x: full.minX, y: full.minY, width: full.width - reserved, height: full.height)
     }
@@ -429,7 +448,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         showsGlobe: Bool,
         showsEmoji: Bool,
         inset: CGFloat,
-        language: KeyboardLanguage
+        language: KeyboardLanguage,
+        hexPlacement placement: HexKeyPlacement
     ) -> [KeyboardKey] {
         let innerWidth = width - 2 * inset
         let rows = characterRows(for: layer, language: language)
@@ -511,7 +531,6 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         if showsEmoji {
             leading.append((.emoji, modW, "emoji"))
         }
-        let placement = HexKeyPlacement.current
         if placement == .leftOfSpace {
             leading.append((.hex, modW, "hex"))
         }
@@ -630,7 +649,8 @@ extension KeyboardLayout {
         showsGlobe: Bool,
         showsEmoji: Bool,
         inset: CGFloat,
-        language: KeyboardLanguage
+        language: KeyboardLanguage,
+        hexPlacement placement: HexKeyPlacement
     ) -> (keys: [KeyboardKey], split: SplitGeometry) {
         typealias G = SplitGeometry
         let rows = characterRows(for: layer, language: language)
@@ -697,7 +717,7 @@ extension KeyboardLayout {
             trailing.append((.character("@"), G.smallKeyWidth, "@"))
             trailing.append((.character("."), G.smallKeyWidth, "."))
         }
-        if HexKeyPlacement.current == .leftOfSpace || HexKeyPlacement.current == .rightOfSpace {
+        if !placement.isInStrip {
             trailing.append((.hex, G.smallKeyWidth, "hex"))
         }
         trailing.append((.returnKey, G.returnWidth, "return"))
@@ -732,10 +752,10 @@ extension KeyboardLayout {
                 }
             }
         }
-        if HexKeyPlacement.current.isInStrip {
+        if placement.isInStrip {
             let height = m.stripHeight - 8
             let hexWidth: CGFloat = 44
-            let hx = HexKeyPlacement.current == .stripLeading ? left : right - hexWidth
+            let hx = placement == .stripLeading ? left : right - hexWidth
             let frame = CGRect(x: hx, y: m.stripTop + 4, width: hexWidth, height: height)
             let target = frame.insetBy(dx: -4, dy: -4)
             let hitFrame = CGRect(x: target.minX, y: target.minY, width: target.width, height: top - target.minY)
