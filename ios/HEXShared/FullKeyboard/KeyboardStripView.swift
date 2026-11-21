@@ -1,19 +1,32 @@
 import UIKit
 
-/// The 3-slot top bar above the keys, matching Apple's iOS 26 suggestion strip:
-/// two 1 pt vertical hairlines at 1/3 and 2/3 width when idle or suggesting, replaced by
-/// the centered `Undo dictation` chip or a status message when needed.
+/// The 3-slot top bar above the keys, drawn as Apple's iOS 26 predictive bar is (measured in
+/// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
+/// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
+/// capsule with the divider beside it hidden. iOS's band above the keyboard takes the top of
+/// Apple's bar, so everything here is centred in the 27 pt below it. The centred
+/// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { applyPalette() } } }
-    /// Hosted extensions sit inside iOS 26's +17 pt Liquid Glass crown above `bounds.minY`,
-    /// so nudge the strip's visual centre slightly upward within `bounds` to align with Apple's bar.
+    /// Hosted in iOS's platter (not a snapshot scene's own backdrop).
     var inSystemPlatter = true {
         didSet {
             guard inSystemPlatter != oldValue else { return }
             for button in slotButtons { button.inSystemPlatter = inSystemPlatter }
             setNeedsLayout()
             setNeedsDisplay()
+        }
+    }
+    /// Each slot's frame in this view, from `KeyboardLayout.stripSlotFrames`; thirds of the
+    /// view until the keyboard lays it out.
+    var slotFrames: [CGRect]? { didSet { if slotFrames != oldValue { setNeedsLayout(); setNeedsDisplay() } } }
+    /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
+    var pillInset: CGFloat = 0.5 {
+        didSet {
+            guard pillInset != oldValue else { return }
+            for button in slotButtons { button.pillInset = pillInset }
+            setNeedsLayout()
         }
     }
     var onSelectSuggestion: ((KeyboardSuggestion) -> Void)?
@@ -121,7 +134,6 @@ final class KeyboardStripView: UIView {
         for (index, button) in slotButtons.enumerated() {
             button.tag = index
             button.addTarget(self, action: #selector(handleSlotTap(_:)), for: .touchUpInside)
-            button.isHidden = true
             addSubview(button)
         }
         applyPalette()
@@ -149,37 +161,56 @@ final class KeyboardStripView: UIView {
         self.clipboard = clipboard
         showsFullAccessHint = fullAccessHint
 
-        if fullAccessHint {
-            (fullAccessHintView ?? makeFullAccessHintView()).isHidden = false
-        } else {
-            fullAccessHintView?.isHidden = true
-        }
+        if fullAccessHint, fullAccessHintView == nil { _ = makeFullAccessHintView() }
+        if let hint = fullAccessHintView { show(hint, fullAccessHint) }
         let showsHint = fullAccessHint
-        undoChip.isHidden = !showsUndo || showsHint
+        show(undoChip, showsUndo && !showsHint)
         let showsClipboard = showsClipboard
-        pasteControl.isHidden = !showsClipboard || clipboard == .code(canPaste: false)
-        nextKeyboardChip.isHidden = !showsClipboard || clipboard == .paste
+        show(pasteControl, showsClipboard && clipboard != .code(canPaste: false))
+        show(nextKeyboardChip, showsClipboard && clipboard != .paste)
+        // Words swap letter by letter (and leave the same way when a chip or status takes the
+        // strip); the strip being shown for the first time just draws them.
+        let animated = window != nil
         if showsHint || showsUndo || showsClipboard {
             statusLabel.isHidden = true
-            slotButtons.forEach { $0.isHidden = true }
+            slotButtons.forEach { $0.configure(with: nil, palette: palette, animated: animated) }
         } else if let statusText, suggestions.isEmpty {
             statusLabel.text = statusText
             statusLabel.isHidden = false
-            slotButtons.forEach { $0.isHidden = true }
+            slotButtons.forEach { $0.configure(with: nil, palette: palette, animated: false) }
         } else {
             statusLabel.isHidden = true
             let slots = Self.slots(for: suggestions)
             for (idx, button) in slotButtons.enumerated() {
-                if let item = slots.firstIndex(of: idx) {
-                    button.configure(with: suggestions[item], palette: palette)
-                    button.isHidden = false
-                } else {
-                    button.isHidden = true
-                }
+                let item = slots.firstIndex(of: idx).map { suggestions[$0] }
+                button.configure(with: item, palette: palette, animated: animated)
             }
         }
         setNeedsLayout()
         setNeedsDisplay()
+    }
+
+    /// Shows or hides a chip, fading it over Apple's 0.2 s word swap (at once with Reduce Motion).
+    private func show(_ view: UIView, _ shown: Bool) {
+        let visible = !view.isHidden && view.alpha > 0
+        guard shown != visible || (shown && view.alpha < 1) else { return }
+        guard window != nil, !UIAccessibility.isReduceMotionEnabled else {
+            view.layer.removeAllAnimations()
+            view.alpha = 1
+            view.isHidden = !shown
+            return
+        }
+        if shown {
+            if view.isHidden { view.alpha = 0 }
+            view.isHidden = false
+        }
+        UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
+            view.alpha = shown ? 1 : 0
+        } completion: { _ in
+            guard view.alpha == 0 else { return }
+            view.isHidden = true
+            view.alpha = 1
+        }
     }
 
     /// Which slot shows each suggestion: in order, except a lone emoji, swiped word or reading
@@ -233,7 +264,7 @@ final class KeyboardStripView: UIView {
         fullAccessHintView?.palette = palette
         loggingMark?.textColor = palette.textMuted
         for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
-            slotButtons[slot].configure(with: currentSuggestions[item], palette: palette)
+            slotButtons[slot].configure(with: currentSuggestions[item], palette: palette, animated: false)
         }
         setNeedsDisplay()
     }
@@ -246,7 +277,7 @@ final class KeyboardStripView: UIView {
         super.layoutSubviews()
         let midY = contentCenterY
         statusLabel.frame = CGRect(x: 16, y: max(0, midY - 12), width: max(0, bounds.width - 32), height: 24)
-        let chipH = min(34, max(24, bounds.height - 10))
+        let chipH = min(34, max(24, bounds.height - 2 * pillInset))
         let chipSize = undoChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
         undoChip.frame = CGRect(
             x: (bounds.width - chipSize.width) / 2,
@@ -256,9 +287,12 @@ final class KeyboardStripView: UIView {
         )
         let pasteW = pasteControl.sizeThatFits(CGSize(width: bounds.width, height: chipH)).width
         let nextSize = nextKeyboardChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
-        let pair = !pasteControl.isHidden && !nextKeyboardChip.isHidden
+        // Laid out for what is shown, not what is still fading out.
+        let pasteShown = showsClipboard && clipboard != .code(canPaste: false)
+        let nextShown = showsClipboard && clipboard != .paste
+        let pair = pasteShown && nextShown
         let gap: CGFloat = 8
-        let total = pair ? pasteW + gap + nextSize.width : (pasteControl.isHidden ? nextSize.width : pasteW)
+        let total = pair ? pasteW + gap + nextSize.width : (pasteShown ? pasteW : nextSize.width)
         let startX = (bounds.width - total) / 2
         let chipY = max(0, midY - chipH / 2)
         pasteControl.frame = CGRect(x: startX, y: chipY, width: pasteW, height: chipH)
@@ -269,11 +303,14 @@ final class KeyboardStripView: UIView {
             height: chipH
         )
         var hintFrame = bounds.insetBy(dx: 12, dy: 0)
+        var markRoom: CGFloat = 0
         if let loggingMark, showsLoggingMark {
-            // Above the outer slot's text, and in from the keyboard's rounded top corner.
+            // On the text line at the outer slot's end, in from the keyboard's rounded corner;
+            // that slot centres its word in the rest, so a long word never runs under it.
             let size = loggingMark.sizeThatFits(bounds.size)
-            let markX = hexOnLeading ? bounds.width - 18 - size.width : 18
-            loggingMark.frame = CGRect(x: markX, y: 2, width: size.width, height: size.height)
+            let markX = hexOnLeading ? bounds.width - 12 - size.width : 12
+            loggingMark.frame = CGRect(x: markX, y: (midY - size.height / 2).rounded(), width: size.width, height: size.height)
+            markRoom = 12 + size.width + 4
             bringSubviewToFront(loggingMark)
             hintFrame = hexOnLeading
                 ? CGRect(x: 12, y: 0, width: max(0, loggingMark.frame.minX - 8 - 12), height: bounds.height)
@@ -281,11 +318,19 @@ final class KeyboardStripView: UIView {
         }
         fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
-        let slotW = bounds.width / 3
+        let slots = currentSlotFrames
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
-            button.frame = CGRect(x: CGFloat(idx) * slotW, y: 0, width: slotW, height: bounds.height)
+            button.frame = slots[idx]
+            button.leadingRoom = !hexOnLeading && idx == 0 ? markRoom : 0
+            button.trailingRoom = hexOnLeading && idx == 2 ? markRoom : 0
         }
+    }
+
+    private var currentSlotFrames: [CGRect] {
+        if let slotFrames, slotFrames.count == 3 { return slotFrames }
+        let slotW = bounds.width / 3
+        return (0..<3).map { CGRect(x: CGFloat($0) * slotW, y: 0, width: slotW, height: bounds.height) }
     }
 
     override func draw(_ rect: CGRect) {
@@ -294,15 +339,17 @@ final class KeyboardStripView: UIView {
         let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
         guard !primaryHighlighted else { return }
 
-        let scale = max(1, traitCollection.displayScale)
-        let hairline = 1 / scale
-        let lineH: CGFloat = min(22, bounds.height * 0.66)
-        let y = max(1, contentCenterY - lineH / 2)
-        let slotW = bounds.width / 3
-
-        palette.separator.setFill()
-        UIRectFill(CGRect(x: (slotW * 1).rounded() - hairline / 2, y: y, width: hairline, height: lineH))
-        UIRectFill(CGRect(x: (slotW * 2).rounded() - hairline / 2, y: y, width: hairline, height: lineH))
+        // Apple's dividers: 1 pt wide, ending on the slot boundary, 24 pt tall on the text's centre.
+        let lineH: CGFloat = min(24, bounds.height - 2)
+        let y = contentCenterY - lineH / 2
+        palette.stripDivider.setFill()
+        // Only between two filled slots: nothing to show, no dividers (as Apple's bar in a
+        // field it offers nothing for).
+        let filled = Set(Self.slots(for: currentSuggestions))
+        for (index, slot) in currentSlotFrames.prefix(2).enumerated()
+        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) {
+            UIRectFill(CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH))
+        }
     }
 
     @objc private func handleUndo() {
@@ -314,17 +361,34 @@ final class KeyboardStripView: UIView {
         onSelectSuggestion?(currentSuggestions[item])
     }
 
+    /// One suggestion slot. A word that changes swaps letter by letter, as Apple's bar does
+    /// (iOS 27.2, recorded at 60 fps): the letters both words share stay, the old word's other
+    /// letters fade from its end and the new word's from its start, each in 0.1 s, staggered
+    /// over 0.2 s. The capsule and dividers change at once. Reduce Motion swaps at once.
     private final class SlotButton: UIControl {
         var inSystemPlatter = true { didSet { if inSystemPlatter != oldValue { setNeedsDisplay() } } }
+        var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
+        /// Room the Logging mark takes at the slot's outer end: the word centres in the rest.
+        var leadingRoom: CGFloat = 0 { didSet { if leadingRoom != oldValue { setNeedsDisplay() } } }
+        var trailingRoom: CGFloat = 0 { didSet { if trailingRoom != oldValue { setNeedsDisplay() } } }
         private var suggestion: KeyboardSuggestion?
         private var palette = FullKeyboardPalette(isDark: false)
+        /// The word leaving while its letters fade, and when the swap began.
+        private var outgoing: KeyboardSuggestion?
+        private var swapStart: CFTimeInterval = 0
+        private var displayLink: CADisplayLink?
+
+        static let letterFade: CFTimeInterval = 0.1
+        static let swapLength: CFTimeInterval = 0.2
+        static let maxStagger: CFTimeInterval = 0.025
 
         override init(frame: CGRect) {
             super.init(frame: frame)
             isOpaque = false
             backgroundColor = .clear
             contentMode = .redraw
-            isAccessibilityElement = true
+            isAccessibilityElement = false
+            isUserInteractionEnabled = false
             accessibilityTraits = .button
             addTarget(self, action: #selector(redraw), for: [.touchDown, .touchDragEnter, .touchDragExit, .touchCancel, .touchUpInside, .touchUpOutside])
         }
@@ -334,72 +398,158 @@ final class KeyboardStripView: UIView {
 
         override var isHighlighted: Bool { didSet { if isHighlighted != oldValue { setNeedsDisplay() } } }
 
-        func configure(with suggestion: KeyboardSuggestion, palette: FullKeyboardPalette) {
+        /// nil empties the slot (its word fades out when animated).
+        func configure(with suggestion: KeyboardSuggestion?, palette: FullKeyboardPalette, animated: Bool) {
+            let old = self.suggestion
             self.suggestion = suggestion
             self.palette = palette
-            accessibilityLabel = suggestion.displayText
+            isAccessibilityElement = suggestion != nil
+            isUserInteractionEnabled = suggestion != nil
+            accessibilityLabel = suggestion?.displayText
+            if old?.displayText != suggestion?.displayText {
+                if animated, window != nil, !UIAccessibility.isReduceMotionEnabled {
+                    outgoing = old
+                    swapStart = CACurrentMediaTime()
+                    startTicking()
+                } else {
+                    endSwap()
+                }
+            }
+            setNeedsDisplay()
+        }
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            if window == nil { endSwap() }
+        }
+
+        private func startTicking() {
+            guard displayLink == nil else { return }
+            let link = CADisplayLink(target: self, selector: #selector(tick))
+            link.add(to: .main, forMode: .common)
+            displayLink = link
+        }
+
+        private func endSwap() {
+            outgoing = nil
+            displayLink?.invalidate()
+            displayLink = nil
+        }
+
+        @objc private func tick() {
+            if CACurrentMediaTime() - swapStart >= Self.swapLength { endSwap() }
             setNeedsDisplay()
         }
 
         @objc private func redraw() { setNeedsDisplay() }
 
-        override func draw(_ rect: CGRect) {
-            guard let suggestion else { return }
-            let midY = bounds.height * 0.5
-            // Like Apple's strip, the highlight fills its slot, 4 pt in from each edge.
-            let pillH = max(22, bounds.height - 8)
-            let pillInset = CGRect(
-                x: 4,
-                y: max(0.5, midY - pillH / 2),
-                width: max(0, bounds.width - 8),
-                height: pillH
-            )
-            if isHighlighted {
-                palette.keyPressedFill.setFill()
-                UIBezierPath(roundedRect: pillInset, cornerRadius: 10).fill()
-            } else if suggestion.willAutoReplace {
-                palette.selectFill.setFill()
-                UIBezierPath(roundedRect: pillInset, cornerRadius: 10).fill()
-            }
+        private struct Word {
+            let text: String
+            let attributes: [NSAttributedString.Key: Any]
+            let origin: CGPoint
+            /// Drawn in a box with a truncating tail (too long for the slot): never swapped by letter.
+            let truncatedRect: CGRect?
+        }
 
-            let isLiteral = suggestion.kind == .keepLiteral
-            let font = UIFont.systemFont(
-                ofSize: suggestion.kind == .emoji ? 24 : 17,
-                weight: suggestion.willAutoReplace ? .medium : .regular
-            )
-            let ink = isLiteral && !suggestion.willAutoReplace ? palette.textBase.withAlphaComponent(0.88) : palette.textBase
-            let attributes: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: ink,
+        private func layout(_ suggestion: KeyboardSuggestion, ink: UIColor) -> Word {
+            let midY = bounds.height * 0.5
+            // Apple's words are all SF 17 pt regular, the one in the capsule included.
+            let font = UIFont.systemFont(ofSize: suggestion.kind == .emoji ? 22 : 17, weight: .regular)
+            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
+            // The word centres in the slot, less any room the Logging mark takes.
+            let textMidX = (leadingRoom + bounds.width - trailingRoom) / 2
+            let maxTextW = max(20, min(bounds.width - 12, bounds.width - leadingRoom - trailingRoom - 8))
+            let text = suggestion.displayText
+            let size = (text as NSString).size(withAttributes: attributes)
+            guard size.width > maxTextW else {
+                let origin = CGPoint(x: textMidX - size.width / 2, y: midY - size.height / 2)
+                return Word(text: text, attributes: attributes, origin: origin, truncatedRect: nil)
+            }
+            let style = NSMutableParagraphStyle()
+            style.lineBreakMode = .byTruncatingTail
+            style.alignment = .center
+            let small: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 15, weight: .regular), .foregroundColor: ink, .paragraphStyle: style,
             ]
-            let maxTextW = max(20, pillInset.width - 12)
-            var drawString = suggestion.displayText
-            var size = (drawString as NSString).size(withAttributes: attributes)
-            if size.width > maxTextW {
-                let smallAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 15, weight: suggestion.willAutoReplace ? .medium : .regular),
-                    .foregroundColor: ink,
-                ]
-                size = (drawString as NSString).size(withAttributes: smallAttrs)
-                let drawRect = CGRect(
-                    x: bounds.midX - min(maxTextW, size.width) / 2,
-                    y: midY - size.height / 2,
-                    width: min(maxTextW, size.width),
-                    height: size.height
-                )
-                let style = NSMutableParagraphStyle()
-                style.lineBreakMode = .byTruncatingTail
-                style.alignment = .center
-                var truncatedAttrs = smallAttrs
-                truncatedAttrs[.paragraphStyle] = style
-                (drawString as NSString).draw(in: drawRect, withAttributes: truncatedAttrs)
+            let smallSize = (text as NSString).size(withAttributes: small)
+            let width = min(maxTextW, smallSize.width)
+            let box = CGRect(x: textMidX - width / 2, y: midY - smallSize.height / 2, width: width, height: smallSize.height)
+            return Word(text: text, attributes: small, origin: box.origin, truncatedRect: box)
+        }
+
+        /// Draws the word with each letter's opacity from alpha (1 is the ink's own).
+        private func draw(_ word: Word, alpha: (Int) -> CGFloat) {
+            let ink = word.attributes[.foregroundColor] as? UIColor ?? .label
+            if let box = word.truncatedRect {
+                var attributes = word.attributes
+                attributes[.foregroundColor] = ink.withAlphaComponent(ink.cgColor.alpha * max(0, alpha(0)))
+                (word.text as NSString).draw(in: box, withAttributes: attributes)
                 return
             }
-            drawString = suggestion.displayText
-            (drawString as NSString).draw(
-                at: CGPoint(x: bounds.midX - size.width / 2, y: midY - size.height / 2),
-                withAttributes: attributes
-            )
+            let string = NSMutableAttributedString(string: word.text, attributes: word.attributes)
+            var offset = 0
+            for (index, character) in word.text.enumerated() {
+                let length = String(character).utf16.count
+                let a = alpha(index)
+                if a < 1 {
+                    let faded = ink.withAlphaComponent(ink.cgColor.alpha * max(0, a))
+                    string.addAttribute(.foregroundColor, value: faded, range: NSRange(location: offset, length: length))
+                }
+                offset += length
+            }
+            string.draw(at: word.origin)
+        }
+
+        private static func progress(_ t: CFTimeInterval, start: CFTimeInterval) -> CGFloat {
+            let x = min(1, max(0, (t - start) / letterFade))
+            return CGFloat(x * x * (3 - 2 * x))
+        }
+
+        override func draw(_ rect: CGRect) {
+            let midY = bounds.height * 0.5
+            let pilled = suggestion != nil && (isHighlighted || suggestion?.willAutoReplace == true)
+            if pilled {
+                // Like Apple's, the highlight is a capsule as wide as its slot.
+                let pillH = max(22, bounds.height - 2 * pillInset)
+                let pill = CGRect(x: 0, y: max(0.5, midY - pillH / 2), width: bounds.width, height: pillH)
+                (isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill).setFill()
+                UIBezierPath(roundedRect: pill, cornerRadius: pillH / 2).fill()
+            }
+            let ink = pilled ? palette.stripPillText : palette.stripText
+            let incoming = suggestion.map { layout($0, ink: ink) }
+            guard var leaving = outgoing.map({ layout($0, ink: ink) }) else {
+                if let incoming { draw(incoming) { _ in 1 } }
+                return
+            }
+            let t = CACurrentMediaTime() - swapStart
+            let oldLetters = Array(leaving.text)
+            let newLetters = Array(incoming?.text ?? "")
+            let byLetter = leaving.truncatedRect == nil && incoming?.truncatedRect == nil
+            // Letters both words start with stay put (drawn once, in the new word).
+            var shared = 0
+            if byLetter, incoming != nil {
+                while shared < min(oldLetters.count, newLetters.count), oldLetters[shared] == newLetters[shared] {
+                    shared += 1
+                }
+            }
+            if shared > 0, let incoming {
+                // The old ending continues from the shared letters, so it never jumps aside.
+                leaving = Word(text: leaving.text, attributes: leaving.attributes, origin: incoming.origin, truncatedRect: nil)
+            }
+            let changing = max(oldLetters.count, newLetters.count) - shared
+            let stagger = changing > 1 ? min(Self.maxStagger, (Self.swapLength - Self.letterFade) / Double(changing - 1)) : 0
+            draw(leaving) { index in
+                guard index >= shared else { return 0 }
+                guard byLetter else { return 1 - Self.progress(t, start: 0) }
+                return 1 - Self.progress(t, start: Double(oldLetters.count - 1 - index) * stagger)
+            }
+            if let incoming {
+                draw(incoming) { index in
+                    guard index >= shared else { return 1 }
+                    guard byLetter else { return Self.progress(t, start: 0) }
+                    return Self.progress(t, start: Double(index - shared) * stagger)
+                }
+            }
         }
     }
 }
@@ -425,9 +575,9 @@ final class FullAccessHintView: UIView {
         super.init(frame: frame)
         backgroundColor = .clear
         titleLabel.text = Self.title
-        titleLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         pathLabel.text = Self.path
-        pathLabel.font = .systemFont(ofSize: 12)
+        pathLabel.font = .systemFont(ofSize: 11.5)
         pathLabel.accessibilityLabel = "Settings, Apps, Hex, Keyboards"
         for label in [titleLabel, pathLabel] {
             label.adjustsFontSizeToFitWidth = true
@@ -473,10 +623,11 @@ final class FullAccessHintView: UIView {
         )
         let textX = chipLeads ? openButton.frame.maxX + 10 : 0
         let textWidth = chipLeads ? max(0, bounds.width - textX) : max(0, openButton.frame.minX - 10)
-        let lineHeight: CGFloat = 16
-        let top = (bounds.height - 2 * lineHeight - 1) / 2
+        // Two lines in the strip's 27 pt.
+        let lineHeight: CGFloat = min(16, (bounds.height + 1) / 2)
+        let top = (bounds.height - 2 * lineHeight) / 2
         titleLabel.frame = CGRect(x: textX, y: top, width: textWidth, height: lineHeight)
-        pathLabel.frame = CGRect(x: textX, y: top + lineHeight + 1, width: textWidth, height: lineHeight)
+        pathLabel.frame = CGRect(x: textX, y: top + lineHeight, width: textWidth, height: lineHeight)
     }
 }
 

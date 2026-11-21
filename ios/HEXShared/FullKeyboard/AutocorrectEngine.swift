@@ -421,22 +421,118 @@ final class AutocorrectEngine {
         return token
     }
 
+    // MARK: - Predictions between words
+
+    /// The empty field, or after a sentence's end and a space, or a new line.
+    static func isSentenceStart(_ beforeInput: String?) -> Bool {
+        guard let beforeInput else { return true }
+        guard let last = beforeInput.last else { return true }
+        if last.isNewline { return true }
+        guard last == " " else { return false }
+        var trimmed = Substring(beforeInput)
+        while trimmed.last == " " { trimmed = trimmed.dropLast() }
+        guard let written = trimmed.last else { return true }
+        return written.isNewline || written == "." || written == "!" || written == "?"
+    }
+
+    /// Common sentence-initial words per language (Hex's own short lists), lowercase except
+    /// words that always take a capital.
+    static func sentenceStarters(_ language: KeyboardLanguage) -> [String] {
+        switch language {
+        case .english: ["I", "the", "I'm"]
+        case .spanish: ["yo", "el", "la"]
+        case .german: ["ich", "das", "die"]
+        case .french, .frenchCanadian, .frenchSwiss: ["je", "le", "la"]
+        case .italian: ["io", "il", "la"]
+        case .portuguese: ["eu", "o", "a"]
+        case .norwegian: ["jeg", "det", "vi"]
+        case .russian: ["я", "это", "мы"]
+        case .ukrainian: ["я", "це", "ми"]
+        case .serbianLatin: ["ja", "to", "da"]
+        }
+    }
+
+    /// Marks after which a sentence goes on.
+    static let midSentenceMarks: Set<Character> = [",", ";", ":", ")", "\"", "\u{201D}", "\u{2019}", "\u{2014}"]
+
+    /// Common first words of a clause, after a comma (Hex's own short lists).
+    static func clauseStarters(_ language: KeyboardLanguage) -> [String] {
+        switch language {
+        case .english: ["I", "but", "and"]
+        case .spanish: ["que", "pero", "y"]
+        case .german: ["und", "aber", "ich"]
+        case .french, .frenchCanadian, .frenchSwiss: ["et", "mais", "je"]
+        case .italian: ["e", "ma", "che"]
+        case .portuguese: ["e", "mas", "que"]
+        case .norwegian: ["og", "men", "jeg"]
+        case .russian: ["и", "но", "что"]
+        case .ukrainian: ["і", "але", "що"]
+        case .serbianLatin: ["i", "ali", "da"]
+        }
+    }
+
+    /// The language's commonest words, for next-word slots the model can't fill.
+    static func commonWords(_ language: KeyboardLanguage) -> [String] {
+        switch language {
+        case .english: ["the", "to", "and", "a", "I", "of"]
+        case .spanish: ["de", "que", "y", "la", "el", "en"]
+        case .german: ["und", "die", "der", "ich", "ist", "das"]
+        case .french, .frenchCanadian, .frenchSwiss: ["de", "la", "et", "le", "je", "à"]
+        case .italian: ["di", "e", "che", "la", "il", "a"]
+        case .portuguese: ["de", "que", "e", "o", "a", "do"]
+        case .norwegian: ["og", "i", "det", "er", "på", "som"]
+        case .russian: ["и", "в", "не", "на", "я", "что"]
+        case .ukrainian: ["і", "в", "не", "на", "що", "я"]
+        case .serbianLatin: ["i", "je", "da", "u", "se", "na"]
+        }
+    }
+
+    /// Up to three distinct, allowed words as tap-only predictions, capitalized when shift
+    /// would be on (never with Auto-capitalization off).
+    private func predictions(_ words: [String], previous: String?, capitalized: Bool) -> [KeyboardSuggestion] {
+        var out: [KeyboardSuggestion] = []
+        for word in words where out.count < 3 {
+            guard previous.map({ word.lowercased() != $0 }) ?? true, mayOffer(word, after: previous) else { continue }
+            let text = capitalized && addsCapitals ? word.prefix(1).uppercased() + word.dropFirst() : word
+            guard !out.contains(where: { $0.replacement.caseInsensitiveCompare(text) == .orderedSame }) else { continue }
+            out.append(KeyboardSuggestion(displayText: text, replacement: text, kind: .nextWord))
+        }
+        return out
+    }
+
     // MARK: - Suggestions & Replace-on-Space
 
+    /// `capitalizesNext`: shift would turn itself on for the next letter (the start of a
+    /// sentence, or every word in a Words field), so predictions start with a capital.
     func suggestions(
         beforeInput: String?,
         field: KeyboardFieldKind,
         autocorrectionType: UITextAutocorrectionType?,
-        predictionModel: TypingDecoderModel? = nil
+        predictionModel: TypingDecoderModel? = nil,
+        capitalizesNext: Bool = false
     ) -> [KeyboardSuggestion] {
         guard field == .text, autocorrectionType != .no, hasDictionary else { return [] }
+        // An empty field, or a new sentence (". ", "! ", "? ", a new line): three common
+        // first words, as Apple's keyboard offers.
+        if Self.isSentenceStart(beforeInput) {
+            return predictions(Self.sentenceStarters(language), previous: nil, capitalized: capitalizesNext)
+        }
         if let beforeInput, beforeInput.last == " " {
-            guard let model = predictionModel, model.language == language.rawValue,
-                  let finished = Self.currentToken(in: String(beforeInput.dropLast())) else { return [] }
-            let previous = finished.lowercased()
-            return model.nextWords(after: previous, allowing: { mayOffer($0, after: previous) }).map {
-                KeyboardSuggestion(displayText: $0, replacement: $0, kind: .nextWord)
+            let before = beforeInput.dropLast()
+            // After a comma or other mid-sentence mark and a space: words that start a clause, as
+            // Apple's bar offers there (not after a handle, a path, a number or a second space).
+            if let mark = before.last, Self.midSentenceMarks.contains(mark) {
+                return predictions(Self.clauseStarters(language), previous: nil, capitalized: capitalizesNext)
             }
+            guard let finished = Self.currentToken(in: String(before)) else { return [] }
+            let previous = finished.lowercased()
+            var words: [String] = []
+            if let model = predictionModel, model.language == language.rawValue {
+                words = model.nextWords(after: previous, allowing: { mayOffer($0, after: previous) })
+            }
+            // Fewer than three from the model: the language's commonest words fill the rest,
+            // after the model's, so no slot stays empty.
+            return predictions(words + Self.commonWords(language), previous: previous, capitalized: capitalizesNext)
         }
         guard let token = Self.currentToken(in: beforeInput) else { return [] }
         self.beforeInput = beforeInput

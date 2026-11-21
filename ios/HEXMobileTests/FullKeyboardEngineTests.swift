@@ -764,13 +764,49 @@ final class FullKeyboardEngineTests: XCTestCase {
         type("por ")
         XCTAssertFalse(engine.suggestions.isEmpty)
         XCTAssertTrue(engine.suggestions.allSatisfy { $0.kind == .nextWord })
-        for context in ["por. ", "hola\n", "@por ", "todo/por ", "por  "] {
+        for context in ["@por ", "todo/por ", "por  "] {
             XCTAssertTrue(engine.autocorrect.suggestions(beforeInput: context, field: .text,
                 autocorrectionType: .default, predictionModel: engine.letterOdds).isEmpty, context)
+        }
+        for context in ["por. ", "hola\n"] {
+            XCTAssertEqual(engine.autocorrect.suggestions(beforeInput: context, field: .text,
+                autocorrectionType: .default, predictionModel: engine.letterOdds).map(\.replacement), ["yo", "el", "la"], context)
         }
         target.autocorrectionType = .no
         engine.refreshSuggestions()
         XCTAssertTrue(engine.suggestions.isEmpty)
+    }
+
+    /// An empty field and a new sentence offer three first words, capitalized as shift would
+    /// be (not with Auto-capitalization off); after a word the three slots are always filled.
+    func testSentenceStartersAndNextWordsFillAllThreeSlots() throws {
+        target.autocapitalizationType = .sentences
+        engine.configureForField()
+        engine.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        engine.refreshSuggestions()
+        XCTAssertEqual(engine.suggestions.map(\.replacement), ["I", "The", "I'm"])
+        XCTAssertTrue(engine.suggestions.allSatisfy { $0.kind == .nextWord && !$0.willAutoReplace })
+        engine.acceptSuggestion(engine.suggestions[1])
+        XCTAssertEqual(target.text, "The ")
+        type("hi ")
+        XCTAssertEqual(engine.suggestions.count, 3, "\(engine.suggestions.map(\.replacement))")
+        XCTAssertTrue(engine.suggestions.allSatisfy { $0.kind == .nextWord })
+        XCTAssertTrue(engine.suggestions.allSatisfy { $0.replacement.first?.isLowercase == true || $0.replacement == "I" })
+
+        let model = engine.letterOdds
+        func words(_ before: String, capitalized: Bool) -> [String] {
+            engine.autocorrect.suggestions(beforeInput: before, field: .text, autocorrectionType: .default,
+                                           predictionModel: model, capitalizesNext: capitalized).map(\.replacement)
+        }
+        for context in ["Done. ", "Really? ", "Wow! ", "Hi\n", ""] {
+            XCTAssertEqual(words(context, capitalized: true), ["I", "The", "I'm"], context)
+        }
+        XCTAssertEqual(words("zzqx ", capitalized: false), ["the", "to", "and"], "an unknown word: the commonest words")
+        XCTAssertEqual(words("Running late, ", capitalized: false), ["I", "but", "and"], "after a comma, words that start a clause")
+        XCTAssertEqual(words("at 7 ", capitalized: false), [], "not after a number")
+        XCTAssertEqual(words("Done.", capitalized: true), [], "no space after the period yet")
+        engine.autoCapitalizes = false
+        XCTAssertEqual(words("Done. ", capitalized: true), ["I", "the", "I'm"], "Auto-capitalization off adds no capitals")
     }
 
     /// A suggestion types its word and a space, so a space pressed right after it (a pick,

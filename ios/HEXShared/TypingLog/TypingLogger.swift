@@ -226,10 +226,7 @@ final class TypingLogger {
     nonisolated private static func layoutDetail(_ layout: KeyboardLayout) -> [TypingLogField] {
         let m = layout.metrics
         let strip = layout.stripFrame
-        let slotWidth = strip.width / 3
-        let slots = (0..<3).map { index in
-            TypingLogValue.rect(CGRect(x: strip.minX + CGFloat(index) * slotWidth, y: strip.minY, width: slotWidth, height: strip.height))
-        }
+        let slots = layout.stripSlotFrames.map { TypingLogValue.rect($0) }
         let keys = layout.keys.map { key in
             TypingLogValue.object([
                 TypingLogField("id", .string(keyID(key.kind))),

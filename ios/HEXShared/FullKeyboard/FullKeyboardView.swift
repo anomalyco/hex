@@ -566,6 +566,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         callout.frame = content
         accentCallout.frame = content
         stripView.frame = layout.stripFrame.offsetBy(dx: 0, dy: lift)
+        stripView.slotFrames = layout.stripSlotFrames.map { $0.offsetBy(dx: -layout.stripFrame.minX, dy: -layout.stripFrame.minY) }
+        stripView.pillInset = layout.metrics.stripInset
         stripView.hexOnLeading = layout.hexOnLeading
 
         hexKey.cornerRadius = layout.metrics.cornerRadius
@@ -706,7 +708,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
                 suggestions = []
             } else {
                 let emoji = emojiForFinishedWord()
-                if !emoji.isEmpty { suggestions = emoji }
+                if !emoji.isEmpty {
+                    // The finished word's emoji, with next words beside it so every slot fills:
+                    // one emoji takes the centre.
+                    let words = Array(suggestions.prefix(max(0, 3 - emoji.count)))
+                    suggestions = emoji.count == 1 && words.count == 2 ? [words[0], emoji[0], words[1]] : emoji + words
+                }
             }
         }
         stripView.update(
@@ -859,9 +866,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let mark = hex.frame.offsetBy(dx: 0, dy: lift)
         let bar = CGRect(
             x: layout.horizontalInset + m.side,
-            y: m.stripTop + lift + 4,
+            y: m.stripTop + lift + m.stripInset,
             width: bounds.width - 2 * (layout.horizontalInset + m.side),
-            height: m.stripHeight - 8
+            height: m.stripPillHeight
         )
         return (mark, bar)
     }
