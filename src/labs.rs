@@ -431,7 +431,8 @@ const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
 /// This switch sits above the minutes.
 const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
 /// The next bit above Import audio's switch, clear of the minutes below it.
-const LIVE_TYPING: u64 = MEETING_IMPORT << 1;
+/// The bit above it (Quit closes Settings) is retired and stays unused.
+const LIVE_TYPING: u64 = MEETING_IMPORT << 2;
 /// The next bit above Live typing's switch.
 const FAILURE_NOTICES: u64 = LIVE_TYPING << 1;
 /// The next bit above Failure notices' switch.
@@ -461,8 +462,9 @@ const RETURN_TO_APP: u64 = DOUBLE_TAP_MODIFIERS << 1;
 /// when the default output is speakers.
 const SPEAKERS_ONLY: u64 = RETURN_TO_APP << 1;
 /// The next bit above Only on speakers' switch: the menu bar offers Pause
-/// Hex, and every capture shortcut is inert while paused (macOS).
-const PAUSE_MENU: u64 = SPEAKERS_ONLY << 1;
+/// Hex, and every capture shortcut is inert while paused (macOS). The bit
+/// above Only on speakers (Switch model with app) is retired and stays unused.
+const PAUSE_MENU: u64 = SPEAKERS_ONLY << 2;
 /// The next bit above Pause from menu bar: the local API's
 /// `timestamps=segment|word` returns native timings.
 const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
