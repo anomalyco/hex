@@ -364,6 +364,66 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(steps, [1, -1, 1])
     }
 
+    /// Settings › Keyboard › Languages with English and Polish: the space bar says "Polski",
+    /// the keys are QWERTY, every Polish letter is on a held key (ą ć ę ł ń ó ś ź ż), and
+    /// Switch dictation too dictates pl-PL.
+    func testPolishTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .polish]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "pl-PL"]
+        let model = KeyboardViewModel()
+        var picked: [String?] = []
+        model.onLanguageSelected = { picked.append($0) }
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .polish)
+        XCTAssertEqual(view.plane.spaceLabel, "Polski")
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Polish typing model: the dictionary engine")
+        XCTAssertEqual(picked, ["pl-PL"])
+        var id = 400
+        func press(_ character: String) {
+            let key = view.engine.layout.key(.character(character))!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        press("z")
+        press("a")
+        for (key, letter) in [("z", "ż"), ("o", "ó"), ("l", "ł"), ("c", "ć"), ("e", "ę"), ("s", "ś"), ("a", "ą"), ("n", "ń"), ("z", "ź")] {
+            hold(key, pick: letter)
+        }
+        XCTAssertEqual(field.text, "zażółćęśąńź")
+        for letter in ["u", "i", "y"] {
+            let key = view.engine.layout.key(.character(letter))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertFalse(view.engine.openAccentMenuIfEligible(forTouch: id), "\(letter) has no long-press options")
+            view.engine.touchEnded(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+        }
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+    }
+
     /// Settings › Keyboard › Languages with English and Ukrainian: the space bar says
     /// "Українська", the keys are the twelve-key ЙЦУКЕН, ʼ types the apostrophe Ukrainian
     /// spells with and a held ʼ the other apostrophes, ґ and ї have keys of their own, and
@@ -630,7 +690,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.engine.autocorrect.decoder)
         // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
         // next-letter odds move French targets (AZERTY's letters aren't theirs).
-        for language in [KeyboardLanguage.russian, .ukrainian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
+        for language in [KeyboardLanguage.russian, .ukrainian, .polish, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")

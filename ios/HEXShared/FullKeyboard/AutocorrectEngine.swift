@@ -213,6 +213,18 @@ final class AutocorrectEngine {
     /// typos are fixed in either language and a word of either is never "corrected" into the
     /// other, as Apple's "Français et English" keyboard does. Nil with one language.
     private(set) var partner: AutocorrectEngine?
+    /// The partner, unless its dictionary takes any letters for a word: iOS can list a
+    /// language whose word data isn't there (the iOS 27.2 simulator's `pl_PL`), and such a
+    /// partner would keep every typo as "a word in the other language". Checked once per
+    /// language, on first use.
+    private var workingPartner: AutocorrectEngine? {
+        guard let partner else { return nil }
+        if partner.acceptsAnyLetters == nil {
+            partner.acceptsAnyLetters = partner.checker.isWordValid("qzxjvkq")
+        }
+        return partner.acceptsAnyLetters == true ? nil : partner
+    }
+    private var acceptsAnyLetters: Bool?
     /// The keys you type on, whose neighbours price a slip: `language`'s layout, or a
     /// partner's primary's.
     private(set) var layoutLanguage: KeyboardLanguage = .english
@@ -327,6 +339,7 @@ final class AutocorrectEngine {
     func setLanguage(_ language: KeyboardLanguage, available: [String] = UITextChecker.availableLanguages) {
         self.language = language
         layoutLanguage = language
+        acceptsAnyLetters = nil
         if partner?.language == language {
             partner = nil
         } else {
@@ -445,6 +458,7 @@ final class AutocorrectEngine {
         case .french, .frenchCanadian, .frenchSwiss: ["je", "le", "la"]
         case .italian: ["io", "il", "la"]
         case .portuguese: ["eu", "o", "a"]
+        case .polish: ["ja", "to", "nie"]
         case .norwegian: ["jeg", "det", "vi"]
         case .russian: ["я", "это", "мы"]
         case .ukrainian: ["я", "це", "ми"]
@@ -464,6 +478,7 @@ final class AutocorrectEngine {
         case .french, .frenchCanadian, .frenchSwiss: ["et", "mais", "je"]
         case .italian: ["e", "ma", "che"]
         case .portuguese: ["e", "mas", "que"]
+        case .polish: ["a", "ale", "że"]
         case .norwegian: ["og", "men", "jeg"]
         case .russian: ["и", "но", "что"]
         case .ukrainian: ["і", "але", "що"]
@@ -480,6 +495,7 @@ final class AutocorrectEngine {
         case .french, .frenchCanadian, .frenchSwiss: ["de", "la", "et", "le", "je", "à"]
         case .italian: ["di", "e", "che", "la", "il", "a"]
         case .portuguese: ["de", "que", "e", "o", "a", "do"]
+        case .polish: ["nie", "i", "w", "się", "na", "to"]
         case .norwegian: ["og", "i", "det", "er", "på", "som"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
@@ -548,7 +564,7 @@ final class AutocorrectEngine {
         let autoFix = allowAuto ? cautiousReplacement(for: token) : nil
         var pool: [String] = autoFix.map { [$0] } ?? []
 
-        if let partner {
+        if let partner = workingPartner {
             // Both languages' candidates, those of the language the words before are in
             // first; spelling guesses only for a word neither knows.
             let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2, model: predictionModel)
@@ -702,7 +718,7 @@ final class AutocorrectEngine {
     /// fix in the language of the words before it, else the cheaper slip on these keys, else
     /// the keyboard's own language's.
     private func cautiousReplacement(for token: String) -> String? {
-        guard let partner else { return ownReplacement(for: token) }
+        guard let partner = workingPartner else { return ownReplacement(for: token) }
         if let shortcut = lexiconShortcuts[token.lowercased()] {
             return shortcut
         }
@@ -1016,6 +1032,14 @@ final class AutocorrectEngine {
         if source == target { return 0 }
         let s = Array(source)
         let t = Array(target)
+        // Polish: diacritics you didn't add, however many ("zolw" -> "żółw", "maly" -> "mały"),
+        // are as cheap as one missing Spanish accent, a little more for each further one.
+        if language == .polish, s.count == t.count {
+            let missed = zip(s, t).filter { $0 != $1 }
+            if !missed.isEmpty, missed.allSatisfy({ samePolishLetterIgnoringDiacritics($0, $1) }) {
+                return 0.15 + 0.05 * Double(missed.count - 1)
+            }
+        }
         let ds = s.count - t.count
         guard abs(ds) <= 1 else { return nil }
 
@@ -1067,6 +1091,12 @@ final class AutocorrectEngine {
         guard a != b else { return false }
         let base: (Character) -> Unicode.Scalar? = { String($0).decomposedStringWithCanonicalMapping.unicodeScalars.first }
         return base(a) == base(b)
+    }
+
+    /// Whether two lowercase letters are one Polish letter with or without its diacritic (a/ą,
+    /// z/ż, l/ł: ł has no decomposition, so it is named).
+    static func samePolishLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
+        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
     }
 
     private static let keyCoordinates: [KeyboardLanguage: [Character: (Double, Double)]] = Dictionary(

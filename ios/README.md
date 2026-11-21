@@ -304,7 +304,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     including a name, day or place typed in lowercase that the dictionary knows only
     capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português, Русский, Українська) keep the dictionary
+    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Русский, Українська) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
@@ -550,7 +550,11 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   `йцукенгшщзхї`, `фівапролджєʼ`, `ячсмитьбюґ`, with ʼ the U+02BC apostrophe Ukrainian
   spells with; as the system keyboard's long-press options were observed, only ʼ offers
   anything, the other apostrophes (' ’ ‘ and the backtick), and ₴, which the system keyboard
-  offers on its held currency key, is held on $; no ы, э, ъ or ё) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  offers on its held currency key, is held on $; no ы, э, ъ or ё), Polski (QWERTY, as the
+  standard Polish layout is, on the English letters; it matches the system keyboard's
+  observed long-press options: Polish's own letter right after the base on A, C, E, L, N, O,
+  S and Z, so ą ć ę ł ń ó ś ż, with ź after ż, and nothing on U, I or Y; its currency key
+  is €, held for € $ £ ¥ ₩ ₽ and no zł, which Hex holds on the #+= page's €) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -573,13 +577,16 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   letter at the end under the thumb, in one row where the system wraps a long list
   (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `pl`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
   the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
   is the cheapest fix of all ("aqui" → "aquí", "manana" → "mañana"; a word the
-  dictionary knows, such as "esta", is never changed). A two-letter non-word one
+  dictionary knows, such as "esta", is never changed); in Polish every missing
+  diacritic in a word counts as one such fix ("zolw" → "żółw", "maly" → "mały"). The
+  iOS 27.2 simulator lists `pl_PL` but its checker flags no word, so Polish fixes are
+  checked against a stub dictionary there. A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
   ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
   Spanish and Italian only). Auto-capitalization is unchanged.
@@ -800,6 +807,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   Ukrainian is `DictationTranscriber`'s only (macOS 27.2 lists `uk-UA` there and
   not for `SpeechTranscriber`): a `say -v Lesya` clip came back word for word in
   Cyrillic, without punctuation, after an 18 s model download.
+  Polish is too (macOS 27.2.1 lists `pl-PL` for `DictationTranscriber` only):
+  `say -v Zosia` clips came back with every diacritic (ą ć ę ł ń ó ś ź ż), numbers as
+  digits ("10 min", "19:30"), and no punctuation.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
