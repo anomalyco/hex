@@ -112,23 +112,54 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> OverlayHandle<Toolb
     app.overlay(spec, Toolbar::default())
 }
 
-/// Saves a toolbar choice off the main thread.
+/// Takes a toolbar choice at once (`screenshot_settings` shows it, so a
+/// recording started next uses it) and saves it, in order, on one thread.
 pub(crate) fn remember(
     what: &'static str,
-    change: impl FnOnce(&mut crate::app_settings::ScreenshotSettings) + Send + 'static,
+    change: impl Fn(&mut crate::app_settings::ScreenshotSettings) + Send + Sync + 'static,
 ) {
-    let spawned = std::thread::Builder::new()
-        .name("hex-record-choice".into())
-        .spawn(move || {
-            if let Err(error) =
-                crate::rune_ui::host::save_settings(|settings| change(&mut settings.screenshots))
-            {
-                tracing::warn!(%error, what, "could not save a recording choice");
-            }
-        });
-    if let Err(error) = spawned {
-        tracing::warn!(%error, what, "could not save a recording choice");
+    crate::app_settings::queue_screenshot_choice(std::sync::Arc::new(change));
+    static SAVER: std::sync::OnceLock<Option<std::sync::mpsc::SyncSender<()>>> =
+        std::sync::OnceLock::new();
+    let saver = SAVER.get_or_init(|| {
+        let (wake, woken) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("hex-record-choice".into())
+            .spawn(move || {
+                for () in woken {
+                    save_choices();
+                }
+            })
+            .inspect_err(|error| tracing::warn!(%error, "could not start the choice saver"))
+            .ok()
+            .map(|_| wake)
+    });
+    match saver {
+        // A wake already waiting saves this choice too.
+        Some(wake) => {
+            let _ = wake.try_send(());
+        }
+        None => {
+            tracing::warn!(what, "could not save a recording choice");
+            crate::app_settings::settle_screenshot_choices(1);
+        }
     }
+}
+
+/// Saves every pending choice in one go, then lets them go.
+fn save_choices() {
+    let choices = crate::app_settings::pending_screenshot_choices();
+    if choices.is_empty() {
+        return;
+    }
+    if let Err(error) = crate::rune_ui::host::save_settings(|settings| {
+        for choice in &choices {
+            choice(&mut settings.screenshots);
+        }
+    }) {
+        tracing::warn!(%error, count = choices.len(), "could not save recording choices");
+    }
+    crate::app_settings::settle_screenshot_choices(choices.len());
 }
 
 pub(crate) fn view(s: &Toolbar, cx: &mut Cx<Toolbar>) -> El {

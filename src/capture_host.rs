@@ -429,6 +429,13 @@ fn scrawl_engine(
 /// How a capture's movie is made: a Screenshots recording is for people, so
 /// it's HEVC at the size, frame rate, and quality Labs › Screenshots asks
 /// for; an Annotate capture's stays sized for agents.
+/// Whether a Screenshots recording holds "While dictating": not while it
+/// records the computer's sound, which that would silence, nor with no
+/// microphone, when there's no voice to clear the way for.
+fn wants_quiet(system_audio: bool, microphone: &microphone::Choice) -> bool {
+    !system_audio && !matches!(microphone, microphone::Choice::Silent)
+}
+
 fn movie_for(clip: bool, screenshots: &crate::app_settings::ScreenshotSettings) -> MovieQuality {
     if clip {
         MovieQuality::Full(screenshots.movie_size())
@@ -2033,13 +2040,23 @@ impl CaptureHost {
         let (sink, chunks) = mpsc::sync_channel(SINK_CAPACITY);
         // A Screenshots recording keeps the microphone it asks for; every
         // other capture copies the dictation timeline.
-        let choice = if clip {
-            microphone::Choice::of(
-                &crate::app_settings::screenshot_settings().record_microphone,
-                audio.device_name().as_deref(),
-            )
+        let screenshots = clip.then(crate::app_settings::screenshot_settings);
+        let choice = match &screenshots {
+            Some(settings) => {
+                microphone::Choice::of(&settings.record_microphone, audio.device_name().as_deref())
+            }
+            None => microphone::Choice::Timeline,
+        };
+        // "While dictating" quiets the computer for a voice over it; a
+        // recording of the computer's own sound, or with no voice, keeps it.
+        let quiet = if screenshots
+            .as_ref()
+            .is_some_and(|settings| !wants_quiet(settings.record_system_audio, &choice))
+        {
+            drop(quiet);
+            None
         } else {
-            microphone::Choice::Timeline
+            quiet.or_else(|| self.quiet())
         };
         let mut microphone = match microphone::Microphone::open(choice, audio, sink, now) {
             Ok(microphone) => Some(microphone),
@@ -2085,7 +2102,7 @@ impl CaptureHost {
             target: target.kind(),
             seal,
             collector,
-            quiet: quiet.or_else(|| self.quiet()),
+            quiet,
             clip,
             microphone: microphone.unwrap_or(microphone::Microphone::Timeline),
         });
@@ -5264,6 +5281,49 @@ mod tests {
         assert_eq!(settled(), [Held(Mute)]);
         host.shutdown(&audio);
         assert_eq!(settled(), [Restored(Mute)]);
+        fs::remove_dir_all(dir).ok();
+    }
+
+    /// A Screenshots recording of the computer's sound must not mute it,
+    /// and one with no microphone has no voice to quiet anything for.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn a_screenshots_recording_quiets_only_for_a_voice_over_silence() {
+        use crate::audio::recording_environment::Effect::Mute;
+        use crate::audio::recording_environment::observed::{
+            self,
+            Event::{Held, Restored},
+        };
+        assert!(wants_quiet(false, &microphone::Choice::Timeline));
+        assert!(!wants_quiet(false, &microphone::Choice::Silent));
+        assert!(!wants_quiet(true, &microphone::Choice::Timeline));
+
+        let dir = temp_dir("clip-quiet");
+        let audio = FakeTimeline::default();
+        let mut host = CaptureHost::with(
+            FakeEngine::new(Arc::new(FakeTranscriber)),
+            Some(dir.clone()),
+        )
+        .unwrap();
+        let (environment, events) = observed::controller();
+        host.environment = Some(environment.clone());
+        host.audio_behavior = Some(crate::app_settings::RecordingAudioBehavior::Mute);
+        let settled = || observed::settled(&environment, &events);
+        let clip = || CaptureCommand::Clip(CaptureTarget::Pointer);
+
+        let bundle = report(host.command(clip(), &audio)).bundle.unwrap();
+        assert_eq!(settled(), [Held(Mute)]);
+        report(host.control(ScrawlCaptureAction::Cancel, &audio));
+        assert_eq!(settled(), [Restored(Mute)]);
+        wait_for_last(&mut host, &audio, &bundle, true);
+
+        crate::app_settings::queue_screenshot_choice(Arc::new(|settings| {
+            settings.record_system_audio = true;
+        }));
+        report(host.command(clip(), &audio)).bundle.unwrap();
+        assert_eq!(settled(), []);
+        host.shutdown(&audio);
+        assert_eq!(settled(), []);
         fs::remove_dir_all(dir).ok();
     }
 

@@ -52,6 +52,10 @@ pub use screenshots::{
     RecordingQuality, ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey,
     screenshot_settings,
 };
+#[cfg(target_os = "macos")]
+pub use screenshots::{
+    pending_screenshot_choices, queue_screenshot_choice, settle_screenshot_choices,
+};
 pub use typing_speed::{
     DEFAULT_TYPING_WPM, MAX_TYPING_WPM, MIN_TYPING_WPM, clamp as clamp_typing_wpm,
 };

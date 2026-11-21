@@ -374,13 +374,50 @@ impl HotkeySlot {
     }
 }
 
-/// The saved screenshot settings.
+/// The saved screenshot settings, with every choice made but not saved yet.
 pub fn screenshot_settings() -> ScreenshotSettings {
-    SCREENSHOT_SETTINGS
+    // Held while reading, so a choice is either still pending or already in
+    // what was saved and applied.
+    let pending = lock_pending();
+    let mut settings = SCREENSHOT_SETTINGS
         .get_or_init(Default::default)
         .read()
         .unwrap_or_else(|error| error.into_inner())
-        .clone()
+        .clone();
+    for choice in pending.iter() {
+        choice(&mut settings);
+    }
+    settings
+}
+
+/// A change to the screenshot settings made before it's saved.
+pub type ScreenshotChoice = Arc<dyn Fn(&mut ScreenshotSettings) + Send + Sync>;
+
+static PENDING: std::sync::Mutex<Vec<ScreenshotChoice>> = std::sync::Mutex::new(Vec::new());
+
+fn lock_pending() -> std::sync::MutexGuard<'static, Vec<ScreenshotChoice>> {
+    PENDING.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+#[cfg(target_os = "macos")]
+/// Shows `choice` in [`screenshot_settings`] at once, until it's saved.
+pub fn queue_screenshot_choice(choice: ScreenshotChoice) {
+    lock_pending().push(choice);
+}
+
+#[cfg(target_os = "macos")]
+/// The choices waiting to be saved, oldest first.
+pub fn pending_screenshot_choices() -> Vec<ScreenshotChoice> {
+    lock_pending().clone()
+}
+
+#[cfg(target_os = "macos")]
+/// Forgets the oldest `count` pending choices, once they're saved (or
+/// can't be).
+pub fn settle_screenshot_choices(count: usize) {
+    let mut pending = lock_pending();
+    let count = count.min(pending.len());
+    pending.drain(..count);
 }
 
 /// The screenshot shortcut the session tap takes, while the Lab is on.

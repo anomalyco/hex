@@ -138,7 +138,7 @@ fn act(toolbar: &Toolbar, action: ToolbarAction) {
         }
         ToolbarAction::Microphone(name) => {
             remember("microphone", move |settings| {
-                settings.record_microphone = name
+                settings.record_microphone.clone_from(&name);
             });
         }
         ToolbarAction::SystemAudio(on) => {
