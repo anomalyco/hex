@@ -54,17 +54,17 @@ final class EmojiGlyphRenderer {
 
     private let fontData: CFData?
     private var font: CGFont?
+    private var fontName: String?
     private var sizedFonts: [CGFloat: CTFont] = [:]
     private var rendersOnFont = 0
     /// The font copy goes once drawing stops for a moment (a page drawn, a scroll ended):
     /// the bitmaps are here, so what it cached is only weight.
     private var idleDrop: DispatchWorkItem?
     static let idleDropDelay: TimeInterval = 0.3
-    /// Each size's label box: the width, ascent and descent of "😀" in the system font.
+    /// Each size's label box: the ascent and descent of "😀" in the system font.
     private var lineBoxes: [CGFloat: LineBox] = [:]
 
     private struct LineBox {
-        let width: CGFloat
         let ascent: CGFloat
         let descent: CGFloat
     }
@@ -130,26 +130,46 @@ final class EmojiGlyphRenderer {
     // MARK: - Drawing
 
     private func render(_ emoji: String, size: CGFloat, scale: CGFloat) -> EmojiGlyph? {
+        autoreleasepool { draw(emoji, size: size, scale: scale) }
+    }
+
+    private func draw(_ emoji: String, size: CGFloat, scale: CGFloat) -> EmojiGlyph? {
         let box = lineBox(size: size)
-        let drawFont = privateFont(size: size) ?? UIFont.systemFont(ofSize: size) as CTFont
+        // Laid out as a label lays it out (the system font, which falls back to the emoji
+        // font at its own size and place); laying out decodes no image.
         let line = CTLineCreateWithAttributedString(NSAttributedString(
             string: emoji,
-            attributes: [NSAttributedString.Key(kCTFontAttributeName as String): drawFont]
+            attributes: [.font: UIFont.systemFont(ofSize: size)]
         ))
-        var ascent: CGFloat = 0
-        var descent: CGFloat = 0
-        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, nil))
-        // The emoji's own image bounds when CoreText knows them, else its line; a pixel of
-        // room either side for antialiasing.
-        var ink = CTLineGetImageBounds(line, nil)
-        if ink.isNull || ink.isEmpty || ink.width > width * 2 || ink.height > (ascent + descent) * 2 {
-            ink = CGRect(x: 0, y: -descent, width: width, height: ascent + descent)
+        let width = CGFloat(CTLineGetTypographicBounds(line, nil, nil, nil))
+        var pieces: [(font: CTFont, glyphs: [CGGlyph], positions: [CGPoint])] = []
+        var ink = CGRect.null
+        for run in (CTLineGetGlyphRuns(line) as? [CTRun]) ?? [] {
+            let count = CTRunGetGlyphCount(run)
+            guard count > 0 else { continue }
+            var glyphs = [CGGlyph](repeating: 0, count: count)
+            var positions = [CGPoint](repeating: .zero, count: count)
+            CTRunGetGlyphs(run, CFRange(location: 0, length: count), &glyphs)
+            CTRunGetPositions(run, CFRange(location: 0, length: count), &positions)
+            let attributes = CTRunGetAttributes(run) as NSDictionary
+            guard let used = attributes[kCTFontAttributeName as String] else { continue }
+            let runFont = used as! CTFont
+            // The emoji font's own glyphs drawn with the private copy, so its cache stays
+            // ours; anything else (a text-style emoji, a fallback box) as the label would.
+            let font = privateFont(matching: runFont) ?? runFont
+            var rects = [CGRect](repeating: .zero, count: count)
+            CTFontGetBoundingRectsForGlyphs(font, .default, glyphs, &rects, count)
+            for (rect, position) in zip(rects, positions) where !rect.isEmpty {
+                ink = ink.union(rect.offsetBy(dx: position.x, dy: position.y))
+            }
+            pieces.append((font, glyphs, positions))
         }
+        guard !pieces.isEmpty, !ink.isNull else { return nil }
         let pad = 1 / scale
         ink = ink.insetBy(dx: -pad, dy: -pad)
-        // A centred label lays the line in a box `box.width` wide and `ascent + descent`
-        // tall around its centre, the baseline `ascent` below the box's top.
-        let baselineX = -box.width / 2
+        // A centred label lays the line in a box as wide as the line and \`ascent + descent\`
+        // tall around its centre, the baseline \`ascent\` below the box's top.
+        let baselineX = -width / 2
         let baselineY = -(box.ascent + box.descent) / 2 + box.ascent
         let rect = Self.pixelAligned(CGRect(
             x: baselineX + ink.minX,
@@ -171,11 +191,12 @@ final class EmojiGlyphRenderer {
                   bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue | CGBitmapInfo.byteOrder32Little.rawValue
               ) else { return nil }
         context.scaleBy(x: scale, y: scale)
-        context.textMatrix = .identity
-        // The bitmap's origin is its bottom left, and the baseline `rect.maxY - baselineY`
+        // The bitmap's origin is its bottom left, and the baseline \`rect.maxY - baselineY\`
         // above it.
-        context.textPosition = CGPoint(x: baselineX - rect.minX, y: rect.maxY - baselineY)
-        CTLineDraw(line, context)
+        context.translateBy(x: baselineX - rect.minX, y: rect.maxY - baselineY)
+        for piece in pieces {
+            CTFontDrawGlyphs(piece.font, piece.glyphs, piece.positions, piece.glyphs.count, context)
+        }
         guard let image = context.makeImage() else { return nil }
         rendersOnFont += 1
         if rendersOnFont >= rendersPerFont {
@@ -195,8 +216,8 @@ final class EmojiGlyphRenderer {
         ))
         var ascent: CGFloat = 0
         var descent: CGFloat = 0
-        let width = CGFloat(CTLineGetTypographicBounds(line, &ascent, &descent, nil))
-        let box = LineBox(width: width, ascent: ascent, descent: descent)
+        CTLineGetTypographicBounds(line, &ascent, &descent, nil)
+        let box = LineBox(ascent: ascent, descent: descent)
         lineBoxes[size] = box
         return box
     }
@@ -211,16 +232,29 @@ final class EmojiGlyphRenderer {
 
     // MARK: - The font copy
 
-    private func privateFont(size: CGFloat) -> CTFont? {
-        if let sized = sizedFonts[size] { return sized }
-        if font == nil, let fontData, let provider = CGDataProvider(data: fontData) {
+    /// The private copy at \`runFont\`'s size, when \`runFont\` is a face of the system emoji
+    /// font (the text system's fallback is its UI face, ".AppleColorEmojiUI").
+    private func privateFont(matching runFont: CTFont) -> CTFont? {
+        let name = CTFontCopyPostScriptName(runFont) as String
+        guard name.contains(Self.emojiFontName), let fontData else { return nil }
+        let size = CTFontGetSize(runFont)
+        if fontName == name, let sized = sizedFonts[size] { return sized }
+        if font == nil || fontName != name {
+            dropFont()
             let started = CACurrentMediaTime()
-            font = CGFont(provider)
-            if font != nil { fontsMade += 1 }
+            // The face of that name in the font file, made from its bytes, so its caches are
+            // its own and go with it.
+            let faces = (CTFontManagerCreateFontDescriptorsFromData(fontData) as? [CTFontDescriptor]) ?? []
+            let face = faces.first { (CTFontDescriptorCopyAttribute($0, kCTFontNameAttribute) as? String) == name }
+            guard let face else { return nil }
+            font = CTFontCopyGraphicsFont(CTFontCreateWithFontDescriptor(face, size, nil), nil)
+            fontName = name
+            fontsMade += 1
             slowestFont = max(slowestFont, CACurrentMediaTime() - started)
         }
         guard let font else { return nil }
-        let sized = CTFontCreateWithGraphicsFont(font, size, nil, nil)
+        var matrix = CTFontGetMatrix(runFont)
+        let sized = CTFontCreateWithGraphicsFont(font, size, &matrix, nil)
         sizedFonts[size] = sized
         return sized
     }
@@ -230,6 +264,7 @@ final class EmojiGlyphRenderer {
         idleDrop = nil
         sizedFonts.removeAll()
         font = nil
+        fontName = nil
         rendersOnFont = 0
     }
 
@@ -245,9 +280,11 @@ final class EmojiGlyphRenderer {
     /// Whether a font copy is held, for tests.
     var holdsFont: Bool { font != nil }
 
+    static let emojiFontName = "AppleColorEmoji"
+
     /// The system emoji font's file, memory-mapped.
     private static func emojiFontData() -> CFData? {
-        let system = CTFontCreateWithName("AppleColorEmoji" as CFString, 12, nil)
+        let system = CTFontCreateWithName(emojiFontName as CFString, 12, nil)
         guard let url = CTFontCopyAttribute(system, kCTFontURLAttribute) as? URL,
               let data = try? NSData(contentsOf: url, options: .alwaysMapped) else { return nil }
         return data as CFData

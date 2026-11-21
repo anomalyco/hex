@@ -234,9 +234,11 @@ final class EmojiSuggesterTests: XCTestCase {
         let library = try library()
         let renderer = EmojiGlyphRenderer(byteLimit: 1 << 20, rendersPerFont: 32)
         let before = Self.footprint()
-        for entry in library.entries {
+        for (index, entry) in library.entries.enumerated() {
             XCTAssertNotNil(renderer.glyph(for: entry.emoji, size: 29, scale: 3), entry.emoji)
             XCTAssertLessThanOrEqual(renderer.cachedBytes, 1 << 20)
+            // The panel draws a screen at a time and its run loop drains between them.
+            if index % 40 == 39 { RunLoop.current.run(until: Date()) }
         }
         let grown = Self.footprint() - before
         XCTAssertLessThan(grown, 12, "drawing every emoji grew the process by \(grown) MB")
@@ -265,9 +267,9 @@ final class EmojiSuggesterTests: XCTestCase {
         panel.layoutIfNeeded()
         let grid = try XCTUnwrap(panel.subviews.compactMap { $0 as? UICollectionView }.first { !($0.superview is EmojiRowView) })
         grid.layoutIfNeeded()
-        let shown = grid.visibleCells.compactMap { ($0 as? EmojiCell)?.emoji }
-        XCTAssertEqual(shown.first, library.entries[thumbs].tones[2])
-        XCTAssertGreaterThan(shown.count, 20)
+        let first = grid.cellForItem(at: IndexPath(item: 0, section: 0)) as? EmojiCell
+        XCTAssertEqual(first?.emoji, library.entries[thumbs].tones[2])
+        XCTAssertGreaterThan(grid.visibleCells.count, 20)
         defaults.removePersistentDomain(forName: suite)
     }
 
