@@ -7,7 +7,8 @@ internal enum class Style { Polished, Casual, Notes, Verbatim }
 /** A keyboard layout's language: its keys, accents and typing model. Dictation languages are
  * [DictationLanguage]; a language can be dictated without a layout of its own. */
 internal enum class Spoken(val code: String, val label: String) {
-    English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk");
+    English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk"),
+    French("fr", "Français"), Italian("it", "Italiano");
 
     // Whisper calls Bokmål "no"; the keyboard and its model use BCP 47 "nb".
     val layoutCode get() = if (this == Norwegian) "nb" else code

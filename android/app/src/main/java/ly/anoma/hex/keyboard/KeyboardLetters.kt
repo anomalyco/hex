@@ -8,6 +8,10 @@ internal object KeyboardLetters {
         "es" to listOf("qwertyuiop", "asdfghjklñ", "zxcvbnm"),
         "nb" to listOf("qwertyuiopå", "asdfghjkløæ", "zxcvbnm"),
         "de" to listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm"),
+        // Gboard's French AZERTY (Pixel 8 emulator): ten keys edge to edge on rows 1 and 2, and an
+        // apostrophe key after n on row 3, between shift and delete.
+        "fr" to listOf("azertyuiop", "qsdfghjklm", "wxcvbn'"),
+        "it" to listOf("qwertyuiop", "asdfghjkl", "zxcvbnm"),
     )
 
     fun rows(layoutCode: String) = rows[layoutCode] ?: rows.getValue("en")
