@@ -919,9 +919,21 @@ final class AutocorrectEngine {
             || properNoun(for: token) != nil
         let previous = Self.previousWord(before, token: token)
         var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
-        if let baseline = decoderBaselineKeys, let replacement = decision?.replacement,
-           decoder.replaces(with: replacement, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline) != true {
-            decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)?.replacement
+        if let baseline = decoderBaselineKeys, let replacement = decision?.replacement {
+            func clears(_ reading: String) -> Bool? {
+                decoder.replaces(with: reading, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)
+            }
+            switch clears(replacement) {
+            case true?:
+                break
+            case false?:
+                // The next reading the baseline would also put in, if any: never a new rewrite,
+                // and no second search on the letter.
+                let readings = decision?.readings ?? []
+                decision?.replacement = readings.lazy.map(\.text).first { $0 != replacement && clears($0) == true }
+            case nil:
+                decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)?.replacement
+            }
         }
         decoderCache = (before, taps, decision)
         return decision
