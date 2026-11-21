@@ -3115,15 +3115,18 @@ pointer, never focused and left out of every capture. Each choice is saved
 as it's made, off the UI thread.
 
 ```ts
-record shortcut  -> the toolbar: ✕ │ Area · Window · Full screen │ [display ▾] [sound ▾] [Options ▾] │ Record
+record shortcut  -> the toolbar: ✕  [Area | Window | Full screen ▾]  [sound ▾] [Options ▾]  ● Record
+│                   icons only (names in tooltips and for VoiceOver), groups spaced, no dividers
 │                   while an Annotate capture records -> nothing; while recording -> stops
 │                   without Screen Recording -> Annotate's permission helper, no toolbar
 ├── kind         -> Area (default), Window, or Full screen; remembered (screenshots.record_kind)
-├── display ▾    -> only with two or more displays: their macOS names, the one under the pointer
-│                   first chosen; picking one moves the toolbar there. Not remembered
+├── display      -> only with two or more displays: a chevron inside the chosen Full screen
+│                   segment, or a second click on it, lists their macOS names, the one under the
+│                   pointer first chosen; picking one moves the toolbar there. Not remembered
 ├── sound ▾      -> Microphone: None, Same as dictation (default), or any input but Hex Microphone
 │                   (screenshots.record_microphone: "none", "default", or the device's name);
-│                   Record computer audio (screenshots.record_system_audio, off)
+│                   Record computer audio (screenshots.record_system_audio, off). The button shows
+│                   a microphone (crossed out for None) and a waveform while computer audio is on
 ├── Options ▾    -> Scale Retina to 1x, 30 or 60 fps, High · Medium · Low (the Recording settings)
 ├── Record / Return -> Area: the picker on an area; Window: the picker on windows;
 │                      Full screen: records the chosen display at once
@@ -3165,16 +3168,17 @@ record shortcut  -> the toolbar (above); Area and Window use the same picker as 
 │                       click -> the editor; drag -> the saved movie; a dictation never lands on it
 └── editor       -> the saved movie's frame above a filmstrip of 12 frames; a drag on the strip
                     moves the nearer end of the span kept (never under 0.5 s) and shows the frame
-                    there; the words said inside the span under it, read-only (one whose model
+                    there; ▶ beside the strip (or Space) plays the span with sound from the
+                    playhead, a white line kept inside the handles, and stops at its end; the words said inside the span under it, read-only (one whose model
                     gave no word times has its text spread over the movie as estimated, never
                     "Nothing was said"); no marks
-                    ├── size     -> "Original · 93 MB" (or "1080p · ~56 MB"), a pop-up of Original,
+                    ├── size     -> "Original · 93 MB ▾" (or "1080p · ~56 MB ▾"), a pop-up of Original,
                     │               1080p, 720p, each with its estimate for the span kept; the pick
                     │               is remembered (screenshots.export_size) and saved off the UI thread
                     ├── Copy (⌘C) -> the movie FILE on the clipboard (pastes as an attachment in
                     │               Slack, Messages, Finder): the saved movie itself when nothing was
                     │               cut at Original, else a copy in the temp folder's hex-screenshots
-                    ├── Save     -> another "Hex Recording … .mp4" in screenshots.folder
+                    ├── Export   -> another "Hex Recording … .mp4" in screenshots.folder
                     └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
                                     the span's words and "Screen recording (m:ss): <movie>" as text,
                                     the saved movie itself when nothing was cut at Original
@@ -3222,6 +3226,7 @@ an Annotate capture's movie  -> 1280 px long edge (2560 for a display), system H
 // check: a_screenshots_recording_follows_its_settings_and_a_capture_stays_compact (capture_host.rs)
 // check: a_full_quality_movie_records_hevc_at_the_size_asked, one_x_and_a_long_edge_take_the_smaller (crates/capture/src/capture/macos.rs)
 // check: an_export_estimate_follows_the_span_kept_and_the_size, a_recording_has_no_marks_and_copies_its_movie (editor/tests.rs)
+// check: playing_moves_the_playhead_through_the_span_and_stops_at_its_end (editor/tests.rs)
 // check: hevc_records_native_pixels_up_to_the_hardware_limit (crates/capture-core/src/plan.rs)
 // check: writes_a_tagged_hevc_movie_from_frames (crates/capture-core/src/video_writer.rs)
 ```
@@ -3250,8 +3255,8 @@ trim, words, sheet, and no-marks tests and the `trim` editor golden in
 [screenshot_thumbnail/editor/tests.rs](../../src/rune_ui/screenshot_thumbnail/editor/tests.rs),
 and the `recording` thumbnail golden. Not yet observed: a real recording
 on a Mac, its card, trimming and saving a movie, and a session receiving
-a sent recording. Left to do: no playback in the editor, no audio-only or
-GIF export, and the recording shows no countdown.
+a sent recording, or playback with sound. Left to do: no audio-only or GIF
+export, and the recording shows no countdown.
 
 The shortcut is taken in Hex's session tap (`screenshots::key`, called
 from [suppression.rs](../../src/suppression.rs) before the listener's
