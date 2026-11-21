@@ -165,6 +165,33 @@ final class TypingLogTests: XCTestCase {
         XCTAssertNil(TypingLogger.sharedIfEnabled(settings: TypingLogSettings(defaults: nil)), "no logger while the experiment is off")
     }
 
+    func testTypingLogsTurnOffOnceAndKeepWhatTheyRecorded() throws {
+        let name = "TypingLogMigration-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+        defer { defaults.removePersistentDomain(forName: name) }
+        let store = TypingLogStore(directory: directory)
+        let logger = TypingLogger(store: store)
+        logger.contextSource = { TypingLogContext(before: "", after: "", hasText: false) }
+        logger.beginSession(Self.info(TypingLogTraits()))
+        logger.endSession(reason: "disappear")
+        store.waitUntilWritten()
+        let recorded = TypingLogStore.days(in: directory).count
+        XCTAssertGreaterThan(recorded, 0)
+
+        let settings = TypingLogSettings(defaults: defaults)
+        settings.isEnabled = true
+        settings.turnOffOnce()
+        XCTAssertFalse(settings.isEnabled, "the migration turns it off")
+        XCTAssertEqual(TypingLogStore.days(in: directory).count, recorded, "the logs already recorded stay")
+        settings.isEnabled = true
+        settings.turnOffOnce()
+        XCTAssertTrue(settings.isEnabled, "turned back on after the migration, it stays on")
+
+        let neverOn = TypingLogSettings(defaults: nil)
+        neverOn.turnOffOnce()
+        XCTAssertFalse(neverOn.isEnabled)
+    }
+
     func testASkippedFieldWritesOneLineAndNothingElse() throws {
         let store = TypingLogStore(directory: directory)
         let logger = TypingLogger(store: store)

@@ -10,6 +10,7 @@ struct HEXMobileApp: App {
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
+        TypingLogSettings().turnOffOnce()
         TypingLogSettings().applyLaunchArguments()
         HinglishSettings().applyLaunchArguments()
         MultilingualParakeetSettings().applyLaunchArguments()

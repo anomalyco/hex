@@ -596,7 +596,10 @@ never at a launch by itself.
     touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
     real fingers.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
-    and apart from Learn how I type. Its description says what it records, and
+    and apart from Learn how I type. A one-time migration (`migrations.typingLogsOff.v1` in the
+    App Group, `TypingLogSettings.turnOffOnce`, run by the app and the keyboard at launch)
+    turned it off for everyone who had it on, keeping the logs already recorded.
+    Its description says what it records, and
     turning it on asks first in a dialog (App Review 2.5.14): each tap and the
     text you type or dictate with Hex, including the text around the cursor,
     for 14 days, on this iPhone, to export or delete, never password, code or
