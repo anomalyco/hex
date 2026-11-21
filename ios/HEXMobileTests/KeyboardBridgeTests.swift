@@ -105,6 +105,84 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(later.stagePhase, .recording)
     }
 
+    /// TestFlight: "The another app is using audio message seems inaccurate cause it's showing
+    /// for me all the time although it's working fine", and "telling me another app is using
+    /// the microphone". Hex writes its snapshot only while it runs, so a failure stayed in the
+    /// App Group: every keyboard after showed it, and the full keyboard's Hex key sent its
+    /// dictations to Hex's warm session, which ignored them while marked failed. A message now
+    /// shows for a few seconds after Hex wrote it; one with no time (an earlier build's) never.
+    func testAFailureHexWroteAWhileAgoIsOver() {
+        let t0 = 20_000.0
+        let busy = "Another app is using the microphone. Try again."
+        func show(_ snapshot: KeyboardSnapshot, at now: TimeInterval, on model: KeyboardViewModel) {
+            model.applyBridgeState(
+                hasFullAccess: true,
+                snapshot: snapshot,
+                isModelInstalled: true,
+                style: .polished,
+                now: now,
+                animated: false
+            )
+        }
+
+        // A warm session's dictation failed just now: the keyboard says so and dictates itself.
+        let model = KeyboardViewModel()
+        show(
+            KeyboardSnapshot(state: .failed, heartbeat: t0 + 1, expiresAt: t0 + 900, message: busy, messageAt: t0),
+            at: t0 + 1,
+            on: model
+        )
+        XCTAssertEqual(model.stagePhase, .failed)
+        XCTAssertEqual(model.statusMessage, busy)
+        XCTAssertTrue(model.isWarmAvailable)
+        XCTAssertFalse(model.dictatesThroughHex, "the Hex key dictates in the keyboard, as Dictate does")
+
+        // Seconds later, with the session still up, it's over and the Hex key uses the session.
+        let later = KeyboardSnapshot(state: .failed, heartbeat: t0 + 9, expiresAt: t0 + 900, message: busy, messageAt: t0)
+        XCTAssertTrue(later.hasStaleMessage(at: t0 + 9))
+        show(later, at: t0 + 9, on: model)
+        XCTAssertEqual(model.stagePhase, .idle)
+        XCTAssertNil(model.statusMessage)
+        XCTAssertTrue(model.dictatesThroughHex)
+
+        // Hex suspended since, or an earlier build's snapshot with no time: never shown.
+        for stale in [
+            KeyboardSnapshot(state: .failed, heartbeat: 0, expiresAt: 0, message: busy, messageAt: t0),
+            KeyboardSnapshot(state: .failed, heartbeat: 0, expiresAt: 0, message: busy),
+        ] {
+            let next = KeyboardViewModel()
+            show(stale, at: t0 + 3_600, on: next)
+            XCTAssertEqual(next.stagePhase, .idle)
+            XCTAssertNil(next.statusMessage)
+        }
+
+        // A note beside a live session ("Interrupted") goes the same way, the session staying.
+        let noted = KeyboardViewModel()
+        show(KeyboardSnapshot(state: .ready, heartbeat: t0 + 1, expiresAt: t0 + 900, message: "Interrupted", messageAt: t0), at: t0 + 1, on: noted)
+        XCTAssertEqual(noted.statusMessage, "Interrupted")
+        show(KeyboardSnapshot(state: .ready, heartbeat: t0 + 9, expiresAt: t0 + 900, message: "Interrupted", messageAt: t0), at: t0 + 9, on: noted)
+        XCTAssertNil(noted.statusMessage)
+        XCTAssertTrue(noted.dictatesThroughHex)
+
+        // The keyboard's own failure keeps its snapshot live for its 6 s, which is no session:
+        // the full keyboard's Hex key tries again in the keyboard instead of sending to no one.
+        let own = KeyboardViewModel()
+        show(
+            KeyboardSnapshot(state: .failed, heartbeat: t0 + 1, expiresAt: t0 + 6, message: busy, messageAt: t0 + 1),
+            at: t0 + 1,
+            on: own
+        )
+        XCTAssertEqual(own.stagePhase, .failed)
+        XCTAssertTrue(own.isWarmAvailable)
+        XCTAssertFalse(own.dictatesThroughHex)
+
+        let encoded = KeyboardSnapshot(state: .failed, heartbeat: t0, expiresAt: 0, message: busy, messageAt: t0)
+        XCTAssertEqual(
+            try JSONDecoder().decode(KeyboardSnapshot.self, from: JSONEncoder().encode(encoded)).messageAt,
+            t0
+        )
+    }
+
     /// The same keyboard's own dictation: one still recording or transcribing when the keyboard
     /// was dismissed finishes without it, goes back into its field when the keyboard returns
     /// there while it's fresh, and is offered as Paste dictation anywhere else or later. A

@@ -152,7 +152,7 @@ final class KeyboardLocalDictation {
                 phase = .idle
                 return nil
             }
-            return KeyboardSnapshot(state: .failed, heartbeat: now, expiresAt: until, message: message)
+            return KeyboardSnapshot(state: .failed, heartbeat: now, expiresAt: until, message: message, messageAt: now)
         }
     }
 

@@ -112,7 +112,9 @@ final class DictationController {
     private var keyboardResultTranslationFailure: TranslationFailure?
     /// Record typing logs: each step of the result, for the keyboard's log; nil while off.
     private var keyboardResultStages: DictationStages?
-    private var keyboardMessage: String?
+    private var keyboardMessage: String? {
+        didSet { keyboardMessageAt = keyboardMessage == nil ? nil : now() }
+    }
     private var pendingHandoff: PendingKeyboardHandoff?
     var keyboardSessionExpiresAt: TimeInterval = 0
     private var suspendedWarmSessionOnInterruption = false
@@ -129,6 +131,8 @@ final class DictationController {
 
     var phase = Phase.modelRequired {
         didSet {
+            captureFailed = false
+            if case .failed = phase { failedAt = now() }
             guard phase.keepsScreenAwake != oldValue.keepsScreenAwake else { return }
             // Only applies while Hex is in front; nothing else in Hex sets it, so ending a
             // dictation hands the screen back to Auto-Lock.
@@ -167,6 +171,13 @@ final class DictationController {
     }
     @ObservationIgnored private var lastPublishedSnapshotSignature: String?
     @ObservationIgnored private var lastPublishedSnapshotAt: TimeInterval = -100
+    /// When the phase last became failed, and when `keyboardMessage` was last set: the
+    /// keyboard shows a message only for a few seconds after (`KeyboardSnapshot.messageAt`).
+    @ObservationIgnored private var failedAt: TimeInterval?
+    @ObservationIgnored private var keyboardMessageAt: TimeInterval?
+    /// The failure on screen is a microphone that didn't start for a keyboard's dictation, with
+    /// the model still loaded: the keyboard's next Hex key tries again.
+    @ObservationIgnored private var captureFailed = false
     var warmDuration: WarmSessionDuration
     private(set) var style: DictationStyle
     private(set) var microphone: MicrophoneChoice
@@ -876,6 +887,7 @@ final class DictationController {
                 let message = UserFacingError.message(for: error, context: .microphone)
                 keyboardMessage = keyboardJobID == nil ? nil : message
                 phase = .failed(message)
+                captureFailed = isModelReady
                 restoreAudioAfterCapture()
                 publishKeyboardSnapshot()
             }
@@ -1190,7 +1202,10 @@ final class DictationController {
 
         switch command.kind {
         case .start:
-            guard phase == .ready, activeKeyboardJobID == nil else { return }
+            // A warm session whose microphone failed for the last dictation stays marked failed:
+            // the keyboard's next Hex key is its Try again. Without this Hex ignored every
+            // start until it was opened, while the keyboard kept sending them.
+            guard phase == .ready || captureFailed, activeKeyboardJobID == nil else { return }
             setStyle(command.style)
             startRecording(
                 keyboardJobID: command.jobID,
@@ -1240,10 +1255,13 @@ final class DictationController {
         }
 
         let failureMessage: String?
+        let messageAt: TimeInterval?
         if case .failed(let message) = phase {
             failureMessage = message
+            messageAt = failedAt
         } else {
             failureMessage = keyboardMessage
+            messageAt = keyboardMessageAt
         }
 
         let signature = "\(state.rawValue)|\(activeKeyboardJobID ?? "")|\(keyboardResultID ?? "")|\(failureMessage ?? "")"
@@ -1277,7 +1295,8 @@ final class DictationController {
                 message: failureMessage,
                 heard: keyboardResultHeard,
                 stages: keyboardResultStages,
-                translationFailure: keyboardResultTranslationFailure
+                translationFailure: keyboardResultTranslationFailure,
+                messageAt: failureMessage == nil ? nil : messageAt
             )
         )
     }

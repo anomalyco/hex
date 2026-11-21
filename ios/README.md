@@ -1095,7 +1095,11 @@ never at a launch by itself.
     (`KeyboardSnapshot.isOrphanedJob`): a Hex that ended, crashed or was
     suspended mid-job used to hold every keyboard in recording for good. A
     result that missed its 30 s to go in by itself stays offered in the full
-    keyboard's strip as **Paste dictation** for 10 minutes.
+    keyboard's strip as **Paste dictation** for 10 minutes. A failure or note
+    from Hex ("Another app is using the microphone. Try again.") shows for 8 s
+    after Hex wrote it (`KeyboardSnapshot.messageAt`), not for as long as it
+    stays in the App Group; meanwhile both keyboards dictate in the keyboard, and
+    after it a warm session's next start is Hex's Try again.
   - An in-keyboard dictation the keyboard is dismissed from (or another app
     comes forward) stops its capture at once, keeps what was said, and
     finishes without the keyboard; its text is held in the App Group

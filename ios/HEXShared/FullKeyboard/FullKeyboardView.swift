@@ -690,7 +690,7 @@ final class FullKeyboardView: UIView {
     }
 
     private func refreshFromModel() {
-        hexKey.isWarm = model.hasFullAccess && model.isWarmAvailable
+        hexKey.isWarm = model.dictatesThroughHex
         hexKey.translatingTo = model.translatingTo
         if engine.showsGlobe != model.needsGlobeKey {
             engine.showsGlobe = model.needsGlobeKey

@@ -1712,6 +1712,54 @@ final class DictationControllerTests: XCTestCase {
         controller.cancelCurrentJob()
     }
 
+    /// A warm session's microphone failed for a keyboard's dictation (another app held it):
+    /// Hex stays marked failed, and ignored every start the keyboard sent until it was opened,
+    /// while its snapshot kept saying so to every keyboard. The failure carries when it
+    /// happened, so the keyboard stops showing it, and the next Hex key is Hex's Try again.
+    func testAWarmSessionsMicrophoneFailureIsRetriedFromTheKeyboard() async throws {
+        var now = 52_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.selectWarmDuration(.fifteenMinutes)
+        try await settle()
+        XCTAssertTrue(audio.isKeepaliveRunning)
+
+        audio.captureShouldThrow = true
+        bridge.send(.start, jobID: "busy-mic", style: .polished, sentAt: now)
+        try await settle()
+        let message = "Hex couldn't start the microphone. Try again."
+        XCTAssertEqual(controller.phase, .failed(message))
+        let failed = bridge.snapshot()
+        XCTAssertEqual(failed.state, .failed)
+        XCTAssertEqual(failed.message, message)
+        XCTAssertEqual(failed.messageAt, now)
+        XCTAssertFalse(failed.hasStaleMessage(at: now + 2))
+        XCTAssertTrue(failed.hasStaleMessage(at: now + KeyboardSnapshot.messageShownFor + 1))
+        XCTAssertTrue(audio.isKeepaliveRunning, "the warm session goes on")
+
+        // The keyboard's next Hex key, with the microphone free again: Hex records.
+        audio.captureShouldThrow = false
+        now += 12
+        bridge.send(.start, jobID: "try-again", style: .polished, sentAt: now)
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        XCTAssertEqual(bridge.snapshot().jobID, "try-again")
+        XCTAssertNil(bridge.snapshot().message)
+        XCTAssertNil(bridge.snapshot().messageAt)
+        controller.endWarmSession()
+    }
+
     /// A recorder's end can arrive after Hex already tore its capture down (Cancel, or the
     /// next dictation started): it changes nothing, and the dictation running now goes on.
     func testAnEndFromATornDownCaptureChangesNothing() async throws {
