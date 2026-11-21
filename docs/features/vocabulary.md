@@ -29,14 +29,18 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   saved once the term has text
 ├── Labs › Vocabulary files (off by default, every OS) -> Import… and Export… join
 │   the footer beside Add term; off, the sheet is exactly as before (labs.md)
-│   ├── Import… -> one CSV or TXT file (at most 1 MiB, UTF-8), Teams' custom dictionary
-│   │   columns: term, then comma-separated "sounds like" spellings; a "Term" header,
-│   │   blank rows, and further columns are ignored. Existing terms keep their entry and
-│   │   gain new spellings; new terms append in file order; over-long terms or spellings,
-│   │   a 17th spelling, and terms past the 500 cap are skipped. The merged rows save
-│   │   through the sheet's own draft path, then "Added 12 terms", "Added 3 terms,
-│   │   updated 2", "Updated 2 terms, skipped 1", "No new terms in that file" only
-│   │   when nothing changed, "No terms found in that file", or the error
+│   ├── Import… -> one CSV or TXT regular file (at most 1 MiB, UTF-8), Teams' custom
+│   │   dictionary columns: term, then comma-separated "sounds like" spellings; a "Term"
+│   │   header, blank rows, and further columns are ignored. A folder, device, or FIFO, a
+│   │   larger or non-UTF-8 file, and an unclosed quote are refused with that reason.
+│   │   Existing terms keep their entry and gain new spellings; new terms append in file
+│   │   order; a term this file added never also counts as updated and a term counts as
+│   │   updated once. Skipped counts each refused term once (over 64 characters, or a new
+│   │   term past 500) and each dropped spelling (over 64 characters, or past the 16th).
+│   │   The merged rows save through the sheet's own draft path, then "Added 12 terms",
+│   │   "Added 3 terms, updated 2", "Updated 2 terms, skipped 1", "No new terms in that
+│   │   file" only when nothing changed, "No terms found in that file", or the error; a
+│   │   failed save says so instead of reporting success
 │   └── Export… -> a save dialog named hex-vocabulary.csv; appends .csv when the name has
 │       no extension, writes the four-column header then term, spellings joined by ", ",
 │       and two empty cells, quoting what needs it, atomically; "Exported N terms"
@@ -237,8 +241,9 @@ Sources: [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
 (`edit_vocabulary`).
 
 Checks: `dictation::vocabulary::csv::tests` (header skip, quotes and embedded
-newlines, BOM, CRLF, blank rows, merge with existing terms and spellings, the
-caps, and an export→import round trip), `merge_status` and the sheet's import
+newlines, an unclosed quote, BOM, CRLF, blank rows, merge with existing terms
+and spellings, duplicate terms, dropped spellings, the caps, a folder, and an
+export→import round trip), `merge_status` and the sheet's import
 and export through its draft path in [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs),
 `the_vocabulary_sheet_offers_files_only_with_its_lab_on` in
 [rune_ui/tests.rs](../../src/rune_ui/tests.rs), and

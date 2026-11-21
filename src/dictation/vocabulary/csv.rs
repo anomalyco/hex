@@ -28,34 +28,57 @@ pub(crate) struct ImportedTerm {
 pub(crate) struct MergeSummary {
     /// New terms appended, in file order.
     pub(crate) added: usize,
-    /// Existing terms that gained at least one spelling.
+    /// Existing terms that gained at least one spelling. A term this import
+    /// added never counts here, and a term counts once however many rows
+    /// name it.
     pub(crate) updated: usize,
-    /// Rows the limits refused: a term over the character cap, or one past
-    /// the entry cap.
+    /// What the limits refused: a refused term once (over the character cap,
+    /// or a new term past the entry cap), and each spelling dropped for its
+    /// length or for a full term.
     pub(crate) skipped: usize,
 }
 
-/// Reads a file's terms, refusing anything larger than MAX_IMPORT_BYTES or
-/// not UTF-8. A leading BOM is dropped.
-pub(crate) fn read(path: &Path) -> Result<Vec<ImportedTerm>, String> {
-    let file = std::fs::File::open(path).map_err(|error| format!("couldn't open it: {error}"))?;
+/// Why a file wasn't imported. An OS error's own text stays as it is.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum ImportError {
+    /// The file is larger than MAX_IMPORT_BYTES.
+    TooLarge,
+    /// The bytes aren't UTF-8 text.
+    NotText,
+    /// The path isn't a regular file: a folder, a device, a FIFO, ...
+    NotFile,
+    /// The CSV text ends inside a quoted field.
+    UnclosedQuote,
+    /// Opening or reading the file failed; the OS's own text.
+    Io(String),
+    /// The merged terms couldn't be saved; the settings error's own text.
+    NotSaved(String),
+}
+
+/// Reads a regular file's terms, refusing a path that isn't one, anything
+/// larger than MAX_IMPORT_BYTES, bytes that aren't UTF-8, or a CSV that ends
+/// inside a quoted field. A leading BOM is dropped.
+pub(crate) fn read(path: &Path) -> Result<Vec<ImportedTerm>, ImportError> {
+    // The type comes before the open: opening a FIFO waits for a writer and
+    // would stall the window.
+    let metadata = std::fs::metadata(path).map_err(|error| ImportError::Io(error.to_string()))?;
+    if !metadata.is_file() {
+        return Err(ImportError::NotFile);
+    }
+    let file = std::fs::File::open(path).map_err(|error| ImportError::Io(error.to_string()))?;
     let mut bytes = Vec::new();
     file.take(MAX_IMPORT_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|error| format!("couldn't read it: {error}"))?;
+        .map_err(|error| ImportError::Io(error.to_string()))?;
     if bytes.len() as u64 > MAX_IMPORT_BYTES {
-        return Err(format!(
-            "the file is larger than {} MB",
-            MAX_IMPORT_BYTES / (1024 * 1024)
-        ));
+        return Err(ImportError::TooLarge);
     }
-    let text = decode(&bytes)?;
-    Ok(parse(&text))
+    parse(&decode(&bytes)?)
 }
 
 /// UTF-8 text without its BOM, or why the bytes aren't text.
-fn decode(bytes: &[u8]) -> Result<String, String> {
-    let text = std::str::from_utf8(bytes).map_err(|_| "the file isn't UTF-8 text".to_string())?;
+fn decode(bytes: &[u8]) -> Result<String, ImportError> {
+    let text = std::str::from_utf8(bytes).map_err(|_| ImportError::NotText)?;
     Ok(text.strip_prefix('\u{feff}').unwrap_or(text).to_owned())
 }
 
@@ -63,11 +86,11 @@ fn decode(bytes: &[u8]) -> Result<String, String> {
 /// first column "Term" or "Term (required)" (any case) is left out, and
 /// blank rows and rows without a term. Column 2's spellings split as the
 /// sheet's "Sounds like" field does.
-pub(crate) fn parse(text: &str) -> Vec<ImportedTerm> {
+pub(crate) fn parse(text: &str) -> Result<Vec<ImportedTerm>, ImportError> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let mut imported = Vec::new();
     let mut header = true;
-    for fields in records(text) {
+    for fields in records(text)? {
         if fields.iter().all(|field| field.trim().is_empty()) {
             continue;
         }
@@ -88,13 +111,16 @@ pub(crate) fn parse(text: &str) -> Vec<ImportedTerm> {
                 .map_or_else(Vec::new, |field| super::parse_sounds_like(field)),
         });
     }
-    imported
+    Ok(imported)
 }
 
 /// Splits the text into RFC 4180 records: double-quoted fields keep commas
 /// and line breaks, and a doubled quote inside one is a quote. CRLF and LF
-/// both end a record.
-fn records(text: &str) -> Vec<Vec<String>> {
+/// both end a record. The handling is deliberately lenient: a quote opens a
+/// field only where the field starts, a quote inside an unquoted field is
+/// literal, and text after a closing quote is kept. The one refusal is a
+/// quoted field the text ends inside.
+fn records(text: &str) -> Result<Vec<Vec<String>>, ImportError> {
     let mut records = Vec::new();
     let mut record: Vec<String> = Vec::new();
     let mut field = String::new();
@@ -125,11 +151,14 @@ fn records(text: &str) -> Vec<Vec<String>> {
             other => field.push(other),
         }
     }
+    if quoted {
+        return Err(ImportError::UnclosedQuote);
+    }
     if !field.is_empty() || !record.is_empty() {
         record.push(field);
         records.push(record);
     }
-    records
+    Ok(records)
 }
 
 /// Ends one record, with its last field.
@@ -140,17 +169,22 @@ fn finish(records: &mut Vec<Vec<String>>, record: &mut Vec<String>, field: &mut 
 
 /// Merges the imported rows into the list: a term already listed keeps its
 /// entry and gains the spellings it lacks, and a new term appends in file
-/// order. Terms and spellings past their character caps are skipped, as is a
-/// new term once the list holds MAX_ENTRIES.
+/// order. A term this file added is not also an update, and a term counts
+/// once however many rows name it. Terms over MAX_TERM_CHARS, new terms past
+/// MAX_ENTRIES (once per distinct term), and spellings over MAX_TERM_CHARS or
+/// past MAX_SOUNDS_LIKE are skipped.
 pub(crate) fn merge(list: &mut Vec<VocabularyEntry>, imported: &[ImportedTerm]) -> MergeSummary {
     let mut summary = MergeSummary::default();
+    let mut added_terms: Vec<String> = Vec::new();
+    let mut updated_terms: Vec<String> = Vec::new();
+    let mut refused_terms: Vec<String> = Vec::new();
     for row in imported {
         let term = super::clean(&row.term);
         if term.is_empty() {
             continue;
         }
         if term.chars().count() > MAX_TERM_CHARS {
-            summary.skipped += 1;
+            skip_term(&mut summary, &mut refused_terms, &term);
             continue;
         }
         match list
@@ -159,21 +193,31 @@ pub(crate) fn merge(list: &mut Vec<VocabularyEntry>, imported: &[ImportedTerm]) 
         {
             Some(index) => {
                 let mut kept = list[index].sounds_like.clone();
-                let before = kept.len();
-                add_spellings(&mut kept, &term, &row.sounds_like);
-                if kept.len() != before {
+                summary.skipped += add_spellings(&mut kept, &term, &row.sounds_like);
+                let gained = kept.len() > list[index].sounds_like.len();
+                if gained
+                    && !updated_terms
+                        .iter()
+                        .any(|updated| super::same(updated, &term))
+                    && !added_terms.iter().any(|added| super::same(added, &term))
+                {
+                    updated_terms.push(term.clone());
                     summary.updated += 1;
                 }
                 list[index].sounds_like = kept;
             }
             None => {
                 if list.len() >= MAX_ENTRIES {
-                    summary.skipped += 1;
+                    skip_term(&mut summary, &mut refused_terms, &term);
                     continue;
                 }
                 let mut sounds_like = Vec::new();
-                add_spellings(&mut sounds_like, &term, &row.sounds_like);
-                list.push(VocabularyEntry { term, sounds_like });
+                summary.skipped += add_spellings(&mut sounds_like, &term, &row.sounds_like);
+                list.push(VocabularyEntry {
+                    term: term.clone(),
+                    sounds_like,
+                });
+                added_terms.push(term);
                 summary.added += 1;
             }
         }
@@ -181,22 +225,35 @@ pub(crate) fn merge(list: &mut Vec<VocabularyEntry>, imported: &[ImportedTerm]) 
     summary
 }
 
+/// Counts a refused term once, however many rows name it.
+fn skip_term(summary: &mut MergeSummary, refused: &mut Vec<String>, term: &str) {
+    if refused.iter().any(|kept| super::same(kept, term)) {
+        return;
+    }
+    refused.push(term.to_owned());
+    summary.skipped += 1;
+}
+
 /// Adds each spelling that fits: at most MAX_SOUNDS_LIKE of them, none over
 /// MAX_TERM_CHARS, none that repeats the term or another spelling in any
-/// case.
-fn add_spellings(kept: &mut Vec<String>, term: &str, sounds_like: &[String]) {
+/// case. Returns the spellings the limits dropped.
+fn add_spellings(kept: &mut Vec<String>, term: &str, sounds_like: &[String]) -> usize {
+    let mut dropped = 0;
     for spelling in sounds_like {
-        if kept.len() >= MAX_SOUNDS_LIKE {
-            break;
+        if spelling.chars().count() > MAX_TERM_CHARS {
+            dropped += 1;
+            continue;
         }
-        if spelling.chars().count() > MAX_TERM_CHARS
-            || super::same(spelling, term)
-            || kept.iter().any(|one| super::same(one, spelling))
-        {
+        if super::same(spelling, term) || kept.iter().any(|one| super::same(one, spelling)) {
+            continue;
+        }
+        if kept.len() >= MAX_SOUNDS_LIKE {
+            dropped += 1;
             continue;
         }
         kept.push(spelling.clone());
     }
+    dropped
 }
 
 /// The list as a CSV file: HEADER, then one row per entry with its spellings
@@ -253,7 +310,7 @@ mod tests {
                     Rune,roon\n\
                     terms,,too,ignored\n";
         assert_eq!(
-            parse(text),
+            parse(text).unwrap(),
             [
                 imported("cappuccino", &["capuchin", "cap a chino"]),
                 imported("Rune", &["roon"]),
@@ -263,21 +320,34 @@ mod tests {
         // A header row is recognized in any case and with either name, and
         // only as the first row with content.
         assert_eq!(
-            parse("term,sounds like\nRune,roon\n"),
+            parse("term,sounds like\nRune,roon\n").unwrap(),
             [imported("Rune", &["roon"])]
         );
         assert_eq!(
-            parse("\u{feff}TERM,SOUNDS LIKE\r\nRune,roon\r\n"),
+            parse("\u{feff}TERM,SOUNDS LIKE\r\nRune,roon\r\n").unwrap(),
             [imported("Rune", &["roon"])]
         );
         assert_eq!(
-            parse("Rune,roon\nTerm,not a header\n"),
+            parse("Rune,roon\nTerm,not a header\n").unwrap(),
             [
                 imported("Rune", &["roon"]),
                 imported("Term", &["not a header"]),
             ]
         );
-        assert!(parse("\n\r\n , , \n").is_empty());
+        assert!(parse("\n\r\n , , \n").unwrap().is_empty());
+    }
+
+    #[test]
+    fn an_unclosed_quote_is_refused() {
+        assert_eq!(
+            parse("Rune,\"roon\nOpenCode,open code\n"),
+            Err(ImportError::UnclosedQuote)
+        );
+        // A quote that closes still reads its line breaks and commas.
+        assert_eq!(
+            parse("Rune,\"roon, ruin\"\n").unwrap(),
+            [imported("Rune", &["roon", "ruin"])]
+        );
     }
 
     #[test]
@@ -286,7 +356,7 @@ mod tests {
                     \"Dax, Inc.\",\"\"\"the\"\" boss\",,\"Says \"\"hi\"\" and bye\"\r\n\
                     \"multi\nline\",one,,two\r\n";
         assert_eq!(
-            parse(text),
+            parse(text).unwrap(),
             [
                 imported("Dax, Inc.", &["\"the\" boss"]),
                 imported("multi\nline", &["one"]),
@@ -324,6 +394,69 @@ mod tests {
     }
 
     #[test]
+    fn a_term_this_file_added_is_not_also_an_update() {
+        let mut list = Vec::new();
+        let summary = merge(
+            &mut list,
+            &[
+                imported("Rune", &["roon"]),
+                imported("Rune", &["ruin"]),
+                imported("open code", &[]),
+            ],
+        );
+        assert_eq!(
+            summary,
+            MergeSummary {
+                added: 2,
+                updated: 0,
+                skipped: 0
+            }
+        );
+        assert_eq!(
+            list,
+            [entry("Rune", &["roon", "ruin"]), entry("open code", &[]),]
+        );
+    }
+
+    #[test]
+    fn an_existing_term_counts_once_and_a_refused_term_counts_once() {
+        let mut list = vec![entry("Rune", &[])];
+        assert_eq!(
+            merge(
+                &mut list,
+                &[imported("Rune", &["roon"]), imported("Rune", &["ruin"]),],
+            ),
+            MergeSummary {
+                added: 0,
+                updated: 1,
+                skipped: 0
+            }
+        );
+        assert_eq!(list[0].sounds_like, ["roon", "ruin"]);
+
+        // A full list refuses each distinct term once, not once per row.
+        let mut full: Vec<_> = (0..MAX_ENTRIES)
+            .map(|index| entry(&format!("term {index}"), &[]))
+            .collect();
+        assert_eq!(
+            merge(
+                &mut full,
+                &[
+                    imported("one more", &[]),
+                    imported("one more", &[]),
+                    imported("ONE MORE", &[]),
+                ],
+            ),
+            MergeSummary {
+                added: 0,
+                updated: 0,
+                skipped: 1
+            }
+        );
+        assert_eq!(full.len(), MAX_ENTRIES);
+    }
+
+    #[test]
     fn limits_skip_what_does_not_fit() {
         let long = "x".repeat(MAX_TERM_CHARS + 1);
         let spellings: Vec<String> = (0..20).map(|index| format!("spelling {index}")).collect();
@@ -337,6 +470,8 @@ mod tests {
             term: "Rune".into(),
             sounds_like: names,
         };
+        // 16 spellings fit and 4 are past the cap, all 20 long ones are
+        // dropped for length, and the over-long term is refused.
         assert_eq!(
             merge(
                 &mut list,
@@ -345,7 +480,7 @@ mod tests {
             MergeSummary {
                 added: 0,
                 updated: 1,
-                skipped: 1
+                skipped: 25
             }
         );
         assert_eq!(list[0].sounds_like.len(), MAX_SOUNDS_LIKE);
@@ -371,6 +506,29 @@ mod tests {
     }
 
     #[test]
+    fn dropped_spellings_count_as_skipped() {
+        let mut list = vec![entry("Rune", &[])];
+        let mut sounds_like: Vec<String> =
+            (0..17).map(|index| format!("spelling {index}")).collect();
+        sounds_like.push("y".repeat(MAX_TERM_CHARS + 1));
+        assert_eq!(
+            merge(
+                &mut list,
+                &[ImportedTerm {
+                    term: "Rune".into(),
+                    sounds_like,
+                }],
+            ),
+            MergeSummary {
+                added: 0,
+                updated: 1,
+                skipped: 2
+            }
+        );
+        assert_eq!(list[0].sounds_like.len(), MAX_SOUNDS_LIKE);
+    }
+
+    #[test]
     fn export_and_import_round_trip() {
         let entries = [
             entry("Rune", &["roon", "ruin"]),
@@ -384,7 +542,7 @@ mod tests {
         assert!(csv.contains("\"say \"\"hi\"\"\",says hi,,"));
         assert!(csv.contains("\"multi\nline\",,"));
         assert_eq!(
-            parse(&csv),
+            parse(&csv).unwrap(),
             [
                 imported("Rune", &["roon", "ruin"]),
                 imported("Dax, Inc.", &[]),
@@ -407,19 +565,28 @@ mod tests {
     }
 
     #[test]
-    fn a_file_over_the_limit_or_not_utf8_is_refused() {
+    fn a_file_over_the_limit_not_utf8_a_folder_or_unclosed_is_refused() {
         let directory =
             std::env::temp_dir().join(format!("hex-vocabulary-csv-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&directory);
         std::fs::create_dir_all(&directory).unwrap();
         let path = directory.join("terms.csv");
         std::fs::write(&path, "Term (required)\nRune\n").unwrap();
         assert_eq!(read(&path).unwrap(), [imported("Rune", &[])]);
 
         std::fs::write(&path, vec![b'a'; MAX_IMPORT_BYTES as usize + 1]).unwrap();
-        assert!(read(&path).unwrap_err().contains("larger than 1 MB"));
+        assert_eq!(read(&path).unwrap_err(), ImportError::TooLarge);
 
         std::fs::write(&path, [0xff, 0xfe]).unwrap();
-        assert!(read(&path).unwrap_err().contains("UTF-8"));
+        assert_eq!(read(&path).unwrap_err(), ImportError::NotText);
+
+        std::fs::write(&path, "Rune,\"roon\n").unwrap();
+        assert_eq!(read(&path).unwrap_err(), ImportError::UnclosedQuote);
+
+        // A folder is not a regular file, so nothing is opened or read.
+        let folder = directory.join("folder");
+        std::fs::create_dir(&folder).unwrap();
+        assert_eq!(read(&folder).unwrap_err(), ImportError::NotFile);
         std::fs::remove_dir_all(&directory).unwrap();
     }
 }

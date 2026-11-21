@@ -253,6 +253,12 @@ fn remove_row(ui: &mut Ui, id: u64) {
     }
 }
 
+/// Labs › Vocabulary files on: the one switch the buttons, the status line,
+/// and the dialog answers read.
+fn on(ui: &Ui) -> bool {
+    crate::labs::Feature::VocabularyFiles.on(&ui.settings)
+}
+
 /// Redraws the window once a file dialog answers.
 fn wake(ui: &Ui) -> impl Fn() + Send + 'static {
     let waker = ui.modes.waker.clone();
@@ -313,11 +319,14 @@ fn choose_export(ui: &mut Ui) {
 /// The file dialogs' answers, since the last call. True when one changed
 /// what the sheet shows or what settings hold.
 pub(super) fn poll(ui: &mut Ui) -> bool {
-    // The lab off asks for no file, so a dialog opened before it was turned
-    // off changes nothing when it answers.
-    if !crate::labs::vocabulary_files() {
+    // A closed sheet or the lab off takes no answer: a dialog that finishes
+    // after either changes nothing.
+    if !ui.vocabulary.open || !on(ui) {
         ui.vocabulary.import_chooser = None;
         ui.vocabulary.export_chooser = None;
+        if !on(ui) {
+            ui.vocabulary.status = None;
+        }
         return false;
     }
     let mut changed = false;
@@ -360,13 +369,40 @@ fn import_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
                 failed: false,
             });
         }
-        Err(message) => fail(ui, message),
+        Err(error) => import_failed(ui, error),
     }
+}
+
+/// Every import failure in the sheet's one wording, with the fixed reasons
+/// translated and the OS's own text left as it is.
+fn import_failed(ui: &mut Ui, error: csv::ImportError) {
+    use crate::dictation::vocabulary::csv::ImportError;
+    let message = match error {
+        ImportError::TooLarge => tr_fill(
+            "Couldn't import that file: {}",
+            tr("the file is larger than 1 MB"),
+        ),
+        ImportError::NotText => tr_fill(
+            "Couldn't import that file: {}",
+            tr("the file isn't UTF-8 text"),
+        ),
+        ImportError::UnclosedQuote => tr_fill(
+            "Couldn't import that file: {}",
+            tr("a quote is never closed"),
+        ),
+        ImportError::NotFile => tr_fill(
+            "Couldn't import that file: {}",
+            tr("it isn't a regular file"),
+        ),
+        ImportError::Io(error) => tr_fill("Couldn't import that file: {}", &error),
+        ImportError::NotSaved(error) => tr_fill("Couldn't save the vocabulary: {}", &error),
+    };
+    fail(ui, message);
 }
 
 /// Merges the file's terms into the sheet's rows, then saves through the
 /// same draft path typing uses. Returns the status line.
-fn apply_import(ui: &mut Ui, path: &Path) -> Result<String, String> {
+fn apply_import(ui: &mut Ui, path: &Path) -> Result<String, csv::ImportError> {
     let imported = csv::read(path)?;
     if imported.is_empty() {
         return Ok(tr("No terms found in that file").to_string());
@@ -374,7 +410,11 @@ fn apply_import(ui: &mut Ui, path: &Path) -> Result<String, String> {
     let mut entries = ui.vocabulary.project();
     let summary = csv::merge(&mut entries, &imported);
     ui.vocabulary.reload(&entries);
-    ui.flush_drafts();
+    if !ui.flush_drafts() {
+        return Err(csv::ImportError::NotSaved(
+            ui.error.clone().unwrap_or_default(),
+        ));
+    }
     Ok(merge_status(summary))
 }
 
@@ -433,6 +473,25 @@ fn merge_status(summary: MergeSummary) -> String {
     }
 }
 
+/// The file to write: the chosen path, or its `.csv` name when the person
+/// left the extension off and that name is free. A name that is just
+/// `.csv` is already a CSV file, so it is never doubled.
+fn export_path(chosen: &Path) -> PathBuf {
+    if chosen.extension().is_some()
+        || chosen
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".csv"))
+    {
+        return chosen.to_path_buf();
+    }
+    let with_extension = chosen.with_extension("csv");
+    if with_extension.exists() {
+        chosen.to_path_buf()
+    } else {
+        with_extension
+    }
+}
+
 fn export_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
     let path = match choice {
         Ok(Some(path)) => path,
@@ -442,11 +501,7 @@ fn export_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
             return;
         }
     };
-    let path = if path.extension().is_none() {
-        path.with_extension("csv")
-    } else {
-        path
-    };
+    let path = export_path(&path);
     let entries = ui.vocabulary.project();
     match crate::durable::write(&path, csv::render(&entries).as_bytes()) {
         Ok(()) => {
@@ -542,7 +597,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
     let mut footer = row().key("footer").gap(12.0).center_y().child(add);
     // Labs › Vocabulary files: two more ways to fill the list, never main
     // actions, so both stay Secondary.
-    if ui.settings.labs.vocabulary_files {
+    if on(ui) {
         footer = footer
             .child(button(
                 p,
@@ -639,7 +694,9 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .mx(-METRICS.row_px),
         );
     }
-    if let Some(status) = &ui.vocabulary.status {
+    if on(ui)
+        && let Some(status) = &ui.vocabulary.status
+    {
         panel = panel.child(
             note(
                 "file-status",
@@ -984,7 +1041,10 @@ mod tests {
     fn an_unreadable_import_reports_why() {
         let scratch = Scratch::new("missing");
         let error = csv::read(&scratch.path("missing.csv")).unwrap_err();
-        assert!(error.contains("couldn't open it"), "{error}");
+        assert!(
+            matches!(&error, csv::ImportError::Io(text) if !text.is_empty()),
+            "{error:?}"
+        );
     }
 
     #[test]
@@ -1013,6 +1073,29 @@ mod tests {
             format!("{}\nRune,\"roon, ruin\",,\n\"Dax, Inc.\",,,\n", csv::HEADER)
         );
         assert!(!ui.vocabulary.status.as_ref().unwrap().failed);
+    }
+
+    #[test]
+    fn an_export_keeps_a_taken_csv_name_and_a_dot_csv_file() {
+        let scratch = Scratch::new("export-names");
+        let path = scratch.path("terms");
+
+        // Free: the .csv name is added.
+        assert_eq!(export_path(&path), scratch.path("terms.csv"));
+        // Taken: the chosen name is written exactly.
+        std::fs::write(scratch.path("terms.csv"), "taken").unwrap();
+        assert_eq!(export_path(&path), path);
+        // Any extension is kept as chosen.
+        assert_eq!(
+            export_path(&scratch.path("terms.txt")),
+            scratch.path("terms.txt")
+        );
+        assert_eq!(
+            export_path(&scratch.path("terms.csv")),
+            scratch.path("terms.csv")
+        );
+        // A file named just ".csv" is already a CSV file.
+        assert_eq!(export_path(&scratch.path(".csv")), scratch.path(".csv"));
     }
 
     #[test]

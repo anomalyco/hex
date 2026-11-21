@@ -376,8 +376,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        columns) into the list and saves it, and Export writes the list as a CSV file. Off,
 │                                        the sheet is exactly as before
 │                                        // checks: dictation::vocabulary::csv tests (header, quotes and embedded newlines,
-│                                        // BOM, CRLF, blank rows, merge, caps, export→import round trip), merge_status and
-│                                        // the sheet's import and export in rune_ui/vocabulary.rs,
+│                                        // an unclosed quote, BOM, CRLF, blank rows, merge, duplicate terms, dropped
+│                                        // spellings, caps, a folder, export→import round trip), merge_status and the
+│                                        // sheet's import and export in rune_ui/vocabulary.rs,
 │                                        // the_vocabulary_sheet_offers_files_only_with_its_lab_on (rune_ui/tests.rs),
 │                                        // vocabulary_files_is_its_own_switch_and_everywhere (labs.rs); the native
 │                                        // dialogs were not opened in a desktop session
@@ -3380,16 +3381,22 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   like" spellings, with a first header row naming the column "Term" or
   "Term (required)" (any case) left out; further columns are ignored.
   Quoted fields keep commas, quotes, and line breaks, and CRLF or LF ends a
-  row. Blank rows and rows without a term are left out. Lines split and merge
-  as the sheet's own fields do: a term already listed in any case keeps its
-  entry and gains the spellings it lacks, new terms append in file order,
-  and terms or spellings over 64 characters, spellings past 16 per term, and
-  terms past the list's 500 are skipped. The merged rows then save through
-  the same draft path typing uses, and the sheet says "Added 12 terms",
-  "Added 3 terms, updated 2", "Updated 2 terms", "Added 3 terms, updated 2,
-  skipped 1", "No new terms in that file" only when nothing changed at all,
-  "No terms found in that file", or what failed; an existing term counts as
-  updated only when it gains at least one spelling.
+  row. Blank rows and rows without a term are left out. A file that isn't a
+  regular file (a folder, a device, a FIFO), is over 1 MiB, isn't UTF-8, or
+  ends inside a quoted field is refused with that reason, so nothing opens a
+  FIFO and stalls the window.
+  Lines split and merge as the sheet's own fields do: a term already listed
+  in any case keeps its entry and gains the spellings it lacks, and new terms
+  append in file order. A term this file added never also counts as updated,
+  and a term counts as updated once however many rows name it. Skipped counts
+  each refused term once, whether it is over 64 characters or a new term
+  past the list's 500, and each spelling the limits drop, whether it is over
+  64 characters or past the 16th for its term. The merged rows then save
+  through the same draft path typing uses; a failed save says so instead of
+  reporting success. The sheet says "Added 12 terms", "Added 3 terms,
+  updated 2", "Updated 2 terms", "Added 3 terms, updated 2, skipped 1", "No
+  new terms in that file" only when nothing changed at all, "No terms found
+  in that file", or what failed.
   Export opens a save dialog named `hex-vocabulary.csv` (starting in
   Downloads), appends `.csv` to a name without an extension, and writes the
   header plus one row per entry, its spellings joined by ", " and two empty
