@@ -2544,6 +2544,286 @@
           }
         }
       }
+    },
+    "Setting up Hex" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在设置 Hex"
+          }
+        }
+      }
+    },
+    "Downloading" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载"
+          }
+        }
+      }
+    },
+    "speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音模型"
+          }
+        }
+      }
+    },
+    "Hex hears you on this iPhone. Your voice never leaves it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 在这台 iPhone 上听你说话，你的声音不会离开它。"
+          }
+        }
+      }
+    },
+    "Skip" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳过"
+          }
+        }
+      }
+    },
+    "With Hex" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有了 Hex"
+          }
+        }
+      }
+    },
+    "Tap the Hex key and say it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点 Hex 键，说出来。"
+          }
+        }
+      }
+    },
+    "On my way. Oat or regular?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "马上去。要燕麦奶还是普通的？"
+          }
+        }
+      }
+    },
+    "Are you near the store? Could you grab some milk?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你在商店附近吗？能帮我带点牛奶吗？"
+          }
+        }
+      }
+    },
+    "Message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "信息"
+          }
+        }
+      }
+    },
+    "Let Hex hear you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Hex 听见你"
+          }
+        }
+      }
+    },
+    "Hex listens only after you tap the Hex key." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有在你轻点 Hex 键后，Hex 才会聆听。"
+          }
+        }
+      }
+    },
+    "So Hex can hear you" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让 Hex 能听见你"
+          }
+        }
+      }
+    },
+    "Hex keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 键盘"
+          }
+        }
+      }
+    },
+    "With Full Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "并允许完全访问"
+          }
+        }
+      }
+    },
+    "Almost ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即将就绪"
+          }
+        }
+      }
+    },
+    "Finishing the speech model so Hex can hear you." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在完成语音模型，以便 Hex 能听见你。"
+          }
+        }
+      }
+    },
+    "Continue without a model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不使用模型继续"
+          }
+        }
+      }
+    },
+    "Dictation won't work until the speech model downloads." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音模型下载完成前，听写无法使用。"
+          }
+        }
+      }
+    },
+    "Your turn" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轮到你了"
+          }
+        }
+      }
+    },
+    "That's Hex" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这就是 Hex"
+          }
+        }
+      }
+    },
+    "It types wherever your cursor is, in any app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在任何 App 中，它都会输入到光标所在的位置。"
+          }
+        }
+      }
+    },
+    "Say anything…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "随便说点什么…"
+          }
+        }
+      }
+    },
+    "Hex didn't hear any words. Try again a little louder." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 没有听到任何字词。请大声一点再试一次。"
+          }
+        }
+      }
+    },
+    "Start using Hex" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开始使用 Hex"
+          }
+        }
+      }
+    },
+    "Turn on the microphone in Settings so Hex can hear you." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“设置”中打开麦克风，以便 Hex 能听见你。"
+          }
+        }
+      }
+    },
+    "Add the Hex keyboard in Settings." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“设置”中添加 Hex 键盘。"
+          }
+        }
+      }
+    },
+    "Use the Hex keyboard once to finish." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用一次 Hex 键盘即可完成。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

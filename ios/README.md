@@ -30,29 +30,31 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
 ## Capabilities
 
 - **One-tap keyboard dictation (`HEXKeyboard`):**
-  - **First run (`HEXMobile/Onboarding.swift`):** Three pages. **Welcome**
-    says what Hex is. **Set up Hex** is a checklist that updates every second:
-    Hex Keyboard, Allow Full Access, the microphone (iOS asks for it when the
-    Keyboard row's **Open Settings** or **Continue** is tapped, never from a
-    button of Hex's that says Allow, per App Review 5.1.1(iv); **Open Settings**
-    once it's denied), and the speech model's download, with one **Open
-    Settings** button (Hex's page, with Keyboards inside) and the steps to take
-    there. Continue needs the keyboard added (or unverifiable), not the
-    microphone, so declining it never blocks the app; Full Access still reads
-    Not checked, and the model keeps downloading. **Try the keyboard** focuses a field: once the keyboard
-    has reported Full Access and text is in the field, it shows success and
-    **Done** enters the app. If Full Access hasn't appeared 4 s after a
-    keyboard switch or new text, it says Full Access looks off, with **Open
-    Settings**; **Skip for now** enters the app. It shows once:
-    `onboarding.completed` in the app's UserDefaults records Done or Skip,
-    `onboarding.page` resumes a quit part-way on the same page, and a launch
-    that finds the keyboard ready and the microphone allowed (an existing
-    user) records completion without showing it. **Run setup again** in the
-    app's settings replays it from page 1. It never shows under
-    `--snap-state` except its own scenes: `onboarding-welcome`,
-    `onboarding-allow`, `onboarding-try`, `onboarding-try-done`,
-    `onboarding-try-off`, and `onboarding-tour`, which walks every page by
-    itself for a screen recording.
+  - **First run (`HEXMobile/Onboarding.swift`):** The desktop's pages and
+    order. **Setting up Hex** starts the speech model downloading (the engine
+    `transcriberFactory` picks; a launch that found Parakeet ended mid-load
+    stays failed until Try again) and moves on after a beat. **With Hex**, a
+    short demo, moves on by itself. **Let Hex hear you** has two rows, the
+    microphone (its pill and the page's Continue say Continue before iOS's
+    prompt, never Allow, per App Review 5.1.1(iv)) and the Hex keyboard with
+    Full Access (Open Settings, Hex's page); a done row shows only its check,
+    and the page moves on once both are done. Continue never needs the
+    microphone. **Almost ready** shows only while the model downloads, with
+    Continue without a model after a failure or 30 s without progress.
+    **Your turn** keeps the keyboard up and counts once a dictation arrives or
+    three words are typed with Full Access; an empty dictation says Hex heard
+    nothing (the keyboard notes it in the App Group). **Hex is ready** shows
+    only once every step is done, else Almost ready with what's left. The
+    model's progress pill sits in the top bar until it's ready; Skip shows on
+    the demo and the practice only. It shows once: `onboarding.completed` in
+    the app's UserDefaults records Start using Hex or Continue without a
+    model, `onboarding.page` resumes a quit part-way on the same page, and a
+    launch that finds the keyboard ready and the microphone allowed (an
+    existing user) records completion without showing it. **Run setup again**
+    replays it from page 1. Its `--snap-state` scenes are `onboarding-setup`,
+    `-demo`, `-permissions`, `-permissions-done`, `-waiting`, `-failed`,
+    `-try`, `-try-done`, `-try-empty`, `-try-off`, `-ready`, and
+    `onboarding-tour`, which walks every page by itself for a recording.
   - **Without Full Access (App Review 4.4.1):** Hex is a keyboard first. The
     full keyboard types without Full Access or network: letters, shift and caps
     lock, numbers and symbols, accents, delete, return, the globe key, and

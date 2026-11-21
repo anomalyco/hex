@@ -208,8 +208,8 @@ struct ContentView: View {
                     SettingsDivider(leading: 50)
 
                     Button {
-                        OnboardingProgress.save(.welcome)
-                        onboardingPage = .welcome
+                        OnboardingProgress.save(.setup)
+                        onboardingPage = .setup
                     } label: {
                         SettingsLinkLabel(title: String(localized: "Run setup again"), icon: "arrow.counterclockwise")
                     }

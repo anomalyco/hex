@@ -96,6 +96,39 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(KeyboardBridge(defaults: defaults).fullAccessSeenAt, 1_234)
     }
 
+    @MainActor
+    func testEmptyKeyboardDictationIsNotedInTheAppGroup() {
+        let suiteName = "hex.tests.emptyDictation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+
+        XCTAssertNil(bridge.lastEmptyDictationAt)
+        bridge.lastEmptyDictationAt = 2_000
+        XCTAssertEqual(KeyboardBridge(defaults: defaults).lastEmptyDictationAt, 2_000)
+        bridge.lastEmptyDictationAt = nil
+        XCTAssertNil(KeyboardBridge(defaults: defaults).lastEmptyDictationAt)
+    }
+
+    func testOnboardingPracticeCountsADictationOrAFewTypedWords() {
+        XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, fullAccessOn: true), "one letter")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, fullAccessOn: true))
+        XCTAssertTrue(OnboardingPractice.isDone(text: "See you at", dictated: false, fullAccessOn: true))
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, fullAccessOn: false), "not the Hex keyboard")
+        XCTAssertTrue(OnboardingPractice.isDone(text: "", dictated: true, fullAccessOn: false), "a dictation arrived")
+        XCTAssertGreaterThanOrEqual(OnboardingPractice.words(in: "我们十点见"), 2, "Chinese splits into words without spaces")
+    }
+
+    func testOnboardingResumesPagesEarlierBuildsSaved() {
+        XCTAssertEqual(OnboardingPage(saved: "welcome"), .setup)
+        XCTAssertEqual(OnboardingPage(saved: "allow"), .permissions)
+        XCTAssertEqual(OnboardingPage(saved: "try"), .practice)
+        XCTAssertEqual(OnboardingPage(saved: "waiting"), .waiting)
+        XCTAssertNil(OnboardingPage(saved: "nope"))
+        XCTAssertEqual(OnboardingPage.allCases, [.setup, .demo, .permissions, .waiting, .practice, .ready])
+        XCTAssertEqual(OnboardingPage.allCases.filter(\.isOptional), [.demo, .practice])
+    }
+
     func testKeyboardRecordingLaunchRequiresAJob() {
         let url = URL(string: "hex-dictation://keyboard/record")!
         XCTAssertNil(KeyboardLaunchRequest(url: url))

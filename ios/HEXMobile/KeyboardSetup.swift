@@ -29,11 +29,16 @@ final class KeyboardSetupMonitor {
         let args = ProcessInfo.processInfo.arguments
         if let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count {
             switch args[idx + 1] {
-            case "setup", "setup-sheet", "onboarding-try", "onboarding-try-off":
+            case "setup", "setup-sheet", "onboarding-try", "onboarding-try-off", "onboarding-try-empty",
+                 "onboarding-permissions-done", "onboarding-waiting", "onboarding-failed":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .granted
-            case "onboarding-welcome", "onboarding-allow", "setup-sheet-microphone":
+            case "onboarding-setup", "onboarding-demo", "onboarding-permissions":
+                keyboardAdded = false
+                fullAccessOn = false
+                microphone = .undetermined
+            case "setup-sheet-microphone":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .undetermined
