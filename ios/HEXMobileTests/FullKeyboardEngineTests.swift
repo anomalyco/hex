@@ -1460,3 +1460,43 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertTrue(field.text.hasSuffix(" fuck"), "with Suggest swear words on")
     }
 }
+
+
+/// The strip's Paste chip: one read per paste, and where to stop iOS's Allow Paste.
+@MainActor
+final class KeyboardClipboardTests: XCTestCase {
+    private var suiteName = ""
+    private var defaults: UserDefaults!
+
+    override func setUp() async throws {
+        suiteName = "hex.tests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testTheChipReadsTextOrALinkOnce() {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        XCTAssertNil(KeyboardClipboardTracker.read(pasteboard))
+        pasteboard.url = URL(string: "https://hex.example/a")
+        XCTAssertEqual(KeyboardClipboardTracker.read(pasteboard), "https://hex.example/a")
+        pasteboard.string = "See you at 7"
+        XCTAssertEqual(KeyboardClipboardTracker.read(pasteboard), "See you at 7")
+    }
+
+    func testAPasteThatAskedPointsToTheSettingAFewTimes() {
+        let tracker = KeyboardClipboardTracker(defaults: defaults)
+        XCTAssertFalse(tracker.shouldPointToAllowPaste(readDuration: 0.01, refused: false), "Allow: iOS didn't ask")
+        for _ in 0..<KeyboardClipboardTracker.allowPasteHintLimit {
+            XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 1.2, refused: false))
+        }
+        XCTAssertFalse(
+            KeyboardClipboardTracker(defaults: defaults).shouldPointToAllowPaste(readDuration: 1.2, refused: false),
+            "after a few, Ask is left alone: someone may want it"
+        )
+        XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 0.01, refused: true), "refused: the chip did nothing, always say why")
+    }
+}

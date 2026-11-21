@@ -58,7 +58,8 @@ final class KeyboardStripView: UIView {
     }
     private var loggingMark: TypingLogMarkView?
     /// A plain chip: `UIPasteControl` renders as an empty blue box inside a keyboard
-    /// extension (TestFlight build 4), so this reads the clipboard on tap instead.
+    /// extension (TestFlight build 4), so this reads the clipboard on tap instead, once, which
+    /// iOS asks about until Paste from Other Apps is Allow (`KeyboardClipboardTracker`).
     private let pasteControl = UIButton(type: .custom)
     private let nextKeyboardChip = UIButton(type: .custom)
 
