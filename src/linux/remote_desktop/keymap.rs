@@ -178,7 +178,7 @@ fn parse(text: &str) -> Option<Groups> {
 
 /// The one evdev code that carries `keysym` at level 1 in every group that has
 /// it. `None` when no group has it, one group has it on two keys, or groups
-/// disagree (`us,us(dvorak)`), so the caller sends the keysym instead.
+/// disagree (`us,us(dvorak)`); the caller decides what a missing code means.
 pub(crate) fn resolve(groups: &Groups, keysym: u32) -> Option<u16> {
     let mut agreed = None;
     for group in groups {
@@ -198,6 +198,15 @@ pub(crate) fn resolve(groups: &Groups, keysym: u32) -> Option<u16> {
         }
     }
     agreed
+}
+
+/// Whether any group types `keysym` at level 1, on any key. A letter no group
+/// has cannot be typed by keysym, which the desktop resolves in the active
+/// group alone.
+pub(crate) fn anywhere(groups: &Groups, keysym: u32) -> bool {
+    groups
+        .iter()
+        .any(|group| group.iter().any(|(_, symbol)| *symbol == keysym))
 }
 
 /// Whether every group types `keysym` at level 1 on the key `code`. Options
@@ -377,9 +386,26 @@ mod tests {
 
     /// A keymap with no such letter anywhere names no code for it.
     #[test]
-    fn a_letter_no_group_has_falls_back_to_the_keysym() {
+    fn a_letter_no_group_has_resolves_to_nothing() {
         let groups = vec![group(&[(KEY_Q, XK_A)])];
         assert_eq!(resolve(&groups, XK_V), None);
+    }
+
+    /// `anywhere` separates a letter no group has from one the groups disagree
+    /// about, which the caller acts on differently; `resolve` alone cannot.
+    #[test]
+    fn a_letter_is_anywhere_only_when_a_group_types_it() {
+        let translated = vec![
+            group(&[(KEY_A, CYRILLIC_EF), (KEY_V, CYRILLIC_EM)]),
+            group(&[(KEY_A, XK_A), (KEY_V, XK_V)]),
+        ];
+        assert!(anywhere(&translated, XK_V));
+        assert!(anywhere(&translated, CYRILLIC_EM));
+        assert!(!anywhere(&translated, XK_C));
+
+        let disagreeing = vec![group(&[(KEY_V, XK_V)]), group(&[(KEY_DOT, XK_V)])];
+        assert!(anywhere(&disagreeing, XK_V));
+        assert_eq!(resolve(&disagreeing, XK_V), None);
     }
 
     /// `ctrl:swapcaps` puts Caps_Lock on 29, where `Control_L` is not, so the

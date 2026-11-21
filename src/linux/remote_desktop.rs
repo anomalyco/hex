@@ -8,11 +8,13 @@
 //! paster can close an idle session and reopen it at the next paste.
 //!
 //! A chord goes out as evdev keycodes when the desktop's keymap confirms every
-//! key of it — each letter on one key in every layout group, and Ctrl, Shift,
-//! and Enter where their keymap options leave them — and otherwise as keysyms,
-//! which the desktop resolves in the active group; KWin's lookup for a Latin
-//! `v` on a Russian layout can lose the held Ctrl. [`keymap`] reads and
-//! resolves the keymap; a chord never mixes the two.
+//! key of it — each letter on one key across the layout groups that have it,
+//! and Ctrl, Shift, and Enter where their keymap options leave them — and
+//! otherwise as keysyms, which the desktop resolves in the active group; KWin's
+//! lookup for a Latin `v` on a Russian layout can lose the held Ctrl. A letter
+//! no group has at all still goes out on its pc105 key, since no keysym could
+//! name it. [`keymap`] reads and resolves the keymap; a chord never mixes the
+//! two.
 
 mod keymap;
 
@@ -45,6 +47,10 @@ const XK_RETURN: i32 = 0xff0d;
 const EVDEV_KEY_LEFTCTRL: i32 = 29;
 const EVDEV_KEY_LEFTSHIFT: i32 = 42;
 const EVDEV_KEY_ENTER: i32 = 28;
+/// The pc105 keys the chord's Latin letters sit on, for a keymap that has none.
+const EVDEV_KEY_A: i32 = 30;
+const EVDEV_KEY_C: i32 = 46;
+const EVDEV_KEY_V: i32 = 47;
 const PRESSED: u32 = 1;
 const RELEASED: u32 = 0;
 /// A restored grant starts in tens of milliseconds; a start that takes
@@ -283,7 +289,8 @@ impl Drop for RemoteDesktop {
 }
 
 /// Presses and releases a chord's keys in order: as evdev keycodes when the
-/// keymap confirms every key of the chord, and as keysyms otherwise.
+/// keymap confirms the modifiers and names one key for the letter, and as
+/// keysyms otherwise. A letter no group has still goes out on its pc105 key.
 fn chord_keys(
     chord: Chord,
     with_shift: bool,
@@ -301,10 +308,10 @@ fn chord_keys(
             ),
         };
     }
-    let (letter, shift) = match chord {
-        Chord::SelectAll => (XK_A, false),
-        Chord::Copy => (XK_C, false),
-        Chord::Paste => (XK_V, with_shift),
+    let (letter, physical, shift) = match chord {
+        Chord::SelectAll => (XK_A, EVDEV_KEY_A, false),
+        Chord::Copy => (XK_C, EVDEV_KEY_C, false),
+        Chord::Paste => (XK_V, EVDEV_KEY_V, with_shift),
         Chord::Return => unreachable!("returned above"),
     };
     let keycode = keymap.and_then(|groups| {
@@ -316,7 +323,14 @@ fn chord_keys(
         if shift && !types(groups, EVDEV_KEY_LEFTSHIFT, XK_SHIFT_L) {
             return None;
         }
-        keymap::resolve(groups, u32::try_from(letter).ok()?)
+        let letter = u32::try_from(letter).ok()?;
+        keymap::resolve(groups, letter).or_else(|| {
+            // The compositor's keysym path searches only the active group, so a
+            // letter no group has can never be typed by keysym. The physical
+            // pc105 key is what a real Ctrl+V press sends.
+            let physical = u16::try_from(physical).ok()?;
+            (!keymap::anywhere(groups, letter)).then_some(physical)
+        })
     });
     match keycode {
         Some(code) => (
@@ -416,6 +430,19 @@ mod tests {
         ]]
     }
 
+    /// A lone `ru`: `a`, `c`, and `v` are Cyrillic on their QWERTY keys, so
+    /// no group types the Latin letters at all.
+    fn russian() -> keymap::Groups {
+        vec![vec![
+            (29, u32::try_from(XK_CONTROL_L).unwrap()),
+            (42, u32::try_from(XK_SHIFT_L).unwrap()),
+            (28, u32::try_from(XK_RETURN).unwrap()),
+            (30, 0x6c6), // Cyrillic_ef
+            (46, 0x6d3), // Cyrillic_es
+            (47, 0x6cd), // Cyrillic_em
+        ]]
+    }
+
     /// Both ways a chord can go out: no keymap at all, and a keymap that names
     /// the letters' keys.
     fn ways() -> [Option<keymap::Groups>; 2] {
@@ -476,6 +503,78 @@ mod tests {
                     (47, RELEASED),
                     (EVDEV_KEY_LEFTSHIFT, RELEASED),
                     (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
+        );
+    }
+
+    /// A Latin-free keymap (`ru` alone) still gets the physical pc105 key: the
+    /// desktop's keysym path searches only the active group, where no key
+    /// types the letter, so it would inject nothing.
+    #[test]
+    fn a_letter_no_group_has_goes_out_on_its_physical_key() {
+        let keymap = russian();
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&keymap)),
+            (
+                Encoding::Keycode,
+                vec![
+                    (EVDEV_KEY_LEFTCTRL, PRESSED),
+                    (EVDEV_KEY_V, PRESSED),
+                    (EVDEV_KEY_V, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
+        );
+        assert_eq!(
+            chord_keys(Chord::Paste, true, Some(&keymap)),
+            (
+                Encoding::Keycode,
+                vec![
+                    (EVDEV_KEY_LEFTCTRL, PRESSED),
+                    (EVDEV_KEY_LEFTSHIFT, PRESSED),
+                    (EVDEV_KEY_V, PRESSED),
+                    (EVDEV_KEY_V, RELEASED),
+                    (EVDEV_KEY_LEFTSHIFT, RELEASED),
+                    (EVDEV_KEY_LEFTCTRL, RELEASED)
+                ]
+            )
+        );
+        for (chord, code) in [(Chord::SelectAll, EVDEV_KEY_A), (Chord::Copy, EVDEV_KEY_C)] {
+            for with_shift in [false, true] {
+                assert_eq!(
+                    chord_keys(chord, with_shift, Some(&keymap)),
+                    (
+                        Encoding::Keycode,
+                        vec![
+                            (EVDEV_KEY_LEFTCTRL, PRESSED),
+                            (code, PRESSED),
+                            (code, RELEASED),
+                            (EVDEV_KEY_LEFTCTRL, RELEASED)
+                        ]
+                    )
+                );
+            }
+        }
+    }
+
+    /// `us,us(dvorak)` disagrees about `v`, so the chord stays keysyms rather
+    /// than guessing one Latin layout's key for the other.
+    #[test]
+    fn disagreeing_groups_still_send_keysyms() {
+        let keymap = vec![
+            vec![(29, 0xffe3), (47, 0x76)],
+            vec![(29, 0xffe3), (52, 0x76)],
+        ];
+        assert_eq!(
+            chord_keys(Chord::Paste, false, Some(&keymap)),
+            (
+                Encoding::Keysym,
+                vec![
+                    (XK_CONTROL_L, PRESSED),
+                    (XK_V, PRESSED),
+                    (XK_V, RELEASED),
+                    (XK_CONTROL_L, RELEASED)
                 ]
             )
         );
