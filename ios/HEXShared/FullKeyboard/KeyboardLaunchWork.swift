@@ -11,6 +11,8 @@ nonisolated enum KeyboardLaunchWork {
     static let afterFirstFrame: TimeInterval = 0.3
     /// The optional work, a turn of its own after the text checker's.
     static let optionalWorkDelay: TimeInterval = 0.6
+    /// The dictation bar's Auto-start, a turn after the optional work.
+    static let autoStartDelay: TimeInterval = 0.8
     /// Memory left below iOS's limit for the keyboard that the optional work needs: what the
     /// first in-keyboard dictation needs (`KeyboardLocalDictation.startHeadroomNeeded`), as
     /// the capture page is that dictation's start made early.

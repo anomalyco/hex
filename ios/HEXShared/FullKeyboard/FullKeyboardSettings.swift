@@ -8,6 +8,16 @@ nonisolated enum KeyHapticStrength: String, CaseIterable, Sendable {
     case strong
 }
 
+/// Settings › Keyboard › Auto-start, while the dictation bar is chosen: whether the bar starts
+/// dictating by itself as it shows, so Dictate needs no tap.
+nonisolated enum DictationBarAutoStart: String, CaseIterable, Sendable {
+    case never
+    /// Only when you switch to Hex from another keyboard in the same field
+    /// (`KeyboardSwitchGuess`), not when a field opens with Hex already chosen.
+    case whenSwitching
+    case always
+}
+
 /// The full keyboard's switches in the shared App Group.
 ///
 /// Without Full Access an iPhone may not let the keyboard read the App Group (the simulator
@@ -38,6 +48,7 @@ struct FullKeyboardSettings {
         static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
         static let swipeTyping = "experiments.swipeTyping"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
+        static let dictationBarAutoStart = "settings.dictationBarAutoStart"
     }
 
     private let defaults: UserDefaults?
@@ -165,6 +176,16 @@ struct FullKeyboardSettings {
     var hexKeyOnLeft: Bool {
         get { defaults?.bool(forKey: Key.hexKeyOnLeft) ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.hexKeyOnLeft) }
+    }
+
+    /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.
+    /// When switching by default.
+    var dictationBarAutoStart: DictationBarAutoStart {
+        get {
+            defaults?.string(forKey: Key.dictationBarAutoStart).flatMap(DictationBarAutoStart.init(rawValue:))
+                ?? .whenSwitching
+        }
+        nonmutating set { defaults?.set(newValue.rawValue, forKey: Key.dictationBarAutoStart) }
     }
 
     /// Where the full keyboard's Hex key sits for `hexKeyOnLeft`.
