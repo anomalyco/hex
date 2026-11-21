@@ -206,11 +206,15 @@ class NeverSuggestTest {
             for (c in typed) w.tap(g, c)
             assertNull(typed, w.replacement())
         }
-        // Without the space bar's place, a bottom-row tap at its centre is only ever a letter.
+        // Without the space bar's place, a bottom-row tap at its centre is only ever a letter. Four
+        // letters: from five, a run no word reads may still be a missed space and an extra tap (#2244).
         val plain = word()
-        plain.reset("is this ")
-        for (c in "ofbthe") plain.tap(KeyGrid(g.centres, g.pitchX, g.pitchY), c)
-        assertNotEquals("of the", plain.replacement())
+        for (typed in listOf("ofba", "isba")) {
+            w.reset("is this "); for (c in typed) w.tap(g, c)
+            assertEquals(typed, typed.substring(0, 2) + " a", w.replacement())
+            plain.reset("is this "); for (c in typed) plain.tap(KeyGrid(g.centres, g.pitchX, g.pitchY), c)
+            assertNull(typed, plain.replacement())
+        }
     }
 
     // iOS testSpatialAutocorrectAddsSpanishAccents: an accented letter with a key of its own is
@@ -485,5 +489,26 @@ class NeverSuggestTest {
         assertEquals("non è esagerato ", word("it").typed(it, "non e esagerato "))
         assertEquals("il vostro indirizzo è cambiato ", word("it").typed(it, "il vostro indirizzo e cambiato "))
         assertEquals("pane e burro ", word("it").typed(it, "pane e burro "))
+    }
+
+    // iOS #2244: a run no word reads may still be a missed space with a slip in the second word, or
+    // three or more words typed with no spaces; never a one-word typo or a likelier reading.
+    @Test fun aMissedSpaceWithASlipOrWordsRunTogether() {
+        val g = layout("en")
+        for ((typed, expected) in listOf(
+            "specialchsracter " to "special character ", "goodmotning " to "good morning ",
+            "nextwerk " to "next week ", "lookingforwsrd " to "looking forward ", "emailaddtess " to "email address ",
+            "seeyoutomorrow " to "see you tomorrow ", "thankyouverymuch " to "thank you very much ",
+            "haveaniceday " to "have a nice day ", "inthemorning " to "in the morning ",
+            "understsnd " to "understand ", "informstion " to "information ",
+        )) assertEquals(typed, expected, word("en").typed(g, typed))
+        assertFalse(word("en").typed(g, "tommorow ").contains("tom morrow"))
+        val w = word("en")
+        w.reset("")
+        for (c in "theheron") w.tap(g, c)
+        assertNotEquals("the her on", w.replacement())
+        w.reset("")
+        for (c in "specialchsracter") w.tap(g, c)
+        assertTrue(w.suggestions().joinToString(), w.suggestions().any { it.equals("special character", ignoreCase = true) })
     }
 }

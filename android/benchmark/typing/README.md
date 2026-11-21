@@ -14,6 +14,8 @@ The same 2,000 held-out English and Spanish sentences, typed by today's iOS engi
 | Words the context decides, the word before revised, a space tapped as a letter | 818 (5.90%) | 1,342 (10.09%) | 774 (5.71%) | 654 (5.24%) |
 | Names kept as typed, and capitals from the books | 770 (5.55%) | 1,133 (8.52%) | 774 (5.71%) | 654 (5.24%) |
 | The likelier next letter claims up to 5 dp of its neighbour's touch area | 721 (5.20%) | 1,090 (8.19%) | 729 (5.38%) | 647 (5.18%) |
+| A missed space with a slip after it, or three or more words run together (iOS #2244; not German) | 707 (5.10%) | 1,058 (7.95%) | 729 (5.38%) | 631 (5.05%) |
+| iOS at fc867484, with #2244 | 768 (5.54%) | 1,146 (8.62%) | — | — |
 
 French and Italian have their own 2,000-sentence sets the same way (French on AZERTY, Italian on QWERTY; accented letters typed as their base key, elisions with their apostrophe). iOS types both with Apple's spelling dictionary and no typing model, and its harness maps only English and Spanish layouts, so there is no iOS column.
 
@@ -22,6 +24,7 @@ French and Italian have their own 2,000-sentence sets the same way (French on AZ
 | Raw hit keys | 5,316 (38.91%) | 4,778 (39.73%) |
 | Models from Google Books, words read after an elision | 1,177 (8.62%) | 895 (7.44%) |
 | Accents the words around decide ("a"/"à", "e"/"è") | 947 (6.93%) | 789 (6.56%) |
+| A missed space with a slip after it, or words run together | 939 (6.87%) | 763 (6.35%) |
 
 French has 13,661 reference words, Italian 12,025.
 
@@ -33,8 +36,10 @@ The replay also counts what the suggestion strip offers, as iOS's harness does: 
 | Android before the strip work | 12,070 / 2,338 / 3,789 | 11,603 / 2,116 / 2,606 | 12,204 / 1,679 / 5,026 | 11,172 / 2,160 / 4,380 |
 | Android with `strip()` and the new predictions | 13,180 / 2,349 / 4,390 | 12,407 / 2,110 / 3,236 | 12,918 / 1,680 / 5,624 | 11,988 / 2,159 / 4,875 |
 | … and the likelier next letter's touch area | 13,219 / 2,349 / 4,686 | 12,398 / 2,112 / 3,455 | 12,941 / 1,679 / 6,019 | 11,991 / 2,165 / 5,148 |
+| … and a missed space with a slip, or words run together | 13,219 / 2,350 / 4,685 | 12,398 / 2,115 / 3,455 | 12,941 / 1,679 / 6,019 | 11,991 / 2,167 / 5,150 |
+| iOS at fc867484, with #2244 | 13,253 / 2,289 / 3,234 | 12,364 / 2,076 / 2,901 | — | — |
 
-French and Italian strip hits (word / next / after two letters): 11,935 / 2,186 / 4,230 of 13,661 / 11,430 / 9,950, and 11,022 / 1,662 / 3,638 of 12,025 / 9,788 / 8,981.
+French and Italian strip hits (word / next / after two letters): 11,935 / 2,188 / 4,230 of 13,661 / 11,430 / 9,950, and 11,022 / 1,662 / 3,638 of 12,025 / 9,788 / 8,981.
 
 Out of 13,870 / 11,639 / 10,874 (English), 13,301 / 11,058 / 9,383 (Spanish), 13,550 / 11,326 / 12,413 (German) and 12,492 / 10,297 / 9,789 (Bokmål).
 
