@@ -925,7 +925,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
 
     private static let page = """
     <!doctype html><meta charset="utf-8"><script>
-    let ctx, stream, source, node, running = false, generation = 0;
+    let ctx, stream, source, node, running = false, generation = 0, revive = null;
     const post = (m) => webkit.messageHandlers.hex.postMessage(m);
     const release = (s, c) => {
       if (s) s.getTracks().forEach((t) => t.stop());
@@ -990,6 +990,12 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         };
         source.connect(node);
         node.connect(ctx.destination);
+        // iOS may suspend or interrupt a running context for other audio (an alert, a call's
+        // ring, another app's session) without resuming it: the page then sends no audio and the
+        // keyboard's watchdog ends the dictation 6 s later. Resume it as soon as iOS allows.
+        revive = setInterval(() => {
+          if (running && ctx && ctx.state !== "running" && ctx.state !== "closed") ctx.resume().catch(() => {});
+        }, 250);
         post({ type: "started", rate: ctx.sampleRate, device: stream.getAudioTracks()[0].label, listed, opened, mic, audio: Date.now() });
       } catch (error) {
         if (stale()) return release(s, c);
@@ -1003,6 +1009,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
       generation++;
       const wasRunning = running;
       running = false;
+      if (revive) { clearInterval(revive); revive = null; }
       try { node && node.disconnect(); source && source.disconnect(); } catch (e) {}
       if (stream) stream.getTracks().forEach((t) => t.stop());
       if (ctx) { try { await ctx.close(); } catch (e) {} }
