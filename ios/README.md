@@ -227,6 +227,17 @@ never at a launch by itself.
     "@" for "at sign" and for "john at gmail dot com". Polished leaves an address's
     case alone, starts no sentence at a full stop inside a word ("gmail.com"),
     and ends no lone address with a full stop.
+  - **Spoken counts (English, every style but Verbatim):** a count of three
+    numbers or more from one, in words or digits with only commas or spaces
+    between them, is written in digits: Apple's `SpeechTranscriber` writes
+    "Test one, 2, 3." where Parakeet writes "Test 1, 2, 3", and both become "Test
+    1, 2, 3." "123" right after "test" or "testing" and ending its clause, which
+    Parakeet and `DictationTranscriber` write for a quick "testing one two
+    three", becomes "1, 2, 3" too (`SpokenCleanupRules.spokenCounts`, run by
+    `CleanupTagger.cleanIfEnabled` before the tagger, with Clean up what I say on
+    or off). Other numbers stay ("Chapter one, two and three", "room 123", "test
+    123 passed"). The tagger alone took a count in words for a self-correction
+    ("Test one two three" became "Test three."); `CleanupGuard` keeps it.
   - **Mid-sentence dictation:** when the text before the cursor doesn't end a
     sentence (`.` `!` `?` `…` or a line break), the keyboard lowercases the
     dictation's first word, except "I" and its contractions, acronyms, words

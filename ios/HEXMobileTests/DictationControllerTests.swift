@@ -838,6 +838,58 @@ final class DictationControllerTests: XCTestCase {
         }
     }
 
+    /// A microphone test reads the same from the app, where Parakeet writes "Test 1, 2, 3", and
+    /// from in-keyboard dictation, where Apple's SpeechTranscriber writes "Test one, 2, 3." and
+    /// DictationTranscriber "Test 123", in every style and with Lowercase, with Clean up what I
+    /// say and Format lists on (TestFlight, Nov 20: "Test three." in the keyboard, "test 123"
+    /// in the app).
+    func testACountReadsTheSameFromTheAppAndTheKeyboard() async throws {
+        let tagger = CleanupTaggerSettings()
+        let wasEnabled = tagger.isEnabled
+        defer { tagger.isEnabled = wasEnabled }
+        tagger.isEnabled = true
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("Test 1, 2, 3")
+        let lowercase = DictationLowercaseSettings(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 97_500 },
+            autoPrepareOnInit: false,
+            cleanupSettings: AppleIntelligenceCleanupSettings(defaults: defaults),
+            customVocabularySettings: CustomVocabularySettings(defaults: defaults),
+            lowercaseSettings: lowercase,
+            listSettings: DictationListSettings(defaults: defaults),
+            periodSettings: DictationPeriodSettings(defaults: defaults),
+            typingJournalSettings: TypingJournalSettings(defaults: defaults)
+        )
+        controller.prepareModel()
+        try await settle()
+
+        var outputs: [String] = []
+        for lower in [false, true] {
+            lowercase.isEnabled = lower
+            for style in [DictationStyle.polished, .casual, .notes] {
+                controller.clearTranscript()
+                controller.startRecording(keyboardJobID: "count-\(style)-\(lower)", styleOverride: style)
+                try await settle()
+                controller.finishRecording()
+                try await settle()
+                for heard in ["Test one, 2, 3.", "Test 123"] {
+                    let keyboard = await DictationPipeline(
+                        style: style, language: "en-US", lowercase: lower, formatLists: true
+                    ).run(heard).formatted
+                    XCTAssertEqual(keyboard, controller.transcript, "\(heard), \(style), lowercase \(lower)")
+                }
+                outputs.append(controller.transcript)
+            }
+        }
+        XCTAssertEqual(outputs, ["Test 1, 2, 3.", "test 1, 2, 3", "Test 1, 2, 3", "test 1, 2, 3.", "test 1, 2, 3", "test 1, 2, 3"])
+    }
+
     func testLowercaseAppliesOnlyWhenCaptured() async throws {
         let audio = FakeAudioManager()
         let transcriber = ControlledTranscriber()

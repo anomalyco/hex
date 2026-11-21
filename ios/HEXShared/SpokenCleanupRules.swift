@@ -407,6 +407,94 @@ nonisolated enum SpokenCleanupRules {
         return word
     }
 
+    // MARK: Spoken counts
+
+    /// The English number words a count is made of.
+    private static let countWords: [String: Int] = [
+        "one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14, "fifteen": 15, "sixteen": 16, "seventeen": 17,
+        "eighteen": 18, "nineteen": 19, "twenty": 20,
+    ]
+
+    /// English `text` with a spoken count in digits, or `text` itself, so a microphone test
+    /// reads the same from every speech model: for "test, one, two, three" Parakeet writes
+    /// "Test 1, 2, 3" and Apple's `SpeechTranscriber` "Test one, 2, 3." (macOS 27.2, `say`
+    /// voices), and the cleanup tagger is sure a count in words is a self-correction (P(DELETE)
+    /// over 0.98 on "one" and "two", which made "Test three." before `CleanupGuard`). A count is
+    /// three numbers or more counting up from one, in words or digits, with only a comma or a
+    /// space between them: "one two three" and "one, 2, 3" become "1, 2, 3". "123" (up to
+    /// "123456789") right after "test" or "testing" and ending its clause, which Parakeet and
+    /// `DictationTranscriber` write for a quick "testing one two three", becomes "1, 2, 3" too.
+    /// Every other number stays as said ("Chapter one, two and three", "at 1, 2, or 3", "room
+    /// 123", "test 123 passed").
+    static func spokenCounts(in text: String, language: String?) -> String {
+        guard SpeechLanguagePicker.isEnglish(language) else { return text }
+        let tokens = symbolTokens(in: text)
+        var edits: [(range: Range<String.Index>, text: String)] = []
+        var index = 0
+        while index < tokens.count {
+            if let digits = joinedCount(tokens, at: index) {
+                edits.append((tokens[index].range, digits))
+                index += 1
+                continue
+            }
+            var count: [(value: Int, trailing: String)] = []
+            while let token = tokens[safe: index + count.count], let number = countNumber(token.word),
+                  number.value == count.count + 1 {
+                count.append(number)
+                // Only a comma or a space comes between two numbers of a count.
+                guard number.trailing.isEmpty || number.trailing == "," else { break }
+            }
+            // "zero, one, two, three" and "twenty one two three" are no count from one.
+            let previous = tokens[safe: index - 1].map { bare($0.word) } ?? ""
+            let followsNumber = countNumber(previous) != nil || previous == "zero"
+                || (!previous.isEmpty && previous.allSatisfy(\.isNumber))
+            guard count.count >= 3, !followsNumber else {
+                index += 1
+                continue
+            }
+            let last = index + count.count - 1
+            let written = count.enumerated().map { offset, number in
+                "\(number.value)" + (offset == count.count - 1 ? number.trailing : ",")
+            }
+            edits.append((tokens[index].range.lowerBound..<tokens[last].range.upperBound, written.joined(separator: " ")))
+            index = last + 1
+        }
+        guard !edits.isEmpty else { return text }
+        var result = ""
+        var cursor = text.startIndex
+        for edit in edits {
+            result += text[cursor..<edit.range.lowerBound] + edit.text
+            cursor = edit.range.upperBound
+        }
+        return result + text[cursor...]
+    }
+
+    /// A count's number and the marks after it ("two," is 2 and ","): one of `countWords`, or 1
+    /// to 20 in digits.
+    private static func countNumber(_ word: String) -> (value: Int, trailing: String)? {
+        let core = String(word.reversed().drop { closingMarks.contains($0) }.reversed())
+        let trailing = String(word.dropFirst(core.count))
+        if let value = countWords[core.lowercased()] { return (value, trailing) }
+        guard core.count <= 2, core.first != "0", core.allSatisfy({ $0.isASCII && $0.isNumber }),
+              let value = Int(core) else { return nil }
+        return (value, trailing)
+    }
+
+    /// "123." after "test" or "testing" as "1, 2, 3.", when nothing but its marks or the end
+    /// follows it: "test 123 passed" keeps its number.
+    private static func joinedCount(_ tokens: [SymbolToken], at index: Int) -> String? {
+        guard let before = tokens[safe: index - 1], ["test", "testing"].contains(bare(before.word)),
+              !endsSentence(before.word) else { return nil }
+        let word = tokens[index].word
+        let core = String(word.reversed().drop { closingMarks.contains($0) }.reversed())
+        let trailing = word.dropFirst(core.count)
+        guard core.count >= 3, "123456789".hasPrefix(core), !trailing.isEmpty || index == tokens.count - 1 else {
+            return nil
+        }
+        return core.map(String.init).joined(separator: ", ") + trailing
+    }
+
     // MARK: Languages
 
     private static let spanish = Rules(
