@@ -1963,11 +1963,13 @@ final class SpeechLanguagePickerTests: XCTestCase {
         preferred: [String],
         current: String = "en_US",
         setAside: Set<String> = [],
-        speechTranscriber: Bool = true
+        speechTranscriber: Bool = true,
+        region: String = "US"
     ) async -> SpeechLanguage? {
         await SpeechLanguagePicker.pick(
             explicit: explicit,
-            candidates: SpeechLanguagePicker.automaticCandidates(preferred: preferred, current: current),
+            candidates: SpeechLanguagePicker.automaticCandidates(preferred: preferred, current: current, region: region),
+            region: region,
             speech: speechTranscriber ? lookup(speechLocales) : { _ in nil },
             dictation: lookup(dictationLocales),
             skip: { setAside.contains($0.identifier(.bcp47)) }
@@ -2071,6 +2073,69 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(picked?.identifier, "nb-NO")
     }
 
+    /// Apple Speech's Spanish is Spain's es-ES and the Americas' es-US and es-MX: es-419 and
+    /// its Latin American regions are the Americas' (es-US, then es-MX), never Spain's.
+    func testLatinAmericanSpanishPicksTheAmericasVariant() async {
+        let speech = lookup(speechLocales + ["es-US"])
+        let dictation = lookup(dictationLocales + ["es-US"])
+        let latin = await SpeechLanguagePicker.pick(
+            explicit: nil,
+            candidates: SpeechLanguagePicker.automaticCandidates(
+                preferred: ["es-419", "en-US"],
+                current: "es_419",
+                region: "US"
+            ),
+            region: "US",
+            speech: speech,
+            dictation: dictation
+        )
+        XCTAssertEqual(latin?.identifier, "es-US")
+        XCTAssertEqual(latin?.module, .speech)
+
+        let withoutUS = await pick(preferred: ["es-419", "en-US"], current: "es_419", region: "ES")
+        XCTAssertEqual(withoutUS?.identifier, "es-MX", "es-US missing")
+
+        let colombian = await pick(preferred: ["es-CO", "en-US"], current: "es_CO", region: "US")
+        XCTAssertEqual(colombian?.identifier, "es-MX", "es-US missing for a Colombian iPhone too")
+
+        let explicit = await SpeechLanguagePicker.pick(
+            explicit: "es-419",
+            candidates: ["en-US"],
+            region: "US",
+            speech: speech,
+            dictation: dictation
+        )
+        XCTAssertEqual(explicit?.identifier, "es-US", "a pick from before the variants")
+    }
+
+    /// Plain "es" names no region: the iPhone's Region decides between Mexico's es-MX, the
+    /// United States' and Latin America's es-US, and Spain's es-ES.
+    func testPlainSpanishFollowsTheIPhonesRegion() async {
+        XCTAssertEqual(
+            SpeechLanguagePicker.automaticCandidates(preferred: ["es", "en-US"], current: "en_US", region: "MX").first,
+            "es-MX"
+        )
+        XCTAssertEqual(
+            SpeechLanguagePicker.automaticCandidates(preferred: ["es", "en-US"], current: "en_US", region: "US").first,
+            "es-US"
+        )
+        XCTAssertEqual(
+            SpeechLanguagePicker.automaticCandidates(preferred: ["es", "en-US"], current: "en_US", region: "ES").first,
+            "es-ES"
+        )
+        XCTAssertEqual(
+            SpeechLanguagePicker.automaticCandidates(preferred: ["es", "en-US"], current: "en_US", region: "FR").first,
+            "es-ES"
+        )
+        let mexican = await pick(preferred: ["es", "en-US"], region: "MX")
+        XCTAssertEqual(mexican?.identifier, "es-MX")
+        XCTAssertEqual(mexican?.module, .speech)
+        let spain = await pick(preferred: ["es", "en-US"], region: "ES")
+        XCTAssertEqual(spain?.identifier, "es-ES")
+        let american = await pick(preferred: ["es", "en-US"], region: "US")
+        XCTAssertEqual(american?.identifier, "es-MX", "es-US missing here, es-MX next")
+    }
+
     func testAnExplicitChoiceWinsAndFallsBackToAutomaticWhenUnsupported() async {
         let danish = await pick(explicit: "da-DK", preferred: ["en-US"])
         XCTAssertEqual(danish?.identifier, "da-DK")
@@ -2153,6 +2218,8 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(names["nb-NO"], "Norwegian Bokmål")
         XCTAssertEqual(names["he-IL"], "Hebrew")
         XCTAssertEqual(names["en-US"], "English (United States)")
+        XCTAssertEqual(SpeechLanguagePicker.shortName(for: "en-US", in: english), "English (US)")
+        XCTAssertEqual(SpeechLanguagePicker.shortName(for: "es-US", in: english), "Spanish (US)")
     }
 
     func testOnlyEnglishCountsAsEnglish() {

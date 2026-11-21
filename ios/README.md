@@ -562,8 +562,15 @@ never at a launch by itself.
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
   dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
-  Apple has. While the keyboard switches between two or more languages, Automatic follows
-  the one it shows (Keyboard languages, below). The menu also lists every locale
+  Apple has. Apple Speech's Spanish is three variants (es-ES, es-MX, es-US), and
+  Spanish follows the iPhone rather than always Spain: es-419, es-CO, es-AR and
+  any other Latin American, United States or unlisted region is the Americas'
+  Spanish (es-US, then es-MX), plain `es` is the iPhone's Region's (es-MX in
+  Mexico, es-US in the United States, Puerto Rico and Latin America, es-ES
+  elsewhere), and only Spain and Equatorial Guinea stay on es-ES
+  (`DictationLanguageSwitch.spanishCandidates`, `spanish(forRegion:)`). While
+  the keyboard switches between two or more languages, Automatic follows the one
+  it shows (Keyboard languages, below). The menu also lists every locale
   `SpeechTranscriber` or
   `DictationTranscriber` supports, by name. `SpeechTranscriber` is used wherever
   it has the language (as before); `DictationTranscriber` (preset
@@ -624,9 +631,21 @@ never at a launch by itself.
   lately (`settings.dictationLanguage.recent`), then the iPhone's preferred
   languages, each matched to one Apple Speech has (`DictationLanguageSwitch`;
   the keyboard lists Apple's languages once per process and caches them in
-  `settings.dictationLanguage.supported`). Names are each language's own
-  ("Español", "Deutsch", "עברית"), with a region code only where two share a
-  language. A long press on a language (a chip, or a row on the Hex key menu's Language
+  `settings.dictationLanguage.supported`). One variant per language, the first
+  of the current, the recents and the preferred winning, so Spain's Spanish and
+  Mexico's never both take a chip; picking one drops its siblings from the
+  recents (Norwegian's nb/nn/no aliases stay one language). Chinese stays
+  apart, so Mandarin's zh-CN, Taiwan's zh-TW and Cantonese's zh-HK each keep a
+  chip and a pick keeps the others in the recents. Names are each language's
+  own ("Español", "Deutsch", "עברית"), with the region where Apple Speech has
+  more than one of that language ("Español (US)" or "Español (ES)", "English
+  (GB)"; Norwegian stays "Norsk"), so the menu and the dictation bar's chips
+  say which variant dictation actually uses. Under Automatic, Settings ›
+  Dictation language says the same itself while the keyboard follows: "Follows
+  keyboard: English (US) · Spanish (US)" names each keyboard language's
+  dictation language, and is refreshed when Hex comes back to the foreground,
+  not only when the row
+  appears. A long press on a language (a chip, or a row on the Hex key menu's Language
   page) shows **Remove**, which takes it off (`settings.dictationLanguage.removed`, so one
   of the iPhone's own languages stays off too) and puts the one set back on Automatic;
   Settings › Dictation language's **Remove from keyboard** does the same (TestFlight build
@@ -701,8 +720,15 @@ never at a launch by itself.
   `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
   which prepares the new language between dictations (TestFlight build 56: with the
   keyboard on Español, dictation stayed English and Spanish came out "incomprehensible").
-  It doesn't where the iPhone's own language has no layout (Hebrew), as dictating is how
-  that language gets written. **Switch dictation too** (off by default, shown with two or
+  Spanish is the iPhone's Spanish, not always Spain's: es-419, es-CO and any other Latin
+  American or United States region is es-US, then es-MX, plain `es` and no Spanish
+  preferred language follow the iPhone's Region (es-MX in Mexico, es-US in the United
+  States, Puerto Rico and Latin America, es-ES elsewhere), and Spain and Equatorial
+  Guinea stay on es-ES. A Spanish variant picked by hand for that language is used again
+  when the space bar comes back to it: the recent pick goes ahead of the preferred
+  languages, so es-US or es-MX survives the switch away and back. It doesn't where the
+  iPhone's own language has no layout (Hebrew), as dictating is how that language gets
+  written. **Switch dictation too** (off by default, shown with two or
   more on iOS 26+) follows there too, and puts a dictation language picked by hand back on
   Automatic at each switch (it used to write the keyboard's language as a pick, which
   stayed after Spanish was unticked or the switch turned off). **Bilingual autocorrect:**
@@ -1131,6 +1157,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   clips came back with every tonos, final ς, numbers as digits ("10 λεπτά", "7:30"), and no
   punctuation. Lowercase lowers with Unicode's context-aware mapping, so a word-final Σ
   becomes ς ("ΟΔΟΣ" → "οδος"), as desktop's `to_lowercase` does.
+  **Spanish variants** have unit tests only: es-419 and es-CO resolve to es-US then
+  es-MX, plain `es` by the iPhone's Region, a picked variant survives a swipe away and
+  back, the switch offers one variant per language with Chinese's variants kept apart,
+  and the Hex key menu names the region. No iPhone or simulator ran the Spanish variants
+  for this change, and the Settings line and menu labels weren't captured.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
@@ -1143,8 +1174,10 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   memory on 4 GB iPhones are unverified on hardware.
 - **Keyboard languages:** `KeyboardLayoutTests` cover the list (resolution, switching,
   space-bar label, pairing, migration, the dictation pick, English & Spanish's keys,
-  dictation following the keyboard), `FullKeyboardEngineTests` the swipe against the
-  hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too), and
+  dictation following the keyboard, Spanish's Americas variants and the iPhone's Region),
+  `FullKeyboardEngineTests` the swipe against the
+  hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too,
+  and a picked Spanish variant surviving the swipe away and back), and
   `AutocorrectEngineTests` bilingual autocorrect on stub dictionaries and iOS's own
   (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro

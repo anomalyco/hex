@@ -77,8 +77,16 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// Keyboard › Languages › Switch dictation too): the iPhone's own region where it has one
     /// for the language (English on a British iPhone is en-GB), else the language's usual
     /// one, among `supported` (what Apple Speech transcribes here; empty when not listed yet).
-    /// Nil when Apple Speech has none of it (Serbian).
-    func dictationLanguage(supported: [String], preferred: [String]) -> String? {
+    /// Spanish follows the iPhone's Spanish (`DictationLanguageSwitch.spanishCandidates`):
+    /// es-419, es-CO, es-AR and the like are the Americas' (es-US, then es-MX), and with no
+    /// Spanish region at all the iPhone's own `region` chooses (es-MX in Mexico, es-US in the
+    /// United States and Latin America, es-ES elsewhere). Nil when Apple Speech has none of it
+    /// (Serbian).
+    func dictationLanguage(
+        supported: [String],
+        preferred: [String],
+        region: String? = Locale.current.region?.identifier
+    ) -> String? {
         func key(_ identifier: String) -> String {
             identifier.replacingOccurrences(of: "_", with: "-").lowercased()
         }
@@ -98,6 +106,20 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .ukrainian: "uk-UA"
         case .greek: "el-GR"
         case .serbianLatin: "sr-Latn-RS"
+        }
+        // Spanish's regions are Apple's three variants, not the iPhone's own identifier.
+        if self == .spanish {
+            let named = preferred.first {
+                Self.matching($0) == .spanish && Locale(identifier: $0).region != nil
+            }
+            guard !supported.isEmpty else {
+                return named ?? DictationLanguageSwitch.spanish(forRegion: region)
+            }
+            return DictationLanguageSwitch.supportedMatch(
+                for: named ?? "es",
+                in: supported,
+                region: region
+            )
         }
         // A French layout keeps its own region: Canadian French dictates fr-CA.
         let ownRegion = self == .frenchCanadian || self == .frenchSwiss

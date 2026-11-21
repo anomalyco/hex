@@ -7,8 +7,12 @@ import UIKit
 /// Remove from keyboard takes a language off the keyboard's quick switch.
 struct DictationLanguageRow: View {
     @Bindable var dictation: DictationController
+    @Environment(\.scenePhase) private var scenePhase
     @State private var options: [SpeechLanguageOption] = []
     @State private var automaticName: String?
+    /// While Automatic follows the space bar, the line naming each keyboard language's
+    /// dictation language ("Follows keyboard: English (US) · Spanish (US)").
+    @State private var followsKeyboard: String?
     /// The keyboard's quick switch (`LanguageSettings.keyboardLanguageChoices`).
     @State private var keyboardChoices: [String] = []
     /// Before iOS 26: where the languages come from.
@@ -22,11 +26,11 @@ struct DictationLanguageRow: View {
                     Text("Dictation language")
                         .font(.system(size: 15, weight: .regular))
                         .foregroundStyle(HexTheme.textBase)
-                    if dictation.dictationLanguage == nil, let automaticName {
-                        Text(automaticName)
+                    if dictation.dictationLanguage == nil, let detail = followsKeyboard ?? automaticName {
+                        Text(detail)
                             .font(.system(size: 12))
                             .foregroundStyle(HexTheme.textMuted)
-                            .lineLimit(1)
+                            .lineLimit(followsKeyboard == nil ? 1 : 2)
                     }
                 }
                 Spacer(minLength: 8)
@@ -50,7 +54,9 @@ struct DictationLanguageRow: View {
                                     if dictation.dictationLanguage != nil, settings.dictationLanguage == nil {
                                         dictation.setDictationLanguage(nil)
                                     }
-                                    keyboardChoices = settings.keyboardLanguageChoices()
+                                    // The switch's chips and the "Follows keyboard" line
+                                    // both change when a language comes off.
+                                    refreshLanguageChoices()
                                 } label: {
                                     Text(name(for: id))
                                 }
@@ -86,26 +92,65 @@ struct DictationLanguageRow: View {
             }
         }
         .onChange(of: dictation.dictationLanguage) { _, _ in
-            guard #available(iOS 26.0, *) else { return }
-            keyboardChoices = LanguageSettings().keyboardLanguageChoices()
+            refreshLanguageChoices()
         }
-        .task {
-            // The keyboard may have switched the language while Hex was away.
-            dictation.followDictationLanguageSetting()
-            guard #available(iOS 26.0, *) else {
-                // Apple's on-device recognizer (OnDeviceSpeechTranscriber); the keyboard's quick
-                // switch is iOS 26's.
-                options = OnDeviceSpeechLanguages.options()
-                listsOnDeviceLanguages = true
-                automaticName = OnDeviceSpeechLanguages.automatic().map { SpeechLanguagePicker.displayName(for: $0) }
-                return
-            }
-            options = await AppleSpeechLanguages.options()
-            keyboardChoices = LanguageSettings().keyboardLanguageChoices()
-            automaticName = await AppleSpeechLanguages.automatic().map {
-                HinglishSettings().name(for: $0.identifier) ?? SpeechLanguagePicker.displayName(for: $0.identifier)
-            }
+        // The keyboard may have switched the language while Hex was away: re-read the
+        // choices and what Automatic follows whenever Hex comes back to the foreground.
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
+            await reloadLanguages()
         }
+    }
+
+    @MainActor
+    private func reloadLanguages() async {
+        dictation.followDictationLanguageSetting()
+        guard #available(iOS 26.0, *) else {
+            // Apple's on-device recognizer (OnDeviceSpeechTranscriber); the keyboard's quick
+            // switch is iOS 26's.
+            options = OnDeviceSpeechLanguages.options()
+            listsOnDeviceLanguages = true
+            refreshLanguageChoices()
+            automaticName = OnDeviceSpeechLanguages.automatic().map { SpeechLanguagePicker.displayName(for: $0) }
+            return
+        }
+        options = await AppleSpeechLanguages.options()
+        refreshLanguageChoices()
+        automaticName = await AppleSpeechLanguages.automatic().map {
+            HinglishSettings().name(for: $0.identifier) ?? SpeechLanguagePicker.displayName(for: $0.identifier)
+        }
+    }
+
+    @MainActor
+    private func refreshLanguageChoices() {
+        guard #available(iOS 26.0, *) else {
+            // The keyboard's quick switch is iOS 26's.
+            keyboardChoices = []
+            followsKeyboard = nil
+            return
+        }
+        let settings = LanguageSettings()
+        keyboardChoices = settings.keyboardLanguageChoices()
+        followsKeyboard = followsKeyboardSummary(settings)
+    }
+
+    /// "Follows keyboard: English (US) · Spanish (US)" while Automatic dictates in the space
+    /// bar's language: each keyboard language's dictation language, short.
+    private func followsKeyboardSummary(_ settings: LanguageSettings) -> String? {
+        guard settings.keyboardDictationLanguage() != nil else { return nil }
+        let preferred = Locale.preferredLanguages
+        let region = Locale.current.region?.identifier
+        var names: [String] = []
+        for language in settings.keyboardLanguages {
+            guard let identifier = settings.dictationLanguage(
+                for: language,
+                preferred: preferred,
+                region: region
+            ) else { continue }
+            names.append(SpeechLanguagePicker.shortName(for: identifier))
+        }
+        guard !names.isEmpty else { return nil }
+        return String(localized: "Follows keyboard: \(names.joined(separator: " · "))")
     }
 
     private var selectedName: String {

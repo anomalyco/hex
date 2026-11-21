@@ -1294,8 +1294,23 @@ final class KeyboardLayoutTests: XCTestCase {
         settings.keyboardLanguages = [.english, .spanish]
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"]), "en-US", "the first until switched")
         settings.currentKeyboardLanguage = .spanish
-        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"]), "es-ES")
-        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US", "es-MX"]), "es-MX", "the iPhone's region")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES"), "es-ES")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "MX"), "es-MX", "the iPhone's Region")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "US"), "es-US")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"], region: "CO"), "es-US", "Latin America")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US", "es-MX"], region: "ES"), "es-MX", "the iPhone's Spanish")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["es-419"], region: "ES"), "es-US", "Latin American Spanish")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["es"], region: "MX"), "es-MX", "no Spanish region")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["es"], region: "FR"), "es-ES")
+        settings.chooseDictationLanguage("es-MX")
+        settings.dictationFollowsKeyboard = true
+        settings.chooseDictationLanguage(nil)
+        XCTAssertEqual(
+            settings.keyboardDictationLanguage(preferred: ["en-US"], region: "ES"),
+            "es-MX",
+            "the variant picked by hand survives a swipe away and back"
+        )
+        settings.dictationFollowsKeyboard = false
         settings.currentKeyboardLanguage = .english
         XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-GB"]), "en-GB")
         settings.currentKeyboardLanguage = .french
@@ -1354,6 +1369,34 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.greek.dictationLanguage(supported: supported + ["el-GR"], preferred: ["el-GR"]), "el-GR")
         XCTAssertEqual(KeyboardLanguage.greek.dictationLanguage(supported: [], preferred: []), "el-GR", "not listed yet")
         XCTAssertEqual(KeyboardLanguage.greek.displayName, "Ελληνικά")
+    }
+
+    /// Apple Speech's three Spanish variants: a Latin American, United States or plain
+    /// Spanish iPhone dictates the Americas' Spanish (es-US, then es-MX), never Spain's, and a
+    /// Spanish layout with no Spanish preferred language follows the iPhone's Region.
+    func testSpanishKeyboardsDictateTheAmericasSpanish() {
+        let supported = ["en-US", "es-ES", "es-MX", "es-US"]
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es-419"], region: "ES"), "es-US")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es-CO"], region: "ES"), "es-US")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es-US"], region: "ES"), "es-US", "exact")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es-ES"], region: "MX"), "es-ES", "Spain's, named")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es-MX"], region: "ES"), "es-MX", "Mexico's, named")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: [], region: "US"), "es-US")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: [], region: "MX"), "es-MX")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: [], region: "ES"), "es-ES")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: [], region: "FR"), "es-ES")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es"], region: "MX"), "es-MX")
+        XCTAssertEqual(KeyboardLanguage.spanish.dictationLanguage(supported: supported, preferred: ["es"], region: "FR"), "es-ES")
+        XCTAssertEqual(
+            KeyboardLanguage.spanish.dictationLanguage(supported: ["en-US", "es-ES", "es-MX"], preferred: ["es-419"], region: "US"),
+            "es-MX",
+            "es-US missing"
+        )
+        XCTAssertEqual(
+            KeyboardLanguage.spanish.dictationLanguage(supported: [], preferred: ["es-419"], region: "US"),
+            "es-419",
+            "not listed yet"
+        )
     }
 
     /// The languages read the one layout chosen before them, and write their first for an
