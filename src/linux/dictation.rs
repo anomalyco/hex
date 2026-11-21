@@ -246,6 +246,7 @@ pub(crate) fn run(
     let (result_sender, results) = mpsc::channel();
     let worker_stop = output.stop.clone();
     output.worker = Some(thread::spawn(move || {
+        crate::linux::input_activity::start();
         let mut paster = LinuxPaster::new(worker_stop.clone(), worker_paste_with_shift, paste_keys);
         let mut last_dictation: Option<String> = None;
         while let Ok(job) = job_receiver.recv() {
@@ -263,7 +264,7 @@ pub(crate) fn run(
                             paster
                                 .as_mut()
                                 .map_err(|error| eyre!("{error:#}"))?
-                                .paste(&text, false)
+                                .paste_dictation(&text, false)
                         })
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
@@ -352,7 +353,7 @@ pub(crate) fn run(
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
                 let mut paste = |text: &str, terminal: bool, send: bool| {
-                    paster.paste(text, terminal)?;
+                    paster.paste_dictation(text, terminal)?;
                     if send {
                         paster.press_return()?;
                     }

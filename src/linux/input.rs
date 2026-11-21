@@ -1013,6 +1013,9 @@ impl Dispatcher {
     }
 
     fn input(&mut self, input: Input) {
+        if !matches!(input, Input::Lost) {
+            crate::linux::input_activity::own();
+        }
         self.pending
             .extend(self.state.update(input, Instant::now()));
     }

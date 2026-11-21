@@ -2458,6 +2458,30 @@ Source: `control_chord` in [windows/paste.rs](../../src/windows/paste.rs).
 Check: `paste_chords_press_shift_inside_control_and_leave_a_held_control_alone`
 (the synthesized key sequence only; no paste into a real Windows app).
 
+**Linux paste continuation (Wayland):** back-to-back dictations join there too,
+on a desktop whose compositor offers `ext_idle_notifier_v1` version 2 (tried on
+Hyprland 0.56); Paste last dictation continues as well, and YOLO mode's
+Return ends the join. Hex reads no input devices on Wayland, so it cannot see
+which key or button was pressed. It asks the compositor when the seat goes
+quiet (250 ms without input) and when it wakes, which gives bursts of input.
+A burst that begins and ends within 200 ms of Hex's own input (a shortcut's
+press or release, a `hex` command, or the keys of a paste) is Hex's own; any
+other burst is the person's and ends the join. That is coarser than macOS and
+Windows: moving the pointer ends the join as a click does, input sent in the
+same burst between two of Hex's own events is not seen, and a window that takes
+focus with no input does not end it. X11, and a desktop without the protocol,
+paste without joining, as before. Sources:
+[linux/input_activity.rs](../../src/linux/input_activity.rs) and
+`paste_dictation` in [linux/paste.rs](../../src/linux/paste.rs). Checks:
+`back_to_back_dictations_join`,
+`the_persons_input_between_dictations_ends_the_join`,
+`input_just_before_the_shortcut_ends_the_join`,
+`input_while_dictating_ends_the_join`,
+`input_still_in_progress_at_the_paste_ends_the_join`, and
+`input_after_the_paste_in_its_burst_ends_the_join` (the burst policy on a
+simulated clock). `the_compositor_reports_input` is a manual probe of the real
+compositor; no automated check reads one, and none dictates twice into an app.
+
 ### Toggle Cancel
 
 ```ts

@@ -943,7 +943,8 @@ Do not start it beside an existing listener.
 Completed output                         // output
 ├── Paste -> Current focus, in submission order
 │   ├── Back-to-back dictations with no key, click, or window change between
-│   │   -> joined with a space and sentence-aware capitalization (macOS, Windows)
+│   │   -> joined with a space and sentence-aware capitalization (macOS, Windows;
+│   │      Linux on Wayland where the compositor reports input, dictation.md)
 │   ├── Previous clipboard restored 500 ms later, unless something newer replaced it
 │   ├── Windows -> the transcript is marked out of clipboard history (Win+V) and cloud sync (#851)
 │   ├── Windows -> a paste only goes to a window that can take it: the desktop
