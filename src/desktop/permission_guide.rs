@@ -15,6 +15,8 @@ use crate::desktop::onboarding::{
 
 unsafe extern "C" {
     fn hex_show_permission_guide(permission: i32);
+    fn hex_close_permission_guide(permission: i32);
+    fn hex_permission_guide_active(permission: i32) -> bool;
     fn hex_permission_list_name(permission: i32) -> *const std::ffi::c_char;
     fn hex_permission_settings_state() -> i32;
     fn hex_prompt_accessibility_trust() -> bool;
@@ -32,9 +34,34 @@ const fn code(kind: PermissionKind) -> i32 {
 
 pub(crate) fn show(kind: PermissionKind) {
     clear_legacy_entries_async(kind);
+    if kind == PermissionKind::ScreenRecording {
+        // The guide's own preflight keeps the answer it read at launch;
+        // the watched read is the one that sees the grant, so start it
+        // fresh as the guide opens.
+        crate::capture_host::invalidate_screen_access();
+    }
     if MainThreadMarker::new().is_some() {
         unsafe { hex_show_permission_guide(code(kind)) };
     }
+}
+
+/// Whether the native guide for `kind` is open. Main thread only.
+pub(crate) fn active(kind: PermissionKind) -> bool {
+    MainThreadMarker::new().is_some() && unsafe { hex_permission_guide_active(code(kind)) }
+}
+
+/// Dismisses the native guide for `kind` once Hex has what it asked for.
+/// Main thread only.
+pub(crate) fn close(kind: PermissionKind) {
+    if MainThreadMarker::new().is_some() {
+        unsafe { hex_close_permission_guide(code(kind)) };
+    }
+}
+
+/// Whether a Screen Recording guide has nothing left to ask: the watched
+/// read saw the grant (usable now or after a restart).
+pub(crate) fn screen_recording_answered(access: crate::capture_host::ScreenAccess) -> bool {
+    access != crate::capture_host::ScreenAccess::Off
 }
 
 /// What System Settings calls the list: macOS 27 renamed Accessibility.
@@ -187,5 +214,20 @@ pub(crate) fn reset_and_reopen_async(
         })
     {
         tracing::warn!(%error, ?kind, "could not start TCC permission reset");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::capture_host::ScreenAccess;
+
+    /// A grant Hex can use now, or one it can use only after a restart, both
+    /// answer the Screen Recording guide; only an Off read leaves it up.
+    #[test]
+    fn a_screen_recording_grant_in_either_form_dismisses_the_guide() {
+        assert!(!screen_recording_answered(ScreenAccess::Off));
+        assert!(screen_recording_answered(ScreenAccess::NeedsRestart));
+        assert!(screen_recording_answered(ScreenAccess::Allowed));
     }
 }

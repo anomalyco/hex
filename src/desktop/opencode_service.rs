@@ -5,9 +5,10 @@
 //! executable; when no service answers, OpenCode isn't running, and when
 //! one answers `/api/info` with 404 it predates the current OpenCode 2.
 //!
-//! On Windows, Labs › OpenCode in WSL also reads the default WSL
-//! distribution's registration when no Windows one answers; that service
-//! gets Hex's workspace as a Linux path.
+//! On Windows, with Labs › OpenCode in WSL on, a WSL service that answers
+//! is used ahead of a Windows one; the Windows registration is the fallback
+//! when WSL answers nothing, and a WSL service gets Hex's workspace as a
+//! Linux path.
 
 mod wsl;
 
@@ -69,8 +70,9 @@ impl Missing {
 }
 
 /// The running service, or why there is none. Reads only registration files
-/// and asks each registered service for `/api/info`. On Windows it also
-/// looks in WSL while Labs › OpenCode in WSL is on.
+/// and asks each registered service for `/api/info`. On Windows, with
+/// Labs › OpenCode in WSL on, a WSL service is preferred and the Windows
+/// registration is the fallback.
 pub(crate) fn find() -> Result<Service, Missing> {
     let found = match state_dir() {
         Some(state) => find_in(&state),
@@ -81,8 +83,10 @@ pub(crate) fn find() -> Result<Service, Missing> {
 
 /// [`find`] within the caller's own budget: every `/api/info` confirmation
 /// shares `deadline` (still capped by [`INFO_DEADLINE`]) and stops when
-/// `cancelled` is set, so a rewrite never waits past its deadline here. The
-/// WSL fallback gets only what the Windows search has left.
+/// `cancelled` is set, so a rewrite never waits past its deadline here. A
+/// WSL lookup gets what the Windows search has left; when Windows already
+/// confirmed a service it is capped at `WSL_LOOKUP_CAP`, so a cold WSL
+/// can't hold the request.
 pub(crate) fn find_cancellable(
     deadline: Duration,
     cancelled: &AtomicBool,
@@ -99,9 +103,11 @@ pub(crate) fn find_cancellable(
     )
 }
 
-/// The Windows result, or a WSL service when Labs › OpenCode in WSL is on
-/// and no Windows registration confirmed one. A confirmed service wins; with
-/// neither, "update OpenCode" is the more useful answer.
+/// A WSL service when Labs › OpenCode in WSL is on, else the Windows
+/// result. A WSL service that answers is used ahead of a Windows one; the
+/// Windows registration is the fallback when WSL answers nothing. When
+/// Windows already confirmed a service the WSL wait is capped, so a cold WSL
+/// can't hold a rewrite or Annotate's send for its whole deadline.
 fn with_wsl(
     found: Result<Service, Missing>,
     budget: Option<Duration>,
@@ -109,9 +115,8 @@ fn with_wsl(
 ) -> Result<Service, Missing> {
     #[cfg(target_os = "windows")]
     if crate::labs::opencode_in_wsl() {
-        if found.is_err() {
-            return prefer_wsl(found, wsl::discover(budget, cancelled));
-        }
+        let budget = wsl_budget(found.is_ok(), budget);
+        return prefer_wsl(found, wsl::discover(budget, cancelled));
     } else {
         wsl::clear_cache();
     }
@@ -119,16 +124,30 @@ fn with_wsl(
     found
 }
 
-/// Whether `found` or the WSL search names the service to use: a confirmed
-/// service wins, and with neither, "update OpenCode" is more useful than
-/// "isn't running".
+/// The wait a WSL lookup gets: the caller's own budget when Windows found
+/// nothing, else what is left of it capped at [`wsl::WSL_LOOKUP_CAP`], so a
+/// cold WSL can't hold a rewrite or Annotate's send past the cap.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+fn wsl_budget(windows_found: bool, budget: Option<Duration>) -> Option<Duration> {
+    if windows_found {
+        Some(budget.map_or(wsl::WSL_LOOKUP_CAP, |budget| {
+            budget.min(wsl::WSL_LOOKUP_CAP)
+        }))
+    } else {
+        budget
+    }
+}
+
+/// Whether `found` or the WSL search names the service to use: a WSL
+/// service that answers wins, else a Windows one; with neither, "update
+/// OpenCode" is more useful than "isn't running".
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 fn prefer_wsl(
     found: Result<Service, Missing>,
     wsl: Result<Service, Missing>,
 ) -> Result<Service, Missing> {
     match (found, wsl) {
-        (Ok(service), _) | (_, Ok(service)) => Ok(service),
+        (_, Ok(service)) | (Ok(service), _) => Ok(service),
         (Err(Missing::Outdated), _) | (_, Err(Missing::Outdated)) => Err(Missing::Outdated),
         (Err(Missing::NotRunning), Err(Missing::NotRunning)) => Err(Missing::NotRunning),
     }
@@ -1105,7 +1124,7 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn a_wsl_service_is_a_fallback_only_without_a_windows_one() {
+    fn a_wsl_service_wins_with_the_lab_on_and_the_windows_one_is_the_fallback() {
         let service = fixture("http://127.0.0.1:1/");
         let wsl = || Service {
             wsl: Some(WslHome::for_test(
@@ -1117,13 +1136,23 @@ pub(crate) mod tests {
         assert_ne!(wsl(), service, "a WSL service is not the Windows one");
         assert_eq!(
             prefer_wsl(Ok(service.clone()), Ok(wsl())),
+            Ok(wsl()),
+            "a WSL service that answers wins over a Windows one"
+        );
+        assert_eq!(
+            prefer_wsl(Ok(service.clone()), Err(Missing::NotRunning)),
             Ok(service.clone()),
-            "a Windows service wins"
+            "the Windows service is used when WSL answers nothing"
+        );
+        assert_eq!(
+            prefer_wsl(Ok(service.clone()), Err(Missing::Outdated)),
+            Ok(service.clone()),
+            "a working Windows service is used over a WSL update notice"
         );
         assert_eq!(
             prefer_wsl(Err(Missing::NotRunning), Ok(wsl())),
             Ok(wsl()),
-            "with no Windows service, the WSL one is used"
+            "a WSL service is used when Windows has nothing"
         );
         assert_eq!(
             prefer_wsl(Err(Missing::Outdated), Ok(wsl())),
@@ -1143,6 +1172,35 @@ pub(crate) mod tests {
         assert_eq!(
             prefer_wsl(Err(Missing::NotRunning), Err(Missing::NotRunning)),
             Err(Missing::NotRunning)
+        );
+    }
+
+    #[test]
+    fn a_wsl_lookup_is_capped_only_when_windows_already_answered() {
+        assert_eq!(
+            wsl_budget(true, None),
+            Some(wsl::WSL_LOOKUP_CAP),
+            "a Windows service leaves the WSL wait at the cap"
+        );
+        assert_eq!(
+            wsl_budget(true, Some(Duration::from_secs(10))),
+            Some(wsl::WSL_LOOKUP_CAP),
+            "a longer caller budget is still capped"
+        );
+        assert_eq!(
+            wsl_budget(true, Some(Duration::from_secs(1))),
+            Some(Duration::from_secs(1)),
+            "a shorter caller budget wins"
+        );
+        assert_eq!(
+            wsl_budget(false, None),
+            None,
+            "with no Windows service the caller's own budget applies"
+        );
+        assert_eq!(
+            wsl_budget(false, Some(Duration::from_secs(10))),
+            Some(Duration::from_secs(10)),
+            "with no Windows service the caller's deadline stands"
         );
     }
 

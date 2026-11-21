@@ -4926,16 +4926,6 @@ fn meeting_paste_is_only_active_in_developer_builds() {
     ));
 }
 
-#[test]
-fn input_activity_revision_invalidates_continuation() {
-    let activity = InputActivity::default();
-    let revision = activity.revision();
-
-    activity.invalidate();
-
-    assert_ne!(activity.revision(), revision);
-}
-
 fn both_options() -> RuntimeHotkey {
     use crate::app_settings::{HotkeyModifiers, ModifierSide};
     RuntimeHotkey {

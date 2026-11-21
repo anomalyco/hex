@@ -33,13 +33,12 @@ final class DictationController {
                 false
             }
         }
-    }
 
-    enum AutoReturnState: Equatable {
-        case idle
-        case attempting(HostApp)
-        case succeeded
-        case swipeFallback
+        /// Recording and transcribing keep the screen on, so the iPhone doesn't dim and lock
+        /// while you talk or wait for the text.
+        var keepsScreenAwake: Bool {
+            self == .recording || self == .transcribing
+        }
     }
 
     private struct ActiveCaptureSession {
@@ -49,15 +48,30 @@ final class DictationController {
         let keyboardJobID: String?
         let style: DictationStyle
         let usesCleanup: Bool
+        /// Settings › Dictation › Lowercase, read at start.
+        let lowercase: Bool
+        /// Settings › Dictation › Format lists, read at start.
+        let formatLists: Bool
+        /// Settings › Dictation › End with a period, read at start.
+        let endsWithPeriod: Bool
+        /// Experiments › Hinglish, read at start.
+        let hinglish: Bool
         let vocabularyTerms: [String]
+        /// Learn how I type's dictation fixes, read at start; empty while it is off.
+        let personalCorrections: [DictationCorrection]
+        /// Custom vocabulary plus the learned fixes' meant words, for Apple Speech.
+        let recognitionHints: [String]
+        /// Whether the keyboard gets the raw transcript to learn from.
+        let sharesHeard: Bool
         let copyToPasteboard: Bool
+        /// The transcriber's language (BCP 47) when the capture started.
+        let language: String
     }
 
     private struct PendingKeyboardHandoff {
         let jobID: String?
         let style: DictationStyle
         let requestedAt: TimeInterval
-        let attemptAutoReturn: Bool
     }
 
     private var transcriber: any LocalTranscribing
@@ -65,12 +79,17 @@ final class DictationController {
     private let cleaner: (any TranscriptCleaning)?
     private let cleanupSettings: AppleIntelligenceCleanupSettings
     private let customVocabularySettings: CustomVocabularySettings
+    private let lowercaseSettings: DictationLowercaseSettings
+    private let listSettings: DictationListSettings
+    private let periodSettings: DictationPeriodSettings
+    private let hinglishSettings: HinglishSettings
+    private let typingJournalSettings: TypingJournalSettings
+    private let learnedDictationCorrections: @MainActor () -> [DictationCorrection]
     private let audio: any AudioManaging
-    private let keyboardBridge: KeyboardBridge
+    let keyboardBridge: KeyboardBridge
     private let fileManager: FileManager
     private let now: () -> TimeInterval
     private let liveActivity = LiveActivityCoordinator()
-    private var defaultURLOpener: @MainActor (URL) async -> Bool
 
     private var jobGeneration: UInt64 = 0
     private var modelPrepGeneration: UInt64 = 0
@@ -78,7 +97,6 @@ final class DictationController {
     private var meterTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
     private var keyboardSessionTask: Task<Void, Never>?
-    private var autoReturnFallbackTask: Task<Void, Never>?
 
     private var lastKeyboardCommandID: String?
     private var lastHandledLaunchJobID: String?
@@ -86,19 +104,29 @@ final class DictationController {
     private var keyboardResultID: String?
     private var keyboardResultExpiresAt: TimeInterval?
     private var keyboardResult: String?
+    private var keyboardResultHeard: String?
+    /// Record typing logs: each step of the result, for the keyboard's log; nil while off.
+    private var keyboardResultStages: DictationStages?
     private var keyboardMessage: String?
     private var pendingHandoff: PendingKeyboardHandoff?
-    private var keyboardSessionExpiresAt: TimeInterval = 0
+    var keyboardSessionExpiresAt: TimeInterval = 0
     private var suspendedWarmSessionOnInterruption = false
 
-    private(set) var phase = Phase.modelRequired
-    private(set) var isModelReady = false
-    private(set) var transcript = ""
-    @ObservationIgnored private(set) var audioLevel: Float = 0
-    @ObservationIgnored private(set) var loudnessDB: Float = -120
+    var phase = Phase.modelRequired {
+        didSet {
+            guard phase.keepsScreenAwake != oldValue.keepsScreenAwake else { return }
+            // Only applies while Hex is in front; nothing else in Hex sets it, so ending a
+            // dictation hands the screen back to Auto-Lock.
+            UIApplication.shared.isIdleTimerDisabled = phase.keepsScreenAwake
+        }
+    }
+    var isModelReady = false
+    var transcript = ""
+    @ObservationIgnored var audioLevel: Float = 0
+    @ObservationIgnored var loudnessDB: Float = -120
     @ObservationIgnored private var rawRecordingDuration: TimeInterval = 0
     private(set) var recordingWholeSeconds: Int = 0
-    private(set) var recordingDuration: TimeInterval {
+    var recordingDuration: TimeInterval {
         get { rawRecordingDuration }
         set {
             rawRecordingDuration = newValue
@@ -109,10 +137,10 @@ final class DictationController {
         }
     }
     private(set) var copied = false
-    private(set) var keyboardSessionEnabled = false
+    var keyboardSessionEnabled = false
     @ObservationIgnored private var rawKeyboardSessionRemaining: TimeInterval = 0
     private(set) var keyboardSessionDisplayRemaining = "0:00"
-    private(set) var keyboardSessionRemaining: TimeInterval {
+    var keyboardSessionRemaining: TimeInterval {
         get { rawKeyboardSessionRemaining }
         set {
             rawKeyboardSessionRemaining = newValue
@@ -124,15 +152,24 @@ final class DictationController {
     }
     @ObservationIgnored private var lastPublishedSnapshotSignature: String?
     @ObservationIgnored private var lastPublishedSnapshotAt: TimeInterval = -100
-    private(set) var warmDuration: WarmSessionDuration
+    var warmDuration: WarmSessionDuration
     private(set) var style: DictationStyle
-    private(set) var returnAppID: String?
-    private(set) var quickReturnApps: [HostApp]
     private(set) var allowBluetoothMic: Bool
-    private(set) var autoReturnState: AutoReturnState = .idle
     private(set) var handoffNotice: String?
-    private(set) var engineName = "Local speech"
-    private(set) var transcriptionLanguage = "English"
+    var engineName = "Local speech"
+    var transcriptionLanguage = "English"
+    /// The BCP 47 identifier of `transcriptionLanguage`, for the steps that depend on it.
+    var transcriptionLanguageID = "en-US"
+    /// Settings › Dictation language: a BCP 47 identifier, or nil for Automatic.
+    private(set) var dictationLanguage: String?
+    /// A language change made while busy, applied once the dictation in flight is done.
+    private var pendingLanguagePreparation = false
+    /// Said once Automatic moved on from a language this iPhone can't dictate yet
+    /// ("Russian isn't available on this iPhone yet. Hex switched to English.").
+    var languageNotice: String?
+    /// The language to offer (BCP 47) when the one chosen can't be dictated here yet.
+    var languageOffer: String?
+    private let languageSettings: LanguageSettings
     private(set) var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,
         detail: "Checking model files"
@@ -146,10 +183,16 @@ final class DictationController {
         fileManager: FileManager = .default,
         now: @escaping () -> TimeInterval = { Date().timeIntervalSince1970 },
         autoPrepareOnInit: Bool = true,
-        urlOpener: (@MainActor (URL) async -> Bool)? = nil,
         cleaner: (any TranscriptCleaning)? = nil,
         cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings(),
-        customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings()
+        customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
+        lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
+        listSettings: DictationListSettings = DictationListSettings(),
+        periodSettings: DictationPeriodSettings = DictationPeriodSettings(),
+        hinglishSettings: HinglishSettings = HinglishSettings(),
+        typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
+        learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
+        languageSettings: LanguageSettings = LanguageSettings()
     ) {
         let resolvedBridge = keyboardBridge ?? KeyboardBridge()
         let resolvedAudio = audio ?? SystemAudioManager()
@@ -162,16 +205,21 @@ final class DictationController {
         self.cleaner = cleaner
         self.cleanupSettings = cleanupSettings
         self.customVocabularySettings = customVocabularySettings
+        self.lowercaseSettings = lowercaseSettings
+        self.listSettings = listSettings
+        self.periodSettings = periodSettings
+        self.hinglishSettings = hinglishSettings
+        self.typingJournalSettings = typingJournalSettings
+        self.learnedDictationCorrections = learnedDictationCorrections ?? {
+            TypingJournal.storedDictationCorrections(settings: typingJournalSettings)
+        }
         self.fileManager = fileManager
         self.now = now
+        self.languageSettings = languageSettings
+        self.dictationLanguage = languageSettings.dictationLanguage
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
-        self.returnAppID = resolvedBridge.returnAppID
-        self.quickReturnApps = resolvedBridge.quickReturnApps
         self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
-        self.defaultURLOpener = urlOpener ?? { url in
-            await UIApplication.shared.open(url)
-        }
 
         let hasCachedModel = ParakeetTranscriber.hasCachedModel
         resolvedBridge.publish(.offline)
@@ -179,35 +227,47 @@ final class DictationController {
 
         wireAudioCallbacks()
         wireSystemIntentBus()
+        if autoPrepareOnInit {
+            // At launch no dictation is running, so any Hex Live Activity is left over.
+            liveActivity.endImmediately()
+        }
 
         if Self.applyLaunchFixtureIfPresent(to: self) {
             return
         }
 
         if autoPrepareOnInit {
-            if hasCachedModel {
+            // A launch after Hex ended while loading Parakeet doesn't load it again by itself,
+            // or it would end the same way at every launch.
+            let parakeetLoads = ParakeetLoadGuard()
+            parakeetLoads.noteLaunch()
+            let parakeetInterrupted = parakeetLoads.lastLoadWasInterrupted
+            if hasCachedModel && !parakeetInterrupted {
                 engineName = "Parakeet V2"
                 prepareModel()
-            } else if #available(iOS 26.0, *), AppleSpeechTranscriber.isAvailable {
+            } else if #available(iOS 26.0, *) {
                 Task { [weak self] in
                     guard let self else { return }
-                    if await AppleSpeechTranscriber.preferredLocale() != nil {
+                    if let language = await AppleSpeechTranscriber.preferredLanguage(),
+                       AppleSpeechTranscriber.shouldUse(language) {
                         self.engineName = "Apple Speech"
                         self.prepareModel()
                     } else {
                         self.engineName = "Parakeet V2"
+                        if hasCachedModel {
+                            self.phase = .failed(ParakeetLoadGuard.message)
+                        }
                     }
                 }
+            } else if hasCachedModel {
+                engineName = "Parakeet V2"
+                phase = .failed(ParakeetLoadGuard.message)
             }
         }
     }
 
     var isRecording: Bool {
         phase == .recording
-    }
-
-    var selectedReturnApp: HostApp? {
-        HostAppCatalog.app(for: returnAppID)
     }
 
     var primaryTitle: String {
@@ -250,9 +310,11 @@ final class DictationController {
         if duration == .off {
             if keyboardSessionEnabled {
                 endWarmSession()
+            } else {
+                endStaleLiveActivities()
             }
         } else if !keyboardSessionEnabled {
-            requestWarmSession(attemptAutoReturn: false)
+            requestWarmSession()
         }
     }
 
@@ -261,18 +323,49 @@ final class DictationController {
         keyboardBridge.style = newStyle
     }
 
-    func setReturnAppID(_ id: String?) {
-        let normalized = (id?.isEmpty == true) ? nil : id
-        returnAppID = normalized
-        keyboardBridge.returnAppID = normalized
+    /// Settings › Dictation language. Prepares the new language's model now, or once the
+    /// dictation in flight is done.
+    func setDictationLanguage(_ identifier: String?) {
+        let normalized = (identifier?.isEmpty == true) ? nil : identifier
+        guard normalized != dictationLanguage else { return }
+        languageSettings.chooseDictationLanguage(normalized)
+        applyDictationLanguage(normalized)
     }
 
-    /// Unticking the saved return app also forgets it, so the ↩ chip only ever names an app in the list.
-    func setQuickReturnApps(_ apps: [HostApp]) {
-        quickReturnApps = apps
-        keyboardBridge.quickReturnApps = apps
-        if let returnAppID, !apps.contains(where: { $0.id == returnAppID }) {
-            setReturnAppID(nil)
+    /// Picks up a language the keyboard switched to in the App Group.
+    func followDictationLanguageSetting() {
+        let stored = languageSettings.dictationLanguage
+        guard stored != dictationLanguage else { return }
+        applyDictationLanguage(stored)
+    }
+
+    /// Takes the language offered after the chosen one couldn't be dictated here.
+    func useOfferedLanguage() {
+        guard let languageOffer else { return }
+        setDictationLanguage(languageOffer)
+    }
+
+    private func applyDictationLanguage(_ identifier: String?) {
+        dictationLanguage = identifier
+        languageNotice = nil
+        languageOffer = nil
+        switch phase {
+        case .recording, .transcribing, .requestingPermission:
+            pendingLanguagePreparation = true
+        case .modelRequired, .preparingModel, .ready, .failed:
+            prepareModel()
+        }
+    }
+
+    /// Runs a language change that waited for the dictation in flight.
+    private func prepareDeferredLanguageIfNeeded() {
+        guard pendingLanguagePreparation else { return }
+        switch phase {
+        case .ready, .failed, .modelRequired:
+            pendingLanguagePreparation = false
+            prepareModel()
+        case .recording, .transcribing, .requestingPermission, .preparingModel:
+            break
         }
     }
 
@@ -325,6 +418,7 @@ final class DictationController {
         }
         restoreAudioAfterCapture()
         publishKeyboardSnapshot()
+        prepareDeferredLanguageIfNeeded()
     }
 
     func clearTranscript() {
@@ -345,7 +439,7 @@ final class DictationController {
             if warmDuration == .off {
                 setWarmDuration(.fifteenMinutes)
             }
-            requestWarmSession(attemptAutoReturn: false)
+            requestWarmSession()
         }
     }
 
@@ -380,46 +474,34 @@ final class DictationController {
         if phase != .recording {
             audio.deactivateSession()
         }
+        endStaleLiveActivities()
 
         publishKeyboardSnapshot()
     }
 
-    func noteSceneDidEnterBackground() {
-        autoReturnFallbackTask?.cancel()
-        autoReturnFallbackTask = nil
-        if case .attempting = autoReturnState {
-            autoReturnState = .succeeded
-        }
+    /// Ends Live Activities no dictation owns, such as one a suspended or killed process left.
+    func endStaleLiveActivities() {
+        guard activeCapture == nil, phase != .recording, phase != .transcribing else { return }
+        liveActivity.endImmediately()
     }
 
-    // MARK: - Keyboard Launch & Auto-Return
+    // MARK: - Keyboard Launch
 
-    func handleKeyboardLaunch(
-        _ request: KeyboardLaunchRequest,
-        urlOpener: (@MainActor (URL) async -> Bool)? = nil
-    ) {
+    func handleKeyboardLaunch(_ request: KeyboardLaunchRequest) {
         if case .setup = request {
             return
         }
-        if let customOpener = urlOpener {
-            defaultURLOpener = customOpener
-        }
-        autoReturnFallbackTask?.cancel()
-        autoReturnState = .idle
+        // A language picked in the keyboard: prepare it before the handoff records.
+        followDictationLanguageSetting()
         handoffNotice = nil
-
-        if let appID = request.returnAppID {
-            setReturnAppID(appID)
-        }
 
         let currentTime = now()
         if request.isHandoffExpired(at: currentTime) {
-            handoffNotice = "Timed out"
+            handoffNotice = String(localized: "Timed out")
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: style,
-                requestedAt: currentTime,
-                attemptAutoReturn: false
+                requestedAt: currentTime
             )
             fulfillPendingHandoffOrPrepare()
             return
@@ -433,12 +515,11 @@ final class DictationController {
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: style,
-                requestedAt: currentTime,
-                attemptAutoReturn: true
+                requestedAt: currentTime
             )
             fulfillPendingHandoffOrPrepare()
 
-        case .startRecording(let jobID, _, let requestedStyle, _):
+        case .startRecording(let jobID, _, let requestedStyle):
             guard !jobID.isEmpty, jobID != lastHandledLaunchJobID else { return }
             lastHandledLaunchJobID = jobID
             if let requestedStyle {
@@ -447,30 +528,21 @@ final class DictationController {
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: jobID,
                 style: requestedStyle ?? style,
-                requestedAt: currentTime,
-                attemptAutoReturn: true
+                requestedAt: currentTime
             )
             fulfillPendingHandoffOrPrepare()
         }
-    }
-
-    func returnToHostApp(_ app: HostApp, remember: Bool = true) {
-        if remember {
-            setReturnAppID(app.id)
-        }
-        triggerAutoReturn(to: app)
     }
 
     private func fulfillPendingHandoffOrPrepare() {
         guard let handoff = pendingHandoff else { return }
 
         if now() - handoff.requestedAt > KeyboardLaunchRequest.handoffWindow {
-            handoffNotice = "Timed out"
+            handoffNotice = String(localized: "Timed out")
             pendingHandoff = PendingKeyboardHandoff(
                 jobID: nil,
                 style: handoff.style,
-                requestedAt: now(),
-                attemptAutoReturn: false
+                requestedAt: now()
             )
         }
 
@@ -484,12 +556,11 @@ final class DictationController {
         }
     }
 
-    private func requestWarmSession(attemptAutoReturn: Bool) {
+    private func requestWarmSession() {
         pendingHandoff = PendingKeyboardHandoff(
             jobID: nil,
             style: style,
-            requestedAt: now(),
-            attemptAutoReturn: attemptAutoReturn
+            requestedAt: now()
         )
         fulfillPendingHandoffOrPrepare()
     }
@@ -507,12 +578,10 @@ final class DictationController {
                 startRecording(
                     keyboardJobID: jobID,
                     styleOverride: handoff?.style,
-                    copyToPasteboard: false,
-                    attemptAutoReturnOnStart: handoff?.attemptAutoReturn ?? false
+                    copyToPasteboard: false
                 )
             } else {
-                handoffNotice = "Timed out"
-                autoReturnState = .swipeFallback
+                handoffNotice = String(localized: "Timed out")
             }
             return
         }
@@ -525,15 +594,13 @@ final class DictationController {
                     startRecording(
                         keyboardJobID: jobID,
                         styleOverride: handoff?.style,
-                        copyToPasteboard: false,
-                        attemptAutoReturnOnStart: handoff?.attemptAutoReturn ?? false
+                        copyToPasteboard: false
                     )
                     return
                 } else {
-                    handoffNotice = "Timed out"
+                    handoffNotice = String(localized: "Timed out")
                 }
             }
-            maybeAutoReturnAfterActivation(allowed: handoff?.attemptAutoReturn ?? false)
             return
         }
 
@@ -546,7 +613,7 @@ final class DictationController {
             let granted = await audio.requestPermission()
             guard self.jobGeneration == requestGen else { return }
             guard granted else {
-                phase = .failed("Microphone access is off. Allow it in Settings to dictate.")
+                phase = .failed(String(localized: "Microphone access is off. Allow it in Settings to dictate."))
                 publishKeyboardSnapshot()
                 return
             }
@@ -561,14 +628,13 @@ final class DictationController {
                 self.startRecording(
                     keyboardJobID: jobID,
                     styleOverride: handoff?.style,
-                    copyToPasteboard: false,
-                    attemptAutoReturnOnStart: handoff?.attemptAutoReturn ?? false
+                    copyToPasteboard: false
                 )
                 return
             }
 
             if let jobID = handoff?.jobID, !jobID.isEmpty {
-                self.handoffNotice = "Timed out"
+                self.handoffNotice = String(localized: "Timed out")
             }
 
             do {
@@ -577,10 +643,9 @@ final class DictationController {
                 phase = .ready
                 startKeyboardSessionLoop()
                 publishKeyboardSnapshot()
-                maybeAutoReturnAfterActivation(allowed: handoff?.attemptAutoReturn ?? false)
             } catch {
                 audio.deactivateSession()
-                phase = .failed(error.localizedDescription)
+                phase = .failed(UserFacingError.message(for: error, context: .microphone))
                 publishKeyboardSnapshot()
             }
         }
@@ -599,44 +664,11 @@ final class DictationController {
         keyboardSessionRemaining = seconds
     }
 
-    private func maybeAutoReturnAfterActivation(allowed: Bool) {
-        guard allowed else { return }
-        if let app = selectedReturnApp {
-            triggerAutoReturn(to: app)
-        } else {
-            autoReturnState = .swipeFallback
-        }
-    }
-
-    private func triggerAutoReturn(to app: HostApp) {
-        guard let url = app.url else {
-            autoReturnState = .swipeFallback
-            return
-        }
-        autoReturnFallbackTask?.cancel()
-        autoReturnState = .attempting(app)
-        let opener = defaultURLOpener
-
-        Task {
-            let opened = await opener(url)
-            guard case .attempting = self.autoReturnState else { return }
-            if !opened {
-                self.autoReturnState = .swipeFallback
-                return
-            }
-            self.autoReturnFallbackTask = Task { [weak self] in
-                try? await Task.sleep(for: .milliseconds(950))
-                guard !Task.isCancelled, let self else { return }
-                if case .attempting = self.autoReturnState {
-                    self.autoReturnState = .swipeFallback
-                }
-            }
-        }
-    }
-
     // MARK: - Model Preparation
 
-    func prepareModel() {
+    /// `fallbacksLeft` bounds how often Automatic moves on to another language after one
+    /// whose model won't install here; each move sets a language aside, so it can't loop.
+    func prepareModel(fallbacksLeft: Int = 2) {
         modelPrepGeneration &+= 1
         let prepGen = modelPrepGeneration
         phase = .preparingModel
@@ -658,8 +690,10 @@ final class DictationController {
                     }
                 }
                 guard self.modelPrepGeneration == prepGen else { return }
+                self.languageOffer = nil
                 self.transcriber = candidate
                 self.transcriptionLanguage = await candidate.languageName
+                self.transcriptionLanguageID = await candidate.languageIdentifier
                 self.keyboardBridge.setModelInstalled(true)
                 self.isModelReady = true
                 self.phase = .ready
@@ -669,9 +703,17 @@ final class DictationController {
                 }
             } catch {
                 guard self.modelPrepGeneration == prepGen else { return }
+                let unavailable = error as? SpeechModelUnavailable
+                if let unavailable, unavailable.switchedAutomatically, fallbacksLeft > 0 {
+                    // Automatic set the language aside: prepare the one it picks now.
+                    self.languageNotice = UserFacingError.message(for: unavailable, context: .model)
+                    self.prepareModel(fallbacksLeft: fallbacksLeft - 1)
+                    return
+                }
+                self.languageOffer = unavailable.flatMap { $0.automatic ? nil : $0.fallback }
                 self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
                 self.pendingHandoff = nil
-                self.phase = .failed(error.localizedDescription)
+                self.phase = .failed(UserFacingError.message(for: error, context: .model))
                 self.publishKeyboardSnapshot()
             }
         }
@@ -679,9 +721,9 @@ final class DictationController {
 
     private static func defaultTranscriber() async -> any LocalTranscribing {
         if #available(iOS 26.0, *),
-           AppleSpeechTranscriber.isAvailable,
-           let locale = await AppleSpeechTranscriber.preferredLocale() {
-            return AppleSpeechTranscriber(locale: locale)
+           let language = await AppleSpeechTranscriber.preferredLanguage(),
+           AppleSpeechTranscriber.shouldUse(language) {
+            return AppleSpeechTranscriber(language: language)
         }
         return ParakeetTranscriber()
     }
@@ -691,8 +733,7 @@ final class DictationController {
     func startRecording(
         keyboardJobID: String? = nil,
         styleOverride: DictationStyle? = nil,
-        copyToPasteboard: Bool = false,
-        attemptAutoReturnOnStart: Bool = false
+        copyToPasteboard: Bool = false
     ) {
         guard activeCapture == nil else { return }
         if let keyboardJobID, keyboardJobID == activeKeyboardJobID {
@@ -711,7 +752,19 @@ final class DictationController {
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
+        let lowercase = lowercaseSettings.isEnabled
+        let formatLists = listSettings.isEnabled
+        let endsWithPeriod = periodSettings.isEnabled
+        let hinglish = hinglishSettings.isEnabled
+        let language = transcriptionLanguageID
+        CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
         let vocabularyTerms = customVocabularySettings.activeTerms
+        let personalCorrections = learnedDictationCorrections()
+        let recognitionHints = DictationCorrections.recognitionHints(
+            vocabulary: vocabularyTerms,
+            corrections: personalCorrections
+        )
+        let sharesHeard = typingJournalSettings.isEnabled
 
         phase = .requestingPermission
         copied = false
@@ -721,7 +774,7 @@ final class DictationController {
             guard self.jobGeneration == captureGeneration else { return }
             guard granted else {
                 activeKeyboardJobID = nil
-                let message = "Microphone access is off. Allow it in Settings."
+                let message = String(localized: "Microphone access is off. Allow it in Settings.")
                 keyboardMessage = keyboardJobID == nil ? nil : message
                 phase = .failed(message)
                 publishKeyboardSnapshot()
@@ -752,26 +805,35 @@ final class DictationController {
                     keyboardJobID: keyboardJobID,
                     style: effectiveStyle,
                     usesCleanup: usesCleanup,
+                    lowercase: lowercase,
+                    formatLists: formatLists,
+                    endsWithPeriod: endsWithPeriod,
+                    hinglish: hinglish,
                     vocabularyTerms: vocabularyTerms,
-                    copyToPasteboard: copyToPasteboard
+                    personalCorrections: personalCorrections,
+                    recognitionHints: recognitionHints,
+                    sharesHeard: sharesHeard,
+                    copyToPasteboard: copyToPasteboard,
+                    language: language
                 )
                 refreshWarmExpiry()
                 audioLevel = 0
                 loudnessDB = -120
                 recordingDuration = 0
                 phase = .recording
-                liveActivity.startRecording(startedAt: Date(timeIntervalSince1970: startedAt))
+                // Only the Action Button, Control Center, and Siri (the dictations that copy)
+                // get a Live Activity: the keyboard and the app show their own recording UI.
+                if copyToPasteboard {
+                    liveActivity.startRecording(startedAt: Date(timeIntervalSince1970: startedAt))
+                }
                 startMetering(for: captureGeneration)
                 publishKeyboardSnapshot()
-
-                if attemptAutoReturnOnStart {
-                    maybeAutoReturnAfterActivation(allowed: true)
-                }
             } catch {
                 try? fileManager.removeItem(at: captureURL)
                 activeKeyboardJobID = nil
-                keyboardMessage = keyboardJobID == nil ? nil : error.localizedDescription
-                phase = .failed(error.localizedDescription)
+                let message = UserFacingError.message(for: error, context: .microphone)
+                keyboardMessage = keyboardJobID == nil ? nil : message
+                phase = .failed(message)
                 restoreAudioAfterCapture()
                 publishKeyboardSnapshot()
             }
@@ -801,6 +863,7 @@ final class DictationController {
             liveActivity.endImmediately()
             restoreAudioAfterCapture()
             publishKeyboardSnapshot()
+            prepareDeferredLanguageIfNeeded()
             return
         }
 
@@ -816,27 +879,39 @@ final class DictationController {
             defer {
                 try? FileManager.default.removeItem(at: captureURL)
             }
+            let transcribeStarted = Date()
 
             do {
                 let rawText = try await activeTranscriber.transcribe(
                     captureURL,
-                    vocabulary: session.vocabularyTerms
+                    vocabulary: session.recognitionHints
                 )
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                // Spelling runs before optional cleanup so cleanup sees the preferred
-                // words, then again after formatting because a style can lowercase a
-                // term or capitalize a sentence start ("iPhone" -> "IPhone").
-                let spelled = VocabularySpelling.apply(session.vocabularyTerms, to: rawText)
-                let text = await self.cleanedTranscriptIfEnabled(spelled, session: session)
+                // The steps in-keyboard dictation runs too, plus Apple Intelligence's cleanup.
+                let pipeline = DictationPipeline(
+                    style: session.style,
+                    language: session.language,
+                    vocabulary: session.vocabularyTerms,
+                    corrections: session.personalCorrections,
+                    lowercase: session.lowercase,
+                    formatLists: session.formatLists,
+                    hinglish: session.hinglish,
+                    endsWithPeriod: session.endsWithPeriod
+                )
+                let stages = await pipeline.run(rawText) { tagged in
+                    await self.cleanedTranscriptIfEnabled(tagged, session: session)
+                }
+                let corrected = stages.fixed
+                let spelled = stages.spelled
+                let tagged = stages.tagged
+                let cleaned = stages.cleaned
+                let translated = stages.translated
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
-                let formatted = VocabularySpelling.apply(
-                    session.vocabularyTerms,
-                    to: TranscriptFormatter.format(text, style: session.style)
-                )
+                let formatted = stages.formatted
                 self.recordingDuration = 0
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {
@@ -850,6 +925,24 @@ final class DictationController {
                 if keyboardJobID != nil {
                     self.keyboardResultID = UUID().uuidString
                     self.keyboardResult = formatted
+                    // A translation's words can't be compared with what was heard.
+                    self.keyboardResultHeard = session.sharesHeard && translated == nil ? stages.heard : nil
+                    self.keyboardResultStages = TypingLogSettings().isEnabled
+                        ? DictationStages(
+                            engine: self.engineName,
+                            language: self.transcriptionLanguage,
+                            style: session.style.rawValue,
+                            recordedMS: Int((finalDuration * 1000).rounded()),
+                            transcribeMS: Int((Date().timeIntervalSince(transcribeStarted) * 1000).rounded()),
+                            raw: rawText,
+                            fixed: corrected,
+                            spelled: spelled,
+                            tagged: CleanupTaggerSettings().isEnabled && session.style != .verbatim ? tagged : nil,
+                            cleaned: session.usesCleanup && session.style != .verbatim ? cleaned : nil,
+                            translated: translated,
+                            formatted: formatted
+                        )
+                        : nil
                     self.keyboardResultExpiresAt = self.now() + Self.resultDeliveryTTL
                     self.keyboardMessage = nil
                 }
@@ -857,6 +950,7 @@ final class DictationController {
                 self.refreshWarmExpiry()
                 self.phase = .ready
                 self.publishKeyboardSnapshot()
+                self.prepareDeferredLanguageIfNeeded()
             } catch {
                 guard !Task.isCancelled, let self, self.jobGeneration == captureGeneration else {
                     return
@@ -864,9 +958,19 @@ final class DictationController {
                 self.recordingDuration = 0
                 self.activeKeyboardJobID = nil
                 self.liveActivity.endImmediately()
-                self.keyboardMessage = keyboardJobID == nil ? nil : error.localizedDescription
-                self.phase = .failed(error.localizedDescription)
+                // Nothing was said: end quietly, as a capture too short to hold a word does.
+                if EmptyCapture.endsQuietly(error) {
+                    self.keyboardMessage = nil
+                    self.refreshWarmExpiry()
+                    self.phase = .ready
+                    self.publishKeyboardSnapshot()
+                    return
+                }
+                let message = UserFacingError.message(for: error, context: .transcription)
+                self.keyboardMessage = keyboardJobID == nil ? nil : message
+                self.phase = .failed(message)
                 self.publishKeyboardSnapshot()
+                self.prepareDeferredLanguageIfNeeded()
             }
         }
     }
@@ -880,7 +984,8 @@ final class DictationController {
               session.style != .verbatim,
               !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let cleaner,
-              cleaner.isAvailable else {
+              cleaner.isAvailable,
+              cleaner.supports(language: session.language) else {
             return rawText
         }
         return await cleaner.clean(rawText) ?? rawText
@@ -902,7 +1007,7 @@ final class DictationController {
                 keyboardSessionEnabled = false
                 keyboardSessionRemaining = 0
                 keyboardSessionExpiresAt = 0
-                keyboardMessage = error.localizedDescription
+                keyboardMessage = UserFacingError.message(for: error, context: .microphone)
                 audio.deactivateSession()
             }
         } else {
@@ -962,6 +1067,8 @@ final class DictationController {
 
                 // Never expire an in-flight recording or accepted transcription mid-work.
                 if self.phase != .recording && self.phase != .transcribing {
+                    // The keyboard's language switch writes the App Group; follow it.
+                    self.followDictationLanguageSetting()
                     let remaining = self.keyboardSessionExpiresAt - self.now()
                     if remaining <= 0 {
                         self.endWarmSession()
@@ -1031,6 +1138,8 @@ final class DictationController {
         if let expires = keyboardResultExpiresAt, expires <= currentTime {
             keyboardResultID = nil
             keyboardResult = nil
+            keyboardResultHeard = nil
+            keyboardResultStages = nil
             keyboardResultExpiresAt = nil
         }
 
@@ -1088,7 +1197,9 @@ final class DictationController {
                 resultID: keyboardResultID,
                 resultExpiresAt: keyboardResultExpiresAt,
                 transcript: keyboardResult,
-                message: failureMessage
+                message: failureMessage,
+                heard: keyboardResultHeard,
+                stages: keyboardResultStages
             )
         )
     }
@@ -1106,7 +1217,7 @@ final class DictationController {
                 self.finishRecording()
             } else {
                 self.cancelCurrentJob()
-                self.phase = .failed("Recording stopped unexpectedly.")
+                self.phase = .failed(String(localized: "Recording stopped unexpectedly."))
                 self.publishKeyboardSnapshot()
             }
         }
@@ -1127,7 +1238,7 @@ final class DictationController {
                     finishRecording()
                 } else {
                     cancelCurrentJob()
-                    keyboardMessage = "Interrupted"
+                    keyboardMessage = String(localized: "Interrupted")
                 }
             } else {
                 audio.stopKeepalive()
@@ -1209,8 +1320,11 @@ final class DictationController {
                 }
                 return transcript
             }
+            followDictationLanguageSetting()
             if phase == .modelRequired || isFailedPhase {
                 prepareModel()
+            }
+            if phase == .preparingModel {
                 try? await waitUntilReady(timeoutSeconds: 10)
             }
             guard phase == .ready else { return nil }
@@ -1234,7 +1348,7 @@ final class DictationController {
                 if warmDuration == .off {
                     setWarmDuration(.fifteenMinutes)
                 }
-                requestWarmSession(attemptAutoReturn: false)
+                requestWarmSession()
             }
             return nil
         }
@@ -1250,236 +1364,5 @@ final class DictationController {
         while phase == .preparingModel && now() < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
-    }
-
-    // MARK: - Launch Fixtures for Simulator Verification (`--snap-state <name>`)
-
-    private static func applyLaunchFixtureIfPresent(to controller: DictationController) -> Bool {
-        let args = ProcessInfo.processInfo.arguments
-        guard let flagIndex = args.firstIndex(of: "--snap-state"),
-              flagIndex + 1 < args.count else {
-            return false
-        }
-        let scene = args[flagIndex + 1]
-        controller.engineName = "Apple Speech"
-        controller.transcriptionLanguage = "English"
-        controller.keyboardBridge.setModelInstalled(true)
-        controller.isModelReady = true
-
-        switch scene {
-        case "setup":
-            controller.phase = .ready
-            controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = false
-
-        case "ready":
-            controller.phase = .ready
-            controller.warmDuration = .off
-            controller.keyboardSessionEnabled = false
-            controller.transcript = "Meet at ten on Thursday and bring the updated design notes."
-
-        case "warm":
-            controller.phase = .ready
-            controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 42
-            controller.keyboardSessionExpiresAt = Date().timeIntervalSince1970 + 14 * 60 + 42
-            controller.setReturnAppID("messages")
-            controller.transcript = "Meet at ten on Thursday and bring the updated design notes."
-
-        case "recording":
-            controller.phase = .recording
-            controller.warmDuration = .fifteenMinutes
-            controller.audioLevel = 0.74
-            controller.loudnessDB = -31.0
-            controller.recordingDuration = 6.4
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 54
-
-        case "transcribing":
-            controller.phase = .transcribing
-            controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 52
-
-        case "handoff-listening", "handoff-no-home-bar":
-            controller.phase = .recording
-            controller.audioLevel = 0.68
-            controller.loudnessDB = -32.5
-            controller.recordingDuration = 3.2
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 57
-            controller.autoReturnState = .swipeFallback
-            Task { @MainActor in
-                let start = Date().timeIntervalSince1970 - 3.0
-                var simTime: Float = 0.0
-                while !Task.isCancelled {
-                    controller.loudnessDB = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
-                    controller.recordingDuration = Date().timeIntervalSince1970 - start
-                    simTime += 0.033
-                    try? await Task.sleep(for: .milliseconds(33))
-                }
-            }
-
-        case "handoff-tour":
-            controller.phase = .recording
-            controller.audioLevel = 0.68
-            controller.loudnessDB = -32.0
-            controller.recordingDuration = 0.0
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 58
-            controller.autoReturnState = .swipeFallback
-            Task { @MainActor in
-                let boot = Date().timeIntervalSince1970
-                var simTime: Float = 0.0
-                while !Task.isCancelled {
-                    let elapsed = Date().timeIntervalSince1970 - boot
-                    if elapsed < 3.4 {
-                        if controller.phase != .recording {
-                            withAnimation(HexMotion.stage) {
-                                controller.phase = .recording
-                            }
-                        }
-                        controller.loudnessDB = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
-                        controller.recordingDuration = elapsed
-                        simTime += 0.033
-                    } else if elapsed < 4.7 {
-                        if controller.phase != .transcribing {
-                            withAnimation(HexMotion.stage) {
-                                controller.phase = .transcribing
-                            }
-                        }
-                        controller.loudnessDB = -120.0
-                    } else {
-                        if controller.phase != .ready {
-                            withAnimation(HexMotion.stage) {
-                                controller.phase = .ready
-                            }
-                        }
-                    }
-                    try? await Task.sleep(for: .milliseconds(33))
-                }
-            }
-
-        case "handoff-returning":
-            controller.phase = .recording
-            controller.audioLevel = 0.62
-            controller.recordingDuration = 1.1
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 59
-            controller.setReturnAppID("claude")
-            controller.autoReturnState = .attempting(HostApp(id: "claude", name: "Claude", schemeURL: "claude://"))
-
-        case "hosted-keyboard-warm":
-            controller.phase = .ready
-            controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 42
-            controller.keyboardSessionExpiresAt = Date().timeIntervalSince1970 + 14 * 60 + 42
-            controller.setReturnAppID("messages")
-            Task { @MainActor in
-                while !Task.isCancelled {
-                    let t = Date().timeIntervalSince1970
-                    controller.keyboardBridge.publish(
-                        KeyboardSnapshot(
-                            state: .ready,
-                            heartbeat: t,
-                            expiresAt: t + 14 * 60 + 42
-                        )
-                    )
-                    try? await Task.sleep(for: .milliseconds(250))
-                }
-            }
-
-        case "hosted-keyboard-recording", "hosted-keyboard-light":
-            controller.phase = .ready
-            controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 55
-            let startWall = Date().timeIntervalSince1970 - 4.0
-            Task { @MainActor in
-                var simTime: Float = 0.4
-                while !Task.isCancelled {
-                    let t = Date().timeIntervalSince1970
-                    let db = -28.5 + 5.2 * sin(simTime * 19.0) + 2.4 * cos(simTime * 7.3)
-                    controller.keyboardBridge.publish(
-                        KeyboardSnapshot(
-                            state: .recording,
-                            heartbeat: t,
-                            expiresAt: t + 15 * 60,
-                            recordingStartedAt: startWall,
-                            audioLevel: 0.78,
-                            loudnessDB: db,
-                            jobID: "hosted-demo-job"
-                        )
-                    )
-                    simTime += 0.033
-                    try? await Task.sleep(for: .milliseconds(33))
-                }
-            }
-
-        case "hosted-keyboard-tour":
-            controller.phase = .ready
-            controller.warmDuration = .fifteenMinutes
-            controller.keyboardSessionEnabled = true
-            controller.keyboardSessionRemaining = 14 * 60 + 58
-            Task { @MainActor in
-                let boot = Date().timeIntervalSince1970
-                let freshResultID = "hosted-tour-\(UUID().uuidString)"
-                var simTime: Float = 0.0
-                while !Task.isCancelled {
-                    let t = Date().timeIntervalSince1970
-                    let elapsed = t - boot
-                    if elapsed < 2.5 {
-                        controller.keyboardBridge.publish(
-                            KeyboardSnapshot(
-                                state: .ready,
-                                heartbeat: t,
-                                expiresAt: t + 15 * 60
-                            )
-                        )
-                    } else if elapsed < 5.2 {
-                        let db = DotScopeSimulation.demoLoudness(at: simTime) + 4.5
-                        controller.keyboardBridge.publish(
-                            KeyboardSnapshot(
-                                state: .recording,
-                                heartbeat: t,
-                                expiresAt: t + 15 * 60,
-                                recordingStartedAt: boot + 2.5,
-                                audioLevel: 0.78,
-                                loudnessDB: db,
-                                jobID: "hosted-tour-job"
-                            )
-                        )
-                        simTime += 0.033
-                    } else if elapsed < 6.4 {
-                        controller.keyboardBridge.publish(
-                            KeyboardSnapshot(
-                                state: .transcribing,
-                                heartbeat: t,
-                                expiresAt: t + 15 * 60,
-                                jobID: "hosted-tour-job"
-                            )
-                        )
-                    } else {
-                        controller.keyboardBridge.publish(
-                            KeyboardSnapshot(
-                                state: .ready,
-                                heartbeat: t,
-                                expiresAt: t + 14 * 60 + 54,
-                                resultID: freshResultID,
-                                resultExpiresAt: boot + 30,
-                                transcript: "See you at ten."
-                            )
-                        )
-                    }
-                    try? await Task.sleep(for: .milliseconds(33))
-                }
-            }
-
-        default:
-            return false
-        }
-        return true
     }
 }

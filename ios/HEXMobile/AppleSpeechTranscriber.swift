@@ -22,8 +22,8 @@ private actor AppleSpeechAssetReservations {
             case nil:
                 generation += 1
                 let currentGeneration = generation
-                let acquisition = Task {
-                    _ = try await AssetInventory.reserve(locale: locale)
+                let acquisition = Task<Void, Error> {
+                    await AppleSpeechAssets.reserve(locale)
                 }
                 states[key] = .acquiring(currentGeneration, acquisition, 1)
                 try await finishAcquisition(acquisition, generation: currentGeneration, key: key)
@@ -88,104 +88,85 @@ private actor AppleSpeechAssetReservations {
 
 @available(iOS 26.0, *)
 actor AppleSpeechTranscriber: LocalTranscribing {
-    enum TranscriberError: LocalizedError {
-        case authorizationDenied
+    enum TranscriberError: HexDescribedError {
         case emptyTranscript
         case unavailable
 
         var errorDescription: String? {
             switch self {
-            case .authorizationDenied:
-                "Speech Recognition access is required to use Apple Speech."
             case .emptyTranscript:
-                "Apple Speech did not detect any speech."
+                String(localized: "Apple Speech did not detect any speech.")
             case .unavailable:
-                "Apple Speech is not available for your preferred languages on this iPhone."
+                String(localized: "Apple Speech can't transcribe this language on this iPhone.")
             }
         }
     }
 
     nonisolated let displayName = "Apple Speech"
 
-    private let requestedLocale: Locale
+    /// The language it dictates; the same language on `DictationTranscriber` once
+    /// `SpeechTranscriber`'s model wouldn't install.
+    private var language: SpeechLanguage
 
     private var preparedAnalyzer: SpeechAnalyzer?
-    private var preparedTranscriber: SpeechTranscriber?
-    private var locale: Locale?
+    private var preparedModule: AppleSpeechModule?
+    private var isPrepared = false
     private var reservedLocale: Locale?
 
     var languageName: String {
-        Self.displayName(for: locale ?? requestedLocale)
+        Self.displayName(for: language.locale)
     }
 
-    init(locale: Locale) {
-        requestedLocale = locale
+    var languageIdentifier: String {
+        language.identifier
     }
 
-    nonisolated static var isAvailable: Bool {
-        SpeechTranscriber.isAvailable
+    /// Never asks for Speech Recognition access: that permission is for `SFSpeechRecognizer`,
+    /// which Hex doesn't use. `SpeechAnalyzer` runs on the iPhone without it, in the app as
+    /// in the keyboard, for `SpeechTranscriber` and `DictationTranscriber` alike, so a
+    /// person who turned it off still dictates (TestFlight build 51, iOS 27.0.1).
+    init(language: SpeechLanguage) {
+        self.language = language
     }
 
-    static func preferredLocale() async -> Locale? {
-        var identifiers = Locale.preferredLanguages
-        identifiers.append(Locale.current.identifier)
-        identifiers.append("en-US")
+    /// Settings › Dictation language, else the first preferred language either module has.
+    static func preferredLanguage() async -> SpeechLanguage? {
+        await AppleSpeechLanguages.resolve()
+    }
 
-        var checked = Set<String>()
-        for identifier in identifiers {
-            let candidate = Locale(identifier: identifier)
-            let normalized = candidate.identifier(.bcp47)
-            guard checked.insert(normalized).inserted else { continue }
-            if let supported = await SpeechTranscriber.supportedLocale(
-                equivalentTo: candidate
-            ) {
-                return supported
-            }
-        }
-        return nil
+    /// Whether Hex dictates this language with Apple Speech rather than Parakeet. English
+    /// without `SpeechTranscriber` stays on Parakeet where it fits; every other language
+    /// `DictationTranscriber` has beats English-only Parakeet. The iPhones without
+    /// `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation) have 3–4 GB, where loading
+    /// Parakeet ended Hex at "50%" and again at every launch, so they dictate English with
+    /// `DictationTranscriber`.
+    nonisolated static func shouldUse(
+        _ language: SpeechLanguage,
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+    ) -> Bool {
+        language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier) || !parakeetFits
     }
 
     func prepare(
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
     ) async throws {
-        guard locale == nil else { return }
-        guard await Self.requestAuthorization() == .authorized else {
-            throw TranscriberError.authorizationDenied
-        }
-        guard let locale = await SpeechTranscriber.supportedLocale(
-            equivalentTo: requestedLocale
-        ) else {
-            throw TranscriberError.unavailable
-        }
+        guard !isPrepared else { return }
+        let locale = language.locale
 
-        try await AppleSpeechAssetReservations.shared.acquire(locale)
-        reservedLocale = locale
+        // Best effort: a reservation Hex can't get (over Apple's limit) doesn't stop the download.
+        if (try? await AppleSpeechAssetReservations.shared.acquire(locale)) != nil {
+            reservedLocale = locale
+        }
         do {
-            let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
-            let status = await AssetInventory.status(forModules: [transcriber])
-
-            if status != .installed,
-               let request = try await AssetInventory.assetInstallationRequest(
-                   supporting: [transcriber]
-               ) {
-                let progress = request.progress
-                let monitor = Task {
-                    while !Task.isCancelled && !progress.isFinished {
-                        progressHandler(
-                            ModelPreparationProgress(
-                                fractionCompleted: min(0.85, progress.fractionCompleted * 0.85),
-                                detail: "Downloading Apple \(Self.displayName(for: locale)) speech"
-                            )
-                        )
-                        try? await Task.sleep(for: .milliseconds(100))
-                    }
-                }
-                defer { monitor.cancel() }
-                try await request.downloadAndInstall()
-            }
-            guard await AssetInventory.status(forModules: [transcriber]) == .installed else {
-                throw TranscriberError.unavailable
-            }
+            let detail = "Downloading Apple \(Self.displayName(for: locale)) speech"
+            // `SpeechTranscriber`'s model, else the same language's on `DictationTranscriber`;
+            // a download that stops moving ends instead of holding the progress bar forever.
+            language = try await AppleSpeechAssets.install(language, progress: { fraction in
+                progressHandler(
+                    ModelPreparationProgress(fractionCompleted: min(0.85, fraction * 0.85), detail: detail)
+                )
+            })
+            let speech = AppleSpeechModule(language)
             progressHandler(
                 ModelPreparationProgress(
                     fractionCompleted: 0.9,
@@ -193,11 +174,11 @@ actor AppleSpeechTranscriber: LocalTranscribing {
                 )
             )
 
-            let analyzer = makeAnalyzer(transcriber: transcriber)
+            let analyzer = makeAnalyzer(module: speech)
             try await analyzer.prepareToAnalyze(in: nil)
 
-            self.locale = locale
-            preparedTranscriber = transcriber
+            isPrepared = true
+            preparedModule = speech
             preparedAnalyzer = analyzer
             progressHandler(
                 ModelPreparationProgress(
@@ -216,20 +197,20 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     }
 
     func transcribe(_ audioURL: URL, vocabulary: [String]) async throws -> String {
-        guard let locale else {
+        guard isPrepared else {
             throw TranscriberError.unavailable
         }
 
-        let transcriber: SpeechTranscriber
+        let speech: AppleSpeechModule
         let analyzer: SpeechAnalyzer
-        if let preparedTranscriber, let preparedAnalyzer {
-            transcriber = preparedTranscriber
+        if let preparedModule, let preparedAnalyzer {
+            speech = preparedModule
             analyzer = preparedAnalyzer
-            self.preparedTranscriber = nil
+            self.preparedModule = nil
             self.preparedAnalyzer = nil
         } else {
-            transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
-            analyzer = makeAnalyzer(transcriber: transcriber)
+            speech = AppleSpeechModule(language)
+            analyzer = makeAnalyzer(module: speech)
         }
 
         let audioFile = try AVAudioFile(forReading: audioURL)
@@ -244,22 +225,16 @@ actor AppleSpeechTranscriber: LocalTranscribing {
 
         try await analyzer.start(inputAudioFile: audioFile, finishAfterFile: true)
 
-        var transcript = AttributedString()
-        for try await result in transcriber.results where result.isFinal {
-            transcript += result.text
-        }
-
-        let text = String(transcript.characters)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let text = try await speech.finalText()
         guard !text.isEmpty else {
             throw TranscriberError.emptyTranscript
         }
         return text
     }
 
-    private func makeAnalyzer(transcriber: SpeechTranscriber) -> SpeechAnalyzer {
+    private func makeAnalyzer(module: AppleSpeechModule) -> SpeechAnalyzer {
         SpeechAnalyzer(
-            modules: [transcriber],
+            modules: [module.module],
             options: SpeechAnalyzer.Options(
                 priority: .userInitiated,
                 modelRetention: .lingering
@@ -280,19 +255,14 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         await AppleSpeechAssetReservations.shared.release(reservedLocale)
     }
 
-    private static func requestAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
-        let status = SFSpeechRecognizer.authorizationStatus()
-        guard status == .notDetermined else { return status }
-        return await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status)
-            }
-        }
-    }
-
     nonisolated private static func displayName(for locale: Locale) -> String {
         Locale.current.localizedString(forIdentifier: locale.identifier)
             ?? locale.localizedString(forIdentifier: locale.identifier)
             ?? locale.identifier
     }
+}
+
+@available(iOS 26.0, *)
+extension AppleSpeechTranscriber.TranscriberError: NoSpeechError {
+    var meansNoSpeech: Bool { self == .emptyTranscript }
 }

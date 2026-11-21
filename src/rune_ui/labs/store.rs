@@ -15,6 +15,8 @@ use super::super::lists::{Tone, tone_tag};
 use super::{Row, Tab, extras, flip, group, row_key, shown};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::labs::Group;
+use crate::rune_ui::{Menu as OpenMenu, settings::toggle_menu};
+use rune_kit::{Menu, MenuItem, Placement};
 
 /// The search field beside the title.
 pub(in crate::rune_ui) fn search_field(ui: &Ui, p: Paint) -> El {
@@ -59,7 +61,7 @@ pub(in crate::rune_ui) fn tabs(ui: &Ui, p: Paint) -> El {
 }
 
 /// The page under the title bar: the chips, then the scrolling cards.
-pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, cx: &rune::Cx<Ui>, layer: &mut Vec<El>) -> El {
     let rows = shown(ui);
     let store = &ui.lab_store;
     let query = store.query();
@@ -142,7 +144,14 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
         .grow(1.0)
         .shrink()
         .min_h(0.0)
-        .child(chips(&rows, store.group, p))
+        .child(chips(
+            ui,
+            p,
+            &rows,
+            cx.layout_with("labs-store/chips", |r| r[2])
+                .unwrap_or_default(),
+            layer,
+        ))
         .child(super::super::scroll_body(p.k, "scroll", content))
 }
 
@@ -150,7 +159,7 @@ pub(in crate::rune_ui) fn page(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
 fn matches(row: &Row, query: &str) -> bool {
     let note = row.note.as_deref().unwrap_or("");
     query.is_empty()
-        || [row.title, row.about, note, group::name(row.group)]
+        || [row.title, row.about.as_ref(), note, group::name(row.group)]
             .iter()
             .any(|copy| copy.to_lowercase().contains(query))
 }
@@ -215,37 +224,105 @@ fn group_header(p: Paint, group: Group, count: usize, open: bool, filtering: boo
         .child(header.px(4.0).py(2.0))
 }
 
-/// All, then a chip per group with its count.
-fn chips(rows: &[Row], selected: Option<Group>, p: Paint) -> El {
-    let mut chips = row()
+const CHIP_PX: f32 = 7.0;
+const COUNT_GAP: f32 = 4.0;
+const CHIP_GAP: f32 = 4.0;
+
+/// All and the selected category always stay on the row. Measure the translated
+/// labels and counts with the same fonts and insets the pills use to draw.
+fn chips(ui: &Ui, p: Paint, rows: &[Row], width: f32, layer: &mut Vec<El>) -> El {
+    let selected = ui.lab_store.group;
+    let more = format!("{}…", tr("More"));
+    let frame = 2.0 * (CHIP_PX + p.hair);
+    let label_width = |s: &str| rune::text::measure(s, &[], p.k.ty.ui, None).0;
+    let pill_width = |s: &str, count: usize| {
+        frame
+            + label_width(s)
+            + COUNT_GAP
+            + rune::text::measure(&count.to_string(), &[], p.k.ty.small, None).0
+    };
+    let all = tr("All");
+    let mut bar = row()
         .key("chips")
         .px(METRICS.gutter)
         .pb(8.0)
-        .gap(6.0)
-        .flex_wrap()
+        .gap(CHIP_GAP)
         .child(chip(
             p,
             "chip-all",
-            tr("All"),
+            all,
             rows.len(),
             selected.is_none(),
             None,
         ));
+    let mut groups = Vec::new();
     for group in Group::ALL {
         let count = rows.iter().filter(|row| row.group == group).count();
-        if count == 0 {
+        if count > 0 || selected == Some(group) {
+            groups.push((
+                group,
+                count,
+                CHIP_GAP + pill_width(group::name(group), count),
+            ));
+        }
+    }
+    let mut room = width - 2.0 * METRICS.gutter - pill_width(all, rows.len());
+    let overflow = groups.iter().map(|g| g.2).sum::<f32>() > room;
+    if overflow {
+        room -= CHIP_GAP + frame + label_width(&more);
+    }
+    if let Some(g) = groups.iter().find(|g| Some(g.0) == selected) {
+        room -= g.2;
+    }
+    let mut hidden = Vec::new();
+    for (group, count, cost) in groups {
+        let chosen = Some(group) == selected;
+        if overflow && !chosen && cost > room {
+            hidden.push((group, count));
             continue;
         }
-        chips = chips.child(chip(
+        if !chosen {
+            room -= cost;
+        }
+        bar = bar.child(chip(
             p,
             &format!("chip-{}", group.id()),
             group::name(group),
             count,
-            selected == Some(group),
+            chosen,
             Some(group),
         ));
     }
-    chips
+    if hidden.is_empty() {
+        return bar;
+    }
+    const MENU: OpenMenu = OpenMenu::Pick("labs-more");
+    let open = ui.open == Some(MENU);
+    let trigger = chip_frame(p, false)
+        .key("chip-more")
+        .role("button")
+        .label(&more)
+        .expanded(open)
+        .child(text(more).key("label").font(p.k.ty.ui).color(p.muted()))
+        .on_press(|ui: &mut Ui| toggle_menu(ui, MENU));
+    let mut menu = Menu::new("labs-more")
+        .trigger(trigger)
+        .placement(Placement::BottomEnd)
+        .gutter(4.0)
+        .open(open)
+        .on_close(|ui: &mut Ui| ui.open = None);
+    for (group, count) in hidden {
+        menu = menu.item(
+            MenuItem::new(group::name(group))
+                .shortcut(count.to_string())
+                .on_select_tx(move |ui: &mut Ui, tx| {
+                    tx.settle();
+                    ui.open = None;
+                    ui.lab_store.group = Some(group);
+                }),
+        );
+    }
+    bar.child(menu.build(p.k, layer))
 }
 
 fn chip(
@@ -256,26 +333,11 @@ fn chip(
     selected: bool,
     group: Option<Group>,
 ) -> El {
-    let c = &p.k.c;
-    let chip = row()
+    chip_frame(p, selected)
         .key(key)
         .role("radio")
         .label(label)
-        .h(26.0)
-        .px(10.0)
-        .gap(6.0)
-        .center_y()
-        .radius(13.0)
-        .border(
-            p.hair,
-            if selected {
-                c.border_base
-            } else {
-                c.border_weak
-            },
-        )
-        .hover(c.hover)
-        .press(c.pressed)
+        .checked(selected)
         .child(text(label).key("label").font(p.k.ty.ui).color(if selected {
             p.text()
         } else {
@@ -290,7 +352,29 @@ fn chip(
         .on_press_tx(move |ui: &mut Ui, tx: &mut Tx| {
             tx.settle();
             ui.lab_store.group = group;
-        });
+        })
+}
+
+fn chip_frame(p: Paint, selected: bool) -> El {
+    let c = &p.k.c;
+    let chip = row()
+        .h(26.0)
+        .px(CHIP_PX)
+        .gap(COUNT_GAP)
+        .center_y()
+        .radius(13.0)
+        .border(
+            p.hair,
+            if selected {
+                c.border_base
+            } else {
+                c.border_weak
+            },
+        )
+        .focusable(true)
+        .focus_ring(2.0, 0.0, c.border_focus)
+        .hover(c.hover)
+        .press(c.pressed);
     if selected {
         chip.fill(c.layer_02)
     } else {
@@ -339,7 +423,7 @@ fn card(ui: &Ui, p: Paint, entry: &Row, new: bool, featured: bool, layer: &mut V
         .gap(2.0)
         .child(title)
         .child(
-            text(entry.about)
+            text(entry.about.clone())
                 .key("description")
                 .font(DESCRIPTION)
                 .color(p.muted())
@@ -397,12 +481,14 @@ const TILE: f32 = 32.0;
 fn lab_switch(p: Paint, entry: &Row) -> El {
     let lab = entry.lab;
     Switch::new(entry.on)
-        .control_size(ControlSize::Small)
+        .control_size(ControlSize::Mini)
         .label(entry.title)
         .hide_label()
         .disabled(entry.locked)
         .on_toggle(move |ui: &mut Ui| flip(ui, lab))
         .build(p.k)
+        .size(44.0, 20.0)
+        .justify_end()
 }
 
 /// What Labs is, Run setup again, and Send feedback.
@@ -456,6 +542,32 @@ mod tests {
     use crate::rune_ui::{AppSettings, SCENES, Service, deep_link, offscreen, view};
     use rune::text::TextSystem;
     use rune::{Env, Key, KeyEvent, Mods, Runtime};
+
+    #[test]
+    fn a_link_to_an_overflow_category_puts_it_on_the_single_chip_row() {
+        let mut ui = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        SCENES
+            .iter()
+            .find(|(name, _)| *name == "mac-labs")
+            .unwrap()
+            .1(&mut ui);
+        let text = TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
+        let mut rt = offscreen::runtime(ui, view, (860.0, 560.0), Env::new(true, 2.0), text);
+        settle(&mut rt);
+        assert!(rt.find("chip-more").is_some());
+        assert!(rt.find("chip-models").is_none());
+        let target = deep_link::parse("hex://labs?category=models&tab=on&search=model", "hex")
+            .unwrap()
+            .unwrap();
+        rt.update(|ui, tx| deep_link::open(ui, target, tx));
+        settle(&mut rt);
+        assert_eq!(rt.state.lab_store.group, Some(Group::Models));
+        assert_eq!(rt.state.lab_store.tab, Tab::On);
+        assert_eq!(rt.state.lab_store.search.text, "model");
+        let (_, y) = rt.find("chip-all").unwrap();
+        assert_eq!(rt.find("chip-models").unwrap().1, y);
+        assert_eq!(rt.find("chip-more").unwrap().1, y);
+    }
 
     #[test]
     fn labs_search_clears_across_the_titlebar_button_and_keeps_typing() {

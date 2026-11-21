@@ -34,9 +34,8 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
 │   Auto when its header says it detects the language (as Parakeet v3-type
 │   files do), no benchmark; Use prepares it like a catalog model (verifies
 │   Hex's copy against its receipt instead of downloading). General's Language menu
-│   lists every language the file declares: Hex's usual list first, then the
-│   rest of Whisper's codes by English name (Norwegian `no`, Norwegian
-│   Nynorsk `nn`, …; #1148)
+│   lists every language the file declares alongside Hex's usual ones,
+│   alphabetical by name (Norwegian `no`, Norwegian Nynorsk `nn`, …; #1148)
 ├── Remove -> Hex's copy, receipt, and manifest only; not the active model
 ├── Changed (a copy replaced by a link or hard link to the same file reads as
 │   changed: its file ID and mtime moved) -> "Check again" rehashes the file:
@@ -57,8 +56,9 @@ Picker header -> "Add model file…" -> native dialog (GGUF, All files)   // set
     while the fallback is downloaded); the card warns
 ```
 
-An imported model in use when the picker opens leads Compare. In the full
-list, “Your model files” comes first unless you explicitly sort by size or name.
+With Labs › Model in use first on, an import in use when the picker opens
+leads Every model, and "Your model files" shows above the language's group
+([labs.md](labs.md)).
 
 ## Use A Model File Where It Is (Labs)
 

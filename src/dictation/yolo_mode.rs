@@ -1,8 +1,6 @@
-//! Labs › YOLO mode: a shortcut dictation held for at
-//! least the lab's chosen time (`labs.yolo_mode_seconds`, 2 s by
-//! default) presses Return after its paste, so a long message sends itself.
+//! Labs › YOLO mode: a shortcut dictation presses Return after its paste.
 //! With apps chosen (`labs.yolo_mode_apps`), only a dictation whose
-//! frontmost app was one of them sends. Shorter ones paste as usual. On
+//! frontmost app was one of them sends. On
 //! macOS, Escape after the release and before Return goes skips the Return:
 //! the text still pastes, unsent.
 
@@ -75,30 +73,20 @@ impl SendGate {
     }
 }
 
-/// Whether a shortcut dictation held `held_ms`, captured with `application`
-/// frontmost, presses Return after its paste: the lab is on, the hold
-/// reached its chosen time, and the app is one it sends in. Callers pass
-/// only hotkey dictations that paste processed text; Dictate without
-/// processing, printing stops, and `hex dictation` or local API captures
-/// never send.
-pub fn sends(held_ms: u64, application: Option<&str>) -> bool {
-    crate::labs::yolo_mode().is_some_and(|minimum| {
-        long_enough(held_ms, minimum) && in_app(&crate::labs::yolo_mode_apps(), application)
-    })
-}
-
-fn long_enough(held_ms: u64, minimum: Duration) -> bool {
-    u128::from(held_ms) >= minimum.as_millis()
+/// Read at output commit, only for a shortcut dictation's processed paste.
+pub fn sends(application: Option<&str>, bundle_name: Option<&str>) -> bool {
+    crate::labs::yolo_mode_apps().is_some_and(|apps| in_app(&apps, application, bundle_name))
 }
 
 /// No apps chosen sends anywhere; otherwise the frontmost app must match
 /// one as a Mode's application does, and an unknown app never sends.
-fn in_app(apps: &[String], application: Option<&str>) -> bool {
+fn in_app(apps: &[String], application: Option<&str>, bundle_name: Option<&str>) -> bool {
     if apps.is_empty() {
         return true;
     }
     let context = crate::dictation::context::ContextSnapshot {
         application: application.map(str::to_owned),
+        bundle_name: bundle_name.map(str::to_owned),
         ..Default::default()
     };
     apps.iter().any(|app| context.application_is(app))
@@ -107,17 +95,6 @@ fn in_app(apps: &[String], application: Option<&str>) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_hold_reaching_the_chosen_time_is_long_enough() {
-        let two = Duration::from_secs(2);
-        assert!(!long_enough(0, two));
-        assert!(!long_enough(1_999, two));
-        assert!(long_enough(2_000, two));
-        assert!(long_enough(60_000, two));
-        assert!(!long_enough(4_999, Duration::from_secs(5)));
-        assert!(long_enough(1_000, Duration::from_secs(1)));
-    }
 
     #[cfg(target_os = "macos")]
     #[test]
@@ -150,12 +127,24 @@ mod tests {
 
     #[test]
     fn chosen_apps_limit_where_it_sends() {
-        assert!(in_app(&[], None));
-        assert!(in_app(&[], Some("Notes")));
+        assert!(in_app(&[], None, None));
+        assert!(in_app(&[], Some("Notes"), None));
         let apps = ["Slack".to_owned(), "Messages.app".to_owned()];
-        assert!(in_app(&apps, Some("Slack")));
-        assert!(in_app(&apps, Some("messages")));
-        assert!(!in_app(&apps, Some("Notes")));
-        assert!(!in_app(&apps, None), "an unknown app never sends");
+        assert!(in_app(&apps, Some("Slack"), None));
+        assert!(in_app(&apps, Some("messages"), None));
+        assert!(!in_app(&apps, Some("Notes"), None));
+        assert!(!in_app(&apps, None, None), "an unknown app never sends");
+    }
+
+    /// The picker saves Finder's name (`Rex Beta.app`), while the running
+    /// app calls itself `Rex`: either name sends.
+    #[test]
+    fn a_picked_app_sends_under_its_finder_name_or_its_own() {
+        let picked = ["Rex Beta".to_owned()];
+        assert!(in_app(&picked, Some("Rex"), Some("Rex Beta")));
+        assert!(!in_app(&picked, Some("Rex"), None));
+        let typed = ["Rex".to_owned()];
+        assert!(in_app(&typed, Some("Rex"), Some("Rex Beta")));
+        assert!(!in_app(&typed, Some("Rex Nightly"), Some("Rex Beta")));
     }
 }

@@ -133,7 +133,7 @@ impl AppSettings {
     }
 
     /// Publishes the saved values the embedded transcription service reads:
-    /// the Labs switches transcription checks (Labs › Vocabulary biasing
+    /// the Labs switches transcription checks (Labs › Vocabulary help
     /// gates the list), the vocabulary and its boost, and, on Linux and
     /// Windows, the speech engine. `hex transcribe` and the TypeScript SDK's
     /// direct child start that service without the app's launch, so nothing
@@ -397,6 +397,7 @@ impl AppSettings {
                         "meeting_descriptive_filenames",
                         "meeting_notes_file",
                         "expire_meeting_audio",
+                        "yearly_stats",
                     ][..],
                 ),
             ] {
@@ -422,6 +423,8 @@ impl AppSettings {
         let mut saved = saved.map_or_else(Self::default, |data| decode(data).0);
         // A file from before `meetings.summaries` keeps its choice under a lock.
         saved.migrate_meeting_summaries();
+        // A file from before Yearly stats merged keeps its choice too.
+        saved.migrate_yearly_stats_lab();
         let mut written = self.clone();
         policy.keep_saved(&mut written, &saved);
         Cow::Owned(written)

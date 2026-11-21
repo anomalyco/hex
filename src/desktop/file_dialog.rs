@@ -1,8 +1,8 @@
-//! Native open dialogs for one file or one folder, through Rune's
-//! `FileDialogs`: `NSOpenPanel` on macOS, the common item dialog on Windows,
-//! and the FileChooser portal on Linux. Each runs on its own thread and
-//! answers on a channel, so neither the window nor the runtime waits on the
-//! person.
+//! Native open and save dialogs for one file or one folder, through Rune's
+//! `FileDialogs`: `NSOpenPanel`/`NSSavePanel` on macOS, the common item
+//! dialog on Windows, and the FileChooser portal on Linux. Each runs on its
+//! own thread and answers on a channel, so neither the window nor the runtime
+//! waits on the person.
 
 use std::path::PathBuf;
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, sync_channel};
@@ -26,6 +26,13 @@ fn show(dialog: Dialog, reply: Reply) {
                     }
                     pollster::block_on(dialogs.open(options))
                 }
+                Target::Save { filters, file_name } => {
+                    options.file_name = Some(file_name);
+                    for filter in filters {
+                        options = options.filter(filter.label, filter.extensions);
+                    }
+                    pollster::block_on(dialogs.save(options))
+                }
             };
             reply.send(choice.map_err(|error| error.to_string()));
         });
@@ -41,6 +48,11 @@ pub(crate) struct Dialog {
 pub(crate) enum Target {
     /// One existing file.
     File(Vec<Filter>),
+    /// A file to write, with the name the dialog offers first.
+    Save {
+        filters: Vec<Filter>,
+        file_name: String,
+    },
     /// A folder: the macOS meetings and annotations folders, and Labs ›
     /// Screenshots' saves folder.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

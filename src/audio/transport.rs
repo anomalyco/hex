@@ -39,7 +39,7 @@ fn is_continuity_capture(kind: u32) -> bool {
 }
 
 /// ALSA devices carry no transport; Linux passes over a Bluetooth default
-/// through the sound server instead (`linux_input_route`).
+/// through the sound server instead (`linux/input/route`).
 #[cfg(target_os = "linux")]
 pub(super) fn transport(_device: &Device) -> Transport {
     Transport::Other

@@ -66,6 +66,8 @@ struct KeyboardSnapshotStage: View {
     private func configureScene() {
         let now: TimeInterval = 10_000
         viewModel.needsGlobeKey = true
+        DictationLanguageFixture.apply(to: viewModel)
+        viewModel.isLoggingTyping = ProcessInfo.processInfo.arguments.contains("--typing-log-mark")
 
         switch scene {
         case "keyboard-cold":
@@ -132,9 +134,77 @@ struct KeyboardSnapshotStage: View {
                 activeTray: .style
             )
 
+        case "keyboard-language-unavailable":
+            // In-keyboard dictation on an iPhone whose Apple Speech can't install Russian.
+            let unavailable = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .failed,
+                    heartbeat: now,
+                    expiresAt: now + 6,
+                    message: UserFacingError.message(for: unavailable, context: .transcription)
+                ),
+                now: now,
+                style: .polished
+            )
+
+        case "keyboard-language":
+            viewModel.configureFixture(
+                snapshot: KeyboardSnapshot(
+                    state: .ready,
+                    heartbeat: now - 0.1,
+                    expiresAt: now + 14 * 60
+                ),
+                now: now,
+                style: .polished,
+                activeTray: .language
+            )
+
         default:
             break
         }
+    }
+}
+
+/// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one (put
+/// first when it isn't in the list, as `hi-IN` for Hinglish), otherwise Automatic, which
+/// resolves to English. `--translate-to en` turns on Translate what I say with that target,
+/// pasting translated unless `--paste-as-spoken`; without it the switch shows off, for Japanese.
+enum DictationLanguageFixture {
+    static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
+
+    static var explicit: String? {
+        argument(after: "--dictation-language")
+    }
+
+    static var translationTarget: String? {
+        argument(after: "--translate-to")
+    }
+
+    private static func argument(after flag: String) -> String? {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: flag), idx + 1 < args.count else { return nil }
+        return args[idx + 1]
+    }
+
+    @MainActor
+    static func apply(to model: KeyboardViewModel) {
+        if let explicit, !choices.contains(explicit) {
+            model.languageChoices = [explicit] + choices.prefix(DictationLanguageSwitch.maxChoices - 1)
+        } else {
+            model.languageChoices = choices
+        }
+        model.dictationLanguage = explicit
+        model.automaticLanguage = "en-US"
+        model.translationTarget = translationTarget
+        model.pastesTranslation = !ProcessInfo.processInfo.arguments.contains("--paste-as-spoken")
+        model.translationLanguage = translationTarget ?? "ja"
+        model.translationTargetChoices = DictationTranslationSettings.targetChoices(
+            current: model.translationLanguage ?? "ja",
+            dictation: model.languageChoices,
+            preferred: ["zh-Hans", "ja"],
+            supported: ["en", "es", "zh", "ja", "de", "fr", "ko", "pt", "it"]
+        )
     }
 }
 
@@ -144,7 +214,7 @@ struct KeyboardSnapshotStage: View {
 struct HostedKeyboardConversationStage: View {
     let scene: String
     @Bindable var dictation: DictationController
-    @State private var draft = ""
+    @State private var draft = HostedFieldSpec.current.initialDraft
 
     static var requestedScene: String? {
         let args = ProcessInfo.processInfo.arguments
@@ -155,13 +225,16 @@ struct HostedKeyboardConversationStage: View {
         return value.hasPrefix("hosted-keyboard") ? value : nil
     }
 
+    private var spec: HostedFieldSpec { .current }
+
     private var usesLightAppearance: Bool {
-        scene.hasSuffix("-light") || usesDarkField
+        if let forceLight = spec.isLightApp { return forceLight }
+        return scene.hasSuffix("-light") || usesDarkField
     }
 
     /// A light app whose field asks for a dark keyboard.
     private var usesDarkField: Bool {
-        scene.hasSuffix("-dark-field")
+        spec.darkKeyboard || scene.hasSuffix("-dark-field")
     }
 
     var body: some View {
@@ -267,7 +340,9 @@ struct HostedKeyboardConversationStage: View {
                     text: $draft,
                     placeholder: "Message",
                     isLight: isLight,
-                    darkKeyboard: usesDarkField
+                    darkKeyboard: usesDarkField,
+                    keyboardType: spec.keyboardType,
+                    returnKeyType: spec.returnKeyType
                 )
                 .frame(height: 36)
                 .padding(.horizontal, 13)
@@ -279,6 +354,64 @@ struct HostedKeyboardConversationStage: View {
         }
         .background(canvas.ignoresSafeArea())
         .preferredColorScheme(isLight ? .light : .dark)
+        .onAppear {
+            if let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                let mask: UIInterfaceOrientationMask = spec.isLandscape ? .landscapeRight : .portrait
+                windowScene.requestGeometryUpdate(.iOS(interfaceOrientations: mask))
+            }
+        }
+    }
+}
+
+private struct HostedFieldSpec {
+    let initialDraft: String
+    let isLightApp: Bool?
+    let darkKeyboard: Bool
+    let keyboardType: UIKeyboardType
+    let returnKeyType: UIReturnKeyType
+    var isLandscape = false
+
+    static var current: HostedFieldSpec {
+        let args = ProcessInfo.processInfo.arguments
+        guard let idx = args.firstIndex(of: "--hosted-field"), idx + 1 < args.count else {
+            return HostedFieldSpec(initialDraft: "", isLightApp: nil, darkKeyboard: false, keyboardType: .default, returnKeyType: .send)
+        }
+        switch args[idx + 1] {
+        case "letters-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, ", isLightApp: false, darkKeyboard: false, keyboardType: .default, returnKeyType: .default)
+        case "letters-light":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, ", isLightApp: true, darkKeyboard: false, keyboardType: .default, returnKeyType: .default)
+        case "dark-field":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, ", isLightApp: true, darkKeyboard: true, keyboardType: .default, returnKeyType: .default)
+        case "shift-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min late. ", isLightApp: false, darkKeyboard: false, keyboardType: .default, returnKeyType: .default)
+        case "shift-light":
+            return HostedFieldSpec(initialDraft: "Running 10 min late. ", isLightApp: true, darkKeyboard: false, keyboardType: .default, returnKeyType: .default)
+        case "typing-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min lat", isLightApp: false, darkKeyboard: false, keyboardType: .default, returnKeyType: .send)
+        case "typing-light":
+            return HostedFieldSpec(initialDraft: "Running 10 min lat", isLightApp: true, darkKeyboard: false, keyboardType: .default, returnKeyType: .send)
+        case "typo-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min teh", isLightApp: false, darkKeyboard: false, keyboardType: .default, returnKeyType: .send)
+        case "numbers-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, home by 7:3", isLightApp: false, darkKeyboard: false, keyboardType: .numbersAndPunctuation, returnKeyType: .default)
+        case "numbers-light":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, home by 7:3", isLightApp: true, darkKeyboard: false, keyboardType: .numbersAndPunctuation, returnKeyType: .default)
+        case "email-dark":
+            return HostedFieldSpec(initialDraft: "alex@", isLightApp: false, darkKeyboard: false, keyboardType: .emailAddress, returnKeyType: .done)
+        case "url-dark":
+            return HostedFieldSpec(initialDraft: "https://anoma.ly/", isLightApp: false, darkKeyboard: false, keyboardType: .URL, returnKeyType: .go)
+        case "recording-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, ", isLightApp: false, darkKeyboard: false, keyboardType: .default, returnKeyType: .default)
+        case "recording-light":
+            return HostedFieldSpec(initialDraft: "Running 10 min late, ", isLightApp: true, darkKeyboard: false, keyboardType: .default, returnKeyType: .default)
+        case "landscape-dark":
+            return HostedFieldSpec(initialDraft: "Running 10 min late. ", isLightApp: false, darkKeyboard: false, keyboardType: .default, returnKeyType: .default, isLandscape: true)
+        case "landscape-light":
+            return HostedFieldSpec(initialDraft: "Running 10 min late. ", isLightApp: true, darkKeyboard: false, keyboardType: .default, returnKeyType: .default, isLandscape: true)
+        default:
+            return HostedFieldSpec(initialDraft: "", isLightApp: nil, darkKeyboard: false, keyboardType: .default, returnKeyType: .send)
+        }
     }
 }
 
@@ -287,6 +420,8 @@ private struct PlainKeyboardHostTextField: UIViewRepresentable {
     let placeholder: String
     let isLight: Bool
     var darkKeyboard = false
+    var keyboardType: UIKeyboardType = .default
+    var returnKeyType: UIReturnKeyType = .send
 
     final class Coordinator: NSObject, UITextFieldDelegate {
         var parent: PlainKeyboardHostTextField
@@ -310,10 +445,12 @@ private struct PlainKeyboardHostTextField: UIViewRepresentable {
             for: .editingChanged
         )
         tf.font = .systemFont(ofSize: 15)
-        tf.autocorrectionType = .no
+        tf.autocorrectionType = .default
         tf.spellCheckingType = .no
         tf.smartInsertDeleteType = .no
-        tf.returnKeyType = .send
+        tf.keyboardType = keyboardType
+        tf.returnKeyType = returnKeyType
+        tf.text = text
         tf.keyboardAppearance = isLight && !darkKeyboard ? .light : .dark
         tf.inputAssistantItem.leadingBarButtonGroups = []
         tf.inputAssistantItem.trailingBarButtonGroups = []

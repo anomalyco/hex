@@ -1,4 +1,5 @@
-//! The languages Hex names, in the order Settings offers them.
+//! The languages Hex names. The catalog order is the order defaults,
+//! validation, the CLI, and the API use; menus sort it by name.
 
 use super::models::AUTO_LANGUAGE;
 
@@ -124,4 +125,42 @@ pub fn language_name(code: &str) -> &str {
         .chain(OTHER_LANGUAGES)
         .find_map(|(candidate, name)| (*candidate == code).then_some(*name))
         .unwrap_or(code)
+}
+
+/// `codes` in the order a menu offers them: Auto first when the model
+/// detects the language, then every language by the name it shows.
+pub fn menu_order(codes: &[&'static str]) -> Vec<&'static str> {
+    let mut ordered = codes.to_vec();
+    ordered.sort_by_cached_key(|code| (*code != AUTO_LANGUAGE, language_name(code).to_lowercase()));
+    ordered
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn menu_order_puts_auto_first_then_names_alphabetically() {
+        let ordered = menu_order(&["en", "zh", "mt", "ms", AUTO_LANGUAGE, "yue"]);
+        assert_eq!(ordered, [AUTO_LANGUAGE, "yue", "en", "ms", "mt", "zh"]);
+    }
+
+    #[test]
+    fn menu_order_sorts_the_whole_catalog_by_name() {
+        let codes: Vec<&'static str> = LANGUAGES.iter().map(|(code, _)| *code).collect();
+        let ordered = menu_order(&codes);
+        assert_eq!(ordered.len(), codes.len());
+        assert_eq!(ordered[0], AUTO_LANGUAGE, "Auto stays first");
+        assert_eq!(ordered[1], "ar", "Arabic is first by name, not English");
+        let malay = ordered.iter().position(|code| *code == "ms").unwrap();
+        let maltese = ordered.iter().position(|code| *code == "mt").unwrap();
+        let mandarin = ordered.iter().position(|code| *code == "zh").unwrap();
+        assert!(malay < maltese && maltese < mandarin);
+    }
+
+    #[test]
+    fn menu_order_leaves_out_auto_when_the_model_takes_no_hint() {
+        let ordered = menu_order(&["ru", "en"]);
+        assert_eq!(ordered, ["en", "ru"]);
+    }
 }

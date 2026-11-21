@@ -37,7 +37,7 @@ const NAMED: &[(&[&str], &str, u32)] = &[
         "Scroll_Lock",
         0xff14,
     ),
-    // The ISO key left of 1; alone only with Labs › Section key alone.
+    // The ISO key left of 1; alone only with Labs › § key alone.
     (&["§", "section"], "section", 0xa7),
 ];
 

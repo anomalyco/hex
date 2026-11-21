@@ -3,16 +3,20 @@
 //! pauses, like a mode's corrections. The boost has no control here; it
 //! stays a setting (`hex settings set vocabulary_boost`).
 
+use std::path::{Path, PathBuf};
+
 use rune::tok::motion::{SETTLE, SETTLE_EXIT};
 use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
 use super::Ui;
 use super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, modal_scrim_transition, modal_transition, note,
+    ButtonKind, DESCRIPTION, METRICS, Paint, button, modal_scrim_transition, modal_transition, note,
 };
 use super::lists::remove_button;
+use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::dictation::vocabulary::csv::{self, MergeSummary};
 use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 const MODAL_WIDTH: f32 = 620.0;
@@ -39,7 +43,15 @@ struct TermRow {
     sounds_like: TextEdit,
 }
 
-/// The term rows, and whether the sheet is open.
+/// What the last Import or Export did, under the rows.
+struct Status {
+    message: String,
+    /// A read, parse, or write failure, shown in the danger colour.
+    failed: bool,
+}
+
+/// The term rows, whether the sheet is open, and the file dialogs its
+/// footer asked for.
 #[derive(Default)]
 pub(super) struct VocabularyEditor {
     rows: Vec<TermRow>,
@@ -49,6 +61,12 @@ pub(super) struct VocabularyEditor {
     /// The row Add term made last while the sheet is open: only it arrives
     /// with motion, so opening the sheet never animates its rows.
     added: Option<u64>,
+    /// Labs › Vocabulary files' last outcome, kept while the sheet stays
+    /// open.
+    status: Option<Status>,
+    /// The file dialogs Import… and Export… asked for.
+    import_chooser: Option<Pending>,
+    export_chooser: Option<Pending>,
     pub(super) open: bool,
 }
 
@@ -176,6 +194,7 @@ pub(super) fn open(ui: &mut Ui) {
     super::sound_sets::close(ui);
     ui.open = None;
     ui.vocabulary.open = true;
+    ui.vocabulary.status = None;
     if ui.vocabulary.rows.is_empty() {
         add_row(ui);
     }
@@ -188,6 +207,7 @@ pub(super) fn close(ui: &mut Ui) {
     }
     ui.vocabulary.open = false;
     ui.vocabulary.added = None;
+    ui.vocabulary.status = None;
     ui.flush_drafts();
     ui.vocabulary
         .rows
@@ -231,6 +251,282 @@ fn remove_row(ui: &mut Ui, id: u64) {
         ui.vocabulary.rows.remove(index);
         ui.flush_drafts();
     }
+}
+
+/// Labs › Vocabulary files on: the one switch the buttons, the status line,
+/// and the dialog answers read.
+fn on(ui: &Ui) -> bool {
+    crate::labs::Feature::VocabularyFiles.on(&ui.settings)
+}
+
+/// Redraws the window once a file dialog answers.
+fn wake(ui: &Ui) -> impl Fn() + Send + 'static {
+    let waker = ui.modes.waker.clone();
+    move || {
+        if let Some(waker) = &waker {
+            waker();
+        }
+    }
+}
+
+/// Import…: one CSV or TXT file, starting where downloads usually land.
+fn choose_import(ui: &mut Ui) {
+    if ui.vocabulary.import_chooser.is_some() {
+        return;
+    }
+    ui.vocabulary.status = None;
+    ui.vocabulary.import_chooser = Some(crate::desktop::file_dialog::open(
+        Dialog {
+            title: tr("Import vocabulary").into(),
+            target: Target::File(vec![
+                Filter {
+                    label: tr("CSV files").into(),
+                    extensions: &["csv"],
+                },
+                Filter {
+                    label: tr("Text files").into(),
+                    extensions: &["txt"],
+                },
+            ]),
+            directory: crate::app_paths::downloads_dir(),
+        },
+        wake(ui),
+    ));
+}
+
+/// Export…: the whole list as one CSV file.
+fn choose_export(ui: &mut Ui) {
+    if ui.vocabulary.export_chooser.is_some() {
+        return;
+    }
+    ui.vocabulary.status = None;
+    ui.vocabulary.export_chooser = Some(crate::desktop::file_dialog::open(
+        Dialog {
+            title: tr("Export vocabulary").into(),
+            target: Target::Save {
+                filters: vec![Filter {
+                    label: tr("CSV files").into(),
+                    extensions: &["csv"],
+                }],
+                file_name: "hex-vocabulary.csv".into(),
+            },
+            directory: crate::app_paths::downloads_dir(),
+        },
+        wake(ui),
+    ));
+}
+
+/// The file dialogs' answers, since the last call. True when one changed
+/// what the sheet shows or what settings hold.
+pub(super) fn poll(ui: &mut Ui) -> bool {
+    // A closed sheet or the lab off takes no answer: a dialog that finishes
+    // after either changes nothing.
+    if !ui.vocabulary.open || !on(ui) {
+        ui.vocabulary.import_chooser = None;
+        ui.vocabulary.export_chooser = None;
+        if !on(ui) {
+            ui.vocabulary.status = None;
+        }
+        return false;
+    }
+    let mut changed = false;
+    if let Some(choice) = ui
+        .vocabulary
+        .import_chooser
+        .as_ref()
+        .and_then(Pending::poll)
+    {
+        ui.vocabulary.import_chooser = None;
+        import_chosen(ui, choice);
+        changed = true;
+    }
+    if let Some(choice) = ui
+        .vocabulary
+        .export_chooser
+        .as_ref()
+        .and_then(Pending::poll)
+    {
+        ui.vocabulary.export_chooser = None;
+        export_chosen(ui, choice);
+        changed = true;
+    }
+    changed
+}
+
+fn import_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
+    let path = match choice {
+        Ok(Some(path)) => path,
+        Ok(None) => return,
+        Err(error) => {
+            fail(ui, tr_fill("Couldn't import that file: {}", &error));
+            return;
+        }
+    };
+    match apply_import(ui, &path) {
+        Ok(message) => {
+            ui.vocabulary.status = Some(Status {
+                message,
+                failed: false,
+            });
+        }
+        Err(error) => import_failed(ui, error),
+    }
+}
+
+/// Every import failure in the sheet's one wording, with the fixed reasons
+/// translated and the OS's own text left as it is.
+fn import_failed(ui: &mut Ui, error: csv::ImportError) {
+    use crate::dictation::vocabulary::csv::ImportError;
+    let message = match error {
+        ImportError::TooLarge => tr_fill(
+            "Couldn't import that file: {}",
+            tr("the file is larger than 1 MB"),
+        ),
+        ImportError::NotText => tr_fill(
+            "Couldn't import that file: {}",
+            tr("the file isn't UTF-8 text"),
+        ),
+        ImportError::UnclosedQuote => tr_fill(
+            "Couldn't import that file: {}",
+            tr("a quote is never closed"),
+        ),
+        ImportError::NotFile => tr_fill(
+            "Couldn't import that file: {}",
+            tr("it isn't a regular file"),
+        ),
+        ImportError::Io(error) => tr_fill("Couldn't import that file: {}", &error),
+        ImportError::NotSaved(error) => tr_fill("Couldn't save the vocabulary: {}", &error),
+    };
+    fail(ui, message);
+}
+
+/// Merges the file's terms into the sheet's rows, then saves through the
+/// same draft path typing uses. Returns the status line.
+fn apply_import(ui: &mut Ui, path: &Path) -> Result<String, csv::ImportError> {
+    let imported = csv::read(path)?;
+    if imported.is_empty() {
+        return Ok(tr("No terms found in that file").to_string());
+    }
+    let mut entries = ui.vocabulary.project();
+    let summary = csv::merge(&mut entries, &imported);
+    ui.vocabulary.reload(&entries);
+    if !ui.flush_drafts() {
+        return Err(csv::ImportError::NotSaved(
+            ui.error.clone().unwrap_or_default(),
+        ));
+    }
+    Ok(merge_status(summary))
+}
+
+/// "Added 12 terms", "Added 3 terms, updated 2, skipped 3", "Updated 2
+/// terms", or why nothing changed.
+fn merge_status(summary: MergeSummary) -> String {
+    let (added, updated, skipped) = (summary.added, summary.updated, summary.skipped);
+    if added == 0 && updated == 0 {
+        return if skipped == 0 {
+            tr("No new terms in that file").to_string()
+        } else {
+            tr_fill("No terms added; skipped {}", &skipped.to_string())
+        };
+    }
+    let (added_text, updated_text, skipped_text) =
+        (added.to_string(), updated.to_string(), skipped.to_string());
+    if skipped > 0 {
+        return match (added, updated) {
+            (0, 1) => tr_fill("Updated 1 term, skipped {}", &skipped_text),
+            (0, _) => tr_named(
+                "Updated {updated} terms, skipped {skipped}",
+                &[("updated", &updated_text), ("skipped", &skipped_text)],
+            ),
+            (1, 0) => tr_fill("Added 1 term, skipped {}", &skipped_text),
+            (1, _) => tr_named(
+                "Added 1 term, updated {updated}, skipped {skipped}",
+                &[("updated", &updated_text), ("skipped", &skipped_text)],
+            ),
+            (_, 0) => tr_named(
+                "Added {added} terms, skipped {skipped}",
+                &[("added", &added_text), ("skipped", &skipped_text)],
+            ),
+            (_, _) => tr_named(
+                "Added {added} terms, updated {updated}, skipped {skipped}",
+                &[
+                    ("added", &added_text),
+                    ("updated", &updated_text),
+                    ("skipped", &skipped_text),
+                ],
+            ),
+        };
+    }
+    match (added, updated) {
+        (1, 0) => tr("Added 1 term").to_string(),
+        (0, 1) => tr("Updated 1 term").to_string(),
+        (0, _) => tr_fill("Updated {} terms", &updated_text),
+        (1, _) => tr_named(
+            "Added 1 term, updated {updated}",
+            &[("updated", &updated_text)],
+        ),
+        (_, 0) => tr_fill("Added {} terms", &added_text),
+        (_, _) => tr_named(
+            "Added {added} terms, updated {updated}",
+            &[("added", &added_text), ("updated", &updated_text)],
+        ),
+    }
+}
+
+/// The file to write: the chosen path, or its `.csv` name when the person
+/// left the extension off and that name is free. A name that is just
+/// `.csv` is already a CSV file, so it is never doubled.
+fn export_path(chosen: &Path) -> PathBuf {
+    if chosen.extension().is_some()
+        || chosen
+            .file_name()
+            .is_some_and(|name| name.eq_ignore_ascii_case(".csv"))
+    {
+        return chosen.to_path_buf();
+    }
+    let with_extension = chosen.with_extension("csv");
+    if with_extension.exists() {
+        chosen.to_path_buf()
+    } else {
+        with_extension
+    }
+}
+
+fn export_chosen(ui: &mut Ui, choice: Result<Option<PathBuf>, String>) {
+    let path = match choice {
+        Ok(Some(path)) => path,
+        Ok(None) => return,
+        Err(error) => {
+            fail(ui, tr_fill("Couldn't export the vocabulary: {}", &error));
+            return;
+        }
+    };
+    let path = export_path(&path);
+    let entries = ui.vocabulary.project();
+    match crate::durable::write(&path, csv::render(&entries).as_bytes()) {
+        Ok(()) => {
+            let message = if entries.len() == 1 {
+                tr("Exported 1 term").to_string()
+            } else {
+                tr_fill("Exported {} terms", &entries.len().to_string())
+            };
+            ui.vocabulary.status = Some(Status {
+                message,
+                failed: false,
+            });
+        }
+        Err(error) => fail(
+            ui,
+            tr_fill("Couldn't export the vocabulary: {}", &error.to_string()),
+        ),
+    }
+}
+
+fn fail(ui: &mut Ui, message: String) {
+    ui.vocabulary.status = Some(Status {
+        message,
+        failed: true,
+    });
 }
 
 fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
@@ -298,22 +594,36 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
         ButtonKind::Secondary,
         add_term,
     );
-    let footer = row()
-        .key("footer")
-        .gap(12.0)
-        .center_y()
-        .child(add)
-        .child(el().key("spacer").grow(1.0))
-        .child(
-            button(
+    let mut footer = row().key("footer").gap(12.0).center_y().child(add);
+    // Labs › Vocabulary files: two more ways to fill the list, never main
+    // actions, so both stay Secondary.
+    if on(ui) {
+        footer = footer
+            .child(button(
                 p,
-                "close-vocabulary",
-                tr("Done"),
+                "import-vocabulary",
+                tr("Import…"),
                 ButtonKind::Secondary,
-                |ui: &mut Ui, _| close(ui),
-            )
-            .default_button(),
-        );
+                |ui: &mut Ui, _| choose_import(ui),
+            ))
+            .child(button(
+                p,
+                "export-vocabulary",
+                tr("Export…"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| choose_export(ui),
+            ));
+    }
+    let footer = footer.child(el().key("spacer").grow(1.0)).child(
+        button(
+            p,
+            "close-vocabulary",
+            tr("Done"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| close(ui),
+        )
+        .default_button(),
+    );
     let mut heading = col()
         .key("heading")
         .gap(4.0)
@@ -372,7 +682,19 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
                 tr("Up to 16 spellings per term are saved, and 64 characters per term or spelling."),
                 p.danger(),
             )
-            .mx(-super::controls::METRICS.row_px),
+            .mx(-METRICS.row_px),
+        );
+    }
+    if on(ui)
+        && let Some(status) = &ui.vocabulary.status
+    {
+        panel = panel.child(
+            note(
+                "file-status",
+                &status.message,
+                if status.failed { p.danger() } else { p.muted() },
+            )
+            .mx(-METRICS.row_px),
         );
     }
     panel = panel.child(footer);
@@ -431,6 +753,31 @@ pub(super) fn fixture(ui: &mut Ui, filled: bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A temporary file for one import or export, removed when dropped.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let directory = std::env::temp_dir().join(format!(
+                "hex-vocabulary-sheet-{}-{name}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&directory);
+            std::fs::create_dir_all(&directory).unwrap();
+            Self(directory)
+        }
+
+        fn path(&self, name: &str) -> std::path::PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     fn ui() -> Ui {
         Ui::with(
@@ -615,6 +962,157 @@ mod tests {
         );
         ui.settings.transcription.model = TranscriptionModelId::SenseVoiceSmall;
         assert!(unused_note(&ui).is_some());
+    }
+
+    #[test]
+    fn an_import_merges_into_the_sheet_and_saves() {
+        let mut ui = ui();
+        open(&mut ui);
+        // Typed but not yet saved: the import merges into the draft too.
+        ui.vocabulary.rows[0].term = TextEdit::new("Rune");
+        let scratch = Scratch::new("import");
+        let path = scratch.path("terms.csv");
+        std::fs::write(
+            &path,
+            "Term (required),Sounds like\nRune,roon\n\"open code\",\n\n",
+        )
+        .unwrap();
+
+        assert_eq!(
+            apply_import(&mut ui, &path).unwrap(),
+            "Added 1 term, updated 1"
+        );
+        assert_eq!(
+            ui.settings.vocabulary,
+            [
+                VocabularyEntry {
+                    term: "Rune".into(),
+                    sounds_like: vec!["roon".into()],
+                },
+                VocabularyEntry {
+                    term: "open code".into(),
+                    sounds_like: Vec::new(),
+                },
+            ]
+        );
+        assert_eq!(terms(&ui), ["Rune", "open code"]);
+        assert_eq!(summary(&ui), "2 terms");
+    }
+
+    #[test]
+    fn an_import_with_no_terms_says_so_and_changes_nothing() {
+        let mut ui = ui();
+        let scratch = Scratch::new("empty");
+        let path = scratch.path("empty.csv");
+        std::fs::write(&path, "Term (required),Sounds like\n\n,\n").unwrap();
+        assert_eq!(
+            apply_import(&mut ui, &path).unwrap(),
+            "No terms found in that file"
+        );
+        assert!(ui.settings.vocabulary.is_empty());
+
+        std::fs::write(&path, "Term (required),Sounds like\nRune,roon\n").unwrap();
+        ui.settings.vocabulary = vec![VocabularyEntry {
+            term: "Rune".into(),
+            sounds_like: vec!["roon".into()],
+        }];
+        ui.vocabulary.reload(&ui.settings.vocabulary);
+        assert_eq!(
+            apply_import(&mut ui, &path).unwrap(),
+            "No new terms in that file"
+        );
+
+        // A new spelling for a term already listed is an update, not nothing.
+        std::fs::write(&path, "Term (required),Sounds like\nRune,\"roon, ruin\"\n").unwrap();
+        assert_eq!(apply_import(&mut ui, &path).unwrap(), "Updated 1 term");
+        assert_eq!(ui.settings.vocabulary[0].sounds_like, ["roon", "ruin"]);
+    }
+
+    #[test]
+    fn an_unreadable_import_reports_why() {
+        let scratch = Scratch::new("missing");
+        let error = csv::read(&scratch.path("missing.csv")).unwrap_err();
+        assert!(
+            matches!(&error, csv::ImportError::Io(text) if !text.is_empty()),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn an_export_writes_the_sheet_and_appends_csv() {
+        let mut ui = ui();
+        ui.vocabulary = VocabularyEditor::new(&[
+            VocabularyEntry {
+                term: "Rune".into(),
+                sounds_like: vec!["roon".into(), "ruin".into()],
+            },
+            VocabularyEntry {
+                term: "Dax, Inc.".into(),
+                sounds_like: Vec::new(),
+            },
+        ]);
+        let scratch = Scratch::new("export");
+        let path = scratch.path("hex-vocabulary");
+        export_chosen(&mut ui, Ok(Some(path.clone())));
+        assert_eq!(
+            ui.vocabulary.status.as_ref().unwrap().message,
+            "Exported 2 terms"
+        );
+        let written = scratch.path("hex-vocabulary.csv");
+        assert_eq!(
+            std::fs::read_to_string(&written).unwrap(),
+            format!("{}\nRune,\"roon, ruin\",,\n\"Dax, Inc.\",,,\n", csv::HEADER)
+        );
+        assert!(!ui.vocabulary.status.as_ref().unwrap().failed);
+    }
+
+    #[test]
+    fn an_export_keeps_a_taken_csv_name_and_a_dot_csv_file() {
+        let scratch = Scratch::new("export-names");
+        let path = scratch.path("terms");
+
+        // Free: the .csv name is added.
+        assert_eq!(export_path(&path), scratch.path("terms.csv"));
+        // Taken: the chosen name is written exactly.
+        std::fs::write(scratch.path("terms.csv"), "taken").unwrap();
+        assert_eq!(export_path(&path), path);
+        // Any extension is kept as chosen.
+        assert_eq!(
+            export_path(&scratch.path("terms.txt")),
+            scratch.path("terms.txt")
+        );
+        assert_eq!(
+            export_path(&scratch.path("terms.csv")),
+            scratch.path("terms.csv")
+        );
+        // A file named just ".csv" is already a CSV file.
+        assert_eq!(export_path(&scratch.path(".csv")), scratch.path(".csv"));
+    }
+
+    #[test]
+    fn the_import_status_names_what_changed() {
+        let status = |added, updated, skipped| {
+            merge_status(MergeSummary {
+                added,
+                updated,
+                skipped,
+            })
+        };
+        assert_eq!(status(12, 0, 3), "Added 12 terms, skipped 3");
+        assert_eq!(status(1, 0, 3), "Added 1 term, skipped 3");
+        assert_eq!(status(12, 0, 0), "Added 12 terms");
+        assert_eq!(status(1, 0, 0), "Added 1 term");
+        assert_eq!(status(0, 1, 0), "Updated 1 term");
+        assert_eq!(status(0, 2, 0), "Updated 2 terms");
+        assert_eq!(status(3, 2, 0), "Added 3 terms, updated 2");
+        assert_eq!(status(1, 2, 0), "Added 1 term, updated 2");
+        assert_eq!(status(0, 2, 1), "Updated 2 terms, skipped 1");
+        assert_eq!(status(0, 1, 1), "Updated 1 term, skipped 1");
+        assert_eq!(status(1, 2, 1), "Added 1 term, updated 2, skipped 1");
+        assert_eq!(status(3, 2, 1), "Added 3 terms, updated 2, skipped 1");
+        assert_eq!(status(3, 0, 1), "Added 3 terms, skipped 1");
+        assert_eq!(status(0, 0, 2), "No terms added; skipped 2");
+        assert_eq!(status(0, 0, 0), "No new terms in that file");
     }
 
     #[test]

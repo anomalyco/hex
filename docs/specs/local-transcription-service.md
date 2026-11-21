@@ -262,6 +262,7 @@ export type ModelId =
   | "parakeet_v2"
   | "parakeet_v3"
   | "orukeet"
+  | "fluid_speech_pro"
   | "whisper_large_v3_turbo"
   | "qwen3_asr06_b"
   | "qwencleo_asr_1_7b"
@@ -274,6 +275,7 @@ export type ModelId =
   | "nemotron_3_5_asr"
   | "gigaam_v3"
   | "nb_whisper_medium"
+  | "kb_whisper_medium"
   | "granite_speech_5"
   | "apple_speech"
   // An imported or found model, listed while it is ready.

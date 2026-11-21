@@ -319,6 +319,13 @@ impl Tuning {
         }
     }
 
+    /// How many whole columns fit in `room` pt at this spacing, the outer
+    /// ones `edge` in from its ends.
+    pub fn columns_in(&self, room: f32, edge: f32) -> f32 {
+        // A room that is a whole number of columns keeps them all.
+        (((room - 2.0 * edge) / self.spacing + 1e-3).floor() + 1.0).max(1.0)
+    }
+
     /// Every value inside its knob's range (a hand-edited file may not be).
     pub fn clamped(mut self) -> Self {
         for knob in &KNOBS {

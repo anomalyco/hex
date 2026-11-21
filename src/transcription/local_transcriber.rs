@@ -11,7 +11,7 @@ use crate::transcription::gpu_health;
 use crate::transcription::models::{
     TranscriptionModelId, TranscriptionSelection, download_with_progress, model_path, validate,
 };
-use crate::transcription::{pad_gguf_samples, trailing_silence_samples};
+use crate::transcription::{pad_gguf_samples, requires_closing_mark, trailing_silence_samples};
 
 /// A word or segment's start and end (ms from the clip's start) and text.
 pub type TimedSpan = (i64, i64, String);
@@ -22,7 +22,6 @@ pub struct LocalTranscriber {
     options: RunOptions,
     device_label: String,
     max_audio_samples: Option<usize>,
-    stream: Option<transcribe_cpp::StreamOptions>,
     /// The finest timestamps the model gives, for a capture's or a
     /// meeting's word times.
     finest_timestamps: TimestampKind,
@@ -35,6 +34,9 @@ pub struct LocalTranscriber {
     /// It loaded on the CPU because the GPU ran out of memory, as it does
     /// when another copy of a model already fills it (#1170).
     gpu_full: bool,
+    /// The GPU out-of-memory fallback it took mid-run, for the dictation
+    /// engine to publish in Settings (#1984). Not saved.
+    out_of_memory: Option<gpu_health::Failure>,
 }
 
 /// 1.5 s of silence: what loading runs to warm a model and time it.
@@ -389,7 +391,6 @@ impl LocalTranscriber {
                 &architecture,
                 capabilities.max_audio_ms,
             ),
-            stream: None,
             finest_timestamps: match capabilities.max_timestamp_kind {
                 TimestampKind::Word | TimestampKind::Token => TimestampKind::Word,
                 kind => kind,
@@ -402,6 +403,7 @@ impl LocalTranscriber {
             preference,
             warm_ms: 0,
             gpu_full: false,
+            out_of_memory: None,
         };
         let started = Instant::now();
         transcriber.warm_on_silence()?;
@@ -409,9 +411,9 @@ impl LocalTranscriber {
             prewarm_ms = started.elapsed().as_millis(),
             "prewarmed local transcription model"
         );
-        transcriber.stream = transcriber
+        transcriber
             .session
-            .probe_stream(&transcriber.options, &architecture);
+            .probe_stream(&transcriber.options, &path);
         // Warm now, so this times the device rather than its first run's
         // shader compiles.
         let started = Instant::now();
@@ -451,13 +453,26 @@ impl LocalTranscriber {
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
-        self.stream.as_ref()
+        self.session.stream_options()
+    }
+
+    /// Re-probes the live stream when Labs › Faster live text or an env
+    /// override changed, so the next capture streams with it.
+    pub(crate) fn refresh_stream(&mut self) {
+        self.session.refresh_stream(&self.options);
     }
 
     /// Silence a live stream of this model hears before it finalizes, the
     /// same trailing silence its whole-clip runs get.
     pub(crate) fn stream_trailing_silence(&self) -> usize {
         trailing_silence_samples(Some(self.model_id()))
+    }
+
+    /// Whether a live stream of this model must end its text with closing
+    /// sentence punctuation before it is trusted, as Unified English's does
+    /// (issue 1933).
+    pub(crate) fn stream_requires_closing_mark(&self) -> bool {
+        requires_closing_mark(Some(self.model_id()))
     }
 
     /// The model this transcriber was loaded for.
@@ -483,6 +498,12 @@ impl LocalTranscriber {
 
     pub(crate) fn matches_selection(&self, selection: &TranscriptionSelection) -> bool {
         &self.selection == selection
+    }
+
+    /// The out-of-memory fallback this model took, for the dictation engine
+    /// to publish in Settings (#1984). `None` on a GPU.
+    pub(crate) fn out_of_memory(&self) -> Option<&gpu_health::Failure> {
+        self.out_of_memory.as_ref()
     }
 
     /// Brings an idle model's weights back before audio arrives, as loading
@@ -626,18 +647,24 @@ impl LocalTranscriber {
 
     /// Reloads this model on the CPU after its GPU failed mid-run (a hang
     /// or reset comes back as an error, #856), remembering the GPU once the
-    /// CPU works.
+    /// CPU works. An out-of-memory failure is carried by the CPU model for
+    /// the dictation engine to show in Settings (#1984).
     fn recover_on_cpu(&mut self, error: &color_eyre::eyre::Report) -> Result<()> {
         tracing::warn!(
             error = format!("{error:#}"),
             "the GPU failed while transcribing; reloading the model on the CPU"
         );
         let gpu = self.gpu.take();
-        let cpu = Self::load_on(&self.selection, Backend::Cpu, None, self.preference)?;
-        if let Some(gpu) = &gpu
-            && !gpu_health::out_of_memory(error)
-        {
-            gpu_health::record(gpu, &format!("{error:#}"));
+        let mut cpu = Self::load_on(&self.selection, Backend::Cpu, None, self.preference)?;
+        if let Some(gpu) = &gpu {
+            if gpu_health::out_of_memory(error) {
+                cpu.out_of_memory = Some(gpu_health::out_of_memory_failure(
+                    gpu,
+                    &format!("{error:#}"),
+                ));
+            } else {
+                gpu_health::record(gpu, &format!("{error:#}"));
+            }
         }
         gpu_health::set_auto_on_cpu(self.preference == TranscriptionDevice::Auto);
         *self = cpu;

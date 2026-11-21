@@ -46,22 +46,26 @@ strip = true
 # transcribe.cpp 0.4.1 plus one ggml patch that builds only the Vulkan
 # shaders Hex's models use (see `CMAKE_ARGS` in .cargo/config.toml),
 # Parakeet's vocabulary rescoring (branches hex/parakeet-vocabulary and
-# hex/vocabulary-sounds-like), and a Metal residency heartbeat that sleeps once
-# its keep-alive runs out (branch hex/metal-idle-residency). Drop this once a
-# transcribe.cpp release carries them.
+# hex/vocabulary-sounds-like), a Metal residency heartbeat that sleeps once
+# its keep-alive runs out (branch hex/metal-idle-residency), Fluid Speech
+# Pro's pre-Conformer encoder block (branch hex/fluid-pre-block), and
+# upstream's Parakeet padding-frame fix (branch hex/nemo-padding-frame). Drop
+# this once a transcribe.cpp release carries them.
 [patch.crates-io]
-transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a" }
-transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "bcb639faa4c74a2300ba19e30360cb2355b1663a" }
+transcribe-cpp = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19" }
+transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev = "60bed89dab84f7c1fddc3a17ad7fa8a27ddfba19" }
 # The crates Rune patches in its own workspace (Rune's README, "Depending on
 # Rune"): a dependency's `[patch]` never reaches the workspace that depends on
-# it, and without these Hex builds against stock winit, parley_engine,
-# wgpu-hal, accesskit_windows and accesskit_macos. Bump the rev with the rune
-# pin above.
-winit = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
-parley_engine = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
-wgpu-hal = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
-accesskit_windows = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
-accesskit_macos = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
+# it, and without these Hex builds against stock winit, sctk-adwaita,
+# parley_engine, wgpu-hal, accesskit_windows and accesskit_macos. Patch winit
+# and sctk-adwaita together: Rune's winit calls the vendored frame's
+# `AdwaitaFrame::content_corner_radius`. Bump the rev with the rune pin above.
+winit = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+parley_engine = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
@@ -133,7 +137,12 @@ wayland-protocols = { version = "0.32.13", features = ["client", "staging", "uns
 wayland-protocols-wlr = { version = "0.3.12", features = ["client"] }
 wayland-scanner = "0.31.11"
 x11-clipboard = "0.9.3"
-x11rb = { version = "0.14.0", features = ["xkb", "xtest"] }
+x11rb = { version = "0.14.0", features = ["xkb", "xtest", "randr"] }
+# Wayland paste reads the compositor's keymap to send the paste chord on the
+# key each layout puts the letter on (`linux/remote_desktop/keymap.rs`). Rune
+# already links libxkbcommon on Linux, so this adds no crate to Cargo.lock and
+# no library to the link; the `wayland` feature's memmap path is unused.
+xkbcommon = { version = "=0.9.0", default-features = false }
 zbus = { version = "6.1.0", default-features = false, features = ["tokio", "proxy"] }
 
 # The desktop UI, and Annotate (Scrawl's capture engine), compiled into
@@ -144,16 +153,16 @@ rmcp = { version = "3.5.1", default-features = false, features = ["server", "mac
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 pollster = "1.0.1"
 # Screenshot PNGs and the screenshot editor's export.
 png = "0.18"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90", features = ["native-file-dialog", "macos-background-cursor"] }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "eb5ae6c9f77b1a0051d8e1e5ee936ebea086bb90" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef", features = ["native-file-dialog", "macos-background-cursor"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 

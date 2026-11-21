@@ -1,0 +1,41 @@
+id	lang	voice	wpm	snr_db	reference
+01	en	Daniel	174	clean	Please bring the green notebook to the meeting.
+02	en	Karen	186	8	Please bring the green notebook to the meeting.
+03	en	Moira	160	clean	The coffee is still warm.
+04	en	Rishi	184	14	Move the afternoon call to Friday morning.
+05	en	Daniel	195	clean	I left the small brass key beside the kitchen door.
+06	en	Karen	175	clean	Please send the revised invoice before lunch.
+07	en	Moira	184	8	Save a seat near the back of the bus.
+08	en	Rishi	162	clean	We should meet at the station after work.
+09	en	Daniel	168	14	The last train leaves just after midnight.
+10	en	Karen	188	clean	Can you find the receipt for the yellow jacket?
+11	en	Moira	161	clean	Um, I left the door open.
+12	en	Rishi	196	8	Bring the blue folder, I mean the green folder.
+13	en	Daniel	180	clean	Meet me on Tuesday, sorry, Wednesday.
+14	en	Karen	171	14	My brother plays the cello in a small orchestra.
+15	en	Moira	194	clean	Check the spelling before you send the message.
+16	en	Rishi	172	clean	Let's take a walk along the river.
+17	en	Daniel	182	8	Keep the windows open until the paint dries.
+18	en	Karen	160	clean	The dentist moved my appointment to next month.
+19	en	Moira	187	14	I usually leave the keys near the entrance.
+20	en	Rishi	174	clean	Nobody ordered another cup of tea.
+21	en	Daniel	193	clean	We need fresh bread and a bottle of olive oil.
+22	en	Karen	180	8	The central library opens early on Saturday.
+23	en	Moira	168	clean	I didn't agree to change the delivery address.
+24	en	Rishi	185	14	Please read the instructions before connecting the cable.
+25	es	Mónica	173	clean	El café todavía está caliente.
+26	es	Paulina	178	8	Trae el cuaderno verde a la reunión.
+27	es	Mónica	185	clean	Nos vemos mañana en la estación.
+28	es	Paulina	163	clean	Te digo que no puedo ir.
+29	es	Mónica	191	14	La tienda cierra temprano los domingos.
+30	es	Paulina	170	clean	Dejé las llaves junto a la puerta.
+31	de	Anna	176	clean	Der Kaffee ist noch warm.
+32	de	Flo (German (Germany))	187	8	Bitte bring das grüne Heft zur Besprechung.
+33	de	Anna	161	clean	Wir treffen uns morgen am Bahnhof.
+34	de	Flo (German (Germany))	170	14	Ich habe den Schlüssel auf den Tisch gelegt.
+35	de	Anna	188	clean	Die Bibliothek schließt heute früher als sonst.
+36	no	Nora	172	clean	Kaffen er fortsatt varm.
+37	no	Nora	184	8	Ta med den grønne boka til møtet.
+38	no	Nora	157	clean	Vi møtes på stasjonen i morgen.
+39	no	Nora	177	14	Jeg la nøklene ved døra i morges.
+40	no	Nora	189	clean	Biblioteket stenger tidlig på lørdag.

@@ -22,6 +22,9 @@ pub(crate) struct MicrophoneLinger {
     /// When the window ends; `None` before the first idle pass and while a
     /// capture records.
     deadline: Option<Instant>,
+    /// The window a test drives instead of this process's lab setting.
+    #[cfg(test)]
+    window: Option<Duration>,
 }
 
 impl MicrophoneLinger {
@@ -37,7 +40,19 @@ impl MicrophoneLinger {
             self.deadline = None;
             return false;
         }
+        #[cfg(test)]
+        if let Some(window) = self.window {
+            return self.may_close_when_idle(now, Some(window));
+        }
         self.may_close_when_idle(now, window())
+    }
+
+    /// Keeps the microphone open for `window` as the lab would, without
+    /// reading this process's settings, so an owner test drives the real
+    /// reconcile path.
+    #[cfg(test)]
+    pub(crate) fn keep_open_for_test(&mut self, window: Duration) {
+        self.window = Some(window);
     }
 
     /// [`Self::may_close`] with `window` given, so a test drives it without

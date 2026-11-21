@@ -13,6 +13,7 @@ platforms, and dependencies.
 - [Rearm without a phantom capture](#rearm-without-a-phantom-capture).
 - [Reopen with fresh audio](#reopen-with-fresh-audio).
 - [Keep an interrupted dictation](#keep-an-interrupted-dictation).
+- [Keep a press across a reopen](#keep-a-press-across-a-reopen).
 - [Fence late capture notifications](#fence-late-capture-notifications).
 - [Degrade only the failing dependency](#degrade-only-the-failing-dependency).
 - [Keep Linux listeners managed](#keep-linux-listeners-managed).
@@ -278,7 +279,11 @@ initial open fails OR stream interrupts
   -> a dictation held past the hold threshold, or a `hex dictation start`
      control capture, keeps what it heard    // recover.interrupted-dictation
      -> transcribed and copied, never pasted
+  -> a press that has not passed the hold threshold waits for the reopen
+     -> its capture starts at the first fresh chunk  // recover.interrupted-press
   -> otherwise cancel the incomplete capture + discard stale audio  // interrupted audio cannot return
+  -> an idle, release-tail, or annotate-only interruption is the stream's
+     own recovery: no failed dictation is recorded  // recover.idle-interruption
   -> bounded backoff -> reopen the resolved input     // warm microphone retries
   -> replacement delivers new audio
   -> fresh capture -> release -> expected output
@@ -399,6 +404,10 @@ meeting microphone stream delivers only exact zeros for 3 s (macOS, #1518)
 open stream stops delivering audio without an error (any OS, #1206)
   -> 4 s with no chunk (STREAM_STALL_TIMEOUT) -> treated as a stream failure
   -> reopened like any interrupted stream, idle or not // logged "microphone stopped delivering audio"
+     ├── an idle listener, a submitted release tail, or Annotate copying the
+     │     microphone -> recovery only, no failed dictation // recover.idle-interruption
+     ├── a press on the stalled stream is kept, not started on dead audio
+     │     -> its capture starts at the reopened stream's first chunk
      ├── it delivered for 8 s without stopping (STREAM_PROVEN_UPTIME) -> it was working:
      │     reopen at once with the backoff reset // exactly as before
      └── any stream that fails before that never proved steady delivery (#1681)
@@ -743,6 +752,44 @@ and raw clips are both copied, with normal and raw history). Proof limit:
 channel-backed audio and the output worker, not a physical microphone taken by
 a call app or a target app's clipboard.
 
+### Keep A Press Across A Reopen
+
+`recover.interrupted-press`: a shortcut press taken before the hold threshold
+that arrives while the microphone cannot capture yet — the stream stopped
+delivering, its replacement is opening, or it opened but has not delivered —
+is kept instead of dropped. The capture begins at the first fresh chunk and
+anchors there, so audio from an earlier stream never joins it. The HUD and log
+already say dictating. Releasing or cancelling while the press waits discards
+it like any pending start.
+
+A reopened stream that is interrupted again before it delivers discards the
+press and records the failure, so the person sees why nothing was dictated.
+While opens keep failing, no event ends the press: it waits until it is
+released or cancelled (Release microphone while idle's failed on-demand open
+still clears it and reports the failure), and the listener keeps retrying with
+its bounded backoff.
+
+```ts
+press before the hold threshold while the stream cannot capture
+  -> the press waits, and the log says dictating
+  -> a failed stream's replacement still starts        // audio.rs recv_timeout
+     -> start_pending never holds the microphone closed
+  -> first fresh chunk -> capture starts there, with no pre-roll
+  ├── released or cancelled meanwhile -> discarded
+  └── interrupted again before any audio -> discarded + failed dictation
+```
+
+Both listeners keep the press when `DictationCapture::tentative_start` is
+`Some`: the capture is cancelled and turned back into a pending press. A
+capture past the hold threshold is dropped. The audio-owner pieces they share
+(`capture_idle` and a stalled stream) live in
+[audio/interruption.rs](../../src/audio/interruption.rs). On macOS the
+equivalent is the cold-stream branch of
+[dictation/audio.rs](../../src/dictation/audio.rs) that turns a tentative
+capture back into its pending capture. Proof limit: the Windows listener is
+compiled only on Windows, so its arm is proven by `Check Windows` rather than
+the Linux suite.
+
 ### Fence Late Capture Notifications
 
 `recover.late-notification`: keeping a failure visible is correct until it
@@ -791,6 +838,38 @@ and `Command::Reload` in [transcription/engine.rs](../../src/transcription/engin
 Check: `a_model_without_room_on_the_gpu_reloads_in_place_once` (swap state
 only). Not observed on a real 2 GB GPU. A second process (another `hex`
 command that loads a model itself) still loads its own copy.
+
+`recover.gpu-oom`: on Linux and Windows a GPU that fails a run out of memory
+(status 7) is not a driver fault, so it is not added to `gpu-failures.json`
+(#1165); the dictation engine still switched to the CPU and must say so
+(#1984).
+
+```ts
+GPU run fails out of memory -> the model reloads on the CPU and carries the failure
+  -> the engine publishes it for this process only     // never gpu-failures.json
+  -> General › Advanced › Speech engine names it: "Hex switched to the CPU
+     because {device} failed during transcription (out of memory). Restart
+     Hex to use the GPU again."
+  -> a later GPU load that works, or Hex restarting -> the note goes away
+     // ggml keeps the failed device for the process, so a restart is the
+     // reliable way back
+```
+Only the model the engine holds publishes the note: the local API's own
+model, model preparation, and a superseded model swap load beside it, and
+their out-of-memory failures are not dictation's.
+Source: `recover_on_cpu` and `out_of_memory` in
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs),
+`publish_out_of_memory` in [transcription/engine.rs](../../src/transcription/engine.rs),
+and `out_of_memory_failure`/`set_out_of_memory`/`out_of_memory_fallback` in
+[transcription/gpu_health.rs](../../src/transcription/gpu_health.rs); the row in
+[rune_ui/general.rs](../../src/rune_ui/general.rs).
+Check: `an_out_of_memory_fallback_lasts_until_a_gpu_load_works` (state only).
+Proof limit: not observed on a real device loss that surfaced as out of memory,
+and no test of the row itself; the copy names the recorded error, not its cause.
+The other copies' failures are kept out by which call sites publish, not by a
+test: reproducing one needs a GPU and a model.
+A load-time out of memory stays the [`recover.gpu-full`](#degrade-only-the-failing-dependency)
+path, which keeps retrying in place.
 
 `recover.command-pressure`: command recognition is best-effort; dictation
 audio is not.

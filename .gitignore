@@ -19,3 +19,5 @@ __pycache__/
 /perf/seeds/.generated/
 /.render
 /captures
+/ios/HEXKeyboard/CleanupTagger/HexCleanupTagger.mlpackage/
+/ios/HEXKeyboard/CleanupTagger/.HexCleanupTagger.sha256

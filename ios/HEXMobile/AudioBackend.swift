@@ -38,6 +38,39 @@ protocol AudioManaging: AnyObject {
     func beginCapture(at url: URL, maxDuration: TimeInterval, allowBluetooth: Bool) throws -> any ActiveAudioCapture
 }
 
+/// Keeps AVAudioRecorders that stopped or failed to start alive until their audio queue is
+/// done calling back.
+///
+/// A recorder's AudioQueue input callback reads the recorder (a weak reference inside it) on
+/// the queue's own thread. When the queue fails or stops from inside that callback (no
+/// microphone, a lost route), it is disposed asynchronously and callbacks it already fetched
+/// are still delivered. Freeing the recorder in that window crashed Hex in `objc_loadWeak`
+/// (`AudioRecorderAQInputCallback`) when the microphone failed during the keyboard's switch to
+/// Hex. Nothing reports when the last callback has run, so a retired recorder is held for
+/// `holdTime`: the queue takes about a millisecond to wind down, and a stopped recorder costs
+/// next to nothing to keep.
+@MainActor
+final class RetiredRecorders {
+    static let shared = RetiredRecorders()
+    static let holdTime: Duration = .seconds(5)
+
+    private var held: [UInt64: AnyObject] = [:]
+    private var nextToken: UInt64 = 0
+
+    /// Recorders still held.
+    var count: Int { held.count }
+
+    func hold(_ recorder: AnyObject, for duration: Duration = holdTime) {
+        nextToken &+= 1
+        let token = nextToken
+        held[token] = recorder
+        Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            self?.held[token] = nil
+        }
+    }
+}
+
 @MainActor
 private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudioRecorderDelegate {
     let url: URL
@@ -76,9 +109,12 @@ private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudi
     }
 
     func stop() {
+        guard !explicitlyStopped else { return }
         explicitlyStopped = true
         recorder.delegate = nil
         recorder.stop()
+        // The controller drops this capture next; its queue may still be calling back.
+        RetiredRecorders.shared.hold(recorder)
     }
 
     nonisolated func audioRecorderDidFinishRecording(
@@ -94,6 +130,7 @@ private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudi
 
 @MainActor
 final class SystemAudioManager: AudioManaging {
+    private let session: any AudioSessionControlling
     private var engine = AVAudioEngine()
     private var tapInstalled = false
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
@@ -105,7 +142,8 @@ final class SystemAudioManager: AudioManaging {
         engine.isRunning
     }
 
-    init() {
+    init(session: any AudioSessionControlling = AVAudioSession.sharedInstance()) {
+        self.session = session
         installNotifications()
     }
 
@@ -127,9 +165,16 @@ final class SystemAudioManager: AudioManaging {
         stopKeepalive()
         try configureAudioSession(allowBluetooth: allowBluetooth)
 
+        // Changing the session (Always use iPhone microphone, or a route change) can move the
+        // hardware to another sample rate. An engine built before that keeps the old input
+        // format, and installTap raises an Objective-C exception Swift can't catch, so build a
+        // fresh engine for the current route and tap with the format the hardware reports.
+        engine = AVAudioEngine()
         let input = engine.inputNode
-        let format = input.outputFormat(forBus: 0)
-        guard format.sampleRate > 0, format.channelCount > 0 else {
+        let format = input.inputFormat(forBus: 0)
+        guard format.sampleRate > 0, format.channelCount > 0,
+              input.outputFormat(forBus: 0).sampleRate == format.sampleRate
+        else {
             throw CocoaError(.coderInvalidValue)
         }
 
@@ -141,7 +186,13 @@ final class SystemAudioManager: AudioManaging {
         )
         tapInstalled = true
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            // Leave nothing half-installed: no tap on an engine that never ran.
+            stopKeepalive()
+            throw error
+        }
     }
 
     func stopKeepalive() {
@@ -157,10 +208,7 @@ final class SystemAudioManager: AudioManaging {
 
     func deactivateSession() {
         stopKeepalive()
-        try? AVAudioSession.sharedInstance().setActive(
-            false,
-            options: .notifyOthersOnDeactivation
-        )
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func beginCapture(
@@ -183,6 +231,11 @@ final class SystemAudioManager: AudioManaging {
         recorder.isMeteringEnabled = true
         recorder.prepareToRecord()
         guard recorder.record(forDuration: maxDuration) else {
+            // The microphone didn't start (none in the simulator, or one another app holds).
+            // The recorder's queue made it this far and is still winding down: freeing the
+            // recorder here crashed Hex on the queue's thread.
+            recorder.stop()
+            RetiredRecorders.shared.hold(recorder)
             throw CocoaError(.fileWriteUnknown)
         }
 
@@ -191,12 +244,24 @@ final class SystemAudioManager: AudioManaging {
         }
     }
 
-    private func configureAudioSession(allowBluetooth: Bool) throws {
-        let session = AVAudioSession.sharedInstance()
-        let options: AVAudioSession.CategoryOptions = allowBluetooth ? [.allowBluetoothHFP] : []
-        try session.setCategory(.record, mode: .measurement, options: options)
+    /// Captures and the warm keepalive record alongside other audio: `.mixWithOthers` never
+    /// interrupts another app, so its video or music keeps playing (over A2DP in a car or
+    /// headphones) with nothing to resume, and no `.duckOthers`. Always use iPhone microphone
+    /// (the default) records from the iPhone's microphone; turned off, a Bluetooth headset's
+    /// hands-free microphone is allowed too (iOS routes HFP first when a device has both).
+    func configureAudioSession(allowBluetooth: Bool) throws {
+        try session.setCategory(
+            .playAndRecord,
+            mode: .measurement,
+            options: allowBluetooth
+                ? [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
+                : [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
+        )
         try session.setPreferredSampleRate(16_000)
-        try session.setActive(true)
+        try session.setActive(true, options: [])
+        if !allowBluetooth, let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
+            try? session.setPreferredInput(builtIn)
+        }
     }
 
     nonisolated private static func discardSamples(

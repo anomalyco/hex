@@ -11,7 +11,7 @@ use super::controls::{
     ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folder_label, folding, icon_row,
     icon_toggle_row, note, section, select, setting_row, toggle_row,
 };
-use super::lists::{PermissionControl, Tone, permission_control, tone_tag};
+use super::lists::{PermissionControl, permission_control, small_button};
 use super::paste_access::PasteAccess;
 use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, PlatformRequest};
 use super::settings::toggle_menu;
@@ -24,6 +24,7 @@ use crate::audio::hex_microphone::DriverActionState;
 use crate::calendar::{CalendarAccess, CallProvider};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::desktop::onboarding::{PermissionAction, PermissionKind, PermissionWarning};
+use crate::labs::Feature;
 
 /// A permission's row key, its name as System Settings lists it, and what
 /// Hex cannot do without it.
@@ -932,22 +933,69 @@ fn calendars_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             }
         })
         .collect();
-    setting_row(
+    let select = select(
         p,
-        "calendar-calendars",
+        "calendar-calendars-control",
         tr("Calendars"),
-        None,
-        select(
-            p,
-            "calendar-calendars-control",
-            tr("Calendars"),
-            &label,
-            ui.open == Some(Menu::Calendars),
-            choices,
-            |ui: &mut Ui| toggle_menu(ui, Menu::Calendars),
-            layer,
-        ),
-    )
+        &label,
+        ui.open == Some(Menu::Calendars),
+        choices,
+        |ui: &mut Ui| toggle_menu(ui, Menu::Calendars),
+        layer,
+    );
+    // Labs › Select all calendars adds one bulk button; off, the row is the
+    // select alone, exactly as before.
+    let control = if bulk_select_on(ui) && !calendars.is_empty() {
+        row()
+            .key("calendar-calendars-controls")
+            .gap(8.0)
+            .center_y()
+            .child(small_button(
+                p,
+                "calendar-select-all",
+                if included == calendars.len() {
+                    tr("Deselect all")
+                } else {
+                    tr("Select all")
+                },
+                |ui: &mut Ui, _| {
+                    // Read the calendars and the direction now, at the click,
+                    // not when the row was drawn.
+                    let ids: Vec<String> = ui
+                        .platform
+                        .calendar
+                        .calendars
+                        .iter()
+                        .map(|info| info.id.clone())
+                        .collect();
+                    let all_included = ids
+                        .iter()
+                        .all(|id| ui.settings.meetings.calendar.includes(id));
+                    ui.update(move |settings| {
+                        let excluded = &mut settings.meetings.calendar.excluded_calendars;
+                        if all_included {
+                            // Deselect all: the setting stores exclusions, so
+                            // calendars added later are still included.
+                            *excluded = ids;
+                        } else {
+                            excluded.clear();
+                        }
+                    });
+                },
+            ))
+            .child(select)
+    } else {
+        select
+    };
+    setting_row(p, "calendar-calendars", tr("Calendars"), None, control)
+}
+
+/// Whether Labs › Select all calendars adds the Calendars row's bulk button.
+/// The lab is UI only: its own toggle, in this build, with no organization
+/// lock, as `in_place_on` reads its lab (`src/rune_ui/model_import.rs:73`).
+fn bulk_select_on(ui: &Ui) -> bool {
+    let feature = Feature::CalendarSelectAll;
+    feature.shipped() && feature.managed().is_none() && feature.on(&ui.settings)
 }
 
 /// The caption of Detected calls' Stop when the call ends, naming
@@ -1036,7 +1084,7 @@ const POLICIES: [MeetingPolicy; 3] = [
 
 /// The virtual microphone driver's row: install, update, or uninstall it.
 pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
-    let title = tr("Virtual microphone driver");
+    let title = tr("Hex Microphone");
     let Some(status) = &ui.platform.hex_microphone else {
         return setting_row(
             p,
@@ -1055,102 +1103,59 @@ pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {
             move |ui: &mut Ui, _| ui.ask(request.clone()),
         )
     };
-    let install = || {
-        action(
-            "install",
-            tr("Install"),
-            PlatformRequest::InstallHexMicrophone,
-        )
+    let mut controls = row().key("controls").gap(8.0).center_y().flex_wrap();
+    let in_use = status.driver_loaded && status.mic_in_use;
+    let mut description = if in_use && !status.active_apps.is_empty() {
+        tr_fill("In use by {}", &status.active_apps.join(", "))
+    } else if in_use {
+        tr("In use").into()
+    } else if status.driver_loaded {
+        tr("Select Hex Microphone as the input in your call app").into()
+    } else if status.driver_bundle_installed {
+        tr("Hex Microphone is installed but unavailable").into()
+    } else {
+        tr("Installation briefly restarts system audio").into()
     };
-    let uninstall = || {
-        action(
-            "uninstall",
-            tr("Uninstall"),
-            PlatformRequest::UninstallHexMicrophone,
-        )
-    };
-    let state_tag = |label: &str, tone: Tone| tone_tag(p, "state", label, tone);
-    let controls = row().key("controls").gap(8.0).center_y();
-    let (description, controls) = match &status.action_state {
-        DriverActionState::Installing => (
-            tr("Installing driver and restarting Core Audio…").to_string(),
-            controls.child(state_tag(tr("Installing…"), Tone::Neutral)),
-        ),
-        DriverActionState::Uninstalling => (
-            tr("Removing driver and restarting Core Audio…").to_string(),
-            controls.child(state_tag(tr("Uninstalling…"), Tone::Neutral)),
-        ),
-        state if status.needs_update() => {
-            let installed = status.installed_version.as_deref().unwrap_or("1.0.0");
-            (
-                match state {
-                    DriverActionState::Cancelled => tr("Update cancelled").into(),
-                    DriverActionState::Failed(reason) => {
-                        tr_fill("Could not update driver: {}", reason)
-                    }
-                    _ => tr_fill("Update driver to v{}", &status.bundled_version),
-                },
-                controls
-                    .child(state_tag(
-                        &tr_fill("v{} installed", installed),
-                        Tone::Accent,
-                    ))
-                    .child(action(
+    match &status.action_state {
+        DriverActionState::Installing => {
+            description = tr("Installing driver and restarting Core Audio…").into()
+        }
+        DriverActionState::Uninstalling => {
+            description = tr("Removing driver and restarting Core Audio…").into()
+        }
+        state => {
+            if let DriverActionState::Failed(reason) = state {
+                description = format!("{} · {}", tr("Failed"), reason);
+            }
+            if matches!(state, DriverActionState::Cancelled) {
+                description = format!("{} · {}", tr("Cancelled"), description);
+            }
+            if status.driver_bundle_installed {
+                if status.needs_update() || !status.driver_loaded {
+                    controls = controls.child(action(
                         "update",
-                        tr("Update"),
+                        if status.needs_update() {
+                            tr("Update")
+                        } else {
+                            tr("Retry")
+                        },
                         PlatformRequest::InstallHexMicrophone,
-                    ))
-                    .child(uninstall()),
-            )
+                    ));
+                }
+                controls = controls.child(action(
+                    "uninstall",
+                    tr("Uninstall"),
+                    PlatformRequest::UninstallHexMicrophone,
+                ));
+            } else {
+                controls = controls.child(action(
+                    "install",
+                    tr("Install Hex Microphone"),
+                    PlatformRequest::InstallHexMicrophone,
+                ));
+            }
         }
-        state if status.driver_loaded => {
-            let version = status
-                .installed_version
-                .as_deref()
-                .unwrap_or(&status.bundled_version);
-            (
-                match state {
-                    DriverActionState::Cancelled => tr("Uninstall cancelled").into(),
-                    DriverActionState::Failed(reason) => {
-                        tr_fill("Could not update driver: {}", reason)
-                    }
-                    _ if !status.active_apps.is_empty() => tr_fill(
-                        "Streaming 48 kHz audio to {}",
-                        &status.active_apps.join(", "),
-                    ),
-                    _ => {
-                        tr("Choose Hex Microphone as your input in Slack, Zoom, or Discord").into()
-                    }
-                },
-                controls
-                    .child(state_tag(&tr_fill("Installed v{}", version), Tone::Success))
-                    .child(uninstall()),
-            )
-        }
-        DriverActionState::DoneUninstalled => (
-            tr("Driver removed").into(),
-            controls
-                .child(state_tag(tr("Removed"), Tone::Neutral))
-                .child(install()),
-        ),
-        DriverActionState::Cancelled => (
-            tr("Installation cancelled").into(),
-            controls
-                .child(state_tag(tr("Cancelled"), Tone::Neutral))
-                .child(install()),
-        ),
-        DriverActionState::Failed(reason) => (
-            tr_fill("Could not install driver: {}", reason),
-            controls
-                .child(state_tag(tr("Failed"), Tone::Danger))
-                .child(install()),
-        ),
-        _ => (
-            tr("Install the CoreAudio driver to choose Hex Microphone in Slack, Zoom, or Discord")
-                .into(),
-            controls.child(install()),
-        ),
-    };
+    }
     setting_row(p, "hex-mic-driver", title, Some(&description), controls)
 }
 

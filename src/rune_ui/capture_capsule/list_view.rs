@@ -22,9 +22,9 @@ pub(super) fn list_view(p: Paint, list: &List, x: f32, w: f32, reduced: bool) ->
     // search's footer says it there).
     let room = w - 2.0 * LIST_PAD - 2.0 * ROW_PX - measure(list.title, small()) - 16.0;
     let shift_hint = match (&list.always, suggesting) {
-        (Some((site, _)), true) => Some(
+        (Some((site, _)), true) if saving || list.target.is_some() => Some(
             label(
-                &shift_hint(list, site, room),
+                &ellipsize(&shift_hint(list, site, room), small(), room),
                 k.ty.small_medium,
                 if saving { p.accent() } else { p.faint() },
             )

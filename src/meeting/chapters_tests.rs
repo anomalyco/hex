@@ -202,6 +202,19 @@ fn the_prompt_names_the_current_chapter_terms_and_only_new_lines() {
 }
 
 #[test]
+fn chapter_prompts_keep_the_transcripts_language() {
+    assert!(INSTRUCTIONS.contains(
+        "You MUST name chapters and write their summaries in the language spoken in the transcript"
+    ));
+    assert!(INSTRUCTIONS.contains("even though these instructions are in English"));
+    assert!(INSTRUCTIONS.contains("never translate them"));
+    assert!(
+        REFINE_INSTRUCTIONS
+            .contains("The transcript may be in a language other than English; that never changes")
+    );
+}
+
+#[test]
 fn a_confirming_pass_on_yet_another_topic_waits_for_its_own_confirmation() {
     let mut state = Chaptering::default();
     state.merge(said("Image storage", false), &window(0, 180_000));

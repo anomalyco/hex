@@ -1,0 +1,17 @@
+<resources>
+    <style name="HexApp" parent="android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:fontFamily">@font/inter_variable</item>
+        <item name="android:windowBackground">@color/page</item>
+        <item name="android:colorAccent">@color/ink</item>
+        <item name="android:windowLightStatusBar">@bool/light_bars</item>
+        <item name="android:windowLightNavigationBar">@bool/light_bars</item>
+        <item name="android:statusBarColor">@color/page</item>
+        <item name="android:navigationBarColor">@color/page</item>
+    </style>
+    <style name="HexIme" parent="android:style/Theme.InputMethod">
+        <item name="android:fontFamily">@font/inter_variable</item>
+        <item name="android:windowLightNavigationBar">@bool/light_bars</item>
+        <item name="android:navigationBarColor">@color/keyboard</item>
+        <item name="android:windowBackground">@color/keyboard</item>
+    </style>
+</resources>

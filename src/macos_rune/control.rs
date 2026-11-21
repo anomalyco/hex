@@ -397,6 +397,9 @@ impl Pump {
                         "Recording “{title}”; `hex meetings stop` stops and transcribes it"
                     ))
                 }
+                (Some(ControllerEvent::Stopping), true) => {
+                    ControlReply::done("Stopping the meeting recording")
+                }
                 (Some(ControllerEvent::Transcribing | ControllerEvent::Finished(_)), true) => {
                     ControlReply::done("Stopped recording; transcribing the meeting")
                 }
@@ -697,12 +700,16 @@ fn clear_history(runtime: &RuntimeHandle) -> Result<ControlReply, ControlError> 
         .history()
         .ok_or_else(|| ControlError::new("unavailable", "history couldn't be opened"))?;
     let count = history.search("").len();
-    if count == 0 {
+    let rollup = history.has_usage();
+    if count == 0 && !rollup {
         return Ok(ControlReply::unchanged("History is already empty"));
     }
     history
         .clear()
         .map_err(|error| ControlError::new("failed", format!("couldn't clear history: {error}")))?;
+    if count == 0 {
+        return Ok(ControlReply::done("Cleared history stats"));
+    }
     Ok(ControlReply::done(format!(
         "Cleared {count} dictation{}",
         if count == 1 { "" } else { "s" }

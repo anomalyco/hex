@@ -65,6 +65,7 @@ impl Feature {
     pub const fn group(self) -> Group {
         match self {
             Self::LiveText
+            | Self::FasterLiveText
             | Self::FailureNotices
             | Self::LiveTyping
             | Self::NotchIndicator
@@ -74,16 +75,17 @@ impl Feature {
             | Self::SkipPauses
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
-            | Self::SettingsSearch
             | Self::Appearance
             | Self::SpeakersOnly
             | Self::Playground
-            | Self::StopPhrase => Group::Dictation,
+            | Self::StopPhrase
+            | Self::VocabularyFiles => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
             | Self::SpokenSymbols
             | Self::FillerWords
             | Self::CleanUpWithAppleIntelligence
+            | Self::NeutralVoice
             | Self::KeepOnClipboard
             | Self::CopyOnly
             | Self::ReturnToApp
@@ -96,19 +98,23 @@ impl Feature {
             | Self::ApiTimestamps
             | Self::YoloMode
             | Self::CursorContext
-            | Self::VoicePrompt => Group::Output,
+            | Self::VoicePrompt
+            | Self::ModesEditor => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::RecentDictations
-            | Self::CopyDictationAudio => Group::History,
+            | Self::CopyDictationAudio
+            | Self::PasteLastPicker => Group::History,
             Self::Meetings
             | Self::LiveChapters
             | Self::GnomeMeetingCapsules
             | Self::MeetingImport
-            | Self::CalendarMenu => Group::Meetings,
+            | Self::CalendarMenu
+            | Self::CalendarSelectAll => Group::Meetings,
             Self::Screenshots
             | Self::AnnotateReplay
             | Self::GnomeAnnotate
+            | Self::AnnotatePointerScreen
             | Self::CopyCaptureZip => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
@@ -131,7 +137,8 @@ impl Feature {
             | Self::ModelInPlace
             | Self::KQuantModels
             | Self::PickerDownloaded
-            | Self::ParakeetUltra => Group::Models,
+            | Self::ParakeetUltra
+            | Self::DropTranscribe => Group::Models,
         }
     }
 }

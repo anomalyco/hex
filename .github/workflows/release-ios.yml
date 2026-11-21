@@ -1,0 +1,50 @@
+name: Release Hex Mobile
+
+# An ios-beta-* tag is the Xcode Cloud start condition. Cloud owns signing,
+# build numbers, and distribution to Hex Internal.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0,17,18,23 * * *"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-hex-mobile
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check release window
+        id: window
+        run: |
+          hour=$(TZ=America/Chicago date +%H)
+          if [[ "$GITHUB_EVENT_NAME" == workflow_dispatch || "$hour" == 12 || "$hour" == 18 ]]; then
+            echo "cut=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        if: steps.window.outputs.cut == 'true'
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Cut iOS prerelease
+        if: steps.window.outputs.cut == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          previous=$(git describe --tags --match 'ios-beta-*' --abbrev=0 HEAD 2>/dev/null || :)
+          if [[ -n "$previous" ]] && git diff --quiet "$previous" HEAD -- ios app/AppIcon.icon tests/fixtures/vocabulary/audio/term-hex-1.wav; then
+            echo "No mobile changes since $previous." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          sha=$(git rev-parse HEAD)
+          tag="ios-beta-${sha:0:12}"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$sha" \
+            --title "Hex Mobile · ${sha:0:12}" --prerelease --latest=false \
+            --notes "Internal iOS beta from \`$sha\`. Xcode Cloud builds and distributes it to Hex Internal."
+          echo "Cut $tag at $sha." >> "$GITHUB_STEP_SUMMARY"

@@ -25,58 +25,20 @@ nonisolated enum WarmSessionDuration: String, Codable, CaseIterable, Sendable {
 
     var shortLabel: String {
         switch self {
-        case .off: "Off"
-        case .fiveMinutes: "5m"
-        case .fifteenMinutes: "15m"
-        case .oneHour: "1h"
+        case .off: String(localized: "Off")
+        case .fiveMinutes: String(localized: "5m")
+        case .fifteenMinutes: String(localized: "15m")
+        case .oneHour: String(localized: "1h")
         }
     }
 
     var title: String {
         switch self {
-        case .off: "One shot"
-        case .fiveMinutes: "5 minutes"
-        case .fifteenMinutes: "15 minutes"
-        case .oneHour: "1 hour"
+        case .off: String(localized: "One shot")
+        case .fiveMinutes: String(localized: "5 minutes")
+        case .fifteenMinutes: String(localized: "15 minutes")
+        case .oneHour: String(localized: "1 hour")
         }
-    }
-}
-
-/// Curated App Store-safe URL schemes for returning from Hex after a cold-start handoff.
-/// Apps without a registered scheme (or when unset) use the bottom-edge swipe fallback.
-nonisolated struct HostApp: Identifiable, Equatable, Codable, Sendable {
-    let id: String
-    let name: String
-    let schemeURL: String
-
-    var url: URL? {
-        URL(string: schemeURL)
-    }
-}
-
-nonisolated enum HostAppCatalog {
-    static let all: [HostApp] = [
-        HostApp(id: "messages", name: "Messages", schemeURL: "messages://"),
-        HostApp(id: "slack", name: "Slack", schemeURL: "slack://"),
-        HostApp(id: "claude", name: "Claude", schemeURL: "claude://"),
-        HostApp(id: "chatgpt", name: "ChatGPT", schemeURL: "chatgpt://"),
-        HostApp(id: "notes", name: "Notes", schemeURL: "mobilenotes://"),
-        HostApp(id: "discord", name: "Discord", schemeURL: "discord://"),
-        HostApp(id: "telegram", name: "Telegram", schemeURL: "tg://"),
-        HostApp(id: "whatsapp", name: "WhatsApp", schemeURL: "whatsapp://"),
-        HostApp(id: "obsidian", name: "Obsidian", schemeURL: "obsidian://"),
-        HostApp(id: "linear", name: "Linear", schemeURL: "linear://"),
-        HostApp(id: "gmail", name: "Gmail", schemeURL: "googlegmail://"),
-        HostApp(id: "reminders", name: "Reminders", schemeURL: "x-apple-reminderkit://"),
-        HostApp(id: "signal", name: "Signal", schemeURL: "sgnl://"),
-        HostApp(id: "t3code", name: "T3 Code", schemeURL: "t3code://"),
-    ]
-
-    static let quickChips: [HostApp] = Array(all.prefix(6))
-
-    static func app(for id: String?) -> HostApp? {
-        guard let id, !id.isEmpty else { return nil }
-        return all.first { $0.id == id }
     }
 }
 
@@ -114,12 +76,11 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
     /// Opens Hex's keyboard setup screen without starting a session.
     case setup
-    case startSession(requestedAt: TimeInterval?, returnAppID: String?)
+    case startSession(requestedAt: TimeInterval?)
     case startRecording(
         jobID: String,
         requestedAt: TimeInterval?,
-        style: DictationStyle?,
-        returnAppID: String?
+        style: DictationStyle?
     )
 
     init?(url: URL) {
@@ -135,21 +96,19 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         }
 
         let requestedAt = value("ts").flatMap(TimeInterval.init)
-        let returnAppID = value("return")
         let style = value("style").flatMap(DictationStyle.init(rawValue:))
 
         switch url.path {
         case "/setup":
             self = .setup
         case "/start":
-            self = .startSession(requestedAt: requestedAt, returnAppID: returnAppID)
+            self = .startSession(requestedAt: requestedAt)
         case "/record":
             guard let jobID = value("job") else { return nil }
             self = .startRecording(
                 jobID: jobID,
                 requestedAt: requestedAt,
-                style: style,
-                returnAppID: returnAppID
+                style: style
             )
         default:
             return nil
@@ -160,17 +119,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         switch self {
         case .setup:
             nil
-        case .startSession(let ts, _), .startRecording(_, let ts, _, _):
+        case .startSession(let ts), .startRecording(_, let ts, _):
             ts
-        }
-    }
-
-    var returnAppID: String? {
-        switch self {
-        case .setup:
-            nil
-        case .startSession(_, let appID), .startRecording(_, _, _, let appID):
-            appID
         }
     }
 
@@ -189,16 +139,13 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         case .setup:
             components.path = "/setup"
 
-        case .startSession(let requestedAt, let returnAppID):
+        case .startSession(let requestedAt):
             components.path = "/start"
             if let requestedAt {
                 items.append(URLQueryItem(name: "ts", value: String(format: "%.3f", requestedAt)))
             }
-            if let returnAppID, !returnAppID.isEmpty {
-                items.append(URLQueryItem(name: "return", value: returnAppID))
-            }
 
-        case .startRecording(let jobID, let requestedAt, let style, let returnAppID):
+        case .startRecording(let jobID, let requestedAt, let style):
             components.path = "/record"
             items.append(URLQueryItem(name: "job", value: jobID))
             if let requestedAt {
@@ -206,9 +153,6 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
             }
             if let style {
                 items.append(URLQueryItem(name: "style", value: style.rawValue))
-            }
-            if let returnAppID, !returnAppID.isEmpty {
-                items.append(URLQueryItem(name: "return", value: returnAppID))
             }
         }
 
@@ -231,6 +175,13 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     let resultExpiresAt: TimeInterval?
     let transcript: String?
     let message: String?
+    /// The raw transcript behind `transcript`, before cleanup and formatting, sent only while
+    /// Learn how I type is on so the keyboard can tell misheard words from formatting.
+    /// Nil when it can't be learned from (translated) or the experiment is off.
+    let heard: String?
+    /// Record typing logs: what each step of the dictation made of it, sent only while
+    /// that experiment is on.
+    let stages: DictationStages?
 
     init(
         state: KeyboardDictationState,
@@ -243,7 +194,9 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         resultID: String? = nil,
         resultExpiresAt: TimeInterval? = nil,
         transcript: String? = nil,
-        message: String? = nil
+        message: String? = nil,
+        heard: String? = nil,
+        stages: DictationStages? = nil
     ) {
         self.state = state
         self.heartbeat = heartbeat
@@ -256,6 +209,8 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         self.resultExpiresAt = resultExpiresAt
         self.transcript = transcript
         self.message = message
+        self.heard = heard
+        self.stages = stages
     }
 
     var effectiveLoudnessDB: Float {
@@ -302,7 +257,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
 
 @MainActor
 struct KeyboardBridge {
-    nonisolated static let appGroup = "group.com.kitlangton.hex.mobile"
+    nonisolated static let appGroup = "group.anomaly.hex.mobile"
 
     private enum Key {
         static let command = "keyboard.command"
@@ -310,11 +265,11 @@ struct KeyboardBridge {
         static let snapshot = "keyboard.snapshot"
         static let warmDuration = "settings.warmDuration"
         static let style = "settings.dictationStyle"
-        static let returnAppID = "settings.returnAppID"
-        static let quickReturnAppIDs = "settings.quickReturnAppIDs"
         static let allowBluetoothMic = "settings.allowBluetoothMic"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
+        static let appMicrophoneAllowed = "app.microphoneAllowed"
+        static let lastEmptyDictationAt = "keyboard.lastEmptyDictationAt"
     }
 
     private let defaults: UserDefaults?
@@ -380,37 +335,6 @@ struct KeyboardBridge {
         }
     }
 
-    var returnAppID: String? {
-        get {
-            let value = defaults?.string(forKey: Key.returnAppID)
-            return (value?.isEmpty == true) ? nil : value
-        }
-        nonmutating set {
-            if let newValue, !newValue.isEmpty {
-                defaults?.set(newValue, forKey: Key.returnAppID)
-            } else {
-                defaults?.removeObject(forKey: Key.returnAppID)
-            }
-        }
-    }
-
-    var returnApp: HostApp? {
-        HostAppCatalog.app(for: returnAppID)
-    }
-
-    /// The apps the keyboard offers to jump back to, in the user's order.
-    var quickReturnApps: [HostApp] {
-        get {
-            guard let ids = defaults?.stringArray(forKey: Key.quickReturnAppIDs) else {
-                return HostAppCatalog.quickChips
-            }
-            return ids.compactMap(HostAppCatalog.app(for:))
-        }
-        nonmutating set {
-            defaults?.set(newValue.map(\.id), forKey: Key.quickReturnAppIDs)
-        }
-    }
-
     var allowBluetoothMic: Bool {
         get {
             defaults?.bool(forKey: Key.allowBluetoothMic) ?? false
@@ -441,6 +365,35 @@ struct KeyboardBridge {
                 defaults?.set(newValue, forKey: Key.fullAccessSeenAt)
             } else {
                 defaults?.removeObject(forKey: Key.fullAccessSeenAt)
+            }
+        }
+    }
+
+    /// Whether Hex has the microphone, as the app last read it. Only the app sets this. A
+    /// keyboard process keeps the permission it read when it started (iOS doesn't update it
+    /// there), so a keyboard opened before Hex was allowed the microphone needs the app's word.
+    var appMicrophoneAllowed: Bool {
+        get {
+            defaults?.bool(forKey: Key.appMicrophoneAllowed) ?? false
+        }
+        nonmutating set {
+            guard newValue != appMicrophoneAllowed else { return }
+            defaults?.set(newValue, forKey: Key.appMicrophoneAllowed)
+        }
+    }
+
+    /// When the keyboard's own dictation last ended with nothing to insert (no speech, or too
+    /// short). The keyboard stays quiet about it; onboarding's practice says it heard nothing.
+    var lastEmptyDictationAt: TimeInterval? {
+        get {
+            let value = defaults?.double(forKey: Key.lastEmptyDictationAt) ?? 0
+            return value > 0 ? value : nil
+        }
+        nonmutating set {
+            if let newValue {
+                defaults?.set(newValue, forKey: Key.lastEmptyDictationAt)
+            } else {
+                defaults?.removeObject(forKey: Key.lastEmptyDictationAt)
             }
         }
     }

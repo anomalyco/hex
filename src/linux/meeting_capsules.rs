@@ -1,4 +1,4 @@
-//! Labs › Floating meeting capsules on GNOME (#1274). A Wayland compositor
+//! Labs › Call recording controls on GNOME (#1274). A Wayland compositor
 //! without layer-shell (GNOME) has no surface for an overlay that takes
 //! clicks, so the recording offer and recording capsule can't float there and
 //! Hex opens the Meetings pane instead (#1271). With this explicit opt-in, Rune

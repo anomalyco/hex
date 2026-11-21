@@ -28,6 +28,7 @@ mod caps_lock_dictation;
 mod capture_host;
 #[cfg(hex_capture)]
 mod capture_zip;
+mod continuation;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod control;
 mod desktop;
@@ -298,6 +299,12 @@ enum MeetingCommand {
 
 #[cfg(target_os = "macos")]
 fn main() -> Result<()> {
+    // ggml turns on its Metal tensor-API kernels by itself on M5/M6/A19/A20
+    // GPUs, and they give wrong results there: every model transcribed to
+    // empty or garbled text (#1965). The simdgroup kernels earlier Macs use
+    // are correct, so keep the tensor path off for every model.
+    // SAFETY: Before any other thread exists to read the environment.
+    unsafe { std::env::set_var("GGML_METAL_TENSOR_DISABLE", "1") };
     color_eyre::install()?;
     let cli = Cli::parse_from(mcp_alias_arguments(std::env::args_os().collect()));
     let executable_name = std::env::current_exe()
@@ -915,7 +922,7 @@ fn main() -> Result<()> {
     // portal or rtkit.
     // SAFETY: Before any other thread exists to read the environment.
     unsafe { std::env::set_var("DISABLE_RTKIT", "1") };
-    linux::input_route::mark_streams();
+    linux::input::route::mark_streams();
     linux::run(&SHUTDOWN)
 }
 

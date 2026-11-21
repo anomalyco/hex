@@ -375,7 +375,7 @@ pub(crate) fn refresh() {
 
 fn poll() {
     // SAFETY: a read-only HIToolbox query.
-    let secure = unsafe { IsSecureEventInputEnabled() } != 0;
+    let secure = enabled();
     let sink = sink();
     let wanted = if secure && sink.is_some() && !crate::app_settings::shortcuts_suspended() {
         chords(crate::app_settings::runtime_hotkeys(), screenshot_hotkeys())
@@ -554,6 +554,10 @@ fn log_secure(secure: bool) {
             "secure input is on and blocks key events; key shortcuts arrive as Carbon hotkeys"
         ),
     }
+}
+
+pub(crate) fn enabled() -> bool {
+    unsafe { IsSecureEventInputEnabled() != 0 }
 }
 
 /// The app that was in front when secure input turned on:

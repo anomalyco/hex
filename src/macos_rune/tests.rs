@@ -142,7 +142,7 @@ impl Fixture {
                 Duration::ZERO
             };
         self.runtime.follow_app(
-            crate::transcription::app_model_switching::Observation::frontmost(application),
+            crate::transcription::app_model_switching::Observation::frontmost(application, None),
             now,
         );
     }

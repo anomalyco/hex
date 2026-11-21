@@ -333,6 +333,7 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
             || format!("custom/{}.gguf", id.digits()),
             |path| path.to_string_lossy().into_owned(),
         )),
+        stored_as: None,
         revision: "",
         repository: "",
         bytes: manifest.bytes,

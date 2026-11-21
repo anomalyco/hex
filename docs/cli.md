@@ -111,8 +111,8 @@ falls back to pasting. `--print` with `toggle` or `cancel` is a usage error
 and `hex paste-last` reach the listener's own queue as its shortcut would;
 Linux's `hex typed-text` does too.
 
-`dictation start --print` (macOS) records a dictation that belongs to the command instead of the person's
-focused app: the command blocks and answers only when the recording ends,
+`dictation start --print` (macOS) records a dictation that belongs to the
+command instead of the person's focused app: the command blocks and answers only when the recording ends,
 however it ends, with the transcript (`transcript`, exit 0) instead of pasting
 or copying it. It starts exactly as `start` does and locks the recording; the
 shortcut press that finishes it, `dictation stop`, `dictation toggle`, and a
@@ -126,8 +126,8 @@ hangs. A printing `start` while anything already records is refused with
 A plain `dictation stop` of a print-only recording answers as any plain stop
 does (`done`, or `discarded` for no audio or silence) and the transcript still
 goes to the start; `stop --print` of it answers `done` too, and both commands
-wait for the one transcript. On Linux and Windows it answers
-`unsupported`. The text gets the same
+wait for the one transcript. On Linux and Windows it answers `unsupported`.
+The text gets the same
 processing as a paste and History keeps it as `printed`, as `stop --print`
 does; Paste Last skips it. A printing start waits at most 31 minutes; if it
 gives up, the recording stays print-only and is never pasted. `--raw` is
@@ -159,6 +159,11 @@ same.
 `paste-last` needs a listening Hex (`not-ready` during setup) and is refused
 with `busy` while anything records or a shortcut gesture is in progress. The
 menu bar's Paste Last Dictation does nothing in that case.
+
+On a Mac with [Labs › Paste Last picker](features/dictation.md#paste-last-picker-labs-macos)
+on, the same command immediately pastes the newest eligible dictation or
+Annotate capture. It does not open a picker or send the capture anywhere. Its
+reply acknowledges queue admission, not receipt by the focused app.
 
 `typed-text` (Linux) runs the same job as Labs › Transform typed text's
 shortcut, for desktops without the shortcuts portal. It needs a listening Hex
@@ -198,8 +203,8 @@ stderr only when it is a terminal. Ctrl-C ends the command and its service,
 printing nothing, with exit 130. It never pastes, records History, runs mode
 processing, or logs the transcript.
 
-`completions <shell>` prints a
-completion script for `hex` to stdout and nothing else. The script is
+`completions <shell>` prints a completion script for `hex` to stdout and
+nothing else. The script is
 generated at runtime from the same clap definitions every command parses, so
 a new command or flag is in it without anyone writing the script out again;
 `bash`, `zsh`, `fish`, `elvish`, and `powershell` are the shells.
@@ -509,7 +514,7 @@ protocol for the active layout, so there Hex keeps the settings but does not
 observe input-source changes or show these controls.
 
 On macOS and Windows, `labs.app_model_switching` opts into switching the
-shared speech-model picker per dictation mode. There is no Settings editor for this saved opt-in. Each mode, Global included, may
+shared speech-model picker per dictation mode. Each mode, Global included, may
 carry `speech`, a model and a language it supports, for example
 `{"model":"parakeet_v3","language":"es"}` in
 `dictation_processing.default_mode` or `dictation_processing.modes[]`; omit it
@@ -520,11 +525,11 @@ recording holds a due switch until it is idle. Matching is by application on
 both macOS and Windows, and a mode's website rules are ignored, so a mode
 chosen only by website never switches. Hex's own window, and a moment with no
 app in front, are ignored: they neither schedule nor cancel a switch, so
-enabling it while Hex is in front applies nothing until you next focus
+enabling the lab while Hex is in front applies nothing until you next focus
 another app. Editing a mode's choice applies when you next focus an app whose
 mode carries it. With keyboard switching also on, the switch that is due
 later wins, and an app switch wins a tie in the same tick. Linux does not
-support per-app model switching.
+support this lab.
 
 - Booleans take `on`/`off`, `true`/`false`, `yes`/`no`, or `1`/`0`.
 - Optional settings take `none` to clear them.
@@ -563,7 +568,7 @@ support per-app model switching.
   more-dictation-shortcuts`) and shares no key with another active shortcut.
   `mode` is `hold_or_double_tap` (the default), `hold`, `tap`, or `double_tap`;
   `double_tap` needs a binding with a key and otherwise reads as
-  `hold_or_double_tap`, except that Labs › Double-tap on a lone modifier also
+  `hold_or_double_tap`, except that Labs › Double-tap Option, Command, or Globe also
   allows a binding without one. Turning the Lab off keeps the rows saved.
 - `json` settings (modes, extra dictation shortcuts, meeting providers,
   excluded calendars) take the JSON value the file stores.

@@ -172,6 +172,7 @@ pub(crate) fn event_summary(event: &VoiceEvent) -> String {
                 DictationPhase::Cancelled => "Dictation was cancelled".into(),
                 DictationPhase::Transcribing => "Dictation is being transcribed".into(),
                 DictationPhase::Pasted => text_or("Dictation paste sent", text),
+                DictationPhase::Copied => text_or("Dictation copied to the clipboard", text),
                 DictationPhase::Printed => text_or("Dictation was printed", text),
                 DictationPhase::Edited => text_or("Selected text was edited", text),
                 DictationPhase::VoiceAction => text_or("Voice Action completed", text),

@@ -15,7 +15,9 @@ pub(crate) mod capture_capsule;
 mod controls;
 #[cfg(target_os = "macos")]
 pub(crate) mod deep_link;
+mod drop_transcribe;
 mod explainer;
+mod find_popover;
 mod found;
 mod found_choice;
 mod fun;
@@ -47,10 +49,13 @@ mod model_details;
 mod model_import;
 mod models;
 mod modes;
+mod notes_writer;
 mod onboarding;
 mod onboarding_kit;
 mod output;
 mod paste_access;
+#[cfg(all(hex_capture, target_os = "macos"))]
+pub(crate) mod paste_picker;
 mod picker;
 mod platform;
 mod platform_settings;
@@ -376,6 +381,7 @@ fn build(init: impl FnOnce() -> Ui + 'static, playground: PlaygroundMode) -> run
 /// Closing the window saves pending text edits and stops a shortcut
 /// recording, as leaving a pane does. Hex keeps running.
 fn on_close(ui: &mut Ui, tx: &mut Tx) {
+    find_popover::close(ui);
     ui.flush_drafts();
     settings::cancel_capture(ui);
     // A hidden window only polls when woken, so poll's visibility check
@@ -435,7 +441,13 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     let pane = match &destination {
         Destination::Settings | Destination::Models => Pane::General,
         Destination::Meetings(_) => Pane::Meetings,
-        Destination::Modes => Pane::Output,
+        Destination::Modes => {
+            if crate::labs::Feature::ModesEditor.on(&ui.settings) {
+                Pane::Modes
+            } else {
+                Pane::Output
+            }
+        }
         Destination::History => Pane::History,
     };
     ui.close_dialogs();
@@ -452,23 +464,9 @@ pub(crate) fn show(ui: &mut Ui, destination: Destination, tx: &mut Tx) {
     }
 }
 
-/// What this OS's Hex can do, by capability name, for `hex status` and the
-/// settings `hex settings` can change here.
-pub(crate) fn capabilities() -> std::collections::BTreeMap<String, bool> {
-    platform::Capabilities::current()
-        .fields()
-        .into_iter()
-        .map(|(name, on)| (name.to_owned(), on))
-        .collect()
-}
-
-/// Whether this OS's Hex has the capability `name` ([`capabilities`]).
-pub(crate) fn capability(name: &str) -> bool {
-    platform::Capabilities::current()
-        .fields()
-        .into_iter()
-        .any(|(field, on)| field == name && on)
-}
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) use history::unified::show_all_history;
+pub(crate) use platform::{capabilities, capability};
 
 /// `hex onboarding reset`: replays the first run in the window now; the
 /// window also shows why it couldn't.
@@ -537,6 +535,9 @@ pub(crate) fn render() {
 /// The window's logical size, which every pane and the picker fit.
 const WINDOW_SIZE: (f32, f32) = (980.0, 760.0);
 
+/// The window's least size: narrower windows crowd the sidebar and rows.
+const MIN_WINDOW_SIZE: (f32, f32) = (860.0, 560.0);
+
 /// One fixed size the user cannot change, which macOS tiling window managers
 /// (AeroSpace, yabai) float: the first-run tour opens centred this way. With
 /// the playground, it resizes, so the stage beside its columns has room.
@@ -557,8 +558,7 @@ fn spec() -> AppSpec<Ui> {
     AppSpec {
         title: "Hex",
         size: WINDOW_SIZE,
-        // Narrower windows crowd the sidebar and rows.
-        min_size: Some((860.0, 560.0)),
+        min_size: Some(MIN_WINDOW_SIZE),
         init: Ui::fixture_base,
         view,
         scenes: SCENES,
@@ -666,7 +666,7 @@ pub(crate) struct Ui {
         Option<std::sync::mpsc::Receiver<Result<crate::audio::InputDevices, String>>>,
     mic_level: general::MicLevel,
     /// General's search, while Labs › Settings search is on.
-    general_search: TextEdit,
+    find: find_popover::Find,
     /// The panes whose Advanced fold is open.
     advanced: Vec<Pane>,
     /// The Labs page shows in place of a pane.
@@ -688,6 +688,9 @@ pub(crate) struct Ui {
     sound_volume_drag: Option<f32>,
     models: models::Models,
     history: history::HistoryPane,
+    /// Labs › Transcribe dropped audio: the drop target, its queue, and the
+    /// toast of the file running or the last one's outcome.
+    drop: drop_transcribe::DropTranscribe,
     #[cfg(hex_capture)]
     captures: captures::CapturesPane,
     modes: modes::ModesPane,
@@ -704,7 +707,6 @@ pub(crate) struct Ui {
     platform: platform::PlatformState,
     host: platform::PlatformHost,
     meetings: meetings::MeetingsPane,
-    fun: fun::FunPane,
     activity: activity::ActivityPane,
     /// HUD Lab's preset was copied since it last changed.
     hud_copied: bool,
@@ -802,7 +804,7 @@ impl Ui {
             input_sources_listed_at: f64::NEG_INFINITY,
             microphones_listing: None,
             mic_level: general::MicLevel::default(),
-            general_search: TextEdit::default(),
+            find: Default::default(),
             advanced: Vec::new(),
             labs_open: false,
             lab_store: labs::Store::default(),
@@ -817,6 +819,7 @@ impl Ui {
             sound_volume_drag: None,
             models: models::Models::default(),
             history: history::HistoryPane::default(),
+            drop: drop_transcribe::DropTranscribe::default(),
             #[cfg(hex_capture)]
             captures: captures::CapturesPane::default(),
             modes,
@@ -830,7 +833,6 @@ impl Ui {
             platform: platform::PlatformState::new(platform::Capabilities::current()),
             host: platform::PlatformHost::Local(Default::default()),
             meetings: meetings::MeetingsPane::default(),
-            fun: fun::FunPane::default(),
             activity: activity::ActivityPane::default(),
             hud_copied: false,
             hud_saved: false,
@@ -958,12 +960,11 @@ impl Ui {
         self.commit(candidate)
     }
 
-    /// Saves pending text-field edits now (leaving a pane or a mode).
-    fn flush_drafts(&mut self) {
+    /// Saves pending text-field edits now (leaving a pane or a mode). False
+    /// when a save failed, with `error` saying why.
+    fn flush_drafts(&mut self) -> bool {
         let candidate = self.drafted();
-        if candidate != self.settings {
-            self.commit(candidate);
-        }
+        candidate == self.settings || self.commit(candidate)
     }
 
     /// Asks the OS host for something only it can do.
@@ -1168,6 +1169,7 @@ impl Ui {
 
     /// Closes the dialogs and sheets a pane switch or window close ends.
     fn close_dialogs(&mut self) {
+        find_popover::close(self);
         picker::close(self);
         explainer::close(self);
         sound_sets::close(self);
@@ -1178,6 +1180,8 @@ impl Ui {
     /// Switches panes at once: the new pane replaces the old without a fade,
     /// already at rest (a grant's morph doesn't replay).
     fn select_pane(&mut self, pane: Pane, tx: &mut Tx) {
+        #[cfg(all(target_os = "macos", hex_capture))]
+        let pane = history::unified::destination(self, pane);
         let labs = std::mem::take(&mut self.labs_open);
         if self.pane == pane && !labs {
             return;
@@ -1186,7 +1190,6 @@ impl Ui {
         self.flush_drafts();
         settings::cancel_capture(self);
         self.open = None;
-        self.general_search.clear();
         models::close(self);
         self.close_dialogs();
         self.output.prompt_copied = false;
@@ -1195,7 +1198,7 @@ impl Ui {
         }
         self.pane = pane;
         match pane {
-            Pane::History => self.history.reload(),
+            Pane::History => self.history.reload(self.settings.labs.history_stats),
             Pane::HudLab => self.ask(platform::PlatformRequest::ConfigureHud(self.platform.hud)),
             #[cfg(hex_capture)]
             Pane::Annotate => self.ask(platform::PlatformRequest::Scrawl(
@@ -1213,6 +1216,13 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     if settings::on_key(ui, event, tx) {
         return true;
     }
+    if ui.find.open {
+        // The popover's field and modal scope own this key, not pane shortcuts.
+        return false;
+    }
+    if find_popover::open_key(ui, event, tx) {
+        return true;
+    }
     // Labs › Playground: ⇧⌘D (Ctrl+Shift+D off macOS) opens the playground.
     if event.key == rune::Key::Command('d') && event.mods.shift && playground::enabled() {
         tx.toggle_playground();
@@ -1226,7 +1236,8 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     // ⌘F (Ctrl+F off macOS) searches Labs or General.
-    if general::focus_search_key(ui, event) {
+    if ui.labs_open && ui.find.local_find_allowed(event) {
+        labs::focus_search(ui);
         return true;
     }
     if let rune::Key::Command(digit @ '1'..='9') = event.key
@@ -1347,9 +1358,15 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             && !ui.labs_open
             && ui.window.as_ref().is_none_or(rune::AppHandle::is_visible),
         ui.settings.labs.keep_recordings,
+        ui.settings.labs.history_stats,
+        ui.settings.typing_wpm,
     );
     #[cfg(hex_capture)]
     let mut changed = ui.captures.poll(ui.pane == Pane::Captures && !ui.labs_open) | changed;
+    #[cfg(all(target_os = "macos", hex_capture))]
+    {
+        changed |= history::unified::poll(ui);
+    }
     if ui.pane == Pane::Output && !ui.labs_open {
         changed |= output::poll(ui, clock, tx);
     }
@@ -1368,11 +1385,13 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= modes::poll_chooser(ui);
     changed |= model_import::poll(ui);
     changed |= meetings::poll_import(ui);
+    changed |= vocabulary::poll(ui);
     // Labs › Screenshots' folder chooser, on macOS.
     #[cfg(all(target_os = "macos", hex_capture))]
     {
         changed |= labs::screenshots::poll(ui);
     }
+    changed |= drop_transcribe::poll(ui);
     changed |= found::poll(ui);
     let login_unknown = ui.platform.login_item.is_none();
     changed |= settings::poll_microphones(ui);
@@ -1430,13 +1449,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
         }
         if let Some(settings) = settings {
             changed |= ui.adopt(settings);
-            // A pane the adopted settings hide (the Hex Microphone turned
-            // off from `hex settings`) leaves for General.
-            if !ui.pane.shown(ui) {
-                ui.pane = Pane::General;
-                ui.open = None;
-                changed = true;
-            }
+            changed |= leave_hidden_pane(ui);
         }
     }
     let preparing = ui
@@ -1456,6 +1469,22 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed | settings::advance_capture(ui, clock, tx)
 }
 
+/// Adopted settings may hide the pane on screen: the Hex Microphone turned off
+/// from `hex settings` hides Voice Filter, and Labs › Modes editor turned off
+/// while the editor shows hides Modes. The window leaves, Output standing in
+/// for the editor it replaced. Returns whether the pane moved.
+fn leave_hidden_pane(ui: &mut Ui) -> bool {
+    if ui.pane.shown(ui) {
+        return false;
+    }
+    ui.pane = match ui.pane {
+        Pane::Modes => Pane::Output,
+        _ => Pane::General,
+    };
+    ui.open = None;
+    true
+}
+
 // ---------------------------------------------------------------------------
 // View
 
@@ -1472,11 +1501,11 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     // Menus and popovers mount above the page (rune-kit overlays).
     let mut layer = Vec::new();
     let (actions, body) = match ui.pane {
-        _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p, &mut layer)),
+        _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p, cx, &mut layer)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
         Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
         Pane::Modes => modes::pane(ui, p, &mut layer),
-        Pane::History => history::pane(ui, p, &mut layer),
+        Pane::History => history::pane(ui, p, cx, &mut layer),
         #[cfg(hex_capture)]
         Pane::Captures => (Vec::new(), captures::pane(ui, p)),
         Pane::Meetings => meetings::pane(ui, p, &mut layer),
@@ -1542,7 +1571,17 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
     }
-    rune_kit::root(window, layer).on_window_focus(window_focused)
+    find_popover::layer(ui, p, &mut layer);
+    // A file drag shows over everything else in the window, the first run
+    // included.
+    layer.extend(drop_transcribe::overlay(ui, p));
+    let root = rune_kit::root(window, layer).on_window_focus(window_focused);
+    // The lab off leaves the window with no drop target at all.
+    if drop_transcribe::on(ui) {
+        drop_transcribe::drop_target(root)
+    } else {
+        root
+    }
 }
 
 fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {

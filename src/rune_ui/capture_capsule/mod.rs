@@ -27,8 +27,8 @@ pub(crate) mod tuning;
 mod undo_ring;
 mod view;
 
-// Its scenes and goldens are macOS's chips and labels.
-#[cfg(all(test, target_os = "macos"))]
+// The macOS fixture is also rendered on the Linux golden runner.
+#[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
 mod tests;
 
 use std::cell::Cell;
@@ -46,9 +46,9 @@ use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres}
 use self::list_view::*;
 use self::surface::{
     CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, PANEL_H, PANEL_W,
-    PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_W, THUMB_X,
-    chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize, measure, medium,
-    processing, small,
+    PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_RADIUS,
+    THUMB_W, THUMB_X, chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize,
+    measure, medium, processing, small,
 };
 use self::tuning::ListFooter;
 use self::view::*;
@@ -961,7 +961,7 @@ impl CaptureCapsule {
         });
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     /// Lets screen recordings see the capsule, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
         self.overlay.set_exclude_from_capture(!shown);

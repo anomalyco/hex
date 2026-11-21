@@ -13,6 +13,7 @@ use color_eyre::eyre::{Result, eyre};
 use crate::app_settings::HotkeyBinding;
 use crate::app_settings::{HOTKEY_MODIFIERS_MASK, RuntimeHotkey, RuntimeHotkeys};
 use crate::audio::CaptureInstant;
+use crate::continuation::InputActivity;
 use crate::dictation::{BOTH_SIDES_WINDOW, DOUBLE_TAP_WINDOW, MINIMUM_HOLD_DURATION};
 
 pub(crate) mod dictation_key;
@@ -303,18 +304,7 @@ impl Drop for PendingInputAcknowledgement<'_> {
     }
 }
 
-#[derive(Clone, Default)]
-pub struct InputActivity(Arc<AtomicU64>);
-
 impl InputActivity {
-    pub fn revision(&self) -> u64 {
-        self.0.load(Ordering::Acquire)
-    }
-
-    pub fn invalidate(&self) {
-        self.0.fetch_add(1, Ordering::AcqRel);
-    }
-
     fn observe(&self, input: InputEvent, suppressed: bool) {
         if !suppressed
             && matches!(
@@ -911,6 +901,41 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
         } else {
             ListSwallow::No
         };
+    }
+    if *taken & bit != 0 {
+        return ListSwallow::Only;
+    }
+    if crate::paste::browse::active() && !crate::app_settings::shortcuts_suspended() {
+        use crate::paste::browse::{self, Nav};
+        let flags = unsafe { CGEventGetFlags(event) };
+        let bindings = crate::app_settings::runtime_hotkeys();
+        let trigger = bindings
+            .paste_last
+            .is_some_and(|key| key.matches_key_press(code, flags));
+        let other_shortcut = !trigger
+            && bindings
+                .all()
+                .iter()
+                .flatten()
+                .any(|key| key.matches_key_press(code, flags));
+        let nav = match code {
+            53 => Some(Nav::Cancel),
+            _ if other_shortcut => None,
+            125 | 48 => Some(Nav::Next),
+            126 => Some(Nav::Previous),
+            36 | 76 => Some(Nav::Commit),
+            _ if trigger && browse::open() => Some(Nav::Next),
+            _ => None,
+        };
+        if let Some(nav) = nav
+            && browse::nav(nav)
+        {
+            *taken |= bit;
+            return ListSwallow::Only;
+        }
+        if !trigger {
+            browse::nav(Nav::Cancel);
+        }
     }
     let suggesting = suggesting();
     if !list_takes_keys(

@@ -1,0 +1,1310 @@
+{
+ "note": "dev and heldOut: sentences and acceptable emoji written by hand on 2026-11-20 before the ranking was tuned; tuning used dev only. blind: 40 messages and acceptable emoji written the same day by a separate agent that saw no code, keyword lists or other sentences; scored once before any change, then used only to check for regressions.",
+ "dev": [
+  {
+   "text": "pizza tonight?",
+   "accept": [
+    "🍕",
+    "🌙",
+    "🌃",
+    "😋",
+    "🍽️"
+   ]
+  },
+  {
+   "text": "congrats on the launch",
+   "accept": [
+    "🎉",
+    "🚀",
+    "👏",
+    "🥳",
+    "🎊",
+    "🍾",
+    "🙌"
+   ]
+  },
+  {
+   "text": "happy birthday mom",
+   "accept": [
+    "🎂",
+    "🎉",
+    "🥳",
+    "🎁",
+    "🎈",
+    "❤️",
+    "🎊",
+    "🍰"
+   ]
+  },
+  {
+   "text": "I love you",
+   "accept": [
+    "❤️",
+    "😍",
+    "🥰",
+    "😘",
+    "💕",
+    "💖",
+    "💗",
+    "💘",
+    "💞",
+    "♥️",
+    "😻"
+   ]
+  },
+  {
+   "text": "good morning",
+   "accept": [
+    "☀️",
+    "🌞",
+    "🌅",
+    "☕",
+    "👋",
+    "🌄"
+   ]
+  },
+  {
+   "text": "good night, sleep well",
+   "accept": [
+    "🌙",
+    "😴",
+    "💤",
+    "🛌",
+    "🌛",
+    "🌜",
+    "🌃",
+    "✨"
+   ]
+  },
+  {
+   "text": "that's hilarious",
+   "accept": [
+    "😂",
+    "🤣",
+    "😆",
+    "😹",
+    "😄",
+    "💀"
+   ]
+  },
+  {
+   "text": "I'm so tired",
+   "accept": [
+    "😴",
+    "🥱",
+    "😩",
+    "😫",
+    "💤"
+   ]
+  },
+  {
+   "text": "running late, stuck in traffic",
+   "accept": [
+    "🚗",
+    "🚦",
+    "🏃",
+    "😩",
+    "⏰",
+    "🚙",
+    "🚕",
+    "😬",
+    "🚥"
+   ]
+  },
+  {
+   "text": "coffee first",
+   "accept": [
+    "☕"
+   ]
+  },
+  {
+   "text": "going to the beach this weekend",
+   "accept": [
+    "🏖️",
+    "🌊",
+    "☀️",
+    "🏝️",
+    "😎",
+    "🩱",
+    "👙"
+   ]
+  },
+  {
+   "text": "my dog just ate my sandwich",
+   "accept": [
+    "🐶",
+    "🐕",
+    "🥪",
+    "😂",
+    "🙄",
+    "😱",
+    "🦮"
+   ]
+  },
+  {
+   "text": "it's raining again",
+   "accept": [
+    "🌧️",
+    "☔",
+    "☂️",
+    "💧",
+    "🌦️",
+    "😒",
+    "⛈️"
+   ]
+  },
+  {
+   "text": "thanks so much",
+   "accept": [
+    "🙏",
+    "😊",
+    "❤️",
+    "🤗",
+    "🥰",
+    "💕"
+   ]
+  },
+  {
+   "text": "sorry, my bad",
+   "accept": [
+    "😅",
+    "🙏",
+    "😬",
+    "😔",
+    "🙈",
+    "😓"
+   ]
+  },
+  {
+   "text": "let's grab a beer",
+   "accept": [
+    "🍺",
+    "🍻"
+   ]
+  },
+  {
+   "text": "the game starts at 8",
+   "accept": [
+    "⚽",
+    "🏀",
+    "🏈",
+    "🎮",
+    "🏟️",
+    "⏰",
+    "🕗",
+    "🎲",
+    "⚾",
+    "🏒"
+   ]
+  },
+  {
+   "text": "just landed in Tokyo",
+   "accept": [
+    "✈️",
+    "🛬",
+    "🗼",
+    "🇯🇵",
+    "🗾",
+    "🏯"
+   ]
+  },
+  {
+   "text": "I'm so excited!!",
+   "accept": [
+    "🤩",
+    "🥳",
+    "🎉",
+    "😃",
+    "😆",
+    "😁",
+    "🙌",
+    "😄"
+   ]
+  },
+  {
+   "text": "feeling sick today",
+   "accept": [
+    "🤒",
+    "🤢",
+    "🤧",
+    "😷",
+    "🤮",
+    "😞"
+   ]
+  },
+  {
+   "text": "studying for the exam",
+   "accept": [
+    "📚",
+    "📖",
+    "✏️",
+    "📝",
+    "🎓",
+    "😩",
+    "🤓",
+    "📓"
+   ]
+  },
+  {
+   "text": "I miss you",
+   "accept": [
+    "🥺",
+    "😢",
+    "❤️",
+    "💔",
+    "😔",
+    "🫂",
+    "😞",
+    "💕"
+   ]
+  },
+  {
+   "text": "happy new year",
+   "accept": [
+    "🎆",
+    "🎉",
+    "🥂",
+    "🍾",
+    "🎊",
+    "🥳",
+    "🎇"
+   ]
+  },
+  {
+   "text": "dinner is ready",
+   "accept": [
+    "🍽️",
+    "🍲",
+    "🍝",
+    "😋",
+    "🍴",
+    "🥘",
+    "🍛"
+   ]
+  },
+  {
+   "text": "we won the match",
+   "accept": [
+    "🏆",
+    "🎉",
+    "🥇",
+    "🙌",
+    "💪",
+    "⚽",
+    "🎾"
+   ]
+  },
+  {
+   "text": "watching a movie",
+   "accept": [
+    "🎬",
+    "🍿",
+    "🎥",
+    "📽️",
+    "🎞️",
+    "📺"
+   ]
+  },
+  {
+   "text": "the cake was amazing",
+   "accept": [
+    "🎂",
+    "🍰",
+    "😋",
+    "🤤",
+    "😍",
+    "🧁"
+   ]
+  },
+  {
+   "text": "Merry Christmas everyone",
+   "accept": [
+    "🎄",
+    "🎅",
+    "🎁",
+    "⛄",
+    "❄️",
+    "🤶",
+    "✨"
+   ]
+  },
+  {
+   "text": "going for a run",
+   "accept": [
+    "🏃",
+    "🏃‍♀️",
+    "🏃‍♂️",
+    "👟",
+    "💪",
+    "🏃‍➡️"
+   ]
+  },
+  {
+   "text": "that's so cute",
+   "accept": [
+    "🥰",
+    "😍",
+    "🥹",
+    "😊",
+    "💕",
+    "🐱",
+    "🐶",
+    "💖"
+   ]
+  }
+ ],
+ "heldOut": [
+  {
+   "text": "can't wait for the concert",
+   "accept": [
+    "🎵",
+    "🎶",
+    "🎤",
+    "🎸",
+    "🤘",
+    "🎉",
+    "🤩",
+    "🎟️",
+    "🎫"
+   ]
+  },
+  {
+   "text": "my flight got cancelled",
+   "accept": [
+    "✈️",
+    "😡",
+    "😤",
+    "😩",
+    "😞",
+    "🛫",
+    "😢"
+   ]
+  },
+  {
+   "text": "happy anniversary babe",
+   "accept": [
+    "❤️",
+    "💍",
+    "🥂",
+    "💕",
+    "🎉",
+    "😘",
+    "🥰",
+    "💑",
+    "💖"
+   ]
+  },
+  {
+   "text": "the baby is finally asleep",
+   "accept": [
+    "👶",
+    "😴",
+    "💤",
+    "🍼",
+    "🙏",
+    "😮‍💨"
+   ]
+  },
+  {
+   "text": "snow day!",
+   "accept": [
+    "❄️",
+    "☃️",
+    "⛄",
+    "🌨️",
+    "🏂",
+    "⛷️"
+   ]
+  },
+  {
+   "text": "nailed the interview",
+   "accept": [
+    "💪",
+    "🎉",
+    "🙌",
+    "😎",
+    "💼",
+    "🔥",
+    "👏",
+    "🥳"
+   ]
+  },
+  {
+   "text": "ugh, Mondays",
+   "accept": [
+    "😩",
+    "😒",
+    "🙄",
+    "😫",
+    "😑",
+    "☕"
+   ]
+  },
+  {
+   "text": "let's go hiking",
+   "accept": [
+    "🥾",
+    "⛰️",
+    "🏔️",
+    "🌲",
+    "🚶",
+    "🏕️",
+    "🗻"
+   ]
+  },
+  {
+   "text": "the tacos here are incredible",
+   "accept": [
+    "🌮",
+    "😋",
+    "🤤",
+    "🔥",
+    "😍"
+   ]
+  },
+  {
+   "text": "good luck tomorrow",
+   "accept": [
+    "🍀",
+    "🤞",
+    "💪",
+    "👍",
+    "✨",
+    "🙏"
+   ]
+  },
+  {
+   "text": "heading to the gym",
+   "accept": [
+    "💪",
+    "🏋️",
+    "🏃",
+    "🏋️‍♀️",
+    "🏋️‍♂️"
+   ]
+  },
+  {
+   "text": "it's so hot outside",
+   "accept": [
+    "🥵",
+    "☀️",
+    "🔥",
+    "🌞",
+    "😓",
+    "🌡️"
+   ]
+  },
+  {
+   "text": "baking cookies with the kids",
+   "accept": [
+    "🍪",
+    "👩‍🍳",
+    "🧑‍🍳",
+    "👨‍🍳",
+    "🧒",
+    "👧",
+    "👦",
+    "🥣",
+    "😋"
+   ]
+  },
+  {
+   "text": "my cat knocked everything off the table",
+   "accept": [
+    "🐱",
+    "🐈",
+    "😹",
+    "😂",
+    "🙄",
+    "😾",
+    "🐈‍⬛"
+   ]
+  },
+  {
+   "text": "see you soon",
+   "accept": [
+    "👋",
+    "😊",
+    "🙂",
+    "🤗",
+    "😘",
+    "✌️",
+    "🔜"
+   ]
+  },
+  {
+   "text": "wine night with the girls",
+   "accept": [
+    "🍷",
+    "🥂",
+    "👯",
+    "👯‍♀️",
+    "💃",
+    "🍾"
+   ]
+  },
+  {
+   "text": "we're getting married!",
+   "accept": [
+    "💍",
+    "💒",
+    "👰",
+    "🤵",
+    "🎉",
+    "❤️",
+    "🥳",
+    "💐",
+    "💕"
+   ]
+  },
+  {
+   "text": "happy Friday",
+   "accept": [
+    "🎉",
+    "🥳",
+    "🍻",
+    "😎",
+    "🙌",
+    "🍷",
+    "🕺",
+    "💃"
+   ]
+  },
+  {
+   "text": "the wifi is down again",
+   "accept": [
+    "😩",
+    "😡",
+    "📶",
+    "🙄",
+    "😤",
+    "💻",
+    "🛜",
+    "😒"
+   ]
+  },
+  {
+   "text": "road trip this summer",
+   "accept": [
+    "🚗",
+    "☀️",
+    "🗺️",
+    "🚙",
+    "🛣️",
+    "🌞",
+    "🏖️"
+   ]
+  },
+  {
+   "text": "I'm so proud of you",
+   "accept": [
+    "🥹",
+    "❤️",
+    "👏",
+    "🙌",
+    "🥲",
+    "💪",
+    "🏆",
+    "😊"
+   ]
+  },
+  {
+   "text": "pancakes for breakfast",
+   "accept": [
+    "🥞",
+    "🍳",
+    "😋",
+    "🧇",
+    "🍯"
+   ]
+  },
+  {
+   "text": "the plants need water",
+   "accept": [
+    "🪴",
+    "🌱",
+    "💧",
+    "🚿",
+    "🌿",
+    "🌵"
+   ]
+  },
+  {
+   "text": "fireworks tonight",
+   "accept": [
+    "🎆",
+    "🎇",
+    "🌙",
+    "🎉",
+    "✨",
+    "🧨"
+   ]
+  },
+  {
+   "text": "I need a vacation",
+   "accept": [
+    "🏖️",
+    "✈️",
+    "🌴",
+    "😩",
+    "🏝️",
+    "😮‍💨",
+    "🌊",
+    "☀️"
+   ]
+  },
+  {
+   "text": "this song is stuck in my head",
+   "accept": [
+    "🎵",
+    "🎶",
+    "🎧",
+    "🎤",
+    "😂"
+   ]
+  },
+  {
+   "text": "the party was wild",
+   "accept": [
+    "🎉",
+    "🥳",
+    "🍾",
+    "🍻",
+    "🤪",
+    "💃",
+    "🕺",
+    "🎊"
+   ]
+  },
+  {
+   "text": "guitar practice tonight",
+   "accept": [
+    "🎸",
+    "🎶",
+    "🎵",
+    "🌙",
+    "🤘"
+   ]
+  },
+  {
+   "text": "just finished my first marathon",
+   "accept": [
+    "🏃",
+    "🏅",
+    "🎉",
+    "💪",
+    "🥇",
+    "🏃‍♀️",
+    "🏃‍♂️",
+    "😮‍💨"
+   ]
+  },
+  {
+   "text": "rest in peace grandpa",
+   "accept": [
+    "🙏",
+    "💔",
+    "😢",
+    "🕊️",
+    "🖤",
+    "😭",
+    "❤️"
+   ]
+  }
+ ],
+ "blind": [
+  {
+   "text": "running 10 min late sorry!!",
+   "accept": [
+    "⏰",
+    "🏃",
+    "😅",
+    "🙏",
+    "🚗",
+    "⌛",
+    "🤦",
+    "😬",
+    "💨",
+    "🚦"
+   ]
+  },
+  {
+   "text": "omg i got the job",
+   "accept": [
+    "🎉",
+    "🥳",
+    "🙌",
+    "😭",
+    "🤩",
+    "💼",
+    "🎊",
+    "🍾",
+    "👏",
+    "✨",
+    "💪"
+   ]
+  },
+  {
+   "text": "pizza tonight?",
+   "accept": [
+    "🍕",
+    "🤤",
+    "😋",
+    "🙋",
+    "🍻",
+    "👀",
+    "🤔",
+    "😍"
+   ]
+  },
+  {
+   "text": "ugh monday again",
+   "accept": [
+    "😩",
+    "😫",
+    "🙄",
+    "☕",
+    "😴",
+    "💀",
+    "😒",
+    "🥱",
+    "😤"
+   ]
+  },
+  {
+   "text": "did you see that goal in the last minute?? absolutely insane",
+   "accept": [
+    "⚽",
+    "🤯",
+    "😱",
+    "🔥",
+    "🙌",
+    "🥅",
+    "😮",
+    "🏆",
+    "👏",
+    "💥"
+   ]
+  },
+  {
+   "text": "landed!! heading to the hotel now",
+   "accept": [
+    "✈️",
+    "🛬",
+    "🏨",
+    "🧳",
+    "🙌",
+    "😊",
+    "🚕",
+    "🌴",
+    "👋"
+   ]
+  },
+  {
+   "text": "it's pouring out here and i forgot my umbrella",
+   "accept": [
+    "🌧️",
+    "☔",
+    "😩",
+    "☂️",
+    "💦",
+    "🤦",
+    "😭",
+    "💧",
+    "⛈️",
+    "🌂"
+   ]
+  },
+  {
+   "text": "this meeting could've been an email",
+   "accept": [
+    "🙄",
+    "😴",
+    "💼",
+    "📧",
+    "🥱",
+    "😑",
+    "😒",
+    "💀",
+    "🤦",
+    "📩"
+   ]
+  },
+  {
+   "text": "finals week is killing me",
+   "accept": [
+    "📚",
+    "😭",
+    "💀",
+    "😩",
+    "📝",
+    "😵",
+    "🥲",
+    "☕",
+    "😫",
+    "🎓"
+   ]
+  },
+  {
+   "text": "the dog ate my sock again lol",
+   "accept": [
+    "🐶",
+    "🧦",
+    "😂",
+    "🐕",
+    "🤦",
+    "🙄",
+    "🤣",
+    "😆",
+    "😅"
+   ]
+  },
+  {
+   "text": "happy birthday mom! love you so much",
+   "accept": [
+    "🎂",
+    "🎉",
+    "🥳",
+    "❤️",
+    "🎈",
+    "🎁",
+    "💐",
+    "😘",
+    "🥰",
+    "💕",
+    "💖"
+   ]
+  },
+  {
+   "text": "merry christmas everyone",
+   "accept": [
+    "🎄",
+    "🎅",
+    "⛄",
+    "🎁",
+    "❄️",
+    "✨",
+    "🤶",
+    "🔔",
+    "❤️",
+    "🦌",
+    "☃️"
+   ]
+  },
+  {
+   "text": "feeling kinda sick, gonna stay home today",
+   "accept": [
+    "🤒",
+    "🤧",
+    "😷",
+    "🛌",
+    "🤢",
+    "😞",
+    "🥲",
+    "🍵",
+    "💊",
+    "😴"
+   ]
+  },
+  {
+   "text": "just finished my first half marathon!!",
+   "accept": [
+    "🏃",
+    "🏅",
+    "🎉",
+    "💪",
+    "🙌",
+    "👟",
+    "🥇",
+    "😅",
+    "🔥",
+    "🏁"
+   ]
+  },
+  {
+   "text": "ngl that was lowkey fire",
+   "accept": [
+    "🔥",
+    "💯",
+    "😮",
+    "🤩",
+    "👌",
+    "🙌",
+    "😤",
+    "💥",
+    "😎"
+   ]
+  },
+  {
+   "text": "can you grab milk on the way home",
+   "accept": [
+    "🥛",
+    "🛒",
+    "🙏",
+    "🏠",
+    "🐄",
+    "😊",
+    "🛍️",
+    "🚗"
+   ]
+  },
+  {
+   "text": "brb",
+   "accept": [
+    "🏃",
+    "⏳",
+    "👋",
+    "⏱️",
+    "🔜",
+    "🙏",
+    "⌛",
+    "🚶"
+   ]
+  },
+  {
+   "text": "i miss you",
+   "accept": [
+    "🥺",
+    "❤️",
+    "😢",
+    "💔",
+    "💕",
+    "🫶",
+    "😔",
+    "🤗",
+    "💗",
+    "😞"
+   ]
+  },
+  {
+   "text": "so proud of you, you totally crushed it today",
+   "accept": [
+    "💪",
+    "👏",
+    "🙌",
+    "🥹",
+    "🎉",
+    "🔥",
+    "❤️",
+    "🏆",
+    "🥳",
+    "💯",
+    "⭐"
+   ]
+  },
+  {
+   "text": "anyone up for hiking this weekend? weather looks perfect",
+   "accept": [
+    "🥾",
+    "⛰️",
+    "🏔️",
+    "🌲",
+    "☀️",
+    "🌞",
+    "🙋",
+    "🌄",
+    "🏕️",
+    "🎒",
+    "🌤️"
+   ]
+  },
+  {
+   "text": "cat knocked my coffee off the desk at 7am",
+   "accept": [
+    "🐱",
+    "☕",
+    "😾",
+    "🙄",
+    "😑",
+    "🤦",
+    "😂",
+    "😩",
+    "🐈",
+    "💀"
+   ]
+  },
+  {
+   "text": "lmaooo stop",
+   "accept": [
+    "😂",
+    "🤣",
+    "💀",
+    "😭",
+    "😆",
+    "🙈",
+    "😹",
+    "🫠"
+   ]
+  },
+  {
+   "text": "sorry for your loss, thinking of you guys",
+   "accept": [
+    "🙏",
+    "❤️",
+    "💔",
+    "🤍",
+    "🕊️",
+    "💐",
+    "🫂",
+    "😢",
+    "🕯️",
+    "💙"
+   ]
+  },
+  {
+   "text": "date night!! wish me luck",
+   "accept": [
+    "🤞",
+    "😍",
+    "💕",
+    "🍷",
+    "🌹",
+    "😬",
+    "🥰",
+    "💃",
+    "✨",
+    "🍀",
+    "❤️"
+   ]
+  },
+  {
+   "text": "the wifi is down again i'm going to scream",
+   "accept": [
+    "😤",
+    "😡",
+    "🤬",
+    "📶",
+    "😩",
+    "🙄",
+    "💻",
+    "😠",
+    "🤯",
+    "😫"
+   ]
+  },
+  {
+   "text": "first snow of the year!!",
+   "accept": [
+    "❄️",
+    "☃️",
+    "⛄",
+    "🌨️",
+    "😍",
+    "🥶",
+    "🤩",
+    "✨",
+    "🏔️",
+    "🧣"
+   ]
+  },
+  {
+   "text": "thx for dinner last night, it was soooo good",
+   "accept": [
+    "🙏",
+    "😋",
+    "🍽️",
+    "🤤",
+    "❤️",
+    "😊",
+    "🥰",
+    "🍝",
+    "🍷",
+    "👌",
+    "💕"
+   ]
+  },
+  {
+   "text": "baby took her first steps today",
+   "accept": [
+    "👶",
+    "🥹",
+    "😭",
+    "🥰",
+    "❤️",
+    "🎉",
+    "👣",
+    "😍",
+    "💕",
+    "🍼"
+   ]
+  },
+  {
+   "text": "happy new year!!",
+   "accept": [
+    "🎆",
+    "🎉",
+    "🥳",
+    "🍾",
+    "🎊",
+    "🥂",
+    "✨",
+    "🎇",
+    "🕛",
+    "❤️"
+   ]
+  },
+  {
+   "text": "game night at mine friday, bring snaks",
+   "accept": [
+    "🎲",
+    "🃏",
+    "🍿",
+    "🎮",
+    "🍕",
+    "🥨",
+    "🎉",
+    "🍻",
+    "🙌",
+    "♟️"
+   ]
+  },
+  {
+   "text": "wya",
+   "accept": [
+    "👀",
+    "📍",
+    "🤔",
+    "🧐",
+    "❓",
+    "🙄",
+    "🗺️",
+    "🚗"
+   ]
+  },
+  {
+   "text": "just got my flu shot, arm is sore",
+   "accept": [
+    "💉",
+    "💪",
+    "😣",
+    "🤕",
+    "😖",
+    "🩹",
+    "😬",
+    "🏥",
+    "🦠"
+   ]
+  },
+  {
+   "text": "can't believe we lost in overtime smh",
+   "accept": [
+    "😤",
+    "😞",
+    "🤦",
+    "😩",
+    "💔",
+    "😭",
+    "🏒",
+    "🏀",
+    "🏈",
+    "😡"
+   ]
+  },
+  {
+   "text": "new plant baby joined the family",
+   "accept": [
+    "🌱",
+    "🪴",
+    "🌿",
+    "🍃",
+    "🥰",
+    "💚",
+    "😍",
+    "🌸",
+    "✨",
+    "🏡"
+   ]
+  },
+  {
+   "text": "taco tuesday lets gooo",
+   "accept": [
+    "🌮",
+    "🌯",
+    "🔥",
+    "🙌",
+    "🎉",
+    "🤤",
+    "😋",
+    "🥑",
+    "🌶️",
+    "💃"
+   ]
+  },
+  {
+   "text": "ok",
+   "accept": [
+    "👍",
+    "👌",
+    "🙂",
+    "✅",
+    "😐",
+    "🙃",
+    "🤷",
+    "👀"
+   ]
+  },
+  {
+   "text": "beach day tmrw if anyone's in",
+   "accept": [
+    "🏖️",
+    "🌊",
+    "☀️",
+    "🌴",
+    "😎",
+    "🩴",
+    "🐚",
+    "🏄",
+    "🍹",
+    "👙",
+    "🕶️"
+   ]
+  },
+  {
+   "text": "got a flat tire on the highway, waiting for the tow truck",
+   "accept": [
+    "🚗",
+    "😩",
+    "🛞",
+    "🚙",
+    "🛻",
+    "😤",
+    "🤦",
+    "😫",
+    "🚨",
+    "🔧",
+    "⏳",
+    "🚚"
+   ]
+  },
+  {
+   "text": "thanks so much, you're a lifesaver",
+   "accept": [
+    "🙏",
+    "❤️",
+    "😭",
+    "🥹",
+    "🛟",
+    "🙌",
+    "😊",
+    "💕",
+    "🤗",
+    "💯"
+   ]
+  },
+  {
+   "text": "been practicing guitar for like 3 hours, fingers are dead",
+   "accept": [
+    "🎸",
+    "🎶",
+    "😵",
+    "🤘",
+    "💀",
+    "😩",
+    "🎵",
+    "😅",
+    "🔥",
+    "🖐️"
+   ]
+  }
+ ]
+}

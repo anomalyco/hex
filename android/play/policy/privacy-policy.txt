@@ -1,0 +1,19 @@
+Hex for Android
+Last updated November 20, 2026
+
+Anomaly Innovations, Inc. makes Hex and Hex Keyboard for Android. We do not collect or share your personal data. Hex has no accounts, ads, tracking or analytics.
+
+Typing
+In ordinary text fields, Hex uses nearby text and your taps to suggest words and correct spelling on your phone. It keeps no keystroke log. In fields that Android marks as passwords, including visible passwords and PINs, Hex types literally. It does not read the field's text, offer suggestions or start dictation.
+
+Dictation
+Hex uses the microphone only when you start dictating. It processes the audio in memory, without saving a recording, and turns speech into text on your device. Translation and cleanup also run on your device. Hex keeps no transcript history. The app where you insert text may save or send it according to its own policy.
+
+The model download
+During setup, Hex asks Hugging Face and its delivery network for one public speech model (190 MB) over HTTPS. The host sees the IP address needed to deliver the file. Hex does not send your words, audio, account information or device identifier with the request. After the download, no connection is needed to use the model. If it is interrupted, you can retry or use the smaller model included in Hex.
+
+What stays on your phone
+Hex saves your settings, setup progress and downloaded model in private app storage. If you undo an autocorrection, Hex keeps a count against a hash of that word pair so it can avoid repeating the correction. It does not store the original words. Clearing Hex's app storage or uninstalling Hex removes this data. Microphone access can be revoked in Android settings.
+
+Contact
+For privacy questions, use https://github.com/anomalyco/hex/issues. To report a security problem privately, use https://github.com/anomalyco/hex/security/advisories/new.

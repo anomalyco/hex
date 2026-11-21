@@ -8,6 +8,7 @@ pub(crate) mod idle_sleep;
 mod input_format;
 pub(crate) mod input_level;
 pub(crate) mod instant;
+mod interruption;
 #[cfg(target_os = "macos")]
 mod lid;
 pub(crate) mod linger;
@@ -19,6 +20,7 @@ mod overloads;
 #[cfg(target_os = "macos")]
 pub(crate) mod recording_environment;
 mod recovery;
+pub(crate) mod system_idle;
 mod transport;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
@@ -30,6 +32,10 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender, SyncSender, TryR
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// A dictation press kept across a microphone reopen (the Linux and Windows
+/// listeners read it; macOS has no such reopen).
+#[cfg(any(target_os = "linux", target_os = "windows"))]
+pub(crate) use interruption::capture_idle;
 use recovery::{MICROPHONE_RETRY_INITIAL, MICROPHONE_RETRY_MAX, MicrophoneRecovery};
 
 static AUDIO_SERVICE_RESTART_GENERATION: AtomicU64 = AtomicU64::new(0);
@@ -342,14 +348,6 @@ pub struct RecoveringAudioInput {
     retry_warning: Option<String>,
 }
 
-/// Whether a listener's capture is idle, so [`RecoveringAudioInput`] may
-/// switch devices. A pending start or a release's tail still needs the
-/// open stream: replacing it would discard the capture.
-#[cfg(any(target_os = "linux", target_os = "windows", test))]
-pub fn capture_idle(recording: bool, start_pending: bool, finishing: bool) -> bool {
-    !recording && !start_pending && !finishing
-}
-
 pub enum RecoveringAudioInputEvent {
     Chunk {
         samples: Vec<f32>,
@@ -534,14 +532,7 @@ impl AudioInput {
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                let stalled = self.stall_after.is_some_and(|after| {
-                    self.last_delivery
-                        .lock()
-                        .unwrap_or_else(|error| error.into_inner())
-                        .elapsed()
-                        >= after
-                });
-                if stalled {
+                if interruption::stalled(self.stall_after, &self.last_delivery) {
                     AudioInputEvent::StreamFailed("microphone stopped delivering audio".into())
                 } else {
                     AudioInputEvent::Timeout
@@ -668,6 +659,17 @@ impl RecoveringAudioInput {
         input
     }
 
+    /// An input that opens into a stream `opener` makes, without naming the
+    /// request: for a test in another module that needs each open to finish
+    /// with a stream of the test's choosing.
+    #[cfg(test)]
+    pub(crate) fn with_stream_opener_for_test(
+        selected_device: Option<&str>,
+        opener: impl Fn() -> Result<Opened> + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_opener_for_test(selected_device, input_route_generation, move |_| opener())
+    }
+
     /// An input whose startup open failed, without touching CoreAudio.
     #[cfg(test)]
     pub fn failed_for_test(device_override: &str) -> Self {
@@ -707,6 +709,15 @@ impl RecoveringAudioInput {
 
     pub fn is_recovering(&self) -> bool {
         self.recovery.blocks_audio()
+    }
+
+    /// Whether the installed stream has stopped delivering audio before the
+    /// stall watchdog's next poll reports it.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub fn is_stalled(&self) -> bool {
+        self.input
+            .as_ref()
+            .is_some_and(|input| interruption::stalled(input.stall_after, &input.last_delivery))
     }
 
     /// A dictation press asks for the microphone now instead of waiting out a
@@ -828,7 +839,9 @@ impl RecoveringAudioInput {
                     self.recovery.reopened();
                     self.after_resolving(now);
                 }
-                Ok(Opened::Input(replacement)) if capture_idle || self.input.is_none() => {
+                Ok(Opened::Input(replacement))
+                    if capture_idle || self.input.is_none() || self.recovery.blocks_audio() =>
+                {
                     self.install(*replacement);
                     self.active_revision = opened_revision;
                     // A failed stream keeps the backoff it grew until this
@@ -879,7 +892,10 @@ impl RecoveringAudioInput {
                 self.recovery.request_route_check(now);
             }
         }
-        if (capture_idle || self.input.is_none())
+        // A failed stream delivers nothing, so a press waiting for it never
+        // holds the microphone dead: its replacement starts even though the
+        // press keeps the capture from counting as idle.
+        if (capture_idle || self.input.is_none() || self.recovery.blocks_audio())
             && self.recovery.should_attempt(now)
             && self.replacement.is_none()
         {
@@ -1278,7 +1294,7 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         // moves the opened stream off a Bluetooth default instead.
         #[cfg(target_os = "linux")]
         if follows_default && route.avoid_bluetooth {
-            crate::linux::input_route::move_streams_off_bluetooth();
+            crate::linux::input::route::move_streams_off_bluetooth();
         }
         Ok(Opened::Input(Box::new(input)))
     };
@@ -1432,7 +1448,7 @@ pub fn input_devices() -> Result<InputDevices> {
     #[cfg(target_os = "linux")]
     let (system_default, bluetooth_default_passed_over) = match route
         .avoid_bluetooth
-        .then(crate::linux::input_route::bluetooth_stand_in)
+        .then(crate::linux::input::route::bluetooth_stand_in)
         .flatten()
     {
         Some(stand_in) => (Some(stand_in.input), Some(stand_in.bluetooth)),
@@ -2358,15 +2374,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn only_an_idle_capture_lets_the_microphone_switch() {
-        assert!(capture_idle(false, false, false));
-        // Recording, a press waiting for its stream, or a release's tail.
-        assert!(!capture_idle(true, false, false));
-        assert!(!capture_idle(false, true, false));
-        assert!(!capture_idle(false, false, true));
-    }
-
     #[cfg(target_os = "macos")]
     #[test]
     fn mach_event_ticks_are_converted_to_nanoseconds() {
@@ -3084,6 +3091,39 @@ mod tests {
         ));
         assert_eq!(input.device_name(), "Next microphone");
         assert_eq!(input.recovery.delay, Duration::from_secs(2));
+    }
+
+    #[test]
+    fn a_press_waiting_for_a_stalled_stream_reopens_it_anyway() {
+        let mut input = RecoveringAudioInput::with_opener_for_test(
+            None,
+            || 0,
+            |_| Ok(Opened::Input(Box::new(named_input("Reopened microphone")))),
+        );
+        input.finish_initial_open(Ok(stalling_input()), Instant::now());
+        // A stream that delivered steadily keeps its device until its
+        // replacement opens, so the failed stream is still installed.
+        input.proven = true;
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, true),
+            RecoveringAudioInputEvent::Interrupted
+        ));
+        assert!(input.input.is_some());
+        assert!(input.is_recovering());
+
+        // The press asks for it now, and keeps `capture_idle` false while it
+        // waits; the replacement must still start.
+        input.retry_now();
+        assert!(matches!(
+            input.recv_timeout(Duration::ZERO, false),
+            RecoveringAudioInputEvent::Timeout
+        ));
+        assert!(input.is_opening());
+        assert!(matches!(
+            settle(&mut input, false),
+            RecoveringAudioInputEvent::Reopened
+        ));
+        assert_eq!(input.device_name(), "Reopened microphone");
     }
 
     #[test]

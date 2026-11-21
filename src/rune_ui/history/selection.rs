@@ -344,10 +344,10 @@ fn delete(ui: &mut Ui) {
     if let Some(store) = &ui.history.store {
         if let Err(error) = store.delete_many(&ids) {
             ui.history.error = Some(error.to_string());
-            ui.history.reload();
+            ui.history.reload(ui.settings.labs.history_stats);
             return;
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else {
         ui.history.entries.retain(|entry| !ids.contains(&entry.id));
         ui.history.selected = None;

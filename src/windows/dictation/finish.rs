@@ -17,6 +17,7 @@ pub(super) fn submit_capture(
     by_shortcut: bool,
     context: crate::windows::context::PendingContext,
     stop_phrase: Option<String>,
+    return_to: Option<crate::windows::paste::CaptureWindow>,
 ) -> Result<bool> {
     let mut submitted = false;
     let no_speech = |print: Option<PrintReply>| {
@@ -35,10 +36,6 @@ pub(super) fn submit_capture(
         }
         Finish::Transcribe(mut clip) => {
             let audio_ms = clip.duration_ms();
-            // Labs › YOLO mode judges only a shortcut's processed
-            // paste, on how long the shortcut was held.
-            let held_ms =
-                (by_shortcut && !flavour.raw() && print.is_none()).then(|| clip.held_ms());
             let stream = clip.take_stream();
             let samples = clip.into_transcription_samples();
             let language = engine
@@ -54,8 +51,9 @@ pub(super) fn submit_capture(
                 recording,
                 print,
                 flavour,
-                held_ms,
+                by_shortcut,
                 stop_phrase,
+                return_to,
             }));
             match jobs.try_send(job) {
                 Ok(()) => {

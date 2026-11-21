@@ -326,7 +326,8 @@ fn record(sampler: &Sampler) -> Result<Option<super::Movie>> {
     if x11 && source == Source::Screen {
         return record_x11(sampler);
     }
-    let portal = pipewire::available().and_then(|()| portal::start(source, &sampler.stopping));
+    let portal = pipewire::available()
+        .and_then(|()| portal::start(source, &sampler.stopping, &sampler.portal_token));
     let mut cast = match portal {
         Ok(cast) => cast,
         // No silent widening to the whole screen: a window on X11 is the portal's to pick.

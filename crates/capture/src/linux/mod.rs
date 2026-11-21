@@ -9,5 +9,3 @@ pub mod pipewire;
 pub mod portal;
 pub mod vaapi;
 pub mod x11;
-
-pub use portal::set_token_path;

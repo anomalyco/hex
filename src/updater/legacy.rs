@@ -37,6 +37,15 @@ pub fn take_over() -> bool {
     }
 }
 
+/// Whether this executable runs from a 2.3.1 install's layout, where a
+/// Windows launch moves itself into the managed one, starts that copy and
+/// exits instead of becoming Hex ([`take_over`]). A move that fails runs in
+/// place.
+#[cfg(target_os = "windows")]
+pub fn will_take_over() -> bool {
+    legacy_install().is_some()
+}
+
 /// The legacy data folder and the managed one, when this executable runs
 /// from the legacy version layout.
 fn legacy_install() -> Option<(PathBuf, PathBuf)> {

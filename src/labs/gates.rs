@@ -9,6 +9,12 @@ pub fn live_text() -> bool {
     on(LIVE_TEXT)
 }
 
+/// A shorter lookahead for live text, so its words appear sooner (Parakeet
+/// buffered streaming; read as each live stream opens).
+pub fn faster_live_text() -> bool {
+    on(FASTER_LIVE_TEXT) && Feature::FasterLiveText.on_this_os()
+}
+
 /// A failed dictation's explanation beside the HUD (read as each failure
 /// reaches the HUD).
 pub fn failure_notices() -> bool {
@@ -147,6 +153,17 @@ pub fn clean_up() -> bool {
     CLEAN_UP.load(Ordering::Acquire) && Feature::CleanUpWithAppleIntelligence.on_this_os()
 }
 
+/// Labs › Neutral voice: a dictation in a mode that opts in is rewritten into
+/// plain, neutral wording on this Mac, instead of the OpenCode rewrite and
+/// the cleanup (read as each dictation's processing starts, and for the HUD's
+/// processing stage). The state word has no bit for it: its own atomic,
+/// written by `labs::apply`, and loaded here first in a process that never
+/// applied.
+pub fn neutral_voice() -> bool {
+    let _ = state();
+    NEUTRAL_VOICE.load(Ordering::Acquire) && Feature::NeutralVoice.on_this_os()
+}
+
 /// A pasted dictation gets one leading space when the character before the
 /// cursor asks for one (macOS; read as each paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -192,8 +209,10 @@ pub fn parakeet_ultra() -> bool {
     on(PARAKEET_ULTRA)
 }
 
-/// History's summary of retained dictations and `hex history stats` (read
-/// when the History pane reloads and when the command starts).
+/// Labs › Dictation stats: History's summary of retained dictations, the
+/// daily rollup that outlives retention, and `hex history stats` (read as
+/// each entry is recorded, when the History pane reloads, and when the
+/// command starts). Off, the rollup is never written or read.
 pub fn history_stats() -> bool {
     on(HISTORY_STATS)
 }
@@ -262,6 +281,14 @@ pub fn gnome_meeting_capsules() -> bool {
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn gnome_annotate() -> bool {
     on(GNOME_ANNOTATE) && Feature::GnomeAnnotate.on_this_os()
+}
+
+/// On Wayland, a screen capture asks the desktop for the monitor under the
+/// pointer, and each monitor keeps its own ScreenCast choice (Linux; read as
+/// each screen capture starts).
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn annotate_pointer_screen() -> bool {
+    on(ANNOTATE_POINTER_SCREEN) && Feature::AnnotatePointerScreen.on_this_os()
 }
 
 /// The screenshot shortcut takes an area or a window (macOS; read by the
@@ -379,9 +406,9 @@ pub fn caps_lock_slow_blink() -> bool {
     on(CAPS_LOCK_SLOW_BLINK) && Feature::CapsLockDictation.on_this_os()
 }
 
-/// An OpenCode service running in the default WSL distribution is used when
-/// no Windows registration answers (Windows; read as each service search
-/// starts).
+/// A service running in the default WSL distribution is used ahead of a
+/// Windows one when it answers; the Windows registration is the fallback when
+/// WSL answers nothing (Windows; read as each service search starts).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn opencode_in_wsl() -> bool {
     on(OPENCODE_IN_WSL) && Feature::OpenCodeInWsl.on_this_os()
@@ -410,21 +437,8 @@ pub fn k_quant_models() -> bool {
     K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
 }
 
-/// Labs › YOLO mode: how long a shortcut dictation must be held
-/// for Return to follow its paste, or `None` while the lab is off (read as
-/// each dictation's output is committed).
-pub fn yolo_mode() -> Option<std::time::Duration> {
-    // The lab has its own atomic, loaded here
-    // first in a process that never applied its settings.
-    let _ = state();
-    let seconds = YOLO_MODE_SECONDS.load(Ordering::Acquire);
-    (seconds > 0 && Feature::YoloMode.on_this_os())
-        .then(|| std::time::Duration::from_secs(u64::from(seconds)))
-}
-
-/// The apps Labs › YOLO mode sends in; empty means
-/// every app.
-pub fn yolo_mode_apps() -> Vec<String> {
+/// The apps YOLO mode sends in (empty: everywhere), or None while off.
+pub fn yolo_mode_apps() -> Option<Vec<String>> {
     let _ = state();
     YOLO_MODE_APPS
         .read()
@@ -432,8 +446,30 @@ pub fn yolo_mode_apps() -> Vec<String> {
         .clone()
 }
 
+/// Labs › Paste Last picker: holding Paste Last opens a picker of recent
+/// dictations and annotations, and History lists them together (macOS; read
+/// where the picker, History's unified list, and the cancel-path words start).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn paste_last_picker() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    PASTE_LAST_PICKER.load(Ordering::Acquire) && Feature::PasteLastPicker.on_this_os()
+}
+
+/// Labs › Transcribe dropped audio: a file with one of this build's
+/// extensions, dropped on the window, is transcribed in this process and saved
+/// as a text file beside it (read as each drop starts, and by the window's
+/// drop target).
+pub fn drop_transcribe() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    DROP_TRANSCRIBE.load(Ordering::Acquire) && Feature::DropTranscribe.on_this_os()
+}
+
 /// How long the speech model may sit unused before the engine unloads it,
-/// while Labs › Unload model when idle is on.
+/// while Labs › Free memory when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
     let state = state();
     (state & UNLOAD_IDLE != 0)

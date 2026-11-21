@@ -9,34 +9,37 @@
 
 use std::sync::mpsc::{Receiver, TryRecvError, channel};
 
-use rune::{El, TextEdit, Tx, col, el, row, text};
+use rune::{Cx, El, TextEdit, Tx, col, row, text};
 use rune_kit::{Menu as KitMenu, MenuItem, Placement, Select, SelectAppearance, TextInput};
 
-use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
+use super::controls::{ButtonKind, Paint, button};
 use super::list_detail::{self as ld, Item};
 use super::lists::{Tone, error_panel, section_label, small_button};
 use super::{Menu, Ui};
 use crate::desktop::i18n::{event_age, tr, tr_fill, tr_named};
 use crate::history::playback::Playback;
-use crate::history::stats::{AppCount, HistoryStats};
+use crate::history::stats::{AppCount, DayCount, HistoryStats, ProfileOutputTime};
 use crate::history::{History, HistoryEntry, HistoryKind, HistoryRetention, Transcript};
 use crate::transcription::models::TranscriptionModelId;
 
 mod audio;
+mod heatmap;
 mod selection;
+mod stats;
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(super) mod unified;
 
 pub(super) use self::audio::AudioCopy;
 use self::audio::copy_audio;
-
-/// The stats dialog's width and padding.
-const STATS_WIDTH: f32 = 460.0;
-const PADDING: f32 = 18.0;
+pub(super) use self::stats::close_stats;
 
 #[derive(Default)]
 pub(super) struct HistoryPane {
+    #[cfg(all(target_os = "macos", hex_capture))]
+    pub(super) unified: unified::Pane,
     store: Option<History>,
     pub(super) entries: Vec<HistoryEntry>,
-    search: TextEdit,
+    pub(super) search: TextEdit,
     /// The query the entries were loaded for.
     searched: String,
     /// The store's revision the entries were loaded at; `None` before the
@@ -51,6 +54,14 @@ pub(super) struct HistoryPane {
     error: Option<String>,
     /// Labs › Dictation stats: every retained entry summed up, while on.
     pub(super) stats: Option<HistoryStats>,
+    /// Labs › Dictation stats' daily rollup that outlives retention, read
+    /// only while the lab is on.
+    pub(super) usage: Option<crate::history::usage::Usage>,
+    /// The stats dialog's typing speed while its slider is dragged, before
+    /// the release saves it.
+    pub(super) typing_speed_drag: Option<u32>,
+    /// The saved typing speed the stats compared against when last read.
+    typing_wpm: u32,
     /// The stats dialog is open.
     pub(super) stats_open: bool,
     /// Every selected entry, when several are, and the Delete confirmation
@@ -113,20 +124,23 @@ impl HistoryPane {
     /// The host's store; `None` when it could not open one.
     pub(super) fn shared(store: Option<History>) -> Self {
         Self {
+            #[cfg(all(target_os = "macos", hex_capture))]
+            unified: unified::Pane::live(),
             error: store
                 .is_none()
                 .then(|| tr("History could not be loaded.").to_string()),
             store,
+            typing_wpm: crate::app_settings::DEFAULT_TYPING_WPM,
             ..Self::default()
         }
     }
 
     /// Refreshes the bounded snapshot for the current query, and the stats.
     /// A reload, as entering the pane does, stops any Delete… confirmation.
-    pub(super) fn reload(&mut self) {
+    pub(super) fn reload(&mut self, stats_on: bool) {
         self.delete_armed = None;
         self.reload_entries();
-        self.reload_stats();
+        self.reload_stats(stats_on);
     }
 
     fn reload_entries(&mut self) {
@@ -168,33 +182,65 @@ impl HistoryPane {
         self.delete_armed = Some(id);
     }
 
-    /// Sums up every retained entry, only while Labs › Dictation stats is
-    /// on; off, nothing is read for it.
-    fn reload_stats(&mut self) {
+    /// Sums up every retained entry and reads the daily rollup, only while
+    /// Labs › Dictation stats is on; off, nothing is read for it. `stats_on`
+    /// is the window's own switch, never the process-wide mirror, so a test
+    /// that applies another setting can't close this window's dialog.
+    pub(super) fn reload_stats(&mut self, stats_on: bool) {
         self.stats = match &self.store {
-            Some(store) if crate::labs::history_stats() => Some(store.stats()),
+            Some(store) if stats_on => Some(store.stats(self.typing_wpm)),
             _ => None,
         };
-        if self
-            .stats
-            .as_ref()
-            .is_none_or(|stats| stats.dictations == 0)
-        {
+        self.usage = match &self.store {
+            Some(store) if stats_on => Some(store.usage()),
+            _ => None,
+        };
+        if !self.has_stats() {
             self.stats_open = false;
         }
+    }
+
+    /// Whether the dialog has anything to show: retained dictations, or the
+    /// Labs › Dictation stats rollup.
+    pub(super) fn has_stats(&self) -> bool {
+        self.stats
+            .as_ref()
+            .is_some_and(|stats| stats.dictations > 0)
+            || self
+                .usage
+                .as_ref()
+                .is_some_and(|usage| usage.dictations() > 0)
+    }
+
+    /// Whether a rollup file exists, so Clear all history can still delete
+    /// it when no entry is retained.
+    pub(super) fn has_usage(&self) -> bool {
+        self.store.as_ref().is_some_and(History::has_usage)
     }
 
     /// While the pane shows, picks up new dictations and search edits. It
     /// searches again only when the query or the store's revision changed,
     /// and sums the stats again when the entries or the toggle changed, or
     /// once when the dialog closes because the stats emptied.
-    pub(super) fn poll(&mut self, visible: bool, keep_audio: bool) -> bool {
+    pub(super) fn poll(
+        &mut self,
+        visible: bool,
+        keep_audio: bool,
+        stats_on: bool,
+        typing_wpm: u32,
+    ) -> bool {
         let answered = self.poll_again();
         // Playback's answer returns the card to Play; it is not a reason to
         // read the stats again.
         let played = self.poll_playback();
         let copied = self.poll_audio();
         let mut changed = false;
+        let typing_wpm = crate::app_settings::clamp_typing_wpm(typing_wpm);
+        if self.typing_wpm != typing_wpm {
+            self.typing_wpm = typing_wpm;
+            self.reload_stats(stats_on);
+            changed = true;
+        }
         // A playback belongs to the card that shows its Stop: leaving the
         // entry or History, turning the lab off, or hiding the window
         // quietly ends it.
@@ -209,14 +255,7 @@ impl HistoryPane {
         }
         // The dialog belongs to the pane and its switch: leaving History,
         // turning Dictation stats off, or emptying the stats closes it.
-        if self.stats_open
-            && (!visible
-                || !crate::labs::history_stats()
-                || self
-                    .stats
-                    .as_ref()
-                    .is_none_or(|stats| stats.dictations == 0))
-        {
+        if self.stats_open && (!visible || !stats_on || !self.has_stats()) {
             self.stats_open = false;
             changed = true;
         }
@@ -229,8 +268,8 @@ impl HistoryPane {
             self.reload_entries();
             changed |= self.entries != previous;
         }
-        if changed || self.stats.is_some() != crate::labs::history_stats() {
-            self.reload_stats();
+        if changed || self.stats.is_some() != stats_on || self.usage.is_some() != stats_on {
+            self.reload_stats(stats_on);
             return true;
         }
         answered || played || copied || changed
@@ -272,6 +311,7 @@ impl HistoryPane {
         let entry =
             |id: u64, minutes: u64, kind, raw: &str, final_text: &str, app: Option<&str>| {
                 HistoryEntry {
+                    cancelled: false,
                     id,
                     timestamp_ms: now - minutes * 60_000 - 30_000,
                     kind,
@@ -300,6 +340,7 @@ impl HistoryPane {
         rewritten.processing = Some(crate::desktop::events::DictationProcessing {
             profile: "Chat".into(),
             latency_ms: 910,
+            model: Some("anthropic/claude-haiku-4-5".into()),
             fallback: None,
         });
         Self {
@@ -323,12 +364,54 @@ impl HistoryPane {
                 ),
             ],
             selected: Some(2),
+            typing_wpm: crate::app_settings::DEFAULT_TYPING_WPM,
             ..Self::default()
         }
     }
 
     pub(super) fn fixture_empty() -> Self {
         Self::default()
+    }
+
+    /// The Labs › Dictation stats rollup for the previews and tests: a year
+    /// of days with quiet spells, weekends, and one long streak.
+    pub(super) fn fixture_usage() -> crate::history::usage::Usage {
+        use crate::history::usage::{Usage, UsageDay};
+        let today = crate::history::stats::local_day(crate::history::now_ms());
+        let days: Vec<UsageDay> = (0..371)
+            .map(|offset| {
+                let day = today - 370 + offset;
+                // 1970-01-01 was a Thursday; 3 makes Monday 0.
+                let weekday = (day + 3).rem_euclid(7);
+                let weekend = weekday >= 5;
+                let band = offset as u64;
+                let count = if (offset / 37) % 5 == 4 {
+                    0
+                } else if weekend {
+                    band % 3
+                } else {
+                    1 + (band * 7 % 11)
+                };
+                let busiest = 9 + (band % 9) as usize;
+                let mut hours = [0_u64; 24];
+                if count > 0 {
+                    hours[busiest] = count;
+                    for (hour, slot) in hours.iter_mut().enumerate() {
+                        if hour != busiest {
+                            *slot = (band + hour as u64) % 2;
+                        }
+                    }
+                }
+                UsageDay {
+                    day,
+                    dictations: count,
+                    words: count * 42,
+                    audio_ms: count * 7_000,
+                    hours,
+                }
+            })
+            .collect();
+        Usage::from_days(days)
     }
 
     /// Two entries selected, for the preview's card.
@@ -339,28 +422,88 @@ impl HistoryPane {
         pane
     }
 
-    /// A representative summary for the stats dialog's snapshots and tests.
+    /// The worst case for the stats dialog's snapshots and tests: five apps,
+    /// four modes, and numbers and names long enough to test truncation.
     pub(super) fn fixture_stats() -> HistoryStats {
+        let today = crate::history::stats::local_day(crate::history::now_ms());
+        // Busy and quiet days across the whole window, so the chart has
+        // both tall bars and empty days.
+        let pattern = [
+            4, 1, 0, 7, 2, 0, 0, 3, 6, 1, 2, 0, 5, 9, 3, 0, 1, 4, 2, 0, 3, 5, 1, 0, 2, 6, 8, 3, 1,
+            5,
+        ];
+        let daily = (0..crate::history::stats::DAILY_DAYS)
+            .map(|offset| DayCount {
+                day: today - crate::history::stats::DAILY_DAYS + 1 + offset,
+                dictations: pattern[offset as usize % pattern.len()] as u64,
+            })
+            .collect();
         HistoryStats {
-            dictations: 128,
-            words: 1_482,
+            dictations: 1_284,
+            words: 128_402,
             audio_ms: 720_000,
+            typing_wpm: crate::app_settings::DEFAULT_TYPING_WPM,
+            time_saved_ms: crate::history::stats::time_saved_ms(
+                128_402,
+                720_000,
+                crate::app_settings::DEFAULT_TYPING_WPM,
+            ),
             words_per_minute: Some(123),
             changed_by_output: 34,
             streak_days: 9,
             active_days: 21,
+            hours: [
+                0, 0, 0, 0, 0, 1, 2, 8, 26, 74, 118, 96, 64, 83, 127, 109, 72, 48, 31, 22, 18, 12,
+                6, 2,
+            ],
+            busiest_hour: Some(14),
+            daily,
             top_apps: vec![
                 AppCount {
                     application: "Slack".into(),
-                    dictations: 41,
+                    dictations: 412,
+                },
+                AppCount {
+                    application: "Visual Studio Code — Insiders".into(),
+                    dictations: 331,
                 },
                 AppCount {
                     application: "WezTerm".into(),
-                    dictations: 33,
+                    dictations: 278,
                 },
                 AppCount {
-                    application: "Firefox".into(),
-                    dictations: 27,
+                    application: "Firefox Developer Edition".into(),
+                    dictations: 190,
+                },
+                AppCount {
+                    application: "Notes".into(),
+                    dictations: 121,
+                },
+            ],
+            output_time: vec![
+                ProfileOutputTime {
+                    profile: "Chat".into(),
+                    runs: 12,
+                    median_ms: 910,
+                    slowest_ms: 3_200,
+                },
+                ProfileOutputTime {
+                    profile: "Email".into(),
+                    runs: 5,
+                    median_ms: 1_450,
+                    slowest_ms: 2_800,
+                },
+                ProfileOutputTime {
+                    profile: "Meeting notes and action items".into(),
+                    runs: 3,
+                    median_ms: 2_050,
+                    slowest_ms: 4_800,
+                },
+                ProfileOutputTime {
+                    profile: "Customer support replies".into(),
+                    runs: 2,
+                    median_ms: 620,
+                    slowest_ms: 1_100,
                 },
             ],
         }
@@ -375,7 +518,7 @@ fn set_retention(ui: &mut Ui, retention: HistoryRetention) {
     if !ui.update(|settings| settings.history_retention = retention) {
         return;
     }
-    ui.history.reload();
+    ui.history.reload(ui.settings.labs.history_stats);
 }
 
 fn clear(ui: &mut Ui) {
@@ -389,7 +532,7 @@ fn clear(ui: &mut Ui) {
         if let Err(error) = store.clear() {
             ui.history.error = Some(error.to_string());
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else {
         ui.history.entries.clear();
         ui.history.selected = None;
@@ -559,7 +702,7 @@ fn replace(ui: &mut Ui, id: u64) {
             return;
         }
         ui.history.again = None;
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else if let Some(entry) = ui.history.entries.iter_mut().find(|entry| entry.id == id) {
         entry.replace(transcript, crate::history::now_ms());
         ui.history.again = None;
@@ -573,7 +716,7 @@ fn restore(ui: &mut Ui, id: u64, index: usize) {
         if let Err(error) = store.restore_version(id, index) {
             ui.history.error = Some(error.to_string());
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else if let Some(entry) = ui.history.entries.iter_mut().find(|entry| entry.id == id) {
         entry.restore(index);
     }
@@ -585,7 +728,7 @@ fn delete(ui: &mut Ui, id: u64) {
         if let Err(error) = store.delete(id) {
             ui.history.error = Some(error.to_string());
         }
-        ui.history.reload();
+        ui.history.reload(ui.settings.labs.history_stats);
     } else {
         ui.history.entries.retain(|entry| entry.id != id);
         ui.history.selected = None;
@@ -594,7 +737,11 @@ fn delete(ui: &mut Ui, id: u64) {
 }
 
 /// The header's retention menu and the list + detail body.
-pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
+pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (Vec<El>, El) {
+    #[cfg(all(target_os = "macos", hex_capture))]
+    if ui.history.unified.enabled {
+        return unified::view(ui, p, cx, layer);
+    }
     let pane = &ui.history;
     let actions = header_actions(ui, p, layer);
     let mut notices = Vec::new();
@@ -613,15 +760,22 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
         None => {
             let mut list = col().key("history-list").label(tr("History"));
             let count = pane.entries.len();
-            for (index, entry) in pane.entries.iter().enumerate() {
+            let mut rows = pane
+                .entries
+                .iter()
+                .map(|e| (e, pane.is_selected(e.id)))
+                .enumerate()
+                .peekable();
+            let mut selected_above = false;
+            while let Some((index, (entry, selected))) = rows.next() {
                 let id = entry.id;
                 let mut meta = tr(entry.kind.label()).to_string();
                 if let Some(application) = &entry.application {
                     meta.push_str(" · ");
                     meta.push_str(application);
                 }
-                let selected = pane.is_selected(id);
                 let primary = pane.selected == Some(id);
+                let selected_below = rows.peek().is_some_and(|(_, (_, selected))| *selected);
                 list = list.child(
                     ld::item_with_press(
                         p,
@@ -634,10 +788,20 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
                             hover: vec![copy_action(ui, p, id, true)],
                             selected,
                         },
-                        move |row| selection::gesture(row, id, primary),
+                        move |row| {
+                            let row = if selected && (selected_above || selected_below) {
+                                let top = if selected_above { 0.0 } else { p.k.radius.md };
+                                let bottom = if selected_below { 0.0 } else { p.k.radius.md };
+                                row.corners([top, top, bottom, bottom])
+                            } else {
+                                row
+                            };
+                            selection::gesture(row, id, primary)
+                        },
                     )
                     .position_in_set(index + 1, count),
                 );
+                selected_above = selected;
             }
             let search = TextInput::new(&pane.search)
                 .placeholder(tr("Search history"))
@@ -650,7 +814,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             ld::body(p, "history-body", column, detail(ui, p, layer))
         }
     };
-    if let Some(modal) = stats_modal(ui, p) {
+    if let Some(modal) = stats::modal(ui, p, cx) {
         layer.extend(modal);
     }
     (
@@ -662,127 +826,6 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> (Vec<El>, El) {
             .children((!notices.is_empty()).then(|| ld::notices(notices)))
             .child(body),
     )
-}
-
-/// Labs › Dictation stats: every retained dictation summed up, in the
-/// dialog the header's Stats button opens.
-fn stats_lines(p: Paint, stats: &HistoryStats) -> Vec<El> {
-    let wpm = stats
-        .words_per_minute
-        .map_or_else(|| "–".to_owned(), |wpm| wpm.to_string());
-    let mut lines = vec![
-        tr_named(
-            "Dictations: {count} · Words: {words} · Words per minute: {wpm}",
-            &[
-                ("count", &stats.dictations.to_string()),
-                ("words", &stats.words.to_string()),
-                ("wpm", &wpm),
-            ],
-        ),
-        tr_named(
-            "Changed by Output: {percent}% · Daily streak: {days}",
-            &[
-                (
-                    "percent",
-                    &stats.changed_percent().unwrap_or_default().to_string(),
-                ),
-                ("days", &stats.streak_days.to_string()),
-            ],
-        ),
-    ];
-    if !stats.top_apps.is_empty() {
-        let apps = stats
-            .top_apps
-            .iter()
-            .map(|app| format!("{} ({})", app.application, app.dictations))
-            .collect::<Vec<_>>()
-            .join(", ");
-        lines.push(tr_fill("Top apps: {}", &apps));
-    }
-    lines
-        .into_iter()
-        .enumerate()
-        .map(|(index, line)| {
-            text(line)
-                .key(format!("line{index}"))
-                .font(super::controls::DESCRIPTION)
-                .color(p.muted())
-                .wrap()
-        })
-        .collect()
-}
-
-/// The stats dialog's scrim and panel, while its button and stats show.
-fn stats_modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
-    if !ui.history.stats_open || !ui.settings.labs.history_stats {
-        return None;
-    }
-    let stats = ui
-        .history
-        .stats
-        .as_ref()
-        .filter(|stats| stats.dictations > 0)?;
-    let c = &p.k.c;
-    let mut panel = col()
-        .key("history-stats-dialog")
-        .role("dialog")
-        .label(tr("Dictation stats"))
-        .w(STATS_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(12.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(
-            text(tr("Dictation stats"))
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
-        )
-        .children(stats_lines(p, stats))
-        .child(
-            row().key("footer").justify_end().child(
-                button(
-                    p,
-                    "history-stats-close",
-                    tr("Close"),
-                    ButtonKind::Secondary,
-                    |ui: &mut Ui, _| close_stats(ui),
-                )
-                .default_button(),
-            ),
-        );
-    for shadow in &p.k.elevation.overlay {
-        panel = panel.box_shadow(*shadow);
-    }
-    let layer = |key: &str| {
-        el().key(key)
-            .role("none")
-            .absolute(0.0, 0.0)
-            .w_full()
-            .h_full()
-    };
-    Some([
-        layer("history-stats-scrim")
-            .fill(c.scrim)
-            .on_press(close_stats)
-            .transition(modal_scrim_transition(p)),
-        layer("history-stats-layer")
-            .center()
-            .transition(modal_transition(p))
-            // Keys stay inside, Escape or a press outside closes, and focus
-            // returns to the Stats button that opened it.
-            .child(panel.modal(true, close_stats)),
-    ])
-}
-
-/// Closes the stats dialog, from its button, Escape, or the scrim.
-pub(super) fn close_stats(ui: &mut Ui) {
-    ui.history.stats_open = false;
 }
 
 /// What the retention menu's trigger says: how long History keeps
@@ -799,12 +842,22 @@ fn kept_label(retention: HistoryRetention) -> String {
 /// where that lab shows, and Clear all history… last. Once Clear all is
 /// chosen, the menu gives way to its confirmation until it is answered.
 fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
+    let (confirm_clear, offer_clear) = (tr("Clear all history"), tr("Clear all history…"));
+    #[cfg(all(target_os = "macos", hex_capture))]
+    let (confirm_clear, offer_clear) = if ui.history.unified.enabled {
+        (
+            tr("Clear dictation history"),
+            tr("Clear dictation history…"),
+        )
+    } else {
+        (confirm_clear, offer_clear)
+    };
     if ui.history.clear_armed {
         return vec![
             button(
                 p,
                 "history-confirm-clear",
-                tr("Clear all history"),
+                confirm_clear,
                 ButtonKind::Danger,
                 |ui: &mut Ui, _| clear(ui),
             ),
@@ -862,9 +915,11 @@ fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
                 }),
         );
     }
-    let nothing = ui.history.entries.is_empty() && ui.history.searched.trim().is_empty();
+    let nothing = ui.history.entries.is_empty()
+        && ui.history.searched.trim().is_empty()
+        && !ui.history.has_usage();
     menu = menu.separator().item(
-        MenuItem::new(tr("Clear all history…"))
+        MenuItem::new(offer_clear)
             .danger(true)
             .disabled(nothing)
             .on_select(|ui: &mut Ui| {
@@ -873,13 +928,7 @@ fn header_actions(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
             }),
     );
     let menu = menu.build(p.k, layer);
-    if ui.settings.labs.history_stats
-        && ui
-            .history
-            .stats
-            .as_ref()
-            .is_some_and(|stats| stats.dictations > 0)
-    {
+    if ui.settings.labs.history_stats && ui.history.has_stats() {
         return vec![
             row()
                 .key("history-actions")
@@ -1273,9 +1322,11 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
 
 /// The chosen model's language for this run, and Transcribe.
 fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El {
-    use crate::transcription::models::language_name;
-    let choices = language_choices(pending.model).unwrap_or_default();
-    let labels: Vec<&str> = choices.iter().map(|code| language_name(code)).collect();
+    use crate::transcription::models::{language_name, menu_order};
+    let choices = language_choices(pending.model)
+        .map(|choices| menu_order(&choices))
+        .unwrap_or_default();
+    let labels: Vec<&'static str> = choices.iter().copied().map(language_name).collect();
     let current = tr_named(
         "{model} · Language: {language}",
         &[
@@ -1283,28 +1334,37 @@ fn language_row(ui: &Ui, p: Paint, pending: &Pending, layer: &mut Vec<El>) -> El
             ("language", language_name(&pending.language)),
         ],
     );
+    let open = ui.open == Some(Menu::HistoryAgainLanguage);
+    let chosen = choices
+        .iter()
+        .position(|code| *code == pending.language)
+        .map(|index| format!("option{index}"));
     let languages = Select::new("again-language", &labels)
         .appearance(SelectAppearance::Inline)
         .current(Some(&current))
-        .open(ui.open == Some(Menu::HistoryAgainLanguage))
-        .on_toggle(|ui: &mut Ui| {
-            ui.open =
-                (ui.open != Some(Menu::HistoryAgainLanguage)).then_some(Menu::HistoryAgainLanguage);
-        })
+        .open(open)
         .on_close(|ui: &mut Ui| ui.open = None)
-        .on_choose(|ui: &mut Ui, choice: &str, _: &mut Tx| {
+        .on_choose(move |ui: &mut Ui, choice: &str, _: &mut Tx| {
             ui.open = None;
             if let Some(pending) = &mut ui.history.pending
-                && let Some(code) = language_choices(pending.model).and_then(|choices| {
-                    choices
-                        .into_iter()
-                        .find(|code| crate::transcription::models::language_name(code) == choice)
-                })
+                && let Some(code) = choices
+                    .iter()
+                    .copied()
+                    .find(|code| language_name(code) == choice)
             {
                 pending.language = code.into();
             }
         })
         .build(p.k, layer)
+        .on_press_tx(super::controls::revealing_press(
+            open,
+            "again-language-content".into(),
+            chosen,
+            |ui: &mut Ui| {
+                ui.open = (ui.open != Some(Menu::HistoryAgainLanguage))
+                    .then_some(Menu::HistoryAgainLanguage);
+            },
+        ))
         .label(tr("Language"))
         .a11y_value(current.clone());
     row()

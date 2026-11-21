@@ -17,6 +17,11 @@ pub(crate) mod indicator;
 pub(crate) mod live_text;
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub(crate) mod modes;
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) mod neutral_voice;
+mod numbers;
+#[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
+pub(crate) mod paste_target;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod processor;
 mod release_tail;
@@ -339,17 +344,6 @@ impl DictationClip {
         self.samples.len() as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
     }
 
-    /// How long the shortcut was held: the audio from the press to the
-    /// release, without the pre-roll before it or the release tail after.
-    pub fn held_ms(&self) -> u64 {
-        let held = self
-            .samples
-            .len()
-            .saturating_sub(self.press_samples)
-            .saturating_sub(self.tail_samples);
-        held as u64 * 1_000 / u64::from(PARAKEET_SAMPLE_RATE)
-    }
-
     /// Takes the clip's live stream; finish it with the complete clip.
     pub fn take_stream(&mut self) -> Option<LiveStream> {
         self.stream.take()
@@ -520,6 +514,17 @@ impl DictationClip {
     }
 
     pub fn into_transcription_samples(self) -> Vec<f32> {
+        self.samples
+    }
+
+    /// A cancel keeps neither warm pre-roll nor a live stream that may have
+    /// heard beyond the physical key event. Never hand it to normal output.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    fn into_cancel_samples(mut self) -> Vec<f32> {
+        self.samples
+            .truncate(self.samples.len().saturating_sub(self.tail_samples));
+        self.samples
+            .drain(..self.press_samples.min(self.samples.len()));
         self.samples
     }
 }
@@ -2042,7 +2047,6 @@ mod tests {
         assert!(!clip.samples.contains(&13.0));
         assert_eq!(clip.tail_samples, 3_200);
         // Press to release: no pre-roll, no tail.
-        assert_eq!(clip.held_ms(), 1_000);
     }
 
     #[test]

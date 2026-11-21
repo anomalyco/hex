@@ -208,6 +208,23 @@ const PATHS: &[(&str, &str)] = &[
         "Window/History/Select multiple dictations",
     ),
     ("history-empty", "Window/History/Empty"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history", "Window/History/History with captures"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-capture", "Window/History/A capture's detail"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-filtered", "Window/History/Only annotations"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-types", "Window/History/Type menu"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-search", "Window/History/Search with matches"),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    (
+        "mac-history-search-empty",
+        "Window/History/Search with nothing",
+    ),
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-history-empty", "Window/History/Nothing yet"),
     #[cfg(hex_capture)]
     ("captures", "Window/Captures/Captures"),
     #[cfg(hex_capture)]
@@ -246,6 +263,15 @@ const PATHS: &[(&str, &str)] = &[
     (
         "mac-labs-yolo-mode-picker",
         "Window/General/Labs YOLO mode picker",
+    ),
+    ("drop-hover", "Window/General/Labs dropped file hover"),
+    (
+        "drop-running",
+        "Window/General/Labs dropped file transcribing",
+    ),
+    (
+        "mac-labs-drop-transcribe",
+        "Window/General/Labs transcribe audio",
     ),
     ("mac-production", "Window/General/Production build"),
     ("mac-activity", "Window/Activity/Activity"),

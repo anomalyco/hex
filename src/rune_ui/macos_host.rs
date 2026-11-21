@@ -202,7 +202,7 @@ impl ChordWatch {
         let watching = crate::suppression::dictation_key::watch(wake.clone());
         let (sender, results) = mpsc::channel();
         let chord_sender = sender.clone();
-        // Labs › Sided modifier chords is read once, as recording starts.
+        // Labs › Left and right keys is read once, as recording starts.
         let capture = Rc::new(RefCell::new(ChordCapture::with_sides(
             crate::labs::sided_modifier_chords(),
         )));
@@ -303,7 +303,7 @@ fn recorded_microphone_key(
 /// Turns key and modifier events into a chord: a key with its held
 /// modifiers, or the most modifier keys held at once when they are all
 /// released without a key, with the sides `recorded_sides` keeps (or,
-/// with Labs › Sided modifier chords on, the side each was pressed on).
+/// with Labs › Left and right keys on, the side each was pressed on).
 struct ChordCapture {
     peak: HotkeyModifiers,
     /// A key went down with these modifiers; their release records nothing.
@@ -849,13 +849,33 @@ impl NativeHost for MacHost {
         let system_audio = crate::meeting::system_audio_ready();
         changed |= update(&mut state.permissions, permissions);
         changed |= update(&mut state.system_audio, system_audio);
+        // A Screen Recording guide has nothing left to point at once Hex can
+        // record, or knows it must restart to: the guide's own preflight
+        // keeps the answer it read at launch, so the read that saw the grant
+        // closes it. It is watched while it shows, like the pane's row.
+        let screen_recording_guide =
+            crate::desktop::permission_guide::active(PermissionKind::ScreenRecording);
+        let screen_access = if screen_recording_guide
+            || state
+                .permissions_shown
+                .contains(&PermissionKind::ScreenRecording)
+        {
+            crate::capture_host::screen_access_watched()
+        } else {
+            crate::capture_host::screen_access()
+        };
+        if screen_recording_guide
+            && crate::desktop::permission_guide::screen_recording_answered(screen_access)
+        {
+            crate::desktop::permission_guide::close(PermissionKind::ScreenRecording);
+        }
         let asked_len = state.permissions_asked.len();
         state.permissions_asked.retain(|kind| match kind {
             PermissionKind::Microphone => permissions.microphone != PermissionState::Ready,
             PermissionKind::Accessibility => permissions.accessibility != PermissionState::Ready,
             PermissionKind::SystemAudio => !system_audio,
             PermissionKind::ScreenRecording => {
-                crate::capture_host::screen_access() == crate::capture_host::ScreenAccess::Off
+                screen_access == crate::capture_host::ScreenAccess::Off
             }
         });
         changed |= state.permissions_asked.len() != asked_len;
@@ -875,14 +895,7 @@ impl NativeHost for MacHost {
             ),
             (PermissionKind::SystemAudio, !system_audio),
             (PermissionKind::ScreenRecording, {
-                #[cfg(hex_capture)]
-                {
-                    crate::capture_host::screen_access() == crate::capture_host::ScreenAccess::Off
-                }
-                #[cfg(not(hex_capture))]
-                {
-                    false
-                }
+                screen_access == crate::capture_host::ScreenAccess::Off
             }),
         ] {
             let Some(slot) = stale_slot(kind) else {
@@ -1801,7 +1814,7 @@ mod tests {
     }
 
     /// The recorder takes the ISO section key alone, as Linux's does; Labs ›
-    /// Section key alone is enforced by `settings::validate` before saving,
+    /// § key alone is enforced by `settings::validate` before saving,
     /// not by the recorder.
     #[test]
     fn the_section_key_records_alone() {

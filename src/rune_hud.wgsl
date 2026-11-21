@@ -101,7 +101,9 @@ struct DotUniforms {
     // indicator's ears (y 1): the notch's half width, the mode, the voice's
     // 0–1 level, and seconds into the stage.
     field: vec4f,
-    // The notch indicator's done and failed, 0 to 1.
+    // The notch indicator's done and failed, 0 to 1, then how far right of
+    // the plate's middle the dots' middle sits, pt: a field held by one end
+    // keeps its dots where they are while the plate widens between columns.
     ears: vec4f,
 }
 
@@ -294,7 +296,8 @@ fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
     let rows = i32(u.rows + 0.5);
     let pitch = u.pitch;
     let center_offset = vec2f(f32(columns) - 1.0, f32(rows) - 1.0) * 0.5;
-    let i0 = i32(round(point.x / pitch + center_offset.x));
+    let shift = vec2f(u.ears.z, 0.0);
+    let i0 = i32(round((point.x - shift.x) / pitch + center_offset.x));
     let j0 = i32(round(point.y / pitch + center_offset.y));
     let unlit = select(0.085, 0.07, dark);
     let full = select(1.0, 0.96, dark);
@@ -307,7 +310,7 @@ fn dot_scope_fragment(in: Varyings) -> @location(0) vec4f {
             if (i < 0 || j < 0 || i >= columns || j >= rows) {
                 continue;
             }
-            let center = (vec2f(f32(i), f32(j)) - center_offset) * pitch;
+            let center = (vec2f(f32(i), f32(j)) - center_offset) * pitch + shift;
             let cap = -rounded_box(center, half_size, radius);
             let mask = sstep(1.4, 4.6, cap);
             if (mask <= 0.0) {

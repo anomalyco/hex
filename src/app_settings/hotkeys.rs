@@ -1354,7 +1354,7 @@ pub struct RuntimeHotkeys {
     pub paste_meeting: Option<RuntimeHotkey>,
     /// The capture shortcut, while captures are on (`cfg(hex_capture)`).
     pub capture: Option<RuntimeHotkey>,
-    /// Labs › Annotate 15 s replay shortcut (macOS 27+), while on and bound.
+    /// Labs › Annotate last 15 seconds shortcut (macOS 27+), while on and bound.
     pub capture_replay: Option<RuntimeHotkey>,
     /// Dictate without processing, while it is bound.
     pub raw_dictation: Option<RuntimeHotkey>,

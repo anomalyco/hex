@@ -17,7 +17,9 @@ use x11rb::protocol::xproto::{ConnectionExt, KeyButMask};
 use x11rb::protocol::xtest;
 use x11rb::rust_connection::RustConnection;
 
+use crate::continuation::Continuation;
 use crate::linux::clipboard::{Selection, Snapshot};
+use crate::linux::input::activity;
 use crate::linux::input::{
     KEY_PRESS, KEY_RELEASE, Keymap, ShortcutKeys, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
 };
@@ -53,6 +55,8 @@ pub(crate) struct LinuxPaster {
     keys: ShortcutKeys,
     selection: Selection,
     restore: Arc<Mutex<Restore>>,
+    /// The dictation the next one may join.
+    continuation: Continuation,
 }
 
 /// The clipboard a paste replaced, waiting to come back.
@@ -417,6 +421,7 @@ impl LinuxPaster {
             keys,
             selection,
             restore: Arc::default(),
+            continuation: Continuation::default(),
         })
     }
 
@@ -444,7 +449,7 @@ impl LinuxPaster {
     }
 
     /// Puts `path` on the clipboard as a `text/uri-list` file, so a chat app
-    /// or agent attaches the file itself (Labs › Copy captures as a zip).
+    /// or agent attaches the file itself (Labs › Copy a capture as one file).
     pub(crate) fn copy_file_uri(&mut self, path: &Path) -> Result<()> {
         let uri = file_uri(path)?;
         let mut restore = self.restore.lock().unwrap_or_else(PoisonError::into_inner);
@@ -548,6 +553,8 @@ impl LinuxPaster {
     /// Labs › YOLO mode: presses Return after a paste, once the
     /// paste has had [`crate::dictation::yolo_mode::SETTLE`] to land.
     pub(crate) fn press_return(&mut self) -> Result<()> {
+        // Return sends the message, so the next dictation starts a new one.
+        self.continuation.clear();
         thread::sleep(crate::dictation::yolo_mode::SETTLE);
         self.send_chord(Chord::Return)
     }
@@ -559,7 +566,7 @@ impl LinuxPaster {
             Backend::X11(paster) => paster.chord(chord, &self.stop, &self.keys),
             Backend::Wayland(wayland) => {
                 self.keys.settle(&self.stop)?;
-                wayland.send(&self.stop, chord, false)
+                activity::sending(|| wayland.send(&self.stop, chord, false))
             }
         }
     }
@@ -573,6 +580,23 @@ impl LinuxPaster {
         // paste's pending restore stands down.
         let keep = crate::labs::keep_on_clipboard();
         self.paste_as(Mime::Text, text.as_bytes(), None, shift, keep)
+    }
+
+    /// Pastes a dictation, joined onto the one before it when the person
+    /// did nothing in between, as macOS and Windows join them. Only where
+    /// [`activity`] reports their input; elsewhere it pastes as is.
+    pub(crate) fn paste_dictation(&mut self, text: &str, shift: bool) -> Result<()> {
+        let Some(revision) = activity::revision() else {
+            return self.paste(text, shift);
+        };
+        let text = self
+            .continuation
+            .join(revision, true, text)
+            .unwrap_or_else(|| text.to_string());
+        self.paste(&text, shift)?;
+        // Only a paste that reached the app is continued by the next one.
+        self.continuation.record(revision, true, text);
+        Ok(())
     }
 
     /// Pastes over a typed-text selection, then puts `original` back: the
@@ -604,6 +628,9 @@ impl LinuxPaster {
         shift: bool,
         keep: bool,
     ) -> Result<()> {
+        // Whatever this inserts, a dictation after it no longer follows the
+        // last one; a dictation's own paste records itself afterwards.
+        self.continuation.clear();
         let restore = self.restore.clone();
         let selection = self.selection.current();
         let mut state = restore.lock().unwrap_or_else(PoisonError::into_inner);
@@ -662,8 +689,7 @@ impl LinuxPaster {
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
                 self.keys.settle(&self.stop)?;
-                wayland
-                    .send(&self.stop, Chord::Paste, paste_with_shift)
+                activity::sending(|| wayland.send(&self.stop, Chord::Paste, paste_with_shift))
                     .map_err(|error| copied_only(error, paste_with_shift))?;
             }
         }

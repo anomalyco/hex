@@ -2,9 +2,9 @@
 //! each behind its own switch, off by default. There is no master switch:
 //! Settings › Labs lists every feature as a card with a toggle, under its
 //! group's collapsible header (`Feature::group`). A feature
-//! with its own pane (Meetings, Voice Filter, Playground) joins the sidebar
-//! as a normal item while on and is hidden while off; a behaviour-only
-//! feature (Live text, Live chapters, Vocabulary biasing, Screen vocabulary,
+//! with its own pane (Meetings, Voice Filter, Playground, the Modes editor)
+//! joins the sidebar as a normal item while on and is hidden while off; a behaviour-only
+//! feature (Live text, Live chapters, Vocabulary help, Words on screen,
 //! the rewrite reading the text around the cursor (macOS),
 //! keyboard-language
 //! model switching, mouse shortcuts, pausing the browser, a spoken phrase
@@ -27,7 +27,7 @@
 //! Gate a feature where its work starts (the worker, thread, or capture
 //! that does it), not only where its UI shows.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
@@ -121,6 +121,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone,
             Self::Playground => settings.labs.playground,
             Self::LiveText => settings.labs.live_text,
+            Self::FasterLiveText => settings.labs.faster_live_text,
             Self::FailureNotices => settings.labs.failure_notices,
             Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
@@ -138,6 +139,7 @@ impl Feature {
             Self::SpokenFormatting => settings.labs.spoken_formatting,
             Self::FillerWords => settings.labs.filler_words,
             Self::CleanUpWithAppleIntelligence => settings.labs.clean_up_with_apple_intelligence,
+            Self::NeutralVoice => settings.labs.neutral_voice,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut,
             Self::SmartSpacing => settings.labs.smart_spacing,
@@ -159,7 +161,6 @@ impl Feature {
             Self::SectionKeyAlone => settings.labs.section_key_alone,
             Self::MicrophoneKeyAlone => settings.labs.microphone_key,
             Self::KeepRecordings => settings.labs.keep_recordings,
-            Self::SettingsSearch => settings.labs.settings_search,
             Self::Appearance => settings.labs.appearance,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore,
@@ -167,6 +168,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules,
             Self::GnomeAnnotate => settings.labs.gnome_annotate,
+            Self::AnnotatePointerScreen => settings.labs.annotate_pointer_screen,
             Self::Screenshots => settings.labs.screenshots,
             Self::AnnotateReplay => settings.labs.annotate_replay,
             Self::MeetingImport => settings.labs.meeting_import,
@@ -176,15 +178,20 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps,
             Self::SpeakersOnly => settings.labs.speakers_only,
             Self::CalendarMenu => settings.labs.calendar_menu,
+            Self::CalendarSelectAll => settings.labs.calendar_bulk_select,
             Self::PauseMenu => settings.labs.pause_menu,
             Self::VoicePrompt => settings.labs.voice_prompt,
             Self::StopPhrase => settings.labs.stop_phrase,
             Self::HoldThroughKeys => settings.labs.hold_through_keys,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
+            Self::DropTranscribe => settings.labs.drop_transcribe,
             Self::YoloMode => settings.labs.yolo_mode,
             Self::CursorContext => settings.labs.cursor_context,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
+            Self::ModesEditor => settings.labs.modes_editor,
+            Self::PasteLastPicker => settings.labs.paste_last_picker,
+            Self::VocabularyFiles => settings.labs.vocabulary_files,
         }
     }
 
@@ -201,6 +208,7 @@ impl Feature {
             &mut settings.share_dictation_shortcut,
             &mut labs.playground,
             &mut labs.live_text,
+            &mut labs.faster_live_text,
             &mut labs.failure_notices,
             &mut labs.live_typing,
             &mut labs.live_chapters,
@@ -214,6 +222,7 @@ impl Feature {
             &mut labs.spoken_formatting,
             &mut labs.filler_words,
             &mut labs.clean_up_with_apple_intelligence,
+            &mut labs.neutral_voice,
             &mut labs.second_dictation_shortcut,
             &mut labs.terminal_paste_shortcut,
             &mut labs.smart_spacing,
@@ -235,7 +244,6 @@ impl Feature {
             &mut labs.section_key_alone,
             &mut labs.microphone_key,
             &mut labs.keep_recordings,
-            &mut labs.settings_search,
             &mut labs.appearance,
             &mut labs.hide_menu_bar_icon,
             &mut labs.gnome_clipboard_restore,
@@ -243,6 +251,7 @@ impl Feature {
             &mut labs.notch_indicator,
             &mut labs.gnome_meeting_capsules,
             &mut labs.gnome_annotate,
+            &mut labs.annotate_pointer_screen,
             &mut labs.screenshots,
             &mut labs.annotate_replay,
             &mut labs.meeting_import,
@@ -252,16 +261,21 @@ impl Feature {
             &mut labs.api_timestamps,
             &mut labs.speakers_only,
             &mut labs.calendar_menu,
+            &mut labs.calendar_bulk_select,
             &mut labs.app_model_switching,
             &mut labs.pause_menu,
             &mut labs.voice_prompt,
             &mut labs.stop_phrase,
             &mut labs.hold_through_keys,
             &mut labs.copy_capture_zip,
+            &mut labs.drop_transcribe,
             &mut labs.yolo_mode,
             &mut labs.cursor_context,
             &mut labs.more_dictation_shortcuts,
             &mut labs.copy_dictation_audio,
+            &mut labs.modes_editor,
+            &mut labs.paste_last_picker,
+            &mut labs.vocabulary_files,
         ]
     }
 
@@ -276,6 +290,7 @@ impl Feature {
             Self::VoiceFilter => settings.experimental.hex_microphone = on,
             Self::Playground => settings.labs.playground = on,
             Self::LiveText => settings.labs.live_text = on,
+            Self::FasterLiveText => settings.labs.faster_live_text = on,
             Self::FailureNotices => settings.labs.failure_notices = on,
             Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
@@ -295,6 +310,7 @@ impl Feature {
             Self::CleanUpWithAppleIntelligence => {
                 settings.labs.clean_up_with_apple_intelligence = on;
             }
+            Self::NeutralVoice => settings.labs.neutral_voice = on,
             Self::SecondDictationShortcut => settings.labs.second_dictation_shortcut = on,
             Self::TerminalPasteShortcut => settings.labs.terminal_paste_shortcut = on,
             Self::SmartSpacing => settings.labs.smart_spacing = on,
@@ -318,7 +334,6 @@ impl Feature {
             Self::KQuantModels => settings.labs.k_quant_models = on,
             Self::PickerDownloaded => settings.labs.picker_downloaded = on,
             Self::KeepRecordings => settings.labs.keep_recordings = on,
-            Self::SettingsSearch => settings.labs.settings_search = on,
             Self::Appearance => settings.labs.appearance = on,
             Self::HideMenuBarIcon => settings.labs.hide_menu_bar_icon = on,
             Self::GnomeClipboardRestore => settings.labs.gnome_clipboard_restore = on,
@@ -326,6 +341,7 @@ impl Feature {
             Self::NotchIndicator => settings.labs.notch_indicator = on,
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
             Self::GnomeAnnotate => settings.labs.gnome_annotate = on,
+            Self::AnnotatePointerScreen => settings.labs.annotate_pointer_screen = on,
             Self::Screenshots => settings.labs.screenshots = on,
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
@@ -335,15 +351,20 @@ impl Feature {
             Self::ApiTimestamps => settings.labs.api_timestamps = on,
             Self::SpeakersOnly => settings.labs.speakers_only = on,
             Self::CalendarMenu => settings.labs.calendar_menu = on,
+            Self::CalendarSelectAll => settings.labs.calendar_bulk_select = on,
             Self::PauseMenu => settings.labs.pause_menu = on,
             Self::VoicePrompt => settings.labs.voice_prompt = on,
             Self::StopPhrase => settings.labs.stop_phrase = on,
             Self::HoldThroughKeys => settings.labs.hold_through_keys = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
+            Self::DropTranscribe => settings.labs.drop_transcribe = on,
             Self::YoloMode => settings.labs.yolo_mode = on,
             Self::CursorContext => settings.labs.cursor_context = on,
             Self::MoreDictationShortcuts => settings.labs.more_dictation_shortcuts = on,
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
+            Self::ModesEditor => settings.labs.modes_editor = on,
+            Self::PasteLastPicker => settings.labs.paste_last_picker = on,
+            Self::VocabularyFiles => settings.labs.vocabulary_files = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -383,11 +404,19 @@ const SKIP_PAUSES: u64 = 1 << 16;
 const PARAKEET_ULTRA: u64 = 1 << 17;
 const HISTORY_STATS: u64 = 1 << 18;
 const RECENT_DICTATIONS: u64 = 1 << 19;
-// 1 << 20 is free (Stop when the call ends moved to Meetings › Settings).
+/// On Wayland, a screen capture follows the pointer to the monitor it is on
+/// (Linux). Yearly stats left this bit free when it merged into Dictation
+/// stats.
+const ANNOTATE_POINTER_SCREEN: u64 = 1 << 20;
 const KEEP_RECORDINGS: u64 = 1 << 21;
 const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
-// 1 << 23 and 1 << 24 are free (Movable meeting capsules and More call apps
-// graduated).
+/// Labs › Faster live text: a shorter stream lookahead, on the bit the
+/// graduated meeting labs left free.
+const FASTER_LIVE_TEXT: u64 = 1 << 23;
+/// Importing and exporting the vocabulary as a CSV file, on the bit More
+/// call apps left free.
+// Kept only for the state-word encoding; no gate reads it.
+const VOCABULARY_FILES: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 // 1 << 26 is free (Vocabulary in meeting notes graduated).
 const NOTCH_INDICATOR: u64 = 1 << 27;
@@ -401,21 +430,23 @@ const MINUTES_BITS: u32 = 11;
 const MINUTES_MASK: u64 = (1 << MINUTES_BITS) - 1;
 /// This switch sits above the minutes.
 const MEETING_IMPORT: u64 = 1 << (MINUTES_SHIFT + MINUTES_BITS as u64);
-/// The next bit above Quit closes Settings, also clear of the minutes below.
-const LIVE_TYPING: u64 = MEETING_IMPORT << 2;
+/// The next bit above Import audio's switch, clear of the minutes below it.
+const LIVE_TYPING: u64 = MEETING_IMPORT << 1;
 /// The next bit above Live typing's switch.
 const FAILURE_NOTICES: u64 = LIVE_TYPING << 1;
 /// The next bit above Failure notices' switch.
 const CAPS_LOCK_DICTATION: u64 = FAILURE_NOTICES << 1;
 /// The next bit above Caps Lock dictation's switch.
 const GNOME_ANNOTATE: u64 = CAPS_LOCK_DICTATION << 1;
+
 /// The next bit above Annotate on GNOME's switch.
 const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// The next bit above Typed text's switch: Caps Lock dictation's recording
 /// light blinks slowly instead of staying solid.
 const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
 /// The next bit above Caps Lock's slow blink: an OpenCode service in WSL is
-/// found when no Windows one answers (Windows).
+/// used ahead of a Windows one when it answers, with Windows as the fallback
+/// (Windows).
 const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 /// The next bit above OpenCode in WSL: the local API's `process=global`
 /// returns a transcript after Global mode's output processing.
@@ -423,15 +454,15 @@ const API_PROCESSING: u64 = OPENCODE_IN_WSL << 1;
 /// The next bit above Process API transcripts' switch: Double-tap accepts a
 /// shortcut without a key (macOS).
 const DOUBLE_TAP_MODIFIERS: u64 = API_PROCESSING << 1;
-/// The next bit above Double-tap on a lone modifier's switch: a dictation
+/// The next bit above Double-tap Option, Command, or Globe's switch: a dictation
 /// pastes into the app its capture started in (macOS).
 const RETURN_TO_APP: u64 = DOUBLE_TAP_MODIFIERS << 1;
 /// The next bit above Return to app's switch: "While dictating" applies only
 /// when the default output is speakers.
 const SPEAKERS_ONLY: u64 = RETURN_TO_APP << 1;
-/// The next bit above Switch model with app: the menu bar offers Pause Hex,
-/// and every capture shortcut is inert while paused (macOS).
-const PAUSE_MENU: u64 = SPEAKERS_ONLY << 2;
+/// The next bit above Only on speakers' switch: the menu bar offers Pause
+/// Hex, and every capture shortcut is inert while paused (macOS).
+const PAUSE_MENU: u64 = SPEAKERS_ONLY << 1;
 /// The next bit above Pause from menu bar: the local API's
 /// `timestamps=segment|word` returns native timings.
 const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
@@ -440,7 +471,7 @@ const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
 /// does not fit above the minutes, so it lives in
 /// [`MICROPHONE_LINGER_SECONDS`]. A new lab can take one of the free bits
 /// below the minutes.
-const KEEP_MICROPHONE_OPEN: u64 = API_TIMESTAMPS << 2;
+const KEEP_MICROPHONE_OPEN: u64 = 1 << 60;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.
@@ -451,8 +482,8 @@ static STATE: AtomicU64 = AtomicU64::new(0);
 /// window itself has no room in the word.
 static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 
-/// Labs › Screen vocabulary's switch, set beside [`STATE`]:
-/// this lab reads the focused window once per dictation.
+/// Labs › Words on screen's switch, set beside [`STATE`] like [`SCREEN_VOCABULARY`]:
+/// that lab reads the focused window once per dictation.
 static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 
 /// Labs › Rewrite reads nearby text's switch, set beside [`STATE`] like
@@ -460,7 +491,7 @@ static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 /// once per dictation, and the state word has no bit for it.
 static CURSOR_CONTEXT: AtomicBool = AtomicBool::new(false);
 
-/// Labs › Voice prompt's switch in its own atomic, written by [`state`] and
+/// Labs › Rewrite by voice's switch in its own atomic, written by [`state`] and
 /// [`apply`].
 static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 
@@ -469,7 +500,7 @@ static VOICE_PROMPT: AtomicBool = AtomicBool::new(false);
 /// [`state`] and [`apply`].
 static STOP_PHRASE: AtomicBool = AtomicBool::new(false);
 
-/// Labs › Copy captures as a zip's switch, set beside [`STATE`] like
+/// Labs › Copy a capture as one file's switch, set beside [`STATE`] like
 /// [`SCREEN_VOCABULARY`]: a written capture copies as one zip file.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
 
@@ -483,29 +514,38 @@ static COPY_DICTATION_AUDIO: AtomicBool = AtomicBool::new(false);
 /// [`SCREEN_VOCABULARY`], written by [`state`] and [`apply`].
 static K_QUANT_MODELS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Transcribe dropped audio's switch, set beside [`STATE`] like
+/// [`SCREEN_VOCABULARY`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static DROP_TRANSCRIBE: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Upcoming meetings in menu bar's switch, set beside [`STATE`] like
 /// [`SCREEN_VOCABULARY`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
 static CALENDAR_MENU: AtomicBool = AtomicBool::new(false);
 
-/// Labs › YOLO mode's minimum hold in seconds, 0 while the lab is
-/// off, set beside [`STATE`] like [`SCREEN_VOCABULARY`], written by [`state`] and
-/// [`apply`].
-static YOLO_MODE_SECONDS: AtomicU32 = AtomicU32::new(0);
-
-/// The apps Labs › YOLO mode sends in (empty: every
-/// app), set beside [`YOLO_MODE_SECONDS`] by [`state`] and [`apply`].
-static YOLO_MODE_APPS: LazyLock<RwLock<Vec<String>>> = LazyLock::new(|| RwLock::new(Vec::new()));
+/// None while YOLO mode is off; an empty app list sends everywhere.
+static YOLO_MODE_APPS: RwLock<Option<Vec<String>>> = RwLock::new(None);
 
 /// Labs › Clean up with Apple Intelligence's switch, set beside [`STATE`] like
 /// [`SCREEN_VOCABULARY`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
 static CLEAN_UP: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Neutral voice's switch, set beside [`STATE`] like [`SCREEN_VOCABULARY`]:
+/// the state word is full, so this lab has its own atomic, written by
+/// [`state`] and [`apply`].
+static NEUTRAL_VOICE: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Microphone key alone's switch, set beside [`STATE`] like
 /// [`SCREEN_VOCABULARY`]: the state word is full, so this lab has its own atomic,
 /// written by [`state`] and [`apply`].
 static MICROPHONE_KEY: AtomicBool = AtomicBool::new(false);
+
+/// Labs › Paste Last picker's switch, set beside [`STATE`] like
+/// [`SCREEN_VOCABULARY`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static PASTE_LAST_PICKER: AtomicBool = AtomicBool::new(false);
 
 /// The words that start a voice prompt, set beside [`STATE`] by [`state`] and
 /// [`apply`]. An invalid saved phrase reads as the default.
@@ -540,10 +580,13 @@ fn state() -> u64 {
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
+                DROP_TRANSCRIBE.store(drop_transcribe_enabled(&saved), Ordering::Release);
                 CALENDAR_MENU.store(calendar_menu_enabled(&saved), Ordering::Release);
                 store_yolo_mode(&saved);
                 CLEAN_UP.store(clean_up_enabled(&saved), Ordering::Release);
+                NEUTRAL_VOICE.store(neutral_voice_enabled(&saved), Ordering::Release);
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
+                PASTE_LAST_PICKER.store(paste_last_picker_enabled(&saved), Ordering::Release);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
                 store_stop_phrase_text(&saved.stop_phrase_text);
             }
@@ -560,7 +603,7 @@ fn linger_seconds(settings: &LabsSettings) -> u64 {
         .map_or(0, |window| window.as_secs())
 }
 
-/// Whether `settings` turn on Labs › Screen vocabulary in this build, before
+/// Whether `settings` turn on Labs › Words on screen in this build, before
 /// its managed lock; the state word has no bit for it.
 fn screen_vocabulary_enabled(settings: &LabsSettings) -> bool {
     settings.screen_vocabulary
@@ -576,7 +619,7 @@ fn cursor_context_enabled(settings: &LabsSettings) -> bool {
         && Feature::CursorContext.managed().is_none()
 }
 
-/// Whether `settings` turn on Labs › Voice prompt in this build, before its
+/// Whether `settings` turn on Labs › Rewrite by voice in this build, before its
 /// managed lock; the state word has no bit for it.
 fn voice_prompt_enabled(settings: &LabsSettings) -> bool {
     settings.voice_prompt
@@ -590,7 +633,7 @@ fn stop_phrase_enabled(settings: &LabsSettings) -> bool {
     settings.stop_phrase && Feature::StopPhrase.shipped() && Feature::StopPhrase.managed().is_none()
 }
 
-/// Whether `settings` turn on Labs › Copy captures as a zip in this build,
+/// Whether `settings` turn on Labs › Copy a capture as one file in this build,
 /// before its managed lock; the state word has no bit for it.
 fn copy_capture_zip_enabled(settings: &LabsSettings) -> bool {
     settings.copy_capture_zip
@@ -604,6 +647,14 @@ fn k_quant_models_enabled(settings: &LabsSettings) -> bool {
     settings.k_quant_models
         && Feature::KQuantModels.shipped()
         && Feature::KQuantModels.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Transcribe dropped audio in this build,
+/// before its managed lock; the state word has no bit for it.
+fn drop_transcribe_enabled(settings: &LabsSettings) -> bool {
+    settings.drop_transcribe
+        && Feature::DropTranscribe.shipped()
+        && Feature::DropTranscribe.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Copy dictation audio in this build,
@@ -628,24 +679,12 @@ fn yolo_mode_enabled(settings: &LabsSettings) -> bool {
     settings.yolo_mode && Feature::YoloMode.shipped() && Feature::YoloMode.managed().is_none()
 }
 
-/// Records Labs › YOLO mode's apps, then its hold, so a
-/// gate that sees the hold also sees the apps that go with it.
+/// Publish the switch and its app scope together.
 fn store_yolo_mode(settings: &LabsSettings) {
     *YOLO_MODE_APPS
         .write()
-        .unwrap_or_else(|error| error.into_inner()) = settings.yolo_mode_apps.clone();
-    YOLO_MODE_SECONDS.store(yolo_mode_seconds(settings), Ordering::Release);
-}
-
-/// Labs › YOLO mode's minimum hold in seconds, or 0 while it's off
-/// (or its hold isn't one it offers).
-fn yolo_mode_seconds(settings: &LabsSettings) -> u32 {
-    let seconds = settings.yolo_mode_seconds;
-    if yolo_mode_enabled(settings) && crate::app_settings::YOLO_MODE_SECONDS.contains(&seconds) {
-        seconds
-    } else {
-        0
-    }
+        .unwrap_or_else(|error| error.into_inner()) =
+        yolo_mode_enabled(settings).then(|| settings.yolo_mode_apps.clone());
 }
 
 /// Whether `settings` turn on Labs › Clean up with Apple Intelligence in this
@@ -656,12 +695,28 @@ fn clean_up_enabled(settings: &LabsSettings) -> bool {
         && Feature::CleanUpWithAppleIntelligence.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Neutral voice in this build, before its
+/// managed lock; the state word has no bit for it.
+fn neutral_voice_enabled(settings: &LabsSettings) -> bool {
+    settings.neutral_voice
+        && Feature::NeutralVoice.shipped()
+        && Feature::NeutralVoice.managed().is_none()
+}
+
 /// Whether `settings` turn on Labs › Microphone key alone in this build,
 /// before its managed lock; the state word has no bit for it.
 fn microphone_key_enabled(settings: &LabsSettings) -> bool {
     settings.microphone_key
         && Feature::MicrophoneKeyAlone.shipped()
         && Feature::MicrophoneKeyAlone.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Paste Last picker in this build, before
+/// its managed lock; the state word has no bit for it.
+fn paste_last_picker_enabled(settings: &LabsSettings) -> bool {
+    settings.paste_last_picker
+        && Feature::PasteLastPicker.shipped()
+        && Feature::PasteLastPicker.managed().is_none()
 }
 
 /// Records the trigger phrase matching reads; an invalid value never turns
@@ -714,10 +769,13 @@ pub(crate) fn apply(settings: &LabsSettings) {
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
+    DROP_TRANSCRIBE.store(drop_transcribe_enabled(settings), Ordering::Release);
     CALENDAR_MENU.store(calendar_menu_enabled(settings), Ordering::Release);
     store_yolo_mode(settings);
     CLEAN_UP.store(clean_up_enabled(settings), Ordering::Release);
+    NEUTRAL_VOICE.store(neutral_voice_enabled(settings), Ordering::Release);
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
+    PASTE_LAST_PICKER.store(paste_last_picker_enabled(settings), Ordering::Release);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -738,6 +796,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
     let minutes = u64::from(settings.unload_idle_minutes.clamp(1, 24 * 60)) << MINUTES_SHIFT;
     [
         (Feature::LiveText, settings.live_text, LIVE_TEXT),
+        (
+            Feature::FasterLiveText,
+            settings.faster_live_text,
+            FASTER_LIVE_TEXT,
+        ),
         (
             Feature::FailureNotices,
             settings.failure_notices,
@@ -810,6 +873,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             HIDE_MENU_BAR_ICON,
         ),
         (
+            Feature::VocabularyFiles,
+            settings.vocabulary_files,
+            VOCABULARY_FILES,
+        ),
+        (
             Feature::GnomeClipboardRestore,
             settings.gnome_clipboard_restore,
             GNOME_CLIPBOARD_RESTORE,
@@ -867,6 +935,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             settings.gnome_annotate,
             GNOME_ANNOTATE,
         ),
+        (
+            Feature::AnnotatePointerScreen,
+            settings.annotate_pointer_screen,
+            ANNOTATE_POINTER_SCREEN,
+        ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
         (
             Feature::KeepMicrophoneOpen,
@@ -919,6 +992,10 @@ mod tests {
             .to_string();
         assert!(error.contains("graduated"), "{error}");
         assert_eq!(Feature::from_name("meeting-platform-icons"), None);
+        // Yearly stats is part of Dictation stats now.
+        let error = resolve("yearly-stats", |_| true).unwrap_err().to_string();
+        assert!(error.contains("history-stats"), "{error}");
+        assert_eq!(Feature::from_name("yearly-stats"), None);
     }
 
     #[test]
@@ -1196,6 +1273,33 @@ mod tests {
         assert_eq!(
             Feature::CleanUpWithAppleIntelligence.name(),
             "clean-up-apple-intelligence"
+        );
+    }
+
+    /// The neutral voice lab's own atomic, its switch, and its macOS-only
+    /// card: the state word is full, so it is not a bit.
+    #[test]
+    fn neutral_voice_is_its_own_atomic_and_macos_only() {
+        let labs = LabsSettings::default();
+        assert!(!neutral_voice_enabled(&labs));
+        assert!(!Feature::NeutralVoice.on(&AppSettings::default()));
+        let on = LabsSettings {
+            neutral_voice: true,
+            ..LabsSettings::default()
+        };
+        assert!(neutral_voice_enabled(&on));
+        assert_eq!(
+            Feature::NeutralVoice.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::NeutralVoice.added(), 20261120);
+        assert_eq!(Feature::NeutralVoice.audience(), Audience::Everyone);
+        assert_eq!(Feature::NeutralVoice.group(), Group::Output);
+        assert_eq!(Feature::NeutralVoice.settings_key(), "labs.neutral_voice");
+        assert_eq!(Feature::NeutralVoice.name(), "neutral-voice");
+        assert_eq!(
+            Feature::for_settings_key("labs.neutral_voice"),
+            Some(Feature::NeutralVoice)
         );
     }
 
@@ -1596,6 +1700,31 @@ mod tests {
     }
 
     #[test]
+    fn calendar_select_all_is_its_own_switch_and_macos_only() {
+        let mut settings = AppSettings::default();
+        assert!(!Feature::CalendarSelectAll.on(&settings));
+        settings.labs.calendar_bulk_select = true;
+        settings.labs.unload_idle_minutes = 24 * 60;
+        assert!(Feature::CalendarSelectAll.on(&settings));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&settings.labs, |_| true);
+        assert_eq!(state & PAUSE_MENU, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::CalendarSelectAll.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::CalendarSelectAll.added(), 20261118);
+        assert_eq!(Feature::CalendarSelectAll.audience(), Audience::Everyone);
+        assert_eq!(Feature::CalendarSelectAll.group(), Group::Meetings);
+        assert_eq!(
+            Feature::CalendarSelectAll.settings_key(),
+            "labs.calendar_bulk_select"
+        );
+        assert_eq!(Feature::CalendarSelectAll.name(), "calendar-select-all");
+    }
+
+    #[test]
     fn screen_vocabulary_is_its_own_switch_and_macos_only() {
         let mut labs = LabsSettings::default();
         assert!(!screen_vocabulary_enabled(&labs));
@@ -1604,6 +1733,7 @@ mod tests {
         assert!(screen_vocabulary_enabled(&labs));
         // The state word has no bit for it: the other switches keep theirs.
         let state = encode_where(&labs, |_| true);
+        assert_eq!(state & VOCABULARY_FILES, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert_eq!(
             Feature::ScreenVocabulary.on_this_os(),
@@ -1722,19 +1852,63 @@ mod tests {
     }
 
     #[test]
+    fn paste_last_picker_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!paste_last_picker_enabled(&labs));
+        labs.paste_last_picker = true;
+        labs.unload_idle_minutes = 24 * 60;
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & KEEP_RECORDINGS, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::PasteLastPicker.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::PasteLastPicker.added(), 20261119);
+        assert_eq!(Feature::PasteLastPicker.audience(), Audience::Dev);
+        assert_eq!(Feature::PasteLastPicker.group(), Group::History);
+        assert_eq!(
+            Feature::PasteLastPicker.settings_key(),
+            "labs.paste_last_picker"
+        );
+        assert_eq!(Feature::PasteLastPicker.name(), "paste-last-picker");
+    }
+
+    #[test]
+    fn drop_transcribe_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!drop_transcribe_enabled(&labs));
+        labs.drop_transcribe = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(drop_transcribe_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(
+            Feature::DropTranscribe.on_this_os(),
+            "the window exists on every OS"
+        );
+        assert_eq!(Feature::DropTranscribe.added(), 20261113);
+        assert_eq!(Feature::DropTranscribe.audience(), Audience::Everyone);
+        assert_eq!(Feature::DropTranscribe.group(), Group::Models);
+        assert_eq!(
+            Feature::DropTranscribe.settings_key(),
+            "labs.drop_transcribe"
+        );
+        assert_eq!(Feature::DropTranscribe.name(), "drop-transcribe");
+    }
+
+    #[test]
     fn yolo_mode_is_its_own_switch_and_everywhere() {
         let mut labs = LabsSettings::default();
         assert!(!yolo_mode_enabled(&labs));
         labs.yolo_mode = true;
         labs.unload_idle_minutes = 24 * 60;
         assert!(yolo_mode_enabled(&labs));
-        assert_eq!(yolo_mode_seconds(&labs), 2);
-        labs.yolo_mode_seconds = 5;
-        assert_eq!(yolo_mode_seconds(&labs), 5);
-        labs.yolo_mode_seconds = 4;
-        assert_eq!(yolo_mode_seconds(&labs), 0);
         assert_eq!(
-            Feature::for_settings_key("labs.yolo_mode_seconds"),
+            Feature::for_settings_key("labs.yolo_mode_apps"),
             Some(Feature::YoloMode)
         );
         // The state word has no bit for it: the other switches keep theirs.
@@ -1778,6 +1952,33 @@ mod tests {
         assert_eq!(
             Feature::TerminalPasteShortcut.on_this_os(),
             cfg!(any(target_os = "windows", target_os = "linux"))
+        );
+    }
+
+    #[test]
+    fn vocabulary_files_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!Feature::VocabularyFiles.on(&AppSettings::default()));
+        assert_eq!(encode(&labs) & VOCABULARY_FILES, 0);
+        labs.vocabulary_files = true;
+        let settings = AppSettings {
+            labs,
+            ..AppSettings::default()
+        };
+        assert!(Feature::VocabularyFiles.on(&settings));
+        assert_ne!(encode(&settings.labs) & VOCABULARY_FILES, 0);
+        assert!(Feature::VocabularyFiles.on_this_os());
+        assert_eq!(Feature::VocabularyFiles.added(), 20261120);
+        assert_eq!(Feature::VocabularyFiles.audience(), Audience::Everyone);
+        assert_eq!(Feature::VocabularyFiles.group(), Group::Dictation);
+        assert_eq!(
+            Feature::VocabularyFiles.settings_key(),
+            "labs.vocabulary_files"
+        );
+        assert_eq!(Feature::VocabularyFiles.name(), "vocabulary-files");
+        assert_eq!(
+            Feature::VocabularyFiles.oses(),
+            &[Os::Macos, Os::Windows, Os::Linux]
         );
     }
 

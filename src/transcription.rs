@@ -10,6 +10,7 @@ pub(crate) mod benchmark;
 pub(crate) mod cpu_floor;
 pub(crate) mod custom_models;
 pub(crate) mod engine;
+pub(crate) mod file_transcript;
 pub(crate) mod found_models;
 pub(crate) mod gguf_header;
 #[cfg(any(target_os = "macos", target_os = "linux", target_os = "windows"))]
@@ -30,6 +31,7 @@ pub(crate) mod preparation;
 pub(crate) mod service;
 pub(crate) mod speech_detector;
 pub(crate) mod stream;
+pub(crate) mod stream_tuning;
 pub(crate) mod subtitle_credits;
 pub(crate) mod transcript;
 
@@ -184,6 +186,13 @@ pub(crate) fn trailing_silence_samples(model: Option<TranscriptionModelId>) -> u
     }
 }
 
+/// Whether a live stream of `model` must end its text with closing sentence
+/// punctuation before it is trusted: Unified English's chunked decode drops
+/// the mark its whole-clip run keeps (issue 1933).
+pub(crate) fn requires_closing_mark(model: Option<TranscriptionModelId>) -> bool {
+    model == Some(TranscriptionModelId::ParakeetUnifiedEnglish)
+}
+
 #[cfg(target_os = "macos")]
 impl WarmTranscriber {
     /// A warm transcriber already serving `model`, for opt-in harnesses.
@@ -217,11 +226,29 @@ impl WarmTranscriber {
         }
     }
 
+    /// Whether a live stream of the warm model must end its text with closing
+    /// sentence punctuation before it is trusted, as Unified English's does
+    /// (issue 1933).
+    pub(crate) fn stream_requires_closing_mark(&self) -> bool {
+        match &self.active {
+            Some(Transcriber::Gguf(model)) => requires_closing_mark(model.model_id()),
+            _ => false,
+        }
+    }
+
     /// Stream options of the warm model, when it can stream on its device.
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
         match &self.active {
             Some(Transcriber::Gguf(model)) => model.stream_options(),
             _ => None,
+        }
+    }
+
+    /// Re-probes the live stream when Labs › Faster live text or an env
+    /// override changed, so the next capture streams with it.
+    pub(crate) fn refresh_stream(&mut self) {
+        if let Some(Transcriber::Gguf(model)) = &mut self.active {
+            model.refresh_stream();
         }
     }
 
@@ -324,5 +351,25 @@ mod padding_tests {
         );
         assert!(samples[..1_600].iter().all(|sample| *sample == 0.5));
         assert!(samples[1_600..].iter().all(|sample| *sample == 0.0));
+    }
+}
+
+#[cfg(test)]
+mod closing_mark_tests {
+    use super::requires_closing_mark;
+    use crate::transcription::models::{CustomModelId, TranscriptionModelId};
+
+    #[test]
+    fn only_unified_english_streams_require_a_closing_mark() {
+        assert!(requires_closing_mark(Some(
+            TranscriptionModelId::ParakeetUnifiedEnglish
+        )));
+        assert!(!requires_closing_mark(None));
+        assert!(!requires_closing_mark(Some(
+            TranscriptionModelId::ParakeetV2
+        )));
+        assert!(!requires_closing_mark(Some(TranscriptionModelId::Custom(
+            CustomModelId::parse("custom-0123456789abcdef").expect("16 hex digits")
+        ))));
     }
 }

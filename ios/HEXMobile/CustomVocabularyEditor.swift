@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The custom vocabulary list shown under its experiment toggle.
+/// The custom vocabulary list shown under its switch in Settings › Dictation.
 struct CustomVocabularyEditor: View {
     private let settings = CustomVocabularySettings()
 
@@ -82,11 +82,7 @@ struct CustomVocabularyEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text(
-                "Hex fixes the spelling of listed words when it hears them. "
-                    + "It can't teach the speech engine new sounds, so a word heard "
-                    + "as something different stays as it is."
-            )
+            Text("Fixes spelling, not words Hex mishears")
             .font(.system(size: 12))
             .foregroundStyle(HexTheme.textMuted)
             .fixedSize(horizontal: false, vertical: true)
@@ -102,19 +98,19 @@ struct CustomVocabularyEditor: View {
         guard !candidate.isEmpty else { return }
 
         guard candidate.count <= CustomVocabularySettings.maxTermLength else {
-            notice = "Too long"
+            notice = String(localized: "Too long")
             return
         }
         let key = VocabularySpelling.normalizedKey(candidate)
         guard key.count >= 2 else {
-            notice = "Needs at least two letters or digits"
+            notice = String(localized: "Needs at least two letters or digits")
             return
         }
         let isDuplicate = terms.contains {
             VocabularySpelling.normalizedKey($0) == key
         }
         guard !isDuplicate else {
-            notice = "Already in the list"
+            notice = String(localized: "Already in the list")
             return
         }
 

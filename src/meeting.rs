@@ -38,6 +38,7 @@ mod os;
 #[cfg(target_os = "windows")]
 #[path = "meeting/windows.rs"]
 mod os;
+pub(crate) mod window_title;
 /// Linux's Trash, for capture retention too: distros ship no `trash` command.
 #[cfg(target_os = "linux")]
 pub(crate) use os::move_to_trash;
@@ -147,7 +148,11 @@ pub enum RecordingUpdate {
 }
 
 pub fn default_title(app: Option<&str>, created_at_ms: u64) -> String {
-    let clock = transcript::LocalTime::from_ms(created_at_ms).clock();
+    titled(app, &transcript::LocalTime::from_ms(created_at_ms).clock())
+}
+
+/// The default title naming a meeting at `clock`, `2:30 PM` or `14:30`.
+fn titled(app: Option<&str>, clock: &str) -> String {
     match app {
         Some(app) => format!("{app} call — {clock}"),
         None => format!("Meeting — {clock}"),
@@ -260,7 +265,13 @@ impl MeetingManifest {
     /// Where `title` came from, inferred for manifests that predate the field.
     pub fn title_source(&self) -> TitleSource {
         self.title_source.unwrap_or_else(|| {
-            if self.title == default_title(self.app.as_deref(), self.created_at_ms) {
+            let app = self.app.as_deref();
+            let time = transcript::LocalTime::from_ms(self.created_at_ms);
+            // A default from before meeting times followed the language was
+            // named with English's 12-hour clock.
+            if self.title == titled(app, &time.clock())
+                || self.title == titled(app, &time.twelve_hour_clock())
+            {
                 TitleSource::Default
             } else {
                 TitleSource::User
@@ -1098,7 +1109,8 @@ fn recovered_status(
     }
 }
 
-/// The local clock time of a timestamp, such as `2:30 PM`.
+/// The local clock time of a timestamp: `2:30 PM` in English, `14:30` in
+/// every other language.
 pub fn clock(milliseconds: u64) -> String {
     transcript::LocalTime::from_ms(milliseconds).clock()
 }

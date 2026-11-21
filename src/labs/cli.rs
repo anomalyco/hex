@@ -137,7 +137,7 @@ fn live_typing_note() -> Option<&'static str> {
 
 /// The feature `name` names, if this OS has it and `reaches` admits it.
 /// Features that left Labs: `hex labs` still knows their names.
-const GRADUATED: [(&str, &str); 23] = [
+const GRADUATED: [(&str, &str); 24] = [
     (
         "custom-models",
         "custom-models graduated: adding a model file and models found on this computer are always on now",
@@ -193,6 +193,10 @@ const GRADUATED: [(&str, &str); 23] = [
     (
         "meeting-notes-file",
         "meeting-notes-file moved: turn on Separate notes file in Meetings › Settings › Export, or hex settings set meetings.export.notes_file true",
+    ),
+    (
+        "yearly-stats",
+        "yearly-stats moved: turn on Dictation stats in Settings › Labs, or hex labs on history-stats (it includes the year heatmap and all-time totals now)",
     ),
     (
         "shell-completions",

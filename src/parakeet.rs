@@ -10,13 +10,13 @@ use std::time::Instant;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Transcript};
 
+use crate::continuation::InputActivity;
 use crate::dictation::context::ContextSnapshot;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, pad_for_parakeet};
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
 use crate::paste::{PasteMode, Paster};
-use crate::suppression::InputActivity;
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
 use crate::transcription::gguf_session::{OfflineGgufSession, output_truncated};
@@ -30,7 +30,6 @@ pub struct Parakeet {
     name: String,
     selection: Option<TranscriptionSelection>,
     max_audio_samples: Option<usize>,
-    stream: Option<transcribe_cpp::StreamOptions>,
     _weights: procwatch::Lease,
 }
 
@@ -122,10 +121,8 @@ struct InferenceJob {
     language: String,
     /// The clip, kept for History while Labs › Keep recordings is on.
     recording: Option<crate::history::Recording>,
-    /// See [`JobTimings::held_ms`].
-    held_ms: Option<u64>,
     /// See [`JobTimings::send_gate`].
-    send_gate: crate::dictation::yolo_mode::SendGate,
+    send_gate: Option<crate::dictation::yolo_mode::SendGate>,
     /// Labs › Stop phrase: the words its capture ended with, read when the
     /// phrase was heard, removed from the transcript before processing.
     stop_phrase: Option<String>,
@@ -151,23 +148,21 @@ struct JobTimings {
     audio_ms: u64,
     prepare_ms: u128,
     inference_ms: u128,
-    /// How long a shortcut-started dictation's shortcut was held, press to
-    /// release; `None` for every other capture. Labs › YOLO mode
-    /// reads it as the paste commits.
-    held_ms: Option<u64>,
-    /// Labs › YOLO mode: whether Escape came after submission, which skips
-    /// the Return.
-    send_gate: crate::dictation::yolo_mode::SendGate,
+    /// Only a shortcut's processed paste can send. An Escape after
+    /// submission lets the text paste but skips Return.
+    send_gate: Option<crate::dictation::yolo_mode::SendGate>,
 }
 
 struct CompletedTranscript {
     text: String,
-    /// Labs › Voice prompt asked for nothing: finish without output even if
+    /// Labs › Rewrite by voice asked for nothing: finish without output even if
     /// some later stage left text behind.
     nothing: bool,
     /// Corrected local transcript before mode processing.
     raw: String,
     application: Option<String>,
+    /// [`crate::dictation::context::ContextSnapshot::bundle_name`].
+    bundle_name: Option<String>,
     /// Labs › Return to app: the app the capture started in, which the
     /// paste returns to (macOS).
     return_to: Option<i32>,
@@ -178,6 +173,11 @@ struct CompletedTranscript {
 
 enum OutputJob {
     PreparePaste,
+    #[cfg(hex_capture)]
+    Recent {
+        sequence: u64,
+        request: crate::paste::recent::Request,
+    },
     Completed {
         job_id: DictationJobId,
         control: Arc<JobControl>,
@@ -194,6 +194,8 @@ impl OutputJob {
     fn sequence(&self) -> u64 {
         match self {
             Self::PreparePaste => u64::MAX,
+            #[cfg(hex_capture)]
+            Self::Recent { sequence, .. } => *sequence,
             Self::Completed { job_id, .. } => job_id.0,
             Self::Paste { sequence, .. } => *sequence,
         }
@@ -297,7 +299,7 @@ impl DictationWorker {
         }));
 
         let (_, selection) = crate::app_settings::transcription_selection();
-        // Labs › Unload model when idle parks a GGUF model at launch too:
+        // Labs › Free memory when idle parks a GGUF model at launch too:
         // the first dictation reloads it, so memory stays free until then.
         // Apple Speech holds no model of Hex's and stays loaded.
         let parked = crate::labs::unload_idle().is_some()
@@ -392,6 +394,14 @@ impl DictationWorker {
         state.started_by_shortcut = by_shortcut;
     }
 
+    #[cfg(hex_capture)]
+    pub(crate) fn started_by_shortcut(&self) -> bool {
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .started_by_shortcut
+    }
+
     /// Hands the clip to the engine at once, so its live stream finishes
     /// before any later capture begins one; the job then waits in order.
     pub fn transcribe(
@@ -450,12 +460,9 @@ impl DictationWorker {
         let language = selection.language.clone();
         let submitted_at = Instant::now();
         let audio_ms = clip.duration_ms();
-        // Labs › YOLO mode: only a shortcut dictation's processed
-        // paste may send, judged on how long its shortcut was held.
-        let held_ms = (matches!(target, TranscriptionTarget::Paste) && state.started_by_shortcut)
-            .then(|| clip.held_ms());
-        let send_gate = crate::dictation::yolo_mode::SendGate::open();
-        // Labs › Screen vocabulary: this capture's terms belong to its
+        let send_gate = (matches!(target, TranscriptionTarget::Paste) && state.started_by_shortcut)
+            .then(crate::dictation::yolo_mode::SendGate::open);
+        // Labs › Words on screen: this capture's terms belong to its
         // whole-clip run and no other job. Only a model that reads the terms
         // gives up its live stream, whose vocabulary is fixed when it starts
         // (before the window was read); a model that ignores them keeps it.
@@ -495,7 +502,6 @@ impl DictationWorker {
             return_to,
             language,
             recording,
-            held_ms,
             send_gate,
             stop_phrase,
         })
@@ -540,6 +546,14 @@ impl DictationWorker {
     }
 
     pub fn paste_last(&self) -> Result<(), &'static str> {
+        #[cfg(hex_capture)]
+        if crate::paste::recent::enabled() {
+            return self.paste_recent(crate::paste::recent::Request {
+                id: None,
+                target: crate::paste::recent::Target::capture()
+                    .ok_or("could not confirm the paste target")?,
+            });
+        }
         self.submit_paste(PasteKind::LastTranscript)
     }
 
@@ -548,12 +562,24 @@ impl DictationWorker {
     }
 
     fn submit_paste(&self, kind: PasteKind) -> Result<(), &'static str> {
+        self.enqueue_paste(|sequence| OutputJob::Paste { sequence, kind })
+    }
+
+    #[cfg(hex_capture)]
+    pub(crate) fn paste_recent(
+        &self,
+        request: crate::paste::recent::Request,
+    ) -> Result<(), &'static str> {
+        self.enqueue_paste(|sequence| OutputJob::Recent { sequence, request })
+    }
+
+    fn enqueue_paste(&self, job: impl FnOnce(u64) -> OutputJob) -> Result<(), &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let sequence = state.next_output_sequence()?;
         self.output_jobs
             .as_ref()
             .ok_or("dictation worker is unavailable")?
-            .try_send(OutputJob::Paste { sequence, kind })
+            .try_send(job(sequence))
             .map(|()| {
                 state.next_sequence += 1;
                 state.pending_pastes += 1;
@@ -612,12 +638,21 @@ fn run_output_worker(
             continue;
         }
         for job in ordered.push(job) {
-            let event = finish_output(
-                job,
-                &mut |text, mode| paster.paste(text, mode),
-                &mut last_transcript,
-                history.as_ref(),
-            );
+            let event = match job {
+                #[cfg(hex_capture)]
+                OutputJob::Recent { request, .. } => WorkerEvent::Pasted {
+                    kind: PasteKind::LastTranscript,
+                    result: request
+                        .insert(&mut paster, history.as_ref())
+                        .map_err(|e| e.to_string()),
+                },
+                job => finish_output(
+                    job,
+                    &mut |text, mode| paster.paste(text, mode),
+                    &mut last_transcript,
+                    history.as_ref(),
+                ),
+            };
             let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
             match &event {
                 WorkerEvent::Completed { job_id, .. } => {
@@ -680,6 +715,7 @@ fn run_processor_worker(
                     nothing: processed.nothing,
                     raw: job.text,
                     application: job.context.application,
+                    bundle_name: job.context.bundle_name,
                     return_to: job.return_to,
                     timings: job.timings,
                     processing: processed.observation,
@@ -874,7 +910,6 @@ fn run_inference_worker(
             audio_ms,
             prepare_ms: job.prepare_ms,
             inference_ms: inference_started.elapsed().as_millis(),
-            held_ms: job.held_ms,
             send_gate: job.send_gate,
         };
         let target = job.target;
@@ -906,12 +941,14 @@ fn run_inference_worker(
             }
             result => {
                 let application = job.context.application;
+                let bundle_name = job.context.bundle_name;
                 let recording = job.recording;
                 let result = result.map(|text| CompletedTranscript {
                     raw: text.clone(),
                     text,
                     nothing: false,
                     application,
+                    bundle_name,
                     return_to: job.return_to,
                     timings,
                     processing: None,
@@ -1047,6 +1084,8 @@ fn finish_output(
 ) -> WorkerEvent {
     match job {
         OutputJob::PreparePaste => unreachable!("paste preparation bypasses ordered output"),
+        #[cfg(hex_capture)]
+        OutputJob::Recent { .. } => unreachable!("a recent paste uses its own insertion adapter"),
         OutputJob::Completed {
             job_id,
             control,
@@ -1067,27 +1106,28 @@ fn finish_output(
                         | TranscriptionTarget::CopyOnlyPaste
                         | TranscriptionTarget::RawCopyOnlyPaste
                         | TranscriptionTarget::RawPaste => {
+                            // A rescued microphone-loss dictation is always
+                            // copied: the disruption may have taken focus.
+                            let rescued = matches!(
+                                target,
+                                TranscriptionTarget::CopyOnlyPaste
+                                    | TranscriptionTarget::RawCopyOnlyPaste
+                            );
+                            let send_gate = completed.timings.send_gate.filter(|_| {
+                                !rescued && crate::dictation::yolo_mode::sends(
+                                    completed.application.as_deref(),
+                                    completed.bundle_name.as_deref(),
+                                )
+                            });
                             // Labs › Copy dictation only, read as the output
                             // commits: dictations go to the clipboard
                             // unpasted; Paste last dictation still pastes.
-                            // A rescued microphone-loss dictation is always
-                            // copied: the disruption may have taken focus.
-                            let mode = if crate::labs::copy_only()
-                                || matches!(
-                                    target,
-                                    TranscriptionTarget::CopyOnlyPaste
-                                        | TranscriptionTarget::RawCopyOnlyPaste
-                                )
-                            {
+                            // A dictation YOLO mode sends is pasted anyway.
+                            let copy_only =
+                                rescued || (crate::labs::copy_only() && send_gate.is_none());
+                            let mode = if copy_only {
                                 PasteMode::CopyOnly
-                            } else if completed.timings.held_ms.is_some_and(|held_ms| {
-                                crate::dictation::yolo_mode::sends(
-                                    held_ms,
-                                    completed.application.as_deref(),
-                                )
-                            }) {
-                                // Labs › YOLO mode, read as the
-                                // output commits.
+                            } else if send_gate.is_some() {
                                 PasteMode::Send
                             } else {
                                 PasteMode::Continue
@@ -1101,7 +1141,7 @@ fn finish_output(
                                 && let Err(error) =
                                     crate::paste::return_to_app::bring_to_front(completed.return_to)
                             {
-                                *last_transcript = Some(completed.text.clone());
+                                recover_output(history, last_transcript, completed.text);
                                 tracing::warn!(
                                     %error,
                                     "a dictation found another app in front and couldn't return to its own"
@@ -1113,32 +1153,28 @@ fn finish_output(
                             // for Paste last dictation, as above, so the
                             // dictation isn't lost.
                             if let Err(error) = paste(&completed.text, mode) {
-                                *last_transcript = Some(completed.text.clone());
+                                recover_output(history, last_transcript, completed.text);
                                 return Err(error.to_string());
                             }
-                            if matches!(mode, PasteMode::Send) {
-                                sent = send_unless_escaped(
-                                    completed.timings.send_gate,
-                                    Instant::now(),
-                                    paste,
-                                );
+                            if let Some(gate) = send_gate {
+                                sent = send_unless_escaped(gate, Instant::now(), paste);
                             }
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print
                         | TranscriptionTarget::RawPrint => {}
                     }
-                    if matches!(
+                    let reusable = matches!(
                         target,
                         TranscriptionTarget::Paste
                             | TranscriptionTarget::CopyOnlyPaste
                             | TranscriptionTarget::RawCopyOnlyPaste
                             | TranscriptionTarget::RawPaste
-                    ) {
-                        *last_transcript = Some(completed.text.clone());
-                    }
-                    if let Some(history) = history {
-                        record_history(history, target, sent, &mut completed);
+                    );
+                    let recorded = history.and_then(|h| record_history(h, target, sent, &mut completed));
+                    if reusable {
+                        if recorded.is_some() { *last_transcript = Some(completed.text.clone()); }
+                        else { recover_output(history, last_transcript, completed.text.clone()); }
                     }
                 }
                 tracing::info!(
@@ -1174,11 +1210,12 @@ fn finish_output(
         OutputJob::Paste { kind, .. } => {
             let result = match kind {
                 PasteKind::LastTranscript => last_transcript
-                    .as_deref()
+                    .clone()
+                    .or_else(|| history.and_then(History::recovered_output))
                     .ok_or_else(|| "no previous transcript is available".to_string())
                     .and_then(|text| {
-                        paste(text, PasteMode::Continue).map_err(|error| error.to_string())?;
-                        Ok(text.to_string())
+                        paste(&text, PasteMode::Continue).map_err(|error| error.to_string())?;
+                        Ok(text)
                     }),
                 PasteKind::MeetingDelta => {
                     paste_meeting_delta(paste).map_err(|error| error.to_string())
@@ -1216,37 +1253,8 @@ fn send_unless_escaped(
     }
 }
 
-/// Record one successfully pasted result. History failures must never fail
-/// the paste that already happened.
-fn record_history(
-    history: &History,
-    target: TranscriptionTarget,
-    sent: bool,
-    completed: &mut CompletedTranscript,
-) {
-    let kind = match target {
-        TranscriptionTarget::Paste if sent => HistoryKind::Send,
-        TranscriptionTarget::Paste | TranscriptionTarget::CopyOnlyPaste => HistoryKind::Dictation,
-        TranscriptionTarget::RawPaste | TranscriptionTarget::RawCopyOnlyPaste => HistoryKind::Raw,
-        TranscriptionTarget::Print | TranscriptionTarget::RawPrint => HistoryKind::Printed,
-        TranscriptionTarget::Service => return,
-    };
-    let draft = HistoryDraft {
-        kind,
-        raw_text: completed.raw.clone(),
-        final_text: completed.text.clone(),
-        application: completed.application.clone(),
-        processing: completed.processing.clone(),
-        audio_ms: completed.timings.audio_ms,
-        inference_ms: completed.timings.inference_ms as u64,
-        total_ms: completed.timings.total_started.elapsed().as_millis() as u64,
-        recording: completed.recording.take(),
-        model: crate::history::dictation_model(),
-    };
-    if let Err(error) = history.record(draft) {
-        tracing::warn!(%error, "could not record dictation history");
-    }
-}
+mod output_history;
+use output_history::{record_history, recover_output};
 
 fn paste_meeting_delta(paste: &mut impl FnMut(&str, PasteMode) -> Result<()>) -> Result<String> {
     meeting::consume_active_or_latest_delta(|text| paste(text, PasteMode::Standalone))
@@ -1274,11 +1282,7 @@ impl Parakeet {
         let mut parakeet = Self::load_from(&path, true, Some(selection))?;
         parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
-        let architecture = match definition.runtime {
-            crate::transcription::models::ModelRuntime::Gguf(artifact) => artifact.architecture,
-            crate::transcription::models::ModelRuntime::AppleSpeech => "",
-        };
-        parakeet.stream = parakeet.session.probe_stream(&stream_run, architecture);
+        parakeet.session.probe_stream(&stream_run, &path);
         Ok(parakeet)
     }
 
@@ -1295,7 +1299,15 @@ impl Parakeet {
     }
 
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
-        self.stream.as_ref()
+        self.session.stream_options()
+    }
+
+    /// Re-probes the live stream when Labs › Faster live text or an env
+    /// override changed, so a later capture streams with it. Streams decode
+    /// with [`Self::stream_run_options`], as the load-time probe does.
+    pub(crate) fn refresh_stream(&mut self) {
+        let options = self.stream_run_options();
+        self.session.refresh_stream(&options);
     }
 
     pub(crate) fn with_stream<R>(
@@ -1398,7 +1410,6 @@ impl Parakeet {
                 &architecture,
                 capabilities.max_audio_ms,
             ),
-            stream: None,
             _weights: MODEL_WEIGHTS.track(weights_bytes),
         })
     }
@@ -1514,8 +1525,7 @@ mod tests {
                 audio_ms: 1000,
                 prepare_ms: 0,
                 inference_ms: 0,
-                held_ms: None,
-                send_gate: crate::dictation::yolo_mode::SendGate::open(),
+                send_gate: None,
             },
             recording: None,
         }
@@ -1619,6 +1629,82 @@ mod tests {
     }
 
     #[test]
+    fn yolo_sends_yep_only_after_a_successful_paste() {
+        use crate::app_settings::LabsSettings;
+        use crate::dictation::yolo_mode::{ESCAPE_WINDOW, SendGate};
+        use std::sync::atomic::AtomicU64;
+        static ESCAPES: AtomicU64 = AtomicU64::new(0);
+        let mut labs = LabsSettings {
+            yolo_mode: true,
+            yolo_mode_apps: vec!["Messages".into()],
+            ..Default::default()
+        };
+        crate::labs::apply(&labs);
+
+        let deliver = |text: Result<&str, &str>, app: &str, paste_succeeds: bool| {
+            let mut calls = Vec::new();
+            let result = text
+                .map(|text| CompletedTranscript {
+                    raw: "yep".into(),
+                    text: text.into(),
+                    nothing: false,
+                    application: Some(app.into()),
+                    bundle_name: None,
+                    return_to: None,
+                    timings: JobTimings {
+                        audio_ms: 1_000,
+                        send_gate: Some(SendGate::on(&ESCAPES, Instant::now() - ESCAPE_WINDOW)),
+                        ..processing_job(TranscriptionTarget::Paste).timings
+                    },
+                    processing: None,
+                    recording: None,
+                })
+                .map_err(str::to_owned);
+            finish_output(
+                OutputJob::Completed {
+                    job_id: DictationJobId(1),
+                    control: Arc::new(JobControl::default()),
+                    target: TranscriptionTarget::Paste,
+                    result: Box::new(result),
+                },
+                &mut |text, mode| {
+                    calls.push(match mode {
+                        PasteMode::Return => "Return".into(),
+                        PasteMode::CopyOnly => format!("copy {text}"),
+                        _ => format!("paste {text}"),
+                    });
+                    if !paste_succeeds {
+                        return Err(eyre!("failed insertion"));
+                    }
+                    Ok(())
+                },
+                &mut Some("older dictation".into()),
+                None,
+            );
+            calls
+        };
+        assert_eq!(
+            deliver(Ok("yep"), "Messages", true),
+            ["paste yep", "Return"]
+        );
+        assert_eq!(deliver(Ok("yep"), "Messages", false), ["paste yep"]);
+        assert_eq!(deliver(Ok("yep"), "Notes", true), ["paste yep"]);
+        for no_text in [Ok(""), Ok(" \t\n"), Err("failed transcription")] {
+            assert!(deliver(no_text, "Messages", true).is_empty());
+        }
+        labs.copy_only = true;
+        crate::labs::apply(&labs);
+        assert_eq!(
+            deliver(Ok("yep"), "Messages", true),
+            ["paste yep", "Return"],
+            "YOLO mode's apps paste and send through Copy dictation only"
+        );
+        assert_eq!(deliver(Ok("yep"), "Notes", true), ["copy yep"]);
+        crate::labs::apply(&LabsSettings::default());
+        assert_eq!(deliver(Ok("yep"), "Messages", true), ["paste yep"]);
+    }
+
+    #[test]
     fn a_failed_paste_keeps_the_dictation_for_paste_last() {
         let text = "the dictation whose paste failed";
         let mut last_transcript = Some("an older dictation".to_string());
@@ -1632,6 +1718,7 @@ mod tests {
                     nothing: false,
                     raw: text.into(),
                     application: None,
+                    bundle_name: None,
                     return_to: None,
                     timings: JobTimings {
                         total_started: Instant::now(),
@@ -1639,8 +1726,7 @@ mod tests {
                         audio_ms: 2_000,
                         prepare_ms: 0,
                         inference_ms: 0,
-                        held_ms: None,
-                        send_gate: crate::dictation::yolo_mode::SendGate::open(),
+                        send_gate: None,
                     },
                     processing: None,
                     recording: None,
@@ -1690,6 +1776,7 @@ mod tests {
                         nothing: false,
                         raw: text.into(),
                         application: Some("Call".into()),
+                        bundle_name: None,
                         return_to: None,
                         timings: JobTimings {
                             total_started: Instant::now(),
@@ -1697,8 +1784,7 @@ mod tests {
                             audio_ms: 4_000,
                             prepare_ms: 0,
                             inference_ms: 0,
-                            held_ms: None,
-                            send_gate: crate::dictation::yolo_mode::SendGate::open(),
+                            send_gate: None,
                         },
                         processing: None,
                         recording: None,
@@ -1780,6 +1866,7 @@ mod tests {
                 nothing: false,
                 raw: "a long message".into(),
                 application: None,
+                bundle_name: None,
                 return_to: None,
                 timings: JobTimings {
                     total_started: Instant::now(),
@@ -1787,8 +1874,7 @@ mod tests {
                     audio_ms: 3_000,
                     prepare_ms: 0,
                     inference_ms: 0,
-                    held_ms: Some(3_000),
-                    send_gate: SendGate::open(),
+                    send_gate: Some(SendGate::open()),
                 },
                 processing: None,
                 recording: None,
@@ -1883,16 +1969,12 @@ mod tests {
         use crate::transcription::{Transcriber, WarmTranscriber};
 
         let selection = TranscriptionSelection::default();
-        let mut model = Parakeet::load_from(
-            &PathBuf::from(std::env::var("HEX_STREAM_MODEL").unwrap()),
-            false,
-            Some(&selection),
-        )
-        .unwrap();
-        model.stream = model
+        let path = PathBuf::from(std::env::var("HEX_STREAM_MODEL").unwrap());
+        let mut model = Parakeet::load_from(&path, false, Some(&selection)).unwrap();
+        model
             .session
-            .probe_stream(&model.stream_run_options(), "parakeet");
-        assert!(model.stream.is_some(), "Metal must stream");
+            .probe_stream(&model.stream_run_options(), &path);
+        assert!(model.stream_options().is_some(), "Metal must stream");
         let engine = TranscriptionEngine::start(WarmTranscriber::serving(Transcriber::Gguf(
             Box::new(model),
         )))
@@ -2024,7 +2106,33 @@ mod tests {
             for (fed_ms, stable, tentative) in &timeline {
                 println!("    audio_ms={fed_ms} stable_words={stable} tentative_words={tentative}");
             }
-            assert_eq!(streamed.source, Source::Stream);
+            let closing_mark = |text: &str| {
+                const CLOSERS: [char; 8] = ['"', '\'', '”', '’', ')', ']', '}', '»'];
+                text.trim_end()
+                    .trim_end_matches(CLOSERS)
+                    .chars()
+                    .last()
+                    .is_some_and(|last| matches!(last, '.' | '?' | '!' | '…'))
+            };
+            // A stream that dropped its closing mark takes the whole-clip
+            // fallback for that reason only (#1933).
+            assert!(
+                streamed.source == Source::Stream
+                    || matches!(
+                        &streamed.source,
+                        Source::Fallback(reason)
+                            if reason.as_str() == "the stream ended without closing sentence punctuation"
+                    ),
+                "unexpected source {}",
+                streamed.source.label()
+            );
+            if closing_mark(&whole.text) {
+                assert!(
+                    closing_mark(&streamed.text),
+                    "the stream dropped the offline text's closing mark: {}",
+                    streamed.text
+                );
+            }
             assert!(differences * 20 <= reference.len().max(20));
         }
     }

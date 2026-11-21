@@ -1,4 +1,4 @@
-//! Labs › Voice prompt's card while on: the words that start a one-off
+//! Labs › Rewrite by voice's card while on: the words that start a one-off
 //! instruction, with the reason under them while a draft doesn't pass
 //! validation.
 

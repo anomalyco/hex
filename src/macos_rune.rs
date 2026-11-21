@@ -302,6 +302,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     // Observing first means a source change during startup still rebuilds
     // the snapshot at the pump's first turn.
     crate::keyboard_input_sources::start(mtm);
+    // The listener releases the warm microphone while the display sleeps, the
+    // session is locked, or the Mac sleeps (#1953); the main run loop delivers
+    // those notifications.
+    crate::audio::system_idle::start();
     crate::keyboard::initialize_layout()?;
     crate::updater::finish_on_launch();
     let _ = UPDATER.set(crate::updater::Updater::start());
@@ -517,6 +521,8 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
     };
     let hud = crate::rune_hud::install(&mut app);
     crate::rune_ui::live_text::install(&mut app, crate::rune_hud::live_text_place);
+    #[cfg(hex_capture)]
+    crate::rune_ui::paste_picker::install(&mut app);
     // The capture capsule, picker, and ink.
     #[cfg(hex_capture)]
     let capture_overlays =
@@ -817,6 +823,14 @@ pub(crate) fn bring_window_forward() {
     with_window(bring_forward);
 }
 
+#[cfg(hex_capture)]
+pub(crate) fn open_paste_history() {
+    with_window(|window| {
+        window.update(crate::rune_ui::show_all_history);
+        bring_forward(window);
+    });
+}
+
 fn bring_forward(window: &rune::AppHandle<Ui>) {
     // An open window always shows the Dock icon: hiding it
     // would deactivate Hex and drop the window behind other apps.
@@ -1051,7 +1065,7 @@ impl Pump {
             | ControllerEvent::Reminder { .. }
             | ControllerEvent::ReminderWithdrawn { .. }
             | ControllerEvent::CallEndedWithdrawn => {}
-            ControllerEvent::Starting => self.meeting_state = MeetingMenuState::Starting,
+            ControllerEvent::Starting(_) => self.meeting_state = MeetingMenuState::Starting,
             ControllerEvent::RecordingStarted { id, title, .. } => {
                 self.meeting_state = MeetingMenuState::Recording {
                     started: Instant::now(),
@@ -1084,12 +1098,13 @@ impl Pump {
                     tracing::info!(%app, "the call ended; the recording continues until Stop");
                 }
             }
+            ControllerEvent::Stopping => {}
             ControllerEvent::Transcribing => self.meeting_state = MeetingMenuState::Transcribing,
             ControllerEvent::Finished(manifest) => {
                 tracing::info!(id = %manifest.id, "meeting transcript ready");
                 self.meeting_state = MeetingMenuState::Idle;
             }
-            ControllerEvent::NotesStarted | ControllerEvent::NotesFinished(_) => {}
+            ControllerEvent::NotesProgress(_) | ControllerEvent::NotesFinished(_) => {}
             ControllerEvent::Failed { title, error } => {
                 tracing::error!(%title, %error, "meeting failed");
                 self.meeting_state = MeetingMenuState::Idle;

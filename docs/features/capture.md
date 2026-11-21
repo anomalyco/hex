@@ -69,22 +69,33 @@ Draw                                     // capture.draw (capture_host::drawing)
 │   physical for the hold on a portal desktop ("Annotate pen" is logged)
 ├── Ink holds 650 ms, then fades over 650 ms on screen; every stroke stays in
 │   the bundle (keyframes, contact sheet, scrawl.json)
-├── Linux: strokes are placed on the recorded screen in its logical points.
-│   A monitor pick whose portal names the output (`mapping_id`, as
-│   xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`) opens the pen on
-│   that output with its logical size from xdg-output (linux::output::find),
-│   so strokes land on the recorded monitor even when the overlay had opened
-│   on another one. Otherwise it uses the ScreenCast portal's stream size
-│   when it reports one smaller than the frames, so a fractional scale
-│   (1.5, 1.33), which reaches the overlay rounded up to 2, no longer pins
-│   strokes to a top-left part of the screen; without that size it divides
-│   the pixels by the overlay's scale. Window picks still report no position
-│   and no output. Check: scrawl-capture capture::platform::tests
-│   a_fractionally_scaled_screen_keeps_its_logical_size and
-│   linux::output::tests the_named_output_carries_its_global_and_logical_size;
-│   neither the follow nor a fractional scale is observed on real hardware
-│   here. Known gap: the overlay starts below a desktop bar's reserved area,
-│   so saved ink sits that bar's height off the live ink
+├── Linux: strokes are placed on the recorded screen in the ink overlay's
+│   own points. A native Wayland layer surface lays out in the desktop's
+│   logical points: a monitor pick whose portal names the output
+│   (`mapping_id`, as xdg-desktop-portal-hyprland 1.4.0+ does, e.g. `DP-3`)
+│   opens the pen on that output with its logical size from xdg-output
+│   (linux::output::find), so strokes land on the recorded monitor even when
+│   the overlay had opened on another one; otherwise it uses the ScreenCast
+│   portal's stream size when it reports one smaller than the frames, so a
+│   fractional scale (1.5, 1.33), which reaches the overlay rounded up to 2,
+│   no longer pins strokes to a top-left part of the screen; without that
+│   size it divides the pixels by the overlay's scale. The XWayland window
+│   GNOME gets instead lays out in its own points and never uses either
+│   logical size: it takes the size its view laid it out in
+│   (capture_host::InkSpace), so ink reaches the whole screen whether the
+│   compositor scales XWayland natively (1920x1200 X11 pixels at Xft's 1 on
+│   a 125% screen, where the portal says 1536x960) or traditionally (the
+│   logical 1536x960, where the stream is 1920x1200 pixels); before that size
+│   is known it divides the pixels by the overlay's scale. Window picks still
+│   report no position and no output. Check: scrawl-capture
+│   capture::platform::tests a_fractionally_scaled_screen_keeps_its_logical_size,
+│   linux::output::tests the_named_output_carries_its_global_and_logical_size,
+│   and capture_host the_ink_target_is_the_overlay_s_own_space; neither the
+│   follow nor a fractional scale is observed on real hardware here. Known
+│   gaps: the overlay starts below a desktop bar's reserved area, so saved ink
+│   sits that bar's height off the live ink; on XWayland the ink is one
+│   full-screen primary-monitor window, so it cannot follow a named output,
+│   and a recording of another monitor maps its strokes to the wrong screen
 └── Linux recordings show the overlay itself (Wayland can't leave it out)
 
 On Linux                                 // capture.linux
@@ -116,6 +127,26 @@ On Linux                                 // capture.linux
 │   desktop's picker every time (the capsule's Window chip goes straight to
 │   it) and names no output, so the pen keeps its old placement; the cursor
 │   is embedded
+├── Labs › Record the screen under the pointer (`labs.annotate_pointer_screen`,
+│   off) -> each Screen capture first asks the compositor for the output the
+│   pointer is on, with no surface and no frame: one
+│   `ext_image_copy_capture_manager_v1.create_pointer_cursor_session` per
+│   output source, and the session that reports `enter` names its `wl_output`
+│   (`src/linux/pointer_output.rs`; two round trips, everything destroyed
+│   after). Its screen then has its own token file,
+│   `<support>/screencast-token-<output>` (output sanitized to [A-Za-z0-9_-]),
+│   so each monitor is asked once; a monitor without one shows the picker
+│   once. After Start the token is saved for the output the desktop actually
+│   recorded: `mapping_id`, else the output whose xdg-output logical geometry
+│   holds the stream's position (`src/linux/output.rs`), else the pointer's.
+│   The refused-token retry removes and forgets whichever file it read. Off,
+│   or when the lookup fails (no seat, no staging protocols, no session
+│   entering, an output below wl_output v4), the single file above is used
+│   exactly as before. Needs the compositor to export ext-image-copy-capture
+│   to ordinary clients (COSMIC does only for non-sandboxed ones) and, on
+│   wlroots, a hardware cursor (a software cursor reports nothing, read from
+│   wlroots' source rather than observed); not observed on real COSMIC
+│   hardware
 ├── Frames -> the portal's PipeWire stream, libpipewire-0.3 loaded at run
 │   time (`maxFramerate` 60/1); 32-bit RGB as a linear DMA-BUF (niri, GNOME,
 │   KDE) or shared memory. A stream that ends or fails before its first frame
@@ -165,18 +196,20 @@ On Linux                                 // capture.linux
 │   open for the capture
 ├── Words -> one foreground job on the listener's engine (its loaded model)
 ├── Copy -> the summary text through Hex's Linux clipboard (wl-copy or the
-│   X11 clipboard), as the Mac copies it; Labs › Copy captures as a zip puts
+│   X11 clipboard), as the Mac copies it; Labs › Copy a capture as one file puts
 │   `<stem>.scrawl.slim.zip` there instead, as a `text/uri-list` file
 ├── Paste -> as the Mac: the contact sheet (image/png), then the summary,
 │   each with Hex's own Ctrl+V (linux/paste). An app that takes no image (a
 │   terminal) gets only the summary, which names the contact sheet; the Mac
 │   pastes a terminal the sheet's path instead
-├── Finished capsule -> "Copied" with Paste (accent), Inspect, and Send to…;
+├── Finished capsule -> "Annotation" with Paste and, if there are destinations, Send to…;
 │   unlike the Mac, a guess doesn't open its suggestions by itself
 │   (Flow::suggesting_on_route(false)): Send to… is a click away
 ├── Shortcuts -> F9 (tap to start and stop, hold to draw) through the
-│   GlobalShortcuts portal ("Annotate") or X11 grabs. There is no separate
-│   draw shortcut and no send-to list shortcut on any OS
+│   GlobalShortcuts portal ("Annotate") or X11 grabs. Without the portal,
+│   General's commands list and this pane's Shortcut row give
+│   `hex annotate toggle` to bind in the desktop instead. There is no
+│   separate draw shortcut and no send-to list shortcut on any OS
 ├── GNOME Wayland -> no layer-shell, so Rune can't show the capsule or ink
 │   until Labs › Annotate on GNOME (`labs.gnome_annotate`, off by default)
 │   opens them on XWayland (`OverlayOptions::xwayland_input`): override-redirect
@@ -187,11 +220,13 @@ On Linux                                 // capture.linux
 │   OnDemand overlay on XWayland, and keeps regions with no hit area while not
 │   drawing because a click-through XWayland window can't take the pointer
 │   later. Esc can't stop drawing there: the capsule's pen button does, or
-│   letting go of a held Annotate key (a tap of it stops the recording). The
-│   in-app picker shows on Linux only in the edge states that return to
-│   Selecting (Window starts the portal's picker, Area isn't offered), and
-│   takes the same opt-in whenever it does. Check: labs
-│   gnome_annotate_is_its_own_bit_*; not run on a GNOME session
+│   letting go of a held Annotate key (a tap of it stops the recording). Its
+│   pen draws in that window's own points, which at a fractional scale are
+│   neither the desktop's logical points nor the stream's pixels (see the
+│   pen bullet's known gaps). The in-app picker shows on Linux only in the
+│   edge states that return to Selecting (Window starts the portal's picker,
+│   Area isn't offered), and takes the same opt-in whenever it does. Check:
+│   labs gnome_annotate_is_its_own_bit_*; not run on a GNOME session
 ├── While it records, dictation starts nothing (the portal
 │   or grab already took their keys, so nothing reaches the app)
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
@@ -225,12 +260,35 @@ On Windows                               // capture.windows
 ├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
 ├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
-│   contact sheet, then the summary; with Labs › Copy captures as a zip, the
+│   contact sheet, then the summary; with Labs › Copy a capture as one file, the
 │   copy is the light zip as CF_HDROP instead
 ├── Pane -> no Screen Recording row, no transcriber choice
 ├── Overlays -> Rune waits for a swap-chain slot before each frame (Rune
 │   #985), so the picker, capsule, and ink's frames in flight stay bounded
 │   through a long annotation (#1833; not measured on Windows)
+├── The finished capsule -> windows/input's hooks stand in for the macOS tap
+│   (#2113): the search field takes its own clicks (its `.hit()` box is
+│   Windows-only, so the window stops being click-through over it and the
+│   click no longer lands on the app in front), a mouse button going down
+│   away from the capsule folds the list or the search (`CapsuleKey::Press`;
+│   a press on the capsule's own boxes is its click), and the keyboard hook
+│   hands the open list or the suggestions the keys `capture_host::list_key`
+│   names: text, ⌫, ↑↓, ⏎/⇧⏎ and ⇥, Escape and Shift. Text is read from
+│   `ToUnicodeEx` in the foreground window's layout with "change no state",
+│   so a key the app gets is never disturbed and a dead key (`^`, `´`, `¨`)
+│   types nothing in the search rather than half an accent landing nowhere.
+│   The search also keeps the caret's own keys from the app — ⌦, ←→, Home and
+│   End, Page Up and Page Down, Insert — though it draws no caret movement for
+│   them; over the suggestions they pass. A key that edits nothing (Caps Lock,
+│   Num Lock, Scroll Lock, the media and browser keys, Print Screen, Sleep,
+│   Apps, a function key) goes on to the app even in the search, as does a key
+│   the app already had down with its repeats and release, wherever the capsule
+│   stood when it went down. Ctrl, Alt and the Windows key make a chord and stay
+│   the app's, so AltGr types its character in the app, not the search; Hex's
+│   own shortcuts do too, and Escape over the suggestions is the app's. While
+│   a dictation records, Escape cancels that first, as it does everywhere on
+│   Windows, so it never reaches the search. Check:
+│   `windows::input::capsule`'s mapping tests; not observed on a Windows PC
 └── Gaps: no `hex annotate` (Windows has no control transport yet), no
     iPhone, keys pressed in the app are not logged. Checked only by
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
@@ -241,7 +299,9 @@ Settings › Annotate                      // capture.pane
 │   input, retention, or folder
 │   └── On while the shortcut collides -> refused, the shortcut row says why
 ├── Shortcut (capture.hotkey, default ⌥⇧S, F9 on Linux and Windows) -> same keycap and recorder as dictation;
-│   a key is required; refused when it overlaps dictation or paste
+│   a key is required; refused when it overlaps dictation or paste. On a Linux desktop with no
+│   GlobalShortcuts portal (the `commands` fallback) the row is the `hex annotate toggle` command
+│   to bind in the desktop instead, as General's commands list has it
 ├── How it works (on) -> start (tap), draw (hold, no click; Shift too on
 │   macOS), the capsule's pen with Esc, stop (tap again), and send, each
 │   with its keys. Check: rune_ui::scrawl tests
@@ -260,7 +320,11 @@ Settings › Annotate                      // capture.pane
 │   │   (`ScreenCapture` reset on running bundle + retired IDs, re-prompt + guide)
 │   └── Allow -> clears retired Hex IDs, rechecks, then opens the permission
 │       guide over System Settings' list (PermissionKind::ScreenRecording); flips
-│       on the next read. Never part of onboarding (macOS also asks at the first
+│       on the next read. The guide's own preflight caches the launch answer,
+│       so it reads the grant from TCC and the host closes it as soon as the
+│       watched read says granted or needs a restart; it hides while another
+│       app is in front of System Settings and returns when System Settings
+│       does. Never part of onboarding (macOS also asks at the first
 │       capture). Check: rune_ui::scrawl tests
 ├── Show in screen recordings (capture.show_overlays_in_recordings, default
 │   off) -> see capture.own-windows; applies at once, to open windows and a recording capture
@@ -467,15 +531,16 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       `capture_host::routing` `an_always_rule_from_a_terminal_keys_on_its_folder`.
 │   │       The process walk was measured once against a real Ghostty; no
 │   │       end-to-end capture of a TUI was run
-├── A finished capture with nowhere sent yet reads "Copied" from the start
+├── A finished capture reads "Annotation". While routing is pending it reads
+│   "Looking for sessions…" instead. Copy failure has its own warning
 │   ├── Anything else with somewhere to go (a guess, nothing fitting, no
-│   │   answer) -> macOS: "Copied", then Search with the capture shortcut's
-│   │   keycaps (as Settings draws them) and ✕, the suggestions open under
+│   │   answer) -> macOS: "Annotation", Paste, a magnifier and ✕. The
+│   │   magnifier is named Search with the current binding. Suggestions open under
 │   │   it; nothing sends until Kit picks. Linux: closed,
-│   │   with Paste, Inspect, and Send to…, which opens them on a click
+│   │   with Paste and Send to…, which opens them on a click
 │   │   ├── "Send to" over up to five rows, suggested then the newest
 │   │   │   sessions, with no numbers and no footer; "⇧-click to always send
-│   │   │   [site] here" on the header's right when a pick can save a rule.
+│   │   │   [site] here" appears on hover when a pick can save a rule.
 │   │   │   The first carries its reason in the accent. A reason is a real one
 │   │   │   in plain words ("you were just in it", "same page", "mentioned",
 │   │   │   "recent") or nothing; never "guess". No row moves once shown: a
@@ -568,35 +633,50 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       press off the capsule (the tap reports mouse-downs while the list
 │   │       is open, and still delivers them) closes the list and gives the
 │   │       keys back; hiding drops the grab
+│   │   └── Windows -> windows/input's keyboard hook stands in for the tap
+│   │       (#2113): the same keys, its text read with ToUnicodeEx in the
+│   │       foreground window's layout and never with the layout's state
+│   │       changed (a dead key types nothing in the search, and AltGr's
+│   │       Ctrl+Alt stays the app's), a press kept only while no shortcut of
+│   │       Hex's claims it, and a key the app already holds left to it;
+│   │       never observed on a Windows PC
 │   ├── `offer` (a rule offer) -> not drawn; Scrawl's capsule doesn't draw it
-│   ├── The top line is calm: the label, its note, one action, and ✕. Undo
-│   │   while a send can be taken back, else Paste and Inspect as two quiet
-│   │   icons (tooltips "Paste the capture", "Open the capture") for a written
-│   │   capture, with the click-only Send to… chip beside them while there is
-│   │   somewhere to send it; over the suggestions, Search alone (the
-│   │   capture is already copied), right beside ✕. Paste and Inspect have no key on either OS.
+│   ├── The ready capsule shows a labeled Paste button, both folded and above
+│   │   the suggestions. A rule waiting to send shows Undo instead. Sending,
+│   │   sent and queued results do not offer Paste. The search field replaces
+│   │   the buttons while typing. Neither Paste nor Inspect binds a key.
 │   │   The list hangs
 │   │   under the capsule, which is never narrower than LIST_W; the capsule
 │   │   widens with it. The capsule is a rounded rect with the list's 14 pt
 │   │   corners (`SHELL_RADIUS`), not a pill, and its chips and icon buttons
-│   │   round concentrically inside it. Two looks while Kit picks (tuning `top_line`):
+│   │   round concentrically inside it. The line and its list are one layout:
+│   │   the list's header and its names start 16 pt in from the wall, and
+│   │   the reasons end 16 pt in from the other, under ✕. The preview is not
+│   │   on that margin: it nests in the capsule's left corners, 10 pt from the
+│   │   left, top and bottom walls, so its 4 pt corners turn about the same
+│   │   centres as the shell's 14 pt ones
+│   │   (`the_preview_nests_in_the_capsules_left_corners`). Paste, Search,
+│   │   Inspect and ✕ are one row of 28 pt
+│   │   boxes 6 pt apart and 6 pt in from the walls; Paste's is filled, and
+│   │   its 32 pt chip is still what takes the click
+│   │   (`the_ready_line_and_its_list_share_their_edges`). Two looks while Kit picks (tuning `top_line`):
 │   │   TopLine::Quiet (default) says the label in quiet MEDIUM ink;
-│   │   TopLine::Icons says it in STRONG. A capture that only copied has no
-│   │   label, the lead alone
+│   │   TopLine::Icons uses stronger ink. Both retain the annotation label
 │   ├── The lead is the capture's first frame (`frames/frame-01.png`, else the
 │   │   contact sheet), cropped to a small rounded card once the bundle is
 │   │   written and decoded off the UI thread; until then, or without one, a
 │   │   check. A warning keeps its glyph
 │   │   ├── Paste -> CaptureCommand::Paste: the contact sheet, then the summary,
-│   │   │   into the app in front; a send still in its Undo window is taken back
-│   │   └── Inspect -> CaptureCommand::Inspect: opens the contact sheet (Hex
+│   │   │   into the focused field, from the bundle shown, not the newest output.
+│   │   │   No Return, send, Undo or rule change
+│   │   └── Click the finished preview, when Inspect is available, or the
+│   │       Inspect button on other outcomes -> opens the contact sheet (Hex
 │   │       has no review window, and opening the bundle could launch
 │   │       Scrawl.app)
 │   ├── Undo is a click only, with no shortcut: Escape meant for another app
 │   │   was taking sends back
-│   ├── Shortcuts read as quiet text after what they do, never a keycap per
-│   │   key, except Search's capture shortcut, drawn as Settings' keycaps: a
-│   │   hint's keys sit in one small rounded rect, on a quiet fill. The
+│   ├── Search's tooltip and accessible name include the configured capture
+│   │   shortcut; no keycaps appear in the ordinary completed header. The
 │   │   search's footer reads "Send ⏎", "Remember ⇧⏎", "New capture ⌥⇧S"; the
 │   │   cursor's and the notch's cards end in "Search ⌥⇧S" under their guesses.
 │   │   The footer sits apart from the rows in one of
@@ -709,7 +789,10 @@ Hex's own windows                        // capture.own-windows
 │   │   still never in the window log or the target. Rune's
 │   │   OverlayHandle::set_exclude_from_capture flips open windows, and the
 │   │   sampler rebuilds its filter mid-recording (OwnWindows::recorded) and
-│   │   the recording's (capture-core's Recording::set_exclusions)
+│   │   the recording's (capture-core's Recording::set_exclusions). macOS's
+│   │   pump and Windows' runtime thread follow the setting while Hex runs
+│   │   (CaptureOverlays::follow_recordings), so it applies live on both, not
+│   │   only to windows made after it changed
 │   └── Rune's presence tests check ordering and sharing together, including
 │       stale fade completions and setting changes. Its native `spaces_probe`
 │       checks this process's WindowServer ordering. A native Hex smoke on
@@ -755,6 +838,7 @@ hex capture start                        // capture.start; needs a listening Hex
 │   └── Fails to start -> sink closed, bundle removed, last outcome `failed`;
 │       Esc and the next ⌥⇧S see nothing recording
 ├── Release microphone while idle -> the capture keeps the microphone open
+│   (even while the display sleeps or the session is locked)
 └── Already recording -> unchanged, same bundle
 
 While it records                         // capture.audio
@@ -836,10 +920,10 @@ hex capture stop                         // capture.stop
     │   spoken_cues_count_in_other_languages
     ├── Transcription fails -> logged; the bundle has no words, and the outcome says why
     ├── Written -> image and text copied to the clipboard (Scrawl's handoff),
-    │   or the light zip alone with Labs › Copy captures as a zip (capture.copy)
+    │   or the light zip alone with Labs › Copy a capture as one file (capture.copy)
     └── Sent -> the capture-route thread (capture.route)
 
-Copying a written capture                 // capture.copy; Labs › Copy captures as a zip
+Copying a written capture                 // capture.copy; Labs › Copy a capture as one file
 ├── Off (default) -> the bundle's summary text on the clipboard, as before:
 │   macOS and Windows through Scrawl's handoff (Windows may also put the
 │   contact sheet PNG when the clipboardImage experiment is on), Linux the
@@ -885,8 +969,9 @@ What a send carries                      // capture.send (router opencode::send_
 │   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
 │   (service.json); a service that isn't up is never started. On Windows with
-│   Labs › OpenCode in WSL on, a service in the default WSL distribution
-│   answers instead (capture.route). The prompt's "Recorded at" line names the
+│   Labs › OpenCode in WSL on, a WSL service that answers is used ahead of a
+│   Windows one; the Windows service is used when WSL answers nothing
+│   (capture.route). The prompt's "Recorded at" line names the
 │   capture folder as its Linux `/mnt/…` path; the summary header keeps the
 │   Windows path
 ├── With an agent host (routing's agentHost), the request body travels on SSH
@@ -932,22 +1017,20 @@ Where it goes                            // capture.route; capture.routing's aut
 │   NoAnswer | Unreachable. Background refinements preserve an open search and
 │   selected session; a pick or Undo cancels them
 │   ├── Rule -> only a rule the person saved (`routing.sites`, `routing.apps`,
-│   │   `routing.terminals`, a Shift pick's), or a page that names its session (a
-│   │   `<meta name="opencode-session">` tag or an `.opencode-session` file in
-│   │   its folder, found through symlinked folders too), which beats any rule
-│   │   and is sent to that exact session, a subagent's included ("page names
-│   │   it"): a three-second countdown begins at Written. A folder
+│   │   `routing.terminals`, a Shift pick's): a three-second countdown begins
+│   │   when the rule is shown. A folder
 │   │   rule shows its repository while its session resolves; it sends once both
 │   │   the countdown and resolution finish. Undo during the countdown posts
 │   │   nothing. The capsule's `Hold` pauses the countdown while the pointer is
 │   │   on it and resumes it with what it had left (at least 1 s; a hold the
 │   │   capsule never ends lapses after 2 min, and the next capture resumes
 │   │   it). Sending -> Sent, or Queued when OpenCode didn't take it. Whatever
-│   │   autoSend, smartRouting, or jevRouting say, a saved rule or signed page
-│   │   sends and nothing else sends on its own. smartRouting off decides with the port
+│   │   autoSend, smartRouting, or jevRouting say, no page or publisher can
+│   │   authorize a send or override a saved rule. smartRouting off decides with the port
 │   │   ladder, after rules and addresses, on the same look
 │   ├── Guess -> everything else the router would send (Jev's pick, HOME when
-│   │   Jev couldn't tell, a dev server's port, a page's data-session or
+│   │   Jev couldn't tell, a dev server's port, a page's opencode-session tag,
+│   │   `.opencode-session` file, data-session or
 │   │   publisher, a name that was said, the captured app's checkout (the one
 │   │   open session folder named like the app, such as `…/hex` for Hex's own
 │   │   Settings; smartRouting only), the port ladder) is suggestion #1, its
@@ -1166,6 +1249,8 @@ Checks:
   [retention.rs](../../crates/capture/src/retention.rs).
 - Routing, in [routing.rs](../../src/capture_host/routing.rs):
   `only_a_saved_rule_sends_on_its_own`,
+  `page_metadata_is_only_a_suggestion_and_never_overrides_a_saved_rule`
+  (early and late page reads, a fake recipient, the send deadline advanced),
   `a_rule_sends_and_lists_the_rest`,
   `a_guess_sends_nothing_and_a_failure_still_lists_recent_sessions`, and
   its `looked` tests, which write a bundle and route it through `look` and
@@ -1194,9 +1279,10 @@ Checks:
   `a_pick_that_cannot_start_says_why`,
   `the_first_click_or_scroll_means_work_started`, and
   `the_newest_grab_takes_only_its_keys_until_it_drops`. Paste and Inspect
-  need a written capture
-  (`controls_are_idempotent_and_stop_writes_a_scrawl_bundle`); neither has
-  pasted into or opened anything in a test.
+  need a written capture. `paste_only_hands_off_the_shown_written_annotation_once`
+  and `clicks_on_the_capsule_do_what_they_say` distinguish local Paste from
+  picking a row by pointer or Enter in search. They record actions, not native
+  clipboard, focus or insertion in a receiving application.
 - Capsule, in rune_ui/capture_capsule (feature builds only): the flow tests
   (`chips_fold_once_seen_when_work_starts_but_never_under_the_pointer`,
   `the_shortcut_records_the_pickers_screen_and_a_chip_discards_the_recording`,
@@ -1313,3 +1399,13 @@ clipboard handoff populated) via `hex capture replay`, an `⌥⇧R` tap, and a
 display sleep/wake, and rejected a 16 s request with
 `SCStreamErrorDomain -3812`. The menu-bar screen-recording indicator stays lit
 for the entire lifetime of the rolling buffer.
+# Paste Last provenance on macOS
+
+A successful Annotate finish marks its own bundle with `.hex-annotate-v1`
+(owner-only identity and ready time, no words or images). Failed, cancelled,
+and Screenshots recordings do not publish this mark. Existing ambiguous
+bundles, including captures made by standalone Scrawl, are not backfilled
+from a folder name. They remain available through their existing actions.
+The [Mac picker](dictation.md#paste-last-picker-labs-macos) (Labs › Paste Last
+picker) reads the mark; failure to write it does not fail the capture or affect
+its send.

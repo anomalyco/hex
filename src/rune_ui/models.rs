@@ -19,7 +19,7 @@ use super::{Menu, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::desktop::opencode_catalog::{
-    ModelCatalogState, OPENCODE_RETRY_INTERVAL, OpenCodeFeature, model_presentation,
+    ModelCatalogState, ModelDefault, OPENCODE_RETRY_INTERVAL, OpenCodeFeature, model_presentation,
     model_variants, open_opencode_docs, opencode_unavailable_copy, provider_label,
     start_model_catalog_load,
 };
@@ -190,6 +190,21 @@ impl Models {
         models
     }
 
+    /// [`Models::fixture`] listing only a model Hex doesn't recommend, so an
+    /// unset key really gets OpenCode's own default.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(super) fn fixture_unranked() -> Self {
+        let mut models = Self::fixture();
+        if let ModelCatalogState::Loaded(catalog) = &mut models.state {
+            catalog
+                .models
+                .retain(|choice| choice.key == "opencode/grok-code");
+            catalog.default_key = Some("opencode/grok-code".into());
+            catalog.default_name = Some("Grok Code Fast".into());
+        }
+        models
+    }
+
     pub(super) fn fixture_not_running() -> Self {
         Self {
             state: ModelCatalogState::NotRunning,
@@ -292,7 +307,8 @@ fn status(models: &Models) -> String {
 pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Vec<El> {
     let (model, variant) = selected(&ui.settings, target);
     let meeting = target == Target::MeetingSummary;
-    // Hex, not OpenCode's default, picks a meeting summary model left unset.
+    // An unset meeting summary uses OpenCode's own default model, so the field
+    // names that instead of a mode's automatic or default presentation.
     let presentation = if meeting && model.is_none() {
         None
     } else {
@@ -334,11 +350,13 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
                     .font(p.k.ty.small)
                     .color(p.muted()),
             )
-            .children(
-                presentation
-                    .is_default
-                    .then(|| Badge::new(tr("Default")).build(p.k)),
-            ),
+            .children(presentation.default.map(|default| {
+                Badge::new(match default {
+                    ModelDefault::Automatic => tr("Automatic"),
+                    ModelDefault::OpenCode => tr("Default"),
+                })
+                .build(p.k)
+            })),
         None if meeting => field.child(
             text(tr(SUMMARY_AUTOMATIC))
                 .key("name")
@@ -439,9 +457,19 @@ pub(super) fn rows(ui: &Ui, p: Paint, target: Target, layer: &mut Vec<El>) -> Ve
     rows
 }
 
-/// The model field's popover: a search over every model, with the OpenCode
-/// default first. Options are keyed by their place in the catalog, since
-/// model keys contain slashes.
+/// The popover's unset entry: Hex's automatic ranked pick while the catalog
+/// lists a ranked model, else OpenCode's own default model.
+fn default_entry_label(catalog: &ModelCatalog) -> &'static str {
+    if catalog.automatic_default() {
+        tr("Automatic")
+    } else {
+        tr("Use OpenCode default")
+    }
+}
+
+/// The model field's popover: a search over every model, with the automatic
+/// or OpenCode default first. Options are keyed by their place in the catalog,
+/// since model keys contain slashes.
 fn model_picker(ui: &Ui, p: Paint, target: Target, field: El, layer: &mut Vec<El>) -> El {
     let catalog = ui.models.catalog();
     let mut keys = Vec::new();
@@ -452,7 +480,7 @@ fn model_picker(ui: &Ui, p: Paint, target: Target, field: El, layer: &mut Vec<El
             options.push(ComboboxOption::new("0", tr(SUMMARY_AUTOMATIC)));
         } else if let Some(name) = &catalog.default_name {
             keys.push(None);
-            let mut option = ComboboxOption::new("0", tr("Use OpenCode default"));
+            let mut option = ComboboxOption::new("0", default_entry_label(catalog));
             option.detail = name.clone();
             options.push(option);
         }

@@ -37,6 +37,7 @@ unsafe extern "C" {
     fn hex_apple_intelligence_text(
         instructions: *const c_char,
         prompt: *const c_char,
+        temperature: f64,
         timeout_ms: u64,
         error: *mut *mut c_char,
     ) -> *mut c_char;
@@ -164,16 +165,26 @@ pub fn generate_chapter_lines(
 }
 
 /// One plain-text answer: no guided structure, so the caller judges the text
-/// itself. Blocks the calling thread for at most `timeout`; the bridge runs at
-/// utility priority.
+/// itself. `temperature` varies the wording per call (the cleanup stays at
+/// 0.2; Labs › Neutral voice asks for 0.7). Blocks the calling thread for at
+/// most `timeout`; the bridge runs at utility priority.
 pub fn generate_text(
     instructions: &str,
     prompt: &str,
+    temperature: f64,
     timeout: Duration,
 ) -> Result<String, GenerationError> {
     call(instructions, prompt, |instructions, prompt, error| {
         // SAFETY: Both strings outlive the call and the bridge writes only `error`.
-        unsafe { hex_apple_intelligence_text(instructions, prompt, timeout_ms(timeout), error) }
+        unsafe {
+            hex_apple_intelligence_text(
+                instructions,
+                prompt,
+                temperature,
+                timeout_ms(timeout),
+                error,
+            )
+        }
     })
     .map(|generated: GeneratedText| generated.text)
 }

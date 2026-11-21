@@ -15,7 +15,7 @@ use rune::{Spring, TextStyle};
 
 use super::flow::{Done, Lead, Mode, Pen, Pres};
 use super::notch;
-use super::tuning::{self, CapsuleFlow, TopLine};
+use super::tuning::{self, CapsuleFlow};
 use crate::desktop::i18n::tr;
 use crate::rune_hud::spring::REDUCED_FADE;
 
@@ -37,11 +37,16 @@ const PROCESSING_TRAIL: f32 = 8.5;
 /// The check's ink spans 12…20, as the dot's does; its label starts where
 /// the timer does.
 pub(crate) const DONE_TEXT_X: f32 = LEAD_TEXT_X;
-/// The capture's first frame in the check's place: a 28 × 20 card 8 pt in
-/// from the capsule's curve, its label 8 pt after it.
-pub(crate) const THUMB_X: f32 = 8.0;
+/// The capture's first frame in the check's place: a 28 × 20 card nested
+/// in the capsule's left corners, its label 8 pt after it. Centred in the
+/// row it clears the top and bottom walls by the shell's radius less its
+/// own (10 pt), so it sits as far from the left wall and its corners turn
+/// about the shell's centres. The list's 16 pt margin is for words, not
+/// for this.
 pub(crate) const THUMB_W: f32 = 28.0;
 pub(crate) const THUMB_H: f32 = 20.0;
+pub(crate) const THUMB_RADIUS: f32 = SHELL_RADIUS - ISLAND_INSET - (CHIP_H - THUMB_H) * 0.5;
+pub(crate) const THUMB_X: f32 = SHELL_RADIUS - THUMB_RADIUS - ISLAND_INSET;
 
 /// Where the finished capsule's label starts after its lead.
 pub(crate) fn done_text_x(lead: Lead) -> f32 {
@@ -52,6 +57,11 @@ pub(crate) fn done_text_x(lead: Lead) -> f32 {
 }
 const CHIP_GAP: f32 = 2.0;
 const GROUP_GAP: f32 = 6.0;
+/// The finished line's buttons (Paste, Search, Inspect, ✕) draw 2 pt
+/// inside their chips: 28 pt boxes 6 pt apart and 6 pt in from the walls.
+pub(crate) const BUTTON_INSET: f32 = 2.0;
+/// From the finished line's words to Paste's fill.
+const PASTE_LEAD: f32 = 16.0;
 /// How far ✕ tucks into the action before it.
 const CLOSE_HUG: f32 = 6.0;
 pub(crate) const CHIP_PX: f32 = 12.0;
@@ -146,16 +156,9 @@ pub(crate) fn chord<S: AsRef<str>>(keys: &[S]) -> String {
     out
 }
 
-/// The finished capsule's label: [`TopLine::Quiet`] only inks it fainter.
+/// The finished capsule's label. Both appearances share its metrics.
 pub(crate) fn done_style() -> TextStyle {
     medium()
-}
-
-/// [`TopLine::Icons`] says nothing for a plain copy: the check is enough.
-pub(crate) fn bare(done: &Done) -> bool {
-    tuning::get().top_line == TopLine::Icons
-        && (done.text.is_empty() || done.text == super::flow::copied())
-        && done.why.is_none()
 }
 
 /// The capsule unfolds from this fraction of its height, anchored on its
@@ -223,6 +226,7 @@ pub(crate) enum Id {
     Paste,
     /// The Send to… chip.
     Ask,
+    Search,
     Inspect,
     /// The open capsule's field.
     Field,
@@ -262,6 +266,7 @@ impl Id {
             Id::Undo => "undo",
             Id::Paste => "paste",
             Id::Ask => "ask",
+            Id::Search => "search",
             Id::Inspect => "inspect",
             Id::Field => "field",
             Id::Row(_) => "row",
@@ -291,6 +296,11 @@ impl Id {
             // The field's well starts the label's trail after it: 12 pt,
             // as the lead's inset is.
             (Id::Done | Id::Why, Id::Field) => 0.0,
+            // Paste's fill starts 16 pt after the words, as far as the
+            // lead sits from the wall and ✕ from the other: the words'
+            // trail, this, and the fill's 2 pt inset in its chip.
+            (Id::Done, Id::Paste) => PASTE_LEAD - LEAD_TRAIL - BUTTON_INSET,
+            (Id::Why, Id::Paste) => PASTE_LEAD - LEAD_TRAIL * 0.5 - BUTTON_INSET,
             // The label's trail and the action's padding already part
             // them.
             (Id::Done | Id::Why, _) => GROUP_GAP,
@@ -298,7 +308,7 @@ impl Id {
             // action's right padding; drawn later, it takes the overlap's
             // presses. Icons beside ✕ keep one even step.
             (Id::Undo | Id::Ask | Id::Next | Id::Pick(_), Id::Close) => -CLOSE_HUG,
-            (Id::Paste | Id::Inspect, Id::Close) => CHIP_GAP,
+            (Id::Paste | Id::Inspect | Id::Search, Id::Close) => CHIP_GAP,
             _ if self.group() == next.group() => CHIP_GAP,
             _ => GROUP_GAP,
         }
@@ -324,7 +334,7 @@ impl Id {
             Id::Inspect => 14,
             Id::Next => 15,
             Id::Pick(row) => 16 + row.min(1) as u8,
-            Id::Ask => 18,
+            Id::Ask | Id::Search => 18,
             Id::Close => 20,
             Id::Row(_) | Id::CardHints => 21,
         }
@@ -355,8 +365,15 @@ fn chip_width(label: f32) -> f32 {
     label + 2.0 * CHIP_PX
 }
 
+#[cfg(test)]
+thread_local! { pub(super) static FIXTURE_SHORTCUT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+
 /// The capture shortcut's keycaps, as Settings draws them.
 pub(crate) fn shortcut_keycaps() -> Vec<String> {
+    #[cfg(test)]
+    if FIXTURE_SHORTCUT.get() {
+        return ["⌥", "⇧", "S"].map(str::to_owned).into();
+    }
     crate::app_settings::capture_hotkey_keycaps()
 }
 
@@ -423,7 +440,7 @@ fn done_items(done: &Done, raw: &mut Vec<(Id, String, f32, bool)>) {
 
 fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
     let text_x = done_text_x(done.lead);
-    if bare(done) || done.text.is_empty() {
+    if done.text.is_empty() {
         // The lead alone, as wide as the dot's.
         raw.push((Id::Done, String::new(), text_x, false));
     } else {
@@ -488,20 +505,32 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
             false,
         ));
     } else {
-        if done.hand_off {
-            raw.push((Id::Paste, String::new(), CHIP_H, false));
+        if done.paste {
+            let label = tr("Paste");
+            raw.push((
+                Id::Paste,
+                label.into(),
+                keyed_width(&[], label, medium()).max(44.0),
+                false,
+            ));
+        }
+        if done.inspect && !done.inspect_preview() {
             raw.push((Id::Inspect, String::new(), CHIP_H, false));
         }
         // Where to send it is a click away, beside Paste, never opened for you.
         // Over the suggestions it's Search, with the capture shortcut that
         // opens it.
         if let Some(ask) = done.ask.as_ref().filter(|_| !listed || done.ask_keys) {
-            let width = if done.ask_keys {
-                keycaps_chip_width(ask, medium())
+            if listed && done.ask_keys {
+                raw.push((Id::Search, ask.clone(), CHIP_H, false));
             } else {
-                keyed_width(&[], ask, medium())
-            };
-            raw.push((Id::Ask, ask.clone(), width, false));
+                let width = if done.ask_keys {
+                    keycaps_chip_width(ask, medium())
+                } else {
+                    keyed_width(&[], ask, medium())
+                };
+                raw.push((Id::Ask, ask.clone(), width, false));
+            }
         }
     }
     raw.push((Id::Close, String::new(), CHIP_H, false));
@@ -1543,18 +1572,19 @@ mod tests {
     }
 
     #[test]
-    fn a_written_copy_offers_paste_and_inspect_as_icons() {
+    fn a_written_copy_has_room_for_the_paste_label_beside_inspect() {
         let copied = Pres::Done(Done {
-            hand_off: true,
+            paste: true,
+            inspect: true,
             ..Done::plain(Lead::Check, "")
         });
         let (_, items) = layout(&copied, "0:00");
         let ids: Vec<Id> = items.iter().map(|i| i.id).collect();
         assert_eq!(ids, [Id::Done, Id::Paste, Id::Inspect, Id::Close]);
-        for id in [Id::Paste, Id::Inspect] {
-            let icon = items.iter().find(|i| i.id == id).unwrap();
-            assert_eq!(icon.rect[2], CHIP_H, "{id:?} is an icon");
-        }
+        let paste = &items[1];
+        assert_eq!(paste.ident, tr("Paste"));
+        assert_eq!(paste.rect[2], chip_width(measure(&paste.ident, medium())));
+        assert!(paste.rect[0] + paste.rect[2] < items[2].rect[0]);
     }
 
     #[test]

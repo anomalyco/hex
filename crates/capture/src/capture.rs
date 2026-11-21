@@ -368,59 +368,10 @@ pub enum MovieQuality {
     Full,
 }
 
-#[derive(Clone, Debug)]
-pub struct Start {
-    /// The capture's start on the boot-time nanosecond clock that audio and input timestamps share.
-    pub t0_boot_ns: u64,
-    pub target: Target,
-    pub bundle_dir: Option<PathBuf>,
-    pub audio: AudioIn,
-    pub window_log: bool,
-    pub note: Option<String>,
-    pub movie: MovieQuality,
-}
-
-impl Default for Start {
-    fn default() -> Self {
-        Self {
-            t0_boot_ns: boot_time_ns(),
-            target: Target::ActiveDisplay,
-            bundle_dir: None,
-            audio: AudioIn::External,
-            window_log: true,
-            note: None,
-            movie: MovieQuality::Compact,
-        }
-    }
-}
-
-impl Start {
-    pub fn screen(target: TargetInfo) -> Self {
-        Self {
-            window_log: target.mode == CaptureMode::Display,
-            target: Target::Screen(target),
-            ..Self::default()
-        }
-    }
-
-    pub fn screen_with_mic(target: TargetInfo) -> Self {
-        Self::screen(target).with_audio(AudioIn::Microphone)
-    }
-
-    pub const fn with_audio(mut self, audio: AudioIn) -> Self {
-        self.audio = audio;
-        self
-    }
-
-    pub fn phone(device: Option<String>, name: Option<String>) -> Self {
-        Self {
-            target: Target::Phone { device, name },
-            audio: AudioIn::None,
-            window_log: false,
-            ..Self::default()
-        }
-    }
-}
+mod start;
+mod token;
+pub use start::Start;
+pub use token::{OutputBounds, PortalToken};
 
 #[derive(Clone, Debug, Default)]
 pub struct RouteContext {
@@ -864,6 +815,9 @@ pub(crate) struct Sampler {
     pub video_output_path: Option<PathBuf>,
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub movie_quality: MovieQuality,
+    /// The screen-cast portal's token choice; ignored off Linux.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+    pub portal_token: PortalToken,
     /// Scrawl's own windows to leave out of the recording.
     #[cfg_attr(any(target_os = "windows", target_os = "linux"), allow(dead_code))]
     pub excluded_window_ids: Arc<Mutex<Vec<u32>>>,
@@ -911,6 +865,7 @@ impl ScreenCaptureSession {
             Arc::default(),
             CANDIDATE_BUDGET_BYTES,
             MovieQuality::Compact,
+            PortalToken::None,
         )
     }
 
@@ -921,6 +876,7 @@ impl ScreenCaptureSession {
         own_windows_recorded: Arc<AtomicBool>,
         budget_bytes: usize,
         movie_quality: MovieQuality,
+        portal_token: PortalToken,
     ) -> Self {
         let started_at = Instant::now();
         #[cfg(target_os = "macos")]
@@ -942,6 +898,7 @@ impl ScreenCaptureSession {
                     target: sampler_target,
                     video_output_path,
                     movie_quality,
+                    portal_token,
                     excluded_window_ids,
                     own_windows_recorded,
                     started_at,
@@ -2703,6 +2660,7 @@ impl Engine {
                     Arc::clone(&own.recorded),
                     engine_cfg.candidate_budget_bytes(),
                     req.movie,
+                    req.portal_token,
                 );
                 self.host
                     .metric("sck_start_ms", stage.elapsed().as_secs_f64() * 1_000.0);

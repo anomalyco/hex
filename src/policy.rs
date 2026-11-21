@@ -143,7 +143,11 @@ impl Policy {
         if feature == crate::labs::Feature::Meetings && self.locks(Lock::Meetings) {
             return Some(Lock::Meetings);
         }
-        if feature == crate::labs::Feature::AnnotateReplay && self.locks(Lock::Annotate) {
+        if matches!(
+            feature,
+            crate::labs::Feature::AnnotateReplay | crate::labs::Feature::AnnotatePointerScreen
+        ) && self.locks(Lock::Annotate)
+        {
             return Some(Lock::Annotate);
         }
         if feature == crate::labs::Feature::VoicePrompt && self.locks(Lock::OpenCodeProcessing) {
@@ -173,6 +177,7 @@ impl Policy {
             Lock::Annotate => vec![
                 &mut settings.capture.enabled,
                 &mut settings.labs.annotate_replay,
+                &mut settings.labs.annotate_pointer_screen,
             ],
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),

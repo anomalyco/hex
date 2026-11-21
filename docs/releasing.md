@@ -37,7 +37,11 @@ Release (push to dev: dev channel; workflow_dispatch on dev: channel check | dev
 ├─ sign-macos               Developer ID inside-out, notarize + staple, ZIP + DMG (sign-macos.sh)     [release]
 ├─ verify-macos             validate-app.sh, Gatekeeper, updater requirement, launch                 [build]
 ├─ sign-windows             Azure Artifact Signing of both hex.exe, Authenticode check                [release]
-├─ installers               windows-installers.yml: Setup.exe around them, tested on x64 + ARM64      [build]
+├─ setup-engine             windows-setup-engine.yml (signed runs): the unsigned setup engine      [build]
+│                           ISCC asks to sign
+├─ sign-windows-engine      Azure Artifact Signing of that setup engine (Smart App Control)            [release]
+├─ installers               windows-installers.yml: Setup.exe around them + the signed engine,        [build]
+│                           tested on x64 + ARM64
 ├─ sign-windows-installers  Azure Artifact Signing of both Setup.exe                                  [release]
 ├─ check-linux, -macos,     stable, check: the full suites on the candidate (check-<os>.yml, called   [build]
 │  -windows                 here; pull requests only compile, dev pushes run no checks)

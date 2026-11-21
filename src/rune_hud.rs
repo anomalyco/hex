@@ -914,7 +914,8 @@ pub(crate) struct DotUniforms {
     plate_layout: [f32; 4],
     island: [f32; 4],
     field: [f32; 4],
-    /// The notch indicator's done and failed, 0 to 1.
+    /// The notch indicator's done and failed, 0 to 1, then how far right
+    /// of the plate's middle the dots' middle sits, pt.
     ears: [f32; 4],
 }
 
@@ -976,7 +977,7 @@ impl DotUniforms {
                 Some(island) if island.ears => [island.notch[0] / 2.0, 1.0, pose.level, pose.clock],
                 _ => [field_radius(layout, pose), 0.0, 0.0, 0.0],
             },
-            ears: [pose.done, pose.fail, 0.0, 0.0],
+            ears: [pose.done, pose.fail, pose.shift, 0.0],
         }
     }
 }

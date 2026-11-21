@@ -122,7 +122,7 @@ const TAP_OR_HOLD: fn() -> bool = if cfg!(test) {
     crate::labs::tap_or_hold
 };
 
-/// Labs › Double-tap on a lone modifier. Unit tests turn it on per machine,
+/// Labs › Double-tap Option, Command, or Globe. Unit tests turn it on per machine,
 /// as they do Tap or hold.
 const DOUBLE_TAP_MODIFIERS: fn() -> bool = if cfg!(test) {
     || false
@@ -156,7 +156,7 @@ pub struct DictationHotkey {
     /// Labs › Tap or hold, read at each Toggle release: a press held past
     /// the hold threshold finishes on release instead of locking.
     tap_or_hold: fn() -> bool,
-    /// Labs › Double-tap on a lone modifier, read as the mode is applied: a
+    /// Labs › Double-tap Option, Command, or Globe, read as the mode is applied: a
     /// modifier-only binding may start a double-tap-only capture.
     double_tap_modifiers: fn() -> bool,
     /// Labs › Hold through other keys, read as a key joins a held
@@ -196,7 +196,7 @@ impl DictationHotkey {
         )
     }
 
-    fn with_binding(
+    pub(crate) fn with_binding(
         trigger_down: bool,
         now: CaptureInstant,
         double_tap_enabled: bool,

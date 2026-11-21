@@ -150,6 +150,39 @@ pub(super) fn stream_trailing_silence(model: &Model) -> usize {
     model.stream_trailing_silence()
 }
 
+/// Whether a dictation stream of `model` must end its text with closing
+/// sentence punctuation before it is trusted: Unified English's chunked
+/// decode drops the full stop or question mark its whole-clip run keeps often
+/// enough that the clip decides instead (issue 1933). Applies on every OS.
+pub(super) fn stream_requires_closing_mark(model: &Model) -> bool {
+    model.stream_requires_closing_mark()
+}
+
+/// Refuses a stream's `text` when it must close a sentence and, past trailing
+/// spaces and closing quotes or brackets, ends in something other than `.`,
+/// `?`, `!`, or `…`, so the whole clip decides instead. Text with nothing left
+/// by then is refused too: a stream that dropped its whole last words is no
+/// more trustworthy than one that dropped the mark. [`finish_stream`] rejects
+/// text that is empty outright.
+pub(super) fn check_closing_mark(text: String, required: bool) -> Result<String, String> {
+    if !required || has_closing_mark(&text) {
+        return Ok(text);
+    }
+    Err("the stream ended without closing sentence punctuation".into())
+}
+
+/// Whether `text` ends in a sentence mark once trailing spaces and closing
+/// quotes or brackets are stripped. Text with nothing left by then has no mark
+/// to judge and fails.
+fn has_closing_mark(text: &str) -> bool {
+    const CLOSERS: [char; 8] = ['"', '\'', '”', '’', ')', ']', '}', '»'];
+    text.trim_end()
+        .trim_end_matches(CLOSERS)
+        .chars()
+        .last()
+        .is_some_and(|last| matches!(last, '.' | '?' | '!' | '…'))
+}
+
 /// Pause audio a dictation stream still hears before its long pauses are
 /// cut: longer than a chunk plus its lookahead (2.08 s for Unified English),
 /// so the words before a pause decode during it.
@@ -575,4 +608,51 @@ pub(super) fn finish_stream(
         return Err("the stream returned no text".into());
     }
     Ok(text)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::check_closing_mark;
+
+    #[test]
+    fn a_sentence_mark_ends_every_accepted_stream() {
+        for text in ["Done.", "Done?", "Done!", "Wait…"] {
+            assert_eq!(check_closing_mark(text.into(), true), Ok(text.into()));
+        }
+    }
+
+    #[test]
+    fn closing_quotes_and_brackets_do_not_hide_the_mark() {
+        for text in ["He said \"stop.\"", "(done.)", "«fini.»", "“Quoi ?”"] {
+            assert_eq!(check_closing_mark(text.into(), true), Ok(text.into()));
+        }
+    }
+
+    #[test]
+    fn a_stream_that_must_close_a_sentence_without_a_mark_falls_back() {
+        assert_eq!(
+            check_closing_mark("Done".into(), true),
+            Err("the stream ended without closing sentence punctuation".into())
+        );
+        assert_eq!(
+            check_closing_mark("He said \"stop\"".into(), true),
+            Err("the stream ended without closing sentence punctuation".into())
+        );
+    }
+
+    #[test]
+    fn a_missing_mark_is_accepted_when_the_model_does_not_require_one() {
+        assert_eq!(check_closing_mark("Done".into(), false), Ok("Done".into()));
+    }
+
+    #[test]
+    fn text_with_nothing_before_the_closers_fails_the_mark_check() {
+        for text in ["", "\")"] {
+            assert_eq!(
+                check_closing_mark(text.into(), true),
+                Err("the stream ended without closing sentence punctuation".into())
+            );
+            assert_eq!(check_closing_mark(text.into(), false), Ok(text.into()));
+        }
+    }
 }

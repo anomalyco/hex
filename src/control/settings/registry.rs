@@ -278,9 +278,19 @@ pub(super) const KEYS: &[Key] = &[
         "How long dictation history is kept",
     ),
     key(
+        "typing_wpm",
+        Kind::Integer { min: 10, max: 200 },
+        "Words a minute you type, which Dictation stats compares against your dictations to show the time saved; 40 by default",
+    ),
+    key(
         "labs.live_text",
         Kind::Bool,
         "Labs: provisional words beside the HUD while dictating",
+    ),
+    key(
+        "labs.faster_live_text",
+        Kind::Bool,
+        "Labs: live words with a shorter lookahead, so they appear sooner at a little more GPU work",
     ),
     key(
         "labs.failure_notices",
@@ -293,11 +303,6 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: provisional words in the focused text field as an underlined input-method preedit, and the final text typed there instead of pasted (Linux Wayland)",
     ),
     key(
-        "labs.settings_search",
-        Kind::Bool,
-        "Labs: a search field at the top of General that filters its rows",
-    ),
-    key(
         "labs.live_chapters",
         Kind::Bool,
         "Labs: chapter meeting transcripts while recording",
@@ -306,6 +311,11 @@ pub(super) const KEYS: &[Key] = &[
         "labs.playground",
         Kind::Bool,
         "Labs: the scene and story browser in the window",
+    ),
+    key(
+        "labs.vocabulary_files",
+        Kind::Bool,
+        "Labs: import vocabulary terms from a CSV file in the Vocabulary sheet, and export the list as one",
     ),
     key(
         "labs.screen_vocabulary",
@@ -330,7 +340,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.unload_idle_minutes",
         Kind::NumberChoice(&["5", "15", "30", "60"]),
-        "Minutes unused before Labs › Unload model when idle unloads the model",
+        "Minutes unused before Labs › Free memory when idle unloads the model",
     ),
     key(
         "labs.keep_microphone_open",
@@ -376,6 +386,11 @@ pub(super) const KEYS: &[Key] = &[
         "labs.clean_up_with_apple_intelligence",
         Kind::Bool,
         "Labs: fix clearly misheard words and spoken self-corrections in each dictation, on this Mac with Apple Intelligence",
+    ),
+    key(
+        "labs.neutral_voice",
+        Kind::Bool,
+        "Labs: rewrite dictations in chosen modes into plain, neutral wording on this Mac, so your writing style doesn't show (macOS)",
     ),
     key(
         "labs.second_dictation_shortcut",
@@ -434,6 +449,13 @@ pub(super) const KEYS: &[Key] = &[
          release still finishes (macOS and Windows)",
     ),
     key(
+        "labs.modes_editor",
+        Kind::Bool,
+        "Labs: a Modes pane in the main sidebar edits each mode's apps and websites, \
+         corrections, OpenCode rewrite (on or off, and its model), and transformations; \
+         Output stays the read-only view",
+    ),
+    key(
         "labs.benchmark_details",
         Kind::Bool,
         "Labs: the Local transcription picker shows each model's raw error rate (WER or CER), benchmark, source, and conditions",
@@ -473,7 +495,7 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.history_stats",
         Kind::Bool,
-        "Labs: a summary of retained dictations at the top of History, and hex history stats",
+        "Labs: a summary of retained dictations at the top of History, with a year-long heatmap and all-time totals from a daily rollup in usage.json (counts only, no text or app names) kept beyond History's retention. While off, the rollup is never written or read; hex history stats prints it too",
     ),
     key(
         "labs.recent_dictations",
@@ -551,6 +573,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: on Wayland desktops without layer-shell, such as GNOME, Annotate's capsule and ink float over the screen through XWayland while it is already running; Esc can't stop drawing there, so use the capsule's pen button or let go of a held Annotate key (Linux)",
     ),
     key(
+        "labs.annotate_pointer_screen",
+        Kind::Bool,
+        "Labs: on Wayland, a screen capture records the monitor under the pointer, and each monitor keeps its own screen-cast choice (Linux)",
+    ),
+    key(
         "labs.meeting_import",
         Kind::Bool,
         "Labs: Meetings offers Import audio…, so a local audio file is transcribed and kept as a meeting (macOS)",
@@ -578,18 +605,26 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.yolo_mode",
         Kind::Bool,
-        "Labs: a shortcut dictation held for at least labs.yolo_mode_seconds presses Return after pasting",
-    ),
-    key(
-        "labs.yolo_mode_seconds",
-        Kind::NumberChoice(&["1", "2", "3", "5", "10"]),
-        "Seconds a dictation shortcut must be held for Labs › YOLO mode to press Return: 1, 2, 3, 5, or 10",
+        "Labs: press Return after pasting a shortcut dictation, so the message sends itself",
     ),
     key(
         "labs.yolo_mode_apps",
         Kind::Json,
         "Labs: the apps YOLO mode presses Return in, as a JSON list of \
          application names as Modes match them; an empty list means every app",
+    ),
+    key(
+        "labs.drop_transcribe",
+        Kind::Bool,
+        "Labs: a WAV, MP3, AAC, M4A, MP4, MOV, AIFF, CAF, FLAC, OGG, Opus, WebM, or MKV file \
+         dropped on the Hex window is transcribed with the selected dictation model and saved \
+         as a text file next to it",
+    ),
+    key(
+        "labs.paste_last_picker",
+        Kind::Bool,
+        "Labs: holding Paste Last opens a picker of recent dictations and annotations, and History \
+         lists dictations, annotations, screenshots, and recordings together (macOS)",
     ),
     key(
         "labs.api_processing",
@@ -615,6 +650,13 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: the menu bar lists the next calendar meetings, each a local start and end time and \
          title; choosing one that has a call link opens it, and that click doesn't start a \
          recording (macOS, with Meetings on and a calendar connected)",
+    ),
+    key(
+        "labs.calendar_bulk_select",
+        Kind::Bool,
+        "Labs: Meetings settings shows Select all or Deselect all beside the Calendars row, so \
+         every calendar is included or left out at once; calendars added later stay included \
+         (macOS)",
     ),
     key(
         "labs.pause_menu",
@@ -886,6 +928,7 @@ pub(super) const RETIRED: &[(&str, &str)] = &[
     ),
     ("labs.meeting_notes_file", "meetings.export.notes_file true"),
     ("labs.expire_meeting_audio", "meetings.audio_retention week"),
+    ("labs.yearly_stats", "labs.history_stats true"),
 ];
 
 /// Settings that act only where Hex has a capability (by its

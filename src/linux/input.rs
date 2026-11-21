@@ -22,8 +22,12 @@ use crate::desktop::host::{DesktopGrantedShortcut, DesktopShortcut, DesktopShort
 use crate::dictation::DictationFlavour;
 use crate::linux::session::LinuxSession;
 
+#[path = "input/activity.rs"]
+pub(crate) mod activity;
 #[path = "input/keys.rs"]
 mod keys;
+#[path = "input/route.rs"]
+pub(crate) mod route;
 #[path = "input/x11.rs"]
 mod x11;
 pub(crate) use keys::keysym;
@@ -1013,6 +1017,9 @@ impl Dispatcher {
     }
 
     fn input(&mut self, input: Input) {
+        if !matches!(input, Input::Lost) {
+            activity::own();
+        }
         self.pending
             .extend(self.state.update(input, Instant::now()));
     }

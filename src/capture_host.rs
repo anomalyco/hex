@@ -70,6 +70,8 @@ use scrawl_capture::transcribe::Transcriber;
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
+#[cfg(target_os = "macos")]
+pub(crate) mod paste_source;
 mod permissions;
 mod replay;
 mod routing;
@@ -301,9 +303,8 @@ pub enum CaptureCommand {
     /// The pointer is on the capsule (`true`) or left it: a rule's send
     /// still waiting out its Undo window pauses while it is there.
     Hold(bool),
-    /// Pastes the newest written capture into the app in front, as
-    /// Scrawl's Paste chip does: its contact sheet, then its summary.
-    Paste,
+    /// Pastes the capsule's written capture, never a later completion.
+    Paste(PathBuf),
     /// Opens the newest written capture's contact sheet: Hex has no review
     /// window, and opening the bundle could launch Scrawl.app, which takes
     /// captures over.
@@ -429,6 +430,18 @@ fn scrawl_engine(
 /// people, so its movie keeps every pixel; an Annotate capture's stays sized
 /// for agents.
 fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool) -> Start {
+    // Only a screen goes through the portal's remembered output; a window is
+    // picked each time and an iPhone never asks.
+    let screen = match &target {
+        Target::ActiveDisplay => true,
+        Target::Screen(info) => info.mode != scrawl_capture::model::CaptureMode::Window,
+        Target::Phone { .. } => false,
+    };
+    let portal_token = if screen {
+        portal_token()
+    } else {
+        scrawl_capture::capture::PortalToken::None
+    };
     Start {
         t0_boot_ns: t0.as_nanos(),
         target,
@@ -441,7 +454,49 @@ fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool
         } else {
             MovieQuality::Compact
         },
+        portal_token,
     }
+}
+
+/// Where a screen capture's ScreenCast restore token goes, read at each
+/// start: the one file, or, with Labs › Record the screen under the pointer
+/// on Wayland, the file for the output under the pointer.
+#[cfg(target_os = "linux")]
+fn portal_token() -> scrawl_capture::capture::PortalToken {
+    use scrawl_capture::capture::{OutputBounds, PortalToken};
+    let Ok(support) = crate::app_paths::support_dir() else {
+        return PortalToken::None;
+    };
+    let single = support.join("screencast-token");
+    // X11 reads the screen itself and a window goes through the portal's
+    // picker each time: only a Wayland screen has a remembered output.
+    if !crate::labs::annotate_pointer_screen() || std::env::var_os("WAYLAND_DISPLAY").is_none() {
+        return PortalToken::File(single);
+    }
+    let Some(pointer) = crate::linux::pointer_output::under_pointer() else {
+        tracing::info!(
+            "the pointer's output is unknown; the screen-cast portal keeps its one remembered screen"
+        );
+        return PortalToken::File(single);
+    };
+    let outputs = crate::linux::output::list()
+        .into_iter()
+        .map(|output| OutputBounds {
+            name: output.name,
+            position: output.position,
+            size: output.size,
+        })
+        .collect();
+    PortalToken::PerOutput {
+        dir: support,
+        pointer,
+        outputs,
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn portal_token() -> scrawl_capture::capture::PortalToken {
+    scrawl_capture::capture::PortalToken::None
 }
 
 /// Forwards events to a bounded channel (the `capture-events` thread logs
@@ -701,11 +756,6 @@ fn shared_engine(
     let mut engine = ENGINE.lock().unwrap_or_else(|error| error.into_inner());
     if let Some(engine) = &*engine {
         return Ok(engine.clone());
-    }
-    // The portal remembers the screen Hex was given; the token is Hex's.
-    #[cfg(target_os = "linux")]
-    if let Ok(support) = crate::app_paths::support_dir() {
-        scrawl_capture::linux::set_token_path(support.join("screencast-token"));
     }
     let (events, received) = mpsc::sync_channel(EVENT_CAPACITY);
     thread::Builder::new()
@@ -1769,8 +1819,8 @@ impl CaptureHost {
             }
             CaptureCommand::Undo => Ok(self.route(routing::Job::Undo)),
             CaptureCommand::Hold(on) => Ok(self.route(routing::Job::Hold(on))),
-            CaptureCommand::Paste => self.hand_off(HandOff::Paste),
-            CaptureCommand::Inspect => self.hand_off(HandOff::Inspect),
+            CaptureCommand::Paste(bundle) => self.hand_off(HandOff::Paste, Some(bundle)),
+            CaptureCommand::Inspect => self.hand_off(HandOff::Inspect, None),
         };
         result.unwrap_or_else(|error| ControlReply::error("failed", format!("{error:#}")))
     }
@@ -2057,12 +2107,15 @@ impl CaptureHost {
 
     /// Pastes or opens the newest written capture on a thread of its own,
     /// one at a time: pasting waits on the pasteboard and the app in front.
-    fn hand_off(&self, how: HandOff) -> Result<ControlReply> {
-        let bundle = lock(&self.outcomes)
-            .last
-            .as_ref()
-            .filter(|last| last.stage == Stage::Done)
-            .map(|last| last.bundle.clone())
+    fn hand_off(&self, how: HandOff, shown: Option<PathBuf>) -> Result<ControlReply> {
+        let bundle = shown
+            .or_else(|| {
+                lock(&self.outcomes)
+                    .last
+                    .as_ref()
+                    .filter(|last| last.stage == Stage::Done)
+                    .map(|last| last.bundle.clone())
+            })
             .ok_or_else(|| eyre!("no written capture"))?;
         if !cfg!(test) {
             static HANDING_OFF: AtomicBool = AtomicBool::new(false);
@@ -2438,14 +2491,59 @@ fn as_pen(event: scrawl_capture::capture::InputEvent) -> scrawl_capture::capture
     }
 }
 
-/// A pointer move on the drawing overlay, at `x`, `y` in its points;
-/// `scale` is its pixels per point (Linux). The capture's target becomes
-/// the recorded screen in points, so strokes land where they were drawn:
-/// the portal's logical size when it gives one, since a fractional scale
-/// (1.5, 1.33) reaches the overlay rounded up to a whole number, which
-/// would shrink the target and pin strokes past it to its edge.
+/// The ink overlay's own space on Linux: the window its pointer moves in
+/// and the points its strokes are drawn in.
 #[cfg(target_os = "linux")]
-pub fn draw(x: f32, y: f32, scale: f32) {
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct InkSpace {
+    /// The overlay is the XWayland window a compositor without layer-shell
+    /// gets (GNOME).
+    pub xwayland: bool,
+    /// The overlay's size in its own points, as the view laid it out, once
+    /// known (`Cx::layout_size`).
+    pub viewport: Option<[f32; 2]>,
+}
+
+/// The recorded screen in the ink overlay's points, so strokes land where
+/// they were drawn.
+///
+/// A native Wayland layer surface lays out in the desktop's logical points,
+/// which the portal's stream `size` (or the named output's xdg-output size)
+/// gives exactly, even at a fractional scale the overlay's integer buffer
+/// scale rounds up.
+///
+/// The XWayland window GNOME gets instead lays out in its own points, and
+/// the desktop's logical size is another space there: a compositor that
+/// scales XWayland natively leaves the overlay at the screen's pixels while
+/// the portal still reports the smaller logical layout (1536x960 for a
+/// 1920x1200 screen at 125%), so using it pins every stroke past 80% of the
+/// screen to the target's edge; one that scales X11 traditionally leaves the
+/// overlay at the logical layout while the stream is the screen's pixels. The
+/// overlay's own size is the only source right in both, and before the view
+/// knows it the recorded pixels over the overlay's scale stand in.
+#[cfg(target_os = "linux")]
+fn ink_points(
+    pixels: (u32, u32),
+    scale: f32,
+    logical: Option<(f64, f64)>,
+    space: InkSpace,
+) -> [f32; 2] {
+    let in_points = [pixels.0 as f32 / scale, pixels.1 as f32 / scale];
+    if space.xwayland {
+        return space
+            .viewport
+            .filter(|[width, height]| *width > 0.0 && *height > 0.0)
+            .unwrap_or(in_points);
+    }
+    logical.map_or(in_points, |(width, height)| [width as f32, height as f32])
+}
+
+/// A pointer move on the drawing overlay, at `x`, `y` in its points;
+/// `scale` is its pixels per point, and `space` is where it lays out
+/// (Linux). The capture's target becomes the recorded screen in that same
+/// space, so strokes land where they were drawn ([`ink_points`]).
+#[cfg(target_os = "linux")]
+pub fn draw(x: f32, y: f32, scale: f32, space: InkSpace) {
     if !drawing() {
         return;
     }
@@ -2453,12 +2551,9 @@ pub fn draw(x: f32, y: f32, scale: f32) {
         && scale > 0.0
         && let Some(source) = ink_source()
     {
-        let area = crate::linux::output::pen_points()
-            .or_else(scrawl_capture::capture::recorded_screen_points)
-            .map_or(
-                [width as f32 / scale, height as f32 / scale],
-                |(width, height)| [width as f32, height as f32],
-            );
+        let logical = crate::linux::output::pen_points()
+            .or_else(scrawl_capture::capture::recorded_screen_points);
+        let area = ink_points((width, height), scale, logical, space);
         let mut frame = source
             .telemetry
             .target_frame
@@ -2972,13 +3067,14 @@ impl CaptureShortcut {
 }
 
 /// The keys the capsule takes from Hex's tap while it is on screen: it never
-/// takes focus, so these never reach the app in front.
+/// takes focus, so these never reach the app in front. Windows hands them over
+/// from its keyboard hook, where the overlay never takes the keyboard either.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapsuleKeys {
     /// The picker: the capture shortcut ([`CapsuleKey::Shortcut`]) and Escape.
     Picker,
-    /// The open list: every key press without ⌘ or ⌃ that isn't one of
-    /// Hex's shortcuts.
+    /// The open list: every key press without ⌘ or ⌃ (Ctrl, Alt or the Windows
+    /// key on Windows) that isn't one of Hex's shortcuts.
     List,
     /// A capture's suggestions: the capture shortcut, which opens the
     /// search ([`CapsuleKey::Shortcut`]), Shift, and a mouse press
@@ -2989,8 +3085,8 @@ pub enum CapsuleKeys {
     Suggest { cycle: bool, search: bool },
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-/// A key the capsule gets from Hex's tap.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+/// A key the capsule gets from Hex's tap, or from the Windows keyboard hook.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CapsuleKey {
     /// The capture shortcut: the picker records what it is on, and the
@@ -3098,13 +3194,13 @@ pub fn wants_escape() -> bool {
     GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::Picker))
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 /// Whether the open list takes every key press at the tap.
 pub fn list_open() -> bool {
     GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::List))
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 /// Whether the capsule's suggestions show, taking the capture shortcut.
 pub fn suggesting() -> bool {
     GRAB_KEYS.load(Ordering::Acquire)
@@ -3112,6 +3208,18 @@ pub fn suggesting() -> bool {
             cycle: false,
             search: false,
         }))
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+/// Whether the capsule takes text now: the open list, or suggestions the
+/// pointer moved onto (`CapsuleKeys::Suggest { search: true, .. }`). The
+/// Windows hook is its only reader: the macOS tap reads the character itself.
+pub fn takes_text() -> bool {
+    grab().as_ref().is_some_and(|grab| match grab.keys {
+        CapsuleKeys::List => true,
+        CapsuleKeys::Suggest { search, .. } => search,
+        CapsuleKeys::Picker => false,
+    })
 }
 
 /// Hands `key` to the capsule if its keys include it; false otherwise.
@@ -3131,7 +3239,10 @@ fn takes(keys: CapsuleKeys, key: &CapsuleKey) -> bool {
             CapsuleKey::Shortcut | CapsuleKey::Press | CapsuleKey::Shift(_),
         ) => true,
         (
-            CapsuleKeys::Suggest { cycle: true, .. },
+            CapsuleKeys::Suggest {
+                cycle: true,
+                search: true,
+            },
             CapsuleKey::Return { shift: false } | CapsuleKey::Tab { .. },
         ) => true,
         (CapsuleKeys::Suggest { search: true, .. }, CapsuleKey::Text(typed)) => opens_search(typed),
@@ -3271,6 +3382,10 @@ fn finish_captures(
                         .map(|error| format!("{error:#}"))
                 };
                 let route = look.as_ref().map(|_| CaptureRoute::looking());
+                #[cfg(target_os = "macos")]
+                if let Err(error) = paste_source::mark_ready(&bundle, crate::history::now_ms()) {
+                    tracing::warn!(%error, "capture written without Paste Last provenance");
+                }
                 lock(outcomes).settle_with(
                     bundle.clone(),
                     Stage::Done,
@@ -3679,6 +3794,65 @@ mod tests {
             "ending a stroke under the input lock deadlocked"
         );
         held.join().expect("the thread finishes");
+    }
+
+    /// The ink's target is the overlay's own space: the desktop's logical
+    /// points on a Wayland layer surface, and the XWayland window's own
+    /// points when GNOME has no layer-shell. #1995: a 1920x1200 screen at
+    /// 125% reported 1536x960 from the portal, and ink stopped at 1536/1920
+    /// of the screen.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_ink_target_is_the_overlay_s_own_space() {
+        let layer = InkSpace {
+            xwayland: false,
+            viewport: None,
+        };
+        let xwayland = |viewport| InkSpace {
+            xwayland: true,
+            viewport,
+        };
+        // GNOME scaling XWayland natively: the overlay is the screen's
+        // 1920x1200 pixels at Xft's 1, and the portal's 1536x960 is the
+        // desktop's logical layout, which it must not use.
+        assert_eq!(
+            ink_points(
+                (1920, 1200),
+                1.0,
+                Some((1536.0, 960.0)),
+                xwayland(Some([1920.0, 1200.0])),
+            ),
+            [1920.0, 1200.0]
+        );
+        // GNOME scaling XWayland traditionally: the X root, and the overlay,
+        // is the logical 1536x960 at Xft's 1 while the stream is still the
+        // screen's 1920x1200 pixels, so the pixels over that scale would
+        // confine every stroke to 80% of the screen.
+        assert_eq!(
+            ink_points(
+                (1920, 1200),
+                1.0,
+                Some((1536.0, 960.0)),
+                xwayland(Some([1536.0, 960.0])),
+            ),
+            [1536.0, 960.0]
+        );
+        // Before the view has laid the overlay out: the pixels over its
+        // scale.
+        assert_eq!(
+            ink_points((1920, 1200), 1.0, Some((1536.0, 960.0)), xwayland(None)),
+            [1920.0, 1200.0]
+        );
+        // A Wayland layer surface lays out in the desktop's logical points,
+        // where a fractional scale's rounded-up buffer scale (2) is not the
+        // space (1.5 gives 1707x960).
+        assert_eq!(
+            ink_points((2560, 1440), 2.0, Some((1707.0, 960.0)), layer),
+            [1707.0, 960.0]
+        );
+        // No portal size (X11, or a portal that reports pixels): the pixels
+        // still give the overlay's points.
+        assert_eq!(ink_points((1920, 1080), 1.0, None, layer), [1920.0, 1080.0]);
     }
 
     /// The capsule is one 640×424 panel above everything, but only its pill
@@ -4172,12 +4346,10 @@ mod tests {
         let idle = report(host.control(ScrawlCaptureAction::Stop, &audio));
         assert!(!idle.changed && idle.bundle.is_none());
         // Paste and Inspect need a written capture.
-        for command in [CaptureCommand::Paste, CaptureCommand::Inspect] {
-            assert!(matches!(
-                host.command(command, &audio),
-                ControlReply::Error { .. }
-            ));
-        }
+        assert!(matches!(
+            host.command(CaptureCommand::Inspect, &audio),
+            ControlReply::Error { .. }
+        ));
         assert!(!report(host.control(ScrawlCaptureAction::Cancel, &audio)).changed);
 
         let started = report(host.control(ScrawlCaptureAction::Start, &audio));
@@ -4205,11 +4377,19 @@ mod tests {
 
         let last = wait_for_last(&mut host, &audio, &bundle, true);
         assert_eq!(last.stage, "done");
+        #[cfg(target_os = "macos")]
+        assert_eq!(
+            paste_source::Scope::new(&dir, Some(7)).rows(1, crate::history::now_ms())[0].2,
+            "hello there"
+        );
         assert_eq!(last.words, Some(2));
         let snapshot = lock(&host.outcomes).snapshot();
         assert!(snapshot.recording.is_none() && snapshot.finishing.is_empty());
         assert_eq!(snapshot.last.unwrap().stage, Stage::Done);
-        for command in [CaptureCommand::Paste, CaptureCommand::Inspect] {
+        for command in [
+            CaptureCommand::Paste(bundle.clone()),
+            CaptureCommand::Inspect,
+        ] {
             assert!(report(host.command(command, &audio)).changed);
         }
         // The fake audio ends before the stop, so the tail may count as a gap.
@@ -5125,7 +5305,7 @@ mod tests {
         let settled = lock(&host.outcomes).snapshot().last.unwrap();
         assert_eq!(settled.error.as_deref(), Some("the window closed"));
         assert!(matches!(
-            host.command(CaptureCommand::Paste, &audio),
+            host.command(CaptureCommand::Inspect, &audio),
             ControlReply::Error { .. }
         ));
         host.shutdown(&audio);
@@ -5391,16 +5571,21 @@ mod tests {
         ] {
             assert!(!capsule_key(key.clone()), "{key:?}");
         }
-        // The toast's one guess at a time: Return sends it, Tab moves on.
+        // A toast appearing over another app never takes its Return or Tab.
         second.set(CapsuleKeys::Suggest {
             cycle: true,
             search: false,
         });
         assert!(suggesting());
+        assert!(!capsule_key(CapsuleKey::Tab { shift: false }));
+        assert!(!capsule_key(CapsuleKey::Return { shift: false }));
+        second.set(CapsuleKeys::Suggest {
+            cycle: true,
+            search: true,
+        });
         assert!(capsule_key(CapsuleKey::Tab { shift: false }));
         assert!(capsule_key(CapsuleKey::Return { shift: false }));
         assert!(!capsule_key(CapsuleKey::Return { shift: true }));
-        assert!(!capsule_key(CapsuleKey::Text("h".into())));
         second.set(CapsuleKeys::List);
         assert!(!suggesting());
         assert!(list_open() && !wants_escape());

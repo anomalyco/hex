@@ -1,7 +1,7 @@
 name: HEXMobile
 options:
   minimumXcodeGenVersion: 2.46.0
-  bundleIdPrefix: com.kitlangton.hex
+  bundleIdPrefix: anomaly.hex
   deploymentTarget:
     iOS: "18.0"
   xcodeVersion: "2660"
@@ -11,8 +11,11 @@ packages:
     exactVersion: 0.15.5
 settings:
   base:
-    DEVELOPMENT_TEAM: QC99C9JE59
+    DEVELOPMENT_TEAM: 5NZ4Q7NXJ4
     SWIFT_VERSION: 6.0
+    # The compiler finds the interface's strings for the String Catalogs (Localizable.xcstrings).
+    SWIFT_EMIT_LOC_STRINGS: YES
+    LOCALIZATION_PREFERS_STRING_CATALOGS: YES
 targets:
   HEXMobile:
     type: application
@@ -38,11 +41,11 @@ targets:
         CADisableMinimumFrameDurationOnPhone: true
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
-            CFBundleURLName: com.kitlangton.hex.mobile.keyboard-session
+            CFBundleURLName: anomaly.hex.mobile.keyboard-session
             CFBundleURLSchemes:
               - hex-dictation
-        NSMicrophoneUsageDescription: Hex records only while you dictate and transcribes locally on this iPhone.
-        NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device SpeechTranscriber to turn your recording into text.
+        NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. Audio never leaves your iPhone and is deleted once it's transcribed.
+        NSSpeechRecognitionUsageDescription: Hex turns your recordings into text with Apple's on-device speech recognition. Nothing you say is sent to a server.
         NSSupportsLiveActivities: true
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes:
@@ -66,10 +69,11 @@ targets:
         CODE_SIGN_ENTITLEMENTS: HEXMobile/HEXMobile.entitlements
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.2.0
+        MARKETING_VERSION: 0.2.2
+        TARGETED_DEVICE_FAMILY: "1"
         OTHER_LDFLAGS: $(inherited) -weak_framework FoundationModels
         OTHER_SWIFT_FLAGS: $(inherited) -Xfrontend -disable-autolink-framework -Xfrontend FoundationModels
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile
         PRODUCT_NAME: HEX
     scheme:
       gatherCoverageData: false
@@ -81,10 +85,15 @@ targets:
     sources:
       - HEXKeyboard
       - HEXShared
+      # The app's String Catalog, so the keyboard's words (the Hex key menu first) follow
+      # the iPhone's language where Hex is translated.
+      - HEXMobile/Localizable.xcstrings
     info:
       path: HEXKeyboard/Info.plist
       properties:
         CFBundleDisplayName: Hex Keyboard
+        NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. Audio never leaves your iPhone and is deleted once it's transcribed.
+        NSSpeechRecognitionUsageDescription: Hex turns your recordings into text with Apple's on-device speech recognition. Nothing you say is sent to a server.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:
@@ -99,11 +108,13 @@ targets:
       base:
         APPLICATION_EXTENSION_API_ONLY: YES
         CODE_SIGN_ENTITLEMENTS: HEXKeyboard/HEXKeyboard.entitlements
+        COREML_CODEGEN_LANGUAGE: None
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.2.0
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.keyboard
+        MARKETING_VERSION: 0.2.2
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.keyboard
         PRODUCT_NAME: HEXKeyboard
         SKIP_INSTALL: YES
   HEXWidgets:
@@ -127,8 +138,9 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.2.0
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.widgets
+        MARKETING_VERSION: 0.2.2
+        TARGETED_DEVICE_FAMILY: "1"
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.widgets
         PRODUCT_NAME: HEXWidgets
         SKIP_INSTALL: YES
   HEXMobileTests:
@@ -145,5 +157,5 @@ targets:
         BUNDLE_LOADER: $(TEST_HOST)
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
-        PRODUCT_BUNDLE_IDENTIFIER: com.kitlangton.hex.mobile.tests
+        PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.tests
         TEST_HOST: $(BUILT_PRODUCTS_DIR)/HEX.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/HEX

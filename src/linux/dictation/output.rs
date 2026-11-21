@@ -62,7 +62,7 @@ impl DictationOutput {
         recording: Option<crate::history::Recording>,
         typing: Option<crate::linux::live_typing::Session>,
         context: crate::dictation::context::ContextSnapshot,
-        held_ms: Option<u64>,
+        by_shortcut: bool,
     ) -> Result<String> {
         let application = context.application.clone();
         let modes = self
@@ -107,17 +107,14 @@ impl DictationOutput {
         if processed.text.trim().is_empty() {
             return Err(eyre!("text replacements produced empty output"));
         }
-        // Labs › YOLO mode, read as the output commits.
-        let send = !inserted
-            && !flavour.raw()
-            && !crate::labs::copy_only()
-            && held_ms.is_some_and(|held_ms| {
-                crate::dictation::yolo_mode::sends(held_ms, application.as_deref())
-            });
         let mut sent = false;
         if let Some(paste) = paste
             && !inserted
         {
+            let send = by_shortcut
+                && !flavour.raw()
+                && !crate::labs::copy_only()
+                && crate::dictation::yolo_mode::sends(application.as_deref(), None);
             // A paste that fails (another app changed the clipboard while
             // Hex saved it, or a format couldn't be read) keeps the text
             // for Paste last dictation, so the dictation isn't lost;

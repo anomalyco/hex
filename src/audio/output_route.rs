@@ -187,9 +187,9 @@ fn classify_sink(default: &str, sinks: &[Sink]) -> OutputRoute {
 /// describes them, or `None` when it cannot be read.
 #[cfg(target_os = "linux")]
 fn listed_sinks() -> Option<Vec<Sink>> {
-    use crate::linux::input_route;
+    use crate::linux::input::route;
 
-    let json = input_route::pactl(&["-f", "json", "list", "sinks"])?;
+    let json = route::pactl(&["-f", "json", "list", "sinks"])?;
     serde_json::from_str(&json)
         .inspect_err(|error| tracing::debug!(%error, "could not read the sound server's sinks"))
         .ok()
@@ -237,9 +237,9 @@ fn capture_sinks(default: &str, sinks: &[Sink]) -> Vec<String> {
 /// its one untargeted capture of the default output.
 #[cfg(target_os = "linux")]
 pub(crate) fn meeting_sinks() -> Option<Vec<String>> {
-    use crate::linux::input_route;
+    use crate::linux::input::route;
 
-    let default = input_route::pactl(&["get-default-sink"])?;
+    let default = route::pactl(&["get-default-sink"])?;
     let sinks = capture_sinks(&default, &listed_sinks()?);
     (!sinks.is_empty()).then_some(sinks)
 }
@@ -249,9 +249,9 @@ pub(crate) fn meeting_sinks() -> Option<Vec<String>> {
 /// without `get-default-sink`, or JSON Hex can't read is unknown.
 #[cfg(target_os = "linux")]
 pub(crate) fn default_output_route() -> OutputRoute {
-    use crate::linux::input_route;
+    use crate::linux::input::route;
 
-    let Some(default) = input_route::pactl(&["get-default-sink"]) else {
+    let Some(default) = route::pactl(&["get-default-sink"]) else {
         return OutputRoute::Unknown;
     };
     let Some(sinks) = listed_sinks() else {

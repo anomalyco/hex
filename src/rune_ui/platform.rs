@@ -946,6 +946,24 @@ impl Capabilities {
     }
 }
 
+/// What this OS's Hex can do, by capability name, for `hex status` and the
+/// settings `hex settings` can change here.
+pub(crate) fn capabilities() -> std::collections::BTreeMap<String, bool> {
+    Capabilities::current()
+        .fields()
+        .into_iter()
+        .map(|(name, on)| (name.to_owned(), on))
+        .collect()
+}
+
+/// Whether this OS's Hex has the capability `name` ([`capabilities`]).
+pub(crate) fn capability(name: &str) -> bool {
+    Capabilities::current()
+        .fields()
+        .into_iter()
+        .any(|(field, on)| field == name && on)
+}
+
 #[cfg(test)]
 mod parity_tests {
     use super::*;

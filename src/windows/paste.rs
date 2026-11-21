@@ -3,19 +3,32 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use arboard::SetExtWindows;
 use color_eyre::eyre::{Result, WrapErr, eyre};
+use windows_sys::Win32::Foundation::HWND;
 use windows_sys::Win32::System::DataExchange::{CountClipboardFormats, GetClipboardSequenceNumber};
+use windows_sys::Win32::System::Threading::GetCurrentProcessId;
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, GetKeyboardLayout, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT,
     KEYEVENTF_KEYUP, MAPVK_VK_TO_VSC, MapVirtualKeyExW, SendInput, VK_CONTROL, VK_LWIN, VK_MENU,
     VK_RETURN, VK_RWIN, VK_SHIFT, VK_V,
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GUITHREADINFO, GetClassNameW, GetForegroundWindow, GetGUIThreadInfo, GetWindowThreadProcessId,
+    IsIconic, IsWindow, IsWindowVisible, SetForegroundWindow,
+};
+
+use crate::continuation::{Continuation, InputActivity};
+use crate::dictation::paste_target::is_shell_target;
 
 const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
+
+/// How long a paste waits for the window its capture started in to come back
+/// to the front, and how often it asks.
+const RETURN_TIMEOUT: Duration = Duration::from_millis(200);
+const RETURN_POLL: Duration = Duration::from_millis(10);
 
 /// Remote desktop clients (#866) forward a clipboard change to the remote
 /// session asynchronously, and the remote fetches the text only when it
@@ -43,6 +56,16 @@ fn paste_with_shift_into(stem: Option<&str>, terminal_paste: bool) -> bool {
 /// paste shortcut) or the saved Terminal paste setting is on.
 fn shift_paste(for_this_capture: bool, terminal_paste: bool) -> bool {
     for_this_capture || terminal_paste
+}
+
+/// What a paste did with the text.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Paste {
+    /// The chord was sent to the window in front.
+    Sent,
+    /// Nothing was sent: the text stayed on the clipboard, because the window
+    /// in front was the shell or Labs › Copy dictation only is on.
+    Copied,
 }
 
 enum ClipboardSnapshot {
@@ -92,12 +115,106 @@ impl ClipboardSnapshot {
     }
 }
 
+/// The window in front as a paste sees it: its class and process, and the
+/// child of the foreground thread that holds the keyboard focus.
+#[derive(Default)]
+struct Foreground {
+    window: isize,
+    class: String,
+    application: Option<String>,
+    focus_class: Option<String>,
+}
+
+impl Foreground {
+    /// Reads the window in front now, for one paste's decision and log line.
+    fn read() -> Self {
+        // SAFETY: plain Win32 queries; a null foreground window owns nothing.
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return Self::default();
+            }
+            Self {
+                window: window as isize,
+                class: window_class(window),
+                application: crate::windows::input::window_process_path(window).and_then(|path| {
+                    path.file_stem()
+                        .map(|stem| stem.to_string_lossy().to_lowercase())
+                }),
+                focus_class: focused_window_class(),
+            }
+        }
+    }
+
+    /// Whether a paste here would be lost in the shell.
+    fn is_shell(&self) -> bool {
+        is_shell_target(
+            (self.window != 0).then_some(self.class.as_str()),
+            self.application.as_deref(),
+            self.focus_class.as_deref(),
+        )
+    }
+}
+
+/// The window a capture started in, with the process that owned it then, so
+/// a reused handle is not mistaken for the same window.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct CaptureWindow {
+    window: isize,
+    pid: u32,
+}
+
+impl CaptureWindow {
+    /// The window in front now, or `None` when nothing is.
+    pub fn read() -> Option<Self> {
+        // SAFETY: plain queries; a null foreground window owns no process.
+        unsafe {
+            let window = GetForegroundWindow();
+            if window.is_null() {
+                return None;
+            }
+            let mut pid = 0_u32;
+            GetWindowThreadProcessId(window, &mut pid);
+            (pid != 0).then_some(Self {
+                window: window as isize,
+                pid,
+            })
+        }
+    }
+}
+
+/// The window's class name, empty when Windows has none to give.
+fn window_class(window: HWND) -> String {
+    let mut buffer = [0_u16; 256];
+    // SAFETY: `buffer` is writable for the length it states.
+    let length = unsafe { GetClassNameW(window, buffer.as_mut_ptr(), buffer.len() as i32) };
+    if length <= 0 {
+        return String::new();
+    }
+    String::from_utf16_lossy(&buffer[..length as usize])
+}
+
+/// The keyboard-focused child of the foreground thread, if any.
+fn focused_window_class() -> Option<String> {
+    let mut info = GUITHREADINFO {
+        cbSize: size_of::<GUITHREADINFO>() as u32,
+        ..Default::default()
+    };
+    // SAFETY: `info` states its own size; a null thread asks for the one in front.
+    let filled = unsafe { GetGUIThreadInfo(0, &mut info) } != 0;
+    (filled && !info.hwndFocus.is_null()).then(|| window_class(info.hwndFocus))
+}
+
 pub struct WindowsPaster {
     clipboard: arboard::Clipboard,
     clipboard_restore: Arc<Mutex<ClipboardRestore>>,
     /// Terminal paste: send Ctrl+Shift+V instead of Ctrl+V. Shared so a
     /// settings change applies to the next paste without a new paster.
     paste_with_shift: Arc<AtomicBool>,
+    /// The user's own input since the listener started: a paste joins the
+    /// one before it only while this revision is unchanged.
+    activity: InputActivity,
+    continuation: Continuation,
 }
 
 #[derive(Default)]
@@ -133,21 +250,33 @@ impl ClipboardRestore {
 }
 
 impl WindowsPaster {
-    pub fn new(paste_with_shift: Arc<AtomicBool>) -> Result<Self> {
+    pub fn new(paste_with_shift: Arc<AtomicBool>, activity: InputActivity) -> Result<Self> {
         Ok(Self {
             clipboard: arboard::Clipboard::new()
                 .wrap_err("could not open the Windows clipboard")?,
             clipboard_restore: Arc::new(Mutex::new(ClipboardRestore::default())),
             paste_with_shift,
+            activity,
+            continuation: Continuation::default(),
         })
     }
 
     /// Pastes `text`, with Ctrl+Shift+V when `shift` asks for it or the
     /// saved Terminal paste setting is on. Java games still take Ctrl+V.
-    pub fn paste(&mut self, text: &str, shift: bool) -> Result<()> {
+    /// `return_to` is the window the capture started in: the desktop or a
+    /// taskbar takes no paste, so Hex returns there first and, when it can't,
+    /// leaves the transcript on the clipboard instead of sending it nowhere.
+    pub fn paste(
+        &mut self,
+        text: &str,
+        shift: bool,
+        return_to: Option<CaptureWindow>,
+    ) -> Result<Paste> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
         }
+        let revision = self.activity.revision();
+        let plain = text;
         let mut restore = self
             .clipboard_restore
             .lock()
@@ -171,29 +300,67 @@ impl WindowsPaster {
             }
         };
         wait_for_conflicting_modifiers();
+        // Resolve the target before the clipboard write: a copy for the shell
+        // leaves the plain transcript, while a paste carries the
+        // continuation's join.
+        let mut target = Foreground::read();
+        let returned = target.is_shell() && return_to.is_some_and(bring_to_front);
+        if returned {
+            target = Foreground::read();
+        }
+        tracing::info!(
+            hwnd = target.window,
+            class = %target.class,
+            application = target.application.as_deref().unwrap_or(""),
+            focus = target.focus_class.as_deref().unwrap_or(""),
+            returned,
+            "Windows paste target"
+        );
         if clipboard_sequence() != original_sequence {
             return Err(eyre!(
                 "the clipboard changed while the transcript was being prepared"
             ));
         }
+        let copied = target.is_shell();
+        let text = if copied {
+            plain.to_string()
+        } else {
+            text_to_paste(&self.continuation, revision, plain)
+        };
         if keep {
             // Labs › Keep dictation on clipboard: an ordinary entry, so
             // Windows keeps it in clipboard history (Win+V) and cloud sync,
             // as macOS keeps its kept entry ordinary too.
             self.clipboard
                 .set()
-                .text(text.to_string())
+                .text(text.clone())
                 .wrap_err("could not place the transcript on the Windows clipboard")?;
             restore.keep();
         } else {
             // Marked so Windows keeps the transcript out of clipboard history
             // (Win+V) and cloud sync, as macOS marks it transient (#851).
+            // A copy for the shell keeps the same marking: the fallback is
+            // still a dictation, not a kept one.
             self.clipboard
                 .set()
                 .exclude_from_history()
                 .exclude_from_cloud()
-                .text(text.to_string())
+                .text(text.clone())
                 .wrap_err("could not place the transcript on the Windows clipboard")?;
+        }
+        if copied {
+            // Nothing in front takes a paste: the words stay on the
+            // clipboard for Paste Last or a manual Ctrl+V instead of being
+            // sent to the desktop or taskbar and lost.
+            restore.keep();
+            drop(restore);
+            tracing::warn!(
+                class = %target.class,
+                application = target.application.as_deref().unwrap_or(""),
+                "the paste target is the Windows shell; the dictation stays on the clipboard"
+            );
+            self.continuation.clear();
+            return Ok(Paste::Copied);
         }
         let generation = if keep {
             None
@@ -203,13 +370,12 @@ impl WindowsPaster {
         };
         drop(restore);
 
-        let stem = crate::windows::input::foreground_process_stem();
-        let remote_desktop = is_remote_desktop(stem.as_deref());
+        let remote_desktop = is_remote_desktop(target.application.as_deref());
         if remote_desktop {
             thread::sleep(REMOTE_DESKTOP_PASTE_DELAY);
         }
         let shift = paste_with_shift_into(
-            stem.as_deref(),
+            target.application.as_deref(),
             shift_paste(shift, self.paste_with_shift.load(Ordering::Relaxed)),
         );
         if let Err(error) = send_paste_shortcut(shift) {
@@ -218,8 +384,10 @@ impl WindowsPaster {
             }
             return Err(error);
         }
+        // Only a paste that reached the app is continued by the next one.
+        self.continuation.record(revision, true, text);
         let Some(generation) = generation else {
-            return Ok(());
+            return Ok(Paste::Sent);
         };
         let clipboard_restore = self.clipboard_restore.clone();
         let restore_delay = if remote_desktop {
@@ -231,12 +399,15 @@ impl WindowsPaster {
             thread::sleep(restore_delay);
             restore_clipboard_generation(&clipboard_restore, generation);
         });
-        Ok(())
+        Ok(Paste::Sent)
     }
 
     /// Labs › YOLO mode: one press of Return after a paste, once
     /// the paste has had [`crate::dictation::yolo_mode::SETTLE`] to land.
     pub fn press_return(&mut self) -> Result<()> {
+        // Return sends the message, so the next dictation starts a new one,
+        // as macOS's Send mode ends its continuation.
+        self.continuation.clear();
         thread::sleep(crate::dictation::yolo_mode::SETTLE);
         wait_for_conflicting_modifiers();
         let scan = foreground_scan_code(VK_RETURN);
@@ -261,6 +432,9 @@ impl WindowsPaster {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to copy an empty transcript"));
         }
+        // Nothing was inserted, so the next paste starts a new
+        // continuation.
+        self.continuation.clear();
         let mut restore = self
             .clipboard_restore
             .lock()
@@ -271,6 +445,15 @@ impl WindowsPaster {
             .text(text.to_string())
             .wrap_err("could not place the transcript on the Windows clipboard")
     }
+}
+
+/// What a dictation pastes: `text`, joined onto the previous dictation when
+/// nothing in between ended the input session. Dictation and Paste Last
+/// both continue their dictation.
+fn text_to_paste(continuation: &Continuation, revision: u64, text: &str) -> String {
+    continuation
+        .join(revision, true, text)
+        .unwrap_or_else(|| text.to_string())
 }
 
 fn clipboard_sequence() -> u32 {
@@ -361,6 +544,61 @@ fn key_down(key: u16) -> bool {
     unsafe { GetAsyncKeyState(i32::from(key)) < 0 }
 }
 
+/// Whether `window` is the desktop or a taskbar rather than a window a paste
+/// can land in. The window is not in front, so the foreground thread's focus
+/// says nothing about it: its class and process alone decide.
+pub(crate) fn is_shell_window(window: HWND) -> bool {
+    if window.is_null() {
+        return true;
+    }
+    let class = window_class(window);
+    if !crate::dictation::paste_target::is_shell_class(&class) {
+        return false;
+    }
+    let application = crate::windows::input::window_process_path(window).and_then(|path| {
+        path.file_stem()
+            .map(|stem| stem.to_string_lossy().to_lowercase())
+    });
+    is_shell_target(Some(&class), application.as_deref(), None)
+}
+
+/// Brings the capture's window back to the front when it is still the same
+/// process's window and another process can paste into it, and says whether
+/// it arrived within [`RETURN_TIMEOUT`]. The shell, Hex's own window, a
+/// minimized window, and a handle whose process changed are left alone.
+fn bring_to_front(capture: CaptureWindow) -> bool {
+    let window = capture.window as HWND;
+    // SAFETY: plain queries on a window that may have closed or been reused
+    // since it was remembered; `IsWindow`, the pid it had at capture start,
+    // and `IsIconic` vet the handle before the foreground request.
+    unsafe {
+        if IsWindow(window) == 0 || IsWindowVisible(window) == 0 || IsIconic(window) != 0 {
+            return false;
+        }
+        let mut pid = 0_u32;
+        let thread = GetWindowThreadProcessId(window, &mut pid);
+        if thread == 0
+            || pid != capture.pid
+            || pid == GetCurrentProcessId()
+            || is_shell_window(window)
+        {
+            return false;
+        }
+        SetForegroundWindow(window);
+    }
+    let started = Instant::now();
+    loop {
+        // SAFETY: plain query.
+        if unsafe { GetForegroundWindow() } == window {
+            return true;
+        }
+        if started.elapsed() >= RETURN_TIMEOUT {
+            return false;
+        }
+        thread::sleep(RETURN_POLL);
+    }
+}
+
 fn send_paste_shortcut(shift: bool) -> Result<()> {
     let inputs = control_chord(VK_V, shift, key_down(VK_CONTROL), foreground_scan_code);
     let sent = send_inputs(&inputs);
@@ -408,6 +646,25 @@ fn keyboard_input(key: u16, scan: u16, flags: u32) -> INPUT {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn back_to_back_dictations_join_until_input_breaks_the_session() {
+        let activity = InputActivity::default();
+        let mut continuation = Continuation::default();
+        let revision = activity.revision();
+
+        continuation.record(revision, true, "day?".into());
+        assert_eq!(
+            text_to_paste(&continuation, activity.revision(), "Oh yeah"),
+            " Oh yeah"
+        );
+
+        activity.invalidate();
+        assert_eq!(
+            text_to_paste(&continuation, activity.revision(), "Oh yeah"),
+            "Oh yeah"
+        );
+    }
 
     #[test]
     fn rapid_pastes_keep_the_original_clipboard_for_the_latest_restore() {

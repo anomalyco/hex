@@ -134,14 +134,18 @@ line_icon!(
         "M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z",
     ]
 );
-line_icon!(
-    BOOK,
-    "hex-row-book",
-    [
-        "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20",
-        "m8 13 4-7 4 7",
-        "M9.1 11h5.7",
-    ]
+macro_rules! book_icons {
+    ($outline:literal) => {
+        line_icon!(PLAIN_BOOK, "hex-plain-book", [$outline]);
+        line_icon!(
+            BOOK,
+            "hex-row-book",
+            [$outline, "m8 13 4-7 4 7", "M9.1 11h5.7"]
+        );
+    };
+}
+book_icons!(
+    "M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"
 );
 line_icon!(
     PASTE,

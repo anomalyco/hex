@@ -378,7 +378,7 @@ pub(super) fn validate(
             tr("Unsupported key")
         });
     }
-    // The ISO section key alone needs Labs › Section key alone (Linux,
+    // The ISO section key alone needs Labs › § key alone (Linux,
     // macOS).
     if cfg!(any(target_os = "linux", target_os = "macos"))
         && binding.is_lone_section_key()
@@ -893,6 +893,18 @@ pub(super) fn desktop_commands(ui: &Ui, p: Paint) -> El {
             &["hex dictation toggle --raw"],
         ),
     ];
+    // Annotate's shortcut goes through the same portal, so it needs a command
+    // here too while the feature is on.
+    #[cfg(hex_capture)]
+    if ui.platform.scrawl.is_some() && ui.settings.capture.enabled {
+        rows.push(command_row(
+            p,
+            "annotate",
+            tr("Annotate"),
+            tr("Start and stop an annotation"),
+            &["hex annotate toggle"],
+        ));
+    }
     // GNOME without a shortcuts portal (GNOME 46 and older, #781): Hex writes
     // the commands into GNOME's own custom shortcuts.
     if on_gnome() {
@@ -935,7 +947,13 @@ fn gnome_shortcuts_row(ui: &Ui, p: Paint) -> El {
     )
 }
 
-fn command_row(p: Paint, key: &str, title: &str, description: &str, commands: &[&str]) -> El {
+pub(super) fn command_row(
+    p: Paint,
+    key: &str,
+    title: &str,
+    description: &str,
+    commands: &[&str],
+) -> El {
     let lines = col()
         .key("commands")
         .gap(2.0)
@@ -1326,7 +1344,7 @@ mod special_keys_tests {
     }
 }
 
-/// Issue 1050: the ISO section key alone needs Labs › Section key alone on
+/// Issue 1050: the ISO section key alone needs Labs › § key alone on
 /// Linux and macOS; with a modifier it records as before. Linux's recorder
 /// checks the lab itself; macOS's recorder records the chord and `validate`
 /// refuses it here, before saving.

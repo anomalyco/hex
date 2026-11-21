@@ -40,21 +40,16 @@ struct ContentView: View {
     @Binding var openedFromKeyboard: Bool
     @Binding var showSetup: Bool
     @State private var setupMonitor = KeyboardSetupMonitor()
-    @State private var practiceText = ""
-    @State private var showReturnAppsEditor = false
-    @FocusState private var practiceFocused: Bool
+    @State private var keyboardSpeech = KeyboardSpeechPreparation()
+    @State private var onboardingPage = OnboardingProgress.launchPage
+    @State private var settingsPath = SettingsSnapshotFixture.initialPath
+    @State private var showAcknowledgements = false
 
     private static let stageWellHeight: CGFloat = 48
     private static let stageControlHeight: CGFloat = 36
     private static let stageInset: CGFloat = 6
     private static let stageCancelWidth: CGFloat = 36
     private static let stageDoneWidth: CGFloat = 70
-
-    private static var autoFocusPracticeField: Bool {
-        let args = ProcessInfo.processInfo.arguments
-        guard let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count else { return false }
-        return args[idx + 1].hasPrefix("hosted-keyboard")
-    }
 
     private static var simulatesHomeButtonDevice: Bool {
         let args = ProcessInfo.processInfo.arguments
@@ -70,13 +65,18 @@ struct ContentView: View {
             if openedFromKeyboard {
                 keyboardHandoffView
                     .transition(.opacity)
+            } else if onboardingPage != nil {
+                OnboardingView(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech, page: $onboardingPage)
+                    .transition(.opacity)
             } else {
                 standaloneView
                     .transition(.opacity)
             }
         }
         .preferredColorScheme(.dark)
+        .task { keyboardSpeech.start { dictation.engineName } }
         .animation(HexMotion.reducedFade, value: openedFromKeyboard)
+        .animation(HexMotion.reducedFade, value: onboardingPage == nil)
     }
 
     private var appStageMode: AppStageMode {
@@ -122,10 +122,9 @@ struct ContentView: View {
         }
     }
 
-    private var setupComplete: Bool {
-        setupMonitor.keyboardReady
-            && setupMonitor.microphone == .granted
-            && dictation.isModelReady
+    private var setupStepsLeft: Int {
+        // The Hex key's own model counts: Ready means dictation works in other apps.
+        setupMonitor.stepsLeft(modelReady: dictation.isModelReady && keyboardSpeech.isReady)
     }
 
     private var hasTranscript: Bool {
@@ -135,42 +134,18 @@ struct ContentView: View {
     // MARK: - Standalone App
 
     private var standaloneView: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                headerRow
-
-                if showSetup || !setupComplete {
-                    KeyboardSetupCard(dictation: dictation, monitor: setupMonitor)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+        NavigationStack(path: $settingsPath) {
+            homeView
+                .navigationTitle("Hex")
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: SettingsPage.self) { page in
+                    settingsPage(page)
                 }
-
-                stageBar
-
-                if hasTranscript {
-                    transcriptCard
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                }
-
-                if case .failed(let message) = dictation.phase {
-                    errorBanner(message)
-                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
-                }
-
-                settingsCard
-                ExperimentsCard()
-                practiceField
-            }
-            .frame(maxWidth: 500)
-            .padding(.horizontal, 20)
-            .padding(.top, 14)
-            .padding(.bottom, 28)
-            .frame(maxWidth: .infinity)
-            .animation(HexMotion.stageAnimation(reduceMotion: reduceMotion), value: appStageMode)
-            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: dictation.keyboardSessionEnabled)
-            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: hasTranscript)
-            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: setupComplete)
         }
-        .scrollDismissesKeyboard(.interactively)
+        .tint(HexTheme.textBase)
+        .sheet(isPresented: $showSetup) {
+            SetupSheet(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech)
+        }
         .task {
             while !Task.isCancelled {
                 setupMonitor.refresh()
@@ -181,6 +156,127 @@ struct ContentView: View {
             if phase == .active {
                 setupMonitor.refresh()
             }
+        }
+    }
+
+    /// Fits one screen: the header and its status line, Dictate, and the four pages.
+    private var homeView: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                VStack(alignment: .leading, spacing: 2) {
+                    headerRow
+                    SetupStatusRow(stepsLeft: setupStepsLeft) {
+                        showSetup = true
+                    }
+                }
+
+                stageBar
+
+                if hasTranscript {
+                    transcriptCard
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+
+                if case .failed(let message) = dictation.phase {
+                    errorBanner(message, offer: dictation.languageOffer)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                } else if let notice = dictation.languageNotice {
+                    noticeBanner(notice)
+                        .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+
+                SettingsCard {
+                    ForEach(Array(SettingsPage.allCases.enumerated()), id: \.element) { index, page in
+                        if index > 0 {
+                            SettingsDivider(leading: 50)
+                        }
+                        NavigationLink(value: page) {
+                            SettingsLinkLabel(title: page.title, icon: page.icon)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.top, 8)
+
+                SettingsCard {
+                    Button {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            openURL(url)
+                        }
+                    } label: {
+                        SettingsLinkLabel(title: String(localized: "Keyboard settings"), icon: "gearshape", trailingIcon: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
+
+                    SettingsDivider(leading: 50)
+
+                    Button {
+                        OnboardingProgress.save(.setup)
+                        onboardingPage = .setup
+                    } label: {
+                        SettingsLinkLabel(title: String(localized: "Run setup again"), icon: "arrow.counterclockwise")
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                // The privacy policy link App Review 5.1.1(i) asks for, with support and the
+                // licence notices.
+                SettingsCard {
+                    Button {
+                        SafariSheet.present(HexLinks.privacyPolicy)
+                    } label: {
+                        SettingsLinkLabel(title: String(localized: "Privacy policy"), icon: "hand.raised", trailingIcon: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
+
+                    SettingsDivider(leading: 50)
+
+                    Button {
+                        SafariSheet.present(HexLinks.support)
+                    } label: {
+                        SettingsLinkLabel(title: String(localized: "Support"), icon: "questionmark.circle", trailingIcon: "arrow.up.right")
+                    }
+                    .buttonStyle(.plain)
+
+                    SettingsDivider(leading: 50)
+
+                    Button {
+                        showAcknowledgements = true
+                    } label: {
+                        SettingsLinkLabel(title: String(localized: "Acknowledgements"), icon: "doc.text")
+                    }
+                    .buttonStyle(.plain)
+                    .sheet(isPresented: $showAcknowledgements) {
+                        AcknowledgementsView()
+                    }
+                }
+            }
+            .frame(maxWidth: 500)
+            .padding(.horizontal, 20)
+            .padding(.top, 14)
+            .padding(.bottom, 28)
+            .frame(maxWidth: .infinity)
+            .animation(HexMotion.stageAnimation(reduceMotion: reduceMotion), value: appStageMode)
+            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: dictation.keyboardSessionEnabled)
+            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: hasTranscript)
+            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: setupStepsLeft)
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .scrollDismissesKeyboard(.interactively)
+        .background(HexTheme.bgDeep.ignoresSafeArea())
+    }
+
+    @ViewBuilder
+    private func settingsPage(_ page: SettingsPage) -> some View {
+        switch page {
+        case .dictation:
+            DictationSettingsPage(dictation: dictation)
+        case .keyboard:
+            KeyboardSettingsPage()
+        case .privacy:
+            PrivacySettingsPage()
+        case .experiments:
+            ExperimentsSettingsPage()
         }
     }
 
@@ -380,7 +476,7 @@ struct ContentView: View {
             HStack(spacing: 6) {
                 Spacer()
 
-                Button(dictation.copied ? "Copied" : "Copy") {
+                Button(dictation.copied ? String(localized: "Copied") : String(localized: "Copy")) {
                     dictation.copyTranscript()
                 }
                 .font(.system(size: 13, weight: .medium))
@@ -409,156 +505,6 @@ struct ContentView: View {
         )
     }
 
-    private var settingsCard: some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 12) {
-                rowTitle("Keep mic warm")
-                Spacer(minLength: 8)
-                compactSegments(
-                    items: WarmSessionDuration.allCases,
-                    selected: dictation.warmDuration,
-                    label: \.shortLabel,
-                    onSelect: { duration in
-                        withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
-                            dictation.selectWarmDuration(duration)
-                        }
-                    }
-                )
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 50)
-
-            rowDivider
-
-            HStack(spacing: 12) {
-                rowTitle("Style")
-                Spacer(minLength: 8)
-                Menu {
-                    ForEach(DictationStyle.allCases, id: \.self) { candidate in
-                        Button {
-                            dictation.setStyle(candidate)
-                        } label: {
-                            if dictation.style == candidate {
-                                Label(candidate.label, systemImage: "checkmark")
-                            } else {
-                                Text(candidate.label)
-                            }
-                        }
-                    }
-                } label: {
-                    menuValueLabel(dictation.style.label)
-                }
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-
-            rowDivider
-
-            HStack(spacing: 12) {
-                rowTitle("Return to")
-                Spacer(minLength: 8)
-                Menu {
-                    Button {
-                        dictation.setReturnAppID(nil)
-                    } label: {
-                        if dictation.returnAppID == nil {
-                            Label("Swipe back", systemImage: "checkmark")
-                        } else {
-                            Text("Swipe back")
-                        }
-                    }
-
-                    Divider()
-
-                    ForEach(dictation.quickReturnApps) { app in
-                        Button {
-                            dictation.setReturnAppID(app.id)
-                        } label: {
-                            if dictation.returnAppID == app.id {
-                                Label(app.name, systemImage: "checkmark")
-                            } else {
-                                Text(app.name)
-                            }
-                        }
-                    }
-
-                    Divider()
-
-                    Button("Edit apps…") { showReturnAppsEditor = true }
-                } label: {
-                    menuValueLabel(dictation.selectedReturnApp?.name ?? "Swipe back")
-                }
-            }
-            .sheet(isPresented: $showReturnAppsEditor) {
-                ReturnAppsSheet(
-                    chosen: dictation.quickReturnApps,
-                    onSave: dictation.setQuickReturnApps
-                )
-            }
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-
-            rowDivider
-
-            Toggle(
-                isOn: Binding(
-                    get: { dictation.allowBluetoothMic },
-                    set: { dictation.setAllowBluetoothMic($0) }
-                )
-            ) {
-                rowTitle("Bluetooth microphone")
-            }
-            .tint(HexTheme.success)
-            .padding(.horizontal, 16)
-            .frame(minHeight: 48)
-
-            rowDivider
-
-            Button {
-                if let url = URL(string: UIApplication.openSettingsURLString) {
-                    openURL(url)
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    rowTitle("Keyboard settings")
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(HexTheme.textMuted)
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        .background(
-            HexTheme.bgBase,
-            in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
-        )
-    }
-
-    private var practiceField: some View {
-        TextField("Test keyboard…", text: $practiceText, axis: .vertical)
-            .font(.system(size: 15))
-            .foregroundStyle(HexTheme.textBase)
-            .focused($practiceFocused)
-            .lineLimit(1...4)
-            .padding(.horizontal, 16)
-            .padding(.vertical, 13)
-            .background(
-                HexTheme.bgBase,
-                in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
-            )
-            .onAppear {
-                if Self.autoFocusPracticeField {
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        practiceFocused = true
-                    }
-                }
-            }
-    }
-
     // MARK: - Cold-Start Handoff Screen (unified bar + home-indicator swipe cue)
 
     private var keyboardHandoffView: some View {
@@ -572,16 +518,7 @@ struct ContentView: View {
             let showFailedRetry = mode == .failed
             let showPreparing = mode == .preparing
             let status = handoffStatusLine
-            let isAutoReturning: Bool = {
-                switch dictation.autoReturnState {
-                case .attempting, .succeeded:
-                    return true
-                case .idle, .swipeFallback:
-                    return false
-                }
-            }()
-            let showReturnChips = (showRecordingControls || dictation.keyboardSessionEnabled) && !isAutoReturning
-            let showHomeSwipeCue = hasHomeIndicator && showReturnChips
+            let showHomeSwipeCue = hasHomeIndicator && (showRecordingControls || dictation.keyboardSessionEnabled)
 
             let handoffWellHeight: CGFloat = 52
             let handoffControlHeight: CGFloat = 38
@@ -738,35 +675,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity)
 
                     Spacer()
-
-                    // Quiet app quick-jump strip comfortably above the bottom gesture zone
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            ForEach(dictation.quickReturnApps) { app in
-                                let isSelected = dictation.returnAppID == app.id
-                                Button {
-                                    dictation.returnToHostApp(app, remember: true)
-                                } label: {
-                                    Text(app.name)
-                                        .font(.system(size: 13, weight: .medium))
-                                        .foregroundStyle(isSelected ? HexTheme.textBase : HexTheme.textMuted)
-                                        .padding(.horizontal, 12)
-                                        .frame(height: 32)
-                                        .background(
-                                            Color.white.opacity(isSelected ? 0.15 : 0.075),
-                                            in: Capsule()
-                                        )
-                                }
-                                .buttonStyle(.plain)
-                            }
-                        }
-                        .padding(.horizontal, 20)
-                    }
-                    .hexScrollEdgeEffectHidden()
-                    .hexHorizontalEdgeFade(leading: 16, trailing: 20)
-                    .padding(.horizontal, -20)
-                    .padding(.bottom, hasHomeIndicator ? 28 : 12)
-                    .hexControlReveal(showReturnChips, reduceMotion: reduceMotion, scale: 0.97, blur: 2.5)
                 }
                 .frame(maxWidth: 500)
                 .padding(.horizontal, 20)
@@ -791,7 +699,6 @@ struct ContentView: View {
                 }
             }
             .animation(HexMotion.stageAnimation(reduceMotion: reduceMotion), value: mode)
-            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showReturnChips)
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showHomeSwipeCue)
         }
         .persistentSystemOverlays(.hidden)
@@ -799,69 +706,8 @@ struct ContentView: View {
 
     // MARK: - Pieces
 
-    private func rowTitle(_ text: String) -> some View {
-        Text(text)
-            .font(.system(size: 15, weight: .regular))
-            .foregroundStyle(HexTheme.textBase)
-    }
-
-    private var rowDivider: some View {
-        Rectangle()
-            .fill(HexTheme.borderWeak)
-            .frame(height: 0.5)
-            .padding(.leading, 16)
-    }
-
-    private func menuValueLabel(_ value: String) -> some View {
-        HStack(spacing: 5) {
-            Text(value)
-                .font(.system(size: 15, weight: .regular))
-                .foregroundStyle(HexTheme.textMuted)
-            Image(systemName: "chevron.up.chevron.down")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(HexTheme.textMuted)
-        }
-        .padding(.vertical, 6)
-        .contentShape(Rectangle())
-    }
-
-    private func compactSegments<Item: Hashable>(
-        items: [Item],
-        selected: Item,
-        label: KeyPath<Item, String>,
-        onSelect: @escaping (Item) -> Void
-    ) -> some View {
-        HStack(spacing: 2) {
-            ForEach(items, id: \.self) { item in
-                let isSelected = item == selected
-                Button {
-                    onSelect(item)
-                } label: {
-                    Text(item[keyPath: label])
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
-                        .fixedSize(horizontal: true, vertical: false)
-                        .foregroundStyle(isSelected ? HexTheme.textBase : HexTheme.textMuted)
-                        .padding(.horizontal, 10)
-                        .frame(height: 28)
-                        .background(
-                            isSelected ? Color.white.opacity(0.14) : Color.clear,
-                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
-                        )
-                        .contentShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .fixedSize(horizontal: true, vertical: false)
-        .padding(2)
-        .background(
-            Color.white.opacity(0.055),
-            in: RoundedRectangle(cornerRadius: 9, style: .continuous)
-        )
-    }
-
-    private func errorBanner(_ message: String) -> some View {
+    /// `offer`: a language (BCP 47) that works here, when the one chosen doesn't yet.
+    private func errorBanner(_ message: String, offer: String? = nil) -> some View {
         HStack(spacing: 10) {
             Image(systemName: "exclamationmark.circle.fill")
                 .font(.system(size: 15))
@@ -870,6 +716,18 @@ struct ContentView: View {
                 .font(.system(size: 13))
                 .foregroundStyle(HexTheme.textBase)
             Spacer(minLength: 0)
+            if let offer {
+                Button("Use \(SpeechModelUnavailable.interfaceName(offer))") {
+                    dictation.useOfferedLanguage()
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HexTheme.textBase)
+                .padding(.horizontal, 12)
+                .frame(height: 28)
+                .background(Color.white.opacity(0.09), in: Capsule())
+                .buttonStyle(.plain)
+                .fixedSize()
+            }
         }
         .padding(14)
         .background(
@@ -878,12 +736,29 @@ struct ContentView: View {
         )
     }
 
+    private func noticeBanner(_ message: String) -> some View {
+        HStack(spacing: 10) {
+            Image(systemName: "info.circle.fill")
+                .font(.system(size: 15))
+                .foregroundStyle(HexTheme.textMuted)
+            Text(message)
+                .font(.system(size: 13))
+                .foregroundStyle(HexTheme.textBase)
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(
+            Color.white.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+    }
+
     private var primaryActionLabel: String {
         switch dictation.phase {
         case .modelRequired, .failed:
-            "Set up"
+            String(localized: "Set up")
         default:
-            "Dictate"
+            String(localized: "Dictate")
         }
     }
 
@@ -900,20 +775,17 @@ struct ContentView: View {
         if let notice = dictation.handoffNotice {
             return notice
         }
-        if case .attempting(let app) = dictation.autoReturnState {
-            return app.name
-        }
         switch dictation.phase {
         case .failed(let message):
             return message
         case .requestingPermission:
-            return "Allow microphone access"
+            return String(localized: "Allow microphone access")
         case .preparingModel:
-            return "Preparing model…"
+            return String(localized: "Preparing model…")
         case .transcribing:
-            return "Transcribing…"
+            return String(localized: "Transcribing…")
         case .ready where dictation.keyboardSessionEnabled:
-            return "Ready"
+            return String(localized: "Ready")
         default:
             return nil
         }

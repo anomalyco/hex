@@ -1,4 +1,4 @@
-//! Labs › Screen vocabulary: the uncommon names and terms visible in the
+//! Labs › Words on screen: the uncommon names and terms visible in the
 //! focused window, as temporary vocabulary for one dictation.
 //!
 //! The macOS reader that collects the window's text lives in
@@ -86,7 +86,7 @@ pub(crate) fn extract(text: &str, known: &[String]) -> Vec<String> {
 }
 
 /// The accessible text of the focused window of the application in front,
-/// when Labs › Screen vocabulary is on. Never Hex's own window. Only the
+/// when Labs › Words on screen is on. Never Hex's own window. Only the
 /// number of terms and the read time are logged, never the text or a term.
 #[cfg(target_os = "macos")]
 pub(crate) fn from_focused_window() -> Option<Vec<String>> {

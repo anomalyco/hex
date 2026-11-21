@@ -4,9 +4,11 @@
 //! History is a product record, deliberately separate from the diagnostic
 //! Activity event stream. Entries hold text and bounded metadata; audio is
 //! kept only while Labs › Keep recordings is on ([`recordings`]), as a file
-//! per entry that follows the entry's retention plus its own byte cap. Every
-//! retention choice remains subject to hard entry and byte caps, writes are
-//! atomic, and files are owner-only.
+//! per entry that follows the entry's retention plus its own byte cap. Labs ›
+//! Dictation stats keeps a separate daily rollup ([`usage`]) with counts but
+//! no text, so it can outlive the retention window. Every retention
+//! choice remains subject to hard entry and byte caps, writes are atomic, and
+//! files are owner-only.
 
 use std::fs;
 use std::io::{self, Write};
@@ -20,9 +22,14 @@ use serde::{Deserialize, Serialize};
 #[cfg(hex_capture)]
 pub mod annotations;
 pub mod captures;
+#[cfg(target_os = "macos")]
+pub(crate) mod paste_source;
 pub mod playback;
 pub mod recordings;
 pub mod stats;
+#[cfg(all(target_os = "macos", hex_capture))]
+pub(crate) mod timeline;
+pub mod usage;
 pub mod versions;
 
 pub use recordings::Recording;
@@ -112,6 +119,9 @@ pub type HistoryProcessing = crate::desktop::events::DictationProcessing;
 /// One retained successful result.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct HistoryEntry {
+    /// The local transcript of a deliberate cancel. Never inserted automatically.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub cancelled: bool,
     pub id: u64,
     pub timestamp_ms: u64,
     pub kind: HistoryKind,
@@ -270,9 +280,15 @@ pub fn read_snapshot(path: &std::path::Path) -> io::Result<Vec<HistoryEntry>> {
 
 /// Owner-only bounded history store. Entries are held oldest-first.
 pub struct HistoryStore {
+    #[cfg(all(target_os = "macos", hex_capture))]
+    cancel_generation: u64,
+    #[cfg(target_os = "macos")]
+    recovery: Option<paste_source::Recovery>,
     path: PathBuf,
     /// Labs › Keep recordings' audio, one file per entry.
     recordings: PathBuf,
+    /// Labs › Dictation stats' daily rollup, beside the store.
+    usage: PathBuf,
     recording_cap: u64,
     entries: Vec<HistoryEntry>,
     next_id: u64,
@@ -300,7 +316,12 @@ impl HistoryStore {
     /// being silently destroyed.
     pub fn open(path: PathBuf, retention: HistoryRetention, now_ms: u64) -> Self {
         let mut store = Self {
+            #[cfg(all(target_os = "macos", hex_capture))]
+            cancel_generation: 0,
+            #[cfg(target_os = "macos")]
+            recovery: None,
             recordings: recordings::directory(&path),
+            usage: usage::path(&path),
             recording_cap: recordings::MAX_RECORDING_BYTES,
             path,
             entries: Vec::new(),
@@ -396,9 +417,25 @@ impl HistoryStore {
     /// Record one successful result. Returns the stable entry ID, or `None`
     /// while retention is off.
     pub fn record(&mut self, draft: HistoryDraft, now_ms: u64) -> io::Result<Option<u64>> {
+        self.record_result(draft, now_ms, false)
+    }
+
+    fn record_result(
+        &mut self,
+        draft: HistoryDraft,
+        now_ms: u64,
+        cancelled: bool,
+    ) -> io::Result<Option<u64>> {
         if self.retention.is_off() {
             return Ok(None);
         }
+        let words = draft.final_text.split_whitespace().count() as u64;
+        let audio_ms = draft.audio_ms;
+        // The rollup's first write seeds itself from what History still
+        // retains, so enabling Labs › Dictation stats doesn't make the
+        // dialog's totals drop. The new entry is added after, exactly once.
+        let yearly = crate::labs::history_stats();
+        let seed = (yearly && !self.usage.exists()).then(|| self.usage_seed(now_ms));
         let id = self.next_id;
         self.next_id = self.next_id.saturating_add(1);
         let recording_bytes = draft.recording.as_ref().map_or(0, |recording| {
@@ -408,6 +445,7 @@ impl HistoryStore {
             })
         });
         self.entries.push(HistoryEntry {
+            cancelled,
             id,
             timestamp_ms: now_ms,
             kind: draft.kind,
@@ -419,6 +457,9 @@ impl HistoryStore {
             processing: draft.processing.map(|processing| HistoryProcessing {
                 profile: truncated(&processing.profile, MAX_LABEL_BYTES),
                 latency_ms: processing.latency_ms,
+                model: processing
+                    .model
+                    .map(|model| truncated(&model, MAX_LABEL_BYTES)),
                 fallback: processing
                     .fallback
                     .map(|fallback| truncated(&fallback, MAX_FALLBACK_BYTES)),
@@ -434,7 +475,54 @@ impl HistoryStore {
         });
         self.prune(now_ms);
         self.persist()?;
+        // Labs › Dictation stats: a daily rollup that outlives retention. It
+        // holds no text or applications, and never fails a record: capture
+        // and paste never wait on this file.
+        if yearly {
+            self.note_usage(seed, now_ms, words, audio_ms);
+        }
+        #[cfg(target_os = "macos")]
+        if self
+            .entries
+            .last()
+            .is_some_and(|e| e.id == id && !e.cancelled && self.pasteable(e, now_ms))
+        {
+            self.recovery = None;
+        }
         Ok(Some(id))
+    }
+
+    /// Every retained entry as a fresh rollup, for its first write.
+    fn usage_seed(&self, now_ms: u64) -> usage::Usage {
+        let cutoff = self.retention.cutoff(now_ms);
+        let mut seed = usage::Usage::default();
+        for entry in &self.entries {
+            if cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff) {
+                seed.add(
+                    stats::local_day(entry.timestamp_ms),
+                    stats::local_hour(entry.timestamp_ms),
+                    entry.final_text.split_whitespace().count() as u64,
+                    entry.audio_ms,
+                );
+            }
+        }
+        seed
+    }
+
+    /// Adds this entry to the rollup, seeded when the file was missing. A
+    /// failure is logged and ignored.
+    fn note_usage(&self, seed: Option<usage::Usage>, now_ms: u64, words: u64, audio_ms: u64) {
+        let today = stats::local_day(now_ms);
+        let result = match seed {
+            Some(mut usage) => {
+                usage.add(today, stats::local_hour(now_ms), words, audio_ms);
+                usage.save(&self.usage, today)
+            }
+            None => usage::count(&self.usage, now_ms, words, audio_ms),
+        };
+        if let Err(error) = result {
+            tracing::warn!(%error, "could not record the usage rollup");
+        }
     }
 
     /// Delete one entry. Returns whether it existed.
@@ -547,17 +635,25 @@ impl HistoryStore {
             .find_map(|entry| recordings::saved(&self.recordings, entry))
     }
 
-    /// Delete every entry. A failed save keeps them, so the clear can be
-    /// retried.
+    /// Delete every entry, and the Labs › Dictation stats rollup with them. A
+    /// failed save keeps the entries, so the clear can be retried.
     pub fn clear(&mut self) -> io::Result<()> {
-        if self.entries.is_empty() && !self.prune_pending {
-            return Ok(());
+        #[cfg(all(target_os = "macos", hex_capture))]
+        {
+            self.cancel_generation += 1;
         }
-        let entries = std::mem::take(&mut self.entries);
-        if let Err(error) = self.persist() {
-            self.entries = entries;
-            return Err(error);
+        #[cfg(target_os = "macos")]
+        {
+            self.recovery = None;
         }
+        if !self.entries.is_empty() || self.prune_pending {
+            let entries = std::mem::take(&mut self.entries);
+            if let Err(error) = self.persist() {
+                self.entries = entries;
+                return Err(error);
+            }
+        }
+        usage::clear(&self.usage);
         Ok(())
     }
 
@@ -569,6 +665,14 @@ impl HistoryStore {
             return Ok(());
         }
         self.retention = retention;
+        #[cfg(all(target_os = "macos", hex_capture))]
+        {
+            self.cancel_generation += 1;
+        }
+        #[cfg(target_os = "macos")]
+        if retention.is_off() {
+            self.recovery = None;
+        }
         self.touch();
         if self.prune(now_ms) {
             self.persist()?;
@@ -579,6 +683,27 @@ impl HistoryStore {
     /// All entries, newest first.
     pub fn entries(&self) -> impl Iterator<Item = &HistoryEntry> {
         self.entries.iter().rev()
+    }
+
+    /// Where Labs › Dictation stats keeps its daily rollup.
+    pub fn usage_path(&self) -> &std::path::Path {
+        &self.usage
+    }
+
+    /// Whether a Labs › Dictation stats rollup file exists, even with no
+    /// retained entries: Clear all history must still be able to delete it.
+    pub fn has_usage(&self) -> bool {
+        self.usage.exists()
+    }
+
+    /// The daily rollup, bounded to its most recent days.
+    pub fn usage(&self) -> usage::Usage {
+        self.usage_at(now_ms())
+    }
+
+    /// [`Self::usage`] at an explicit time, whose local day bounds the days.
+    pub fn usage_at(&self, now_ms: u64) -> usage::Usage {
+        usage::Usage::load(self.usage_path(), stats::local_day(now_ms))
     }
 
     #[cfg(test)]
@@ -614,7 +739,7 @@ impl HistoryStore {
         let cutoff = self.retention.cutoff(now_ms);
         self.entries()
             .filter(|entry| cutoff.is_none_or(|cutoff| entry.timestamp_ms >= cutoff))
-            .filter(|entry| entry.kind != HistoryKind::Printed)
+            .filter(|entry| !entry.cancelled && entry.kind != HistoryKind::Printed)
             .filter(|entry| !entry.final_text.trim().is_empty())
             .take(count)
             .collect()
@@ -797,6 +922,18 @@ impl History {
         self.synced().recording_path(id)
     }
 
+    /// Labs › Dictation stats' daily rollup, read from disk (the caller
+    /// gates it on the lab).
+    pub fn usage(&self) -> usage::Usage {
+        self.synced().usage()
+    }
+
+    /// Whether a Labs › Dictation stats rollup file exists, even with no
+    /// retained entries.
+    pub fn has_usage(&self) -> bool {
+        self.synced().has_usage()
+    }
+
     /// Entry `id`'s kept recording, when the file is still there
     /// ([`HistoryStore::saved_recording`]).
     pub fn saved_recording(&self, id: u64) -> Option<PathBuf> {
@@ -901,6 +1038,7 @@ mod tests {
             processing: Some(HistoryProcessing {
                 profile: "Messages".into(),
                 latency_ms: 120,
+                model: Some("anthropic/claude-haiku-4-5".into()),
                 fallback: None,
             }),
             audio_ms: 900,
@@ -1557,6 +1695,32 @@ mod tests {
         assert!(texts(&store, 5).is_empty(), "Off lists nothing");
     }
 
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn failed_paste_appears_once_and_clear_invalidates_even_a_selected_session_row() {
+        let path = temp_path("paste-source");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 100);
+        let older = store.record(draft("older"), 100).unwrap().unwrap();
+        let before = fs::read(&path).unwrap();
+        store.recover_paste("could not insert".into(), 101);
+        let rows = store.paste_rows(8, 102);
+        assert_eq!(rows.len(), 2);
+        assert_eq!(
+            store.resolve_paste(rows[0].id, 102),
+            Some("could not insert")
+        );
+        assert_eq!(rows[1].id, paste_source::Id::Retained(older));
+        assert_eq!(fs::read(&path).unwrap(), before);
+        assert_eq!(
+            HistoryStore::open(path, HistoryRetention::Day, 102)
+                .paste_rows(8, 102)
+                .len(),
+            1
+        );
+        store.clear().unwrap();
+        assert_eq!(store.resolve_paste(rows[0].id, 102), None);
+    }
+
     #[test]
     fn clear_removes_everything_durably() {
         let path = temp_path("clear");
@@ -1568,6 +1732,104 @@ mod tests {
         assert_eq!(store.len(), 0);
         let reopened = HistoryStore::open(path, HistoryRetention::Week, 3_000);
         assert_eq!(reopened.len(), 0);
+    }
+
+    /// Turns Labs › Dictation stats on for one test, and back off after.
+    struct DictationStats;
+
+    /// Serializes the tests that turn the global Labs gate on, so one can't
+    /// observe another's switch.
+    static STATS_LABS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    impl DictationStats {
+        fn on() -> Self {
+            crate::labs::apply(&crate::app_settings::LabsSettings {
+                history_stats: true,
+                ..crate::app_settings::LabsSettings::default()
+            });
+            Self
+        }
+    }
+
+    impl Drop for DictationStats {
+        fn drop(&mut self) {
+            crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        }
+    }
+
+    #[test]
+    fn dictation_stats_rolls_every_recorded_day_up_and_clear_removes_it() {
+        let _lock = STATS_LABS.lock().unwrap_or_else(|error| error.into_inner());
+        let _labs = DictationStats::on();
+        assert!(crate::labs::history_stats(), "the gate is on for the test");
+        let path = temp_path("usage-rollup");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 0);
+        store.record(draft("one two"), 1_000).unwrap();
+        // A day later the first entry is pruned from History, while the
+        // rollup still holds both days.
+        store.record(draft("three"), 1_000 + day_ms).unwrap();
+        assert!(
+            store.usage_path().exists(),
+            "the rollup exists at {}",
+            store.usage_path().display()
+        );
+        let usage = store.usage_at(1_000 + day_ms);
+        assert_eq!(usage.dictations(), 2);
+        assert_eq!(usage.words(), 3);
+        assert_eq!(usage.days().len(), 2);
+        assert_eq!(store.len(), 2);
+
+        store.clear().unwrap();
+        assert!(!store.usage_path().exists());
+        assert_eq!(store.usage().dictations(), 0);
+    }
+
+    #[test]
+    fn history_off_records_no_usage_rollup() {
+        let _lock = STATS_LABS.lock().unwrap_or_else(|error| error.into_inner());
+        let _labs = DictationStats::on();
+        let path = temp_path("usage-off");
+        let mut store = HistoryStore::open(path, HistoryRetention::Off, 0);
+        assert_eq!(store.record(draft("one two"), 1_000).unwrap(), None);
+        assert!(
+            !store.usage_path().exists(),
+            "retention Off keeps nothing, rollup included"
+        );
+    }
+
+    #[test]
+    fn the_first_rollup_write_seeds_itself_from_retained_history_once() {
+        let _lock = STATS_LABS.lock().unwrap_or_else(|error| error.into_inner());
+        crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        let path = temp_path("usage-seed");
+        let day_ms = HistoryRetention::Day.max_age_ms().unwrap();
+        let mut store = HistoryStore::open(path, HistoryRetention::Day, 0);
+        // Two entries while the lab is off: History has them, the rollup
+        // does not exist yet.
+        store.record(draft("one two three"), 1_000).unwrap();
+        store.record(draft("four five"), day_ms / 2).unwrap();
+        assert!(!store.usage_path().exists());
+
+        // The lab turns on, and the next record seeds from both retained
+        // entries and adds itself once.
+        let _labs = DictationStats::on();
+        store.record(draft("six seven"), day_ms + 1_000).unwrap();
+        let usage = store.usage_at(day_ms + 1_000);
+        assert_eq!(usage.dictations(), 3);
+        assert_eq!(usage.words(), 7);
+        assert_eq!(usage.audio_ms(), 2_700);
+        assert_eq!(usage.days().len(), 2);
+    }
+
+    #[test]
+    fn clear_removes_a_rollup_even_with_no_entries() {
+        let path = temp_path("usage-clear-empty");
+        let mut store = HistoryStore::open(path.clone(), HistoryRetention::Week, 0);
+        crate::history::usage::count(&crate::history::usage::path(&path), 1_000, 5, 1_000).unwrap();
+        assert!(store.has_usage());
+        store.clear().unwrap();
+        assert!(!store.has_usage());
     }
 
     #[test]

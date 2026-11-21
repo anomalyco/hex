@@ -122,6 +122,10 @@ pub enum DictationPhase {
     /// The paste shortcut was sent. No platform confirms that the focused
     /// application accepted it, so this does not prove the text landed.
     Pasted,
+    /// No paste chord was sent: the text stayed on the clipboard, because the
+    /// window in front could not take one (the Windows desktop or a taskbar),
+    /// or Labs › Copy dictation only is on.
+    Copied,
     /// `hex dictation stop --print` received the text instead of a paste.
     Printed,
     Edited,
@@ -137,6 +141,14 @@ pub enum DictationPhase {
 pub struct DictationProcessing {
     pub profile: String,
     pub latency_ms: u64,
+    /// The OpenCode rewrite model this processing ran against, as
+    /// `provider/id`: the one that answered, or on failure the one the request
+    /// asked for. Absent when no model was named (OpenCode's own default
+    /// answered, or an automatic choice failed before any model answered),
+    /// for the on-device Apple Intelligence cleanup pass, and in events
+    /// written before the model was recorded.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback: Option<String>,
 }
@@ -653,6 +665,7 @@ mod tests {
             processing: Some(DictationProcessing {
                 profile: "slack".into(),
                 latency_ms: 321,
+                model: Some("anthropic/claude-haiku-4-5".into()),
                 fallback: Some("deadline exceeded".into()),
             }),
             reason: None,
@@ -667,11 +680,29 @@ mod tests {
                 processing: Some(DictationProcessing {
                     profile,
                     latency_ms: 321,
+                    model: Some(model),
                     fallback: Some(fallback),
                 }),
                 ..
-            } if profile == "slack" && fallback == "deadline exceeded"
+            } if profile == "slack"
+                && model == "anthropic/claude-haiku-4-5"
+                && fallback == "deadline exceeded"
         ));
+    }
+
+    /// Events and History entries written before the model was recorded still
+    /// decode, and name no model.
+    #[test]
+    fn dictation_processing_without_a_model_still_decodes() {
+        let decoded: DictationProcessing =
+            serde_json::from_str(r#"{"profile":"slack","latency_ms":321}"#).unwrap();
+
+        assert_eq!(decoded.model, None);
+        assert_eq!(decoded.fallback, None);
+        assert_eq!(
+            serde_json::to_string(&decoded).unwrap(),
+            r#"{"profile":"slack","latency_ms":321}"#
+        );
     }
 
     #[test]

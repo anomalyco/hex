@@ -1,4 +1,4 @@
-//! Labs › Voice prompt: a spoken trigger phrase inside a dictation splits it
+//! Labs › Rewrite by voice: a spoken trigger phrase inside a dictation splits it
 //! into text and a one-off instruction for the mode's OpenCode model.
 //!
 //! Matching is word-aligned and case-insensitive. Apostrophes and hyphens
@@ -7,7 +7,7 @@
 //! this", "overwrite this", and "this's" do not. A hyphen joins a word, so
 //! "Rewrite-this" is one word and doesn't match the two-word phrase.
 
-/// The phrase Labs › Voice prompt starts with.
+/// The phrase Labs › Rewrite by voice starts with.
 pub const DEFAULT_PHRASE: &str = "rewrite this";
 
 /// The fewest letters a trigger phrase needs, counted after normalization.

@@ -34,18 +34,28 @@ impl PracticeFeed {
                     timestamp_ms,
                     phase,
                     ..
-                } if timestamp_ms >= since_ms => Some(match phase {
-                    DictationPhase::Started => Observation::Started,
-                    DictationPhase::Transcribing => Observation::Transcribing,
-                    DictationPhase::Discarded => Observation::Discarded,
-                    DictationPhase::Cancelled => Observation::Cancelled,
-                    DictationPhase::Pasted | DictationPhase::Edited => Observation::Pasted,
-                    DictationPhase::Failed(_) => Observation::Failed,
-                    _ => return None,
-                }),
+                } if timestamp_ms >= since_ms => Some(observation(&phase)?),
                 _ => None,
             })
             .collect()
+    }
+}
+
+/// The practice outcome one dictation phase reports, or none for the phases
+/// the tour doesn't hear.
+fn observation(phase: &DictationPhase) -> Option<Observation> {
+    match phase {
+        DictationPhase::Started => Some(Observation::Started),
+        DictationPhase::Transcribing => Some(Observation::Transcribing),
+        DictationPhase::Discarded => Some(Observation::Discarded),
+        DictationPhase::Cancelled => Some(Observation::Cancelled),
+        // A copy is a finished tour dictation too: the words are on the
+        // clipboard even when the practice field couldn't take a paste.
+        DictationPhase::Pasted | DictationPhase::Copied | DictationPhase::Edited => {
+            Some(Observation::Pasted)
+        }
+        DictationPhase::Failed(_) => Some(Observation::Failed),
+        _ => None,
     }
 }
 
@@ -80,6 +90,25 @@ impl LocalPractice {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_copied_dictation_completes_the_practice_like_a_paste() {
+        // The practice field can't receive text when the shell is in front,
+        // but the listener copied the words, so the step still counts as done.
+        assert_eq!(
+            observation(&DictationPhase::Copied),
+            Some(Observation::Pasted)
+        );
+        assert_eq!(
+            observation(&DictationPhase::Pasted),
+            Some(Observation::Pasted)
+        );
+        assert_eq!(
+            observation(&DictationPhase::Transcribing),
+            Some(Observation::Transcribing)
+        );
+        assert_eq!(observation(&DictationPhase::Logged), None);
+    }
 
     #[test]
     fn practice_hears_dictations_logged_after_it_began() {

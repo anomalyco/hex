@@ -403,19 +403,23 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             window,
             ..Done::plain(Lead::Check, tr_fill("Sending to {}", &short(name)))
         },
+        // An explicit send can arrive while suggestions are still open.
+        // Its destination isn't part of this suggestions list's selection.
+        _ if routed.delivered => Done::plain(Lead::Check, tr("Sent")),
+        _ if routed.sending => Done::plain(Lead::Check, tr("Sending…")),
         // The suggestions are the ask (closed, Send to… opens them).
         Route::Guess { .. } => Done {
             ask: Some(tr("Send to…").into()),
-            ..Done::plain(Lead::Check, "")
+            ..Done::plain(Lead::Check, annotation())
         },
         Route::Nothing { .. } => Done {
             ask: Some(tr("Send to…").into()),
-            ..Done::plain(Lead::Check, "")
+            ..Done::plain(Lead::Check, annotation())
         },
         Route::NoAnswer { .. } => Done {
             why: Some(tr("no suggestions").into()),
             ask: Some(tr("Send to…").into()),
-            ..Done::plain(Lead::Check, copied())
+            ..Done::plain(Lead::Check, annotation())
         },
         // Still copied, so Paste and Inspect stay; there's nothing to list.
         Route::Unreachable { why } => match plain_reason(why) {
@@ -440,7 +444,7 @@ pub(super) fn routed_done(routed: &Routed, now: f64) -> Done {
             ..base
         },
         None => Done {
-            hand_off: true,
+            inspect: true,
             ..base
         },
     }
@@ -454,18 +458,12 @@ pub(super) fn offered(base: Done, list: List) -> Done {
             .collect()
     };
     match tuning::get().flow {
-        // Just Search and its shortcut beside "Copied": a click on a row
-        // sends, and the capture is already on the clipboard to paste.
+        // Local actions above, destinations below.
         CapsuleFlow::List => Done {
-            text: if base.text.is_empty() {
-                copied().into()
-            } else {
-                base.text.clone()
-            },
             ask: Some(tr("Search").into()),
             ask_keys: true,
             open: Some((TextEdit::default(), list)),
-            hand_off: false,
+            inspect: false,
             ..base
         },
         // One guess at a time on one quiet line; ⏎ sends it, ⇥ moves on.

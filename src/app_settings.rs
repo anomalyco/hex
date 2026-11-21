@@ -30,6 +30,7 @@ mod screenshots;
 pub(crate) use persistence::LaunchLoad;
 pub(crate) use persistence::LaunchNote;
 mod shortcut_repair;
+mod typing_speed;
 
 #[cfg(hex_capture)]
 pub use capture::*;
@@ -46,6 +47,9 @@ pub(crate) use microphone_key::{MicrophoneKey, MicrophoneKeyTap};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{
     ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey, screenshot_settings,
+};
+pub use typing_speed::{
+    DEFAULT_TYPING_WPM, MAX_TYPING_WPM, MIN_TYPING_WPM, clamp as clamp_typing_wpm,
 };
 
 const DEFAULT_RECORDING_DUCK_VOLUME: f32 = 0.2;
@@ -325,6 +329,13 @@ pub struct AppSettings {
     )]
     pub retired_voice_action: Option<serde_json::Value>,
     pub history_retention: crate::history::HistoryRetention,
+    /// Words a minute the person types, which Dictation stats' time saved
+    /// compares against what they dictated; clamped to 10–200.
+    #[serde(
+        default = "typing_speed::default_wpm",
+        deserialize_with = "typing_speed::deserialize"
+    )]
+    pub typing_wpm: u32,
     pub meetings: MeetingSettings,
     #[cfg(hex_capture)]
     pub capture: CaptureSettings,
@@ -394,6 +405,7 @@ const MIGRATIONS: &[&str] = &[
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
     MEETING_LABS_SETTINGS_MIGRATION,
+    labs::YEARLY_STATS_MERGE_MIGRATION,
 ];
 #[cfg(not(hex_capture))]
 const MIGRATIONS: &[&str] = &[
@@ -402,6 +414,7 @@ const MIGRATIONS: &[&str] = &[
     MEETING_RETENTION_DEFAULT_MIGRATION,
     MEETING_SUMMARIES_MIGRATION,
     MEETING_LABS_SETTINGS_MIGRATION,
+    labs::YEARLY_STATS_MERGE_MIGRATION,
 ];
 /// Scrawl's settings were read into `capture` once. Left out of
 /// `MIGRATIONS` so new settings import them too.
@@ -465,6 +478,7 @@ impl Default for AppSettings {
             dictation_processing: DictationProcessingSettings::default(),
             retired_voice_action: None,
             history_retention: crate::history::HistoryRetention::default(),
+            typing_wpm: DEFAULT_TYPING_WPM,
             meetings: MeetingSettings::default(),
             #[cfg(hex_capture)]
             capture: CaptureSettings::default(),
@@ -956,6 +970,7 @@ impl AppSettings {
         }
         self.migrate_meeting_summaries();
         self.migrate_meeting_labs();
+        self.migrate_yearly_stats_lab();
         #[cfg(hex_capture)]
         if !self.has_migration(ANNOTATE_DEFAULT_MIGRATION) {
             self.capture.enabled = true;
@@ -1157,7 +1172,7 @@ impl AppSettings {
         self.capture.enabled
     }
 
-    /// Labs › Annotate 15 s replay's shortcut while it takes effect: macOS 27+,
+    /// Labs › Annotate last 15 seconds shortcut while it takes effect: macOS 27+,
     /// Annotate and the Lab on, bound, and sharing no key with another active
     /// shortcut.
     #[cfg(hex_capture)]
@@ -1256,7 +1271,7 @@ pub enum HotkeySlot {
     TypedText,
     #[cfg(hex_capture)]
     Capture,
-    /// Labs › Annotate 15 s replay shortcut (macOS 27+).
+    /// Labs › Annotate last 15 seconds shortcut (macOS 27+).
     #[cfg(hex_capture)]
     CaptureReplay,
     /// Labs › Second dictation shortcut.
@@ -1664,6 +1679,37 @@ mod tests {
             Some(MeetingRetention::Day)
         );
         assert!(AppSettings::default().has_migration(MEETING_LABS_SETTINGS_MIGRATION));
+    }
+
+    /// The retired Yearly stats lab is part of Dictation stats now: a saved
+    /// switch turns Dictation stats on once, and is never written back.
+    #[test]
+    fn retired_yearly_stats_becomes_dictation_stats_once() {
+        let migrated = |json: &str| {
+            let mut settings: AppSettings = serde_json::from_str(json).unwrap();
+            settings.apply_one_time_migrations_with(|_| true);
+            assert!(settings.has_migration(labs::YEARLY_STATS_MERGE_MIGRATION));
+            let written = serde_json::to_value(&settings).unwrap();
+            assert!(
+                written["labs"].get("yearly_stats").is_none(),
+                "the retired switch is never written"
+            );
+            assert!(settings.labs.yearly_stats.is_none());
+            settings.labs
+        };
+        assert!(migrated(r#"{"labs":{"yearly_stats":true}}"#).history_stats);
+        assert!(!migrated(r#"{"labs":{"yearly_stats":false}}"#).history_stats);
+        assert!(!migrated("{}").history_stats);
+
+        // A later choice sticks, even beside a stale retired switch.
+        let mut settings: AppSettings = serde_json::from_str(
+            r#"{"labs":{"history_stats":false,"yearly_stats":true},"migrations":["yearly-stats-merge"]}"#,
+        )
+        .unwrap();
+        settings.apply_one_time_migrations_with(|_| true);
+        assert!(!settings.labs.history_stats);
+        assert!(settings.labs.yearly_stats.is_none());
+        assert!(AppSettings::default().has_migration(labs::YEARLY_STATS_MERGE_MIGRATION));
     }
 
     #[test]
@@ -2699,6 +2745,27 @@ mod tests {
         let serialized = serde_json::to_value(settings).unwrap();
 
         assert!(serialized.get("prevent_system_sleep").is_none());
+    }
+
+    #[test]
+    fn a_missing_typing_speed_loads_forty_and_a_saved_one_is_clamped() {
+        let missing: AppSettings = serde_json::from_str("{}").unwrap();
+        assert_eq!(missing.typing_wpm, crate::app_settings::DEFAULT_TYPING_WPM);
+
+        let slow: AppSettings = serde_json::from_str(r#"{"typing_wpm":5}"#).unwrap();
+        assert_eq!(slow.typing_wpm, crate::app_settings::MIN_TYPING_WPM);
+        let fast: AppSettings = serde_json::from_str(r#"{"typing_wpm":500}"#).unwrap();
+        assert_eq!(fast.typing_wpm, crate::app_settings::MAX_TYPING_WPM);
+        let saved: AppSettings = serde_json::from_str(r#"{"typing_wpm":65}"#).unwrap();
+        assert_eq!(saved.typing_wpm, 65);
+
+        let directory = TestSettingsDir::new("typing-wpm");
+        std::fs::write(&directory.path, br#"{"typing_wpm":900}"#).unwrap();
+        let loaded = AppSettings::load_from(&directory.path).unwrap();
+        assert_eq!(loaded.typing_wpm, crate::app_settings::MAX_TYPING_WPM);
+        let persisted: AppSettings =
+            serde_json::from_slice(&std::fs::read(&directory.path).unwrap()).unwrap();
+        assert_eq!(persisted.typing_wpm, crate::app_settings::MAX_TYPING_WPM);
     }
 
     #[test]

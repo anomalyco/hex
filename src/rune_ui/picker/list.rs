@@ -269,6 +269,7 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
         def.id,
         TranscriptionModelId::ParakeetV3
             | TranscriptionModelId::Orukeet
+            | TranscriptionModelId::FluidSpeechPro
             | TranscriptionModelId::ParakeetUltra
     ) && language != AUTO_LANGUAGE
     {
@@ -278,7 +279,7 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
             p.faint(),
         ));
     }
-    // Labs › Benchmark details: raw error rates with their provenance.
+    // Labs › Model test details: raw error rates with their provenance.
     if picker::benchmark_details_on(ui)
         && let Some(record) = transcription_models::benchmark(def)
     {
