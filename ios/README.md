@@ -1283,9 +1283,12 @@ uses Anomaly's signing team. The GitHub **Release Hex Mobile** workflow checks
 `dev` at noon and 6 p.m. Chicago time, or on manual dispatch, and cuts an
 `ios-beta-*` prerelease when iOS inputs have changed. These tags are separate
 from desktop releases. The marketing version stays fixed across beta builds.
-`MARKETING_VERSION` is 0.2.2 for TestFlight, above the last approved App Store version
-(0.2.1); App Store submissions use their own version. To build one, push the tag
-`ios-beta-appstore-<version>` (e.g. `ios-beta-appstore-0.2.1`) on the chosen `dev` commit:
+`MARKETING_VERSION` stays 0.9.0 for TestFlight, so every `dev` build reaches testers
+without a new beta review; it's never submitted to the App Store. App Store releases are
+1.0.x and use their own version. Apple rejects any upload below the highest approved App
+Store version, so TestFlight's version has to move above an App Store release before it's
+approved. To build one, run `scripts/marketing-release.sh <version> [commit]`, which pushes
+the tag `ios-beta-appstore-<version>` (e.g. `ios-beta-appstore-1.0.0`) on that `dev` commit:
 it matches the Xcode Cloud start condition, and `ci_scripts/ci_post_clone.sh` stamps that
 version into `project.yml` before generating the project. Once Apple approves a
 version, later uploads must be higher than it. Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
