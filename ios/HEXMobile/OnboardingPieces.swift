@@ -51,7 +51,9 @@ private struct OnboardingPillFlight: ViewModifier {
 
     func body(content: Content) -> some View {
         if let space {
-            content.matchedGeometryEffect(id: "download-pill", in: space)
+            // Position only: the two pills keep their own sizes, so the language never truncates
+            // mid-flight.
+            content.matchedGeometryEffect(id: "download-pill", in: space, properties: .position)
         } else {
             content
         }

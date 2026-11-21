@@ -30,8 +30,8 @@ final class KeyboardSpeechPreparation {
             if case .downloading = state { downloads = true }
         }
     }
-    /// Whether it had anything to download, so a model already in place (or the handoff to
-    /// Hex) doesn't count as half of onboarding's progress.
+    /// Whether it downloaded the keyboard's model, so a model already in place (or the handoff
+    /// to Hex) doesn't count as half of onboarding's progress.
     private(set) var downloads = false
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -115,5 +115,7 @@ final class KeyboardSpeechPreparation {
     private func handOffToHex(_ settings: LanguageSettings) {
         settings.markKeyboardNeedsHex()
         state = .followsApp
+        // A download that ended in the handoff isn't part of onboarding's progress either.
+        downloads = false
     }
 }
