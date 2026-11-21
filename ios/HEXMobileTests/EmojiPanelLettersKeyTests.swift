@@ -80,6 +80,15 @@ final class EmojiPanelLettersKeyTests: XCTestCase {
                             panel.hitTest(CGPoint(x: bar.minX - 6, y: bar.midY), with: nil) === letters,
                             "a tap left of ABC still hits ABC (\(context))"
                         )
+                        // ABC's width comes out of the categories' room, and they still end
+                        // before delete.
+                        let categories = try XCTUnwrap(
+                            panel.subviews.compactMap { $0 as? EmojiCategoryBar }.first,
+                            "a category bar on a \(width) pt keyboard"
+                        )
+                        let delete = try XCTUnwrap(panel.subviews.first { $0.accessibilityLabel == "Delete" })
+                        XCTAssertGreaterThan(categories.frame.width, 0, "the categories keep their room (\(context))")
+                        XCTAssertLessThan(categories.frame.maxX, delete.frame.minX, "the categories end before delete (\(context))")
                     }
                 }
             }

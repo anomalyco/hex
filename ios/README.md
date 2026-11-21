@@ -1139,7 +1139,7 @@ never at a launch by itself.
   categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
   delete below, drawn without keycaps as the system's are; a tap anywhere under the
   grid goes to the key under it, each category the full width of its slot. With
-  Experiments › ABC under the emoji key on (off by default,
+  Settings › Experiments › ABC under the emoji key on (off by default,
   `experiments.emojiLettersUnderEmojiKey`, App Group), ABC sits exactly where the emoji
   key that opened the panel was, its x and width, so switching back to the letters needs
   no thumb move; a tap left of it still goes to ABC, and the categories take the room

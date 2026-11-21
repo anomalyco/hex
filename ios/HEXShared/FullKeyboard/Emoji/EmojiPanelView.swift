@@ -21,8 +21,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     var showsKeyPopups = true
     var metrics = KeyboardMetrics.portrait { didSet { if metrics != oldValue { setNeedsLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { setNeedsLayout() } } }
-    /// The emoji key that opened the panel, in the panel's coordinates, when the full keyboard
-    /// has one. ABC takes its x and width, under the thumb that just lifted off the key
+    /// The full keyboard's current emoji key, in the panel's coordinates, when it has one: only
+    /// its x and width are used. ABC takes both, under the thumb that just lifted off the key
     /// (Settings › Experiments › ABC under the emoji key); nil keeps ABC at the bar's leading
     /// end, as on the dictation bar and in a panel a fixture shows alone.
     var emojiKeyFrame: CGRect? {
@@ -267,7 +267,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         deleteKey.frame = CGRect(x: bounds.width - horizontalInset - side - keyWidth, y: barY, width: keyWidth, height: barKeyHeight)
         lettersKey.cornerRadius = metrics.cornerRadius
         deleteKey.cornerRadius = metrics.cornerRadius
-        categoryBar.frame = CGRect(x: lettersKey.frame.maxX + 4, y: barY, width: deleteKey.frame.minX - lettersKey.frame.maxX - 8, height: barKeyHeight)
+        categoryBar.frame = CGRect(x: lettersKey.frame.maxX + 4, y: barY, width: max(0, deleteKey.frame.minX - lettersKey.frame.maxX - 8), height: barKeyHeight)
 
         let gridTop = row.maxY
         let gridFrame = CGRect(x: horizontalInset, y: gridTop, width: bounds.width - 2 * horizontalInset, height: barY - 4 - gridTop)
