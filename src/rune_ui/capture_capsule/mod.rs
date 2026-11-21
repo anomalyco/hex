@@ -470,7 +470,7 @@ impl CapsuleState {
     }
 
     /// A recording still that shows its microphone at `level`, 0 to 1.
-    #[cfg(test)]
+    #[cfg(all(test, any(target_os = "macos", target_os = "linux")))]
     pub(crate) fn hearing(mut self, level: f32) -> Self {
         let pres = self.surface.pres.clone();
         self.surface.metered = true;
