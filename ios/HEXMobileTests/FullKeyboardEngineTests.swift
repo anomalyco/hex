@@ -2331,6 +2331,31 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(plane.engine.swipeCased("I'm", capital: false), "I'm")
     }
 
+    /// TestFlight (build 56, iPhone 17 Pro, Auto-capitalization on): "Getting random words
+    /// capitalized", the field reading "Testing how this World" and the strip "working | Works
+    /// | writing". Reproduced on build 56 with "World" and "Works" as `UILexicon` terms (text
+    /// replacements whose phrase is the word, as a Contacts name is); #2173 fixed it with
+    /// Auto-capitalization on, but with it off a swipe still wrote them capitalised. Apple's
+    /// keyboard (black box, iOS 27.2) swipes them lowercase mid-sentence. A word in your
+    /// vocabulary keeps the capitals you gave it either way.
+    func testSwipedCommonWordsStayLowercaseMidSentenceAndVocabularyKeepsItsCapitals() throws {
+        for autoCapitalizes in [true, false] {
+            let (field, plane) = try swipeKeyboard()
+            field.autocapitalizationType = .sentences
+            plane.engine.autoCapitalizes = autoCapitalizes
+            plane.engine.autocorrect.loadLexiconEntries([("World", "World"), ("Works", "Works")])
+            plane.engine.autocorrect.setVocabulary(["Swift"])
+            plane.engine.refreshAutoCapitalization()
+            for word in ["testing", "how", "this", "works"] { swipe(word, on: plane) }
+            let mode = autoCapitalizes ? "on" : "off"
+            XCTAssertEqual(field.text, (autoCapitalizes ? "Testing" : "testing") + " how this works", mode)
+            XCTAssertFalse(plane.engine.suggestions.contains { $0.replacement == "World" || $0.replacement == "Works" }, mode)
+            XCTAssertEqual(plane.engine.swipeCased("World", capital: false), "world", mode)
+            XCTAssertEqual(plane.engine.swipeCased("Swift", capital: false), "Swift", mode)
+            XCTAssertEqual(plane.engine.swipeCased("world", capital: true), "World", "a capital shift gives, \(mode)")
+        }
+    }
+
     func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {
         let (field, plane) = try swipeKeyboard()
         swipe("hello", on: plane)

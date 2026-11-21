@@ -21,6 +21,12 @@ extension AutocorrectEngine {
         return Self.vocabularyWords(vocabulary).first { $0.caseInsensitiveCompare(token) == .orderedSame }
     }
 
+    /// Whether `word` is in your vocabulary spelled exactly so, capitals and all: it keeps
+    /// them anywhere in a sentence, as you added it.
+    func isVocabularySpelling(_ word: String) -> Bool {
+        !vocabulary.isEmpty && Self.vocabularyWords(vocabulary).contains(word)
+    }
+
     /// What space puts in for `token`, a vocabulary word: your spelling, with a capital you
     /// typed first ("github" -> "GitHub", "Kubectl" stays); nil when that is what you typed.
     static func vocabularySpelling(of token: String, as term: String) -> String? {
