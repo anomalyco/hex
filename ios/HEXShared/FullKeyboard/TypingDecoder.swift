@@ -142,6 +142,21 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return index(ofCodes: bytes)
     }
 
+    /// Whether the model has `second` following `first` as a pair.
+    func hasPair(_ first: String, _ second: String) -> Bool {
+        guard let a = index(of: first), let b = index(of: second) else { return false }
+        return bigramCost(a, b) != nil
+    }
+
+    /// -ln P(word | previous) with the decoder's backoff to the unigram (0.92 nats), or nil
+    /// when the model lacks the word.
+    func cost(of word: String, after previous: String?) -> Double? {
+        guard let i = index(of: word) else { return nil }
+        let backoff = 0.92 + unigramCost(i)
+        guard let previous, let a = index(of: previous), let pair = bigramCost(a, i) else { return backoff }
+        return min(pair, backoff)
+    }
+
     /// The three most probable allowed continuations of a completed word. Scan just its
     /// mapped bigram row and keep three entries, even for a word with thousands of followers.
     func nextWords(after previous: String, allowing: (String) -> Bool) -> [String] {

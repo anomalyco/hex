@@ -171,6 +171,72 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(slots.dropFirst().first?.willAutoReplace, false)
     }
 
+    /// Types `text` at the keys' centres into a new field, with the typing model's word pairs,
+    /// and returns the field's text.
+    private func typedWithContext(_ text: String, then: ((FullKeyboardEngine) -> Void)? = nil) throws -> String {
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let keys = FullKeyboardEngine(
+            target: field,
+            autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults))
+        )
+        keys.width = 393
+        keys.clock = { [unowned self] in self.now }
+        keys.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        keys.configureForField()
+        let saved = engine
+        engine = keys
+        defer { engine = saved }
+        typeWord(text)
+        then?(keys)
+        return field.text
+    }
+
+    /// X (Erick): "the id in this didn't autocorrect to I'd". A word the same letters spell
+    /// with an apostrophe follows the words around it, as on Apple's keyboard: the word
+    /// before decides when it is clear ("yes id" -> "yes I'd", "the id" stays), else the next
+    /// word ("well see" -> "we'll see", "well done" stays).
+    func testContractionsWithoutTheApostropheFollowTheWordsAroundThem() throws {
+        let cases: [(String, String)] = [
+            ("id like to go ", "I'd like to go "),
+            ("yes id love to ", "yes I'd love to "),
+            ("i think id help ", "I think I'd help "),
+            ("the id in this ", "the id in this "),
+            ("my id is here ", "my id is here "),
+            ("ill be there ", "I'll be there "),
+            ("shell be here ", "she'll be here "),
+            ("the shell is ", "the shell is "),
+            ("wed love to ", "we'd love to "),
+            ("lets go ", "let's go "),
+            ("well see ", "we'll see "),
+            ("well done ", "well done "),
+            ("as well as ", "as well as "),
+            ("till hell freezes over ", "till hell freezes over "),
+            ("hell be here ", "he'll be here "),
+            ("were going home ", "were going home "),
+        ]
+        for (typed, expected) in cases {
+            XCTAssertEqual(try typedWithContext(typed), expected, typed)
+        }
+        // Without the typing model nothing changes ("ill" stays a word).
+        typeWord("ill be there ")
+        XCTAssertEqual(target.text, "ill be there ")
+    }
+
+    /// The next word's space revised the word before: one backspace puts back both as typed,
+    /// and the word you kept stays.
+    func testOneBackspaceTakesARevisionBack() throws {
+        let text = try typedWithContext("well see ") { keys in
+            XCTAssertEqual(keys.target.documentContextBeforeInput, "we'll see ")
+            keys.deleteBackward()
+            XCTAssertEqual(keys.target.documentContextBeforeInput, "well see")
+            let space = keys.layout.key(.space)!.frame
+            keys.touchBegan(id: 1, at: CGPoint(x: space.midX, y: space.midY))
+            keys.touchEnded(id: 1, at: CGPoint(x: space.midX, y: space.midY))
+        }
+        XCTAssertEqual(text, "well see ")
+    }
+
     func testSpaceDeleteSpaceKeepLoopAndLearnedWordsPersistence() {
         typeWord("teh")
         XCTAssertEqual(engine.suggestions.count >= 2, true)

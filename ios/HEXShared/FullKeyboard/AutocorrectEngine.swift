@@ -195,8 +195,16 @@ final class LearnedWordsStore {
 @MainActor
 final class AutocorrectEngine {
     struct AppliedCorrection: Equatable {
+        /// One word backspace puts back as typed (`from`), and what autocorrect made it.
+        struct Change: Equatable {
+            let from: String
+            let to: String
+        }
+
         let original: String
         let insertedText: String
+        /// The words in `original` that autocorrect changed; backspace keeps each as typed.
+        let changes: [Change]
     }
 
     let checker: TextChecking
@@ -240,6 +248,10 @@ final class AutocorrectEngine {
     var decoder: TypingDecoder? {
         didSet { if oldValue?.model !== decoder?.model { userWordsBuilt = nil } }
     }
+    /// The layout language's word list and word pairs (the typing model, whether or not
+    /// Spatial autocorrect is on): English chooses between words the same letters spell with
+    /// and without an apostrophe by the words around them (`contextChoice`). Nil without one.
+    var contextModel: TypingDecoderModel?
     /// The letter keys for `decoder`, from the current layout.
     var decoderKeys: TypingDecoder.Keys? {
         didSet { partner?.decoderKeys = decoderKeys }
@@ -326,8 +338,8 @@ final class AutocorrectEngine {
         lastCorrection = nil
     }
 
-    func recordAppliedCorrection(original: String, insertedText: String) {
-        lastCorrection = AppliedCorrection(original: original, insertedText: insertedText)
+    func recordAppliedCorrection(original: String, insertedText: String, changes: [AppliedCorrection.Change]) {
+        lastCorrection = AppliedCorrection(original: original, insertedText: insertedText, changes: changes)
     }
 
     func consumePendingUndo() -> AppliedCorrection? {
@@ -792,6 +804,16 @@ final class AutocorrectEngine {
         let hasInternalCaps = token.dropFirst().contains(where: \.isUppercase) && !isAllCaps
         if hasInternalCaps { return nil }
 
+        // A word the same letters spell with an apostrophe ("id", "I'd"), chosen by the word
+        // before when it says so clearly ("yes id" -> "yes I'd", "the id" stays). The next
+        // word may still revise it (`revision(of:before:next:)`).
+        if !isAllCaps, let choice = contextChoice(
+            for: token, previous: Self.previousWord(beforeInput ?? "", token: token), next: nil,
+            startsSentence: Self.startsSentence(before: beforeInput ?? "", token: token)
+        ), mayOffer(choice, replacing: token) {
+            return withoutAddedCapitals(choice, typed: token)
+        }
+
         // 2. Deterministic contractions and common QWERTY transpositions (English only:
         // Norwegian "i" means "in" and must not become "I").
         if language.usesEnglishFixes, let fixed = Self.unambiguousFixes[lower] {
@@ -897,6 +919,116 @@ final class AutocorrectEngine {
         let capitalised = first.uppercased() + token.dropFirst()
         guard checker.isWordValid(capitalised), !checker.isWordValid(token) else { return nil }
         return capitalised
+    }
+
+    // MARK: - Words the context decides
+
+    /// English words the same letters spell with and without an apostrophe, chosen by the
+    /// words around them rather than as typos: "id" or "I'd", "ill" or "I'll". "were" and
+    /// "we're" aren't here: the word pairs can't tell them apart, so the strip offers
+    /// "we're" and space never changes it.
+    static let contextGroups: [[String]] = [
+        ["id", "I'd"], ["ill", "I'll"], ["hell", "he'll"], ["shell", "she'll"],
+        ["wed", "we'd"], ["lets", "let's"], ["well", "we'll"],
+    ]
+
+    /// The typing model's word pairs barely spell contractions (its books split "I'd" into
+    /// "I" and "'d"), so a contraction is scored as the words it stands for.
+    static let contractionWords: [String: [[String]]] = [
+        "i'd": [["i", "would"], ["i", "had"]], "i'll": [["i", "will"]], "he'll": [["he", "will"]],
+        "she'll": [["she", "will"]], "we'd": [["we", "would"], ["we", "had"]], "let's": [["let", "us"]],
+        "we'll": [["we", "will"]],
+    ]
+
+    private static let contextGroupOf: [String: [String]] = {
+        var out: [String: [String]] = [:]
+        for group in contextGroups { for word in group { out[word.lowercased()] = group } }
+        return out
+    }()
+
+    /// Nats the better word must win by: with the word before only, and once the next word
+    /// is known too. Changing only an apostrophe needs less than changing letters ("your"
+    /// and "you're"). Tuned on Tatoeba sentences outside the benchmark's held-out ones.
+    static let contextMargin = (previous: 3.0, next: 1.5)
+    static let contextLetterMargin = (previous: 6.0, next: 4.0)
+    /// -ln P of a word the model lacks.
+    private static let contextUnknownCost = 15.0
+    /// How much likelier a sentence starts with a contraction's pronoun ("I'd", "It's") than
+    /// the word list alone says: the pairs have no sentence starts.
+    private static let contextSentenceStart = 3.0
+    /// A contraction ends in "will", "would", "had" or "us", which thousands of words follow
+    /// in the pairs: one the next word never follows is evidence against it ("till hell
+    /// freezes", not "till he'll freezes").
+    private static let contextMissingFollower = 5.0
+
+    /// Whether `token`, at the end of `before`, starts a sentence.
+    static func startsSentence(before: String, token: String) -> Bool {
+        let rest = before.hasSuffix(token) ? String(before.dropLast(token.count)) : before
+        return AutoCapitalization.shouldCapitalize(mode: .sentences, before: rest, hasText: true)
+    }
+
+    /// -ln P(`word` | `previous`) + -ln P(`next` | `word`) by the model's pairs, a
+    /// contraction as its words ("I'd like" as "I would like").
+    private func contextCost(_ word: String, previous: String?, next: String?, startsSentence: Bool, model: TypingDecoderModel) -> Double {
+        let unknown = Self.contextUnknownCost
+        let expanded = Self.contractionWords[word.lowercased()]
+        var best = Double.infinity
+        for words in expanded ?? [[word.lowercased()]] {
+            var cost = model.cost(of: words[0], after: previous) ?? unknown
+            for k in words.indices.dropFirst() { cost += model.cost(of: words[k], after: words[k - 1]) ?? unknown }
+            if let next {
+                let last = words[words.count - 1]
+                cost += model.cost(of: next, after: last) ?? unknown
+                if expanded != nil, !model.hasPair(last, next) { cost += Self.contextMissingFollower }
+            }
+            best = min(best, cost)
+        }
+        return expanded != nil && startsSentence ? best - Self.contextSentenceStart : best
+    }
+
+    /// The word of `word`'s group (`contextGroups`) that the words around it make clearly
+    /// likelier, cased as `word` is, or nil to keep it. English only, with the layout's
+    /// model, and never a word you kept or Hex learned not to change.
+    func contextChoice(for word: String, previous: String?, next: String?, startsSentence: Bool = false) -> String? {
+        guard isEnabled, language.usesEnglishFixes, let model = contextModel, model.language == language.rawValue,
+              let group = Self.contextGroupOf[word.lowercased()] else { return nil }
+        let lower = word.lowercased()
+        guard !suppressedInSession.contains(lower), !learning.rejected.contains(lower), !learnedWords.contains(lower),
+              !lexiconTerms.contains(where: { $0.lowercased() == lower }) else { return nil }
+        let own = contextCost(word, previous: previous, next: next, startsSentence: startsSentence, model: model)
+        var best: (word: String, cost: Double)?
+        for other in group where other.lowercased() != lower {
+            let cost = contextCost(other, previous: previous, next: next, startsSentence: startsSentence, model: model)
+            if cost < best?.cost ?? .infinity { best = (other, cost) }
+        }
+        guard let best else { return nil }
+        let sameLetters = best.word.replacingOccurrences(of: "'", with: "").lowercased() == lower.replacingOccurrences(of: "'", with: "")
+        let margins = sameLetters ? Self.contextMargin : Self.contextLetterMargin
+        guard own - best.cost >= (next == nil ? margins.previous : margins.next) else { return nil }
+        return Self.matchContextCase(of: word, onto: best.word)
+    }
+
+    /// `target` cased as `word` reads: a capital first letter carries over (a sentence's
+    /// start), except the "I" of "I'd" or "I'll", which comes off ("I'd" to "id").
+    private static func matchContextCase(of word: String, onto target: String) -> String {
+        let startsWithI = word.hasPrefix("I'") && word.dropFirst(2).allSatisfy(\.isLowercase)
+        guard let first = word.first, first.isUppercase, !startsWithI, let t = target.first else { return target }
+        return t.uppercased() + target.dropFirst()
+    }
+
+    /// The word before the one being finished, revised now that `next` follows it: "well
+    /// see" becomes "we'll see", as Apple's keyboard decides at the next word. `before` is
+    /// the text up to the end of `word`. Nil to leave it.
+    func revision(of word: String, before: String, next: String, field: KeyboardFieldKind, autocorrectionType: UITextAutocorrectionType?) -> String? {
+        guard field == .text, autocorrectionType != .no, hasDictionary, word.count >= 2 else { return nil }
+        let isAllCaps = word == word.uppercased() && word != word.lowercased() && !word.hasPrefix("I'")
+        guard !isAllCaps, let nextWord = next.split(separator: " ").first.map(String.init) else { return nil }
+        let previous = Self.previousWord(before, token: word)
+        guard let choice = contextChoice(
+            for: word, previous: previous, next: nextWord.lowercased(),
+            startsSentence: Self.startsSentence(before: before, token: word)
+        ), mayOffer(choice, after: previous) else { return nil }
+        return addsCapitals || word.first?.isUppercase == true ? choice : choice.lowercased()
     }
 
     /// Your own words for Swipe typing: Contacts names and other `UILexicon` terms, one-word
