@@ -70,6 +70,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val clean = remember(revision) { speech.clean }
     val lowercase = remember(revision) { speech.lowercase }
     val endWithPeriod = remember(revision) { speech.endWithPeriod }
+    val formatLists = remember(revision) { speech.formatLists }
+    val spokenPunctuation = remember(revision) { speech.spokenPunctuation }
+    val customVocabulary = remember(revision) { speech.customVocabulary }
+    var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
     val spatial = remember(revision) { typing.spatial }
@@ -141,6 +145,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry("Style", value = style.name, action = { open(Page.Styles) })
                             Rule(); Toggle(stringResource(R.string.dictation_lowercase), stringResource(R.string.dictation_lowercase_detail),
                                 lowercase) { speech.lowercase = it }
+                            Rule(); Toggle(stringResource(R.string.dictation_format_lists), stringResource(R.string.dictation_format_lists_detail),
+                                formatLists) { speech.formatLists = it }
+                            Rule(); Toggle(stringResource(R.string.dictation_spoken_punctuation), stringResource(R.string.dictation_spoken_punctuation_detail),
+                                spokenPunctuation) { speech.spokenPunctuation = it }
                             Rule(); Toggle(stringResource(R.string.dictation_end_with_period), stringResource(R.string.dictation_end_with_period_detail),
                                 endWithPeriod) { speech.endWithPeriod = it }
                             Rule(); Entry("Dictation language", if (selectedLanguage == null) automatic.label else null,
@@ -149,6 +157,18 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         Card {
                             Toggle("Translate what I say", "Dictate in Spanish, write in English", translate) { speech.translation = it }
                             Rule(); Toggle("Clean up what I say", "Drop hesitations and spoken corrections", clean) { speech.clean = it }
+                            Rule(); Toggle(stringResource(R.string.dictation_vocabulary), stringResource(R.string.dictation_vocabulary_detail),
+                                customVocabulary) { speech.customVocabulary = it }
+                            if (customVocabulary) {
+                                val ink = colorResource(R.color.ink)
+                                BasicTextField(value = vocabularyDraft, onValueChange = {
+                                    vocabularyDraft = it; speech.vocabularyTerms = it.split('\n')
+                                }, modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp).padding(bottom = 14.dp),
+                                    textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
+                                    cursorBrush = SolidColor(ink), decorationBox = { field ->
+                                        Box { if (vocabularyDraft.isEmpty()) Label(stringResource(R.string.dictation_vocabulary_hint), muted = true); field() }
+                                    })
+                            }
                         }
                         Card {
                             val detail = when (model) {

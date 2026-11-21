@@ -126,7 +126,8 @@ internal class MicCapture(
         }
         main.post { if (active === ticket && phase != SpeechPhase.Transcribing) publish(SpeechPhase.Transcribing) }
         val options = ticket.options
-        val raw = recognizer.decode(pcm, maxOf(count, rate + rate / 10), options.spoken.code, options.translate)
+        val raw = recognizer.decode(pcm, maxOf(count, rate + rate / 10), options.spoken.code, options.translate,
+            options.vocabulary.takeIf { it.isNotEmpty() }?.joinToString(", "))
         if (ticket.cancelled) return
         when (val text = raw?.let { SpokenText.format(it, options) }) {
             null -> complete(ticket, "Couldn’t transcribe. Try again.")

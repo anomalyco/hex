@@ -116,4 +116,169 @@ internal object SpokenCleanup {
         }
         return if (words == input) text else words.joinToString(" ")
     }
+
+    // Spoken symbols and counts (iOS SpokenCleanupRules.spokenSymbols/spokenCounts): English only,
+    // in every style but Verbatim, with Clean up what I say on or off.
+    private class Token(val word: String, val start: Int, val end: Int)
+    private fun tokens(text: String) = Regex("\\S+").findAll(text).map { Token(it.value, it.range.first, it.range.last + 1) }.toList()
+    private fun core(word: String) = word.trimEnd { it in close }
+    private fun splice(text: String, edits: List<Triple<Int, Int, String>>): String {
+        if (edits.isEmpty()) return text
+        val out = StringBuilder()
+        var cursor = 0
+        for ((start, end, value) in edits) { out.append(text, cursor, start).append(value); cursor = end }
+        return out.append(text, cursor, text.length).toString()
+    }
+    private fun english(lang: String?) = (lang ?: "en").substringBefore('-').lowercase(Locale.ROOT) == "en"
+
+    /** "at the rate" (India's name for @) before a domain, and "at sign" anywhere, become "@"; an
+     * address said around it joins up in lowercase: "John at the rate Gmail dot com" -> "john@gmail.com". */
+    fun symbols(text: String, lang: String?): String {
+        if (!english(lang) || !text.contains("at", ignoreCase = true)) return text
+        val tokens = gluedDomains(tokens(text), text)
+        val edits = mutableListOf<Triple<Int, Int, String>>()
+        var i = 0
+        while (i < tokens.size) {
+            val marker = symbolMarker(tokens, i)
+            if (marker == null) { i++; continue }
+            val (end, ambiguous) = marker
+            val next = end + 1
+            if (ambiguous && next < tokens.size && bare(tokens[next].word) == "of") { i = next; continue }
+            val domain = addressDomain(tokens, next)
+            if (domain != null) {
+                var start = i
+                val local = mutableListOf<String>()
+                tokens.getOrNull(i - 1)?.let { localPart(it.word) }?.let { part ->
+                    local += part; start = i - 1
+                    while (start >= 2 && tokens[start - 1].word.lowercase(Locale.ROOT) == "dot") {
+                        val before = localPart(tokens[start - 2].word) ?: break
+                        local.add(0, before); start -= 2
+                    }
+                }
+                val address = (local.joinToString(".") + "@" + domain.first.joinToString(".")).lowercase(Locale.ROOT)
+                edits += Triple(tokens[start].start, tokens[domain.second].end, address + domain.third)
+                i = domain.second + 1
+            } else if (!ambiguous && bare(tokens.getOrNull(next)?.word ?: "") != "language") {
+                val last = tokens[end].word
+                edits += Triple(tokens[i].start, tokens[end].end, "@" + last.takeLastWhile { it in close })
+                i = end + 1
+            } else i = end + 1
+        }
+        return splice(text, edits)
+    }
+
+    // Apple's recognizer glued the domain to the marker ("at the rategmail.com"); Whisper small
+    // glued "the rate" too ("john at therategmail.com", emulator microphone, Daniel voice).
+    private fun gluedDomains(tokens: List<Token>, text: String): List<Token> = tokens.flatMapIndexed { i, token ->
+        val lower = token.word.lowercase(Locale.ROOT)
+        val before = tokens.getOrNull(i - 1)?.word?.lowercase(Locale.ROOT)
+        if (before == "at" && lower.startsWith("therate") && isDomain(token.word.drop(7))) return@flatMapIndexed listOf(
+            Token(token.word.take(3), token.start, token.start + 3), Token(token.word.substring(3, 7), token.start + 3, token.start + 7),
+            Token(token.word.drop(7), token.start + 7, token.end))
+        val prefix = when {
+            before == "the" && tokens.getOrNull(i - 2)?.word?.lowercase(Locale.ROOT) == "at" && lower.startsWith("rate") -> "rate"
+            before == "at" && lower.startsWith("sign") -> "sign"
+            else -> null
+        }
+        if (prefix == null || !isDomain(token.word.drop(prefix.length))) listOf(token)
+        else listOf(Token(token.word.take(prefix.length), token.start, token.start + prefix.length),
+            Token(token.word.drop(prefix.length), token.start + prefix.length, token.end))
+    }
+
+    private fun isDomain(word: String): Boolean {
+        val labels = core(word).split('.')
+        val top = labels.last()
+        return labels.size >= 2 && top.length >= 2 && top.all(Char::isLetter) && labels.all(::isLabel)
+    }
+
+    private fun symbolMarker(tokens: List<Token>, i: Int): Pair<Int, Boolean>? {
+        fun word(offset: Int) = tokens.getOrNull(i + offset)?.word?.lowercase(Locale.ROOT)
+        if (bare(tokens[i].word) == "at-sign") return i to false
+        if (word(0) != "at") return null
+        if (word(1)?.let(::bare) == "sign") return i + 1 to false
+        if (word(1) == "the" && word(2)?.let(::bare) == "rate") return i + 2 to true
+        return null
+    }
+
+    /** Labels joined by "dot" or "." (at least two, ending in letters), its end, and the marks after it. */
+    private fun addressDomain(tokens: List<Token>, from: Int): Triple<List<String>, Int, String>? {
+        val labels = mutableListOf<String>()
+        var position = from
+        var trailing = ""
+        while (position < tokens.size) {
+            val word = tokens[position].word
+            val core = core(word)
+            val parts = core.split('.')
+            if (core.isEmpty() || !parts.all(::isLabel)) return null
+            labels += parts
+            trailing = word.drop(core.length)
+            val following = tokens.getOrNull(position + 2)
+            if (trailing.isNotEmpty() || tokens.getOrNull(position + 1)?.word?.lowercase(Locale.ROOT) != "dot" ||
+                following == null || !isLabel(core(following.word).split('.').first())) break
+            position += 2
+        }
+        val top = labels.lastOrNull() ?: return null
+        if (labels.size < 2 || top.length < 2 || !top.all(Char::isLetter)) return null
+        return Triple(labels, position, trailing)
+    }
+
+    private fun isLabel(label: String) = label.isNotEmpty() && label.length <= 63 && label.first() != '-' &&
+        label.last() != '-' && label.all { it.code < 128 && (it.isLetterOrDigit() || it == '-') }
+
+    private fun localPart(word: String): String? {
+        if (word.isEmpty() || !word.last().isLetterOrDigit() || !word.first().isLetterOrDigit() ||
+            !word.all { it.code < 128 && (it.isLetterOrDigit() || it in "._-+") }) return null
+        return word
+    }
+
+    private val countWords = listOf("one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen", "twenty")
+        .withIndex().associate { it.value to it.index + 1 }
+
+    /** A count of three or more numbers from one, with only commas or spaces between, in digits:
+     * "Test one, two, three." -> "Test 1, 2, 3."; "Testing 123" -> "Testing 1, 2, 3". */
+    fun counts(text: String, lang: String?): String {
+        if (!english(lang)) return text
+        val tokens = tokens(text)
+        val edits = mutableListOf<Triple<Int, Int, String>>()
+        var i = 0
+        while (i < tokens.size) {
+            val joined = joinedCount(tokens, i)
+            if (joined != null) { edits += Triple(tokens[i].start, tokens[i].end, joined); i++; continue }
+            val count = mutableListOf<Pair<Int, String>>()
+            while (true) {
+                val number = tokens.getOrNull(i + count.size)?.let { countNumber(it.word) } ?: break
+                if (number.first != count.size + 1) break
+                count += number
+                if (number.second.isNotEmpty() && number.second != ",") break
+            }
+            val previous = tokens.getOrNull(i - 1)?.let { bare(it.word) } ?: ""
+            val followsNumber = countNumber(previous) != null || previous == "zero" ||
+                (previous.isNotEmpty() && previous.all(Char::isDigit))
+            if (count.size < 3 || followsNumber) { i++; continue }
+            val last = i + count.size - 1
+            val written = count.mapIndexed { n, (value, trailing) -> "$value" + if (n == count.lastIndex) trailing else "," }
+            edits += Triple(tokens[i].start, tokens[last].end, written.joinToString(" "))
+            i = last + 1
+        }
+        return splice(text, edits)
+    }
+
+    private fun countNumber(word: String): Pair<Int, String>? {
+        val core = core(word)
+        val trailing = word.drop(core.length)
+        countWords[core.lowercase(Locale.ROOT)]?.let { return it to trailing }
+        if (core.isEmpty() || core.length > 2 || core.first() == '0' || !core.all { it in '0'..'9' }) return null
+        return core.toInt() to trailing
+    }
+
+    private fun joinedCount(tokens: List<Token>, i: Int): String? {
+        val before = tokens.getOrNull(i - 1) ?: return null
+        if (bare(before.word) !in setOf("test", "testing") || end(before.word)) return null
+        val word = tokens[i].word
+        val core = core(word)
+        val trailing = word.drop(core.length)
+        if (core.length < 3 || !"123456789".startsWith(core) || (trailing.isEmpty() && i != tokens.lastIndex)) return null
+        return core.toList().joinToString(", ") + trailing
+    }
 }
