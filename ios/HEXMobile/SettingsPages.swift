@@ -166,6 +166,16 @@ private enum KeyboardChoice: CaseIterable {
 }
 
 /// Settings › Keyboard › Hex key: which end of the strip the full keyboard's Hex key sits at.
+private extension KeyHapticStrength {
+    var label: String {
+        switch self {
+        case .light: String(localized: "Light")
+        case .medium: String(localized: "Medium")
+        case .strong: String(localized: "Strong")
+        }
+    }
+}
+
 private enum HexKeySide: CaseIterable {
     case left
     case right
@@ -197,6 +207,7 @@ struct KeyboardSettingsPage: View {
     @State private var swipeTyping = FullKeyboardSettings().swipeTyping
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
+    @State private var hapticStrength = FullKeyboardSettings().hapticStrength
     @State private var practiceText = ""
 
     /// The full keyboard is iPhone only: on an iPad the keyboard shows the dictation bar, whichever
@@ -306,6 +317,23 @@ struct KeyboardSettingsPage: View {
                     detail: String(localized: "A light tap as you press Hex's keys"),
                     isOn: $haptics
                 )
+
+                if haptics {
+                    SettingsDivider()
+
+                    HStack(spacing: 12) {
+                        SettingsRowLabel(title: String(localized: "Strength"))
+                        Spacer(minLength: 8)
+                        SettingsSegments(
+                            items: KeyHapticStrength.allCases,
+                            selected: hapticStrength,
+                            label: \.label,
+                            onSelect: { hapticStrength = $0 }
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 50)
+                }
             }
 
             SettingsCard {
@@ -363,6 +391,9 @@ struct KeyboardSettingsPage: View {
         .onChange(of: swipeTyping) { _, enabled in
             FullKeyboardSettings().swipeTyping = enabled
         }
+        .onChange(of: hapticStrength) { _, strength in
+            FullKeyboardSettings().hapticStrength = strength
+        }
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autoCapitalization = FullKeyboardSettings().autoCapitalization
@@ -375,6 +406,7 @@ struct KeyboardSettingsPage: View {
             swipeTyping = FullKeyboardSettings().swipeTyping
             emoji = FullKeyboardSettings().emoji
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
+            hapticStrength = FullKeyboardSettings().hapticStrength
         }
     }
 }

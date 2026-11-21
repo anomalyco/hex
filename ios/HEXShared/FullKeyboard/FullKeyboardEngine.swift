@@ -85,14 +85,19 @@ final class FullKeyboardEngine {
         var downPoint: CGPoint = .zero
     }
 
-    static let accentHoldDelay: TimeInterval = 0.40
+    /// Apple's callout replaces the key's pop-up about 382 ms after it appeared (iOS 27.2, 60 fps
+    /// recordings); Hex's took 420 at 0.4 s, a frame later to show.
+    static let accentHoldDelay: TimeInterval = 0.36
+    /// How far below the held key's middle a finger lets go to close the callout untyped.
+    static let accentCancelDrop: CGFloat = 57.5
     static let accentSlop: CGFloat = 10
     static let trackpadActivationDistance: CGFloat = 10
     static let trackpadPointsPerCharacter: CGFloat = 7.5
     /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
     /// letting go then types no space. With two or more languages a slide moves the cursor
     /// only after it; a slide before it is a language swipe.
-    static let trackpadHoldDelay: TimeInterval = 0.4
+    /// Apple's space bar turns into the trackpad about 363 ms after touch-down (iOS 27.2, 60 fps).
+    static let trackpadHoldDelay: TimeInterval = 0.35
     /// A finger on the strip's lower half this soon after a key went down or came up (or
     /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
     static let stripTouchGuard: TimeInterval = 0.25
@@ -143,6 +148,11 @@ final class FullKeyboardEngine {
 
     private(set) var activeAccentMenu: AccentMenu?
     private var activeAccentTouchID: Int?
+    /// The callout cell under the finger when it opened. Apple's callout keeps the key's own
+    /// character selected until the finger moves into another cell (iOS 27.2: held and let go
+    /// at the screen's edge, where the callout shifts so another cell is under the finger, it
+    /// types the key's own); then the cell under the finger is the one.
+    private var accentOpenCell: Int?
     private(set) var suggestions: [KeyboardSuggestion] = []
 
     let target: KeyboardTextTarget
@@ -186,6 +196,8 @@ final class FullKeyboardEngine {
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
     /// An iPhone, or the iPhone Duo folded or unfolded (`KeyboardPosture`).
     var posture: KeyboardPosture = .phone { didSet { if posture != oldValue { rebuildLayout() } } }
+    /// Which iPhone key plane to draw (`KeyboardPhoneSize`), from the screen's size.
+    var phoneSize: KeyboardPhoneSize = .regular { didSet { if phoneSize != oldValue { rebuildLayout() } } }
     /// How far iOS set the keyboard in from each side of the screen (the Duo).
     var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
     /// Settings › Keyboard › Hex key: the strip's trailing (Right) or leading (Left) end.
@@ -295,6 +307,16 @@ final class FullKeyboardEngine {
     func displayLabel(for key: KeyboardKey) -> String {
         guard let character = key.character else { return key.label }
         return isUppercase && layerState.layer == .letters ? character.uppercased() : character
+    }
+
+    /// Whether the letter keys read as capitals: as `isUppercase`, except while a press that
+    /// turns shift on is still down (`ShiftStateMachine.pressShowsOff`).
+    var keycapsUppercase: Bool { isUppercase && !shift.pressShowsOff }
+
+    /// A key's label as its keycap shows it (`keycapsUppercase`); pop-ups use `displayLabel`.
+    func keycapLabel(for key: KeyboardKey) -> String {
+        guard let character = key.character else { return key.label }
+        return keycapsUppercase ? character.uppercased() : character
     }
 
     // MARK: - Field
@@ -538,6 +560,13 @@ final class FullKeyboardEngine {
         return (dx * dx + dy * dy).squareRoot()
     }
 
+    /// The kind of key a finger going down at `point` lands on, or nil off the keys: what
+    /// `touchBegan(id:at:)` will press, up to the next-letter odds choosing a neighbouring
+    /// letter. Cheap and free of side effects, so the key haptic can fire before any typing.
+    func keyKind(at point: CGPoint) -> KeyKind? {
+        layout.hitTest(pointOnKeys(point))?.kind
+    }
+
     func touchBegan(id: Int, at point: CGPoint) {
         let downPoint = point
         let point = pointOnKeys(point)
@@ -606,13 +635,23 @@ final class FullKeyboardEngine {
         guard (dx * dx + dy * dy).squareRoot() <= Self.accentSlop else { return false }
         guard let options = AccentCatalog.options(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters),
               options.count > 1 else { return false }
-        activeAccentMenu = AccentMenu.build(
-            for: touch.key.frame,
-            rawOptions: options,
-            in: layout.width,
-            horizontalInset: layout.horizontalInset
-        )
+        if let arrangement = AccentCatalog.arrangement(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters) {
+            activeAccentMenu = AccentMenu.build(
+                for: touch.key.frame,
+                arrangement: arrangement,
+                in: layout.width,
+                horizontalInset: layout.horizontalInset
+            )
+        } else {
+            activeAccentMenu = AccentMenu.build(
+                for: touch.key.frame,
+                rawOptions: options,
+                in: layout.width,
+                horizontalInset: layout.horizontalInset
+            )
+        }
         activeAccentTouchID = id
+        accentOpenCell = activeAccentMenu?.index(for: touch.point)
         typingLog?.ui("accent_open", [
             TypingLogField("id", .int(id)),
             TypingLogField("key", .string(TypingLogger.keyID(touch.key.kind))),
@@ -622,13 +661,32 @@ final class FullKeyboardEngine {
         return true
     }
 
+    /// Fixtures: select a callout option as sliding to it does.
+    func debugSelectAccent(_ index: Int) {
+        guard var menu = activeAccentMenu, menu.cellFrames.indices.contains(index), index != menu.selectedIndex else { return }
+        menu.selectedIndex = index
+        activeAccentMenu = menu
+        accentOpenCell = nil
+        onSelectionStep?()
+        onChange?()
+    }
+
+    /// The callout's selection for a finger at `point` (`accentOpenCell`).
+    private func accentIndex(in menu: AccentMenu, at point: CGPoint) -> Int {
+        let under = menu.index(for: point)
+        guard let open = accentOpenCell else { return under }
+        if under == open { return menu.selectedIndex }
+        accentOpenCell = nil
+        return under
+    }
+
     func touchMoved(id: Int, to point: CGPoint) {
         guard var touch = touches[id] else { return }
         touch.point = point
 
         // 1. Active long-press accent picker: horizontal drag selects the alternate character.
         if activeAccentTouchID == id, var menu = activeAccentMenu {
-            let nextIndex = menu.index(for: point.x)
+            let nextIndex = accentIndex(in: menu, at: point)
             touches[id] = touch
             if nextIndex != menu.selectedIndex {
                 menu.selectedIndex = nextIndex
@@ -739,10 +797,18 @@ final class FullKeyboardEngine {
         touch.point = point
 
         if activeAccentTouchID == id, let menu = activeAccentMenu {
-            let index = menu.index(for: point.x)
+            let index = accentIndex(in: menu, at: point)
+            accentOpenCell = nil
             let chosen = menu.options[index]
             activeAccentMenu = nil
             activeAccentTouchID = nil
+            // Let go well below the held key, the callout closes with nothing typed, as Apple's
+            // does (iOS 27.2: 55 pt down types, 60 pt cancels; any distance up types).
+            if point.y - menu.keyFrame.midY > Self.accentCancelDrop {
+                typingLog?.ui("accent_cancel", [TypingLogField("id", .int(id))])
+                onChange?()
+                return
+            }
             if !touch.committed {
                 typingLog?.ui("accent_pick", [
                     TypingLogField("id", .int(id)),
@@ -1455,7 +1521,8 @@ final class FullKeyboardEngine {
             letters: letterLayout,
             posture: posture,
             windowInset: windowInset,
-            hexPlacement: hexPlacement
+            hexPlacement: hexPlacement,
+            phoneSize: phoneSize
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)
         syncDecoderKeys()

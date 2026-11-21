@@ -36,12 +36,21 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs253PointsAndLandscapeIs187Points() {
+    func testPortraitHeightFollowsApplesKeyPlaneAndLandscapeIs204Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 236, "width \(width)")
         }
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
-        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 187)
+        // 35 pt of strip, then 4 rows: 43 pt on a 54 pt pitch with row 4 4 pt short (17, 17 Pro),
+        // 42 pt on 54 pt and 4 pt under (SE), 45 pt on 56 pt and 7 pt under (Air, Pro Max).
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 236)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 243)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .large), 255)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 204)
+        XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 375, height: 667)), .homeButton)
+        XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 402, height: 874)), .regular)
+        XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 390, height: 844)), .regular)
+        XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 420, height: 912)), .large)
+        XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 956, height: 440)), .large)
     }
 
     /// The strip is the 27 pt of Apple's predictive bar below the band iOS draws over a
@@ -76,7 +85,8 @@ final class KeyboardLayoutTests: XCTestCase {
     /// as far in from the screen's side as Apple's, and keys filling the width.
     func testDuoKeysMatchApplesRowsAndEdges() {
         let cases: [(KeyboardLayout, windowInset: CGFloat, pitch: CGFloat, appleEdge: CGFloat)] = [
-            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 8),
+            // Folded, Apple's keys start 6.67 pt in, just outside the view: Hex's start at its edge.
+            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 6.67),
             (KeyboardLayout(width: 655, posture: .unfoldedTall, windowInset: 7), 7, 59.7, 19),
             (KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75), 75, 51.7, 86),
         ]
@@ -92,7 +102,7 @@ final class KeyboardLayoutTests: XCTestCase {
         // Folded in landscape the Duo keeps the iPhone's landscape keys.
         let land = KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75)
         XCTAssertEqual(land.metrics.keyHeight, KeyboardMetrics.landscape.keyHeight)
-        XCTAssertEqual(land.totalHeight, 181)
+        XCTAssertEqual(land.totalHeight, 198)
     }
 
     /// Apple's split keyboard on the Duo unfolded upright (iOS 27.2 simulator, keyboard at
@@ -201,15 +211,86 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 669, height: 951), isFoldable: true), .unfoldedTall)
     }
 
-    func testPortraitMetricsMatchAppleIOS26() {
-        let proMax = KeyboardLayout(width: 440)
+    /// Apple's keys beside Hex's in the same field (iOS 27.2 simulators), every edge within a
+    /// device pixel: the numbers below are Apple's, read off screenshots.
+    func testPortraitMetricsMatchApple() {
+        let proMax = KeyboardLayout(width: 440, phoneSize: .large)
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
         XCTAssertEqual(q.frame.minY, 35, accuracy: 0.001)
         XCTAssertEqual(q.frame.height, 45)
-        let shift = proMax.key(.shift)!
-        XCTAssertEqual(shift.frame.width, proMax.letterWidth * 1.34, accuracy: 0.001)
+        XCTAssertEqual(proMax.key(.character("a"))!.frame.minY - q.frame.minY, 56, accuracy: 0.001)
+        XCTAssertEqual(proMax.totalHeight - proMax.key(.space)!.frame.maxY, 7, accuracy: 0.001)
+        // Shift 6.67 to 56.67 pt and delete 383.33 to 433.67 pt on Apple's Pro Max.
+        XCTAssertEqual(proMax.key(.shift)!.frame.maxX, 56.67, accuracy: 0.34)
+        XCTAssertEqual(proMax.key(.delete)!.frame.minX, 383.33, accuracy: 0.34)
+
+        // The 17 Pro: 43 pt keys on a 54 pt pitch, row 4 ending on the view's bottom edge, 4 pt
+        // short of Apple's (a third-party keyboard's view ends there); shift to 52, delete from 350.
+        let pro = KeyboardLayout(width: 402)
+        let proQ = pro.key(.character("q"))!
+        XCTAssertEqual(proQ.frame.height, 43)
+        XCTAssertEqual(pro.key(.character("a"))!.frame.minY - proQ.frame.minY, 54, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.minY - proQ.frame.minY, 3 * 54, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.height, 39)
+        XCTAssertEqual(pro.key(.space)!.frame.maxY, pro.totalHeight, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.shift)!.frame.maxX, 52, accuracy: 0.34)
+        XCTAssertEqual(pro.key(.delete)!.frame.minX, 350, accuracy: 0.34)
+
+        // The SE: 6.5 pt in from each side, 42 pt keys on a 54 pt pitch, 4 pt under row 4.
+        let se = KeyboardLayout(width: 375, showsGlobe: true, phoneSize: .homeButton)
+        XCTAssertEqual(se.key(.character("q"))!.frame.minX, 6.5, accuracy: 0.001)
+        XCTAssertEqual(se.key(.character("p"))!.frame.maxX, 368.5, accuracy: 0.001)
+        XCTAssertEqual(se.key(.character("q"))!.frame.height, 42)
+        XCTAssertEqual(se.totalHeight - se.key(.space)!.frame.maxY, 4, accuracy: 0.001)
+        XCTAssertEqual(se.key(.shift)!.frame.maxX, 48.5, accuracy: 0.26)
+    }
+
+    /// Apple's emoji key (iPhone 17 Pro, mapped by tapping): its keycap runs 56 to 99.3 pt, but
+    /// only 62 to 94 pt types it, from 7.5 pt below its top; 54 to 62 and 94 to 102 type
+    /// nothing, so a tap meant for 123 or space that lands near it doesn't switch keyboards.
+    func testEmojiKeyTakesOnlyTheMiddleOfItsKeycapAsApplesDoes() {
+        let layout = KeyboardLayout(width: 402, showsEmoji: true)
+        let emoji = layout.key(.emoji)!
+        XCTAssertEqual(emoji.frame.minX, 56, accuracy: 0.34)
+        XCTAssertEqual(emoji.frame.maxX, 99.33, accuracy: 0.34)
+        XCTAssertEqual(emoji.hitFrame.minX, emoji.frame.minX + 6, accuracy: 0.001)
+        XCTAssertEqual(emoji.hitFrame.maxX, emoji.frame.maxX - 6, accuracy: 0.001)
+        XCTAssertEqual(emoji.hitFrame.minY, emoji.frame.minY + 7.5, accuracy: 0.001)
+        let y = emoji.frame.midY + 5
+        XCTAssertEqual(layout.hitTest(CGPoint(x: emoji.frame.midX, y: y))?.kind, .emoji)
+        XCTAssertNil(layout.hitTest(CGPoint(x: emoji.frame.minX + 3, y: y)), "the emoji key's left margin types nothing")
+        XCTAssertNil(layout.hitTest(CGPoint(x: emoji.frame.maxX - 3, y: y)), "nor its right margin")
+        XCTAssertNil(layout.hitTest(CGPoint(x: emoji.frame.midX, y: emoji.frame.minY + 3)), "nor its top")
+        XCTAssertEqual(layout.hitTest(CGPoint(x: emoji.frame.minX - 4, y: y))?.kind, .layerSwitch(.numbers))
+        XCTAssertEqual(layout.hitTest(CGPoint(x: emoji.frame.maxX + 4, y: y))?.kind, .space)
+    }
+
+    /// Apple's portrait bottom row stands on row 3's columns: 123 (and emoji or the globe) end
+    /// at z's right edge, space runs from x to n, return from m to the edge. Without an emoji key
+    /// Apple's 123 fills the first block, which is Hex's usual row.
+    func testBottomRowStandsOnRowThreesColumns() {
+        for width in portraitWidths {
+            for (globe, emoji) in [(false, false), (true, false), (false, true)] {
+                for layer in [KeyboardLayer.letters, .numbers, .symbols] {
+                    let layout = KeyboardLayout(width: width, layer: layer, showsGlobe: globe, showsEmoji: emoji)
+                    let letters = KeyboardLayout(width: width)
+                    let label = "\(width) globe \(globe) emoji \(emoji) \(layer)"
+                    let z = letters.key(.character("z"))!.frame, x = letters.key(.character("x"))!.frame
+                    let n = letters.key(.character("n"))!.frame, m = letters.key(.character("m"))!.frame
+                    let space = layout.key(.space)!.frame, ret = layout.key(.returnKey)!.frame
+                    XCTAssertEqual(space.minX, x.minX, accuracy: 0.001, label)
+                    XCTAssertEqual(space.maxX, n.maxX, accuracy: 0.001, label)
+                    XCTAssertEqual(ret.minX, m.minX, accuracy: 0.001, label)
+                    XCTAssertEqual(ret.maxX, width - layout.metrics.side, accuracy: 0.001, label)
+                    let page = layout.key(.layerSwitch(layer == .letters ? .numbers : .letters))!.frame
+                    XCTAssertEqual(page.minX, layout.metrics.side, accuracy: 0.001, label)
+                    let blockEnd = [KeyKind.globe, .emoji].compactMap { layout.key($0)?.frame.maxX }.max() ?? page.maxX
+                    XCTAssertEqual(blockEnd, z.maxX, accuracy: 0.001, label)
+                }
+            }
+        }
     }
 
     func testHitTargetsTileTheKeyAreaWithNoDeadZonesOrOverlaps() {
@@ -228,9 +309,26 @@ final class KeyboardLayoutTests: XCTestCase {
                 let justAbove = CGPoint(x: key.frame.midX, y: key.frame.minY - 2)
                 XCTAssertEqual(layout.hitTest(justAbove)?.kind, key.kind, "\(describe(layout)) \(key.label)")
             }
+            // Apple's emoji key on row 4 takes only the middle of its keycap; the rest of its
+            // slot types nothing (`testEmojiKeyTakesOnlyTheMiddleOfItsKeycapAsApplesDoes`).
+            let emoji = layout.key(.emoji).flatMap { $0.row == 3 && layout.metrics.keyHeight >= 40 ? $0 : nil }
+            var emojiSlot: CGRect?
             var rowTop = area.minY
             for row in 0..<4 {
-                let targets = layout.keys.filter { $0.row == row }.map(\.hitFrame).sorted { $0.minX < $1.minX }
+                var keys = layout.keys.filter { $0.row == row }.sorted { $0.hitFrame.minX < $1.hitFrame.minX }
+                if row == 3, let emoji, let i = keys.firstIndex(where: { $0.kind == .emoji }) {
+                    let slot = CGRect(x: keys[i - 1].hitFrame.maxX, y: rowTop, width: keys[i + 1].hitFrame.minX - keys[i - 1].hitFrame.maxX, height: area.maxY - rowTop)
+                    XCTAssertTrue(slot.contains(emoji.hitFrame), describe(layout))
+                    emojiSlot = slot
+                    keys.remove(at: i)
+                    var targets = keys.map(\.hitFrame)
+                    targets.insert(slot, at: i)
+                    for target in targets { XCTAssertEqual(target.minY, rowTop, accuracy: 0.0001, describe(layout)) }
+                    for (a, b) in zip(targets, targets.dropFirst()) { XCTAssertEqual(a.maxX, b.minX, accuracy: 0.0001, describe(layout)) }
+                    rowTop = targets[0].maxY
+                    continue
+                }
+                let targets = keys.map(\.hitFrame)
                 XCTAssertEqual(targets.first?.minX, 0, describe(layout))
                 XCTAssertEqual(targets.last?.maxX, layout.width, describe(layout))
                 for target in targets {
@@ -249,7 +347,8 @@ final class KeyboardLayoutTests: XCTestCase {
                     y: CGFloat.random(in: area.minY..<area.maxY, using: &generator)
                 )
                 let hits = layout.keys.filter { $0.hitFrame.contains(point) }
-                XCTAssertEqual(hits.count, 1, "\(describe(layout)) at \(point): \(hits.map(\.label))")
+                let inEmojiMargin = emojiSlot?.contains(point) == true && emoji?.hitFrame.contains(point) == false
+                XCTAssertEqual(hits.count, inEmojiMargin ? 0 : 1, "\(describe(layout)) at \(point): \(hits.map(\.label))")
             }
             XCTAssertNil(layout.hitTest(CGPoint(x: 20, y: layout.stripFrame.midY)), "strip is not a key")
         }
@@ -257,9 +356,9 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testKeycapsSitInsideTheirTargetsAndNeverOverlap() {
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
-            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
+            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight).insetBy(dx: -0.001, dy: -0.001)
             for key in layout.keys {
-                XCTAssertTrue(key.hitFrame.contains(key.frame), "\(describe(layout)) \(key.label)")
+                XCTAssertTrue(key.hitFrame.insetBy(dx: -0.001, dy: -0.001).contains(key.frame), "\(describe(layout)) \(key.label)")
                 XCTAssertTrue(bounds.contains(key.frame), "\(describe(layout)) \(key.label)")
                 XCTAssertGreaterThan(key.frame.width, 20, "\(describe(layout)) \(key.label)")
             }
@@ -426,9 +525,34 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testLandscapeKeepsInsetsAndHeight() {
         let layout = KeyboardLayout(width: 932, orientation: .landscape, horizontalInset: 60)
-        XCTAssertEqual(layout.totalHeight, 187)
+        XCTAssertEqual(layout.totalHeight, 204)
         XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 64, accuracy: 0.001)
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
+    }
+
+    /// Apple's keys turned (iPhone 17 Pro, 874 pt, keys from 79 to 795 pt; iOS 27.2): 32 pt on a
+    /// 40 pt pitch, 2 pt under row 4, and row 4 on row 1's columns: 123 on q, emoji on w, space
+    /// from e to i, return from o. On the SE they start 72 pt in, 47 pt wide.
+    func testLandscapeMatchesApplesKeys() {
+        let pro = KeyboardLayout(width: 874, orientation: .landscape, showsEmoji: true, horizontalInset: 75)
+        let col = { (c: String) in pro.key(.character(c))!.frame }
+        XCTAssertEqual(col("q").minX, 79, accuracy: 0.34)
+        XCTAssertEqual(col("p").maxX, 795, accuracy: 0.34)
+        XCTAssertEqual(col("q").height, 32)
+        XCTAssertEqual(col("a").minY - col("q").minY, 40, accuracy: 0.001)
+        XCTAssertEqual(pro.totalHeight - pro.key(.space)!.frame.maxY, 2, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.layerSwitch(.numbers))!.frame.minX, col("q").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.layerSwitch(.numbers))!.frame.maxX, col("q").maxX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.emoji)!.frame.minX, col("w").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.minX, col("e").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.maxX, col("i").maxX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.returnKey)!.frame.minX, col("o").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.returnKey)!.frame.maxX, col("p").maxX, accuracy: 0.001)
+
+        let se = KeyboardLayout(width: 667, orientation: .landscape, phoneSize: .homeButton)
+        XCTAssertEqual(se.key(.character("q"))!.frame.minX, 72, accuracy: 0.5)
+        XCTAssertEqual(se.key(.character("p"))!.frame.maxX, 595, accuracy: 0.5)
+        XCTAssertEqual(se.key(.character("q"))!.frame.width, 47, accuracy: 0.2)
     }
 
     // MARK: - Languages

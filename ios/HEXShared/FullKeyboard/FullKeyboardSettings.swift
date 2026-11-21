@@ -1,5 +1,13 @@
 import Foundation
 
+/// How hard the keys' haptic tap is (Settings › Keyboard › Strength). Medium is meant to match
+/// Apple's keyboard (testers found Hex's, a 0.65 light impact, too weak beside it).
+nonisolated enum KeyHapticStrength: String, CaseIterable, Sendable {
+    case light
+    case medium
+    case strong
+}
+
 /// The full keyboard's switches in the shared App Group.
 ///
 /// Without Full Access an iPhone may not let the keyboard read the App Group (the simulator
@@ -23,6 +31,7 @@ struct FullKeyboardSettings {
         static let germanSpatialAutocorrect = "experiments.germanSpatialAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
+        static let hapticStrength = "settings.keyboardHapticStrength"
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
         static let swipeTyping = "experiments.swipeTyping"
@@ -110,6 +119,13 @@ struct FullKeyboardSettings {
     var haptics: Bool {
         get { defaults?.object(forKey: Key.haptics) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.haptics) }
+    }
+
+    /// Settings › Keyboard › Strength, under Haptics: how hard each key's tap is. Medium, the
+    /// default, is meant to feel like Apple's keyboard.
+    var hapticStrength: KeyHapticStrength {
+        get { defaults?.string(forKey: Key.hapticStrength).flatMap(KeyHapticStrength.init(rawValue:)) ?? .medium }
+        nonmutating set { defaults?.set(newValue.rawValue, forKey: Key.hapticStrength) }
     }
 
     /// Settings › Keyboard › Emoji: an emoji key whose panel suggests emoji for what you just

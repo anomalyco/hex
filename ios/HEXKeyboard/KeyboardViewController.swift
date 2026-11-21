@@ -43,15 +43,25 @@ final class KeyboardViewController: UIInputViewController {
     static let translationNoteDuration: TimeInterval = 8
     private var isShown = false
     /// The dictation bar's key haptic; the full keyboard has its own generator.
-    private lazy var barHaptics = UIImpactFeedbackGenerator(style: .light)
+    private lazy var barHaptics = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(hapticStrength))
+    /// Settings › Keyboard › Strength as of the last bridge sync.
+    private var hapticStrength = KeyHapticStrength.medium {
+        didSet {
+            if hapticStrength != oldValue { barHaptics = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(hapticStrength)) }
+        }
+    }
     /// The Hex key's last touch-down (wall clock), where a start's probe timeline begins.
     private var hexKeyPressedAt: TimeInterval?
     private var warmStartTimeline: WarmStartTimeline?
 
     /// Haptics need Full Access, and Settings › Keyboard › Haptics covers both keyboards.
     private var allowsKeyHaptics: Bool {
-        hasFullAccess && FullKeyboardSettings().haptics
+        hasFullAccess && hapticsSetting
     }
+
+    /// Settings › Keyboard › Haptics as of the last bridge sync (on appearing and every poll),
+    /// so a key press doesn't open the App Group's settings to ask.
+    private var hapticsSetting = true
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -414,7 +424,7 @@ final class KeyboardViewController: UIInputViewController {
         viewModel.onHexKeyAbandon = { [weak self] in self?.localDictation.discard() }
         viewModel.onKeyFeedback = { [weak self] in
             guard let self, self.allowsKeyHaptics else { return }
-            self.barHaptics.impactOccurred(intensity: 0.65)
+            self.barHaptics.impactOccurred(intensity: FullKeyboardView.keyTickIntensity(self.hapticStrength))
             self.barHaptics.prepare()
         }
         viewModel.onStopTap = { [weak self] in
@@ -626,6 +636,8 @@ final class KeyboardViewController: UIInputViewController {
         let now = Date().timeIntervalSince1970
         reportFullAccess(force: false)
         updateKeyboardTraits()
+        hapticsSetting = FullKeyboardSettings().haptics
+        hapticStrength = FullKeyboardSettings().hapticStrength
         fullKeyboard?.syncSettings()
         syncTypingLogEnabled()
         syncLoggingMark()

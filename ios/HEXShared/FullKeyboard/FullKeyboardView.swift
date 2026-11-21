@@ -51,6 +51,32 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// How long the Full Access hint stays unless a key or the strip is used first.
     static let fullAccessHintDuration: TimeInterval = 8
     private let haptics = UIImpactFeedbackGenerator(style: .light)
+    /// Every key's touch-down tick (letters, space, delete and its repeats, shift, 123,
+    /// return, suggestions), as hard as Settings › Keyboard › Strength asks. The Hex key's hold
+    /// and its menu keep `haptics`' fuller thud.
+    var hapticStrength: KeyHapticStrength = .medium {
+        didSet {
+            guard hapticStrength != oldValue else { return }
+            keyTicks = UIImpactFeedbackGenerator(style: Self.keyTickStyle(hapticStrength))
+            if allowsHaptics() { keyTicks.prepare() }
+        }
+    }
+    private var keyTicks = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(.medium))
+
+    /// Apple's key haptic is a crisp tick, so every strength is a rigid impact (the sharpest
+    /// style) but Strong, a fuller medium one. Medium, the default, is 0.8 of a rigid tap;
+    /// Hex's was a 0.65 light impact, which testers found much weaker than Apple's.
+    static func keyTickStyle(_ strength: KeyHapticStrength) -> UIImpactFeedbackGenerator.FeedbackStyle {
+        strength == .strong ? .medium : .rigid
+    }
+
+    static func keyTickIntensity(_ strength: KeyHapticStrength) -> CGFloat {
+        switch strength {
+        case .light: 0.5
+        case .medium: 0.8
+        case .strong: 1
+        }
+    }
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
     /// What the strip's Paste chip offers now.
@@ -235,7 +261,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation, posture: engine.posture) + lift
+        KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize) + lift
     }
 
     /// Room above the strip for the emoji search results. The strip itself keeps its height in
@@ -247,7 +273,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
     private var appliedLift: CGFloat {
-        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture)))
+        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize)))
     }
 
     /// Reads which device and posture the keyboard is on, and how far iOS set it in from the
@@ -258,8 +284,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let size = screen.bounds.size
         let posture = KeyboardPosture.current(screenSize: size, isFoldable: Self.isFoldable)
         let inset = posture == .phone ? 0 : max(0, (size.width - bounds.width) / 2)
-        let heightChanges = posture != engine.posture
+        let phoneSize = KeyboardPhoneSize.current(screenSize: size)
+        let heightChanges = posture != engine.posture || phoneSize != engine.phoneSize
         engine.posture = posture
+        engine.phoneSize = phoneSize
         engine.windowInset = inset
         if heightChanges { onPreferredHeightChange?() }
     }
@@ -403,6 +431,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
+        hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
         refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
@@ -516,7 +545,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         refreshStrip()
         dismissStyleMenu()
         if allowsHaptics() {
-            haptics.prepare()
+            keyTicks.prepare()
             selectionHaptics.prepare()
         }
     }
@@ -556,11 +585,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// Fixtures: show a key's accent callout with `option` selected.
     func debugHoldAccent(_ character: String, selecting option: String) {
         debugHoldAccent(character)
-        guard let menu = engine.activeAccentMenu,
-              let index = menu.options.firstIndex(of: option),
-              let key = engine.layout.key(.character(character)) else { return }
-        let cell = menu.cellFrames[index]
-        engine.touchMoved(id: -2, to: CGPoint(x: cell.midX, y: key.frame.midY))
+        guard let index = engine.activeAccentMenu?.options.firstIndex(of: option) else { return }
+        engine.debugSelectAccent(index)
     }
 
     /// Fixtures: show a key's long-press accent callout.
@@ -569,12 +595,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let center = CGPoint(x: key.frame.midX, y: key.frame.midY)
         engine.touchBegan(id: -2, at: center)
         _ = engine.openAccentMenuIfEligible(forTouch: -2)
-        if let selectIndex,
-           let menu = engine.activeAccentMenu,
-           selectIndex >= 0, selectIndex < menu.cellFrames.count {
-            let cell = menu.cellFrames[selectIndex]
-            engine.touchMoved(id: -2, to: CGPoint(x: cell.midX, y: center.y))
-        }
+        if let selectIndex { engine.debugSelectAccent(selectIndex) }
     }
 
     // MARK: - Layout
@@ -618,7 +639,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             panel.frame = recordingPanelFrame
             panel.horizontalInset = layout.horizontalInset
             panel.metrics = layout.metrics
-            panel.sideKeyWidth = layout.letterWidth * KeyboardLayout.modifierWidthRatio
+            panel.sideKeyWidth = layout.modifierWidth
             panel.hexOnLeading = layout.hexOnLeading
         }
         if let menu = styleMenu, let hex = layout.key(.hex) {
@@ -1027,6 +1048,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     private func updateCallout() {
         if let menu = engine.activeAccentMenu {
+            endCalloutLinger()
             callout.show(nil, label: "")
             accentCallout.show(menu)
             return
@@ -1034,8 +1056,34 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         accentCallout.show(nil)
         let layout = engine.layout
         if engine.showsKeyPopups, let key = engine.previewKey, let balloon = layout.balloon(for: key) {
-            callout.show(balloon, label: engine.displayLabel(for: key))
-        } else {
+            endCalloutLinger()
+            let label = KeyboardKeyPlaneView.keycapLabel(engine.displayLabel(for: key))
+            callout.show(balloon, label: label, style: KeyCalloutView.style(for: label))
+            shownPreviewKind = key.kind
+        } else if let kind = shownPreviewKind, calloutLingerWork == nil, engine.touches.isEmpty {
+            // The finger lifted: Apple's pop-up and its grey key stay up 3 frames more (about
+            // 50 ms after the letter lands, iOS 27.2 at 60 fps), then go in one frame.
+            plane.lingeringKind = kind
+            let work = DispatchWorkItem { [weak self] in self?.endCalloutLinger() }
+            calloutLingerWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + KeyCalloutView.linger, execute: work)
+        } else if calloutLingerWork == nil {
+            shownPreviewKind = nil
+            callout.show(nil, label: "")
+        }
+    }
+
+    /// The key whose pop-up is up, or lingering after the finger lifted.
+    private var shownPreviewKind: KeyKind?
+    private var calloutLingerWork: DispatchWorkItem?
+
+    private func endCalloutLinger() {
+        calloutLingerWork?.cancel()
+        calloutLingerWork = nil
+        guard plane.lingeringKind != nil || shownPreviewKind != nil else { return }
+        plane.lingeringKind = nil
+        if engine.previewKey == nil {
+            shownPreviewKind = nil
             callout.show(nil, label: "")
         }
     }
@@ -1043,11 +1091,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     // MARK: - Actions
 
     func keyFeedback() {
-        UIDevice.current.playInputClick()
         if allowsHaptics() {
-            haptics.impactOccurred(intensity: 0.65)
-            haptics.prepare()
+            keyTicks.impactOccurred(intensity: Self.keyTickIntensity(hapticStrength))
+            keyTicks.prepare()
         }
+        UIDevice.current.playInputClick()
     }
 
     func selectionFeedback() {

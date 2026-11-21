@@ -33,12 +33,26 @@ struct FullKeyboardPalette: Equatable {
     /// `white @ 0.16` composites to `(61,61,63)` on dark `(23,24,26)` and `(94,94,96)` on dark-field `(64,64,66)`.
     var keyFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.16) : .white }
     var keyPressedFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.28) : Self.rgb(0xD8DCE4) }
+    /// A held key on the key plane, under its pop-up: Apple's grey (222 on white keys; 105 on
+    /// dark ones, iOS 27.2).
+    var keyHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE) }
+    /// A held shift, delete, globe, emoji or return key: Apple's darker grey (197, 197, 201;
+    /// 131 on dark keys).
+    var functionHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.44) : Self.rgb(0xC5C5C9) }
+    /// A held space bar: only a shade darker (242, 242, 247; 56 on dark keys).
+    var spaceHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.1) : Self.rgb(0xF2F2F7) }
     /// Secondary fill for non-key chips and the recording panel's cancel pill.
     var functionFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.09) : UIColor(white: 0, alpha: 0.065) }
     var keyShadow: UIColor { .clear }
 
     /// Opaque so balloons and menus float cleanly over the strip and neighbouring keys.
     var popupFill: UIColor { isDark ? Self.rgb(0x4E5056) : .white }
+    /// The key pop-up's and the accent callout's bubble: white, or in dark Apple's neutral grey
+    /// (63 at its top, lightening downward).
+    var bubbleFill: UIColor { isDark ? Self.rgb(0x3F3F41) : .white }
+    var bubbleShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.3 : 0.1) }
+    /// The accent callout's selected option: a grey square behind it (227, 227, 230; 87 in dark).
+    var accentSelectFill: UIColor { isDark ? Self.rgb(0x57575A) : Self.rgb(0xE3E3E6) }
     var popupBorder: UIColor { isDark ? UIColor(white: 1, alpha: 0.14) : UIColor(white: 0, alpha: 0.08) }
     var popupShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.42 : 0.18) }
 
