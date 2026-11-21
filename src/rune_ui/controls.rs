@@ -859,6 +859,19 @@ pub(super) fn button(
     kind: ButtonKind,
     press: impl Fn(&mut Ui, &mut Tx) + 'static,
 ) -> El {
+    button_enabled(p, key, label, kind, true, press)
+}
+
+/// A [`button`] that keeps its place but can't be pressed while `enabled` is
+/// false, so an action with nothing to do never silently does nothing.
+pub(super) fn button_enabled(
+    p: Paint,
+    key: &str,
+    label: &str,
+    kind: ButtonKind,
+    enabled: bool,
+    press: impl Fn(&mut Ui, &mut Tx) + 'static,
+) -> El {
     let variant = match kind {
         ButtonKind::Primary => ButtonVariant::Contrast,
         ButtonKind::Secondary => ButtonVariant::Neutral,
@@ -866,6 +879,7 @@ pub(super) fn button(
     };
     Button::new(label)
         .variant(variant)
+        .disabled(!enabled)
         .on_press_tx(press)
         .build_push(p.k)
         .key(key)

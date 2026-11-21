@@ -762,6 +762,20 @@ fn rows(ui: &Ui) -> Vec<Row> {
             on: !agent_locked && Feature::AnnotateAgentTools.on(settings),
             ..agent_tools
         });
+        // The Annotate pane's Agents section writes that skill into each
+        // coding agent's folder and links hex onto PATH (macOS).
+        let install_locked = annotate_locked || Feature::AnnotateAgentInstall.managed().is_some();
+        let agent_install = row(Feature::AnnotateAgentInstall, Some(&TERMINAL));
+        rows.push(Row {
+            locked: install_locked,
+            about: if install_locked {
+                super::managed_note().into()
+            } else {
+                agent_install.about.clone()
+            },
+            on: !install_locked && Feature::AnnotateAgentInstall.on(settings),
+            ..agent_install
+        });
         let locked = annotate_locked;
         rows.push(Row {
             lab: Lab::Annotate,
@@ -900,6 +914,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::AnnotateAgentTools => "lab-annotate-agent-tools",
+        Feature::AnnotateAgentInstall => "lab-annotate-agent-install",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::YoloMode => "lab-yolo-mode",

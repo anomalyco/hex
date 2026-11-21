@@ -225,6 +225,9 @@ impl Feature {
             Self::AnnotateAgentTools => {
                 "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
             }
+            Self::AnnotateAgentInstall => {
+                "Adds an Agents section to the Annotate pane: one checked row per coding agent writes the hex-annotate skill into its own skills folder, a row copies the npx skills add command, and on macOS the Command-line tool row links hex onto PATH (/opt/homebrew/bin, /usr/local/bin, else ~/.local/bin) without replacing a hex another program owns"
+            }
         }
     }
 }

@@ -194,6 +194,7 @@ impl Feature {
             Self::PasteLastPicker => settings.labs.paste_last_picker,
             Self::VocabularyFiles => settings.labs.vocabulary_files,
             Self::AnnotateAgentTools => settings.labs.annotate_agent_tools,
+            Self::AnnotateAgentInstall => settings.labs.annotate_agent_install,
         }
     }
 
@@ -280,6 +281,7 @@ impl Feature {
             &mut labs.paste_last_picker,
             &mut labs.vocabulary_files,
             &mut labs.annotate_agent_tools,
+            &mut labs.annotate_agent_install,
         ]
     }
 
@@ -377,6 +379,7 @@ impl Feature {
             Self::PasteLastPicker => settings.labs.paste_last_picker = on,
             Self::VocabularyFiles => settings.labs.vocabulary_files = on,
             Self::AnnotateAgentTools => settings.labs.annotate_agent_tools = on,
+            Self::AnnotateAgentInstall => settings.labs.annotate_agent_install = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;

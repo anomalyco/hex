@@ -722,6 +722,14 @@ pub(super) const SCENES: &[Scene] = &[
             view.screen_needs_restart = true;
         })
     }),
+    // Labs › Install agent skill from Annotate: every agent state, the
+    // copyable skills command, and the Command-line tool.
+    #[cfg(hex_capture)]
+    ("mac-scrawl-agents", |ui| {
+        scrawl_fixture(ui, true, |_| {});
+        ui.settings.labs.annotate_agent_install = true;
+        ui.agents = scrawl::Agents::fixture();
+    }),
     ("mac-voice-filter", |ui| {
         *ui = mac_fixture();
         ui.pane = Pane::VoiceFilter;

@@ -87,7 +87,8 @@ impl Feature {
             | Self::HoldThroughKeys
             | Self::ModesEditor
             | Self::VocabularyFiles
-            | Self::AnnotateAgentTools => Audience::Everyone,
+            | Self::AnnotateAgentTools
+            | Self::AnnotateAgentInstall => Audience::Everyone,
         }
     }
 
@@ -155,7 +156,9 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::FasterLiveText
             | Self::VocabularyFiles => 20261120,
-            Self::LearnFromCorrections | Self::AnnotateAgentTools => 20261121,
+            Self::LearnFromCorrections | Self::AnnotateAgentTools | Self::AnnotateAgentInstall => {
+                20261121
+            }
         }
     }
 
@@ -304,7 +307,8 @@ impl Feature {
             | Self::StopPhrase
             | Self::ModesEditor
             | Self::VocabularyFiles
-            | Self::AnnotateAgentTools => EVERY,
+            | Self::AnnotateAgentTools
+            | Self::AnnotateAgentInstall => EVERY,
         }
     }
 
@@ -388,6 +392,7 @@ impl Feature {
             Self::PasteLastPicker => "paste-last-picker",
             Self::VocabularyFiles => "vocabulary-files",
             Self::AnnotateAgentTools => "annotate-agent-tools",
+            Self::AnnotateAgentInstall => "annotate-agent-install",
         }
     }
 
@@ -471,6 +476,7 @@ impl Feature {
             Self::ModesEditor => "labs.modes_editor",
             Self::VocabularyFiles => "labs.vocabulary_files",
             Self::AnnotateAgentTools => "labs.annotate_agent_tools",
+            Self::AnnotateAgentInstall => "labs.annotate_agent_install",
         }
     }
 

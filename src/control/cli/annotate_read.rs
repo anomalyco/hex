@@ -10,8 +10,9 @@ use super::fail;
 /// Why these commands refuse while the Labs feature is off, naming its switch.
 const LAB_OFF: &str = "Agent tools for captures is a Labs feature and is off. Turn it on with `hex labs on annotate-agent-tools` or in Settings › Labs.";
 
-/// What `hex annotate skill` prints: the skill an agent installs.
-const SKILL: &str = include_str!("../../../skills/hex-annotate/SKILL.md");
+/// What `hex annotate skill` prints, and what the Annotate pane's Agents
+/// section writes into an agent's folder: the skill an agent installs.
+pub(crate) const SKILL: &str = include_str!("../../../skills/hex-annotate/SKILL.md");
 
 #[derive(Args, Debug)]
 pub(crate) struct Inspect {

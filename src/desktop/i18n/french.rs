@@ -1,16 +1,16 @@
-//! French (fr) interface strings, keyed by the English source string like
-//! [`super::TRANSLATIONS`]; used for any French system language. Not yet
-//! reviewed by a native speaker. Terms: dictation is "dictée", shortcut
-//! "raccourci", vocabulary "vocabulaire", Settings "Réglages", and meetings
-//! "réunions".
+//! French (fr) interface strings; not yet reviewed by a native speaker.
+//! Terms: dictation is "dictée", shortcut "raccourci", vocabulary
+//! "vocabulaire", Settings "Réglages", and meetings "réunions".
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use super::screenshots::{Language, merged};
+
 /// The French strings by their English source.
 pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| super::screenshots::merged(TRANSLATIONS, super::screenshots::FRENCH))
+    TABLE.get_or_init(|| merged(TRANSLATIONS, Language::French))
 }
 
 #[rustfmt::skip]
