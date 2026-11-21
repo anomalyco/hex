@@ -1422,9 +1422,12 @@ and `taps-right` are the recordings whose path never leaves its key by a swipe's
 keyboard types that key's letter, and the field keeps it, as for a person typing a one-letter
 word. `not-swipes` counts swipe attempts the plane never took as swipes or that read nothing;
 `skipped` counts gestures that began off the letter keys, and `clamped` the touches moved
-forward to the previous lift. The decoder's own median and p90 milliseconds close
-the line. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT`
-writes each sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
+forward to the previous lift; unlike `taps` and `taps-right`, which count in-dictionary
+words, those three count every recorded touch, whatever its word. The decoder's own median
+and p90 milliseconds close the line, though a swipe's preview decode can overlap its timed
+final decode, so a `decode-ms` sample may include that overlap; the words are unaffected.
+`HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT` writes each sentence's intended
+and typed words (prefix both with `TEST_RUNNER_` too).
 
 The test with no recording checks Hex's key geometry against the grid and runs clean
 gestures through the same mapping to type the right words; it cannot catch a converter that

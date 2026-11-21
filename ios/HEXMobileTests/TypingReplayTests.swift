@@ -14,8 +14,8 @@ private let replayClockBase: TimeInterval = 100
 /// one before it started. The accent and trackpad holds (0.36 s and 0.35 s) are real-time
 /// `asyncAfter`s armed on touch-down and cancelled on lift, the swipe trail's 0.45 s runs on
 /// its own clock, and `SwipeTyping.previewInterval` (0.07 s) only throttles the strip.
-/// Recordings should carry their own (`start`): real ones are mostly longer (FUTO's median is
-/// 0.87 s).
+/// Recordings should carry their own (`start`): real ones are mostly longer (FUTO's dev split
+/// has a median gap of about 0.84 s and a minimum of 20 ms).
 private let replayDefaultGestureGap: TimeInterval = 0.5
 
 /// Replaying recorded fingers through the full keyboard as it runs: the key plane's touches,
@@ -62,9 +62,10 @@ private let replayDefaultGestureGap: TimeInterval = 0.5
 /// a path that never leaves its key by a swipe's pitch is a tap, and the keyboard types its
 /// letter), the swipe attempts this keyboard missed (`not-swipes`), the gestures that began
 /// off the letter keys (`skipped`), the touches moved forward to the previous lift
-/// (`clamped`), and the decoder's own median and p90 milliseconds.
-/// `HEX_REPLAY_LIMIT` caps sentences per source and `HEX_REPLAY_OUT` writes each sentence's
-/// intended and typed words as JSON.
+/// (`clamped`), and the decoder's own median and p90 milliseconds. `taps` and `taps-right`
+/// count in-dictionary words only; `not-swipes`, `skipped` and `clamped` count every
+/// recorded touch, in the dictionary or not. `HEX_REPLAY_LIMIT` caps sentences per source and
+/// `HEX_REPLAY_OUT` writes each sentence's intended and typed words as JSON.
 @MainActor
 final class TypingReplayTests: XCTestCase {
     /// English's own letter rows, for the in-memory gestures: row 2 starts half a column in
@@ -393,13 +394,17 @@ final class TypingReplayTests: XCTestCase {
     }
 
     /// Gives the main queue a turn after a touch, as the keyboard gets between touches.
-    /// `SwipeTyping.schedulePreview` posts its preview's completion there (SwipeTyping.swift:251),
-    /// and a synchronous replay would otherwise never run it: `previewInFlight` would stay true,
-    /// so only the first swipe ever previewed and its background decode overlapped the next
-    /// measured one. Nothing else is due here: the accent and trackpad holds are real-time
-    /// `asyncAfter`s 0.36 s and 0.35 s away (FullKeyboardEngine.swift:67, :79), and each has
-    /// been cancelled by its own touch's lift, so a turn runs only completions already posted,
-    /// which drop themselves while no swipe is under way (SwipeTyping.swift:255).
+    /// `SwipeTyping.schedulePreview` decodes off the main thread and posts its completion there
+    /// (SwipeTyping.swift:251), which resets `previewInFlight` (SwipeTyping.swift:254); without
+    /// a turn the flag would stay true, and only the first swipe of a sentence would preview.
+    /// A turn runs the completions already posted — one still decoding runs at a later drain —
+    /// so a swipe's own preview decode can overlap its timed final decode, and a `decode-ms`
+    /// sample may include that overlap. The words are unaffected: a completion whose swipe has
+    /// ended drops itself at the generation check (SwipeTyping.swift:255). Nothing else posted
+    /// is due: the accent and trackpad holds are real-time `asyncAfter`s 0.36 s and 0.35 s away
+    /// (FullKeyboardEngine.swift:67, :79) and each has been cancelled by its own touch's lift,
+    /// and the function-key linger's redraw (KeyboardKeyPlaneView.swift:577) only touches views
+    /// that are not in a window.
     private func drainMainQueue() {
         RunLoop.main.run(until: Date())
     }
@@ -486,7 +491,10 @@ final class TypingReplayTests: XCTestCase {
     /// field keeps `FixtureTextTarget`'s own default, `.sentences`
     /// (FullKeyboardSnapshotStage.swift:583): the people who recorded these sentences typed
     /// them into ordinary fields, which capitalise sentence starts, and the report compares
-    /// letters only.
+    /// letters only. It leaves out the typing journal and adaptive touch, which
+    /// `FullKeyboardView.syncSettings` supplies: each sentence starts on a fresh engine, so it
+    /// has no fixes or adaptive key centres of its own to apply, and the replay keeps their
+    /// shared stores from carrying one sentence's learning into the next.
     private func makeKeyboard() throws -> (FixtureTextTarget, FullKeyboardEngine, KeyboardKeyPlaneView) {
         let target = FixtureTextTarget()
         let engine = FullKeyboardEngine(

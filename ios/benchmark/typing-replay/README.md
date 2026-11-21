@@ -72,8 +72,8 @@ grouped by `(session, sentence)` and ordered by `word_idx`; a sentence is only
 emitted when every word from `sentence.split()` is present. Words keep their
 punctuation, which the tests ignore when comparing letters. Each gesture's `start`
 is its first sample's epoch `t` less the sentence's first word's, so the gaps the
-epoch stamps record survive the conversion (median about 0.9 s, minimum 85 ms in
-`dev`).
+epoch stamps record survive the conversion (median about 0.84 s and minimum 20 ms
+over `dev`).
 
 The root splits do not carry `layout`, `language` or `dual_finger`; those are
 assumed qwerty/English/single-finger. `swipe-5` does carry them, and records
