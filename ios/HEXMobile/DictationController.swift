@@ -186,8 +186,13 @@ final class DictationController {
     private let languageSettings: LanguageSettings
     private(set) var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,
-        detail: "Checking model files"
+        detail: String(localized: "Checking the speech model")
     )
+    /// Whether Hex is in the background, where iOS suspends it and a download's connection
+    /// drops.
+    private var isInBackground = false
+    /// A model download that failed while Hex was in the background, tried again on return.
+    private var preparationFailedInBackground = false
 
     init(
         audio: (any AudioManaging)? = nil,
@@ -699,10 +704,14 @@ final class DictationController {
         copied = false
         modelPreparation = ModelPreparationProgress(
             fractionCompleted: 0,
-            detail: "Checking model files"
+            detail: String(localized: "Checking the speech model")
         )
+        preparationFailedInBackground = false
+        // A few more seconds from iOS when Hex goes to the background mid-download or mid-compile.
+        let backgroundTime = BackgroundTime("Prepare speech model")
 
         Task {
+            defer { backgroundTime.end() }
             do {
                 let candidate = await transcriberFactory()
                 guard self.modelPrepGeneration == prepGen else { return }
@@ -735,12 +744,33 @@ final class DictationController {
                     return
                 }
                 self.languageOffer = unavailable.flatMap { $0.automatic ? nil : $0.fallback }
+                self.preparationFailedInBackground = self.isInBackground && Self.isDownloadInterruption(error)
                 self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
                 self.pendingHandoff = nil
                 self.phase = .failed(UserFacingError.message(for: error, context: .model))
                 self.publishKeyboardSnapshot()
             }
         }
+    }
+
+    func appMovedToBackground() {
+        isInBackground = true
+    }
+
+    /// Picks up a download that iOS cut off while Hex was in the background; FluidAudio
+    /// resumes each file from the bytes it has.
+    func appBecameActive() {
+        isInBackground = false
+        guard preparationFailedInBackground else { return }
+        preparationFailedInBackground = false
+        if case .failed = phase, !isModelReady {
+            prepareModel()
+        }
+    }
+
+    nonisolated static func isDownloadInterruption(_ error: Error) -> Bool {
+        if error is StallWatch.Stalled || error is URLError { return true }
+        return (error as? ParakeetTranscriber.TranscriberError) == .downloadFailed
     }
 
     private static func defaultTranscriber() async -> any LocalTranscribing {

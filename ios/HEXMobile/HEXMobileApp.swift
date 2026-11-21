@@ -53,8 +53,10 @@ struct HEXMobileApp: App {
                 .onChange(of: scenePhase) { _, phase in
                     if phase == .background {
                         openedFromKeyboard = false
+                        dictation.appMovedToBackground()
                     } else if phase == .active {
                         dictation.endStaleLiveActivities()
+                        dictation.appBecameActive()
                     }
                 }
             }

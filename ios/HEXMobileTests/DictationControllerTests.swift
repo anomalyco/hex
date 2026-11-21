@@ -1309,6 +1309,111 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertTrue(AppleSpeechTranscriber.shouldUse(speech, parakeetFits: true))
     }
 
+    func testParakeetsFirstCompileKeepsTheBarMovingAndSaysWhy() {
+        var progress = ParakeetPreparationProgress(downloads: true, compiledBefore: false)
+        XCTAssertEqual(progress.snapshot(at: 0).detail, "Checking the speech model")
+        progress.download(0.5)
+        let halfDownloaded = progress.snapshot(at: 1)
+        XCTAssertEqual(halfDownloaded.fractionCompleted, 0.35, accuracy: 0.001)
+        XCTAssertEqual(halfDownloaded.detail, "Downloading the speech model")
+        progress.download(0.2)
+        XCTAssertEqual(progress.snapshot(at: 1).fractionCompleted, 0.35, accuracy: 0.001, "never back")
+
+        // Core ML reports only each model's start and end; the encoder's compile alone is
+        // a minute or more on an iPhone 14, where the bar used to sit at 50%.
+        progress.startLoading(at: 100)
+        progress.finishModel(at: 103)
+        var last = progress.snapshot(at: 103).fractionCompleted
+        XCTAssertGreaterThanOrEqual(last, 0.7)
+        // However long this iPhone's compile takes, the bar keeps moving.
+        for second in stride(from: 108.0, through: 900, by: 5) {
+            let snapshot = progress.snapshot(at: second)
+            XCTAssertGreaterThan(snapshot.fractionCompleted, last, "moves at \(second)")
+            XCTAssertLessThan(snapshot.fractionCompleted, 0.99)
+            last = snapshot.fractionCompleted
+        }
+        XCTAssertEqual(progress.snapshot(at: 120).detail, "Optimizing for this iPhone… about a minute")
+        XCTAssertEqual(
+            progress.snapshot(at: 100 + progress.expectedLoadSeconds * 2 + 1).detail,
+            "Still optimizing. The first time can take a few minutes."
+        )
+
+        progress.finishModel(at: 901)
+        XCTAssertGreaterThanOrEqual(progress.snapshot(at: 901).fractionCompleted, last, "a model's end never moves it back")
+        progress.finish()
+        XCTAssertEqual(progress.snapshot(at: 902).fractionCompleted, 1)
+    }
+
+    func testAParakeetLoadAfterTheFirstSaysLoadingAndUsesTheWholeBar() {
+        var progress = ParakeetPreparationProgress(downloads: false, compiledBefore: true)
+        progress.startLoading(at: 0)
+        XCTAssertEqual(progress.snapshot(at: 0).fractionCompleted, 0, accuracy: 0.001)
+        XCTAssertEqual(progress.snapshot(at: 0.5).detail, "Loading the speech model")
+        XCTAssertLessThan(progress.expectedLoadSeconds, 10)
+    }
+
+    func testParakeetsCompileRecordFollowsTheSystem() {
+        let record = ParakeetCompileRecord(defaults: defaults, system: "Version 18.6 (Build 22G86)")
+        XCTAssertFalse(record.isCurrent)
+        record.markCurrent()
+        XCTAssertTrue(record.isCurrent)
+        XCTAssertFalse(
+            ParakeetCompileRecord(defaults: defaults, system: "Version 18.7 (Build 22H20)").isCurrent,
+            "Core ML compiles again after an iOS update"
+        )
+    }
+
+    func testADownloadCutOffInTheBackgroundStartsAgainOnReturn() async throws {
+        let failing = UnpreparableTranscriber(error: ParakeetTranscriber.TranscriberError.downloadFailed)
+        let working = ControlledTranscriber()
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: working,
+            transcriberFactory: {
+                made += 1
+                return made == 1 ? failing : working
+            },
+            autoPrepareOnInit: false
+        )
+        controller.appMovedToBackground()
+        controller.prepareModel()
+        try await settle()
+        guard case .failed = controller.phase else { return XCTFail("\(controller.phase)") }
+
+        controller.appBecameActive()
+        try await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertEqual(made, 2)
+
+        controller.appBecameActive()
+        try await settle()
+        XCTAssertEqual(made, 2, "once")
+    }
+
+    func testAFailureWhileHexIsOpenWaitsForTryAgain() async throws {
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: ControlledTranscriber(),
+            transcriberFactory: {
+                made += 1
+                return UnpreparableTranscriber(error: ParakeetTranscriber.TranscriberError.downloadFailed)
+            },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.appMovedToBackground()
+        controller.appBecameActive()
+        try await settle()
+        XCTAssertEqual(made, 1)
+        XCTAssertFalse(DictationController.isDownloadInterruption(CancellationError()))
+        XCTAssertTrue(DictationController.isDownloadInterruption(StallWatch.Stalled()))
+    }
+
     func testAParakeetLoadThatEndedHexIsNotRepeatedAtLaunch() {
         let loads = ParakeetLoadGuard(defaults: defaults)
         loads.noteLaunch()

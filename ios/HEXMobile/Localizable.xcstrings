@@ -4,6 +4,16 @@
     "" : {
       "shouldTranslate" : false
     },
+    "Checking the speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查语音模型"
+          }
+        }
+      }
+    },
     "Dictate in the keyboard's language" : {
       "localizations" : {
         "zh-Hans" : {
@@ -14,12 +24,32 @@
         }
       }
     },
+    "Downloading the speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载语音模型"
+          }
+        }
+      }
+    },
     "Languages" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "语言"
+          }
+        }
+      }
+    },
+    "Loading the speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在加载语音模型"
           }
         }
       }
@@ -40,6 +70,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 iPhone 上"
+          }
+        }
+      }
+    },
+    "Optimizing for this iPhone… about a minute" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在为这台 iPhone 优化…约需一分钟"
+          }
+        }
+      }
+    },
+    "Still optimizing. The first time can take a few minutes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仍在优化，首次可能需要几分钟。"
           }
         }
       }
