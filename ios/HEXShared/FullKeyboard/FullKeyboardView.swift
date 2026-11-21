@@ -1056,6 +1056,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     private func updateCallout() {
         if let menu = engine.activeAccentMenu {
+            endCalloutLinger()
             callout.show(nil, label: "")
             accentCallout.show(menu)
             return
@@ -1063,8 +1064,34 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         accentCallout.show(nil)
         let layout = engine.layout
         if engine.showsKeyPopups, let key = engine.previewKey, let balloon = layout.balloon(for: key) {
-            callout.show(balloon, label: engine.displayLabel(for: key))
-        } else {
+            endCalloutLinger()
+            let label = KeyboardKeyPlaneView.keycapLabel(engine.displayLabel(for: key))
+            callout.show(balloon, label: label, style: KeyCalloutView.style(for: label))
+            shownPreviewKind = key.kind
+        } else if let kind = shownPreviewKind, calloutLingerWork == nil, engine.touches.isEmpty {
+            // The finger lifted: Apple's pop-up and its grey key stay up 3 frames more (about
+            // 50 ms after the letter lands, iOS 27.2 at 60 fps), then go in one frame.
+            plane.lingeringKind = kind
+            let work = DispatchWorkItem { [weak self] in self?.endCalloutLinger() }
+            calloutLingerWork = work
+            DispatchQueue.main.asyncAfter(deadline: .now() + KeyCalloutView.linger, execute: work)
+        } else if calloutLingerWork == nil {
+            shownPreviewKind = nil
+            callout.show(nil, label: "")
+        }
+    }
+
+    /// The key whose pop-up is up, or lingering after the finger lifted.
+    private var shownPreviewKind: KeyKind?
+    private var calloutLingerWork: DispatchWorkItem?
+
+    private func endCalloutLinger() {
+        calloutLingerWork?.cancel()
+        calloutLingerWork = nil
+        guard plane.lingeringKind != nil || shownPreviewKind != nil else { return }
+        plane.lingeringKind = nil
+        if engine.previewKey == nil {
+            shownPreviewKind = nil
             callout.show(nil, label: "")
         }
     }

@@ -21,6 +21,8 @@ final class KeyboardKeyPlaneView: UIView {
     /// or more ("Français"), else the dictation language's name ("English", "Norsk"), with
     /// the language dictations paste in while they're translated ("Español → English").
     var spaceLabel: String? { didSet { if spaceLabel != oldValue { setNeedsDisplay() } } }
+    /// A key just let go whose pop-up is still up: drawn held a moment longer, with it.
+    var lingeringKind: KeyKind? { didSet { if lingeringKind != oldValue { setNeedsDisplay() } } }
     /// Called on every key going down, for clicks and haptics.
     var onKeyDown: ((KeyKind) -> Void)?
     /// Called when long-press accents open.
@@ -75,7 +77,8 @@ final class KeyboardKeyPlaneView: UIView {
         let layout = engine.layout
         let isLandscape = layout.orientation == .landscape
         let radius = layout.metrics.cornerRadius
-        let pressed = engine.pressedKinds
+        var pressed = engine.pressedKinds
+        if let lingeringKind { pressed.insert(lingeringKind) }
         // Like Apple's spacebar trackpad, key glyphs blank out while sliding the cursor.
         let hideGlyphs = engine.isTrackpadActive
 
@@ -540,92 +543,76 @@ final class KeyCalloutView: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    func show(_ balloon: KeyBalloon?, label: String) {
-        guard balloon != self.balloon || label != self.label else { return }
+    func show(_ balloon: KeyBalloon?, label: String, style: KeyboardKeyPlaneView.LabelStyle? = nil) {
+        let style = style ?? Self.letterStyle
+        guard balloon != self.balloon || label != self.label || style.size != labelStyle.size || style.yOffset != labelStyle.yOffset else { return }
         self.balloon = balloon
         self.label = label
+        labelStyle = style
         setNeedsDisplay()
     }
+
+    /// How long the pop-up stays after the finger lifts, as Apple's does.
+    static let linger: TimeInterval = 0.045
+
+    /// A letter in the bubble, either case.
+    static let letterStyle = KeyboardKeyPlaneView.LabelStyle(size: 36.5, yOffset: 0.8)
+
+    /// The bubble's style for a key's label: a letter's, or for a digit or symbol the key's own
+    /// type scaled by the same 1.5.
+    static func style(for label: String) -> KeyboardKeyPlaneView.LabelStyle {
+        if label.first?.isLetter == true { return letterStyle }
+        let key = KeyboardKeyPlaneView.LabelStyle.symbolOverrides[label] ?? .symbol
+        return KeyboardKeyPlaneView.LabelStyle(
+            size: key.size * 1.5, weight: key.weight, yOffset: 0.8, caseSensitive: key.caseSensitive, shows: key.shows
+        )
+    }
+
+    /// The bubble's label: iOS 27 draws a letter 36.5 pt, whatever its case, a little below the
+    /// bubble's centre (fitted to the 17e's q and the 17 Pro's G); digits and symbols the key's
+    /// own font scaled the same way.
+    private(set) var labelStyle = KeyCalloutView.letterStyle
 
     override func draw(_ rect: CGRect) {
         guard let balloon, let context = UIGraphicsGetCurrentContext() else { return }
         let path = Self.path(for: balloon)
         context.saveGState()
-        context.setShadow(offset: CGSize(width: 0, height: 2), blur: 6, color: palette.popupShadow.cgColor)
+        context.setShadow(offset: CGSize(width: 0, height: 1), blur: 6, color: palette.bubbleShadow.cgColor)
         context.addPath(path)
-        context.setFillColor(palette.popupFill.cgColor)
+        context.setFillColor(palette.bubbleFill.cgColor)
         context.fillPath()
         context.restoreGState()
-
-        let scale = max(1, traitCollection.displayScale)
-        context.saveGState()
-        context.addPath(path)
-        context.setLineWidth(1 / scale)
-        context.setStrokeColor(palette.popupBorder.cgColor)
-        context.strokePath()
-        context.restoreGState()
+        if palette.isDark {
+            // Apple's dark bubble lightens toward its bottom (63 to 85 grey).
+            context.saveGState()
+            context.addPath(path)
+            context.clip()
+            let colors = [palette.bubbleFill.cgColor, UIColor(white: 0.26, alpha: 1).cgColor, UIColor(white: 0.333, alpha: 1).cgColor] as CFArray
+            if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 0.5, 1]) {
+                context.drawLinearGradient(
+                    gradient,
+                    start: CGPoint(x: 0, y: balloon.bubble.minY),
+                    end: CGPoint(x: 0, y: balloon.bubble.maxY),
+                    options: []
+                )
+            }
+            context.restoreGState()
+        }
 
         let attributes: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 33, weight: .light),
+            .font: labelStyle.font,
             .foregroundColor: palette.textBase,
         ]
-        let size = (label as NSString).size(withAttributes: attributes)
-        (label as NSString).draw(
-            at: CGPoint(x: balloon.bubble.midX - size.width / 2, y: balloon.bubble.midY - size.height / 2),
+        let shown = labelStyle.shows ?? label
+        let size = (shown as NSString).size(withAttributes: attributes)
+        (shown as NSString).draw(
+            at: CGPoint(x: balloon.bubble.midX - size.width / 2, y: balloon.bubble.midY - size.height / 2 + labelStyle.yOffset),
             withAttributes: attributes
         )
     }
 
-    /// Key at the bottom, wider bubble above, joined by a smooth downward neck.
+    /// The bubble: a rounded rectangle floating over the key (iOS 27), with no stem.
     static func path(for balloon: KeyBalloon) -> CGPath {
-        let kr = FullKeyboardPalette.cornerRadius
-        let br: CGFloat = 11
-        let kl = balloon.keyFrame.minX
-        let krt = balloon.keyFrame.maxX
-        let kb = balloon.keyFrame.maxY
-        let kt = balloon.keyFrame.minY
-        let bb = balloon.bubble.maxY
-        let bt = balloon.bubble.minY
-        let bl = balloon.bubble.minX
-        let brt = balloon.bubble.maxX
-        let stemTop = min(kb - kr - 2, max(kt + 6, bb + 7))
-
-        let p = CGMutablePath()
-        p.move(to: CGPoint(x: bl, y: bt + br))
-        p.addQuadCurve(to: CGPoint(x: bl + br, y: bt), control: CGPoint(x: bl, y: bt))
-        p.addLine(to: CGPoint(x: brt - br, y: bt))
-        p.addQuadCurve(to: CGPoint(x: brt, y: bt + br), control: CGPoint(x: brt, y: bt))
-        if brt - br >= krt + 2 {
-            p.addLine(to: CGPoint(x: brt, y: bb - br))
-            p.addQuadCurve(to: CGPoint(x: brt - br, y: bb), control: CGPoint(x: brt, y: bb))
-            p.addLine(to: CGPoint(x: min(brt - br, krt + 6), y: bb))
-            p.addCurve(
-                to: CGPoint(x: krt, y: stemTop),
-                control1: CGPoint(x: krt + 1, y: bb),
-                control2: CGPoint(x: krt, y: (bb + stemTop) * 0.5)
-            )
-        } else {
-            p.addLine(to: CGPoint(x: brt, y: bb))
-            p.addLine(to: CGPoint(x: krt, y: max(kt + 4, bb + 4)))
-        }
-        p.addLine(to: CGPoint(x: krt, y: kb - kr))
-        p.addQuadCurve(to: CGPoint(x: krt - kr, y: kb), control: CGPoint(x: krt, y: kb))
-        p.addLine(to: CGPoint(x: kl + kr, y: kb))
-        p.addQuadCurve(to: CGPoint(x: kl, y: kb - kr), control: CGPoint(x: kl, y: kb))
-        if bl + br <= kl - 2 {
-            p.addLine(to: CGPoint(x: kl, y: stemTop))
-            p.addCurve(
-                to: CGPoint(x: max(bl + br, kl - 6), y: bb),
-                control1: CGPoint(x: kl, y: (bb + stemTop) * 0.5),
-                control2: CGPoint(x: kl - 1, y: bb)
-            )
-            p.addLine(to: CGPoint(x: bl + br, y: bb))
-            p.addQuadCurve(to: CGPoint(x: bl, y: bb - br), control: CGPoint(x: bl, y: bb))
-        } else {
-            p.addLine(to: CGPoint(x: kl, y: max(kt + 4, bb + 4)))
-            p.addLine(to: CGPoint(x: bl, y: bb))
-        }
-        p.closeSubpath()
-        return p
+        UIBezierPath(roundedRect: balloon.bubble, cornerRadius: 12).cgPath
     }
 }

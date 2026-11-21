@@ -51,9 +51,17 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
 
 /// The pop-up balloon over a pressed key: a wider bubble joined to the key by a neck.
 nonisolated struct KeyBalloon: Equatable, Sendable {
-    static let bubbleHeight: CGFloat = 46
-    static let neck: CGFloat = 8
-    static let extraWidth: CGFloat = 20
+    /// iOS 27's key pop-up is a bubble floating over the key, not joined to it: 23.3 pt wider
+    /// than the key, 65 pt tall, its bottom 3.5 pt above the key's top (iPhone 17e and 17 Pro
+    /// simulators). Hex drew iOS 26's balloon, a 46 pt bubble on a stem that hid the key.
+    static let bubbleHeight: CGFloat = 65
+    /// The gap between the bubble and the key below it.
+    static let neck: CGFloat = 3.5
+    static let extraWidth: CGFloat = 23.33
+    /// Apple's bubble over row 1 rises above the keyboard; a keyboard extension can't draw
+    /// outside its view, so there Hex's shrinks to the room it has, down to this, and overlaps
+    /// the key below that.
+    static let minimumBubbleHeight: CGFloat = 50
 
     let keyFrame: CGRect
     let bubble: CGRect
@@ -558,16 +566,19 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     func balloon(for key: KeyboardKey) -> KeyBalloon? {
         guard showsBalloons, key.character != nil else { return nil }
         let bubbleWidth = key.frame.width + KeyBalloon.extraWidth
-        let bubbleY = max(0, key.frame.minY - KeyBalloon.neck - KeyBalloon.bubbleHeight)
-        let minX = max(0, horizontalInset + 2)
-        let maxX = max(minX, width - horizontalInset - 2 - bubbleWidth)
+        let room = key.frame.minY - KeyBalloon.neck
+        let bubbleHeight = room >= KeyBalloon.bubbleHeight ? KeyBalloon.bubbleHeight : max(KeyBalloon.minimumBubbleHeight, room)
+        let bubbleY = max(0, key.frame.minY - KeyBalloon.neck - bubbleHeight)
+        // An edge key's bubble is pushed in just far enough to stay on screen, as Apple's is.
+        let minX = max(0, horizontalInset)
+        let maxX = max(minX, width - horizontalInset - bubbleWidth)
         var x = key.frame.midX - bubbleWidth / 2
         x = max(minX, min(maxX, x))
         let bubble = CGRect(
             x: x,
             y: bubbleY,
             width: bubbleWidth,
-            height: KeyBalloon.bubbleHeight
+            height: bubbleHeight
         )
         return KeyBalloon(keyFrame: key.frame, bubble: bubble)
     }
