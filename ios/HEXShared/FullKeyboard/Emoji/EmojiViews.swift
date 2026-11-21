@@ -91,7 +91,7 @@ final class EmojiSectionHeader: UICollectionReusableView {
 
     override init(frame: CGRect) {
         super.init(frame: frame)
-        label.font = .systemFont(ofSize: 12, weight: .medium)
+        label.font = .systemFont(ofSize: 13, weight: .semibold)
         label.isAccessibilityElement = false
         addSubview(label)
     }
@@ -101,7 +101,7 @@ final class EmojiSectionHeader: UICollectionReusableView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        label.frame = CGRect(x: 6 + shift, y: 0, width: max(0, bounds.width - 6 - shift), height: bounds.height)
+        label.frame = CGRect(x: 10 + shift, y: 0, width: max(0, bounds.width - 10 - shift), height: bounds.height)
     }
 
     override func prepareForReuse() {
@@ -277,7 +277,7 @@ final class EmojiCategoryBar: UIView {
             button.tag = index
             button.accessibilityLabel = item.title
             button.setImage(
-                UIImage(systemName: item.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 15, weight: .medium)),
+                UIImage(systemName: item.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)),
                 for: .normal
             )
             button.addTarget(self, action: #selector(tapped(_:)), for: .touchUpInside)
@@ -305,7 +305,8 @@ final class EmojiCategoryBar: UIView {
         chip.backgroundColor = palette.chipFill
         for (index, button) in buttons.enumerated() {
             let isSelected = index == selected
-            button.tintColor = isSelected ? palette.textBase : palette.textMuted
+            // The chip marks the section; the icons stay one grey, as the system keyboard's.
+            button.tintColor = palette.textMuted
             button.accessibilityTraits = isSelected ? [.button, .selected] : .button
         }
         setNeedsLayout()

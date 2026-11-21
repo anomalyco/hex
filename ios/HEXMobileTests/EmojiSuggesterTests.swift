@@ -204,9 +204,9 @@ final class EmojiSuggesterTests: XCTestCase {
     func testAnEmojiCellDrawsItsEmojiWhereALabelDid() throws {
         let renderer = EmojiGlyphRenderer()
         XCTAssertTrue(renderer.hasPrivateFont)
-        let size = CGSize(width: 42, height: 46)
+        let size = CGSize(width: 46, height: 40)
         for emoji in ["😀", "👍🏽", "🇳🇴", "❤️", "#️⃣", "🧑‍🧑‍🧒", "©️"] {
-            for fontSize: CGFloat in [29, 23] {
+            for fontSize: CGFloat in [32, 26] {
                 let label = UILabel(frame: CGRect(origin: .zero, size: size))
                 label.textAlignment = .center
                 label.font = .systemFont(ofSize: fontSize)

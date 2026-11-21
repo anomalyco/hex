@@ -117,6 +117,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         lettersKey.title = "ABC"
         lettersKey.isPrimary = true
         lettersKey.drawsLikeKeys = true
+        lettersKey.isPlain = true
         lettersKey.accessibilityLabel = "Letters"
         lettersKey.addTarget(self, action: #selector(lettersTapped), for: .touchUpInside)
         addSubview(lettersKey)
@@ -124,6 +125,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         deleteKey.symbol = "delete.left"
         deleteKey.isPrimary = true
         deleteKey.drawsLikeKeys = true
+        deleteKey.isPlain = true
         deleteKey.accessibilityLabel = "Delete"
         deleteKey.addTarget(self, action: #selector(deleteDown), for: .touchDown)
         deleteKey.addTarget(self, action: #selector(deleteUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
@@ -212,7 +214,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         suggestionRow.fontSize = rowFontSize
 
         let barY = bounds.height - metrics.keysBottom - barKeyHeight
-        let keyWidth = KeyboardLayout.letterWidth(innerWidth: bounds.width - 2 * horizontalInset, metrics: metrics) * KeyboardLayout.bottomSwitchWidthRatio
+        // ABC and delete are drawn without keys, so they take only their label's room and the
+        // categories get the rest.
+        let keyWidth = min(44, KeyboardLayout.letterWidth(innerWidth: bounds.width - 2 * horizontalInset, metrics: metrics) * KeyboardLayout.bottomSwitchWidthRatio)
         lettersKey.frame = CGRect(x: horizontalInset + side, y: barY, width: keyWidth, height: barKeyHeight)
         deleteKey.frame = CGRect(x: bounds.width - horizontalInset - side - keyWidth, y: barY, width: keyWidth, height: barKeyHeight)
         lettersKey.cornerRadius = metrics.cornerRadius
@@ -252,9 +256,10 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         let geometry = GridGeometry(
             rows: rows,
             rowHeight: rowHeight,
-            columnWidth: isRoomy ? 42 : 38,
+            // The system emoji keyboard's pitch and emoji size, measured from screenshots.
+            columnWidth: isRoomy ? 46 : 42,
             headerHeight: headerHeight,
-            fontSize: isRoomy ? 29 : 23,
+            fontSize: isRoomy ? 32 : 26,
             counts: sections.map(\.entries.count)
         )
         guard geometry != layoutKey, height > 0 else { return }
@@ -266,7 +271,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private static func makeLayout(_ g: GridGeometry) -> UICollectionViewCompositionalLayout {
         let config = UICollectionViewCompositionalLayoutConfiguration()
         config.scrollDirection = .horizontal
-        config.interSectionSpacing = 8
+        config.interSectionSpacing = 10
         let counts = g.counts
         return UICollectionViewCompositionalLayout(sectionProvider: { index, _ in
             let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(
@@ -333,7 +338,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
             cell.configure(
                 emoji: display(for: entry),
                 name: library.name(of: entry),
-                fontSize: layoutKey?.fontSize ?? 29,
+                fontSize: layoutKey?.fontSize ?? 32,
                 palette: palette,
                 renderer: glyphs,
                 scale: collectionView.traitCollection.displayScale
@@ -404,7 +409,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private func keepHeadersInView() {
         let left = grid.contentOffset.x
         for case let header as EmojiSectionHeader in grid.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionHeader) {
-            let room = max(0, header.frame.width - header.label.intrinsicContentSize.width - 12)
+            let room = max(0, header.frame.width - header.label.intrinsicContentSize.width - 16)
             header.shift = min(room, max(0, left - header.frame.minX))
         }
     }
@@ -492,7 +497,16 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// Opens the skin tone picker over a cell, the remembered tone selected.
     func showTones(for entry: Int, over frame: CGRect) {
         let item = library.entries[entry]
-        var menu = AccentMenu.build(for: frame, rawOptions: [item.emoji] + item.tones, in: bounds.width, horizontalInset: horizontalInset)
+        // As the system keyboard's: emoji about its grid's size, the untoned one set apart.
+        var menu = AccentMenu.build(
+            for: frame,
+            rawOptions: [item.emoji] + item.tones,
+            in: bounds.width,
+            horizontalInset: horizontalInset,
+            cellWidth: 44
+        )
+        tonePicker.optionFontSize = 28
+        tonePicker.separatedOption = item.emoji
         if let index = menu.options.firstIndex(of: display(for: entry)) { menu.selectedIndex = index }
         toneEntry = entry
         tonePicker.show(menu)

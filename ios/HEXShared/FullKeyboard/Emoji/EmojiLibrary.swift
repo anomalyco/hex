@@ -28,14 +28,14 @@ nonisolated enum EmojiCategory: Int, CaseIterable, Sendable {
     /// The category bar's SF Symbol.
     var symbol: String {
         switch self {
-        case .smileysPeople: "face.smiling"
-        case .animalsNature: "pawprint"
-        case .foodDrink: "fork.knife"
-        case .activity: "soccerball"
-        case .travelPlaces: "car"
-        case .objects: "lightbulb"
-        case .symbols: "number"
-        case .flags: "flag"
+        case .smileysPeople: "face.smiling.inverse"
+        case .animalsNature: "teddybear.fill"
+        case .foodDrink: "takeoutbag.and.cup.and.straw.fill"
+        case .activity: "soccerball.inverse"
+        case .travelPlaces: "building.2.fill"
+        case .objects: "lightbulb.fill"
+        case .symbols: "music.note"
+        case .flags: "flag.fill"
         }
     }
 }
