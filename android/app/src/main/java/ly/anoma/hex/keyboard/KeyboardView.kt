@@ -35,8 +35,14 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         status(SpeechPhase.Idle, context.getString(R.string.keyboard_hint_hold))
     }
 
-    override fun showPage(page: KeyboardPage) = keys.showPage(page)
+    override fun showPage(page: KeyboardPage) {
+        keys.showPage(page)
+        // What TalkBack names the keyboard as it appears, as Gboard's "English (US) (QWERTY)".
+        val title = context.getString(R.string.keyboard_pane, page.language.label)
+        if (accessibilityPaneTitle != title) accessibilityPaneTitle = title
+    }
     override fun suggestions(slots: List<Suggestion>) = strip.suggestions(slots)
+    override fun undoDictation(shown: Boolean) = strip.undo(shown)
 
     /** Emoji in place of the strip and the keys, the window's height unchanged (Gboard's panel
      * replaces its toolbar too); ABC brings both back. */

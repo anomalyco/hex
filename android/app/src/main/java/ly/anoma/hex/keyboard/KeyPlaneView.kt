@@ -111,6 +111,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         addView(bottom, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + bottomExtra))
         modeKey = caps.cap(context.getString(R.string.keyboard_numbers_label), context.getString(R.string.keyboard_numbers),
             modifier, 17f, ime.engine::mode)
+        modeKey.textEntry = false
         // ?123 switches pages as it goes down, as Gboard's; a slide onto a key types it and comes back.
         modeKey.setOnTouchListener { v, e ->
             when (e.actionMasked) {
@@ -134,6 +135,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             text = context.getString(R.string.keyboard_pad_label); textSize = 13f; useInter(500); setTextColor(ink)
             gravity = Gravity.CENTER; includeFontPadding = false; setLineSpacing(0f, 0.9f); visibility = GONE
         }, FrameLayout.LayoutParams(-1, -1))
+        emojiKey.textEntry = false
         typesOnLift(emojiKey, preview = { null }, holds = { emptyList() }, type = { emojiKey.performClick() })
         spaceKey = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) {
             ime.engine.space(spacePoint, if (current?.symbols == false) geometry() else null); spacePoint = null
@@ -173,6 +175,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         }
         period = caps.cap(".", context.getString(R.string.keyboard_period), modifier) { ime.engine.type(".") }
         // Held on the letters page, period offers Gboard's punctuation; on the symbol pages an ellipsis.
+        period.setOnLongClickListener {
+            host.openAccents(if (current?.symbols == false) LetterFeedback.periodHolds.flatten() else LetterFeedback.symbolHolds('.')); true
+        }
+        period.longClickLabel = context.getString(R.string.keyboard_more_characters)
         typesOnLift(period, preview = { null },
             holds = { if (current?.symbols == false) LetterFeedback.periodHolds else listOf(LetterFeedback.symbolHolds('.')) },
             default = { if (current?.symbols == false) LetterFeedback.PERIOD_DEFAULT else 0 },
@@ -180,6 +186,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         bottomSlides[period] = { ime.engine.type(".") }
         enterKey = caps.cap("", context.getString(R.string.keyboard_return), modifier, 17f, ime.engine::enter)
         enterKey.sound = AudioManager.FX_KEYPRESS_RETURN
+        enterKey.textEntry = false
         typesOnLift(enterKey, preview = { null }, holds = { emptyList() }, type = { enterKey.performClick() })
         enterIcon.setImageResource(R.drawable.ic_enter)
         enterIcon.imageTintList = ColorStateList.valueOf(ink)
@@ -190,6 +197,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         // Gboard's emoji panel ends with ABC and delete; Hex puts a space bar between them.
         val letters = caps.cap(context.getString(R.string.keyboard_letters_label), context.getString(R.string.keyboard_letters),
             modifier, 17f) { host.closeEmoji(); ime.engine.letters() }
+        letters.textEntry = false
         typesOnLift(letters, preview = { null }, holds = { emptyList() }, type = { letters.performClick() })
         val emojiSpace = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) { ime.engine.space() }
         emojiSpace.sound = AudioManager.FX_KEYPRESS_SPACEBAR
@@ -227,7 +235,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             val width = if (index < 2) 1f else (columns - 2 * side) / line.length
             if (index == 2) {
                 val switch = if (symbols) caps.cap(context.getString(if (page.more) R.string.keyboard_page_numbers else R.string.keyboard_page_symbols),
-                    context.getString(R.string.keyboard_more_symbols), modifier, 15f, ime.engine::shiftUp)
+                    context.getString(R.string.keyboard_more_symbols), modifier, 15f, ime.engine::shiftUp).also { it.textEntry = false }
                 else caps.icon(shiftIconFor(page), shiftDescription(page), modifier, { ime.engine.shiftDown(); ime.engine.shiftUp() }).also { key ->
                     shiftIcon = key.face.getChildAt(0) as ImageView
                     // Shift acts as it goes down and again as it lifts: a chord types capitals, and a slide
@@ -263,7 +271,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 val digit = if (symbols) null else KeyboardLetters.digit(index, position)
                 k.hint(digit?.toString())
                 fun holds() = if (symbols) LetterFeedback.symbolHolds(c) else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit)
-                if (holds().isNotEmpty()) k.setOnLongClickListener { host.openAccents(holds()); true }
+                if (holds().isNotEmpty()) {
+                    k.setOnLongClickListener { host.openAccents(holds()); true }
+                    k.longClickLabel = context.getString(R.string.keyboard_more_characters)
+                }
                 slides[k] = { p ->
                     val g = if (symbols) null else geometry()
                     if (g != null) ime.engine.letter(cased(c), p.x, p.y, g) else ime.engine.type(cased(c))
@@ -335,8 +346,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             PadAction.Enter -> (page.enter.label?.let { caps.cap(it, it, fill, 17f, ime.engine::enter) }
                 ?: caps.icon(actionIcon(page.enter.action), actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return),
                     fill, ime.engine::enter)).also { it.sound = AudioManager.FX_KEYPRESS_RETURN }
-            else -> caps.cap(label, if (key.action is PadAction.Go && key.word == 0) context.getString(R.string.keyboard_phone_symbols) else label,
-                fill, when { key.word != 0 -> 17f; label.length > 1 -> 21f; else -> 26f }) { act(key.action) }
+            else -> caps.cap(label, padDescription(key, label), fill, when { key.word != 0 -> 17f; label.length > 1 -> 21f; else -> 26f }) { act(key.action) }
         }
         // A phone digit's letters beside it, small and quiet, as Gboard's.
         key.letters?.let { letters ->
@@ -346,9 +356,21 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 setSpan(Centred, label.length, length, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE)
             }
         }
+        k.textEntry = key.action is PadAction.Text || key.action == PadAction.Space
+        key.hold?.let { held ->
+            k.setOnLongClickListener { ime.engine.type(held); true }
+            k.longClickLabel = context.getString(R.string.keyboard_type_held, held)
+        }
         typesOnLift(k, preview = { null }, holds = { key.hold?.let { listOf(listOf(it)) } ?: emptyList() },
             type = { option -> if (option != null) ime.engine.type(option) else k.performClick() })
         return k
+    }
+    // What TalkBack calls a pad's switches; other keys are their own label.
+    private fun padDescription(key: PadKey, label: String) = when (val action = key.action) {
+        is PadAction.Go -> context.getString(if (action.pad == Pad.PhoneSymbols) R.string.keyboard_phone_symbols else R.string.keyboard_phone_keypad)
+        PadAction.Letters -> context.getString(R.string.keyboard_letters)
+        PadAction.SymbolsPage -> context.getString(R.string.keyboard_symbols)
+        else -> label
     }
     /** Small letters beside a big digit sit at its middle, not on its baseline. */
     private object Centred : MetricAffectingSpan() {
@@ -554,7 +576,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
 
     private fun shiftIconFor(page: KeyboardPage) = when { page.locked -> R.drawable.ic_caps_lock; page.shifted -> R.drawable.ic_shift_on; else -> R.drawable.ic_shift }
-    private fun shiftDescription(page: KeyboardPage) = context.getString(if (page.locked) R.string.keyboard_caps_lock else R.string.keyboard_shift)
+    // As Gboard's: "Shift", "Shift enabled", "Caps lock enabled".
+    private fun shiftDescription(page: KeyboardPage) = context.getString(when {
+        page.locked -> R.string.keyboard_caps_lock_on; page.shifted -> R.string.keyboard_shift_on; else -> R.string.keyboard_shift
+    })
     /** Shift changed and nothing else: new labels on the same keys. */
     private fun relabel(page: KeyboardPage) {
         for ((c, key) in caseKeys) { val text = cased(c); key.label?.text = text; key.contentDescription = text }
@@ -624,7 +649,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
     fun refreshSpace() {
         val next = ime.preferences.options(ime.nextEnglish)
-        spaceKey.contentDescription = context.getString(R.string.keyboard_space_language, next.spoken.label)
+        spaceKey.contentDescription = context.getString(R.string.keyboard_space)
+        spaceKey.longClickLabel = context.getString(R.string.keyboard_space_language_action,
+            if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label)
         spaceKey.label?.text = if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label
         spaceKey.label?.textSize = if (next.translate) 12f else 14f
     }
