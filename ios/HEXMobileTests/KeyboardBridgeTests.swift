@@ -426,6 +426,25 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertNil(KeyboardBridge(defaults: defaults).lastEmptyDictationAt)
     }
 
+    func testHexKeyboardIsShownFromAppearingUntilItHides() {
+        XCTAssertFalse(KeyboardPresence.isShown(shownAt: nil, hiddenAt: nil, heartbeat: nil, now: 1_000), "never shown")
+        XCTAssertTrue(KeyboardPresence.isShown(shownAt: 999, hiddenAt: 990, heartbeat: nil, now: 1_000))
+        XCTAssertFalse(KeyboardPresence.isShown(shownAt: 990, hiddenAt: 999, heartbeat: nil, now: 1_000), "another keyboard or iOS's dictation took over")
+        XCTAssertFalse(KeyboardPresence.isShown(shownAt: 980, hiddenAt: nil, heartbeat: 985, now: 1_000), "no sign of life: the process ended")
+        XCTAssertTrue(KeyboardPresence.isShown(shownAt: 900, hiddenAt: 890, heartbeat: 995, now: 1_000), "the Full Access report it repeats while shown")
+
+        let suiteName = "hex.tests.presence.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        let now = Date().timeIntervalSince1970
+        XCTAssertFalse(bridge.isKeyboardShown(now: now))
+        bridge.recordKeyboardShown(at: now - 1)
+        XCTAssertTrue(KeyboardBridge(defaults: defaults).isKeyboardShown(now: now))
+        bridge.recordKeyboardHidden(at: now)
+        XCTAssertFalse(KeyboardBridge(defaults: defaults).isKeyboardShown(now: now))
+    }
+
     func testOnboardingPracticeCountsADictationOrAFewTypedWords() {
         XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, fullAccessOn: true), "one letter")
         XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, fullAccessOn: true))
