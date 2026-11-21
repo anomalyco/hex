@@ -4,6 +4,8 @@ import android.content.Context
 import android.content.res.Resources
 
 internal enum class Style { Polished, Casual, Notes, Verbatim }
+/** A keyboard layout's language: its keys, accents and typing model. Dictation languages are
+ * [DictationLanguage]; a language can be dictated without a layout of its own. */
 internal enum class Spoken(val code: String, val label: String) {
     English("en", "English"), Spanish("es", "Español"), German("de", "Deutsch"), Norwegian("no", "Norsk");
 
@@ -16,7 +18,22 @@ internal enum class Spoken(val code: String, val label: String) {
         }
     }
 }
-internal data class SpeechOptions(val style: Style, val spoken: Spoken, val clean: Boolean, val translate: Boolean,
+
+/** What Whisper is asked to transcribe ([code], Whisper's name for it) and the layout the
+ * keyboard follows while it is the dictation language, when there is one. */
+internal enum class DictationLanguage(val code: String, val label: String, val layout: Spoken?) {
+    English("en", "English", Spoken.English), Spanish("es", "Español", Spoken.Spanish),
+    German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian);
+
+    companion object {
+        fun matching(code: String?): DictationLanguage? = when (code) {
+            "no", "nb", "nn" -> Norwegian
+            else -> entries.firstOrNull { it.code == code }
+        }
+    }
+}
+
+internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
                                    val formatLists: Boolean = false, val spokenPunctuation: Boolean = false,
                                    val vocabulary: List<String> = emptyList())
@@ -26,15 +43,15 @@ internal class SpeechPreferences(context: Context) {
         get() = Style.entries.firstOrNull { it.name == prefs.getString("style", null) } ?: Style.Polished
         set(value) { prefs.edit().putString("style", value.name).apply() }
     // Null means Automatic; never save the resolved locale over that choice.
-    var language: Spoken?
-        get() = Spoken.matching(prefs.getString("spoken", null))
+    var language: DictationLanguage?
+        get() = DictationLanguage.matching(prefs.getString("spoken", null))
         set(value) { prefs.edit().putString("spoken", value?.code).apply() }
-    val spoken: Spoken
+    val spoken: DictationLanguage
         get() {
             language?.let { return it }
             val locales = Resources.getSystem().configuration.locales
-            for (i in 0 until locales.size()) Spoken.matching(locales[i].language)?.let { return it }
-            return Spoken.English
+            for (i in 0 until locales.size()) DictationLanguage.matching(locales[i].language)?.let { return it }
+            return DictationLanguage.English
         }
     var clean: Boolean
         get() = prefs.getBoolean("clean", false)
@@ -66,6 +83,6 @@ internal class SpeechPreferences(context: Context) {
         get() = prefs.getString("vocabularyTerms", null)?.split('\n').orEmpty().filter(String::isNotEmpty)
         set(value) { prefs.edit().putString("vocabularyTerms", VocabularySpelling.sanitize(value).joinToString("\n")).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
-        translation && spoken == Spoken.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,
+        translation && spoken == DictationLanguage.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,
         if (customVocabulary) vocabularyTerms else emptyList())
 }

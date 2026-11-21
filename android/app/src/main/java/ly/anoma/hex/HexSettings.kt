@@ -223,13 +223,14 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     }
                     Page.Language, Page.Layout -> Card {
                         val layout = page == Page.Layout
-                        (listOf(null) + Spoken.entries).forEachIndexed { i, it ->
+                        // Layouts and dictation languages are separate lists that happen to match today.
+                        val choices: List<Triple<String?, Boolean, () -> Unit>> =
+                            if (layout) (listOf(null) + Spoken.entries).map { Triple(it?.label, it == selectedLayout, { typing.layout = it }) }
+                            else (listOf(null) + DictationLanguage.entries).map { Triple(it?.label, it == selectedLanguage, { speech.language = it }) }
+                        choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
-                            Entry(it?.label ?: "Automatic", if (it != null) null else if (layout) "Follow dictation language" else "Follow system language",
-                                if (it == (if (layout) selectedLayout else selectedLanguage)) "✓" else "", {
-                                    if (layout) typing.layout = it else speech.language = it
-                                    open(page.parent)
-                                })
+                            Entry(label ?: "Automatic", if (label != null) null else if (layout) "Follow dictation language" else "Follow system language",
+                                if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }
                     Page.Policy, Page.Licences -> {

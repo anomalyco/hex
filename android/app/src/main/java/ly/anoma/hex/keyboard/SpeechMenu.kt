@@ -6,7 +6,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import ly.anoma.hex.R
-import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.Style
 import ly.anoma.hex.useInter
 import kotlin.math.roundToInt
@@ -42,7 +42,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
             Page.Home -> {
                 row(s(R.string.keyboard_menu_style), more(prefs.style.name)) { show(Page.Style) }
                 row(s(R.string.keyboard_menu_language), more(prefs.language?.label ?: s(R.string.keyboard_menu_automatic))) { show(Page.Language) }
-                if (prefs.translation && prefs.spoken == Spoken.Spanish)
+                if (prefs.translation && prefs.spoken == DictationLanguage.Spanish)
                     row(s(R.string.keyboard_menu_next_dictation),
                         more(s(if (ime.nextEnglish != false) R.string.keyboard_paste_english else R.string.keyboard_paste_spoken))) {
                         show(Page.NextDictation)
@@ -63,7 +63,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
             Page.Style -> Style.entries.forEach { value -> row(value.name, if (prefs.style == value) chosen else "") {
                 prefs.style = value; home()
             } }
-            Page.Language -> (listOf(null) + Spoken.entries).forEach { value ->
+            Page.Language -> (listOf(null) + DictationLanguage.entries).forEach { value ->
                 row(value?.label ?: s(R.string.keyboard_menu_automatic), if (prefs.language == value) chosen else "") {
                     prefs.language = value; ime.nextEnglish = null; close()
                 }
