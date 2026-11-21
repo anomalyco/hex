@@ -1626,6 +1626,49 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertGreaterThan(afterUs - afterThink, 3, "\"I'm\" after \"think\", hardly after \"us\"")
     }
 
+    /// TestFlight (Jason, build 56): "Swipe typing keeps auto capitalising in most cases, even
+    /// when it shouldn't. It doesn't work how Apple's keyboard does, where it capitalises only
+    /// after a full stop." Shift and auto-capitalisation around swipes are right on dev (after
+    /// a comma, a swipe, a pick from the strip, a delete, a tapped word, and a sentence-start
+    /// capital you turned off; a capital after "." and for "I'm"). What still gave a capital
+    /// mid-sentence was your own words: a Contacts name that is also a common word ("Bell",
+    /// "Will") read as the name. Apple's keyboard (black box, iOS 27.2, contact Kate Bell)
+    /// swipes "the bell rang" in lowercase.
+    func testSwipedWordsTakeACapitalOnlyWhereApplesKeyboardGivesOne() throws {
+        let (field, plane) = try swipeKeyboard()
+        field.autocapitalizationType = .sentences
+        plane.engine.autocorrect.loadLexiconEntries([("Bell", "Bell"), ("Will", "Will"), ("Taylor", "Taylor")])
+        plane.engine.refreshAutoCapitalization()
+        XCTAssertTrue(plane.engine.shift.isUppercase, "an empty field starts a sentence")
+        tap(.shift, on: plane)
+        swipe("hello", on: plane)
+        swipe("there", on: plane)
+        XCTAssertEqual(field.text, "hello there", "the capital you turned off stays off")
+        let pick = try XCTUnwrap(plane.engine.suggestions.first)
+        plane.engine.acceptSuggestion(pick)
+        swipe("the", on: plane)
+        swipe("bell", on: plane)
+        tap(.delete, on: plane)
+        swipe("bell", on: plane)
+        swipe("will", on: plane)
+        XCTAssertEqual(field.text, "hello \(pick.replacement) the bell will", "after a pick and a delete")
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character(","), on: plane)
+        tap(.layerSwitch(.letters), on: plane)
+        swipe("ring", on: plane)
+        for letter in "now" { tap(.character(String(letter)), on: plane) }
+        tap(.space, on: plane)
+        swipe("for", on: plane)
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character("."), on: plane)
+        tap(.layerSwitch(.letters), on: plane)
+        swipe("will", on: plane)
+        XCTAssertEqual(field.text, "hello \(pick.replacement) the bell will, ring now for. Will", "a capital only after the full stop")
+        XCTAssertEqual(plane.engine.swipeCased("Taylor", capital: false), "Taylor", "a name keeps its capital")
+        XCTAssertEqual(plane.engine.swipeCased("Bell", capital: false), "bell")
+        XCTAssertEqual(plane.engine.swipeCased("I'm", capital: false), "I'm")
+    }
+
     func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {
         let (field, plane) = try swipeKeyboard()
         swipe("hello", on: plane)
@@ -1662,6 +1705,27 @@ final class FullKeyboardEngineTests: XCTestCase {
         swipe("hello", on: plane)
         tap(.space, on: plane)
         XCTAssertEqual(field.text, "hello ", "a text replacement applies to what you type, not to a swiped word")
+    }
+
+    /// Apple's keyboard (black box, iOS 27.2) offers a text replacement in the strip after a
+    /// swipe that read as its shortcut, and space leaves the swiped word; a shortcut tapped
+    /// after a swiped word goes in on space as anywhere else.
+    func testASwipedShortcutOffersItsReplacementAndATappedOneGoesIn() throws {
+        let (field, plane) = try swipeKeyboard("I'm")
+        plane.engine.autocorrect.loadLexiconEntries([("home", "at my house"), ("myem", "jason@example.com")])
+        swipe("home", on: plane)
+        XCTAssertEqual(field.text, "I'm home")
+        let offer = try XCTUnwrap(plane.engine.suggestions.first { $0.replacement == "at my house" }, "\(plane.engine.suggestions)")
+        XCTAssertEqual(plane.engine.suggestions.count >= 2 ? plane.engine.suggestions[1] : plane.engine.suggestions[0], offer, "in the centre")
+        plane.engine.acceptSuggestion(offer)
+        XCTAssertEqual(field.text, "I'm at my house")
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "I'm", "delete still takes what the swipe put in back")
+
+        swipe("hello", on: plane)
+        for letter in "myem" { tap(.character(String(letter)), on: plane) }
+        tap(.space, on: plane)
+        XCTAssertEqual(field.text, "I'm hello jason@example.com ")
     }
 
     func testTapsShortSlidesAndAccentsStillTypeWithSwipeTypingOn() throws {

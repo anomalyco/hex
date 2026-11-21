@@ -292,6 +292,28 @@ final class AutocorrectEngine {
         return first.uppercased() + stored.dropFirst()
     }
 
+    /// Your text replacement whose shortcut ends `before`, as Apple's keyboard finds one
+    /// (black box, iOS 27.2): a shortcut may hold digits and punctuation ("ad2", "s.o"), and may
+    /// follow an opening bracket or a comma ("(myem", "hi,myem"), but never the end of a longer
+    /// word ("xmyem"). The longest one wins. `typed` is the shortcut as typed, `replacement`
+    /// cased as `shortcut(for:)` writes it. Nothing turns one off: Apple's keyboard applies a
+    /// text replacement every time, however often you kept the shortcut.
+    func textReplacement(before: String?) -> (typed: String, replacement: String)? {
+        guard !lexiconShortcuts.isEmpty, let before, before.last.map({ !$0.isWhitespace }) == true else { return nil }
+        let chunk = before.suffix(64).reversed().prefix { !$0.isWhitespace }.reversed()
+        let joins: (Character) -> Bool = { $0.isLetter || $0.isNumber || $0 == "'" || $0 == "\u{2019}" }
+        var start = chunk.startIndex
+        while start < chunk.endIndex {
+            let atBoundary = start == chunk.startIndex || !joins(chunk[chunk.index(before: start)]) || !joins(chunk[start])
+            let typed = String(chunk[start...])
+            if atBoundary, let replacement = shortcut(for: typed) {
+                return (typed, replacement)
+            }
+            start = chunk.index(after: start)
+        }
+        return nil
+    }
+
     func clearPendingUndo() {
         lastCorrection = nil
     }
@@ -511,7 +533,17 @@ final class AutocorrectEngine {
         predictionModel: TypingDecoderModel? = nil,
         capitalizesNext: Bool = false
     ) -> [KeyboardSuggestion] {
-        guard field == .text, autocorrectionType != .no, hasDictionary else { return [] }
+        guard field == .text, autocorrectionType != .no else { return [] }
+        // Your text replacement shows as Apple's keyboard shows it ("myem": "myem", then the
+        // address Space puts in), in any language and whatever the word's history.
+        let replaced = textReplacement(before: beforeInput)
+        let replacementOnly = replaced.map { typed, replacement in
+            [
+                KeyboardSuggestion(displayText: "“\(typed)”", replacement: typed, kind: .keepLiteral),
+                KeyboardSuggestion(displayText: replacement, replacement: replacement, kind: .primary(autoReplace: true)),
+            ]
+        }
+        guard hasDictionary else { return replacementOnly ?? [] }
         // An empty field, or a new sentence (". ", "! ", "? ", a new line): three common
         // first words, as Apple's keyboard offers.
         if Self.isSentenceStart(beforeInput) {
@@ -534,19 +566,21 @@ final class AutocorrectEngine {
             // after the model's, so no slot stays empty.
             return predictions(words + Self.commonWords(language), previous: previous, capitalized: capitalizesNext)
         }
-        guard let token = Self.currentToken(in: beforeInput) else { return [] }
+        guard let token = Self.currentToken(in: beforeInput) else { return replacementOnly ?? [] }
+        // A shortcut with digits or punctuation ("ad2", "s.o"): only it.
+        if let replaced, replaced.typed.count != token.count { return replacementOnly ?? [] }
         self.beforeInput = beforeInput
 
         let lower = token.lowercased()
-        // Chat shorthand ("brb") is left alone, unless it is your own text replacement's shortcut.
+        // Chat shorthand ("brb") is left alone.
         let allowAuto = !suppressedInSession.contains(lower)
             && !learning.rejected.contains(lower)
             && !learnedWords.contains(lower)
-            && (!Self.shorthandAllowlist.contains(lower) || lexiconShortcuts[lower] != nil)
+            && !Self.shorthandAllowlist.contains(lower)
 
         partner?.beforeInput = beforeInput
         // Autocorrect off: your text replacements only.
-        let autoFix = !allowAuto ? nil : isEnabled ? cautiousReplacement(for: token) : shortcut(for: token)
+        let autoFix = replaced?.replacement ?? (allowAuto && isEnabled ? cautiousReplacement(for: token) : nil)
         var pool: [String] = autoFix.map { [$0] } ?? []
 
         if let partner = workingPartner {
@@ -604,7 +638,7 @@ final class AutocorrectEngine {
         if corrects, autoFix == nil {
             if let learned = learning.typos[lower], mayOffer(learned, replacing: token) {
                 // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
-                pool.append(Self.matchCase(of: token, onto: learned))
+                pool.append(cased(learned, typed: token))
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
                 pool.append(Self.matchCase(of: token, onto: suggested))
             }
@@ -623,9 +657,9 @@ final class AutocorrectEngine {
         // Spatial autocorrect's other readings of your taps.
         if corrects, let decision = decoderDecision(for: token) {
             for reading in decision.readings where pool.count < end && mayOffer(reading.text, replacing: token) {
-                let cased = Self.matchCase(of: token, onto: reading.text)
-                if !has(cased) {
-                    pool.append(cased)
+                let text = cased(reading.text, typed: token)
+                if !has(text) {
+                    pool.append(text)
                 }
             }
         }
@@ -635,9 +669,9 @@ final class AutocorrectEngine {
             let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower) || checker.isWordValid(token)
             if !valid {
                 for guess in rankedGuesses(for: token) {
-                    let cased = Self.matchCase(of: token, onto: guess)
-                    if cased.caseInsensitiveCompare(token) != .orderedSame, mayOffer(guess, replacing: token), !has(cased) {
-                        pool.append(cased)
+                    let fixed = cased(guess, typed: token)
+                    if fixed.caseInsensitiveCompare(token) != .orderedSame, mayOffer(guess, replacing: token), !has(fixed) {
+                        pool.append(fixed)
                     }
                     if pool.count >= end { break }
                 }
@@ -678,7 +712,7 @@ final class AutocorrectEngine {
         where term.count > token.count && term.lowercased().hasPrefix(lower) && seen.insert(term.lowercased()).inserted {
             if isName(term) && !typedCapital { names.append(term) } else { yours.append(term) }
         }
-        return (common + yours + names).map { Self.matchCase(of: token, onto: $0) }
+        return (common + yours + names).map { cased($0, typed: token) }
     }
 
     /// Returns `(tokenToDelete, replacement)` only when cautious autocorrect is confident, or
@@ -689,6 +723,10 @@ final class AutocorrectEngine {
         autocorrectionType: UITextAutocorrectionType?
     ) -> (original: String, replacement: String)? {
         guard field == .text, autocorrectionType != .no else { return nil }
+        // Your own text replacement comes first, as on Apple's keyboard: before the chat
+        // shorthand Hex leaves alone ("brb"), with Autocorrect off or no dictionary, and
+        // however often you kept the shortcut.
+        if let replaced = textReplacement(before: beforeInput) { return (replaced.typed, replaced.replacement) }
         guard let token = Self.currentToken(in: beforeInput) else { return nil }
         self.beforeInput = beforeInput
         partner?.beforeInput = beforeInput
@@ -696,9 +734,6 @@ final class AutocorrectEngine {
         guard !suppressedInSession.contains(lower),
               !learning.rejected.contains(lower),
               !learnedWords.contains(lower) else { return nil }
-        // Your own text replacement comes first, as on Apple's keyboard: before the chat
-        // shorthand Hex leaves alone ("brb"), and with Autocorrect off or no dictionary.
-        if let shortcut = shortcut(for: token) { return (token, shortcut) }
         guard isEnabled, hasDictionary, !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
         return (token, fix)
@@ -775,7 +810,7 @@ final class AutocorrectEngine {
         // A typo you fixed the same way at least twice (Learn how I type), unless what you
         // typed is a real word: then it is only suggested.
         if let learned = learning.typos[lower], mayOffer(learned, replacing: token), !checker.isWordValid(token) {
-            return Self.matchCase(of: token, onto: learned)
+            return cased(learned, typed: token)
         }
         // Leave ALL-CAPS acronyms (`API`, `PR`, `NYC`) alone unless matched in `UILexicon` above,
         // except unambiguous all-caps contractions/typos of 3+ letters (`DONT` -> `DON'T`, `TEH` -> `THE`).
@@ -806,7 +841,7 @@ final class AutocorrectEngine {
         // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
         if let decision = decoderDecision(for: token) {
             if let replacement = decision.replacement, mayOffer(replacement, replacing: token) {
-                var cased = Self.matchCase(of: token, onto: replacement)
+                var cased = self.cased(replacement, typed: token)
                 // A missed space after English "i" ("iwant") gives "I want", as "i" alone does.
                 if language.usesEnglishFixes, cased.contains(" ") {
                     cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
@@ -853,7 +888,30 @@ final class AutocorrectEngine {
             }
         }
         guard let bestGuess, bestScore <= 1.35 else { return nil }
-        return withoutAddedCapitals(Self.matchCase(of: token, onto: bestGuess), typed: token)
+        return withoutAddedCapitals(cased(bestGuess, typed: token), typed: token)
+    }
+
+    /// `candidate` cased as `token` was typed (`matchCase`), less a capital it only has
+    /// from where it was learned (`withoutStrayCapital`).
+    private func cased(_ candidate: String, typed token: String) -> String {
+        withoutStrayCapital(Self.matchCase(of: token, onto: candidate), typed: token)
+    }
+
+    /// `word` without a capital first letter it only has from where it was learned: a fix
+    /// you picked at the start of a sentence ("Helli" to "Hello"), a guess iOS knows
+    /// capitalised, a Contacts name that is also a common word ("Bell", "Will"). When `typed`
+    /// starts in lowercase and the dictionary knows the word in lowercase, it is written in
+    /// lowercase, as Apple's keyboard writes "bell" mid-sentence beside a contact Kate Bell
+    /// (black box, iOS 27.2). Names the dictionary knows only capitalised ("Taylor"), "I" and
+    /// its contractions, words with more capitals ("iPhone") and German, whose nouns take
+    /// capitals, keep theirs.
+    func withoutStrayCapital(_ word: String, typed: String) -> String {
+        guard language != .german, hasDictionary, typed.first?.isUppercase != true, word.count >= 2,
+              let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
+              !word.contains(" ") else { return word }
+        let lower = first.lowercased() + word.dropFirst()
+        if language.usesEnglishFixes, lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}") { return word }
+        return checker.isWordValid(lower) ? lower : word
     }
 
     /// `fix` for `token` as autocorrect puts it in: with `addsCapitals` off and nothing
@@ -1316,167 +1374,4 @@ final class AutocorrectEngine {
         let dy = pa.0 - pb.0
         return (dx * dx + dy * dy).squareRoot() <= 1.6
     }
-
-    // MARK: - Built-in dictionaries
-
-    /// Valid words where an apostrophe form exists, offered as a suggestion without clobbering the word.
-    static let suggestOnlyContractions: [String: String] = [
-        "ill": "I'll",
-        "id": "I'd",
-        "were": "we're",
-        "wed": "we'd",
-        "well": "we'll",
-        "its": "it's",
-        "lets": "let's",
-        "hell": "he'll",
-        "shell": "she'll",
-    ]
-
-    /// Words a period after them makes an abbreviation ("approx.", "etc."): a period never
-    /// corrects them.
-    static let abbreviations: Set<String> = [
-        "approx", "appt", "apt", "assn", "asst", "ave", "blvd", "cf", "co", "corp", "dept", "dr",
-        "eg", "est", "etc", "fig", "govt", "ie", "inc", "jr", "lb", "lbs", "ltd", "misc", "mr",
-        "mrs", "ms", "mt", "no", "nr", "oz", "pp", "prof", "pt", "rd", "sr", "st", "vol", "vs", "wk", "yr",
-    ]
-
-    /// Common chat & engineering shorthand that cautious autocorrect never rewrites.
-    static let shorthandAllowlist: Set<String> = [
-        "ok", "okay", "ty", "thx", "pls", "plz", "tmrw", "tbh", "idk", "imo", "imho",
-        "lol", "lmao", "omg", "brb", "btw", "afaik", "fyi", "nvm", "rn", "irl", "jk",
-        "np", "yw", "smh", "ikr", "ngl", "fr", "gg", "dm", "pr", "prs", "ci", "ui",
-        "ux", "ios", "macos", "api", "apis", "url", "urls", "json", "sql", "ssh", "cli",
-        "gpu", "cpu", "ram", "sdk", "hex", "wisp", "seer", "rune", "kit", "gonna",
-        "wanna", "gotta", "kinda", "sorta", "yeah", "yep", "nope", "nah", "hey", "yo",
-    ]
-
-    /// ~125 unambiguous missing-apostrophe contractions and high-frequency QWERTY transpositions.
-    static let unambiguousFixes: [String: String] = [
-        // Pronoun & missing-apostrophe contractions
-        "i": "I",
-        "im": "I'm",
-        "ive": "I've",
-        "dont": "don't",
-        "cant": "can't",
-        "wont": "won't",
-        "didnt": "didn't",
-        "doesnt": "doesn't",
-        "isnt": "isn't",
-        "arent": "aren't",
-        "wasnt": "wasn't",
-        "werent": "weren't",
-        "hasnt": "hasn't",
-        "havent": "haven't",
-        "hadnt": "hadn't",
-        "wouldnt": "wouldn't",
-        "couldnt": "couldn't",
-        "shouldnt": "shouldn't",
-        "mustnt": "mustn't",
-        "neednt": "needn't",
-        "youre": "you're",
-        "youve": "you've",
-        "youd": "you'd",
-        "youll": "you'll",
-        "theyre": "they're",
-        "theyve": "they've",
-        "theyd": "they'd",
-        "theyll": "they'll",
-        "weve": "we've",
-        "shes": "she's",
-        "hes": "he's",
-        "itll": "it'll",
-        "thats": "that's",
-        "theres": "there's",
-        "heres": "here's",
-        "wheres": "where's",
-        "whos": "who's",
-        "whats": "what's",
-        "hows": "how's",
-        "whens": "when's",
-        "whys": "why's",
-        "aint": "ain't",
-        "yall": "y'all",
-        "oclock": "o'clock",
-        "maam": "ma'am",
-        "cmon": "c'mon",
-        "wouldve": "would've",
-        "couldve": "could've",
-        "shouldve": "should've",
-        "mightve": "might've",
-        "mustve": "must've",
-        // High-frequency QWERTY transpositions & fat-finger typos
-        "teh": "the",
-        "hte": "the",
-        "taht": "that",
-        "thta": "that",
-        "adn": "and",
-        "nad": "and",
-        "wiht": "with",
-        "iwth": "with",
-        "waht": "what",
-        "hwat": "what",
-        "wich": "which",
-        "whcih": "which",
-        "thier": "their",
-        "theri": "their",
-        "recieve": "receive",
-        "definately": "definitely",
-        "seperate": "separate",
-        "occured": "occurred",
-        "untill": "until",
-        "abotu": "about",
-        "baout": "about",
-        "becuase": "because",
-        "beacuse": "because",
-        "jsut": "just",
-        "jstu": "just",
-        "knwo": "know",
-        "konw": "know",
-        "tiem": "time",
-        "tmie": "time",
-        "shoudl": "should",
-        "hsould": "should",
-        "woudl": "would",
-        "owuld": "would",
-        "coudl": "could",
-        "oculd": "could",
-        "ahve": "have",
-        "hvae": "have",
-        "maek": "make",
-        "mkae": "make",
-        "thign": "thing",
-        "hting": "thing",
-        "peopel": "people",
-        "poeple": "people",
-        "workign": "working",
-        "goign": "going",
-        "doign": "doing",
-        "runnign": "running",
-        "comign": "coming",
-        "thnaks": "thanks",
-        "htanks": "thanks",
-        "plase": "please",
-        "pleaes": "please",
-        "yuor": "your",
-        "yoru": "your",
-        "yuo": "you",
-        "oyu": "you",
-        "fomr": "from",
-        "verry": "very",
-        "evrey": "every",
-        "realyl": "really",
-        "realy": "really",
-        "actualyl": "actually",
-        "probalby": "probably",
-        "tomorow": "tomorrow",
-        "tommorow": "tomorrow",
-        "tonihgt": "tonight",
-        "tongiht": "tonight",
-        "mesasge": "message",
-        "messgae": "message",
-        "keybaord": "keyboard",
-        "keboard": "keyboard",
-        "iphnoe": "iPhone",
-        "ipohne": "iPhone",
-    ]
 }

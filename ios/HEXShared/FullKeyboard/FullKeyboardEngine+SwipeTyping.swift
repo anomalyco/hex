@@ -72,6 +72,9 @@ extension FullKeyboardEngine {
 
     /// A reading as it's typed: all capitals with caps lock, a capital first letter with
     /// `capital`, else a name the dictionary only knows capitalised ("monday" -> "Monday").
+    /// One of your own words with a capital that is also a common word (a Contacts name such
+    /// as "Bell" or "Will") is written as the sentence needs it, as Apple's keyboard swipes
+    /// "the bell rang" beside a contact Kate Bell (`AutocorrectEngine.withoutStrayCapital`).
     /// With Auto-capitalization off, no capital you didn't ask for ("i'm", "monday"), but
     /// your own spellings keep theirs.
     func swipeCased(_ word: String, capital: Bool) -> String {
@@ -81,7 +84,28 @@ extension FullKeyboardEngine {
         if !autoCapitalizes {
             return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
         }
-        return swipeReadsAsName(word) ? first.uppercased() + word.dropFirst() : word
+        if swipeReadsAsName(word) { return first.uppercased() + word.dropFirst() }
+        return autocorrect.withoutStrayCapital(word, typed: "")
+    }
+
+    /// The strip's other readings after a swipe, cased as its word is (`readings` best first,
+    /// the first the one typed). A reading that is a text replacement's shortcut shows as its
+    /// replacement ("home" as "at my house"), the swiped word's first, as Apple's keyboard
+    /// offers one after a swipe (black box, iOS 27.2); space never puts it in.
+    func swipeAlternatives(_ readings: [String], capital: Bool) -> [String] {
+        func replacement(_ reading: String) -> String? {
+            guard target.autocorrectionType != .no else { return nil }
+            let typed = capital ? reading.prefix(1).uppercased() + reading.dropFirst() : reading
+            guard let replaced = autocorrect.textReplacement(before: typed), replaced.typed.count == typed.count else { return nil }
+            return replaced.replacement
+        }
+        var out: [String] = []
+        if let first = readings.first, let phrase = replacement(first) { out.append(phrase) }
+        for reading in readings.dropFirst() {
+            let item = replacement(reading) ?? swipeCased(reading, capital: capital)
+            if !out.contains(item) { out.append(item) }
+        }
+        return Array(out.prefix(3))
     }
 
     /// Whether a swipe's reading, as the model spells it (lowercase), is a word the dictionary
