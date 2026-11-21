@@ -9,7 +9,7 @@ use rune::{
 };
 use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
-use super::clip::{Clip, duration_label, size_label};
+use super::clip::{Clip, Grip, duration_label, position_label, size_label};
 use super::marks::{self, Mark, Tool};
 use super::{
     Editor, Layout, Listen, Out, PAD, Pressed, SendList, Sessions, Shot, Talk, clamp_panel,
@@ -19,7 +19,7 @@ use crate::app_settings::ExportSize;
 use crate::desktop::i18n::tr;
 use crate::rune_ui::capture_capsule::ink::{ink_red, layer};
 use crate::rune_ui::capture_capsule::surface::{self, CHIP_H, CHIP_PX, SHELL_RADIUS, medium};
-use crate::rune_ui::controls::{Paint, status_dot};
+use crate::rune_ui::controls::{PAUSE, PLAY, Paint, status_dot};
 use crate::rune_ui::icons::{ARROW_TOOL, BOX_TOOL, CROP_TOOL, MIC, PEN, TEXT_TOOL};
 
 /// The panel's corner, the capsule's and the thumbnail's.
@@ -139,7 +139,9 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         .child(toolbar(p, s, w - 2.0 * PAD).absolute(PAD, PAD))
         .child(canvas_el(p, s, shot, layout));
     if let Some(clip) = &s.clip {
-        panel = panel.child(strip_el(p, clip, layout));
+        panel = panel
+            .child(transport_el(p, clip, layout))
+            .child(strip_el(p, clip, layout));
     }
     let mut panel = panel.child(words_el(p, s, layout));
     if let Some(list) = &s.send {
@@ -168,6 +170,20 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
         .pixels_fit(shot.image.pixels(), rune::SurfaceFit::Fit)
         .clip_rounded(INNER_RADIUS)
         .instant_changes();
+    if let Some(player) = s
+        .clip
+        .as_ref()
+        .filter(|c| c.live)
+        .and_then(|c| c.player.as_ref())
+    {
+        image = image.child(
+            el().key("movie")
+                .absolute(0.0, 0.0)
+                .size(iw, ih)
+                .radius(INNER_RADIUS)
+                .video(player, rune::SurfaceFit::Fit),
+        );
+    }
     // A recording's frame takes no marks.
     if s.clip.is_none() {
         image =
@@ -251,15 +267,14 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
     let mut bar = row().center_y().gap(2.0).size(w, CHIP_H);
     if let Some(clip) = &s.clip {
         let [from, to] = clip.trim;
-        bar = bar.child(
-            text(format!("{} – {}", duration_label(from), duration_label(to)))
+        bar = bar.child(export_size(k, s)).child(
+            text(format!("{} – {}", position_label(from), duration_label(to)))
                 .key("span")
                 .font(medium())
                 .color(p.muted())
                 .single_line()
-                .px(CHIP_PX - 4.0),
+                .px(6.0),
         );
-        bar = bar.child(export_size(k, s));
     }
     for tool in Tool::ALL.into_iter().filter(|_| s.clip.is_none()) {
         bar = bar.child(
@@ -304,6 +319,12 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
                 .on_press_tx(|s: &mut Editor, tx| s.retry(tx)),
         ));
     }
+    // A recording's size is picked beside it, so its save says what it does.
+    let save = if s.clip.is_some() {
+        tr("Export")
+    } else {
+        tr("Save")
+    };
     bar.child(push(
         k,
         Button::new(pressed_label(s, Pressed::Copy, tr("Copy")))
@@ -312,7 +333,7 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
     ))
     .child(push(
         k,
-        Button::new(pressed_label(s, Pressed::Save, tr("Save")))
+        Button::new(pressed_label(s, Pressed::Save, save))
             .variant(ButtonVariant::Ghost)
             .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Save, tx)),
     ))
@@ -358,8 +379,17 @@ fn export_size(k: &rune_kit::Kit, s: &Editor) -> El {
         .into_iter()
         .map(|size| (size.id().to_owned(), label(size)))
         .collect();
+    let shown = title.clone();
     let button = Button::new(title)
-        .variant(ButtonVariant::Ghost)
+        .variant(ButtonVariant::Outline)
+        .help(tr("Export size"))
+        .label_with(move |font, ink| {
+            row()
+                .center_y()
+                .gap(4.0)
+                .child(text(shown).font(font).color(ink).single_line())
+                .child(rune::icon(&rune_theme_opencode::icons::CHEVRON_DOWN, 10.0).color(ink))
+        })
         .on_press_tx(move |_: &mut Editor, tx| {
             let menu = PopupMenu::picker(options.clone(), size.id());
             tx.popup_menu(menu, "export-size", |s: &mut Editor, picked, tx| {
@@ -486,11 +516,58 @@ fn words_el(p: Paint, s: &Editor, layout: Layout) -> El {
 }
 
 /// A handle's width, at each end of the span kept.
-const HANDLE_W: f32 = 8.0;
+const HANDLE_W: f32 = 12.0;
+const PLAYHEAD_W: f32 = 3.0;
+/// How near a handle, in points, a press takes it rather than the playhead.
+const HANDLE_REACH: f32 = 16.0;
+
+/// Play or Pause, and where the playhead is of the whole recording.
+fn transport_el(p: Paint, clip: &Clip, layout: Layout) -> El {
+    let k = p.k;
+    let [x, y, w, h] = layout.transport;
+    let name = if clip.playing {
+        tr("Pause")
+    } else {
+        tr("Play")
+    };
+    let play = IconButton::new(if clip.playing { &PAUSE } else { &PLAY })
+        .variant(IconButtonVariant::Ghost)
+        .control_size(ControlSize::Large)
+        .label(name)
+        .help(name)
+        .shortcut("Space")
+        .on_press_tx(|s: &mut Editor, tx| {
+            if let Some(clip) = &mut s.clip {
+                clip.toggle_play();
+            }
+            tx.wake_after(Duration::ZERO);
+        })
+        .build(k)
+        .key("play");
+    row()
+        .key("transport")
+        .absolute(x, y)
+        .size(w, h)
+        .center_y()
+        .gap(4.0)
+        .child(play)
+        .child(
+            text(format!(
+                "{} / {}",
+                position_label(clip.at_ms),
+                duration_label(clip.duration_ms)
+            ))
+            .key("time")
+            .font(surface::small())
+            .color(p.muted())
+            .single_line(),
+        )
+}
 
 /// A recording's filmstrip: its frames side by side, the span kept framed
-/// between two handles and the rest shaded. A drag moves the nearer handle
-/// and shows the frame there above.
+/// between two handles with the rest dimmed, and the playhead. A press
+/// near a handle drags it; anywhere else it moves the playhead. Either
+/// shows the frame there above.
 fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
     let k = p.k;
     let [x, y, w, h] = layout.strip;
@@ -513,35 +590,53 @@ fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
         );
     }
     let (a, b) = (at(clip.trim[0]), at(clip.trim[1]));
-    let shade = k.alpha(k.c.black, 0.55);
+    let shade = k.alpha(k.c.bg_base, 0.72);
     if a > 0.0 {
         strip = strip.child(el().absolute(0.0, 0.0).size(a, h).fill(shade));
     }
     if b < w {
         strip = strip.child(el().absolute(b, 0.0).size(w - b, h).fill(shade));
     }
+    let span_w = (b - a).max(2.0 * HANDLE_W);
+    let a = a.min(w - span_w);
     strip = strip.child(
         el().key("span")
             .absolute(a, 0.0)
-            .size((b - a).max(2.0 * HANDLE_W), h)
+            .size(span_w, h)
             .radius(INNER_RADIUS)
             .border(2.0, p.text()),
     );
-    for (key, left) in [("start", a), ("end", b - HANDLE_W)] {
+    for (key, left) in [("start", a), ("end", a + span_w - HANDLE_W)] {
         strip = strip.child(
             el().key(key)
-                .absolute(left.clamp(0.0, (w - HANDLE_W).max(0.0)), 0.0)
+                .absolute(left, 0.0)
                 .size(HANDLE_W, h)
-                .radius(k.radius.sm)
+                .radius(INNER_RADIUS)
                 .fill(p.text())
                 .child(
-                    el().absolute(HANDLE_W * 0.5 - 0.75, h * 0.5 - 7.0)
-                        .size(1.5, 14.0)
-                        .radius(0.75)
+                    el().absolute(HANDLE_W * 0.5 - 1.0, h * 0.5 - 7.0)
+                        .size(2.0, 14.0)
+                        .radius(1.0)
                         .fill(k.c.bg_base),
                 ),
         );
     }
+    let head = at(clip.at_ms).clamp(a + HANDLE_W, (a + span_w - HANDLE_W).max(a + HANDLE_W));
+    // White in a dark halo, so it reads over any frame in either theme.
+    strip = strip.child(
+        el().key("playhead")
+            .absolute(head - PLAYHEAD_W * 0.5 - 1.0, 0.0)
+            .size(PLAYHEAD_W + 2.0, h)
+            .radius(PLAYHEAD_W * 0.5 + 1.0)
+            .fill(k.alpha(k.c.black, 0.5))
+            .child(
+                el().absolute(1.0, 1.0)
+                    .size(PLAYHEAD_W, h - 2.0)
+                    .radius(PLAYHEAD_W * 0.5)
+                    .fill(k.c.white),
+            ),
+    );
+    let reach = (HANDLE_REACH / w.max(1.0) * duration).round() as u64;
     strip
         .child(
             el().absolute(0.0, 0.0)
@@ -557,12 +652,15 @@ fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
             s.send = None;
             if let Some(clip) = &mut s.clip {
                 let ms = ((d.x / w).clamp(0.0, 1.0) * clip.duration_ms as f32).round() as u64;
-                let handle = match (d.phase, clip.holding) {
-                    (Phase::Down, _) | (_, None) => clip.nearer(ms),
-                    (_, Some(handle)) => handle,
+                let grip = match (d.phase, clip.holding) {
+                    (Phase::Down, _) | (_, None) => clip.grip(ms, reach),
+                    (_, Some(grip)) => grip,
                 };
-                clip.holding = (d.phase != Phase::Up).then_some(handle);
-                clip.drag(handle, ms);
+                clip.holding = (d.phase != Phase::Up).then_some(grip);
+                match grip {
+                    Grip::Handle(handle) => clip.drag(handle, ms),
+                    Grip::Playhead => clip.scrub(ms),
+                }
             }
             tx.instant();
             tx.wake_after(Duration::ZERO);

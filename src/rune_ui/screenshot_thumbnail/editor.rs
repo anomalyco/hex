@@ -50,6 +50,8 @@ const LIST_ROWS: usize = 8;
 const NOTE_S: f64 = 2.0;
 /// How long a close takes, before the overlay hides.
 const LEAVE_S: f64 = 0.3;
+/// How often the playhead moves while a recording plays.
+const PLAY_STEP: Duration = Duration::from_millis(33);
 
 /// The shot being edited.
 pub(crate) struct Shot {
@@ -174,7 +176,9 @@ struct Layout {
     panel: [f32; 4],
     /// The shot inside the panel.
     image: [f32; 4],
-    /// A recording's filmstrip, under its picture; empty for a shot.
+    /// A recording's play button and time, then its filmstrip, under its
+    /// picture; empty for a shot.
+    transport: [f32; 4],
     strip: [f32; 4],
     /// The row under the shot: the microphone and the words.
     words: [f32; 4],
@@ -283,7 +287,13 @@ impl Editor {
         Layout {
             panel: [x, y, pw, ph],
             image: [((pw - iw) * 0.5).round(), iy, iw, ih],
-            strip: [PAD, sy, pw - 2.0 * PAD, strip_h - GAP],
+            transport: [PAD, sy, clip::TRANSPORT_W, strip_h - GAP],
+            strip: [
+                PAD + clip::TRANSPORT_W + GAP,
+                sy,
+                pw - 2.0 * PAD - clip::TRANSPORT_W - GAP,
+                strip_h - GAP,
+            ],
             words: [PAD, sy + strip_h, pw - 2.0 * PAD, words_h],
             fit,
         }
@@ -292,6 +302,9 @@ impl Editor {
     fn close(&mut self, tx: &mut Tx) {
         if self.on {
             *OPEN.lock().unwrap_or_else(|e| e.into_inner()) = None;
+            if let Some(clip) = &mut self.clip {
+                clip.pause();
+            }
             self.on = false;
             self.send = None;
             self.waiting = None;
@@ -736,6 +749,14 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
         }
         return true;
     }
+    if let (Key::Text(t), Some(clip)) = (&key.key, &mut s.clip)
+        && t == " "
+        && !key.mods.cmd
+    {
+        clip.toggle_play();
+        tx.wake_after(Duration::ZERO);
+        return true;
+    }
     if key.key == Key::Escape {
         // Escape first cancels a dictation over the shot; the panel stays.
         if s.cancel_listening() {
@@ -750,6 +771,13 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
 
 fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
+    let mut moved = false;
+    if let Some(clip) = &mut s.clip
+        && clip.playing
+    {
+        moved = clip.tick(now);
+        tx.wake_after(PLAY_STEP);
+    }
     if let Some(at) = s.leaving {
         if now - at >= LEAVE_S {
             s.leaving = None;
@@ -773,7 +801,7 @@ fn poll(s: &mut Editor, now: f64, tx: &mut Tx) -> bool {
         }
         tx.wake_after(Duration::from_secs_f64(left));
     }
-    false
+    moved
 }
 
 // ─── Opening, exporting, sending ─────────────────────────────────────────────
@@ -851,6 +879,12 @@ pub(crate) fn open_recording(movie: PathBuf, words: Vec<clip::Word>) {
                 // Dictation stays dictation: nothing talks over a recording.
                 *OPEN.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 s.load_clip(clip, screen);
+                if let Some(clip) = &mut s.clip {
+                    let player = rune::Player::file(clip.movie.clone());
+                    player.set_muted(false);
+                    player.preload();
+                    clip.player = Some(player);
+                }
                 handle.show();
                 handle.request_keys();
                 tx.animated();

@@ -34,6 +34,8 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Same as dictation", ["Jak przy dyktowaniu", "与听写相同", "音声入力と同じ", "Wie beim Diktieren", "El mismo que el dictado", "Як для диктування"]),
     ("Record computer audio", ["Nagrywaj dźwięk komputera", "录制电脑音频", "コンピュータのオーディオを録音", "Computer-Audio aufnehmen", "Grabar el audio del ordenador", "Записувати звук комп’ютера"]),
     ("Display {}", ["Ekran {}", "显示器 {}", "ディスプレイ {}", "Display {}", "Pantalla {}", "Дисплей {}"]),
+    ("Export size", ["Rozmiar eksportu", "导出尺寸", "書き出しサイズ", "Exportgröße", "Tamaño de exportación", "Розмір експорту"]),
+    ("Pause", ["Wstrzymaj", "暂停", "一時停止", "Pause", "Pausar", "Пауза"]),
 ];
 
 #[rustfmt::skip]
@@ -57,6 +59,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("Same as dictation", "Comme la dictée"),
     ("Record computer audio", "Enregistrer le son de l’ordinateur"),
     ("Display {}", "Écran {}"),
+    ("Export size", "Taille d’export"),
+    ("Pause", "Pause"),
 ];
 
 #[rustfmt::skip]
@@ -80,6 +84,8 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("Same as dictation", "O mesmo do ditado"),
     ("Record computer audio", "Gravar o áudio do computador"),
     ("Display {}", "Tela {}"),
+    ("Export size", "Tamanho da exportação"),
+    ("Pause", "Pausar"),
 ];
 
 #[rustfmt::skip]
@@ -103,4 +109,6 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Same as dictation", "Как для диктовки"),
     ("Record computer audio", "Записывать звук компьютера"),
     ("Display {}", "Дисплей {}"),
+    ("Export size", "Размер экспорта"),
+    ("Pause", "Пауза"),
 ];

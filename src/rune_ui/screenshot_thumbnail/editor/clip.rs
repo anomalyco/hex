@@ -16,8 +16,12 @@ pub(super) const FRAMES: usize = 12;
 pub(super) const FRAME_PX: u32 = 960;
 /// The filmstrip's height.
 pub(super) const STRIP_H: f32 = 44.0;
+/// Play and the playhead's time, left of the filmstrip.
+pub(super) const TRANSPORT_W: f32 = 108.0;
 /// The shortest span a trim keeps.
 const MIN_SPAN_MS: u64 = 500;
+/// A playhead this close to the span's end starts over from its start.
+const END_SLACK_MS: u64 = 100;
 /// The most frames on a sent contact sheet.
 const SHEET_FRAMES: usize = 4;
 /// How much more a 60 fps encode takes than a 30 fps one: 1.27× on the
@@ -39,6 +43,13 @@ pub(crate) enum Handle {
     End,
 }
 
+/// What a drag on the filmstrip moves: a handle, or the playhead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Grip {
+    Handle(Handle),
+    Playhead,
+}
+
 /// A recording open in the editor.
 pub(crate) struct Clip {
     pub(crate) movie: PathBuf,
@@ -48,10 +59,19 @@ pub(crate) struct Clip {
     pub(crate) words: Vec<Word>,
     /// The span kept, in ms.
     pub(crate) trim: [u64; 2],
-    /// The handle a drag holds.
-    pub(crate) holding: Option<Handle>,
+    /// What a drag on the filmstrip holds.
+    pub(crate) holding: Option<Grip>,
     /// The frame shown above the filmstrip.
     pub(crate) shown: usize,
+    /// The playhead, in ms on the movie's clock.
+    pub(crate) at_ms: u64,
+    pub(crate) playing: bool,
+    /// The animation seconds the playhead last moved while playing.
+    ticked: Option<f64>,
+    /// The movie itself, which plays over the frame once Play is pressed
+    /// (`live`). Headless runs have none and step the filmstrip instead.
+    pub(crate) player: Option<rune::Player>,
+    pub(crate) live: bool,
     /// The movie's size on disk, and its picture's in pixels (zero when
     /// unknown), for the export's estimate.
     pub(crate) bytes: u64,
@@ -73,6 +93,11 @@ impl Clip {
             trim: [0, duration_ms],
             holding: None,
             shown: 0,
+            at_ms: 0,
+            playing: false,
+            ticked: None,
+            player: None,
+            live: false,
             bytes: 0,
             pixels: [0, 0],
         }
@@ -122,13 +147,85 @@ impl Clip {
             .join(" ")
     }
 
-    /// The handle nearer `ms`.
-    pub(crate) fn nearer(&self, ms: u64) -> Handle {
+    /// What a press at `ms` takes: the handle within `reach` ms of it,
+    /// the nearer if both are, else the playhead.
+    pub(crate) fn grip(&self, ms: u64, reach: u64) -> Grip {
         let [from, to] = self.trim;
-        if ms.abs_diff(from) <= ms.abs_diff(to) {
-            Handle::Start
+        let (start, end) = (ms.abs_diff(from), ms.abs_diff(to));
+        if start.min(end) > reach {
+            Grip::Playhead
+        } else if start <= end {
+            Grip::Handle(Handle::Start)
         } else {
-            Handle::End
+            Grip::Handle(Handle::End)
+        }
+    }
+
+    /// Plays from the playhead, or from the span's start once it's at the
+    /// end; or pauses.
+    pub(crate) fn toggle_play(&mut self) {
+        if self.playing {
+            self.pause();
+            return;
+        }
+        let [from, to] = self.trim;
+        if self.at_ms < from || self.at_ms + END_SLACK_MS >= to {
+            self.at_ms = from;
+        }
+        self.playing = true;
+        self.ticked = None;
+        if let Some(player) = &self.player {
+            player.seek(self.at_ms as f64 / 1000.0);
+            player.play();
+            self.live = true;
+        }
+    }
+
+    pub(crate) fn pause(&mut self) {
+        self.playing = false;
+        if let Some(player) = &self.player {
+            player.pause();
+        }
+    }
+
+    /// Moves the playhead with the movie, or by the time passed without
+    /// one, and stops it at the span's end. Whether it moved.
+    pub(crate) fn tick(&mut self, now: f64) -> bool {
+        if !self.playing {
+            return false;
+        }
+        let last = self.ticked.replace(now).unwrap_or(now);
+        let end = self.trim[1];
+        let at = match self.player.as_ref().map(|player| (player.state(), player)) {
+            Some((rune::PlayerState::Failed(error), _)) => {
+                tracing::warn!(%error, "could not play the recording");
+                self.live = false;
+                self.pause();
+                return true;
+            }
+            Some((rune::PlayerState::Ended, _)) => end,
+            Some((_, player)) => (player.time() * 1000.0).round() as u64,
+            None => self.at_ms + ((now - last).max(0.0) * 1000.0).round() as u64,
+        };
+        let at = at.max(self.trim[0]);
+        if at >= end {
+            self.pause();
+        }
+        let moved = at.min(end) != self.at_ms;
+        self.at_ms = at.min(end);
+        self.shown = self.frame_at(self.at_ms);
+        moved
+    }
+
+    /// Puts the playhead at `ms` inside the span kept, paused, with the
+    /// frame there shown.
+    pub(crate) fn scrub(&mut self, ms: u64) {
+        self.pause();
+        self.at_ms = ms.clamp(self.trim[0], self.trim[1]);
+        self.shown = self.frame_at(self.at_ms);
+        self.live = false;
+        if let Some(player) = &self.player {
+            player.seek(self.at_ms as f64 / 1000.0);
         }
     }
 
@@ -142,10 +239,11 @@ impl Clip {
             Handle::Start => *from = ms.min(to.saturating_sub(span)),
             Handle::End => *to = ms.clamp(*from + span, self.duration_ms),
         }
-        self.shown = self.frame_at(match handle {
+        let at = match handle {
             Handle::Start => self.trim[0],
             Handle::End => self.trim[1],
-        });
+        };
+        self.scrub(at);
     }
 
     /// The filmstrip frame nearest `ms`.
@@ -175,9 +273,17 @@ impl Clip {
     }
 }
 
-/// `ms` as `0:07` or `12:03`.
+/// `ms` as `0:07` or `12:03`, rounded up: a length.
 pub(crate) fn duration_label(ms: u64) -> String {
-    let seconds = ms.div_ceil(1000);
+    clock(ms.div_ceil(1000))
+}
+
+/// The playhead at `ms` as `0:03`, the seconds already played.
+pub(crate) fn position_label(ms: u64) -> String {
+    clock(ms / 1000)
+}
+
+fn clock(seconds: u64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 

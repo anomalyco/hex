@@ -79,7 +79,39 @@ fn a_trim_keeps_the_words_inside_it_and_shows_the_frame_at_its_handle() {
     assert_eq!(recording.trim, [8_500, 9_000]);
     recording.drag(clip::Handle::End, 99_000);
     assert_eq!(recording.trim[1], 12_400);
-    assert_eq!(recording.nearer(12_000), clip::Handle::End);
+    assert_eq!(
+        recording.grip(12_000, 500),
+        clip::Grip::Handle(clip::Handle::End)
+    );
+    assert_eq!(recording.grip(4_000, 500), clip::Grip::Playhead);
+}
+
+#[test]
+fn playing_moves_the_playhead_through_the_span_and_stops_at_its_end() {
+    let mut recording = clip();
+    recording.drag(clip::Handle::Start, 2_000);
+    recording.drag(clip::Handle::End, 4_000);
+    recording.scrub(3_000);
+    assert_eq!(clip::position_label(recording.at_ms), "0:03");
+    recording.toggle_play();
+    assert!(
+        !recording.tick(10.0),
+        "the first tick only starts the clock"
+    );
+    assert!(recording.tick(10.5));
+    assert_eq!(recording.at_ms, 3_500);
+    assert_eq!(recording.shown, recording.frame_at(3_500));
+    recording.tick(12.0);
+    assert_eq!(recording.at_ms, 4_000);
+    assert!(!recording.playing);
+    // Played again at the end, it starts over from the span's start.
+    recording.toggle_play();
+    assert_eq!(recording.at_ms, 2_000);
+    recording.toggle_play();
+    assert!(!recording.playing);
+    // A scrub stays inside the span kept.
+    recording.scrub(100);
+    assert_eq!(recording.at_ms, 2_000);
 }
 
 #[test]
@@ -802,7 +834,9 @@ fn recording_editor_snapshots() {
             let mut recording = clip();
             recording.bytes = 93_000_000;
             recording.pixels = [2560, 1600];
+            recording.drag(clip::Handle::Start, 1_200);
             recording.drag(clip::Handle::End, 9_800);
+            recording.scrub(4_300);
             let editor = Editor {
                 clip: Some(recording),
                 screen: [size.0, size.1],
