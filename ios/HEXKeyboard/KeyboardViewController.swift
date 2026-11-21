@@ -240,6 +240,8 @@ final class KeyboardViewController: UIInputViewController {
             settings: [
                 TypingLogField("autocorrect", .bool(FullKeyboardSettings().autocorrect)),
                 TypingLogField("spatialAutocorrect", .bool(FullKeyboardSettings().spatialAutocorrect)),
+                TypingLogField("swipeTyping", .bool(FullKeyboardSettings().swipeTyping)),
+                TypingLogField("emoji", .bool(FullKeyboardSettings().emoji)),
                 TypingLogField("key_popups", .bool(FullKeyboardSettings().keyPopups)),
                 TypingLogField("haptics", .bool(FullKeyboardSettings().haptics)),
                 TypingLogField("learnHowIType", .bool(TypingJournalSettings().isEnabled)),

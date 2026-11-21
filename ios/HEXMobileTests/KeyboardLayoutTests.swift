@@ -952,4 +952,33 @@ final class FullKeyboardSettingsTests: XCTestCase {
     func testNoAppGroupReadsAsFullKeyboard() {
         XCTAssertTrue(FullKeyboardSettings(defaults: nil).isEnabled)
     }
+
+    /// Swipe typing and Emoji are on by default: an unset key (a fresh install, or a tester
+    /// who never touched the old experiments) is on, a stored off stays off, and the keyboard
+    /// without the App Group reads them as on.
+    func testSwipeTypingAndEmojiAreOnByDefaultAndAStoredOffStaysOff() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let fresh = FullKeyboardSettings(defaults: defaults)
+        XCTAssertTrue(fresh.swipeTyping)
+        XCTAssertTrue(fresh.emoji)
+        XCTAssertNil(defaults.object(forKey: "experiments.swipeTyping"), "reading writes nothing")
+        XCTAssertNil(defaults.object(forKey: "experiments.emoji"))
+        XCTAssertTrue(FullKeyboardSettings(defaults: nil).swipeTyping, "without the App Group")
+        XCTAssertTrue(FullKeyboardSettings(defaults: nil).emoji)
+
+        defaults.set(false, forKey: "experiments.swipeTyping")
+        defaults.set(false, forKey: "experiments.emoji")
+        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).swipeTyping, "an upgrade that turned it off")
+        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).emoji)
+        fresh.applyLaunchArguments(["HEX"])
+        XCTAssertFalse(fresh.swipeTyping, "no launch argument leaves a stored off")
+        fresh.applyLaunchArguments(["HEX", FullKeyboardSettings.swipeLaunchArgument, FullKeyboardSettings.emojiLaunchArgument])
+        XCTAssertTrue(fresh.swipeTyping)
+        XCTAssertTrue(fresh.emoji)
+        fresh.swipeTyping = false
+        XCTAssertEqual(defaults.object(forKey: "experiments.swipeTyping") as? Bool, false)
+    }
 }

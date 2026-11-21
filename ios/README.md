@@ -297,7 +297,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     them as words). An expression is blocked only as the pair ("blow job"), never its words
     alone. A word it may not offer, typed in full, is never corrected (as on Android); your own `UILexicon` words
     (Contacts names, text replacements) are always offered.
-  - **Swipe typing (Settings › Experiments › Swipe typing):** Off by default, for the
+  - **Swipe typing (Settings › Keyboard › Swipe typing):** On by default (stored as
+    `experiments.swipeTyping` from when it was an experiment off by default: unset or true
+    is on, false off, so testers who turned it off keep it off), for the
     English and Spanish layouts only (every other layout keeps a drag as a slide to
     another key) and off under VoiceOver. A touch that goes down on a letter and travels
     more than a key's pitch (width plus gap) is a swipe (`SwipeTyping`): its key no longer
@@ -376,19 +378,20 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     the dictation bar, so testers who turned that experiment off keep the bar),
     then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
-    and a field to try the keyboard in.
+    then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
+    full keyboard while the dictation bar is chosen, and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
     learned below the switch), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
-  - **Experiments:** Emoji (it says it needs the full keyboard while the
-    dictation bar is chosen; Clear emoji history while it's on), Swipe typing
-    (the same), and Clean up with Apple Intelligence.
+  - **Experiments:** Hinglish (Hindi in Latin letters) and Clean up with Apple
+    Intelligence.
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
   (before iOS has asked for the microphone), and
   `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
-  its page's switches to the App Group: off by default, on with `-on`.
+  its page's switches to the App Group: off by default, on with `-on`; switches that are
+  on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
   `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
   opens Record typing logs' consent dialog.
 - **Dictation language (Settings › Dictation › Dictation language, iOS 26+):** Automatic by
@@ -612,7 +615,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   off the keys it types nothing and the page stays. Holding shift and sliding to a letter
   shows and types its capital. None of them is a swipe, and a slid-to key opens no
   accent menu (Apple's does after a hold).
-- **Emoji (Settings › Experiments › Emoji, for the full keyboard):** Off by default. An emoji key
+- **Emoji (Settings › Keyboard › Emoji, for the full keyboard):** On by default (stored as
+  `experiments.emoji` from when it was an experiment off by default: unset or true is on,
+  false off, so testers who turned it off keep it off). An emoji key
   right of 123 (after the globe) in plain text fields, not web address, email or
   ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
   emoji for the text before the cursor, then a grid that scrolls sideways through

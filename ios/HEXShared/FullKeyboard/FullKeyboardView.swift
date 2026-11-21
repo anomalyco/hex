@@ -54,7 +54,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
 
-    // MARK: Emoji (Experiments › Emoji; FullKeyboardView+Emoji.swift)
+    // MARK: Emoji (Settings › Keyboard › Emoji; FullKeyboardView+Emoji.swift)
 
     /// The keys' target: the field, or the emoji search while you search.
     let routedTarget: EmojiRoutedTarget
@@ -404,10 +404,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         setNeedsLayout()
     }
 
-    /// Fixtures and tests turn Swipe typing on or off; otherwise its switch in Experiments.
+    /// Fixtures and tests turn Swipe typing on or off; otherwise its switch in Settings › Keyboard.
     var swipeOverride: Bool? { didSet { syncSwipeTyping() } }
 
-    /// Experiments › Swipe typing (off by default): on the English and Spanish layouts, a
+    /// Settings › Keyboard › Swipe typing (on by default): on the English and Spanish layouts, a
     /// drag across the letters types a word, read with the layout language's bundled model.
     /// Off under VoiceOver, which has its own way to type.
     private func syncSwipeTyping() {

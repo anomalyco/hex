@@ -34,7 +34,7 @@ final class KeyboardKeyPlaneView: UIView {
     private(set) var deleteSwipe: DeleteWordSwipe?
     /// Each held key's pending hold: a letter's accents, or the space bar's trackpad.
     private var accentHoldWork: [Int: DispatchWorkItem] = [:]
-    /// Experiments › Swipe typing, while it's on for the layout's language; its trail draws
+    /// Settings › Keyboard › Swipe typing, while it's on for the layout's language; its trail draws
     /// above the keys.
     var swipe: SwipeTyping? {
         didSet {

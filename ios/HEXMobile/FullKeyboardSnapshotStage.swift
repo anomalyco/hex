@@ -8,7 +8,7 @@ import UIKit
 /// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|ru|uk|sr-Latn|en` pins it; drafts are in the layout's language.
 /// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
-/// Experiments › Emoji on with a seeded history; `emoji-probe` prints the panel's
+/// Settings › Keyboard › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
 struct FullKeyboardSnapshotStage: View {
     let scene: String

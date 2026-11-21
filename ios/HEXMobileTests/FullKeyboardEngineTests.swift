@@ -1371,7 +1371,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         }
         view.languageOverride = .english
         view.swipeOverride = false
-        XCTAssertNil(view.plane.swipe, "off by default and when turned off")
+        XCTAssertNil(view.plane.swipe, "off when turned off")
         view.swipeOverride = nil
         XCTAssertEqual(view.plane.swipe != nil, FullKeyboardSettings().swipeTyping)
     }

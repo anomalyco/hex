@@ -156,7 +156,7 @@ final class FullKeyboardEngine {
     var width: CGFloat = 375 { didSet { if width != oldValue { rebuildLayout() } } }
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { rebuildLayout() } } }
     var showsGlobe = false { didSet { if showsGlobe != oldValue { rebuildLayout() } } }
-    /// Experiments › Emoji, in fields that take emoji.
+    /// Settings › Keyboard › Emoji, in fields that take emoji.
     var showsEmoji = false { didSet { if showsEmoji != oldValue { rebuildLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
     /// An iPhone, or the iPhone Duo folded or unfolded (`KeyboardPosture`).
@@ -1043,7 +1043,7 @@ final class FullKeyboardEngine {
         onEdit?()
     }
 
-    // MARK: - Swipe typing (Experiments › Swipe typing; SwipeTyping.swift)
+    // MARK: - Swipe typing (Settings › Keyboard › Swipe typing; SwipeTyping.swift)
 
     /// The word a swipe just typed, until anything else changes the text: delete takes it
     /// back whole, space never autocorrects it, and the strip offers the swipe's other

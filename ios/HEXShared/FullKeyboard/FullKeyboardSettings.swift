@@ -91,17 +91,22 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.haptics) }
     }
 
-    /// Experiment: an emoji key whose panel suggests emoji for what you just typed, from
-    /// what the words mean and what you use. Off by default.
+    /// Settings › Keyboard › Emoji: an emoji key whose panel suggests emoji for what you just
+    /// typed, from what the words mean and what you use. On by default. Stored as
+    /// `experiments.emoji`, from when it was an experiment (off by default) that only its
+    /// switch ever wrote: unset or true is on and false off, so testers who turned it off
+    /// keep it off.
     var emoji: Bool {
-        get { defaults?.bool(forKey: Key.emoji) ?? false }
+        get { defaults?.object(forKey: Key.emoji) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.emoji) }
     }
 
-    /// Experiment: slide through a word's letters to type it, on the English and Spanish
-    /// layouts (`SwipeTyping`). Off by default.
+    /// Settings › Keyboard › Swipe typing: slide through a word's letters to type it, on the
+    /// English and Spanish layouts (`SwipeTyping`). On by default. Stored as
+    /// `experiments.swipeTyping`, from when it was an experiment (off by default): unset or
+    /// true is on and false off, so testers who turned it off keep it off.
     var swipeTyping: Bool {
-        get { defaults?.bool(forKey: Key.swipeTyping) ?? false }
+        get { defaults?.object(forKey: Key.swipeTyping) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.swipeTyping) }
     }
 
@@ -119,8 +124,9 @@ struct FullKeyboardSettings {
     }
 
     /// Simulator scenes pass `--experiment-full-keyboard` or `--keyboard full|dictation-bar`
-    /// to pick the keyboard, `--experiment-emoji` to turn the emoji experiment on, and
-    /// `--experiment-swipe` for Swipe typing, and `--hex-key left|right` for the Hex key's side.
+    /// to pick the keyboard, `--experiment-emoji` to turn Emoji on, `--experiment-swipe` for
+    /// Swipe typing (both on by default; the arguments override a stored off), and
+    /// `--hex-key left|right` for the Hex key's side.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
