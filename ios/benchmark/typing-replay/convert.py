@@ -50,7 +50,12 @@ def limited(count, limit):
     return limit is not None and count >= limit
 
 
-def futo(paths, writer, limit):
+def is_true(value):
+    """A JSON boolean, 1, or the string 'true'/'1', as some exports spell a flag."""
+    return value is True or value == 1 or (isinstance(value, str) and value.strip().lower() in ("true", "1"))
+
+
+def futo(paths, writer, limit, valid_only):
     """One JSONL record per word; records for a sentence may have gaps."""
     stats, done = Counter(), False
     for path in paths:
@@ -65,6 +70,9 @@ def futo(paths, writer, limit):
                     continue
                 record = json.loads(line)
                 stats["records"] += 1
+                if valid_only and is_true(record.get("potentially_invalid_sentence")):
+                    stats["invalid"] += 1
+                    continue
                 if record.get("dual_finger"):
                     stats["dual"] += 1
                     continue
@@ -108,8 +116,9 @@ def futo(paths, writer, limit):
             break
     print(
         f"futo: {writer.count} sentences, {stats['words']} words; skipped {stats['dual']} dual-finger, "
-        f"{stats['layout']} non-qwerty, {stats['language']} non-English, {stats['incomplete']} incomplete, "
-        f"{stats['mismatch']} word mismatches, {stats['malformed']} malformed, {stats['stale']} stale groups; "
+        f"{stats['layout']} non-qwerty, {stats['language']} non-English, {stats['invalid']} invalid-marked, "
+        f"{stats['incomplete']} incomplete, {stats['mismatch']} word mismatches, "
+        f"{stats['malformed']} malformed, {stats['stale']} stale groups; "
         f"{stats['records']} records", file=sys.stderr,
     )
 
@@ -281,6 +290,7 @@ class ArrayReader:
 
 
 def linear(pairs):
+    """The line through the first and last pair (a row of key centres, or q's and z's row means)."""
     (x0, y0), (x1, y1) = pairs[0], pairs[-1]
     if abs(x1 - x0) < 1e-9:
         raise ValueError("degenerate fit")
@@ -374,9 +384,15 @@ def noisy_word_touches(counts, touches):
         word = touches[cursor:cursor + count]
         cursor += count
         if index and word:
-            # A millisecond before the next word, never before the last letter.
+            # A space sits 1 ms before the next word but never before the previous tap. If
+            # the aligned word starts earlier than that, move it after the space instead of
+            # letting the replay read times backwards.
             previous = spaced[-1][-1][2] if spaced else 0
-            spaced.append([point(0.5, 1.25, max(previous, word[0][0][2] - 1))])
+            space = max(previous, word[0][0][2] - 1)
+            if word[0][0][2] <= space:
+                shift = space + 1 - word[0][0][2]
+                word = [[point(x, y, t + shift) for x, y, t in touch] for touch in word]
+            spaced.append([point(0.5, 1.25, space)])
         spaced.extend(word)
     return spaced
 
@@ -401,8 +417,8 @@ def noisy(paths, writer, limit, device, wanted_set, word_sets, eyes_free, small_
                         stats["device"] += 1
                         continue
                     # The eyes-free studies tapped a keyboard they imagined, and the
-                    # small and tiny ones used 42 px and 26 px keys: neither is the
-                    # full-size sighted typing the other datasets measure.
+                    # small and tiny conditions used smaller-than-full-size keyboards:
+                    # neither is the full-size sighted typing the other datasets measure.
                     if not eyes_free and (record.get("condition") == "blindfolded" or (
                             record["experiment"].startswith("eyesfree")
                             and record.get("condition") != "sighted")):
@@ -516,7 +532,7 @@ def tsi(paths, writer, limit, prompt_type):
                 continue
             groups.setdefault(key, []).append({
                 "time": int(row["timestamp_ms"]), "x": float(row["first_frame_touch_x"]),
-                "y": float(row["first_frame_touch_y"]), "char": row["ref_char"],
+                "y": float(row["first_frame_touch_y"]),
                 "deleted": row["was_deleted"].lower() == "true"})
     for key, rows in groups.items():
         if limited(writer.count, limit):
@@ -533,11 +549,11 @@ def tsi(paths, writer, limit, prompt_type):
                 left = space["key_center_x"] - space["key_width"] / 2
                 x = 0.25 + 0.5 * min(1, max(0, (row["x"] - left) / space["key_width"]))
                 touches.append(gesture([point(x, 1.25, row["time"] - start)]))
-            elif hit["key_id"] == "." or row["char"] == ".":
+            elif hit["key_id"] == ".":
                 stats["period"] += 1
             elif len(hit["key_id"]) == 1 and hit["key_id"].isalpha():
                 x = 0.05 + (row["x"] - q["key_center_x"]) / (10 * pitch_x)
-                y = 1 / 6 + (row["y"] - q["key_center_y"]) / (3 * pitch_y)
+                y = min(1, 1 / 6 + (row["y"] - q["key_center_y"]) / (3 * pitch_y))
                 touches.append(gesture([point(x, y, row["time"] - start)]))
             else:
                 stats["unknown"] += 1
@@ -563,7 +579,10 @@ def main():
         command.add_argument("inputs", nargs="+"); command.add_argument("-o", "--output", required=True)
         command.add_argument("--limit", type=int, help="maximum sentences to emit")
 
-    common(sub.add_parser("futo", help="FUTO swipe JSONL"))
+    futo_parser = sub.add_parser("futo", help="FUTO swipe JSONL")
+    common(futo_parser)
+    futo_parser.add_argument("--valid-only", action="store_true",
+                             help="skip records whose sentence is potentially_invalid_sentence")
     common(sub.add_parser("howweswipe", help="How We Swipe log, folder or swipelogs.zip"))
     noisy_parser = sub.add_parser("noisy", help="Noisy Typing JSON zip")
     common(noisy_parser)
@@ -584,7 +603,7 @@ def main():
     writer = Writer(args.output)
     try:
         if args.dataset == "futo":
-            futo(args.inputs, writer, args.limit)
+            futo(args.inputs, writer, args.limit, args.valid_only)
         elif args.dataset == "howweswipe":
             howweswipe(args.inputs, writer, args.limit)
         elif args.dataset == "noisy":

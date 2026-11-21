@@ -1381,11 +1381,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
 ### Replaying real typing
 
 `TypingReplayTests` runs recordings of real fingers through the keyboard as it runs: the
-key plane, Swipe typing or taps with Spatial autocorrect, then the engine's spacing and
-casing. It is opt-in, one test per mode, and the datasets below are not vendored, so convert
-a recording to one of the two JSON shapes first. `xcodebuild` passes environment variables
-to the test runner only when they are prefixed with `TEST_RUNNER_`, and strips the prefix,
-so `TEST_RUNNER_HEX_SWIPE_REPLAY` becomes `HEX_SWIPE_REPLAY`:
+key plane, Swipe typing or taps with Spatial autocorrect, then the engine's spacing. It is
+opt-in, one test per mode, and the datasets below are not vendored, so convert a recording
+to one of the two JSON shapes first. `xcodebuild` passes environment variables to the test
+runner only when they are prefixed with `TEST_RUNNER_`, and strips the prefix, so
+`TEST_RUNNER_HEX_SWIPE_REPLAY` becomes `HEX_SWIPE_REPLAY`:
 
 ```sh
 TEST_RUNNER_HEX_SWIPE_REPLAY=/path/swipes.json xcodebuild test \
@@ -1406,16 +1406,23 @@ y > 1 is the space bar, x 0.25…0.75 across it.
 autocorrect reading each word on its space.
 
 Both report a line per source inside `TYPING-REPLAY … TYPING-REPLAY-END`: total words,
-words outside the decoder's dictionary (and their share, counted separately), and accuracy
-among the in-dictionary words (letters only, case-insensitive). Swipes also report
-typed-or-offered in the suggestion strip, gestures not read as swipes, and decode-on-lift
-median and p90. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT` writes each
-sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
+words outside the decoder's dictionary (counted after keeping only ASCII a–z letters, so
+accented, hyphenated and numeric tokens count as outside; their share is its own number),
+and accuracy among the in-dictionary words (case-insensitive letters). Swipes also report
+typed-or-offered in the suggestion strip, gestures not read as swipes, and the decoder's own
+median and p90 milliseconds. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT`
+writes each sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
+
+The test with no recording checks Hex's key geometry against the grid and runs clean
+gestures through the same mapping to type the right words; it cannot catch a converter that
+emits wrong coordinates.
+
+Numbers can move between simulator iOS versions because autocorrect also consults the system
+text checker for word validity and names, and its dictionary changes with iOS.
 
 Public datasets of real typing it is meant for:
 
-- [FUTO swipe dataset](https://huggingface.co/datasets/futo-org/swipe.futo.org) (MIT; train,
-  validation and test split by donor).
+- [FUTO swipe dataset](https://huggingface.co/datasets/futo-org/swipe.futo.org) (MIT).
 - [How We Swipe](https://osf.io/sj67f) (Leiva et al., MobileHCI 2021; MIT).
 - [Noisy Typing on QWERTY Keyboards](https://zenodo.org/records/24225302) (Vertanen and
   Kristensson, IUI 2023; CC-BY-4.0).

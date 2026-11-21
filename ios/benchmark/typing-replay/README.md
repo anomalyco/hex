@@ -8,11 +8,13 @@ requests.
 Both output shapes are described in `ios/HEXMobileTests/TypingReplayTests.swift`.
 Swipes have one gesture per word, taps have every committed touch of the
 sentence in order. Coordinates are in the unit grid: x 0…1 spans the ten columns
-of the top letter row (q's left edge to p's right edge), y 0…1 spans the three
-letter rows, and rows two and three start half and one and a half columns in.
-Times are milliseconds from the gesture's first point (swipes) or the sentence's
-first touch (taps). A space tap has y = 1.25 and x along 0.25…0.75 of the
-dataset's own space bar.
+of the top letter row (q's left edge to p's right edge, so their centres are 0.05
+and 0.95), y 0…1 runs from the top of the first letter row to the bottom of the
+third (row centres at 1/6, 1/2 and 5/6), and rows two and three start half and one
+and a half columns in.
+Times are milliseconds from the gesture's first point (swipes) or the sentence's first
+touch (taps); the test shifts each swipe onto one running clock for its sentence. A space
+tap has y = 1.25 and x along 0.25…0.75 of the dataset's own space bar.
 
 Every subcommand writes the same JSON object and prints sentences, touches and
 what it skipped to stderr:
@@ -50,6 +52,9 @@ python3 convert.py futo dev.jsonl -o futo-dev.json
 python3 convert.py futo swipe-5/swipe5.jsonl -o futo-swipe5.json
 ```
 
+`--valid-only` skips records whose `potentially_invalid_sentence` is true; it is
+off by default. `distance` is not used.
+
 Each JSONL line is one word: `session`, `sentence`, `word_idx`, `word`, and
 `data` with epoch-millisecond `t` and canvas-normalised `x`/`y`. Records are
 grouped by `(session, sentence)` and ordered by `word_idx`; a sentence is only
@@ -80,16 +85,17 @@ python3 convert.py howweswipe swipelogs/03ft0n5ol992m393fb9lpc0uqt.log -o one-us
 Rows are space-separated: `sentence timestamp keyb_width keyb_height event
 x_pos y_pos x_radius y_radius angle word is_err`. Words in `sentence` are
 joined with underscores. A swipe is a run of consecutive `touchmove` rows for
-the same word, split on a word change or `touchend` (the same chunking as the
-study's `stats_create.py`); the last attempt for each word in a sentence is
+the same word, split on a word change or `touchend`, following the approach of
+the study's `stats_create.py`; the last attempt for each word in a sentence is
 used. Rows shorter than 12 columns and rows whose `is_err` is not 0/1 are
 ignored, and extra columns are ignored.
 
-The geometry is reconstructed from the study's web keyboard, not exported with
-the logs: ten columns across `keyb_width`, and three letter rows of pitch
-`(keyb_height - 4) / 3.7` starting one pixel down. Treat it as approximate.
-Some touches have no recorded `touchstart`; the first `touchmove` still starts
-the gesture. Sentences with a missing word or fewer than two points are skipped.
+The geometry is inferred from the study's web keyboard, not exported with the
+logs: ten columns across `keyb_width`, and three letter rows of pitch
+`(keyb_height - 4) / 3.7` starting one pixel down. The converter has not been run
+over the full `swipelogs.zip`; treat the geometry as approximate. Some touches have
+no recorded `touchstart`; the first `touchmove` still starts the gesture. Sentences
+with a missing word or fewer than two points are skipped.
 
 ## Noisy Typing on QWERTY Keyboards
 
@@ -113,36 +119,30 @@ are not emitted unless `--word-sets` is given, because they are force-aligned
 variants of the same input, but their per-word tap counts are still read to
 segment the plain records. Deleted chunks are skipped, and so are records
 without a reference (the composition tasks in `vt_exp3`). A keyboard's
-coordinates are mapped with a per-row linear fit from its own key centres: each
-letter row's x centres map to that row's grid columns, and the three row mean y
-centres map to 1/6, 1/2 and 5/6. A tap whose nearest key is `<sp>` becomes a
-space tap; taps nearest to other non-letter keys are skipped. Samples keep the
-dataset's relative times, shifted to the sentence's first touch.
+coordinates are mapped with a line through each letter row's first and last key
+centres for x, and a line through q's and z's row-mean y centres for y; the grid
+centres are 0.05…0.95 across and 1/6, 1/2 and 5/6 down. A tap whose nearest key
+is `<sp>` becomes a space tap; taps nearest to other non-letter keys are skipped.
+Samples keep the dataset's relative times, shifted to the sentence's first touch.
 
 The eyes-free studies are left out unless `--eyes-free` is given:
 `eyesfree_exp1`'s `blindfolded` condition and `eyesfree_exp2` tapped a keyboard
-they only imagined, and their raw taps read as the reference's letters 31% of
-the time against 94% for the sighted condition of the same study (the study's
-own decoder fitted a per-sentence scale, translation and rotation before
-reading them). The `small` and `tiny` conditions of `vt_exp3` and
-`vt_potential` are left out unless `--small-keyboards` is given: they used
-42 px and 26 px keys instead of the full-size keyboard the other datasets
-measure. A `--set test --limit 400` with both filters off is `eyesfree_exp1`
-alone, a third of whose words are blindfolded typing that reads at about 2%
-word accuracy raw: with those all wrong, the run's ceiling is 67%. Read a
-limited cut with its filters in mind: `--limit` takes records in the dataset's
-own order, not a sample.
+they only imagined, so their touches do not land where the keys are. The `small`
+and `tiny` conditions of `vt_exp3` and `vt_potential` are left out unless
+`--small-keyboards` is given: they used smaller-than-full-size keyboards, not the
+full-size sighted typing the other datasets measure. `--set test` with both filters
+off is `eyesfree_exp1` alone; read a limited cut with its filters in mind: `--limit`
+takes records in the dataset's own order, not a sample.
 
 The logs do not always record spaces. `vt_exp1`, `vt_exp2`'s `nospace`
 condition and `vt_exp3` typed a run of letters and let their decoder choose the
 word breaks; the `swipe` condition and `eyesfree_exp2` drew a space as a right
-swipe (the study's 52 px). A touch that travels more than two key widths along
-x is read as a space when its record has no spacebar tap. A record with fewer
-space taps than the reference has words is segmented by the tap counts of its
-force-aligned `*_word` twin, which holds that attempt's letter taps split at
-the reference's words; a record whose twin is missing stays one run of
-letters. The stderr line counts how many sentences were split either way and
-how many ran together.
+swipe. A touch that travels more than two q-key widths along x is read as a space
+when its record has no spacebar tap. A record with fewer space taps than the reference
+has words is segmented by the tap counts of its force-aligned `*_word` twin, which holds
+that attempt's letter taps split at the reference's words; a record whose twin is missing
+stays one run of letters. The stderr line counts how many sentences were split either way
+and how many ran together.
 
 ## Tap Typing with Touch Sensing Images
 
@@ -166,15 +166,26 @@ coordinate columns.
 Coordinates are mapped with the single Pixel 6 Pro keyboard in
 `keyboard_data.json`: the x pitch comes from q and p's centres (with a half-key
 margin so q's centre is 0.05), and the y pitch comes from q and z. A tap whose
-nearest key is `SPACE` becomes a space tap. Period taps are dropped; words stay
-as `prompt.split()`, including their punctuation.
+nearest key is `SPACE` becomes a space tap, and one whose nearest key is `.` is
+dropped; the reference's `ref_char` is never used to choose what to keep. Words
+stay as `prompt.split()`, including their punctuation.
+
+## Biases
+
+- TSI drops `was_deleted` taps, so a mistake the participant fixed is invisible.
+- Noisy records with fewer space taps than reference words and no `_word` twin stay one
+  run of letters (the stderr line's "run together"), so their later words cannot come out
+  right.
+- FUTO ignores `distance`; `--valid-only` skips records marked
+  `potentially_invalid_sentence` and is off by default.
+- How We Swipe's keyboard geometry is inferred from the study's web keyboard, and the
+  converter has not been run over the full logs.
 
 ## Pitfalls
 
 - The data is not vendored and the converters never download anything.
 - FUTO root splits and How We Swipe logs are recordings of what people did, not
   clean synthetic gestures; incomplete sentences and retries are normal.
-- How We Swipe's keyboard geometry is inferred and approximate.
 - Noisy Typing's JSON is much larger than its zip; use `--limit` while
   experimenting. `--set`, `--word-sets`, `--eyes-free` and `--small-keyboards`
   change which attempts are emitted.

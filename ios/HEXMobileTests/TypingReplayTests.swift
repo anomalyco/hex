@@ -7,10 +7,11 @@ import XCTest
 private let replayClockBase: TimeInterval = 100
 
 /// Replaying recorded fingers through the full keyboard as it runs: the key plane's touches,
-/// Swipe typing or taps with Spatial autocorrect, and the engine's spacing and casing. Two
-/// opt-in tests read recordings (`HEX_SWIPE_REPLAY`, `HEX_TAP_REPLAY`); one test with no
-/// environment builds the same gestures in memory and asserts every word comes out right, so
-/// the replay mapping itself stays honest.
+/// Swipe typing or taps with Spatial autocorrect, and the engine's spacing. Two opt-in tests
+/// read recordings (`HEX_SWIPE_REPLAY`, `HEX_TAP_REPLAY`); one test with no environment
+/// checks Hex's key geometry against the grid and runs clean gestures through the same
+/// mapping to type the right words, so a wrong layout fails loudly, but it cannot catch a
+/// converter that emits wrong coordinates.
 ///
 /// `xcodebuild` passes environment variables to the test runner only when they are prefixed
 /// with `TEST_RUNNER_`, and strips the prefix, so the variables below are set that way:
@@ -25,8 +26,9 @@ private let replayClockBase: TimeInterval = 100
 /// 0…1 across the ten columns of the top letter row, from q's left edge to p's right edge
 /// (their centres at 0.05 and 0.95), y runs 0…1 from the top of the first letter row to the
 /// bottom of the third (row centres at 1/6, 1/2 and 5/6), and t is milliseconds since that
-/// finger landed. The second and third rows sit half a column and one and a half columns
-/// right of the first, as on QWERTY
+/// finger landed; the replay puts each gesture on one running clock for its sentence. The
+/// second and third rows sit half a column and one and a half columns right of the first, as
+/// on QWERTY
 /// (`TypingReplayGrid` checks Hex's keys against that before replaying). A tap file replaces
 /// `gestures` with `taps`, one `{x, y, t}` per touch, each array holding that touch's
 /// samples (a tap is usually one) on the sentence's clock; y > 1 is the space-bar row, where
@@ -34,13 +36,13 @@ private let replayClockBase: TimeInterval = 100
 ///
 /// Both report a line per source between `TYPING-REPLAY` and `TYPING-REPLAY-END`: total
 /// words, words the decoder's dictionary lacks and their share, and accuracy among the words
-/// it has. Swipes also report typed-or-offered in the strip, gestures not read as swipes, and
-/// decode-on-lift median and p90. `HEX_REPLAY_LIMIT` caps sentences per source and
-/// `HEX_REPLAY_OUT` writes each sentence's intended and typed words as JSON.
+/// it has. The dictionary check keeps only ASCII a–z letters, so accented, hyphenated and
+/// numeric tokens count as outside. Swipes also report typed-or-offered in the strip,
+/// gestures not read as swipes, and the decoder's own median and p90 milliseconds.
+/// `HEX_REPLAY_LIMIT` caps sentences per source and `HEX_REPLAY_OUT` writes each sentence's
+/// intended and typed words as JSON.
 @MainActor
 final class TypingReplayTests: XCTestCase {
-    /// The word a swipe that wasn't read leaves behind, so the next gesture starts a word.
-    private static let placeholderWord = "x"
     /// English's own letter rows, for the in-memory gestures: row 2 starts half a column in
     /// and row 3 one and a half, as Apple's and Hex's keyboards draw them.
     private static let qwertyRows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
@@ -50,6 +52,17 @@ final class TypingReplayTests: XCTestCase {
     private var model: TypingDecoderModel!
     /// The engine's clock, driven by a recording's times.
     private var now: TimeInterval = replayClockBase
+    /// The real time when `now` was last set, for `SwipeTyping.clock`.
+    private var realBase: TimeInterval = CACurrentMediaTime()
+
+    /// Moves the replay's clock to a recorded time. `SwipeTyping` asks its own clock for both
+    /// preview throttling and its decode timing, so that clock runs from `now` plus the real
+    /// time since this call: preview throttling sees the recording's gaps, and `lastDecodeTime`
+    /// still measures the decode instead of zero.
+    private func setNow(_ time: TimeInterval) {
+        now = time
+        realBase = CACurrentMediaTime()
+    }
 
     override func setUp() async throws {
         suiteName = "TypingReplayTests-\(UUID().uuidString)"
@@ -148,6 +161,15 @@ final class TypingReplayTests: XCTestCase {
         XCTAssertTrue(tapReport.words.allSatisfy(\.right), "tapped \(tapped)")
     }
 
+    /// Tap word alignment: a split word and a missing word each leave the later intended
+    /// words matched instead of shifting every word after them.
+    func testAlignmentKeepsLaterWordsAfterASplitOrAMissingWord() {
+        let missing: [Int?] = [0, nil, 1, 2]
+        XCTAssertEqual(align(["one", "of", "the", "best"], ["one", "the", "best"]), missing)
+        let split: [Int?] = [0, nil, 3, 4]
+        XCTAssertEqual(align(["a", "lot", "of", "fun"], ["a", "lo", "t", "of", "fun"]), split)
+    }
+
     // MARK: - Swipes
 
     private struct SwipeResult {
@@ -155,6 +177,8 @@ final class TypingReplayTests: XCTestCase {
         var typed: String
         var notSwiped: Bool
         var decodeMilliseconds: Double?
+        /// Where the next gesture starts on the sentence's clock.
+        var nextStart: TimeInterval
     }
 
     /// Replays `sentences` through a fresh keyboard each, grouped by source. One gesture per
@@ -173,6 +197,11 @@ final class TypingReplayTests: XCTestCase {
                 guard plane.swipe != nil else { throw ReplayError.missingSwipeModel }
                 let grid = try TypingReplayGrid(keys: engine.swipeKeys)
                 report.sentences += 1
+                // Every word's recorded times start at its finger's landing, so each gesture is
+                // put on one running clock for the sentence: the next begins after this one lifts.
+                // Nothing goes backwards, and SwipeTyping's preview throttle sees the recorded
+                // gaps.
+                var start = replayClockBase
                 var typed: [String] = []
                 for (index, word) in sentence.words.enumerated() {
                     let result = try replaySwipe(
@@ -182,8 +211,10 @@ final class TypingReplayTests: XCTestCase {
                         engine: engine,
                         plane: plane,
                         grid: grid,
-                        id: index + 1
+                        id: index + 1,
+                        start: start
                     )
+                    start = result.nextStart
                     typed.append(result.typed)
                     report.words.append(result.word)
                     if result.notSwiped { report.notSwipes += 1 }
@@ -213,45 +244,58 @@ final class TypingReplayTests: XCTestCase {
         engine: FullKeyboardEngine,
         plane: KeyboardKeyPlaneView,
         grid: TypingReplayGrid,
-        id: Int
+        id: Int,
+        start: TimeInterval
     ) throws -> SwipeResult {
-        let samples = try gesture.samples(grid: grid)
+        let samples = try gesture.samples(grid: grid, start: start)
         let before = target.text
         var typed = ""
-        var notSwiped = true
+        var couldReadAddedWord = false
+        var wasSwipe = false
         var decode: Double?
 
         // A swipe starts only on a letter key (`SwipeTyping.began`), and a path shorter than
         // two points can't be one. Skip the plane entirely, so a stray first touch on delete
         // can't change the context the next word reads.
         if samples.count >= 2, startsOnALetter(samples[0].point, engine: engine) {
-            now = samples[0].time
+            setNow(samples[0].time)
             plane.began(id: id, sample: TypingLogTouchSample(point: samples[0].point, timestamp: samples[0].time))
             for sample in samples.dropFirst().dropLast() {
-                now = sample.time
+                setNow(sample.time)
                 plane.moved(id: id, sample: TypingLogTouchSample(point: sample.point, timestamp: sample.time))
             }
             let lift = samples[samples.count - 1]
-            now = lift.time
-            let wasSwipe = plane.swipe?.owns(id) ?? false
-            let started = CACurrentMediaTime()
+            setNow(lift.time)
+            wasSwipe = plane.swipe?.owns(id) ?? false
             plane.ended(id: id, sample: TypingLogTouchSample(point: lift.point, timestamp: lift.time))
-            if wasSwipe { decode = (CACurrentMediaTime() - started) * 1000 }
+            if wasSwipe, let last = plane.swipe?.lastDecodeTime {
+                decode = last * 1000
+            }
             if target.text.hasPrefix(before) {
                 typed = String(target.text.dropFirst(before.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+                couldReadAddedWord = true
+            } else {
+                // The engine edited text elsewhere, so a prefix diff can't name what this
+                // gesture added. Report the last token and mark the word wrong.
+                typed = target.text.split(whereSeparator: \.isWhitespace).last.map(String.init) ?? ""
             }
-            notSwiped = typed.isEmpty || (intended.count > 1 && typed.count <= 1)
         }
 
+        // A swipe is read only if it was still a swipe on lift and left text: a swipe that
+        // typed nothing wasn't read, while one decoded to the wrong word or a single letter
+        // is a wrong word, not a missing swipe.
+        let notSwiped = !wasSwipe || typed.isEmpty
         if notSwiped {
+            // A tap that went in is removed, and the engine re-reads the field afterwards.
+            // `SwipeTyping.endSwipe` spaces a word from `needsSpace(before:)`, so restoring
+            // the text is enough for the next swipe to start a new word; no placeholder.
             restore(target, to: before)
-            let separator = before.isEmpty || before.last?.isWhitespace == true ? "" : " "
-            engine.insert(separator + Self.placeholderWord, source: nil)
+            engine.textDidChange()
         }
 
         let key = Self.replayKey(intended)
         let inDictionary = isInDictionary(intended)
-        let right = !notSwiped && inDictionary && !key.isEmpty && Self.replayKey(typed) == key
+        let right = couldReadAddedWord && !notSwiped && inDictionary && !key.isEmpty && Self.replayKey(typed) == key
         let offered = !notSwiped && inDictionary && !key.isEmpty && engine.suggestions.contains {
             let replacement = Self.replayKey($0.replacement)
             return !replacement.isEmpty && replacement == key
@@ -260,7 +304,8 @@ final class TypingReplayTests: XCTestCase {
             word: ReplayWord(intended: intended, typed: typed, inDictionary: inDictionary, right: right, offered: offered),
             typed: typed,
             notSwiped: notSwiped,
-            decodeMilliseconds: decode
+            decodeMilliseconds: decode,
+            nextStart: (samples.last?.time ?? start) + 0.5
         )
     }
 
@@ -281,17 +326,17 @@ final class TypingReplayTests: XCTestCase {
                 for (index, tap) in sentence.taps.enumerated() {
                     let samples = try tap.samples(grid: grid, space: space)
                     guard let first = samples.first, let lift = samples.last else { continue }
-                    now = first.time
+                    setNow(first.time)
                     plane.began(id: index + 1, sample: TypingLogTouchSample(point: first.point, timestamp: first.time))
                     for sample in samples.dropFirst().dropLast() {
-                        now = sample.time
+                        setNow(sample.time)
                         plane.moved(id: index + 1, sample: TypingLogTouchSample(point: sample.point, timestamp: sample.time))
                     }
-                    now = lift.time
+                    setNow(lift.time)
                     plane.ended(id: index + 1, sample: TypingLogTouchSample(point: lift.point, timestamp: lift.time))
                 }
                 if !target.text.hasSuffix(" ") {
-                    now = replayClockBase + (sentence.taps.last?.t.last ?? 0) / 1000 + 0.4
+                    setNow(replayClockBase + (sentence.taps.last?.t.last ?? 0) / 1000 + 0.4)
                     let point = CGPoint(x: space.midX, y: space.midY)
                     let sample = TypingLogTouchSample(point: point, timestamp: now)
                     plane.began(id: sentence.taps.count + 1, sample: sample)
@@ -328,10 +373,9 @@ final class TypingReplayTests: XCTestCase {
 
     /// A 390 pt English keyboard set up as `FullKeyboardView` sets one up: Autocorrect and
     /// Auto-capitalization from the switches, the typing model for the letter odds and, while
-    /// Spatial autocorrect is on, its decoder (`FullKeyboardView.syncSpatialAutocorrect`,
-    /// ios/HEXShared/FullKeyboard/FullKeyboardView.swift:535), and Swipe typing's model while
-    /// the switch is on (`syncSwipeTyping`, :517). The field asks for no automatic caps, as
-    /// the existing swipe fixtures do.
+    /// Spatial autocorrect is on, its decoder (`FullKeyboardView.syncSpatialAutocorrect`), and
+    /// Swipe typing's model while the switch is on (`FullKeyboardView.syncSwipeTyping`). The
+    /// field asks for no automatic caps, as the existing swipe fixtures do.
     private func makeKeyboard() throws -> (FixtureTextTarget, FullKeyboardEngine, KeyboardKeyPlaneView) {
         let target = FixtureTextTarget()
         target.autocapitalizationType = .none
@@ -352,6 +396,10 @@ final class TypingReplayTests: XCTestCase {
         let plane = KeyboardKeyPlaneView(engine: engine)
         if settings.swipeTyping, engine.language.supportsSwipeTyping {
             plane.swipe = SwipeTyping(engine: engine, model: words)
+            // SwipeTyping's clock runs from the recorded time plus the real time since the
+            // last sample: preview throttling sees the recorded gaps, and its own
+            // `lastDecodeTime` still measures the decode instead of zero.
+            plane.swipe?.clock = { [unowned self] in self.now + (CACurrentMediaTime() - self.realBase) }
         }
         return (target, engine, plane)
     }
@@ -361,7 +409,8 @@ final class TypingReplayTests: XCTestCase {
         return character.first?.isLetter == true
     }
 
-    /// Deletes back to `text`; a swipe only inserts, so this takes exactly what it added.
+    /// Deletes back to `text`: a not-read gesture only appended text, so this takes exactly
+    /// what it added. Leaves the field alone when the engine edited it elsewhere.
     private func restore(_ target: FixtureTextTarget, to text: String) {
         guard target.text.hasPrefix(text) else { return }
         while target.text.count > text.count {
@@ -612,15 +661,16 @@ private struct ReplaySample {
 }
 
 private extension ReplayGesture {
-    /// The gesture's points on Hex's keys, with its milliseconds moved onto the clock.
-    func samples(grid: TypingReplayGrid) throws -> [ReplaySample] {
+    /// The gesture's points on Hex's keys, with its milliseconds moved onto the sentence's
+    /// clock at `start`.
+    func samples(grid: TypingReplayGrid, start: TimeInterval) throws -> [ReplaySample] {
         guard x.count == y.count, y.count == t.count else {
             throw ReplayError.malformed("a gesture's x, y and t must have the same count")
         }
         return t.indices.map { index in
             ReplaySample(
                 point: grid.point(x: CGFloat(x[index]), y: CGFloat(y[index])),
-                time: replayClockBase + t[index] / 1000
+                time: start + t[index] / 1000
             )
         }
     }
