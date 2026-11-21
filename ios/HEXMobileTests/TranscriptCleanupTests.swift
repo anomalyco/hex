@@ -96,11 +96,12 @@ final class TranscriptCleanupGuardTests: XCTestCase {
 
     /// The reported shape: a dictated fragment comes back answered.
     func testRejectsARepliedToSentence() {
-        XCTAssertFalse(
-            TranscriptCleanupGuard.isAcceptable(
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
                 original: "would you say",
                 cleaned: "Yes, I would say."
-            )
+            ),
+            "the cleaned text added words the speaker did not say"
         )
         XCTAssertEqual(
             TranscriptCleanupGuard.rejection(
@@ -113,11 +114,12 @@ final class TranscriptCleanupGuardTests: XCTestCase {
 
     /// The reported shape: a long transcript comes back behind a preamble.
     func testRejectsAPreambleBeforeALongTranscript() {
-        XCTAssertFalse(
-            TranscriptCleanupGuard.isAcceptable(
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
                 original: "the quarterly report needs a short summary for the sales team before the meeting on monday",
                 cleaned: "Sure, I can help with that. Here's the cleaned transcript: The quarterly report needs a short summary for the sales team before the meeting on Monday."
-            )
+            ),
+            "the cleaned text added words the speaker did not say"
         )
     }
 
@@ -156,9 +158,21 @@ final class TranscriptCleanupGuardTests: XCTestCase {
         )
     }
 
-    /// One misheard word is exactly what the pass is for, so the budget leaves room for
-    /// it.
-    func testAcceptsASingleMisheardWordWithinTheAddedWordBudget() {
+    /// A pure insertion is new content even when it is only one word: there is no
+    /// dropped word for it to replace.
+    func testRejectsAPureInsertion() {
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "i will call you tomorrow",
+                cleaned: "I will definitely call you tomorrow."
+            ),
+            "the cleaned text added words the speaker did not say"
+        )
+    }
+
+    /// A misheard word may be replaced, including a whole phrase, as long as each added
+    /// word replaces a distinct word the cleanup dropped.
+    func testAcceptsMisheardAndReplacedWords() {
         XCTAssertTrue(
             TranscriptCleanupGuard.isAcceptable(
                 original: "we should use cloud code on tuesday, no wait, wednesday",
@@ -167,8 +181,82 @@ final class TranscriptCleanupGuardTests: XCTestCase {
         )
         XCTAssertTrue(
             TranscriptCleanupGuard.isAcceptable(
+                original: "open get hub and cloud code",
+                cleaned: "Open GitHub and Claude Code."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
                 original: "open the file in vs code",
                 cleaned: "Open the file in VS Code."
+            )
+        )
+    }
+
+    /// A stutter or a repeated pronoun is dropped, never added back.
+    func testAcceptsStuttersAndRepeatedPronounSelfCorrections() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i i think we should ship",
+                cleaned: "I think we should ship."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "we we should ship it",
+                cleaned: "We should ship it."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i'll send it tomorrow, i mean, i'll send it today",
+                cleaned: "I'll send it today."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i want, i mean, i need the report",
+                cleaned: "I need the report."
+            )
+        )
+    }
+
+    /// Pronoun contractions compare as their expansions, so "I'm" and "I am" are the
+    /// same words on both sides.
+    func testPronounContractionsCompareAsTheirExpansions() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i am going home",
+                cleaned: "I'm going home."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "we are ready",
+                cleaned: "We're ready."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "you are late",
+                cleaned: "You're late."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i'm going home",
+                cleaned: "I am going home."
+            )
+        )
+    }
+
+    /// "i'd" reads as "i would". When the speaker meant "i had", the one added word
+    /// replaces the one dropped word, so the ambiguity costs nothing.
+    func testAHadContractionStillPassesAsItsExpansion() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i'd finished the report",
+                cleaned: "I had finished the report."
             )
         )
     }
@@ -229,6 +317,63 @@ final class TranscriptCleanupGuardTests: XCTestCase {
                 cleaned: "Of course we should ship it."
             ),
             "the cleaned text starts with a reply"
+        )
+    }
+
+    /// The transcript's own leading fillers do not make its opener new, and "ok" and
+    /// "okay" are the same opener.
+    func testFillersAndOkAreNotReplies() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "um yes ship it",
+                cleaned: "Yes, ship it."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "so okay let's go",
+                cleaned: "Okay, let's go."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "ok ship it",
+                cleaned: "Okay, ship it."
+            )
+        )
+    }
+
+    /// "hear" may come back as "here" when nothing else changed; a reply that merely
+    /// starts with "here" still does not pass.
+    func testHearBecameHereWithEverythingElseEqual() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "hear is the doc",
+                cleaned: "Here is the doc."
+            )
+        )
+        XCTAssertEqual(
+            TranscriptCleanupGuard.rejection(
+                original: "there is the doc",
+                cleaned: "Here is the doc."
+            ),
+            "the cleaned text starts with a reply"
+        )
+    }
+
+    /// A colon between two digits is a time, not a preamble.
+    func testATimeColonIsNotAPreamble() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "meet at 3 30",
+                cleaned: "Meet at 3:30."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "meet at 3:30",
+                cleaned: "Meet at 3:30."
+            )
         )
     }
 

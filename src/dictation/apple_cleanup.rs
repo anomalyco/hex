@@ -314,46 +314,60 @@ pub(crate) fn rejection(original: &str, cleaned: &str) -> Option<&'static str> {
     if digits(original) != digits(cleaned) {
         return Some("a number changed");
     }
-    let original_words = words(original);
-    let cleaned_words = words(cleaned);
-    if original_words.is_empty() || cleaned_words.is_empty() {
+    let original_heard = words(original);
+    let cleaned_heard = words(cleaned);
+    if original_heard.is_empty() || cleaned_heard.is_empty() {
         return Some("the cleaned text is empty");
     }
+    // An added negation flips the meaning just as surely as a dropped one, so
+    // every negation count must match exactly. Negations are read as heard:
+    // "don't" keeps its own spelling here.
+    if negations(&original_heard) != negations(&cleaned_heard) {
+        return Some("a negation was added or dropped");
+    }
+    // Pronoun contractions read as their expansions, so "I'm" and "I am"
+    // compare the same and neither is a new word.
+    let original_words = expanded(&original_heard);
+    let cleaned_words = expanded(&cleaned_heard);
     if cleaned_words.len() > original_words.len() * 2 + 4 {
         return Some("the cleaned text has many more words than the transcript");
     }
-    // An added negation flips the meaning just as surely as a dropped one, so
-    // every negation count must match exactly.
-    if negations(&original_words) != negations(&cleaned_words) {
-        return Some("a negation was added or dropped");
-    }
-    // A cleanup may fix a word the model misheard, but not invent several:
-    // beyond a sixth of the transcript, the answer is new content rather than
-    // the speaker's.
-    if added_words(&original_words, &cleaned_words) > added_word_budget(original_words.len()) {
+    // A cleanup may fix a word the model misheard, but each word it adds must
+    // replace a distinct word it dropped, and it may not add more than a
+    // quarter of the transcript (or two words, for a short one). Anything else
+    // is new content rather than the speaker's.
+    let added = added_words(&original_words, &cleaned_words);
+    if added > dropped_words(&original_words, &cleaned_words)
+        || added > added_word_budget(original_words.len())
+    {
         return Some("the cleaned text added words the speaker did not say");
     }
     // An answer or a preamble introduces its own speaker ("I can help with
     // that" for a question addressed to the person). A pronoun the transcript
-    // never used, or one its speaker repeated, is that tell. A dropped
-    // pronoun is left to the overlap checks, since a spoken self-correction
-    // may legitimately remove one.
+    // never used, or one its speaker repeated more often, is that tell. A
+    // stutter or a repeated-pronoun self-correction may drop repeats, and a
+    // dropped pronoun is left to the overlap checks.
+    let original_people = people(&original_words);
     if people(&cleaned_words)
         .into_iter()
-        .any(|(word, count)| people(&original_words).get(word).copied().unwrap_or(0) != count)
+        .any(|(word, count)| count > original_people.get(word).copied().unwrap_or(0))
     {
         return Some("the cleaned text changed who is speaking");
     }
     // "Yes, I would say." for a dictated "would you say" answers instead of
-    // cleaning. The transcript may start with the same word on purpose.
-    if let Some(cleaned_opener) = opener(&cleaned_words)
-        && opener(&original_words) != Some(cleaned_opener)
-    {
-        return Some("the cleaned text starts with a reply");
+    // cleaning. The transcript may start with the same word on purpose, after
+    // its own leading fillers, and "hear" may come back as "here" when every
+    // other word is unchanged.
+    let hear_fix = hear_became_here(&original_words, &cleaned_words);
+    if let Some(cleaned_opener) = opener(&cleaned_words) {
+        let original_opener = opener_after_fillers(&original_words);
+        if original_opener != Some(cleaned_opener) && !(cleaned_opener == "here" && hear_fix) {
+            return Some("the cleaned text starts with a reply");
+        }
     }
     // A colon or "here's the …" the speaker never said is the shape of a
     // preamble ("Here's the cleaned transcript: …").
-    if preamble(original, cleaned) {
+    if preamble(original, cleaned, hear_fix) {
         return Some("the cleaned text starts with a preamble");
     }
     let shared = shared_words(&original_words, &cleaned_words);
@@ -361,8 +375,10 @@ pub(crate) fn rejection(original: &str, cleaned: &str) -> Option<&'static str> {
         return Some("the cleaned text is about something else");
     }
     // A short transcript may be entirely a spoken self-correction; a long one
-    // may lose at most half of its words.
+    // may lose at most half of its words, unless it only drops words, as a
+    // self-correction does.
     if !(original_words.len() <= 6 && cleaned_words.len() <= 3)
+        && added > 0
         && ratio(shared, original_words.len()) < 0.5
     {
         return Some("the cleaned text dropped most of the transcript");
@@ -376,10 +392,48 @@ pub(crate) fn is_acceptable(original: &str, cleaned: &str) -> bool {
     rejection(original, cleaned).is_none()
 }
 
-/// How many words a cleanup may add: one, so a misheard word can be fixed,
-/// and one more per six words of transcript.
+/// How many words a cleanup may add: two, or a quarter of the transcript for
+/// a longer one.
 fn added_word_budget(original_words: usize) -> usize {
-    (original_words / 6).max(1)
+    (original_words / 4).max(2)
+}
+
+/// The heard words with pronoun contractions read as their expansions, so
+/// "I'm" and "I am" compare the same. `words` itself stays as heard for
+/// negations and for neutral voice.
+fn expanded(words: &[String]) -> Vec<String> {
+    let mut expanded = Vec::with_capacity(words.len());
+    for word in words {
+        match pronoun_expansion(word) {
+            Some([first, second]) => {
+                expanded.push(first.to_owned());
+                expanded.push(second.to_owned());
+            }
+            None => expanded.push(word.clone()),
+        }
+    }
+    expanded
+}
+
+/// The two words a pronoun contraction stands for. "i'd" reads as "i would";
+/// when the speaker meant "i had", the expansion still costs only one dropped
+/// and one added word, which the replacement rule allows.
+fn pronoun_expansion(word: &str) -> Option<[&'static str; 2]> {
+    Some(match word {
+        "i'm" => ["i", "am"],
+        "i've" => ["i", "have"],
+        "i'll" => ["i", "will"],
+        "i'd" => ["i", "would"],
+        "you're" => ["you", "are"],
+        "you've" => ["you", "have"],
+        "you'll" => ["you", "will"],
+        "you'd" => ["you", "would"],
+        "we're" => ["we", "are"],
+        "we've" => ["we", "have"],
+        "we'll" => ["we", "will"],
+        "we'd" => ["we", "would"],
+        _ => return None,
+    })
 }
 
 /// The cleaned words that never appear in the original, counted with the
@@ -392,8 +446,17 @@ fn added_words(original: &[String], cleaned: &[String]) -> usize {
         .count()
 }
 
-/// The first- and second-person pronouns that tell who is speaking, in the
-/// spelling the word splitter gives them.
+/// The distinct original words the cleanup dropped, one for each word it may
+/// add.
+fn dropped_words(original: &[String], cleaned: &[String]) -> usize {
+    let original: BTreeSet<&str> = original.iter().map(String::as_str).collect();
+    let cleaned: BTreeSet<&str> = cleaned.iter().map(String::as_str).collect();
+    original.difference(&cleaned).count()
+}
+
+/// The first- and second-person pronouns that tell who is speaking. The
+/// contractions are here too, though [`expanded`] has usually already
+/// replaced them with their two words.
 const PEOPLE: &[&str] = &[
     "i", "me", "my", "mine", "myself", "you", "your", "yours", "yourself", "we", "us", "our",
     "ours", "i'm", "i've", "i'll", "i'd", "you're", "you've", "you'll", "you'd", "we're", "we've",
@@ -411,17 +474,39 @@ fn people(words: &[String]) -> BTreeMap<&str, usize> {
     counts
 }
 
-/// The reply opener `words` starts with, or `None`. "Of course" is one
-/// opener even though it is two words.
+/// The reply opener at the start of `words`, or `None`. "Of course" is one
+/// opener even though it is two words, and "ok" and "okay" are the same one.
 fn opener(words: &[String]) -> Option<&'static str> {
     let first = words.first()?;
     if first == "of" && words.get(1).is_some_and(|word| word == "course") {
         return Some("of course");
     }
-    OPENERS
+    let opener = OPENERS
         .iter()
         .copied()
-        .find(|opener| *opener == first.as_str())
+        .find(|opener| *opener == first.as_str())?;
+    Some(if opener == "ok" { "okay" } else { opener })
+}
+
+/// The reply opener the transcript itself starts with, after its own leading
+/// fillers ("um yes ship it" starts with "yes", not a reply).
+fn opener_after_fillers(words: &[String]) -> Option<&'static str> {
+    let start = words
+        .iter()
+        .position(|word| !FILLERS.contains(&word.as_str()))
+        .unwrap_or(words.len());
+    opener(&words[start..])
+}
+
+/// The leading fillers a transcript may start with without being a reply.
+const FILLERS: &[&str] = &["um", "uh", "er", "ah", "so", "well", "like"];
+
+/// Whether "hear" became "here" at the start and every other word is
+/// unchanged: the one near-homophone fix that may pass an opener check.
+fn hear_became_here(original: &[String], cleaned: &[String]) -> bool {
+    original.first().is_some_and(|word| word == "hear")
+        && original.len() == cleaned.len()
+        && original.iter().skip(1).eq(cleaned.iter().skip(1))
 }
 
 /// The words a model starts a reply or a preamble with instead of cleaning.
@@ -451,17 +536,39 @@ const PREAMBLES: &[&str] = &[
 
 /// Whether `cleaned` gained a preamble the transcript did not have: a colon
 /// in its first sentence or clause where the original has no colon at all,
-/// or one of the preamble phrases absent from the original.
-fn preamble(original: &str, cleaned: &str) -> bool {
-    if !original.contains([':', '：']) && first_clause(cleaned).contains([':', '：']) {
+/// or one of the preamble phrases absent from the original. A colon between
+/// two digits (3:30) is a time, not a preamble, and a leading "hear is the"
+/// that became "here is the" is the near-homophone fix, not a preamble.
+fn preamble(original: &str, cleaned: &str, hear_fix: bool) -> bool {
+    if !has_real_colon(original) && has_real_colon(first_clause(cleaned)) {
         return true;
     }
     let normalized = |text: &str| text.to_lowercase().replace('\u{2019}', "'");
     let original = normalized(original);
     let cleaned = normalized(cleaned);
-    PREAMBLES
+    PREAMBLES.iter().any(|phrase| {
+        cleaned.contains(phrase)
+            && !original.contains(phrase)
+            && !(hear_fix && *phrase == "here is the")
+    })
+}
+
+/// Whether `text` has a colon or full-width colon that is not between two
+/// digits, as in 3:30.
+fn has_real_colon(text: &str) -> bool {
+    let characters: Vec<char> = text.chars().collect();
+    characters
         .iter()
-        .any(|phrase| cleaned.contains(phrase) && !original.contains(phrase))
+        .copied()
+        .enumerate()
+        .any(|(index, character)| {
+            matches!(character, ':' | '：')
+                && !(index > 0
+                    && characters[index - 1].is_numeric()
+                    && characters
+                        .get(index + 1)
+                        .is_some_and(|next| next.is_numeric()))
+        })
 }
 
 /// The cleaned text's first sentence or clause, where a preamble's colon
@@ -642,7 +749,10 @@ mod tests {
     /// The reported shape: a dictated fragment comes back answered.
     #[test]
     fn a_replied_to_sentence_is_rejected() {
-        assert!(!is_acceptable("would you say", "Yes, I would say."));
+        assert_eq!(
+            rejection("would you say", "Yes, I would say."),
+            Some("the cleaned text added words the speaker did not say")
+        );
         assert_eq!(
             rejection("sure, would you say", "Yes, would you say."),
             Some("the cleaned text starts with a reply")
@@ -657,7 +767,10 @@ mod tests {
         let cleaned = "Sure, I can help with that. Here's the cleaned transcript: The \
             quarterly report needs a short summary for the sales team before the meeting on \
             Monday.";
-        assert!(!is_acceptable(original, cleaned));
+        assert_eq!(
+            rejection(original, cleaned),
+            Some("the cleaned text added words the speaker did not say")
+        );
     }
 
     /// A preamble phrase the transcript never said is refused on its own,
@@ -695,17 +808,73 @@ mod tests {
         );
     }
 
-    /// One misheard word is exactly what the pass is for, so the budget
-    /// leaves room for it; a word the speaker did say may also move.
+    /// A pure insertion is new content even when it is only one word: there
+    /// is no dropped word for it to replace.
     #[test]
-    fn a_single_misheard_word_is_within_the_added_word_budget() {
+    fn a_pure_insertion_is_rejected() {
+        assert_eq!(
+            rejection(
+                "i will call you tomorrow",
+                "I will definitely call you tomorrow."
+            ),
+            Some("the cleaned text added words the speaker did not say")
+        );
+    }
+
+    /// A misheard word may be replaced, including a whole phrase, as long as
+    /// each added word replaces a distinct word the cleanup dropped.
+    #[test]
+    fn misheard_and_replaced_words_pass_the_added_word_rule() {
         assert!(is_acceptable(
             "we should use cloud code on tuesday, no wait, wednesday",
             "We should use Claude Code on Wednesday."
         ));
         assert!(is_acceptable(
+            "open get hub and cloud code",
+            "Open GitHub and Claude Code."
+        ));
+        assert!(is_acceptable(
             "open the file in vs code",
             "Open the file in VS Code."
+        ));
+    }
+
+    /// A stutter or a repeated pronoun is dropped, never added back.
+    #[test]
+    fn stutters_and_repeated_pronoun_self_corrections_are_accepted() {
+        assert!(is_acceptable(
+            "i i think we should ship",
+            "I think we should ship."
+        ));
+        assert!(is_acceptable("we we should ship it", "We should ship it."));
+        assert!(is_acceptable(
+            "i'll send it tomorrow, i mean, i'll send it today",
+            "I'll send it today."
+        ));
+        assert!(is_acceptable(
+            "i want, i mean, i need the report",
+            "I need the report."
+        ));
+    }
+
+    /// Pronoun contractions compare as their expansions, so "I'm" and "I am"
+    /// are the same words on both sides.
+    #[test]
+    fn pronoun_contractions_compare_as_their_expansions() {
+        assert!(is_acceptable("i am going home", "I'm going home."));
+        assert!(is_acceptable("we are ready", "We're ready."));
+        assert!(is_acceptable("you are late", "You're late."));
+        assert!(is_acceptable("i'm going home", "I am going home."));
+    }
+
+    /// "i'd" reads as "i would". When the speaker meant "i had", the one
+    /// added word replaces the one dropped word, so the ambiguity costs
+    /// nothing.
+    #[test]
+    fn a_had_contraction_still_passes_as_its_expansion() {
+        assert!(is_acceptable(
+            "i'd finished the report",
+            "I had finished the report."
         ));
     }
 
@@ -756,6 +925,33 @@ mod tests {
             ),
             Some("the cleaned text starts with a reply")
         );
+    }
+
+    /// The transcript's own leading fillers do not make its opener new, and
+    /// "ok" and "okay" are the same opener.
+    #[test]
+    fn fillers_and_ok_are_not_replies() {
+        assert!(is_acceptable("um yes ship it", "Yes, ship it."));
+        assert!(is_acceptable("so okay let's go", "Okay, let's go."));
+        assert!(is_acceptable("ok ship it", "Okay, ship it."));
+    }
+
+    /// "hear" may come back as "here" when nothing else changed; a reply
+    /// that merely starts with "here" still does not pass.
+    #[test]
+    fn hear_became_here_with_everything_else_equal() {
+        assert!(is_acceptable("hear is the doc", "Here is the doc."));
+        assert_eq!(
+            rejection("there is the doc", "Here is the doc."),
+            Some("the cleaned text starts with a reply")
+        );
+    }
+
+    /// A colon between two digits is a time, not a preamble.
+    #[test]
+    fn a_time_colon_is_not_a_preamble() {
+        assert!(is_acceptable("meet at 3 30", "Meet at 3:30."));
+        assert!(is_acceptable("meet at 3:30", "Meet at 3:30."));
     }
 
     /// The iOS cleaner's instructions are the same text here and in Swift, so

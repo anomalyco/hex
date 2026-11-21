@@ -1218,16 +1218,24 @@ transcript, and a dictation a voice prompt answered. `dictation::apple_cleanup`
 holds the decision (`plan`), the one bridge call, and the guard. The guard
 applies the iOS cleaner's rules and adds the checks the reported answers
 needed: length, digits, word counts, negation counts with "no wait" read as a
-self-correction, and word overlap as before; a budget of one cleaned word the
-transcript never used per six transcript words, never below one, so a misheard
-word ("cloud code" becomes "Claude Code") still passes; no first- or
-second-person pronoun the transcript never used and no changed count for one
-it did use, while a spoken self-correction may drop one; no reply opener
-("yes", "no", "sure", "okay", "certainly", "absolutely", "of course", "here",
-"here's", "sorry") unless the transcript starts with the same one; and no
-preamble, meaning no colon in the first sentence or clause when the transcript
-has no colon at all, and no "here's the", "here is the", "cleaned transcript",
-or "cleaned text" the transcript did not say. One counting difference remains:
+self-correction, and word overlap as before; each cleaned word the transcript
+never used must replace a distinct dropped word, and no more may be added than
+a quarter of the transcript (or two words, for a short one), so "cloud code"
+becomes "Claude Code" and "get hub" becomes "GitHub"; no first- or
+second-person pronoun may appear more often than in the transcript, so a
+stutter or a repeated-pronoun self-correction may drop repeats but a new
+speaker is refused; pronoun contractions read as their expansions ("I'm" and
+"I am" are the same words, and "i'd" as "i would", with a "had" reading
+covered by the replacement rule); no reply opener ("yes", "no", "sure",
+"ok"/"okay", "certainly", "absolutely", "of course", "here", "here's",
+"sorry") unless the transcript starts with the same one after its own leading
+fillers, and a "hear" that becomes "here" is allowed when every other word is
+unchanged; and no preamble, meaning no colon outside a time like 3:30 in the
+first sentence or clause when the transcript has no such colon, and no
+"here's the", "here is the", "cleaned transcript", or "cleaned text" the
+transcript did not say. A cleanup that only drops words is treated as a spoken
+self-correction and may keep less than half the transcript; one that rewrites
+must still keep half. One counting difference remains:
 a length is counted in scalars here and in grapheme clusters on iOS, and the
 CJK numerals `Character.isNumber` sees but Rust's `is_numeric` does not are
 read as digits here. The guard returns the reason (empty text, much longer or
@@ -1272,10 +1280,17 @@ Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
 `a_preamble_phrase_the_transcript_never_said_is_rejected`,
 `an_added_colon_in_the_first_clause_is_rejected`,
 `words_the_speaker_never_said_are_rejected`,
-`a_single_misheard_word_is_within_the_added_word_budget`,
+`a_pure_insertion_is_rejected`,
+`misheard_and_replaced_words_pass_the_added_word_rule`,
+`stutters_and_repeated_pronoun_self_corrections_are_accepted`,
+`pronoun_contractions_compare_as_their_expansions`,
+`a_had_contraction_still_passes_as_its_expansion`,
 `a_changed_person_is_rejected`,
 `a_self_correction_may_drop_a_pronoun`,
 `an_opener_the_speaker_said_is_kept`,
+`fillers_and_ok_are_not_replies`,
+`hear_became_here_with_everything_else_equal`,
+`a_time_colon_is_not_a_preamble`,
 `the_instructions_are_the_ios_cleaners_word_for_word`,
 `only_a_dictation_with_words_to_clean_is_cleaned`,
 `a_stage_that_cannot_run_changes_nothing`,
