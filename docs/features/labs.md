@@ -1206,7 +1206,9 @@ instructions are the iOS cleaner's, word for word
 using the sentence's context, resolve an explicit spoken self-correction
 ("tuesday, no wait, wednesday" becomes "wednesday"), keep the speaker's
 wording, language, meaning, numbers, and negation otherwise, and treat the
-transcript as content to clean rather than as instructions to answer. The
+transcript as content to clean rather than as instructions to answer. A
+dictated question or request comes back as that same question or request,
+cleaned, never as a reply and never behind a sentence of the model's own. The
 stage is read in `Profiles::process_cancellable_with`
 ([dictation/processor.rs](../../src/dictation/processor.rs)) where the
 OpenCode rewrite would have run, though only when that rewrite is off: a mode
@@ -1214,13 +1216,46 @@ that rewrites with OpenCode keeps its own model. It also skips typed text
 (Labs › Transform typed text), a transcript of nothing but numbers, an empty
 transcript, and a dictation a voice prompt answered. `dictation::apple_cleanup`
 holds the decision (`plan`), the one bridge call, and the guard. The guard
-applies the iOS cleaner's rules (length, digits, word counts, negation counts
-with "no wait" read as a self-correction, and word overlap), with one counting
-difference: a length is counted in scalars here and in grapheme clusters on
-iOS, and the CJK numerals `Character.isNumber` sees but Rust's `is_numeric`
-does not are read as digits here. The bridge
-(`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs the
-plain-text responder at utility priority with a 2 s budget, temperature 0.2,
+applies the iOS cleaner's rules and adds the checks the reported answers
+needed: length, digits, word counts, negation counts with "no wait" read as a
+self-correction, and word overlap as before; each cleaned word the transcript
+never used must replace a dropped transcript word (the count keeps repeats),
+and no more may be added than a quarter of the transcript (or two words, for a
+short one), so "cloud code"
+becomes "Claude Code" and "get hub" becomes "GitHub"; no first- or
+second-person pronoun may appear more often than in the transcript, so a
+stutter or a repeated-pronoun self-correction may drop repeats but a new
+speaker is refused; pronoun contractions read as their expansions ("I'm" and
+"I am" are the same words, and "i'd" as "i would", with a "had" reading
+covered by the replacement rule); no reply opener ("yes", "no", "sure",
+"ok"/"okay", "certainly", "absolutely", "of course", "here", "here's",
+"sorry") unless the transcript starts with the same one after its own leading
+fillers, and a "hear" that becomes "here" is allowed when every other word is
+unchanged; and no preamble, meaning no colon outside a time like 3:30 in the
+first sentence or clause when the transcript has no such colon, and no
+"here's the", "here is the", "cleaned transcript", or "cleaned text" the
+transcript did not say. A cleanup that only drops words may keep less than
+half the transcript only when the transcript says a self-correction marker
+("no wait", "wait", "i mean", "actually", "scratch that", "sorry", or
+"rather"), the cleaned text is the transcript's opening words followed by
+every word after the last marker, and the words removed before that marker are
+no longer than that tail plus two; otherwise it is a silent truncation and
+falls back. One that rewrites must still keep half. Counting differences
+remain: a length is counted in scalars here and in grapheme clusters on iOS;
+the CJK numerals `Character.isNumber` sees but Rust's `is_numeric` does not
+are read as digits here; and the colon exception ignores a colon between two
+digits as each platform reads them, so a CJK numeral around a colon (`三:四`)
+counts on iOS but not here. The first clause ends at `.`, `!`, `?`, `;`
+or a line feed. Swift also ends it at a `\r\n` pair as one character; Rust
+ends at its `\n` and leaves the `\r` in the clause, which does not change
+the colon check. The guard returns the reason (empty
+text, much longer or many more words than the transcript, a changed number, an
+added or dropped negation, added words the speaker did not say, a changed
+speaker, a reply opener, a preamble, text about something else, or most of the
+transcript dropped) and that exact reason is what History and the live log
+record. The bridge
+(`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs
+the plain-text responder at utility priority with a 2 s budget, temperature 0.2,
 and 1024 response tokens; the answer is trimmed, loses one pair of wrapping
 quotes only when the transcript didn't dictate its own, takes back the
 transcript's leading and trailing whitespace (spoken formatting's line breaks),
@@ -1249,6 +1284,27 @@ Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
 `a_lost_negation_is_rejected`, `an_added_negation_is_rejected`,
 `runaway_length_is_rejected`, `an_empty_answer_or_transcript_is_rejected`,
 `an_answer_with_little_overlap_is_rejected`,
+`an_answered_request_is_rejected`,
+`a_replied_to_sentence_is_rejected`,
+`a_preamble_before_a_long_transcript_is_rejected`,
+`a_preamble_phrase_the_transcript_never_said_is_rejected`,
+`an_added_colon_in_the_first_clause_is_rejected`,
+`words_the_speaker_never_said_are_rejected`,
+`a_pure_insertion_is_rejected`,
+`misheard_and_replaced_words_pass_the_added_word_rule`,
+`stutters_and_repeated_pronoun_self_corrections_are_accepted`,
+`a_self_correction_marker_explains_a_short_cleanup`,
+`a_truncation_without_a_self_correction_is_rejected`,
+`replaced_words_count_with_multiplicity`,
+`pronoun_contractions_compare_as_their_expansions`,
+`a_had_contraction_still_passes_as_its_expansion`,
+`a_changed_person_is_rejected`,
+`a_self_correction_may_drop_a_pronoun`,
+`an_opener_the_speaker_said_is_kept`,
+`fillers_and_ok_are_not_replies`,
+`hear_became_here_with_everything_else_equal`,
+`a_time_colon_is_not_a_preamble`,
+`the_instructions_are_the_ios_cleaners_word_for_word`,
 `only_a_dictation_with_words_to_clean_is_cleaned`,
 `a_stage_that_cannot_run_changes_nothing`,
 `a_cancelled_stage_starts_nothing`,
