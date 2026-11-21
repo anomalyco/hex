@@ -364,6 +364,58 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(steps, [1, -1, 1])
     }
 
+    /// Settings › Keyboard › Languages with English and Ukrainian: the space bar says
+    /// "Українська", the keys are the twelve-key ЙЦУКЕН, ʼ types the apostrophe Ukrainian
+    /// spells with and a held ʼ the other apostrophes, ґ and ї have keys of their own, and
+    /// Switch dictation too dictates uk-UA.
+    func testUkrainianTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .ukrainian]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "ru-RU", "uk-UA"]
+        let model = KeyboardViewModel()
+        var picked: [String?] = []
+        model.onLanguageSelected = { picked.append($0) }
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .ukrainian)
+        XCTAssertEqual(view.plane.spaceLabel, "Українська")
+        XCTAssertNil(view.engine.partnerLanguage)
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Ukrainian typing model: the dictionary engine")
+        XCTAssertEqual(picked, ["uk-UA"])
+        var id = 300
+        func press(_ character: String) {
+            let key = view.engine.layout.key(.character(character))!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        for character in ["с", "і", "м", "ʼ", "я", "ґ", "ї"] { press(character) }
+        hold("ʼ", pick: "’")
+        XCTAssertEqual(field.text, "сімʼяґї’")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+    }
+
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
@@ -552,7 +604,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.engine.autocorrect.decoder)
         // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
         // next-letter odds move French targets (AZERTY's letters aren't theirs).
-        for language in [KeyboardLanguage.russian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
+        for language in [KeyboardLanguage.russian, .ukrainian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")
@@ -983,15 +1035,16 @@ final class FullKeyboardEngineTests: XCTestCase {
                 asked += 1
                 return true
             }
-            // Russian has no Latin letters: press its own а and hold its own е.
-            let cyrillic = language == .russian
+            // Russian and Ukrainian have no Latin letters: press their own а and hold their own
+            // е (Ukrainian's ʼ, its only key with long-press options).
+            let cyrillic = !language.isLatin
             for (id, kind) in [KeyKind.character(cyrillic ? "а" : "a"), .space, .delete].enumerated() {
                 let key = view.engine.layout.key(kind)!
                 let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
                 view.plane.began(id: id + 10, sample: sample)
                 view.plane.ended(id: id + 10, sample: sample)
             }
-            view.debugHoldAccent(cyrillic ? "е" : "e", selectIndex: 1)
+            view.debugHoldAccent(language == .ukrainian ? "ʼ" : cyrillic ? "е" : "e", selectIndex: 1)
             counts[language] = asked
         }
         XCTAssertGreaterThanOrEqual(counts[.english] ?? 0, 4, "three keys and an accent step")

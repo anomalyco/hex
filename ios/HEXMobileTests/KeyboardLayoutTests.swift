@@ -405,6 +405,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
             .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"],
+            .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"],
             .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
         ]
         for (language, expected) in rows {
@@ -484,6 +485,53 @@ final class KeyboardLayoutTests: XCTestCase {
         for layer in [KeyboardLayer.numbers, .symbols] {
             XCTAssertEqual(
                 KeyboardLayout(width: 402, layer: layer, language: .russian).keys,
+                KeyboardLayout(width: 402, layer: layer).keys
+            )
+        }
+    }
+
+    /// The standard Ukrainian ЙЦУКЕН in the rows the system Ukrainian keyboard shows on an
+    /// iPhone 17 Pro (iOS 27.2 simulator, 402 pt, read through accessibility): rows 1 and 2
+    /// are twelve keys edge to edge (Й at 5 pt, Ї at 367 pt, a 33 pt pitch), row 3's ten letters
+    /// sit between a shift and delete one letter wide, and the bottom row and the numbers and
+    /// symbols pages are English's.
+    func testUkrainiansTwelveKeyRowsMatchApples() {
+        let cases: [(CGFloat, KeyboardOrientation, CGFloat)] = [
+            (320, .portrait, 0), (375, .portrait, 0), (402, .portrait, 0), (440, .portrait, 0),
+            (667, .landscape, 0), (956, .landscape, 60),
+        ]
+        for (width, orientation, inset) in cases {
+            let layout = KeyboardLayout(width: width, orientation: orientation, horizontalInset: inset, language: .ukrainian)
+            let english = KeyboardLayout(width: width, orientation: orientation, horizontalInset: inset)
+            let m = layout.metrics
+            let label = "\(width)pt \(orientation)"
+            XCTAssertEqual(layout.characterWidth, (width - 2 * inset - 2 * m.side - 11 * m.gap) / 12, accuracy: 0.001, label)
+            for row in 0..<2 {
+                let keys = layout.keys.filter { $0.row == row }.sorted { $0.frame.minX < $1.frame.minX }
+                XCTAssertEqual(keys.count, 12, label)
+                XCTAssertEqual(keys.first!.frame.minX, inset + m.side, accuracy: 0.001, label)
+                XCTAssertEqual(keys.last!.frame.maxX, width - inset - m.side, accuracy: 0.001, label)
+            }
+            let row3 = layout.keys.filter { $0.row == 2 && $0.character != nil }.sorted { $0.frame.minX < $1.frame.minX }
+            XCTAssertEqual(row3.count, 10, label)
+            let shift = layout.key(.shift)!.frame
+            let delete = layout.key(.delete)!.frame
+            XCTAssertEqual(shift.width, layout.characterWidth, accuracy: 0.001, label)
+            XCTAssertEqual(delete.width, layout.characterWidth, accuracy: 0.001, label)
+            XCTAssertEqual(row3.first!.frame.minX - shift.maxX, m.gap, accuracy: 0.001, label)
+            XCTAssertEqual(delete.minX - row3.last!.frame.maxX, m.gap, accuracy: 0.001, label)
+            XCTAssertEqual(
+                layout.keys.filter { $0.row == 3 }.map(\.frame),
+                english.keys.filter { $0.row == 3 }.map(\.frame),
+                label
+            )
+        }
+        let pro = KeyboardLayout(width: 402, language: .ukrainian)
+        XCTAssertEqual(pro.key(.character("й"))!.frame.minX, 5, accuracy: 2)
+        XCTAssertEqual(pro.key(.character("ї"))!.frame.minX, 367, accuracy: 2)
+        for layer in [KeyboardLayer.numbers, .symbols] {
+            XCTAssertEqual(
+                KeyboardLayout(width: 402, layer: layer, language: .ukrainian).keys,
                 KeyboardLayout(width: 402, layer: layer).keys
             )
         }
@@ -594,6 +642,18 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(AccentCatalog.options(for: "ь", uppercase: false, language: .russian)?.prefix(2), ["ь", "ъ"])
         XCTAssertEqual(AccentCatalog.options(for: "ь", uppercase: true, language: .russian)?.prefix(2), ["Ь", "Ъ"])
         XCTAssertNil(AccentCatalog.options(for: "б", uppercase: false, language: .russian))
+        // Ukrainian, as the system keyboard's long-press options were observed: only ʼ offers
+        // anything (the other apostrophes); ₴ on $; no ё, and no other Cyrillic language's
+        // letters.
+        XCTAssertEqual(AccentCatalog.options(for: "ʼ", uppercase: false, language: .ukrainian), ["ʼ", "'", "’", "‘", "`"])
+        for letter in KeyboardLanguage.ukrainian.letterRows.joined() where letter != "ʼ" {
+            XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .ukrainian), letter)
+        }
+        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .ukrainian)?.prefix(2), ["$", "₴"])
+        XCTAssertFalse(AccentCatalog.options(for: "$", uppercase: false)?.contains("₴") ?? true, "the hryvnia is Ukrainian's")
+        XCTAssertNil(AccentCatalog.options(for: "е", uppercase: false, language: .ukrainian))
+        XCTAssertNil(AccentCatalog.options(for: "и", uppercase: false, language: .ukrainian))
+        XCTAssertFalse(KeyboardLanguage.ukrainian.letterRows.joined().contains { ["ы", "э", "ъ", "ё"].contains($0) })
         XCTAssertEqual(AccentCatalog.options(for: "c", uppercase: false, language: .serbianLatin)?.prefix(3), ["c", "č", "ć"])
         XCTAssertEqual(AccentCatalog.options(for: "d", uppercase: true, language: .serbianLatin), ["D", "Đ"])
         XCTAssertEqual(AccentCatalog.options(for: "s", uppercase: false, language: .serbianLatin)?.prefix(2), ["s", "š"])
@@ -606,6 +666,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .spanish: ["ñ", "a", "o", "n"],
             .german: ["ü", "ö", "ä", "s", "a", "u"],
             .russian: ["й", "е", "х", "ж", "э", "ь", "ю", "я"],
+            .ukrainian: ["й", "ї", "є", "ʼ", "ґ"],
             .serbianLatin: ["c", "d", "s", "z"],
         ]
         for width in portraitWidths {
@@ -654,6 +715,10 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic("sr_Latn"), .serbianLatin)
         XCTAssertEqual(automatic("sr-RS"), .english, "Cyrillic Serbian has no layout")
         XCTAssertEqual(automatic("en-US", modes: ["ru-RU", "sr-Latn"]), .english, "the dictation language still wins")
+        XCTAssertEqual(automatic("uk-UA", modes: ["ru-RU", "en-US"]), .ukrainian)
+        XCTAssertEqual(automatic("uk_UA"), .ukrainian)
+        XCTAssertEqual(automatic(nil, modes: ["emoji", "uk-UA", "en-US"], preferred: ["ru-RU"]), .ukrainian)
+        XCTAssertEqual(automatic(nil, preferred: ["uk-UA", "en-US"]), .ukrainian)
         // Before Hex knows the dictation language: the first keyboard, then language, with a layout.
         XCTAssertEqual(automatic(nil, modes: ["emoji", "nb-NO", "en-US"]), .norwegian)
         XCTAssertEqual(automatic(nil, preferred: ["nn-NO"]), .norwegian)
@@ -707,6 +772,8 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(partner([.french, .frenchCanadian], .frenchCanadian), "one language, two layouts")
         XCTAssertNil(partner([.serbianLatin, .english], .serbianLatin), "Serbian has no dictionary to check")
         XCTAssertNil(partner([.english, .serbianLatin], .english))
+        XCTAssertNil(partner([.ukrainian, .english], .ukrainian), "Cyrillic has no bilingual partner")
+        XCTAssertNil(partner([.english, .ukrainian], .english))
         XCTAssertNil(partner([.english], .english))
     }
 
@@ -727,6 +794,13 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(KeyboardLanguage.serbianLatin.dictationLanguage(supported: supported, preferred: ["sr-Latn-RS"]))
         XCTAssertNil(KeyboardLanguage.german.dictationLanguage(supported: supported, preferred: []), "Apple Speech has no German here")
         XCTAssertEqual(KeyboardLanguage.german.dictationLanguage(supported: [], preferred: []), "de-DE", "not listed yet")
+        XCTAssertEqual(
+            KeyboardLanguage.suggested(inputModes: ["uk-UA", "emoji", "en-US"], preferred: ["uk-UA", "ru-RU"]),
+            [.ukrainian, .english, .russian]
+        )
+        XCTAssertEqual(KeyboardLanguage.ukrainian.dictationLanguage(supported: supported + ["uk-UA"], preferred: ["uk-UA"]), "uk-UA")
+        XCTAssertNil(KeyboardLanguage.ukrainian.dictationLanguage(supported: supported, preferred: []), "not Russian instead")
+        XCTAssertEqual(KeyboardLanguage.ukrainian.dictationLanguage(supported: [], preferred: []), "uk-UA", "not listed yet")
     }
 
     /// The languages read the one layout chosen before them, and write their first for an
@@ -761,6 +835,9 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(KeyboardLanguage.italian.spellCheckLanguage(available: ["en_US", "es"]), "never English")
         XCTAssertEqual(KeyboardLanguage.russian.spellCheckLanguage(available: ["en_US", "ru_RU"]), "ru_RU")
         XCTAssertNil(KeyboardLanguage.russian.spellCheckLanguage(available: ["en_US", "uk_UA"]), "never English")
+        XCTAssertEqual(KeyboardLanguage.ukrainian.spellCheckLanguage(available: ["en_US", "ru_RU", "uk_UA"]), "uk_UA")
+        XCTAssertNil(KeyboardLanguage.ukrainian.spellCheckLanguage(available: ["en_US", "ru_RU"]), "never Russian or English")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "uk-UA", available: ["en_US", "uk_UA"]), "uk_UA")
         XCTAssertEqual(KeyboardLanguage.serbianLatin.spellCheckLanguage(available: ["en_US", "sr_Latn"]), "sr_Latn")
         XCTAssertNil(KeyboardLanguage.serbianLatin.spellCheckLanguage(available: ["en_US", "sr", "hr_HR"]), "no Cyrillic or Croatian")
     }

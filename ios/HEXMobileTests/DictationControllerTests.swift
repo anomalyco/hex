@@ -1290,6 +1290,28 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(spanish?.module, .speech)
     }
 
+    /// Ukrainian is `DictationTranscriber`'s only (macOS 27.2 lists uk-UA there and not in
+    /// `SpeechTranscriber`): picked by hand or by a Ukrainian iPhone, it dictates in Ukrainian.
+    func testUkrainianComesFromDictationTranscriber() async {
+        let speech = lookup(speechLocales)
+        let dictation = lookup(dictationLocales + ["uk-UA", "ru-RU"])
+        let chosen = await SpeechLanguagePicker.pick(
+            explicit: "uk-UA", candidates: ["en-US"], speech: speech, dictation: dictation
+        )
+        XCTAssertEqual(chosen?.identifier, "uk-UA")
+        XCTAssertEqual(chosen?.module, .dictation)
+        let automatic = await SpeechLanguagePicker.pick(
+            explicit: nil,
+            candidates: SpeechLanguagePicker.automaticCandidates(preferred: ["uk-UA", "en-US"], current: "uk_UA"),
+            speech: speech,
+            dictation: dictation
+        )
+        XCTAssertEqual(automatic?.identifier, "uk-UA")
+        XCTAssertEqual(automatic?.module, .dictation)
+        XCTAssertFalse(SpeechLanguagePicker.isEnglish("uk-UA"), "Apple Speech, never English-only Parakeet")
+        XCTAssertEqual(SpeechLanguagePicker.shortNames(for: ["uk-UA"], in: Locale(identifier: "en-US"))["uk-UA"], "Ukrainian")
+    }
+
     func testThePreferredOrderWinsOverTheModule() async {
         // Hebrew first: DictationTranscriber's Hebrew beats SpeechTranscriber's English.
         let picked = await pick(preferred: ["he-IL", "en-US"])

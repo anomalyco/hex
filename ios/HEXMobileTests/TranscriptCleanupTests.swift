@@ -351,6 +351,23 @@ final class SpokenCleanupRulesTests: XCTestCase {
         )
     }
 
+    /// Ukrainian as `DictationTranscriber` writes it (macOS 27.2, Lesya voice: Cyrillic, no
+    /// punctuation): Polished capitalizes and ends it, Casual starts each sentence lowercase,
+    /// Lowercase lowers Ґ, Є and Ї, and English's "i" rules never touch Cyrillic "і" ("and").
+    func testUkrainianStylesAndLowercase() {
+        let heard = "привіт як справи їжак Єнот завтра о дев'ятій ми підемо на каву"
+        XCTAssertEqual(
+            TranscriptFormatter.format(heard, style: .polished, language: "uk-UA"),
+            "Привіт як справи їжак Єнот завтра о дев'ятій ми підемо на каву."
+        )
+        XCTAssertEqual(TranscriptFormatter.format("ґанок і сад. і все", style: .polished, language: "uk-UA"), "Ґанок і сад. І все.")
+        XCTAssertEqual(TranscriptFormatter.format("Ґанок і сад. І все.", style: .casual, language: "uk-UA"), "ґанок і сад. і все")
+        XCTAssertEqual(TranscriptFormatter.format("Ґанок і сад.", style: .verbatim, language: "uk-UA"), "Ґанок і сад.")
+        var pipeline = DictationPipeline(style: .polished, language: "uk-UA", vocabulary: [])
+        pipeline.lowercase = true
+        XCTAssertEqual(pipeline.format("Єнот, Ґанок і Їжак", language: "uk-UA"), "єнот, ґанок і їжак.")
+    }
+
     /// Lowercase comes after the style and the vocabulary's spellings, as desktop's Lowercase
     /// step lowercases the final text, custom vocabulary included.
     func testLowercaseRunsAfterTheStyleAndVocabulary() {

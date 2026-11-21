@@ -5,8 +5,8 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|ru|sr-Latn|en` pins it; drafts are in the layout's language.
-/// `--accent-key ø` (or Cyrillic `е`, `ь`) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|ru|uk|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Experiments › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
@@ -126,6 +126,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Опаздываю на десять мину"
             case "accents": Self.accentKey == "ь" ? "Об" : "Ещ"
             default: "Опаздываю на десять минут, "
+            }
+        case .ukrainian:
+            return switch state {
+            case "inserted": "Запізнююсь на десять хвилин, буду вдома о 19:30. Починайте без мене."
+            case "numbers": "Запізнююсь на десять хвилин, буду вдома о 19:3"
+            case "shift": "Запізнююсь на десять хвилин. "
+            case "typing": "Запізнююсь на десять хвил"
+            case "accents": "Сім"
+            default: "Запізнююсь на десять хвилин, "
             }
         case .serbianLatin:
             return switch state {
@@ -274,7 +283,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 let serbian = FullKeyboardSnapshotStage.layout == .serbianLatin
                 let pick = [
                     "e": "é", "s": serbian ? "š" : "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú",
-                    "i": "ì", "е": "ё", "ь": "ъ", "c": "ć",
+                    "i": "ì", "е": "ё", "ь": "ъ", "c": "ć", "ʼ": "’",
                 ][key]
                 view.debugHoldAccent(key, selecting: pick ?? key)
             case "numbers":
