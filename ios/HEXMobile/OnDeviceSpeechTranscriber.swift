@@ -68,7 +68,8 @@ nonisolated enum OnDeviceSpeechLanguages {
     }
 
     /// What Automatic picks, whatever the setting says: the first of the iPhone's languages the
-    /// recognizer has on device.
+    /// recognizer has on device. An Americas Spanish candidate keeps its own region (es-AR is
+    /// not the es-ES the recognizer would answer), so es-US, then es-MX, then Spain's follow.
     static func automatic(
         settings: LanguageSettings = LanguageSettings(),
         preferred: [String] = Locale.preferredLanguages,
@@ -77,10 +78,22 @@ nonisolated enum OnDeviceSpeechLanguages {
     ) -> String? {
         let candidates = SpeechLanguagePicker.automaticCandidates(preferred: preferred, current: Locale.current.identifier)
         for candidate in candidates {
-            guard let found = match(candidate, in: supported), !settings.isUnavailable(found) else { continue }
+            guard let found = match(candidate, in: supported),
+                  accepts(found, for: candidate),
+                  !settings.isUnavailable(found) else { continue }
             if onDevice(found) { return found }
         }
         return nil
+    }
+
+    /// Whether `found` may stand for `candidate`: every Spanish candidate keeps its own
+    /// region (es-CO on es-CO, not the es-ES another fallback answers), so the next candidate
+    /// is tried. Only non-Spanish languages resolve loosely.
+    private static func accepts(_ found: String, for candidate: String) -> Bool {
+        let wanted = Locale(identifier: candidate)
+        guard wanted.language.languageCode?.identifier == "es",
+              let region = wanted.region?.identifier else { return true }
+        return Locale(identifier: found).region?.identifier == region
     }
 
     static func supportedIdentifiers() -> [String] {

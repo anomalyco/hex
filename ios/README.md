@@ -624,13 +624,16 @@ never at a launch by itself.
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
   dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
-  Apple has. Apple Speech's Spanish is three variants (es-ES, es-MX, es-US), and
-  Spanish follows the iPhone rather than always Spain: es-419, es-CO, es-AR and
-  any other Latin American, United States or unlisted region is the Americas'
-  Spanish (es-US, then es-MX), plain `es` is the iPhone's Region's (es-MX in
-  Mexico, es-US in the United States, Puerto Rico and Latin America, es-ES
-  elsewhere), and only Spain and Equatorial Guinea stay on es-ES
-  (`DictationLanguageSwitch.spanishCandidates`, `spanish(forRegion:)`). While
+  Apple has. Apple Speech's Spanish includes es-ES, es-MX and es-US (and es-CL on
+  recent systems), and Spanish follows the iPhone rather than always Spain: a region
+  Apple has keeps it (es-CL on a Chilean phone), es-419, es-CO, es-AR and any other
+  Latin American, United States or unlisted region is the Americas' Spanish (es-US,
+  then es-MX), plain `es` is the iPhone's Region's (es-MX in Mexico, es-US in the
+  United States, Puerto Rico and Latin America, es-ES elsewhere), and only Spain and
+  Equatorial Guinea stay on es-ES (`DictationLanguageSwitch.spanishCandidates`,
+  `spanish(forRegion:)`). Before iOS 26 `SFSpeechRecognizer` lists es-CO and es-419
+  itself, so the on-device pick keeps them, then falls through es-US, es-MX and
+  Spain's. While
   the keyboard switches between two or more languages, Automatic follows the one
   it shows (Keyboard languages, below). The menu also lists every locale
   `SpeechTranscriber` or
@@ -782,11 +785,12 @@ never at a launch by itself.
   `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
   which prepares the new language between dictations (TestFlight build 56: with the
   keyboard on Español, dictation stayed English and Spanish came out "incomprehensible").
-  Spanish is the iPhone's Spanish, not always Spain's: es-419, es-CO and any other Latin
-  American or United States region is es-US, then es-MX, plain `es` and no Spanish
-  preferred language follow the iPhone's Region (es-MX in Mexico, es-US in the United
-  States, Puerto Rico and Latin America, es-ES elsewhere), and Spain and Equatorial
-  Guinea stay on es-ES. A Spanish variant picked by hand for that language is used again
+  Spanish is the iPhone's Spanish, not always Spain's: a region Apple has keeps it
+  (es-CL on a Chilean phone), es-419, es-CO and any other Latin American or United
+  States region is es-US, then es-MX, plain `es` and no Spanish preferred language
+  follow the iPhone's Region (es-MX in Mexico, es-US in the United States, Puerto Rico
+  and Latin America, es-ES elsewhere), and Spain and Equatorial Guinea stay on es-ES.
+  A Spanish variant picked by hand for that language is used again
   when the space bar comes back to it: the recent pick goes ahead of the preferred
   languages, so es-US or es-MX survives the switch away and back. It doesn't where the
   iPhone's own language has no layout (Hebrew), as dictating is how that language gets
@@ -1269,11 +1273,14 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   clips came back with every tonos, final ς, numbers as digits ("10 λεπτά", "7:30"), and no
   punctuation. Lowercase lowers with Unicode's context-aware mapping, so a word-final Σ
   becomes ς ("ΟΔΟΣ" → "οδος"), as desktop's `to_lowercase` does.
-  **Spanish variants** have unit tests only: es-419 and es-CO resolve to es-US then
-  es-MX, plain `es` by the iPhone's Region, a picked variant survives a swipe away and
-  back, the switch offers one variant per language with Chinese's variants kept apart,
-  and the Hex key menu names the region. No iPhone or simulator ran the Spanish variants
-  for this change, and the Settings line and menu labels weren't captured.
+  **Spanish variants** have unit tests only: a region Apple has keeps it (es-CL on a
+  Chilean phone), es-419 and es-CO resolve to es-US then es-MX, before iOS 26
+  `SFSpeechRecognizer` keeps es-CO and es-419 as themselves and falls to es-US, then
+  es-MX, then Spain's for an unlisted region, plain `es` by the iPhone's Region,
+  a picked variant survives a swipe away and back, the switch offers one variant per
+  language with Chinese's variants kept apart, and the Hex key menu names the region.
+  No iPhone or simulator ran the Spanish variants for this change, and the Settings
+  line and menu labels weren't captured.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
