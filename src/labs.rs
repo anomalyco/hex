@@ -1780,7 +1780,7 @@ mod tests {
         assert!(learn_from_corrections_enabled(&labs));
         // The state word has no bit for it: the other switches keep theirs.
         let state = encode_where(&labs, |_| true);
-        assert_eq!(state & VOCABULARY_BIASING, 0);
+        assert_eq!(state & SPEAKERS_ONLY, 0);
         assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
         assert_eq!(
             Feature::LearnFromCorrections.on_this_os(),
