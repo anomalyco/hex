@@ -756,6 +756,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   downloaded each model in 11–16 s. `DictationTranscriber` returned Norwegian
   and Hebrew without punctuation under every preset (the short-form presets
   returned nothing), so Polished only capitalizes and ends the sentence.
+  Ukrainian is `DictationTranscriber`'s only (macOS 27.2 lists `uk-UA` there and
+  not for `SpeechTranscriber`): a `say -v Lesya` clip came back word for word in
+  Cyrillic, without punctuation, after an 18 s model download.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
