@@ -1333,9 +1333,14 @@ final class FullKeyboardEngine {
         if !autoCapitalizes {
             return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
         }
-        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2 else { return word }
-        let capitalised = first.uppercased() + word.dropFirst()
-        return autocorrect.checker.isWordValid(capitalised) && !autocorrect.checker.isWordValid(word) ? capitalised : word
+        return swipeReadsAsName(word) ? first.uppercased() + word.dropFirst() : word
+    }
+
+    /// Whether a swipe's reading, as the model spells it (lowercase), is a word the dictionary
+    /// knows only with a capital: a name, day or place ("monday"), or an abbreviation.
+    func swipeReadsAsName(_ word: String) -> Bool {
+        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2, let first = word.first else { return false }
+        return autocorrect.checker.isWordValid(first.uppercased() + word.dropFirst()) && !autocorrect.checker.isWordValid(word)
     }
 
     /// Puts another of the swipe's readings in its word's place; the word joins the others.

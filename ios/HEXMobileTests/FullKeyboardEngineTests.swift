@@ -1401,6 +1401,42 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(sentence.text, "Great. thanks Hello", "shift still capitalises")
     }
 
+    /// X (Eric Jung): "the swipe keyboard has random auto capitalization of words." Shift and
+    /// auto-capitalization around swipes were right (after a period, a return, a comma, a
+    /// delete, a pick); the capitals came from readings: the word list's names and
+    /// abbreviations, which the dictionary knows only capitalised ("kent", "gs"), and "I'm"
+    /// read after a word "I" never follows. A name now needs more evidence than a common word,
+    /// your own words don't, and a contraction follows the word before.
+    func testASwipeMidSentenceGetsNoStrayCapital() throws {
+        let (field, plane) = try swipeKeyboard("Great.")
+        field.autocapitalizationType = .sentences
+        plane.engine.refreshAutoCapitalization()
+        let swipe = try XCTUnwrap(plane.swipe)
+        XCTAssertTrue(plane.engine.swipeReadsAsName("kent"))
+        XCTAssertTrue(plane.engine.swipeReadsAsName("york"))
+        XCTAssertFalse(plane.engine.swipeReadsAsName("many"))
+        XCTAssertFalse(plane.engine.swipeReadsAsName("Kent"), "your own spelling")
+        let close = [SwipeDecoder.Candidate(text: "kent", cost: 10), SwipeDecoder.Candidate(text: "many", cost: 12)]
+        XCTAssertEqual(swipe.ranked(close), ["many", "kent"])
+        let clear = [SwipeDecoder.Candidate(text: "kent", cost: 10), SwipeDecoder.Candidate(text: "many", cost: 20)]
+        XCTAssertEqual(swipe.ranked(clear), ["kent", "many"])
+
+        for word in ["thanks", "for", "the", "help"] { self.swipe(word, on: plane) }
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character(","), on: plane)
+        tap(.space, on: plane)
+        for word in ["see", "you", "in", "york"] { self.swipe(word, on: plane) }
+        XCTAssertEqual(field.text, "Great. Thanks for the help, see you in York", "a common name keeps its capital")
+
+        let decoder = swipe.decoder
+        let path = SwipePath.through("im", keys: plane.engine.swipeKeys)
+        let cost = { (previous: String) in
+            decoder.decode(path, keys: plane.engine.swipeKeys, previous: previous, limit: 8).first { $0.text == "I'm" }?.cost
+        }
+        let afterThink = try XCTUnwrap(cost("think")), afterUs = try XCTUnwrap(cost("us"))
+        XCTAssertGreaterThan(afterUs - afterThink, 3, "\"I'm\" after \"think\", hardly after \"us\"")
+    }
+
     func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {
         let (field, plane) = try swipeKeyboard()
         swipe("hello", on: plane)
