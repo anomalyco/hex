@@ -55,11 +55,12 @@ const MIN_CHANGED: usize = 3;
 /// - capitalized and not at the start of a sentence, like Raunak.
 ///
 /// A word needs at least two letters, so I and A are never learned, and a
-/// word whose part before an apostrophe is shorter than two letters (I'm,
-/// I'll, I've, I'd) never is either. A sentence starts at the field's first
-/// word, after a line break, and after a word ending in a colon, or in a
-/// period, exclamation mark, or question mark once closing quotes and
-/// brackets are ignored.
+/// word whose part before an apostrophe is I (I'm, I'll, I've, I'd) never is
+/// either, while a name such as O'Brien or D'Angelo keeps its apostrophe. A
+/// sentence starts at the field's first word, after a line break (a newline,
+/// carriage return, or Unicode line or paragraph separator), and after a
+/// word ending in a colon, or in a period, exclamation mark, or question
+/// mark once closing quotes and brackets are ignored.
 ///
 /// The exact capitalization rule is: learning is a casing decision, not a
 /// dictionary. A replacement that only capitalizes the first word of a
@@ -174,7 +175,7 @@ fn tokenize(text: &str) -> Vec<Token<'_>> {
 
 fn push_token<'a>(tokens: &mut Vec<Token<'a>>, text: &'a str, start: usize, end: usize) {
     let sentence_start = tokens.last().is_none_or(|previous| {
-        text[previous.end..start].contains('\n')
+        breaks_line(&text[previous.end..start])
             || ends_sentence(&text[previous.start..previous.end])
     });
     tokens.push(Token {
@@ -183,6 +184,14 @@ fn push_token<'a>(tokens: &mut Vec<Token<'a>>, text: &'a str, start: usize, end:
         end,
         sentence_start,
     });
+}
+
+/// Whether the whitespace between two tokens opens a new line, so the next
+/// token is a sentence start. A carriage return and a Unicode line or
+/// paragraph separator open one as a newline does.
+fn breaks_line(gap: &str) -> bool {
+    gap.chars()
+        .any(|character| matches!(character, '\n' | '\r' | '\u{2028}' | '\u{2029}'))
 }
 
 /// Whether a token's end closes its sentence: a colon always opens a new
@@ -194,19 +203,24 @@ fn ends_sentence(token: &str) -> bool {
         .ends_with([':', '.', '!', '?'])
 }
 
-/// The last byte offset of `needle` in `haystack` that stands on word
-/// boundaries: the characters around it are not alphanumeric, or it touches
-/// the field's edge. A later occurrence inside a longer word ("ok" in "book")
-/// is skipped for the pasted one before it.
+/// The last byte offset of `needle` in `haystack` that keeps the word
+/// boundary each of its edges asks for: an alphanumeric edge must not touch
+/// another alphanumeric character (or only the field's edge), while a
+/// punctuation edge, such as a paste that began at a comma, may sit against
+/// one. A later occurrence inside a longer word ("ok" in "book") is skipped
+/// for the pasted one before it.
 fn last_whole_word(haystack: &str, needle: &str) -> Option<usize> {
+    let punctuated = |character: char| !character.is_alphanumeric();
+    let left_free = needle.chars().next().is_some_and(punctuated);
+    let right_free = needle.chars().next_back().is_some_and(punctuated);
     let mut end = haystack.len();
     loop {
         let index = haystack[..end].rfind(needle)?;
         let before = haystack[..index].chars().next_back();
         let after = haystack[index + needle.len()..].chars().next();
-        if !before.is_some_and(|character| character.is_alphanumeric())
-            && !after.is_some_and(|character| character.is_alphanumeric())
-        {
+        let left = left_free || !before.is_some_and(|character| character.is_alphanumeric());
+        let right = right_free || !after.is_some_and(|character| character.is_alphanumeric());
+        if left && right {
             return Some(index);
         }
         // Search strictly before this occurrence. `index` is a character
@@ -333,14 +347,13 @@ fn name_like(token: &Token<'_>) -> bool {
     if letters.len() < 2 {
         return false;
     }
-    // I'm, I'll, I've, and I'd are never names, however they are capitalized.
-    if word.split(['\'', '’']).next().is_some_and(|before| {
-        before
-            .chars()
-            .filter(|character| character.is_alphabetic())
-            .count()
-            < 2
-    }) {
+    // I'm, I'll, I've, and I'd are never names, however they are
+    // capitalized. A name keeps its apostrophe: O'Brien, D'Angelo, O'Neil.
+    if word
+        .split(['\'', '’'])
+        .next()
+        .is_some_and(|before| before.eq_ignore_ascii_case("I"))
+    {
         return false;
     }
     let lowercase = letters.iter().any(|character| character.is_lowercase());
@@ -572,10 +585,18 @@ mod tests {
     }
 
     #[test]
-    fn an_apostrophe_word_is_never_a_name() {
+    fn an_im_word_is_never_a_name() {
         assert_eq!(
             learned("so im going", "im", "so I'm going"),
             Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_name_with_an_apostrophe_is_learned() {
+        assert_eq!(
+            learned("meet o brian today", "o brian", "meet O'Brien today"),
+            ["O'Brien"]
         );
     }
 
@@ -589,6 +610,18 @@ mod tests {
             ),
             Vec::<String>::new()
         );
+        // A carriage return and the Unicode separators open a line too.
+        for separator in ['\r', '\u{2028}', '\u{2029}'] {
+            assert_eq!(
+                learned(
+                    &format!("Hi Bob,{separator}thanks"),
+                    "thanks",
+                    &format!("Hi Bob,{separator}Thanks"),
+                ),
+                Vec::<String>::new(),
+                "{separator:?}"
+            );
+        }
     }
 
     #[test]
@@ -614,6 +647,20 @@ mod tests {
         assert_eq!(learned("ok okay", "ok", "ok Okay"), Vec::<String>::new());
         // Of two whole-word occurrences, the last is still the pasted one.
         assert_eq!(learned("ok ok", "ok", "ok OK"), ["OK"]);
+    }
+
+    #[test]
+    fn a_punctuation_edge_needs_no_word_boundary() {
+        // The paste began at the comma inside "word,": its left edge is
+        // punctuation, so only its right edge needs a boundary.
+        assert_eq!(
+            learned(
+                "word, and rowan ak came",
+                ", and rowan ak came",
+                "word, and Raunak came",
+            ),
+            ["Raunak"]
+        );
     }
 
     #[test]

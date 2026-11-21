@@ -172,7 +172,8 @@ Learn from corrections (Labs › Learn from corrections, macOS)  // vocabulary.l
     // a_full_list_keeps_its_terms_and_takes_no_more in correction_watch.rs;
     // learns_a_short_correction_past_its_sixty_percent,
     // ignores_a_long_rewrite, the_pasted_text_matches_only_on_word_boundaries,
-    // an_apostrophe_word_is_never_a_name, a_line_break_starts_a_sentence,
+    // a_punctuation_edge_needs_no_word_boundary, an_im_word_is_never_a_name,
+    // a_name_with_an_apostrophe_is_learned, a_line_break_starts_a_sentence,
     // a_colon_starts_a_sentence, and
     // a_closing_quote_after_a_period_still_starts_a_sentence in
     // correction_terms.rs; not observed on a real Mac

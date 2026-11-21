@@ -577,7 +577,8 @@ the field or a term. Nothing leaves the Mac. Checks:
 [correction_terms.rs](../../src/dictation/correction_terms.rs)'s
 `learns_a_short_correction_past_its_sixty_percent`,
 `ignores_a_long_rewrite`, `the_pasted_text_matches_only_on_word_boundaries`,
-`an_apostrophe_word_is_never_a_name`, `a_line_break_starts_a_sentence`,
+`a_punctuation_edge_needs_no_word_boundary`, `an_im_word_is_never_a_name`,
+`a_name_with_an_apostrophe_is_learned`, `a_line_break_starts_a_sentence`,
 `a_colon_starts_a_sentence`, and
 `a_closing_quote_after_a_period_still_starts_a_sentence`. Not observed: a
 real Mac reading a real field through a correction.
