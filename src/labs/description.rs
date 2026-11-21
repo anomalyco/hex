@@ -222,6 +222,9 @@ impl Feature {
             Self::VocabularyFiles => {
                 "Import terms from a CSV file into the vocabulary sheet, merging them into the list, and export the list as a CSV file"
             }
+            Self::AnnotateAgentTools => {
+                "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
+            }
         }
     }
 }

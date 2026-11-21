@@ -76,7 +76,11 @@ CSV file into the Vocabulary sheet and exports the list as one.
 models another app already downloaded; its Labs › Smaller model files toggle
 (off by default, macOS) also accepts imports quantized to Q6_K, Q5_K, or Q4_K.
 [Annotate](capture.md) (macOS, Linux,
-and Windows) records the screen while you draw and talk and sends it to an agent.
+and Windows) records the screen while you draw and talk and sends it to an agent;
+its Labs › Agent tools for captures toggle (off by default, every OS) adds
+`hex annotate inspect`, `zoom`, `frames`, and `skill`, which read a bundle in
+the CLI process so a coding agent can see its summary, marks, a dense frame
+sheet, or a range of frames itself.
 [Screenshots](labs.md) (Labs, macOS) takes CleanShot-style ⌘⇧4 area and
 window screenshots, and with Annotate on records from a ⌘⇧5 toolbar.
 The other capabilities stay here until they need their own verification recipe.

@@ -84,6 +84,7 @@ impl Feature {
             Self::DropTranscribe => "Transcribe dropped audio",
             Self::PasteLastPicker => "Paste Last picker",
             Self::VocabularyFiles => "Vocabulary files",
+            Self::AnnotateAgentTools => "Agent tools for captures",
         }
     }
 
@@ -305,6 +306,9 @@ impl Feature {
             }
             Self::VocabularyFiles => {
                 "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one"
+            }
+            Self::AnnotateAgentTools => {
+                "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
             }
         }
     }

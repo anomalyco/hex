@@ -91,18 +91,18 @@ fn captures_dir() -> PathBuf {
 }
 
 /// A bundle name, path, or `latest`, inside the captures folder or not.
-fn resolve(capture: &str) -> Result<PathBuf, ControlError> {
+pub(super) fn resolve(capture: &str) -> Result<PathBuf, ControlError> {
     resolve_bundle_dir_in(Some(&captures_dir()), Path::new(capture))
         .map_err(|error| ControlError::new("not-found", format!("{error:#}")))
 }
 
-fn load(dir: &Path) -> Option<ScrawlBundle> {
+pub(super) fn load(dir: &Path) -> Option<ScrawlBundle> {
     scrawl_capture::bundle::load_bundle_in(None, dir)
         .ok()
         .map(|(_, bundle)| bundle)
 }
 
-fn unreadable(dir: &Path) -> ControlError {
+pub(super) fn unreadable(dir: &Path) -> ControlError {
     ControlError::new(
         "not-found",
         format!("{} has no readable scrawl.json yet", dir.display()),

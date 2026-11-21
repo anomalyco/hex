@@ -25,8 +25,8 @@ window, and its OSes `labs::Feature::oses`.
 
 **On the web.** Every `Everyone` lab (not Dev ones, nor the labs that only
 matter once Annotate is on: Screenshots, Annotate last 15 seconds, Record the
-screen under the pointer, Copy a capture as one file) has a page at
-`anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
+screen under the pointer, Copy a capture as one file, Agent tools for captures)
+has a page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
 the dev site), listed newest first at `/hex/labs`, with a 1200 × 630 social
 card. The pages come from `site/src/labs.json`, which only the registry
 writes:
@@ -307,6 +307,18 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // a second copy); a_file_is_one_percent_encoded_uri_list_line (linux/paste.rs);
 │                                        // copy_capture_zip_is_its_own_switch_and_everywhere (labs.rs); not observed pasting the
 │                                        // zip into a real chat or agent app, and the Windows clipboard write is cross-compiled only
+├── Agent tools for captures no labs.annotate_agent_tools (every OS)
+│                                        `hex annotate inspect [<capture>] [--marks] [--json]`,
+│                                        `zoom [<capture>] (--at <M:SS|secs|phrase> | --mark <n|id> [--frame N]) [--span secs]`,
+│                                        `frames [<capture>] --from --to [--fps N]`, and `skill` read a .scrawl bundle in the
+│                                        CLI process, with Hex closed: summary.md, the marks, or scrawl.json; a dense sheet around a
+│                                        moment or a mark with each cell's time and what was said; PNGs across a range; or the
+│                                        hex-annotate skill an agent installs with npx skills add. zoom and frames write only into
+│                                        <bundle>/zoom/. Off, the four commands refuse naming hex labs on annotate-agent-tools
+│                                        // checks: capture_host::annotate_read (mark lines, both JSON shapes, a sheet's printed
+│                                        // lines, every refusal), control::cli::annotate_read's clap conflicts, and
+│                                        // agent_tools_for_captures_is_its_own_switch_and_everywhere (labs.rs); the video decode
+│                                        // path is unverified on a real bundle, and no capture was recorded for this change
 ├── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
 │                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
 │                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
@@ -3383,6 +3395,27 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 
 ## Features
 
+- Agent tools for captures: `hex annotate inspect`, `zoom`, `frames`, and
+  `skill` read a capture for a coding agent (every OS; off by default,
+  `labs.annotate_agent_tools`, in the Annotate group). They run in the `hex`
+  process itself, never over the running Hex's control socket, so they work
+  with Hex closed; they only read the bundle and decode its video, and write
+  nothing but `<bundle>/zoom/`. `inspect [<capture>]` prints `summary.md`;
+  `--marks` lists every mark as `#2 ✎② 0:09 circled · m2` (or `No marks`), and
+  `--json` prints `scrawl.json` pretty (`--marks --json`: the marks as JSON).
+  `zoom [<capture>] (--at <M:SS|secs|phrase> | --mark <n|id> [--frame N])
+  [--span secs] [--frames N] [--full]` writes a sheet at
+  `<bundle>/zoom/zoom-<from>-<to>.png` and prints its path, the window, each
+  cell's time, and `Said: “…”` when anything was said; for a mark it prints
+  the mark's line first. `frames [<capture>] --from <M:SS|secs> --to
+  <M:SS|secs> [--fps 4]` writes one PNG per frame under
+  `<bundle>/zoom/range-*/` and prints each path. `skill` prints the
+  `skills/hex-annotate/SKILL.md` guide this Hex ships, which an agent installs
+  with `npx skills add anomalyco/hex --skill hex-annotate`. Every command
+  resolves its capture as `hex capture list` does (bundle name, path, or
+  `latest`, in `capture.folder`) and refuses an unknown one with
+  `not-found`. While the lab is off all four print how to turn it on and exit
+  1.
 - Vocabulary files: the Vocabulary sheet gains **Import…** and **Export…**
   beside Add term (every OS; off by default, `labs.vocabulary_files`). Off,
   the sheet is exactly as before. Import opens one CSV or TXT file, refuses

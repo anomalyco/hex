@@ -215,6 +215,9 @@ pub struct LabsSettings {
     /// The Vocabulary sheet imports terms from a CSV file and exports the
     /// list as one (Labs › Vocabulary files).
     pub vocabulary_files: bool,
+    /// `hex annotate inspect`, `zoom`, `frames`, and `skill` read a capture
+    /// bundle for a coding agent (Labs › Agent tools for captures).
+    pub annotate_agent_tools: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -420,6 +423,7 @@ impl Default for LabsSettings {
             drop_transcribe: false,
             paste_last_picker: false,
             vocabulary_files: false,
+            annotate_agent_tools: false,
             api_processing: false,
             api_timestamps: false,
             speakers_only: false,

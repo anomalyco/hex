@@ -748,6 +748,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
             on: !locked && Feature::CopyCaptureZip.on(settings),
             ..copy_zip
         });
+        // `hex annotate inspect|zoom|frames|skill` for coding agents.
+        rows.push(row(Feature::AnnotateAgentTools, Some(&TERMINAL)));
         let locked = annotate_locked;
         rows.push(Row {
             lab: Lab::Annotate,
@@ -885,6 +887,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::Screenshots => "lab-screenshots",
         Feature::AnnotateReplay => "lab-annotate-replay",
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
+        Feature::AnnotateAgentTools => "lab-annotate-agent-tools",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::YoloMode => "lab-yolo-mode",

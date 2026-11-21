@@ -1097,6 +1097,35 @@ hex capture list|show|send|route         // capture.cli; docs/cli.md
 ├── route <capture> [--ask-jev] -> what the router sees and decides; sends nothing
 └── <capture> = bundle name, path, or `latest`; unknown -> `not-found`
 
+hex annotate inspect|zoom|frames|skill   // capture.agents; labs.annotate_agent_tools
+├── Off by default (`Audience::Everyone`, every OS); a CLI read in the `hex`
+│   process, never over the control socket: Hex needn't run, and nothing
+│   records, sends, or writes a setting. Off -> refused naming
+│   `hex labs on annotate-agent-tools`
+├── inspect [<capture>=latest] -> `summary.md` (sketch::summary_markdown)
+│   ├── --marks -> one `agent_context::MarkEntry::line()` per mark, time order,
+│   │   or `No marks`; --marks --json -> the entries as a JSON array
+│   └── --json -> `scrawl.json` pretty-printed as written
+├── zoom [<capture>=latest] (--at <M:SS|secs|phrase> | --mark <n|id> [--frame N])
+│   [--span secs=2] [--frames N=12] [--full] -> `zoom::zoom` into a sheet at
+│   `<bundle>/zoom/zoom-<from>-<to>.png`; prints the sheet's path,
+│   `0:09.500 → 0:11.500, 12 frames: #1 0:09.500, …`, and `Said: “…”` when
+│   the window has words. A mark prints `find_mark`'s line first, and its
+│   `--frame` picks the keyframe whose ✎① the number counts
+├── frames [<capture>=latest] --from <M:SS|secs> --to <M:SS|secs> [--fps 4] ->
+│   `handoff::extract_frames_range`'s PNGs under `<bundle>/zoom/range-*/`,
+│   each path printed
+├── skill -> `include_str!` of `skills/hex-annotate/SKILL.md`, the guide an
+│   agent installs with `npx skills add anomalyco/hex --skill hex-annotate`
+├── Every command resolves `<capture>` as `hex capture list` does (bundle name,
+│   path, or `latest`, in `capture.folder`); an unknown bundle -> `not-found`.
+│   `zoom` and `frames` write only into `<bundle>/zoom/`; nothing else in the
+│   bundle changes
+└── Proof limits: unit tests cover the mark lines, both JSON shapes, a sheet's
+    printed lines, and every refusal; decoding a bundle's video into a sheet or
+    frames is the engine's own `zoom`/`movie_frames_at` path, unverified on a
+    real bundle here, and no capture was recorded for this change
+
 hex capture cancel -> engine cancelled, sink closed, bundle removed
 hex capture status -> recording (bundle, elapsed), bundles still writing, last outcome
                       (words, audio gaps, or why it has no transcript, and where

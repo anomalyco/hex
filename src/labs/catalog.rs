@@ -86,7 +86,8 @@ impl Feature {
             | Self::StopPhrase
             | Self::HoldThroughKeys
             | Self::ModesEditor
-            | Self::VocabularyFiles => Audience::Everyone,
+            | Self::VocabularyFiles
+            | Self::AnnotateAgentTools => Audience::Everyone,
         }
     }
 
@@ -154,7 +155,7 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::FasterLiveText
             | Self::VocabularyFiles => 20261120,
-            Self::LearnFromCorrections => 20261121,
+            Self::LearnFromCorrections | Self::AnnotateAgentTools => 20261121,
         }
     }
 
@@ -302,7 +303,8 @@ impl Feature {
             | Self::CopyDictationAudio
             | Self::StopPhrase
             | Self::ModesEditor
-            | Self::VocabularyFiles => EVERY,
+            | Self::VocabularyFiles
+            | Self::AnnotateAgentTools => EVERY,
         }
     }
 
@@ -385,6 +387,7 @@ impl Feature {
             Self::ModesEditor => "modes-editor",
             Self::PasteLastPicker => "paste-last-picker",
             Self::VocabularyFiles => "vocabulary-files",
+            Self::AnnotateAgentTools => "annotate-agent-tools",
         }
     }
 
@@ -467,6 +470,7 @@ impl Feature {
             Self::HoldThroughKeys => "labs.hold_through_keys",
             Self::ModesEditor => "labs.modes_editor",
             Self::VocabularyFiles => "labs.vocabulary_files",
+            Self::AnnotateAgentTools => "labs.annotate_agent_tools",
         }
     }
 

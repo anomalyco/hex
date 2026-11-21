@@ -66,6 +66,7 @@ use scrawl_capture::hosted_input::{HostInput, HostedInput, Modifiers};
 use scrawl_capture::model::WordTiming;
 use scrawl_capture::transcribe::Transcriber;
 
+pub(crate) mod annotate_read;
 // `hex annotate`'s folder commands; Windows has no control transport for
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
