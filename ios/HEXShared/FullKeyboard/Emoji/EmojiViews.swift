@@ -251,7 +251,20 @@ final class EmojiCategoryBar: UIView {
         didSet { if selected != oldValue { refresh() } }
     }
 
-    private var buttons: [UIButton] = []
+    /// How far above and below the bar a touch still counts as on its buttons.
+    var hitOutsets: UIEdgeInsets = .zero {
+        didSet { for button in buttons { button.hitOutsets = hitOutsets } }
+    }
+
+    private final class BarButton: UIButton {
+        var hitOutsets: UIEdgeInsets = .zero
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            bounds.inset(by: UIEdgeInsets(top: -hitOutsets.top, left: 0, bottom: -hitOutsets.bottom, right: 0)).contains(point)
+        }
+    }
+
+    private var buttons: [BarButton] = []
     private let chip = UIView()
 
     init(items: [(symbol: String, title: String)]) {
@@ -260,7 +273,7 @@ final class EmojiCategoryBar: UIView {
         chip.layer.cornerCurve = .continuous
         addSubview(chip)
         for (index, item) in items.enumerated() {
-            let button = UIButton(type: .custom)
+            let button = BarButton(type: .custom)
             button.tag = index
             button.accessibilityLabel = item.title
             button.setImage(
@@ -279,6 +292,13 @@ final class EmojiCategoryBar: UIView {
 
     @objc private func tapped(_ sender: UIButton) {
         onSelect?(sender.tag)
+    }
+
+    /// The section button under `x`, in the bar's coordinates.
+    func button(atX x: CGFloat) -> UIButton? {
+        guard !buttons.isEmpty, bounds.width > 0 else { return nil }
+        let index = Int(x / (bounds.width / CGFloat(buttons.count)))
+        return buttons[min(max(0, index), buttons.count - 1)]
     }
 
     private func refresh() {

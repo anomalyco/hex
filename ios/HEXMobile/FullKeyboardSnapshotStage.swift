@@ -394,6 +394,30 @@ enum EmojiFixture {
         var latencies: [Double] = []
         steps.append((1.0, { view.debugOpenEmoji(); latencies.append(view.lastEmojiPanelLatency ?? -1) }))
         steps.append((1.0, { log("panel open, first time, latency=\(String(format: "%.1f", latencies[0] * 1000))ms") }))
+        // A category tapped every 8 frames, each for the first time, then each again: the
+        // longest frame after each tap (60 fps is 16.7 ms).
+        steps.append((0.3, {
+            let order = [3, 7, 1, 5, 8, 2, 6, 4, 3, 7, 1, 5, 8, 2, 6, 4, 0]
+            var frame = 0
+            var lastTick: CFTimeInterval = 0
+            var worst: [Double] = Array(repeating: 0, count: order.count)
+            FrameProbe.run(step: {
+                let now = CACurrentMediaTime()
+                let tap = frame / 8
+                if lastTick > 0, tap > 0, frame % 8 != 0 || tap <= order.count {
+                    let owner = frame % 8 == 0 ? tap - 1 : tap
+                    if owner < order.count { worst[owner] = max(worst[owner], now - lastTick) }
+                }
+                lastTick = now
+                if frame % 8 == 0, tap < order.count { view.emojiPanel?.debugJump(toSection: order[tap]) }
+                frame += 1
+                return tap < order.count
+            }) { _, _ in
+                func ms(_ values: ArraySlice<Double>) -> String { values.map { String(format: "%.0f", $0 * 1000) }.joined(separator: " ") }
+                log("category taps, longest frame after each (ms): first visits \(ms(worst[0..<8])) | again \(ms(worst[8..<16]))")
+            }
+        }))
+        steps.append((3.0, {}))
         for section in 1...8 {
             steps.append((0.3, { view.emojiPanel?.debugJump(toSection: section) }))
         }

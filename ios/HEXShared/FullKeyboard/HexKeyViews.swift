@@ -345,6 +345,12 @@ final class HexKeyRecordingPanel: UIView {
 /// A keycap-styled button for the recording panel.
 @MainActor
 final class PanelKeyButton: UIControl {
+    /// How far past its edges a touch still counts as on the key (the emoji panel's bar).
+    var hitOutsets: UIEdgeInsets = .zero
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.inset(by: UIEdgeInsets(top: -hitOutsets.top, left: -hitOutsets.left, bottom: -hitOutsets.bottom, right: -hitOutsets.right)).contains(point)
+    }
     var palette = FullKeyboardPalette(isDark: false) { didSet { setNeedsDisplay() } }
     var title: String? { didSet { setNeedsDisplay() } }
     var symbol: String? { didSet { setNeedsDisplay() } }

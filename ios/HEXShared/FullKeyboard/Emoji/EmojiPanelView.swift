@@ -212,9 +212,26 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         let gridTop = row.maxY
         let gridFrame = CGRect(x: horizontalInset, y: gridTop, width: bounds.width - 2 * horizontalInset, height: barY - 4 - gridTop)
         grid.frame = gridFrame
+        let band = UIEdgeInsets(top: barY - gridFrame.maxY, left: 0, bottom: max(0, bounds.height - barY - barKeyHeight), right: 0)
+        categoryBar.hitOutsets = band
+        lettersKey.hitOutsets = UIEdgeInsets(top: band.top, left: lettersKey.frame.minX, bottom: band.bottom, right: categoryBar.frame.minX - lettersKey.frame.maxX)
+        deleteKey.hitOutsets = UIEdgeInsets(top: band.top, left: deleteKey.frame.minX - categoryBar.frame.maxX, bottom: band.bottom, right: bounds.width - deleteKey.frame.maxX)
         callout.frame = bounds
         tonePicker.frame = bounds
         applyGridLayout(height: gridFrame.height)
+    }
+
+    /// The bar's keys take the whole band under the grid: the gap above them and the margin
+    /// down to the keyboard's edge, where a thumb aiming at a small icon often lands. Taps
+    /// there used to hit nothing, so a category could take two taps.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard !isHidden, isUserInteractionEnabled, alpha > 0.01, self.point(inside: point, with: event) else { return nil }
+        if tonePicker.menu == nil, point.y >= grid.frame.maxY {
+            if point.x < categoryBar.frame.minX { return lettersKey }
+            if point.x >= categoryBar.frame.maxX { return deleteKey }
+            if let button = categoryBar.button(atX: point.x - categoryBar.frame.minX) { return button }
+        }
+        return super.hitTest(point, with: event)
     }
 
     private func applyGridLayout(height: CGFloat) {

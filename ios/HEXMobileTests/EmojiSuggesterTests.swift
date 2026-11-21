@@ -273,6 +273,30 @@ final class EmojiSuggesterTests: XCTestCase {
         defaults.removePersistentDomain(forName: suite)
     }
 
+    /// A tap a little under or over the bar's icons, or beside ABC and delete, still lands
+    /// on them (it used to hit nothing, so a category could take two taps).
+    func testTheBarsKeysTakeTheWholeBandUnderTheGrid() throws {
+        let library = try library()
+        let panel = EmojiPanelView(library: library, usage: EmojiUsageStore(defaults: UserDefaults(suiteName: "anomaly.hex.tests.emoji-band")))
+        panel.frame = CGRect(x: 0, y: 0, width: 402, height: 300)
+        panel.show(suggestions: [], frequent: [])
+        panel.layoutIfNeeded()
+        let buttons = panel.subviews.compactMap { $0 as? EmojiCategoryBar }.first?.subviews.compactMap { $0 as? UIButton } ?? []
+        XCTAssertEqual(buttons.count, EmojiCategory.allCases.count + 1)
+        let grid = try XCTUnwrap(panel.subviews.compactMap { $0 as? UICollectionView }.first { !($0.superview is EmojiRowView) })
+        for button in buttons {
+            let frame = button.convert(button.bounds, to: panel)
+            for y in [grid.frame.maxY + 1, frame.minY - 1, frame.maxY + 1, panel.bounds.maxY - 1] {
+                let hit = panel.hitTest(CGPoint(x: frame.midX, y: y), with: nil)
+                XCTAssertTrue(hit === button, "\(button.accessibilityLabel ?? "") at y \(y): \(String(describing: hit))")
+            }
+        }
+        let below = panel.bounds.maxY - 1
+        XCTAssertEqual(panel.hitTest(CGPoint(x: 20, y: below), with: nil)?.accessibilityLabel, "Letters")
+        XCTAssertEqual(panel.hitTest(CGPoint(x: 390, y: below), with: nil)?.accessibilityLabel, "Delete")
+        XCTAssertTrue(panel.hitTest(CGPoint(x: 200, y: grid.frame.midY), with: nil)?.isDescendant(of: grid) ?? false)
+    }
+
     private static func footprint() -> Double {
         var info = task_vm_info_data_t()
         var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
