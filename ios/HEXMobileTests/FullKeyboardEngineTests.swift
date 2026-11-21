@@ -1664,6 +1664,27 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hello ", "a text replacement applies to what you type, not to a swiped word")
     }
 
+    /// Apple's keyboard (black box, iOS 27.2) offers a text replacement in the strip after a
+    /// swipe that read as its shortcut, and space leaves the swiped word; a shortcut tapped
+    /// after a swiped word goes in on space as anywhere else.
+    func testASwipedShortcutOffersItsReplacementAndATappedOneGoesIn() throws {
+        let (field, plane) = try swipeKeyboard("I'm")
+        plane.engine.autocorrect.loadLexiconEntries([("home", "at my house"), ("myem", "jason@example.com")])
+        swipe("home", on: plane)
+        XCTAssertEqual(field.text, "I'm home")
+        let offer = try XCTUnwrap(plane.engine.suggestions.first { $0.replacement == "at my house" }, "\(plane.engine.suggestions)")
+        XCTAssertEqual(plane.engine.suggestions.count >= 2 ? plane.engine.suggestions[1] : plane.engine.suggestions[0], offer, "in the centre")
+        plane.engine.acceptSuggestion(offer)
+        XCTAssertEqual(field.text, "I'm at my house")
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "I'm", "delete still takes what the swipe put in back")
+
+        swipe("hello", on: plane)
+        for letter in "myem" { tap(.character(String(letter)), on: plane) }
+        tap(.space, on: plane)
+        XCTAssertEqual(field.text, "I'm hello jason@example.com ")
+    }
+
     func testTapsShortSlidesAndAccentsStillTypeWithSwipeTypingOn() throws {
         let (field, plane) = try swipeKeyboard()
         for letter in "the" { tap(.character(String(letter)), on: plane) }

@@ -1228,11 +1228,10 @@ final class AutocorrectEngineTests: XCTestCase {
         tap(.space)
         XCTAssertEqual(target.text, "On my way! ")
         tap(.delete)
-        XCTAssertEqual(target.text, "omw", "one backspace puts back the shortcut")
+        XCTAssertEqual(target.text, "On my way!", "delete takes the space, never the replacement")
 
         while target.hasText { target.deleteBackward() }
         engine.configureForField()
-        // The backspace kept "omw" for the session, so another shortcut.
         typeWord("teh addr")
         tap(.layerSwitch(.numbers))
         tap(.character("."))
@@ -1261,7 +1260,88 @@ final class AutocorrectEngineTests: XCTestCase {
         tap(.space)
         XCTAssertEqual(target.text, "be right back idk oh my god ")
         tap(.delete)
-        XCTAssertEqual(target.text, "be right back idk omg", "one backspace puts back the shortcut")
+        XCTAssertEqual(target.text, "be right back idk oh my god", "delete takes the space, never the replacement")
+    }
+
+    /// Types `text` on the keys, switching between the letters and 123 pages as needed.
+    private func typeKeys(_ text: String) {
+        for ch in text {
+            if ch == " " { tap(.space); continue }
+            if ch == "\n" { tap(.returnKey); continue }
+            let kind = KeyKind.character(String(ch))
+            if engine.layout.key(kind) == nil {
+                tap(.layerSwitch(engine.layout.layer == .letters ? .numbers : .letters))
+            }
+            tap(kind)
+        }
+    }
+
+    /// TestFlight (build 56, with a video): "Text replacement doesn't seem to work accurately.
+    /// At the times where it does, tapping the backspace immediately undoes whatever
+    /// replacement was done." His shortcut for his email address stayed as typed on space and
+    /// on return, and a replacement backspace undid twice was turned off for good. Apple's
+    /// keyboard (black box, iOS 27.2) puts a text replacement in on space, a closing mark or
+    /// return; after a bracket or a comma; for a shortcut with a digit or a dot, or one that is
+    /// a word; delete right after takes only the space; and keeping the shortcut, however
+    /// often, never turns it off.
+    func testTextReplacementsGoInAsOnApplesKeyboard() {
+        engine.autocorrect.loadLexiconEntries([
+            ("myem", "jason@example.com"), ("ad2", "second address"), ("s.o", "significant other"),
+            ("home", "at my house"),
+        ])
+        typeKeys("hi myem")
+        XCTAssertEqual(engine.suggestions.first?.displayText, "“myem”")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "jason@example.com")
+        XCTAssertTrue(engine.suggestions.dropFirst().first?.willAutoReplace == true)
+        tap(.space)
+        XCTAssertEqual(target.text, "hi jason@example.com ")
+        tap(.delete)
+        XCTAssertEqual(target.text, "hi jason@example.com", "delete takes the space, not the replacement")
+        tap(.delete)
+        XCTAssertEqual(target.text, "hi jason@example.co")
+
+        for (typed, strip, expected) in [
+            ("ad2", "second address", "second address"), ("s.o", "significant other", "significant other"),
+            ("home", "at my house", "at my house"), ("ok (myem", "jason@example.com", "ok (jason@example.com"),
+            ("hi,myem", "jason@example.com", "hi,jason@example.com"), ("xmyem", nil, "xmyem"),
+        ] {
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+            typeKeys(typed)
+            if let strip {
+                XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, strip, "the strip shows it: \(typed)")
+            }
+            typeKeys(" ")
+            XCTAssertEqual(target.text, expected + " ", typed)
+        }
+
+        for (ending, expected) in [(".", "jason@example.com."), ("\n", "jason@example.com\n")] {
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+            typeKeys("myem" + ending)
+            XCTAssertEqual(target.text, expected, "a closing mark and return put it in too")
+        }
+
+        // Keeping the shortcut, twice, and a word Hex learned: it still goes in.
+        for _ in 0..<2 {
+            typeKeys(" myem")
+            engine.acceptSuggestion(engine.suggestions[0])
+        }
+        XCTAssertTrue(target.text.hasSuffix(" myem myem "))
+        engine.autocorrect.learnedWords.learn("myem")
+        typeKeys("myem ")
+        XCTAssertTrue(target.text.hasSuffix(" myem myem jason@example.com "), target.text)
+
+        // Picked from the strip, a shortcut with a digit goes in whole.
+        typeKeys("ad2")
+        engine.acceptSuggestion(engine.suggestions[1])
+        XCTAssertTrue(target.text.hasSuffix(" jason@example.com second address "), target.text)
+
+        // In either of two languages.
+        engine.autocorrect.setLanguage(.spanish, available: ["es_ES", "en_US"])
+        engine.autocorrect.setPartner(.english, available: ["es_ES", "en_US"])
+        typeKeys("myem ")
+        XCTAssertTrue(target.text.hasSuffix(" second address jason@example.com "), target.text)
     }
 
     /// A text replacement's case, as Apple's keyboard writes it (black box, iOS 27.2): a

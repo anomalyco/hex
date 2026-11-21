@@ -395,8 +395,12 @@ final class FullKeyboardEngine {
             replaceSwipedWord(with: suggestion.replacement)
             return
         }
+        // What the suggestion takes the place of: the word being typed, or a text
+        // replacement's shortcut, which may hold digits or punctuation ("ad2").
+        let before = target.documentContextBeforeInput
+        let replacing = autocorrect.textReplacement(before: before)?.typed ?? AutocorrectEngine.currentToken(in: before)
         if let log = typingLog {
-            let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) ?? ""
+            let token = replacing ?? ""
             log.edit("suggestion", [
                 TypingLogField("slot", suggestions.firstIndex(of: suggestion).map { .int($0) } ?? .null),
                 TypingLogField("text", .string(suggestion.displayText)),
@@ -406,7 +410,7 @@ final class FullKeyboardEngine {
             ])
         }
         if let journal = learning {
-            let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput)
+            let token = replacing
             if let token, !token.isEmpty, token != suggestion.replacement {
                 journal.record(.picked, typed: token, final: suggestion.replacement)
             } else {
@@ -418,7 +422,7 @@ final class FullKeyboardEngine {
                 }
             }
         }
-        if let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) {
+        if let token = replacing {
             adaptiveLearning?.picked(
                 token: token, replacement: suggestion.replacement,
                 overCorrection: suggestion.kind == .keepLiteral && suggestions.contains(where: \.willAutoReplace),
@@ -795,6 +799,9 @@ final class FullKeyboardEngine {
                 TypingLogField("send", .bool(target.returnKeyType == .send)),
             ])
             onReturn?()
+            // A text replacement goes in on return too, as on Apple's keyboard; the new line
+            // goes in on its own, so a field's return (Send, Search) still sees just "\n".
+            _ = applyTextReplacement(ending: "")
             insert("\n", source: nil)
             typingLog?.context("return")
         case .layerSwitch:
@@ -999,6 +1006,7 @@ final class FullKeyboardEngine {
     /// False when there is nothing to fix: the caller types the mark as usual.
     private func correctWord(endingWith text: String) -> Bool {
         guard text.count == 1, let mark = text.first, Self.wordEnders.contains(mark), swipedWord == nil else { return false }
+        if applyTextReplacement(ending: text) { return true }
         let before = target.documentContextBeforeInput
         guard let last = before?.last, last.isLetter, let token = AutocorrectEngine.currentToken(in: before) else { return false }
         // "approx." and "etc." are abbreviations, not typos.
@@ -1010,6 +1018,39 @@ final class FullKeyboardEngine {
         finishedWord = nil
         lastSpaceAt = nil
         layerState.didInsert(text)
+        rebuildLayoutIfNeeded()
+        didEdit()
+        return true
+    }
+
+    /// Puts your text replacement in place of its shortcut as `ending` (a space or a closing
+    /// mark; nothing for return, whose new line follows) finishes it, as Apple's keyboard does
+    /// (black box, iOS 27.2), whatever autocorrect would do. There, delete right after takes
+    /// only `ending` back, never the replacement, and keeping the shortcut never turns it
+    /// off: so no undo is recorded and nothing is learned. False, typing nothing, when no
+    /// shortcut ends the text.
+    private func applyTextReplacement(ending: String) -> Bool {
+        let before = target.documentContextBeforeInput
+        guard field == .text, target.autocorrectionType != .no,
+              let replaced = autocorrect.textReplacement(before: before) else { return false }
+        adaptiveLearning?.finish(token: replaced.typed, corrected: replaced.replacement, before: before)
+        for _ in 0..<replaced.typed.count {
+            target.deleteBackward()
+        }
+        typingLog?.edit("autocorrect", [
+            TypingLogField("from", .string(replaced.typed)),
+            TypingLogField("to", .string(replaced.replacement)),
+            TypingLogField("deleted", .string(replaced.typed)),
+            TypingLogField("inserted", .string(replaced.replacement + ending)),
+            TypingLogField("textReplacement", .bool(true)),
+        ])
+        target.insertText(replaced.replacement + ending)
+        autocorrect.clearPendingUndo()
+        tokenTaps.removeAll()
+        swipedWord = nil
+        finishedWord = nil
+        lastSpaceAt = nil
+        layerState.didInsert(ending)
         rebuildLayoutIfNeeded()
         didEdit()
         return true
@@ -1168,6 +1209,11 @@ final class FullKeyboardEngine {
         learning?.didFinish(word: token)
         syncLearning()
         autocorrect.decoderTaps = taps
+        if !afterSwipe, applyTextReplacement(ending: " ") {
+            lastSpaceAt = now
+            typingLog?.context("space")
+            return
+        }
         if !afterSwipe, finishWord(ending: " ") {
             rememberFinishedWord(typed: token, taps: taps, space: point)
             lastSpaceAt = now
@@ -1316,7 +1362,7 @@ final class FullKeyboardEngine {
         swipedWord = SwipedWord(
             inserted: inserted,
             word: word,
-            alternatives: readings.dropFirst().prefix(3).map { swipeCased($0, capital: capital) }
+            alternatives: swipeAlternatives(readings, capital: capital)
         )
         logState("typed")
         didEdit()
