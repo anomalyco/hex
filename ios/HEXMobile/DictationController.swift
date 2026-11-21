@@ -111,6 +111,16 @@ final class DictationController {
     private var pendingHandoff: PendingKeyboardHandoff?
     var keyboardSessionExpiresAt: TimeInterval = 0
     private var suspendedWarmSessionOnInterruption = false
+    /// The warm session loop's restarts of a keepalive that stopped by itself. Each one
+    /// activates the session and reopens the microphone under every app recording at the
+    /// time (a screen recording too), so one that keeps stopping soon after its restart waits
+    /// twice as long each time (1 s, 2 s, … 30 s), not 100 ms; one that ran a while restarts
+    /// at once.
+    @ObservationIgnored private var keepaliveRestartedAt = -TimeInterval.infinity
+    @ObservationIgnored private var keepaliveRestartDelay: TimeInterval = 0
+    @ObservationIgnored private var keepaliveRestartDue: TimeInterval?
+    private static let steadyKeepalive: TimeInterval = 10
+    private static let maxKeepaliveRestartDelay: TimeInterval = 30
 
     var phase = Phase.modelRequired {
         didSet {
@@ -1061,6 +1071,9 @@ final class DictationController {
 
     private func startKeyboardSessionLoop() {
         keyboardSessionTask?.cancel()
+        keepaliveRestartedAt = -.infinity
+        keepaliveRestartDelay = 0
+        keepaliveRestartDue = nil
         keyboardSessionTask = Task { [weak self] in
             while !Task.isCancelled {
                 guard let self, self.keyboardSessionEnabled else { return }
@@ -1077,7 +1090,10 @@ final class DictationController {
                     self.keyboardSessionRemaining = remaining
 
                     // Verify the keepalive engine is genuinely alive so we never publish a stuck "Ready".
-                    if self.phase == .ready && !self.audio.isKeepaliveRunning && !self.suspendedWarmSessionOnInterruption {
+                    if self.audio.isKeepaliveRunning {
+                        self.keepaliveRestartDue = nil
+                    } else if self.phase == .ready && !self.suspendedWarmSessionOnInterruption,
+                              self.keepaliveRestartIsDue() {
                         do {
                             try self.audio.startKeepalive(allowBluetooth: self.allowBluetoothMic)
                         } catch {
@@ -1094,6 +1110,21 @@ final class DictationController {
                 try? await Task.sleep(for: .milliseconds(100))
             }
         }
+    }
+
+    private func keepaliveRestartIsDue() -> Bool {
+        let time = now()
+        if keepaliveRestartDue == nil {
+            let stoppedSoon = time - keepaliveRestartedAt < Self.steadyKeepalive
+            keepaliveRestartDelay = stoppedSoon
+                ? min(max(1, keepaliveRestartDelay * 2), Self.maxKeepaliveRestartDelay)
+                : 0
+            keepaliveRestartDue = time + keepaliveRestartDelay
+        }
+        guard let due = keepaliveRestartDue, time >= due else { return false }
+        keepaliveRestartDue = nil
+        keepaliveRestartedAt = time
+        return true
     }
 
     func processPendingKeyboardCommandForTesting() {

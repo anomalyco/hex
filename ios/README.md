@@ -767,7 +767,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     recorded (a screen recording's audio too) to 16 kHz while Hex held the
     session (48 kHz to 16 kHz in the simulator). The recorder writes 16 kHz
     itself, and the keepalive is input only (an `AVAudioEngine` input tap, no
-    output node: its output element is off). **Always use iPhone
+    output node: its output element is off). A keepalive that keeps stopping by
+    itself is restarted at once, then after 1 s, 2 s, … up to 30 s, not every
+    100 ms. **Always use iPhone
     microphone** (on by default) records from the built-in microphone, so a car
     or headphones never drop into call audio; turning it off also allows a
     Bluetooth HFP microphone (still mixing). In-keyboard dictation records
