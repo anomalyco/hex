@@ -122,6 +122,9 @@ impl Paster {
         capture: &Payload,
         target: &super::recent::Target,
     ) -> Result<()> {
+        // A capture's sheet and summary replace what a running dictation
+        // watch has in front of it, exactly as another dictation would.
+        super::note_paste();
         let revision = self.activity.revision();
         self.continuation.clear();
         self.prepared_clipboard = None;

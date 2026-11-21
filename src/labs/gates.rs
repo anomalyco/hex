@@ -51,6 +51,17 @@ pub fn screen_vocabulary() -> bool {
     SCREEN_VOCABULARY.load(Ordering::Acquire) && Feature::ScreenVocabulary.on_this_os()
 }
 
+/// Names a person fixes in text Hex just pasted join Vocabulary, read from
+/// that field alone for a few minutes after the paste (macOS; read as each
+/// paste commits).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn learn_from_corrections() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    LEARN_FROM_CORRECTIONS.load(Ordering::Acquire) && Feature::LearnFromCorrections.on_this_os()
+}
+
 /// Mouse buttons may be recorded as shortcuts (macOS).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mouse_shortcuts() -> bool {

@@ -255,9 +255,46 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     }
 }
 
+/// What a keyboard saw of Full Access, written from inside the keyboard: iOS tells only the
+/// keyboard. `launchedAt` is when that keyboard process started. iOS can keep a keyboard
+/// process running, so one started earlier may still say what it saw then.
+nonisolated struct KeyboardFullAccessReport: Codable, Equatable, Sendable {
+    var isOn: Bool
+    var at: TimeInterval
+    var launchedAt: TimeInterval
+}
+
+/// Full Access as Hex can know it: on once a keyboard ran with it, off only when a keyboard
+/// said so since Hex last came to the foreground, and unconfirmed otherwise.
+nonisolated enum KeyboardFullAccess: Equatable, Sendable {
+    case on
+    case off
+    case unconfirmed
+
+    /// `activeSince` is when Hex last came to the foreground. Full Access changes only in
+    /// Settings, outside Hex, so a keyboard's "off" from before then may predate a grant.
+    /// An "off" counts over an "on" only when it is newer and from the same or a later
+    /// keyboard process: an older process may still say what it saw before the grant.
+    static func resolve(
+        on: KeyboardFullAccessReport?,
+        off: KeyboardFullAccessReport?,
+        activeSince: TimeInterval
+    ) -> KeyboardFullAccess {
+        if let off, on.map({ off.at > $0.at && off.launchedAt >= $0.launchedAt }) ?? true {
+            return off.at >= activeSince ? .off : .unconfirmed
+        }
+        return on == nil ? .unconfirmed : .on
+    }
+}
+
 @MainActor
 struct KeyboardBridge {
     nonisolated static let appGroup = "group.anomaly.hex.mobile"
+    /// Posted by the keyboard each time it reports Full Access (`recordFullAccess`).
+    nonisolated static let fullAccessDarwinNotification = "anomaly.hex.mobile.keyboard.fullAccess"
+    /// The keyboard's Darwin notification, forwarded on the main thread once
+    /// `forwardFullAccessReports()` has run in the app.
+    nonisolated static let fullAccessReported = Notification.Name("KeyboardBridge.fullAccessReported")
 
     private enum Key {
         static let command = "keyboard.command"
@@ -268,6 +305,8 @@ struct KeyboardBridge {
         static let allowBluetoothMic = "settings.allowBluetoothMic"
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
+        static let fullAccessOn = "keyboard.fullAccessOn"
+        static let fullAccessOff = "keyboard.fullAccessOff"
         static let appMicrophoneAllowed = "app.microphoneAllowed"
         static let lastEmptyDictationAt = "keyboard.lastEmptyDictationAt"
     }
@@ -368,6 +407,65 @@ struct KeyboardBridge {
             }
         }
     }
+
+    /// Only the keyboard writes these, and a keyboard without Full Access may not be able to
+    /// (an iPhone's App Group can refuse it). An "on" also sets `fullAccessSeenAt`, which
+    /// builds before these reports read.
+    func recordFullAccess(_ report: KeyboardFullAccessReport) {
+        guard let data = try? encoder.encode(report) else { return }
+        if report.isOn {
+            defaults?.set(data, forKey: Key.fullAccessOn)
+            defaults?.set(report.at, forKey: Key.fullAccessSeenAt)
+        } else {
+            defaults?.set(data, forKey: Key.fullAccessOff)
+        }
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName(Self.fullAccessDarwinNotification as CFString),
+            nil,
+            nil,
+            true
+        )
+    }
+
+    /// The last "on". A keyboard from before these reports left only `fullAccessSeenAt`:
+    /// it counts as an "on" from the oldest process.
+    var fullAccessOnReport: KeyboardFullAccessReport? {
+        if let data = defaults?.data(forKey: Key.fullAccessOn),
+           let report = try? decoder.decode(KeyboardFullAccessReport.self, from: data) {
+            return report
+        }
+        return fullAccessSeenAt.map { KeyboardFullAccessReport(isOn: true, at: $0, launchedAt: 0) }
+    }
+
+    var fullAccessOffReport: KeyboardFullAccessReport? {
+        guard let data = defaults?.data(forKey: Key.fullAccessOff) else { return nil }
+        return try? decoder.decode(KeyboardFullAccessReport.self, from: data)
+    }
+
+    func fullAccess(activeSince: TimeInterval) -> KeyboardFullAccess {
+        KeyboardFullAccess.resolve(on: fullAccessOnReport, off: fullAccessOffReport, activeSince: activeSince)
+    }
+
+    /// Forwards the keyboard's Darwin notification to `fullAccessReported`, once per process.
+    static func forwardFullAccessReports() {
+        _ = fullAccessForwarder
+    }
+
+    private static let fullAccessForwarder: Void = {
+        CFNotificationCenterAddObserver(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            nil,
+            { _, _, _, _, _ in
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: KeyboardBridge.fullAccessReported, object: nil)
+                }
+            },
+            fullAccessDarwinNotification as CFString,
+            nil,
+            .deliverImmediately
+        )
+    }()
 
     /// Whether Hex has the microphone, as the app last read it. Only the app sets this. A
     /// keyboard process keeps the permission it read when it started (iOS doesn't update it

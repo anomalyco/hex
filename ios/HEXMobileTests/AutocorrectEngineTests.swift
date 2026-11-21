@@ -439,10 +439,15 @@ final class AutocorrectEngineTests: XCTestCase {
     /// A deterministic dictionary: `UITextChecker`'s answers vary between iOS versions.
     private final class StubChecker: TextChecking {
         var valid: Set<String> = []
+        /// Words the dictionary knows only with their capitals, as German nouns are ("Haus",
+        /// never "haus"): `valid` lowercases, so it cannot say this.
+        var capitalised: Set<String> = []
         var acceptsEverything = false
         var guessTable: [String: [String]] = [:]
         var completionTable: [String: [String]] = [:]
-        func isWordValid(_ word: String) -> Bool { acceptsEverything || valid.contains(word.lowercased()) }
+        func isWordValid(_ word: String) -> Bool {
+            acceptsEverything || valid.contains(word.lowercased()) || capitalised.contains(word)
+        }
         func guesses(for word: String) -> [String] { guessTable[word.lowercased()] ?? [] }
         func completions(for prefix: String) -> [String] { completionTable[prefix.lowercased()] ?? [] }
     }
@@ -821,10 +826,68 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "see mary on monday with Zorbix ")
     }
 
+    /// German's model is Android's, byte for byte: the same v3 file, with its own language
+    /// and a vocabulary of lowercase German words ("haus", never "haua").
+    func testTheBundledGermanModelLoads() throws {
+        let model = try XCTUnwrap(TypingDecoderModel.bundled("de"), "the German model is bundled")
+        XCTAssertEqual(model.language, "de")
+        XCTAssertGreaterThan(model.wordCount, 50_000)
+        XCTAssertNotNil(model.index(of: "haus"), "a common German word")
+        XCTAssertNil(model.index(of: "haua"), "not a word")
+    }
+
+    /// Settings › Experiments › German spatial autocorrect, off by default, gates German alone.
+    /// Without it the Deutsch layout keeps the dictionary engine exactly as before: no word
+    /// list either, so no letter odds, no model completions in the strip, and no partner model.
+    /// English and Spanish never wait on the experiment.
+    func testTheGermanTypingModelNeedsItsExperiment() {
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertFalse(settings.germanSpatialAutocorrect, "off by default")
+        XCTAssertNil(settings.typingModel(for: .german), "no German model unless the experiment is on")
+        settings.spatialAutocorrect = true
+        XCTAssertNil(settings.typingModel(for: .german), "and never without Spatial autocorrect")
+        settings.germanSpatialAutocorrect = true
+        XCTAssertEqual(settings.typingModel(for: .german)?.language, "de")
+        settings.spatialAutocorrect = false
+        XCTAssertNil(settings.typingModel(for: .german), "Spatial autocorrect off turns it off again")
+        XCTAssertEqual(settings.typingModel(for: .english)?.language, "en", "English never waits on the experiment")
+        XCTAssertEqual(settings.typingModel(for: .spanish)?.language, "es")
+        settings.spatialAutocorrect = true
+        XCTAssertEqual(settings.typingModel(for: .english)?.language, "en")
+        XCTAssertEqual(settings.typingModel(for: .spanish)?.language, "es")
+    }
+
     func testSpatialAutocorrectAddsSpanishAccents() throws {
         try useDecoder(.spanish)
         for word in ["esta", "aqui", "manana"] { typeTaps(word) }
         XCTAssertEqual(target.text, "esta aquí mañana ", "\"esta\" is a word too, so it stays")
+    }
+
+    /// German spells every noun with a capital, and its model is lowercase throughout: a noun
+    /// the decoder corrects to takes its capital as a name does while Auto-capitalization is
+    /// on ("haua" reads "haus", and the dictionary knows only "Haus"), and stays as read off.
+    func testGermanSpatialAutocorrectCapitalisesTheNounItCorrects() throws {
+        let layout = KeyboardLayout(width: 393, language: .german)
+        let keys = try XCTUnwrap(TypingDecoder.Keys(layout: layout))
+        let checker = StubChecker()
+        checker.valid = ["ist", "das"]
+        checker.capitalised = ["Haus"]
+        let autocorrect = AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
+        autocorrect.setLanguage(.german, available: ["de"])
+        autocorrect.decoder = TypingDecoder(model: try XCTUnwrap(TypingDecoderModel.bundled("de")))
+        autocorrect.decoderKeys = keys
+        // A tap on a where s was meant: "haua" reads "haus", not the literal it spells.
+        autocorrect.decoderTaps = "haua".map { keys.centres[$0]! }
+        XCTAssertEqual(
+            autocorrect.replacementOnSpace(beforeInput: "das haua", field: .text, autocorrectionType: .default)?.replacement,
+            "Haus"
+        )
+        autocorrect.addsCapitals = false
+        XCTAssertEqual(
+            autocorrect.replacementOnSpace(beforeInput: "das haua", field: .text, autocorrectionType: .default)?.replacement,
+            "haus",
+            "Auto-capitalization off adds no capital you did not type"
+        )
     }
 
     func testSpatialAutocorrectKnowsYourOwnWords() throws {
@@ -1158,6 +1221,33 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "be right back idk oh my god ")
         tap(.delete)
         XCTAssertEqual(target.text, "be right back idk omg", "one backspace puts back the shortcut")
+    }
+
+    /// A text replacement's case, as Apple's keyboard writes it (black box, iOS 27.2): a
+    /// leading capital, typed or auto-capitalised ("Brb"), capitalises its first letter; a
+    /// shortcut in lowercase or all caps ("BRB") gets it as stored; stored capitals stay.
+    func testTextReplacementsTakeTheShortcutsLeadingCapital() {
+        engine.autocorrect.loadLexiconEntries([("brb", "be right back"), ("omw", "On my way!"), ("mip", "My iPhone")])
+        typeWord("Brb")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "Be right back")
+        for (typed, expected) in [("Brb", "Be right back"), ("brb", "be right back"), ("BRB", "be right back"),
+                                  ("omw", "On my way!"), ("OMW", "On my way!"), ("mip", "My iPhone"),
+                                  ("Mip", "My iPhone"), ("MIP", "My iPhone")] {
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+            typeWord("ok " + typed + " ")
+            XCTAssertEqual(target.text, "ok \(expected) ", typed)
+        }
+
+        // Auto-capitalised at a sentence start, with Autocorrect on and off.
+        target.autocapitalizationType = .sentences
+        for autocorrect in [true, false] {
+            engine.autocorrect.isEnabled = autocorrect
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+            typeWord("brb ")
+            XCTAssertEqual(target.text, "Be right back ", "autocorrect \(autocorrect)")
+        }
     }
 }
 

@@ -533,6 +533,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
     // becomes real.
     if caps.os == super::platform::Os::Macos {
         rows.push(row(Feature::ScreenVocabulary, Some(&BOOK)));
+        // macOS reads back the field a dictation pasted into.
+        rows.push(row(Feature::LearnFromCorrections, Some(&BOOK)));
     }
     if caps.keyboard_model_switching {
         rows.push(row(Feature::KeyboardModelSwitching, Some(&KEYBOARD)));
@@ -830,6 +832,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
         Feature::ScreenVocabulary => "lab-screen-vocabulary",
+        Feature::LearnFromCorrections => "lab-learn-from-corrections",
         Feature::TerminalPaste => "lab-terminal-paste",
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
         Feature::MouseShortcuts => "lab-mouse-shortcuts",

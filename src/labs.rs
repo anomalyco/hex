@@ -126,6 +126,7 @@ impl Feature {
             Self::LiveTyping => settings.labs.live_typing,
             Self::LiveChapters => settings.labs.live_chapters,
             Self::ScreenVocabulary => settings.labs.screen_vocabulary,
+            Self::LearnFromCorrections => settings.labs.learn_from_corrections,
             Self::TerminalPaste => settings.paste_with_shift,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled,
             Self::MouseShortcuts => settings.labs.mouse_shortcuts,
@@ -213,6 +214,7 @@ impl Feature {
             &mut labs.live_typing,
             &mut labs.live_chapters,
             &mut labs.screen_vocabulary,
+            &mut labs.learn_from_corrections,
             &mut labs.mouse_shortcuts,
             &mut labs.unload_idle,
             &mut labs.keep_microphone_open,
@@ -295,6 +297,7 @@ impl Feature {
             Self::LiveTyping => settings.labs.live_typing = on,
             Self::LiveChapters => settings.labs.live_chapters = on,
             Self::ScreenVocabulary => settings.labs.screen_vocabulary = on,
+            Self::LearnFromCorrections => settings.labs.learn_from_corrections = on,
             Self::TerminalPaste => settings.paste_with_shift = on,
             Self::KeyboardModelSwitching => settings.keyboard_model_switching.enabled = on,
             Self::MouseShortcuts => settings.labs.mouse_shortcuts = on,
@@ -488,6 +491,11 @@ static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
 /// that lab reads the focused window once per dictation.
 static SCREEN_VOCABULARY: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Learn from corrections' switch, set beside [`STATE`] like
+/// [`SCREEN_VOCABULARY`]: that lab reads the field a dictation pasted into,
+/// and the state word has no bit for it.
+static LEARN_FROM_CORRECTIONS: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Rewrite reads nearby text's switch, set beside [`STATE`] like
 /// [`SCREEN_VOCABULARY`]: the mode's rewrite reads the focused text element
 /// once per dictation, and the state word has no bit for it.
@@ -576,6 +584,8 @@ fn state() -> u64 {
                 // as off, and the next read is right.
                 MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
+                LEARN_FROM_CORRECTIONS
+                    .store(learn_from_corrections_enabled(&saved), Ordering::Release);
                 CURSOR_CONTEXT.store(cursor_context_enabled(&saved), Ordering::Release);
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 STOP_PHRASE.store(stop_phrase_enabled(&saved), Ordering::Release);
@@ -611,6 +621,14 @@ fn screen_vocabulary_enabled(settings: &LabsSettings) -> bool {
     settings.screen_vocabulary
         && Feature::ScreenVocabulary.shipped()
         && Feature::ScreenVocabulary.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Learn from corrections in this build,
+/// before its managed lock; the state word has no bit for it.
+fn learn_from_corrections_enabled(settings: &LabsSettings) -> bool {
+    settings.learn_from_corrections
+        && Feature::LearnFromCorrections.shipped()
+        && Feature::LearnFromCorrections.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Rewrite reads nearby text in this build,
@@ -765,6 +783,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     STATE.store(encode(settings), Ordering::Release);
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
+    LEARN_FROM_CORRECTIONS.store(learn_from_corrections_enabled(settings), Ordering::Release);
     CURSOR_CONTEXT.store(cursor_context_enabled(settings), Ordering::Release);
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     STOP_PHRASE.store(stop_phrase_enabled(settings), Ordering::Release);
@@ -972,6 +991,7 @@ pub fn log_launch() {
         typed_text = typed_text(),
         playground = playground(),
         screen_vocabulary = screen_vocabulary(),
+        learn_from_corrections = learn_from_corrections(),
         cursor_context = cursor_context(),
         copy_dictation_audio = copy_dictation_audio(),
         hold_through_keys = hold_through_keys(),
@@ -1749,6 +1769,34 @@ mod tests {
             "labs.screen_vocabulary"
         );
         assert_eq!(Feature::ScreenVocabulary.name(), "screen-vocabulary");
+    }
+
+    #[test]
+    fn learn_from_corrections_is_its_own_switch_and_macos_only() {
+        let mut labs = LabsSettings::default();
+        assert!(!learn_from_corrections_enabled(&labs));
+        labs.learn_from_corrections = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(learn_from_corrections_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & VOCABULARY_BIASING, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::LearnFromCorrections.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::LearnFromCorrections.added(), 20261121);
+        assert_eq!(Feature::LearnFromCorrections.audience(), Audience::Everyone);
+        assert_eq!(Feature::LearnFromCorrections.group(), Group::Dictation);
+        assert_eq!(
+            Feature::LearnFromCorrections.settings_key(),
+            "labs.learn_from_corrections"
+        );
+        assert_eq!(
+            Feature::LearnFromCorrections.name(),
+            "learn-from-corrections"
+        );
     }
 
     #[test]

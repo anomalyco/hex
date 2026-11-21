@@ -21,6 +21,7 @@ impl Feature {
             | Self::LiveTyping
             | Self::LiveChapters
             | Self::ScreenVocabulary
+            | Self::LearnFromCorrections
             | Self::TerminalPaste
             | Self::KeyboardModelSwitching
             | Self::MouseShortcuts
@@ -153,6 +154,7 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::FasterLiveText
             | Self::VocabularyFiles => 20261120,
+            Self::LearnFromCorrections => 20261121,
         }
     }
 
@@ -255,6 +257,7 @@ impl Feature {
             | Self::DoubleTapModifiers
             | Self::PauseMenu
             | Self::ScreenVocabulary
+            | Self::LearnFromCorrections
             | Self::CursorContext
             | Self::MoreDictationShortcuts
             | Self::CalendarMenu
@@ -315,6 +318,7 @@ impl Feature {
             Self::LiveTyping => "live-typing",
             Self::LiveChapters => "live-chapters",
             Self::ScreenVocabulary => "screen-vocabulary",
+            Self::LearnFromCorrections => "learn-from-corrections",
             Self::TerminalPaste => "terminal-paste",
             Self::KeyboardModelSwitching => "keyboard-model-switching",
             Self::MouseShortcuts => "mouse-shortcuts",
@@ -396,6 +400,7 @@ impl Feature {
             Self::LiveTyping => "labs.live_typing",
             Self::LiveChapters => "labs.live_chapters",
             Self::ScreenVocabulary => "labs.screen_vocabulary",
+            Self::LearnFromCorrections => "labs.learn_from_corrections",
             Self::TerminalPaste => "paste_with_shift",
             Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
             Self::MouseShortcuts => "labs.mouse_shortcuts",

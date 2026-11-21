@@ -344,6 +344,19 @@ final class AutocorrectEngine {
         partner?.loadLexiconEntries(entries)
     }
 
+    /// Your text replacement for `token`, cased as Apple's keyboard writes it (black box, iOS
+    /// 27.2): a shortcut typed with a leading capital, yours or auto-capitalisation's ("Brb"),
+    /// capitalises the replacement's first letter ("Be right back"); one typed in lowercase or
+    /// all caps ("BRB") gets the replacement as stored, and stored capitals always stay
+    /// ("mip" and "MIP" both give "My iPhone").
+    private func shortcut(for token: String) -> String? {
+        guard let stored = lexiconShortcuts[token.lowercased()] else { return nil }
+        let letters = token.filter(\.isLetter)
+        let leadingCapital = token.first?.isUppercase == true && (letters.count < 2 || letters != letters.uppercased())
+        guard leadingCapital, let first = stored.first, first.isLowercase else { return stored }
+        return first.uppercased() + stored.dropFirst()
+    }
+
     func clearPendingUndo() {
         lastCorrection = nil
     }
@@ -482,6 +495,7 @@ final class AutocorrectEngine {
         case .italian: ["io", "il", "la"]
         case .portuguese: ["eu", "o", "a"]
         case .polish: ["ja", "to", "nie"]
+        case .romanian: ["eu", "nu", "am"]
         case .norwegian: ["jeg", "det", "vi"]
         case .russian: ["я", "это", "мы"]
         case .ukrainian: ["я", "це", "ми"]
@@ -502,6 +516,7 @@ final class AutocorrectEngine {
         case .italian: ["e", "ma", "che"]
         case .portuguese: ["e", "mas", "que"]
         case .polish: ["a", "ale", "że"]
+        case .romanian: ["și", "dar", "că"]
         case .norwegian: ["og", "men", "jeg"]
         case .russian: ["и", "но", "что"]
         case .ukrainian: ["і", "але", "що"]
@@ -519,6 +534,7 @@ final class AutocorrectEngine {
         case .italian: ["di", "e", "che", "la", "il", "a"]
         case .portuguese: ["de", "que", "e", "o", "a", "do"]
         case .polish: ["nie", "i", "w", "się", "na", "to"]
+        case .romanian: ["de", "și", "în", "nu", "să", "la"]
         case .norwegian: ["og", "i", "det", "er", "på", "som"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
@@ -585,7 +601,7 @@ final class AutocorrectEngine {
 
         partner?.beforeInput = beforeInput
         // Autocorrect off: your text replacements only.
-        let autoFix = !allowAuto ? nil : isEnabled ? cautiousReplacement(for: token) : lexiconShortcuts[lower]
+        let autoFix = !allowAuto ? nil : isEnabled ? cautiousReplacement(for: token) : shortcut(for: token)
         var pool: [String] = autoFix.map { [$0] } ?? []
 
         if let partner = workingPartner {
@@ -737,7 +753,7 @@ final class AutocorrectEngine {
               !learnedWords.contains(lower) else { return nil }
         // Your own text replacement comes first, as on Apple's keyboard: before the chat
         // shorthand Hex leaves alone ("brb"), and with Autocorrect off or no dictionary.
-        if let shortcut = lexiconShortcuts[lower] { return (token, shortcut) }
+        if let shortcut = shortcut(for: token) { return (token, shortcut) }
         guard isEnabled, hasDictionary, !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
         return (token, fix)
@@ -750,7 +766,7 @@ final class AutocorrectEngine {
     /// the keyboard's own language's.
     private func cautiousReplacement(for token: String) -> String? {
         guard let partner = workingPartner else { return ownReplacement(for: token) }
-        if let shortcut = lexiconShortcuts[token.lowercased()] {
+        if let shortcut = shortcut(for: token) {
             return shortcut
         }
         // One-letter words are left to the keyboard's own language: `UITextChecker` takes
@@ -802,7 +818,7 @@ final class AutocorrectEngine {
     private func ownReplacement(for token: String) -> String? {
         let lower = token.lowercased()
         // 1. Explicit iOS Text Replacement (`omw` -> `On my way!`).
-        if let shortcut = lexiconShortcuts[lower] {
+        if let shortcut = shortcut(for: token) {
             return shortcut
         }
         // A word that may not be offered, typed in full, is a word you meant: never corrected
@@ -850,10 +866,18 @@ final class AutocorrectEngine {
                 if language.usesEnglishFixes, cased.contains(" ") {
                     cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
                 }
+                // German spells every noun with a capital, and the German model is lowercase
+                // throughout like the English one: a corrected word the dictionary knows only
+                // capitalised is a noun ("hsus" -> "haus" -> "Haus"), as the no-replacement
+                // path does below. One word only: a split reading keeps its second word as read.
+                if addsCapitals, !cased.contains(" "), decoder?.model.language == KeyboardLanguage.german.rawValue {
+                    cased = properNoun(for: cased) ?? cased
+                }
                 return withoutAddedCapitals(cased, typed: token)
             }
-            // A name, day or place its lowercase word list lacks, typed in lowercase, is
-            // capitalised as the dictionary path does ("mary" -> "Mary"), unless
+            // A word the model knows lowercase that the dictionary knows only capitalised
+            // (a name, day or place; a German noun), typed in lowercase, is capitalised as
+            // the dictionary path does ("mary" -> "Mary", "haus" -> "Haus"), unless
             // Auto-capitalization is off.
             return addsCapitals ? properNoun(for: token) : nil
         }
@@ -951,7 +975,8 @@ final class AutocorrectEngine {
     }
 
     /// `token` capitalised when it is all lowercase and the dictionary knows it only that way
-    /// (a name, day or place: "mary" -> "Mary", "monday" -> "Monday"), else nil.
+    /// (a name, day or place: "mary" -> "Mary", "monday" -> "Monday"; a German noun:
+    /// "haus" -> "Haus"), else nil.
     private func properNoun(for token: String) -> String? {
         guard token.count >= 2, token == token.lowercased(), let first = token.first else { return nil }
         let capitalised = first.uppercased() + token.dropFirst()

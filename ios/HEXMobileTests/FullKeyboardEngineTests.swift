@@ -690,7 +690,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.engine.autocorrect.decoder)
         // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
         // next-letter odds move French targets (AZERTY's letters aren't theirs).
-        for language in [KeyboardLanguage.russian, .ukrainian, .polish, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
+        for language in [KeyboardLanguage.russian, .ukrainian, .polish, .romanian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")
@@ -1166,8 +1166,15 @@ final class FullKeyboardEngineTests: XCTestCase {
                 view.plane.began(id: id + 10, sample: sample)
                 view.plane.ended(id: id + 10, sample: sample)
             }
-            // Serbian's e holds nothing, as on the system keyboard; its c holds č and ć.
-            let held = language == .ukrainian ? "ʼ" : cyrillic ? "е" : language == .serbianLatin ? "c" : "e"
+            // Serbian's and Romanian's e hold nothing, as on the system keyboard; Serbian's c
+            // holds č and ć, Romanian's s ș.
+            let held: String = switch language {
+            case .ukrainian: "ʼ"
+            case .russian: "е"
+            case .serbianLatin: "c"
+            case .romanian: "s"
+            default: "e"
+            }
             view.debugHoldAccent(held, selectIndex: 1)
             counts[language] = asked
         }
@@ -1351,11 +1358,53 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(plane.engine.isSwiping)
         swipe("world", on: plane)
         XCTAssertEqual(field.text, "hello world")
-        tap(.character("s"), on: plane)
-        XCTAssertEqual(field.text, "hello worlds", "a tap after a swipe adds to its word")
         tap(.space, on: plane)
         swipe("keyboard", on: plane)
-        XCTAssertEqual(field.text, "hello worlds keyboard", "no second space after one typed")
+        XCTAssertEqual(field.text, "hello world keyboard", "no second space after one typed")
+    }
+
+    /// TestFlight (build 56): "Manual typing right after swipe typing a word should add a space
+    /// after for the next word." Apple's keyboard (iOS 27.2, watched in Messages) keeps a space
+    /// pending after a swiped word: a letter, digit, opening mark or symbol goes in after it,
+    /// closing punctuation goes against the word, and delete takes the letters, then the space.
+    func testATapAfterASwipeStartsTheNextWordAsOnApplesKeyboard() throws {
+        let (field, plane) = try swipeKeyboard()
+        swipe("hello", on: plane)
+        for letter in "world" { tap(.character(String(letter)), on: plane) }
+        XCTAssertEqual(field.text, "hello world")
+        for _ in 0..<5 { tap(.delete, on: plane) }
+        XCTAssertEqual(field.text, "hello ", "delete takes the letters, then the space")
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "hello")
+
+        for (mark, typed) in [(",", "hello,"), (".", "hello."), ("?", "hello?"), ("'", "hello'"), ("-", "hello-"), ("(", "hello ("), ("2", "hello 2"), ("@", "hello @"), ("\"", "hello \"")] {
+            let (field, plane) = try swipeKeyboard()
+            swipe("hello", on: plane)
+            tap(.layerSwitch(.numbers), on: plane)
+            tap(.character(mark), on: plane)
+            XCTAssertEqual(field.text, typed, mark)
+        }
+
+        let (comma, keys) = try swipeKeyboard()
+        swipe("hello", on: keys)
+        tap(.layerSwitch(.numbers), on: keys)
+        tap(.character(","), on: keys)
+        tap(.layerSwitch(.letters), on: keys)
+        tap(.character("w"), on: keys)
+        XCTAssertEqual(comma.text, "hello,w", "the mark took the pending space")
+        swipe("world", on: keys)
+        XCTAssertEqual(comma.text, "hello,w world")
+
+        let (shifted, shiftKeys) = try swipeKeyboard("Hi")
+        shifted.autocapitalizationType = .sentences
+        shiftKeys.engine.refreshAutoCapitalization()
+        swipe("there", on: shiftKeys)
+        tap(.character("y"), on: shiftKeys)
+        XCTAssertEqual(shifted.text, "Hi there y", "no capital mid-sentence")
+        swipe("you", on: shiftKeys)
+        tap(.shift, on: shiftKeys)
+        tap(.character("w"), on: shiftKeys)
+        XCTAssertEqual(shifted.text, "Hi there y you W", "shift you set stays on")
     }
 
     func testASwipedWordFollowsSpacingAndPunctuationAsApplesDoes() {
@@ -1448,7 +1497,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         swipe("people", on: plane)
         tap(.character("s"), on: plane)
         tap(.delete, on: plane)
-        XCTAssertEqual(field.text, "hell people", "only right after the swipe")
+        XCTAssertEqual(field.text, "hell people ", "only right after the swipe; the space a tap brought stays")
     }
 
     func testTheStripOffersTheSwipesOtherReadingsInItsWordsPlace() throws {
@@ -1639,7 +1688,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         swipe("hello", on: plane, lift: false)
         XCTAssertTrue(plane.engine.isSwiping)
         tap(.character("s"), on: plane)
-        XCTAssertEqual(field.text, "hellos")
+        XCTAssertEqual(field.text, "hello s", "the swipe's word, then the tap's letter a space later")
         XCTAssertFalse(plane.engine.isSwiping)
     }
 
@@ -1862,8 +1911,8 @@ extension FullKeyboardEngineTests {
         tap(.character("s"), on: plane)
         tap(.space, on: plane)
         swipe("it", on: plane)
-        XCTAssertEqual(field.text, "hello world agains it")
-        XCTAssertEqual(learned(touch).weak, 0, "never from a swipe, nor a tap that adds to one")
+        XCTAssertEqual(field.text, "hello world again s it")
+        XCTAssertEqual(learned(touch).weak, 0, "never from a swipe")
     }
 
     func testAdaptiveTouchMovesTheDecodersCentresNeverTheKeys() throws {

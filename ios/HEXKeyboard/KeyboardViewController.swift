@@ -10,7 +10,9 @@ final class KeyboardViewController: UIInputViewController {
     private var pollTimer: Timer?
     private var coldStartJobID = UUID().uuidString
     private var lastURLRefreshBucket: Int = 0
-    private var lastFullAccessNote: TimeInterval = 0
+    private var lastFullAccessReport: KeyboardFullAccessReport?
+    /// When this keyboard process started (its first load): its Full Access reports' generation.
+    private static let processLaunchedAt = Date().timeIntervalSince1970
     private var surface: UIView?
     private var fullKeyboard: FullKeyboardView?
     /// The dictation bar's emoji panel, at the full keyboard's height while it's open, and
@@ -18,6 +20,8 @@ final class KeyboardViewController: UIInputViewController {
     private var barEmojiPanel: EmojiPanelView?
     private var barEmojiLibrary: EmojiLibrary?
     private var heightConstraint: NSLayoutConstraint?
+    /// The dictation bar's top edge, `barTopInset` below the keyboard's.
+    private var barTopConstraint: NSLayoutConstraint?
     /// Opaque, under the surface: nothing iOS leaves behind the keyboard shows through it.
     private let backdrop = KeyboardBackdropView()
     private var pollInterval: TimeInterval = 0
@@ -47,6 +51,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        reportFullAccess(force: true)
         // Keyboard dictation sets this process's audio session to record (WebKit captures for
         // it), and iOS mutes a recording session's haptics by default: keep key haptics on.
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
@@ -56,6 +61,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        reportFullAccess(force: true)
         coldStartJobID = UUID().uuidString
         didHandOffCurrentField = false
         // The keyboard may come back for another field: settle on where the dictation was last seen.
@@ -104,7 +110,35 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        if let fullKeyboard { applyHeight(fullKeyboard.preferredHeight) }
+        if let fullKeyboard {
+            applyHeight(fullKeyboard.preferredHeight)
+        } else {
+            applyBarInset()
+        }
+    }
+
+    /// The dictation bar's own height, under `barTopInset`.
+    private static let barHeight: CGFloat = 140
+
+    /// On an iPad, iPadOS adds its shortcut bar (undo, redo, paste, and the app's own buttons)
+    /// to a custom keyboard. Mostly it sits above the keyboard, but some apps draw it over the
+    /// keyboard's top instead: in Notes on an iPad mini (iPadOS 26.6, TestFlight) its buttons
+    /// reached about 40 pt down and covered the bar's top row and its language and style trays.
+    /// The keyboard can't tell which an app does, so on an iPad the bar keeps that strip clear.
+    /// A floating keyboard is iPhone-wide and has no shortcut bar; before the first layout
+    /// (no width yet) the keyboard is taken to be docked, as it mostly is.
+    private var barTopInset: CGFloat {
+        let width = view.bounds.width
+        return UIDevice.current.userInterfaceIdiom == .pad && (width == 0 || width >= 500) ? 44 : 0
+    }
+
+    /// Keeps the dictation bar's top inset, and with it the keyboard's height, right for the
+    /// keyboard's width (it changes as an iPad keyboard floats or docks).
+    private func applyBarInset() {
+        guard fullKeyboard == nil, barEmojiPanel == nil, let barTopConstraint else { return }
+        let inset = barTopInset
+        if barTopConstraint.constant != inset { barTopConstraint.constant = inset }
+        applyHeight(Self.barHeight + inset)
     }
 
     /// The keyboard's height. Set once before the first layout (the surface's own height), then
@@ -491,9 +525,11 @@ final class KeyboardViewController: UIInputViewController {
         surface?.removeFromSuperview()
         view.subviews.filter { $0 is FullKeyboardView }.forEach { $0.removeFromSuperview() }
         fullKeyboard = nil
+        barTopConstraint = nil
         didWarmLexicon = false
 
         let mounted: UIView
+        var topInset: CGFloat = 0
         if wantsFull {
             let keyboard = FullKeyboardView(
                 model: viewModel,
@@ -524,16 +560,19 @@ final class KeyboardViewController: UIInputViewController {
             addChild(hosting)
             hosting.didMove(toParent: self)
             mounted = hosting.view
-            applyHeight(140)
+            topInset = barTopInset
+            applyHeight(Self.barHeight + topInset)
         }
         mounted.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(mounted, aboveSubview: backdrop)
+        let top = mounted.topAnchor.constraint(equalTo: view.topAnchor, constant: topInset)
         NSLayoutConstraint.activate([
             mounted.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             mounted.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            mounted.topAnchor.constraint(equalTo: view.topAnchor),
+            top,
             mounted.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        if !wantsFull { barTopConstraint = top }
         surface = mounted
         attachTypingLog()
         schedulePoll(force: false)
@@ -564,8 +603,21 @@ final class KeyboardViewController: UIInputViewController {
         #endif
     }
 
+    /// Tells Hex what this keyboard sees of Full Access, which only a keyboard can see: as it
+    /// loads and each time it appears, before anything else runs, then every 5 s while it's
+    /// shown. One small App Group write; it reads nothing from the field.
+    private func reportFullAccess(force: Bool) {
+        let now = Date().timeIntervalSince1970
+        let isOn = hasFullAccess
+        if let last = lastFullAccessReport, last.isOn == isOn, now - last.at < (force ? 1 : 5) { return }
+        let report = KeyboardFullAccessReport(isOn: isOn, at: now, launchedAt: Self.processLaunchedAt)
+        lastFullAccessReport = report
+        bridge.recordFullAccess(report)
+    }
+
     private func syncFromBridge(animated: Bool) {
         let now = Date().timeIntervalSince1970
+        reportFullAccess(force: false)
         updateKeyboardTraits()
         fullKeyboard?.syncSettings()
         syncTypingLogEnabled()
@@ -584,11 +636,6 @@ final class KeyboardViewController: UIInputViewController {
                 animated: animated
             )
             return
-        }
-
-        if now - lastFullAccessNote >= 5 {
-            lastFullAccessNote = now
-            bridge.fullAccessSeenAt = now
         }
 
         if dictationEdits.isTracking {
@@ -721,7 +768,7 @@ final class KeyboardViewController: UIInputViewController {
         panel.removeFromSuperview()
         barEmojiPanel = nil
         surface?.isHidden = false
-        if fullKeyboard == nil { applyHeight(140) }
+        applyBarInset()
     }
 
     // MARK: - In-keyboard dictation

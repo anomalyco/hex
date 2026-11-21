@@ -437,6 +437,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
             .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .polish: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
+            .romanian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"],
             .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"],
             .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
@@ -726,6 +727,29 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(AccentCatalog.options(for: "€", uppercase: false, language: .polish), ["€", "$", "£", "¥", "₩", "₽"])
         XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .polish), AccentCatalog.options(for: "$", uppercase: false))
         XCTAssertEqual(AccentCatalog.options(for: "\"", uppercase: false, language: .polish), AccentCatalog.options(for: "\"", uppercase: false))
+        // Romanian: ă and â on A, î on I, ș on S and ț on T right after the base, ș and ț the
+        // comma-below letters (U+0219, U+021B), never the cedilla ş ţ; every other letter holds
+        // nothing. Its currency key is € and its held " is Romanian's own order.
+        XCTAssertEqual(
+            AccentCatalog.options(for: "a", uppercase: false, language: .romanian),
+            ["a", "ă", "â", "à", "á", "ä", "æ", "ã", "å", "ā"]
+        )
+        XCTAssertEqual(AccentCatalog.options(for: "i", uppercase: false, language: .romanian), ["i", "î", "ï", "ì", "í", "į", "ī"])
+        XCTAssertEqual(AccentCatalog.options(for: "s", uppercase: false, language: .romanian), ["s", "ș", "ß", "ś", "š"])
+        XCTAssertEqual(AccentCatalog.options(for: "t", uppercase: false, language: .romanian), ["t", "ț"])
+        XCTAssertEqual(AccentCatalog.options(for: "t", uppercase: true, language: .romanian), ["T", "Ț"])
+        XCTAssertEqual(Array("șț".unicodeScalars).map(\.value), [0x0219, 0x021B], "comma-below, never the cedilla")
+        XCTAssertEqual(Array("ȘȚ".unicodeScalars).map(\.value), [0x0218, 0x021A])
+        let romanian: Set<String> = ["a", "i", "s", "t"]
+        for letter in KeyboardLanguage.romanian.letterRows.joined() where !romanian.contains(letter) {
+            XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .romanian), letter)
+        }
+        XCTAssertEqual(AccentCatalog.options(for: "€", uppercase: false, language: .romanian), ["€", "$", "£", "¥", "₩", "₽"])
+        XCTAssertEqual(
+            AccentCatalog.options(for: "\"", uppercase: false, language: .romanian),
+            ["\"", "„", "”", "»", "«", "“"]
+        )
+        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .romanian), AccentCatalog.options(for: "$", uppercase: false))
     }
 
     func testAccentMenusOnTheNewKeysStayInside() {
@@ -737,6 +761,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .ukrainian: ["й", "ї", "є", "ʼ", "ґ"],
             .serbianLatin: ["c", "d", "s", "z"],
             .polish: ["a", "c", "e", "l", "n", "o", "s", "z"],
+            .romanian: ["a", "i", "s", "t"],
         ]
         for width in portraitWidths {
             for (language, characters) in keys {
@@ -792,6 +817,8 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic("pl_PL"), .polish)
         XCTAssertEqual(automatic(nil, modes: ["emoji", "pl_PL", "en-US"]), .polish)
         XCTAssertEqual(automatic(nil, preferred: ["pl-PL", "en-US"]), .polish)
+        XCTAssertEqual(automatic("ro-RO", modes: ["en-US"]), .romanian)
+        XCTAssertEqual(automatic("ro_RO"), .romanian)
         // Before Hex knows the dictation language: the first keyboard, then language, with a layout.
         XCTAssertEqual(automatic(nil, modes: ["emoji", "nb-NO", "en-US"]), .norwegian)
         XCTAssertEqual(automatic(nil, preferred: ["nn-NO"]), .norwegian)

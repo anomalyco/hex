@@ -43,8 +43,8 @@ hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
 (beta), Voice Filter (Dev; locked on while its macOS driver is installed, and
 a stable build with the driver keeps its pane for Uninstall alone), Playground
 (Dev), Paste Last picker (Dev, macOS; the mixed dictation-and-annotation
-picker and History, `labs.paste_last_picker`), Live text, Live chapters, Vocabulary
-files, Words on screen
+picker and History, `labs.paste_last_picker`), Live text, Live chapters,
+Vocabulary files, Words on screen, Learn from corrections
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Free memory when idle
@@ -404,7 +404,7 @@ substitute for source inspection or a second roadmap.
 - `linux/audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
   audio through `audio/output_ducking`, and MPRIS pause over D-Bus (zbus),
   restoring only what it changed, plus idle-sleep prevention for dictations.
-- `linux/input_route`: System default's Bluetooth avoidance on Linux. ALSA's
+- `linux/input/route`: System default's Bluetooth avoidance on Linux. ALSA's
   default cannot name another PipeWire source, so Hex marks its ALSA streams
   (`PIPEWIRE_ALSA`: `state.restore-target = false` and its PID, set on the
   main thread at startup) and moves them off a Bluetooth default source to

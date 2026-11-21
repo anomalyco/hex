@@ -13,6 +13,7 @@ use std::fs;
 use std::ops::RangeInclusive;
 use std::path::Path;
 use std::ptr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -26,6 +27,25 @@ use objc2_foundation::{NSArray, NSData, NSString};
 
 use crate::continuation::{Continuation, InputActivity};
 use crate::keyboard;
+
+/// Every paste into another app since this process started, bumped before
+/// the app is touched. A watch that outlives its paste compares it to tell a
+/// reading taken before a newer paste from one a newer paste may have
+/// replaced. Not gated by any lab: it only orders pastes.
+static PASTE_GENERATION: AtomicU64 = AtomicU64::new(0);
+
+/// The newest paste's generation, read after a paste and again after every
+/// read of a watched field.
+pub(crate) fn paste_generation() -> u64 {
+    PASTE_GENERATION.load(Ordering::Acquire)
+}
+
+/// Marks a paste into another app that goes around [`Paster::insert_text`]
+/// (a capture's sheet and summary), so a running watch knows the field may
+/// have changed under it.
+pub(crate) fn note_paste() {
+    PASTE_GENERATION.fetch_add(1, Ordering::AcqRel);
+}
 
 pub struct Paster {
     clipboard: Retained<NSPasteboard>,
@@ -239,17 +259,23 @@ impl Paster {
         }
     }
 
-    pub fn paste(&mut self, text: &str, mode: PasteMode) -> Result<()> {
+    /// Inserts `text` and returns exactly what reached the app: the
+    /// continuation join's capitalization and leading space, or smart
+    /// spacing, are part of what the app holds and so of what a watch
+    /// compares. Copy-only returns an empty string, as nothing was inserted.
+    pub fn paste(&mut self, text: &str, mode: PasteMode) -> Result<String> {
         if matches!(mode, PasteMode::CopyOnly) {
-            return self.copy_only(text);
+            self.copy_only(text)?;
+            return Ok(String::new());
         }
         if matches!(mode, PasteMode::Send) {
-            self.paste(text, PasteMode::Continue)?;
+            let inserted = self.paste(text, PasteMode::Continue)?;
             self.continuation.clear();
-            return Ok(());
+            return Ok(inserted);
         }
         if matches!(mode, PasteMode::Return) {
-            return keyboard::post_return();
+            keyboard::post_return()?;
+            return Ok(String::new());
         }
         self.insert_text(text, mode, None)
     }
@@ -259,6 +285,7 @@ impl Paster {
     #[cfg(hex_capture)]
     fn insert_recent_text(&mut self, text: &str, target: &recent::Target) -> Result<()> {
         self.insert_text(text, PasteMode::Continue, Some(&|| target.unchanged()))
+            .map(drop)
     }
 
     fn insert_text(
@@ -266,7 +293,10 @@ impl Paster {
         text: &str,
         mode: PasteMode,
         target: Option<&dyn Fn() -> bool>,
-    ) -> Result<()> {
+    ) -> Result<String> {
+        // Before anything reaches the app: a watch still reading another
+        // field may only learn from text taken before this paste.
+        note_paste();
         let revision = self.activity.revision();
         let joinable = !matches!(mode, PasteMode::Standalone);
         let text = self
@@ -295,8 +325,8 @@ impl Paster {
             Some(_) => return Err(eyre!("paste target changed")),
             None => self.paste_through_clipboard(&text, joinable, focused)?,
         }
-        self.continuation.record(revision, joinable, text);
-        Ok(())
+        self.continuation.record(revision, joinable, text.clone());
+        Ok(text)
     }
 
     /// Inserts `text` as synthesized key events instead of a clipboard paste,

@@ -14,6 +14,7 @@ pub enum Feature {
     LiveTyping,
     LiveChapters,
     ScreenVocabulary,
+    LearnFromCorrections,
     TerminalPaste,
     KeyboardModelSwitching,
     MouseShortcuts,
@@ -83,7 +84,7 @@ pub enum Feature {
 }
 
 impl Feature {
-    pub const ALL: [Self; 75] = [
+    pub const ALL: [Self; 76] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -93,6 +94,7 @@ impl Feature {
         Self::LiveTyping,
         Self::LiveChapters,
         Self::ScreenVocabulary,
+        Self::LearnFromCorrections,
         Self::TerminalPaste,
         Self::KeyboardModelSwitching,
         Self::MouseShortcuts,

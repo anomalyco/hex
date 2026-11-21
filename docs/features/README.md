@@ -2857,7 +2857,15 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Modes app icons: the executable's first icon (PrivateExtractIconsW)
 └── Not yet: custom caption
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
-├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary
+├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
+│   Hinglish, Adaptive touch, German spatial autocorrect
+├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
+│   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
+│   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file
+│   and hash as `android/app/src/main/assets/typing/de.hextm`); a noun it corrects
+│   to takes its capital ("haus" -> "Haus") while Auto-capitalization is on. Off,
+│   German keeps the dictionary engine and has no word list, so no letter odds,
+│   model completions or bilingual partner model
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after
 │   formatting

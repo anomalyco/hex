@@ -65,7 +65,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     full keyboard types without Full Access or network: letters, shift and caps
     lock, numbers and symbols, accents, delete, return, the globe key, and
     suggestions and autocorrect (`UITextChecker`, the supplementary lexicon,
-    and, in English and Spanish, Spatial autocorrect's bundled model). Words
+    and, where a typing model is bundled for the language, Spatial autocorrect's
+    model: English and Spanish, and German with its experiment on). Words
     it learns may last only while the keyboard runs, as an iPhone may not let
     it write the App Group; haptics, Paste and dictation need Full Access. Without Full
     Access the keyboard always mounts the full keyboard, whichever keyboard is
@@ -82,10 +83,16 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     **Continue**, which iOS's prompt follows, until it's asked; never a button
     that says Allow, per App Review 5.1.1(iv)), and the speech model, a field to
     switch to Hex in while Full Access is unconfirmed, and **Open Settings**
-    (Hex's page in Settings) while the keyboard isn't ready. Full Access shows
-    as on once the keyboard has run with it (`keyboard.fullAccessSeenAt`): iOS
-    reports Full Access only inside the keyboard, so the app can't tell on from
-    off until then, and the sheet calls it "Not confirmed yet".
+    (Hex's page in Settings) while the keyboard isn't ready. iOS reports Full
+    Access only inside the keyboard, so the keyboard reports it to the App Group
+    as it loads, each time it appears and every 5 s while shown
+    (`keyboard.fullAccessOn`/`Off`, with when its process started, and
+    `keyboard.fullAccessSeenAt` for an on), and posts a Darwin notification the
+    app refreshes on. Full Access shows as on once a keyboard has run with it,
+    and as off only when a keyboard said so since Hex last came to the
+    foreground (it changes only in Settings), from a keyboard process no older
+    than the one that last saw it on. Otherwise the sheet says "Not confirmed
+    yet" with "Switch to Hex below to confirm." under it, and focuses the field.
   - **Opening Hex:** SwiftUI `Link`, `openURL`, and `extensionContext.open`
     do nothing in a keyboard extension, so the keyboard opens Hex through
     the `UIApplication` at the end of its responder chain
@@ -104,7 +111,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     fresh keyboard process builds no Metal device, pipeline, layer, display
     link, or idle pre-roll before its first frame; the app's docked keyboard
     preview keeps the live scope. The home-indicator swipe cue's pipeline is
-    compiled on first use, which only the app shows. Lock Screen / Dynamic
+    compiled on first use, which only the app shows. Both layers turn off the Metal
+    Performance HUD (Settings › Developer › Graphics HUD), which would draw its frame
+    rate under the home well's Dictate pill, unless launched with `MTL_HUD_ENABLED=1`. Lock Screen / Dynamic
     Island Live Activities render a
     matching `Canvas` dot-matrix badge (`HexDotMatrixBadge`) because WidgetKit
     archives static view snapshots rather than hosting live `CAMetalLayer`s.
@@ -304,12 +313,26 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     including a name, day or place typed in lowercase that the dictionary knows only
     capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Русский, Українська) keep the dictionary
+    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
-    Acknowledgements below).
+    Acknowledgements below); `de.hextm` is the German model Android builds and ships
+    (`android/benchmark/typing/build-layout-model.py`), the same v3 format and, on iOS,
+    off until the experiment below is turned on.
+  - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
+    Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
+    Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
+    `HEXKeyboard/TypingModel/de.hextm`, byte-identical to
+    `android/app/src/main/assets/typing/de.hextm` and the hash its `SHA256SUMS` lists: the
+    word list feeds the decoder, the letter odds and the strip, and a bilingual partner may
+    read German taps too. German's model is lowercase throughout, so a noun it corrects to
+    takes the capital the dictionary knows only capitalised ("hsus" reads "haus" and comes
+    out "Haus"), as a name does, while Auto-capitalization is on. Off, Deutsch keeps the
+    dictionary engine exactly as before: no decoder, no word list for the letter odds or
+    model completions, and no model for a bilingual partner. Swipe typing stays English and
+    Spanish only.
   - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
     (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
     letter key, on this device, and Spatial autocorrect's decoder and the strip read your
@@ -379,8 +402,13 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     capitalised. The strip then offers the next three readings, the likeliest in the
     centre; tapping one puts it in the word's place. Until anything else changes the
     text, delete takes the whole word back (with the space it added) and space never
-    autocorrects it; a tap after it adds to the word. A second finger going down ends the
-    swipe first, so its word goes before that key's letter. On the iPhone Duo's split
+    autocorrects it. As on Apple's keyboard (watched on iOS 27.2), a space stays pending
+    after the word: a tapped letter, digit, opening mark or symbol goes in after a space
+    ("hello" then w-o-r-l-d types "hello world", "(" types "hello ("), while
+    `, . ! ? ; : ) ] } ' - /` go against the word ("hello,") and take that space; shift you
+    set stays, and delete then takes the letters and the space one at a time. A second
+    finger going down ends the swipe first, so its word goes a space before that key's
+    letter. On the iPhone Duo's split
     keyboard a swipe reads across the middle between the halves: its points are read with
     the right half pushed against the left and the middle shrunk to one key's gap
     (`KeyboardLayout.joinedForSwipe`), so either half's G and V is the one letter, as for
@@ -441,8 +469,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
-    the dictation bar, so testers who turned that experiment off keep the bar),
-    then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
+    the dictation bar, so testers who turned that experiment off keep the bar;
+    on an iPad, where the keyboard always shows the dictation bar, the row says so:
+    "On iPad, Hex shows the dictation bar"), then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
     full keyboard while the dictation bar is chosen, and a field to try the keyboard in.
@@ -595,7 +624,12 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   standard Polish layout is, on the English letters; it matches the system keyboard's
   observed long-press options: Polish's own letter right after the base on A, C, E, L, N, O,
   S and Z, so ą ć ę ł ń ó ś ż, with ź after ż, and nothing on U, I or Y; its currency key
-  is €, held for € $ £ ¥ ₩ ₽ and no zł, which Hex holds on the #+= page's €) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  is €, held for € $ £ ¥ ₩ ₽ and no zł, which Hex holds on the #+= page's €), Română (QWERTY
+  on the English letters, as Apple's iPhone Romanian keyboard is: ă and â held on A, î on I,
+  ș on S and ț on T right after the base, the comma-below ș and ț (U+0219, U+021B), never the
+  cedilla ş ţ, and nothing on the other letters; Apple's Romanian layout with keys of its own
+  for them is the iPad's; its currency key is €, held for € $ £ ¥ ₩ ₽ as Polish's is, and its
+  held " offers " „ ” » « “) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -618,7 +652,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   letter at the end under the thumb, in one row where the system wraps a long list
   (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `pl`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `pl`, `ro`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
@@ -742,7 +776,15 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     recording (the app, a warm session's keepalive and captures) is
     `playAndRecord` with `mixWithOthers` and A2DP output, never `duckOthers`,
     so it doesn't interrupt another app's video or music, and ending a session
-    deactivates with `notifyOthersOnDeactivation`. **Always use iPhone
+    deactivates with `notifyOthersOnDeactivation`. It sets no preferred sample
+    rate: `playAndRecord` runs the microphone and the output at one rate, and
+    the 16 kHz it used to ask for moved everything the iPhone played and
+    recorded (a screen recording's audio too) to 16 kHz while Hex held the
+    session (48 kHz to 16 kHz in the simulator). The recorder writes 16 kHz
+    itself, and the keepalive is input only (an `AVAudioEngine` input tap, no
+    output node: its output element is off). A keepalive that keeps stopping by
+    itself is restarted at once, then after 1 s, 2 s, … up to 30 s, not every
+    100 ms. **Always use iPhone
     microphone** (on by default) records from the built-in microphone, so a car
     or headphones never drop into call audio; turning it off also allows a
     Bluetooth HFP microphone (still mixing). In-keyboard dictation records
@@ -833,6 +875,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
   changes have not been reproduced on hardware; the meter recovery tests inject
   that condition through `ActiveAudioCapture`.
+- **Screen recordings with the microphone:** The simulator can't screen-record,
+  so whether one picks up noise while Hex records shows only on an iPhone:
+  record with the microphone on with Hex closed, Hex open and idle, a warm
+  session on, and during in-keyboard dictation (WebKit's `videoChat` session,
+  which Hex can't change), and compare.
 - **In-keyboard dictation's start time:** The simulator's WebKit captures from a
   mock microphone, and on a Mac without a microphone the warm session's
   recorder can't start, so how long a real microphone takes to open
@@ -1013,6 +1060,11 @@ from desktop releases. The marketing version stays fixed across beta builds.
 it matches the Xcode Cloud start condition, and `ci_scripts/ci_post_clone.sh` stamps that
 version into `project.yml` before generating the project. Once Apple approves a
 version, later uploads must be higher than it. Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
+An iPad still installs it (as an iPhone app) and runs its keyboard, which there is always the
+dictation bar (the full keyboard is iPhone only). Docked, the bar keeps its top 44 pt clear:
+iPadOS adds its shortcut bar (undo, redo, paste) to a custom keyboard, usually above it but
+in some apps over its top (Notes, iPadOS 26.6), where it covered the bar's top row. A
+floating keyboard (iPhone-wide) has no shortcut bar and no strip.
 
 The Xcode Cloud workflow needs a tag start condition with prefix `ios-beta-`,
 container `ios/HEXMobile.xcodeproj`, shared scheme `HEXMobile`, an iOS Archive
