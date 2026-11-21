@@ -428,4 +428,37 @@ final class HinglishRomanizerTests: XCTestCase {
         XCTAssertEqual(HinglishRomanizer.romanize("uska naam Rahul hai"), "uska naam Rahul hai")
         XCTAssertEqual(HinglishRomanizer.romanize("Let's meet at 5, Home is fine."), "Let's meet at 5, Home is fine.")
     }
+
+    /// Hinglish runs first, so the style and Lowercase apply to the Latin words, only for Hindi
+    /// and only while the experiment is on; what was heard is kept in Latin to learn from.
+    @MainActor
+    func testStylesAndLowercaseApplyToHinglish() async {
+        let heard = "मेरा फ़ोन चार्ज नहीं हो रहा"
+        var pipeline = DictationPipeline(style: .polished, language: "hi-IN", hinglish: true)
+        var stages = await pipeline.run(heard)
+        XCTAssertEqual(stages.heard, "mera phone charge nahi ho raha")
+        XCTAssertEqual(stages.formatted, "Mera phone charge nahi ho raha.")
+        pipeline.style = .casual
+        stages = await pipeline.run(heard)
+        XCTAssertEqual(stages.formatted, "mera phone charge nahi ho raha")
+        pipeline.style = .polished
+        pipeline.lowercase = true
+        stages = await pipeline.run(heard)
+        XCTAssertEqual(stages.formatted, "mera phone charge nahi ho raha.")
+
+        pipeline.hinglish = false
+        stages = await pipeline.run(heard)
+        XCTAssertEqual(stages.heard, heard, "off: Devanagari as Apple wrote it")
+        let english = await DictationPipeline(style: .verbatim, language: "en-US", hinglish: true).run("Mei Ghar")
+        XCTAssertEqual(english.formatted, "Mei Ghar", "only Hindi")
+
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let settings = HinglishSettings(defaults: defaults)
+        XCTAssertFalse(settings.isEnabled, "off by default")
+        XCTAssertNil(settings.name(for: "hi-IN"))
+        settings.applyLaunchArguments([HinglishSettings.launchArgument])
+        XCTAssertTrue(HinglishSettings(defaults: defaults).isEnabled)
+        XCTAssertEqual(settings.name(for: "hi-IN"), "Hinglish")
+        XCTAssertNil(settings.name(for: "en-IN"))
+    }
 }

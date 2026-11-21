@@ -379,6 +379,37 @@ final class DictationLanguageSwitchTests: XCTestCase {
         )
     }
 
+    /// Experiments › Hinglish offers Hindi in the Hex key's language menu, named Hinglish.
+    func testHinglishOffersHindiByThatName() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let hinglish = HinglishSettings(defaults: defaults)
+        let supported = self.supported + ["hi-IN"]
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "hi-IN", hinglish: hinglish), "हिन्दी")
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(current: "de-DE", recent: ["he-IL"], preferred: ["en-US"], supported: supported),
+            ["de-DE", "he-IL", "en-US"]
+        )
+        hinglish.isEnabled = true
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "hi-IN", hinglish: hinglish), "Hinglish")
+        XCTAssertEqual(
+            DictationLanguageSwitch.nativeNames(for: ["hi-IN", "en-US"], hinglish: hinglish),
+            ["hi-IN": "Hinglish", "en-US": "English"]
+        )
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(
+                current: "de-DE", recent: ["he-IL"], preferred: ["en-US"], supported: supported, hinglish: true
+            ),
+            ["de-DE", "he-IL", "hi-IN", "en-US"]
+        )
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(current: nil, recent: [], preferred: ["en-US"], supported: ["en-US"], hinglish: true),
+            ["en-US"],
+            "not offered where Apple has no Hindi"
+        )
+    }
+
     func testAChoiceMovesToTheFrontOfTheRecents() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

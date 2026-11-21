@@ -2414,6 +2414,26 @@
           }
         }
       }
+    },
+    "Hinglish (Hindi in Latin letters)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hinglish（用拉丁字母书写印地语）"
+          }
+        }
+      }
+    },
+    "Pick Hinglish as your dictation language" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将听写语言设为 Hinglish"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

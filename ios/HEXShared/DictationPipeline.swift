@@ -20,12 +20,53 @@ nonisolated struct DictationLowercaseSettings {
     }
 }
 
+/// Experiments › Hinglish (Hindi in Latin letters), in the shared App Group so in-keyboard
+/// dictation reads it too. Off by default. While it is on, Hindi dictation is written in Latin
+/// letters (`HinglishRomanizer`) and Hindi is called Hinglish in the language menus.
+nonisolated struct HinglishSettings {
+    static let enabledKey = "experiments.hinglish"
+    static let launchArgument = "--experiment-hinglish"
+    /// Hindi's name in the Hex key's language menu and Settings › Dictation language while on.
+    static let languageName = "Hinglish"
+    /// The language it is for: Apple Speech's Hindi, also what the keyboard offers to switch to.
+    static let language = "hi-IN"
+
+    private let defaults: UserDefaults?
+
+    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+        self.defaults = defaults
+    }
+
+    var isEnabled: Bool {
+        get { defaults?.bool(forKey: Self.enabledKey) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Self.enabledKey) }
+    }
+
+    /// "Hinglish" for Hindi while the experiment is on; nil for other languages, or while off.
+    func name(for language: String) -> String? {
+        isEnabled && Self.isHindi(language) ? Self.languageName : nil
+    }
+
+    static func isHindi(_ language: String?) -> Bool {
+        guard let language else { return false }
+        return Locale(identifier: language).language.languageCode?.identifier == "hi"
+    }
+
+    /// Simulator scenes pass `--experiment-hinglish` to turn the experiment on.
+    func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
+        if arguments.contains(Self.launchArgument) {
+            isEnabled = true
+        }
+    }
+}
+
 /// The steps between the speech model and the text Hex inserts, the same wherever Hex
 /// dictates: `DictationController` (the app, the keyboard's warm session and cold start, the
 /// Action Button, Control Center and Siri) and in-keyboard dictation
 /// (`KeyboardLocalDictation`), so a style and Lowercase apply on every path.
 ///
-/// In order: learned fixes, custom vocabulary, Clean up what I say
+/// In order: Hinglish (Hindi in Latin letters, while that experiment is on), learned fixes,
+/// custom vocabulary, Clean up what I say
 /// (`CleanupTagger.cleanIfEnabled`, which guards its own memory in the keyboard), `refine`
 /// (Clean up with Apple Intelligence, only in the app), translation, the style
 /// (`TranscriptFormatter`), the spellings again, then Lowercase. The style and Lowercase are
@@ -39,9 +80,15 @@ nonisolated struct DictationPipeline: Sendable {
     /// Learn how I type's dictation fixes; empty while it is off.
     var corrections: [DictationCorrection] = []
     var lowercase = false
+    /// Experiments › Hinglish: Hindi is written in Latin letters before every other step, so
+    /// learned fixes, vocabulary and the style see the Latin words.
+    var hinglish = false
 
     /// Each step's text, for Record typing logs.
     struct Stages: Equatable, Sendable {
+        /// What the speech model heard, in Latin letters for Hinglish: what learning compares
+        /// the inserted text with.
+        var heard: String
         /// After learned fixes.
         var fixed: String
         /// After custom vocabulary.
@@ -63,6 +110,7 @@ nonisolated struct DictationPipeline: Sendable {
         translationSource: Locale.Language? = nil,
         refine: ((String) async -> String)? = nil
     ) async -> Stages {
+        let heard = hinglish && HinglishSettings.isHindi(language) ? HinglishRomanizer.romanize(heard) : heard
         let fixed = DictationCorrections.apply(corrections, to: heard)
         let spelled = VocabularySpelling.apply(vocabulary, to: fixed)
         let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: style, language: language)
@@ -74,6 +122,7 @@ nonisolated struct DictationPipeline: Sendable {
         // A translation is formatted in the language it is now in.
         let formatLanguage = translated == nil ? language : DictationTranslationSettings().targetLanguage
         return Stages(
+            heard: heard,
             fixed: fixed,
             spelled: spelled,
             tagged: tagged,

@@ -5,12 +5,20 @@ import Foundation
 nonisolated enum DictationLanguageSwitch {
     static let maxChoices = 5
 
-    /// Up to five languages, best first: the one set now, the ones picked recently, then the
-    /// iPhone's preferred languages. Each is matched to a language Apple Speech has
-    /// (`supported`, BCP 47) when that list is known, and dropped when it has none.
-    static func choices(current: String?, recent: [String], preferred: [String], supported: [String]) -> [String] {
+    /// Up to five languages, best first: the one set now, the ones picked recently, Hindi while
+    /// Experiments › Hinglish is on (shown as Hinglish), then the iPhone's preferred languages.
+    /// Each is matched to a language Apple Speech has (`supported`, BCP 47) when that list is
+    /// known, and dropped when it has none.
+    static func choices(
+        current: String?,
+        recent: [String],
+        preferred: [String],
+        supported: [String],
+        hinglish: Bool = false
+    ) -> [String] {
         var result: [String] = []
-        for identifier in [current].compactMap({ $0 }) + recent + preferred {
+        let offered = hinglish ? [HinglishSettings.language] : []
+        for identifier in [current].compactMap({ $0 }) + recent + offered + preferred {
             guard let match = supportedMatch(for: identifier, in: supported),
                   !result.contains(match) else { continue }
             result.append(match)
@@ -37,8 +45,14 @@ nonisolated enum DictationLanguageSwitch {
     }
 
     /// The language's own short name: "English", "Norsk", "Español", "Deutsch", "עברית",
-    /// "Русский", and "Srpski" in its script for Serbian (Latin).
+    /// "Русский", and "Srpski" in its script for Serbian (Latin). Hindi is "Hinglish" while
+    /// Experiments › Hinglish writes it in Latin letters.
     static func nativeName(for identifier: String) -> String {
+        nativeName(for: identifier, hinglish: HinglishSettings())
+    }
+
+    static func nativeName(for identifier: String, hinglish: HinglishSettings) -> String {
+        if let name = hinglish.name(for: identifier) { return name }
         let language = Locale(identifier: identifier).language
         let code = language.languageCode?.identifier ?? identifier
         switch code {
@@ -53,14 +67,14 @@ nonisolated enum DictationLanguageSwitch {
 
     /// Native names for a list, with the region code only where two share a language:
     /// "English (US)", "English (GB)", "Norsk".
-    static func nativeNames(for identifiers: [String]) -> [String: String] {
+    static func nativeNames(for identifiers: [String], hinglish: HinglishSettings = HinglishSettings()) -> [String: String] {
         var perLanguage: [String: Int] = [:]
         for identifier in identifiers {
-            perLanguage[nativeName(for: identifier), default: 0] += 1
+            perLanguage[nativeName(for: identifier, hinglish: hinglish), default: 0] += 1
         }
         var names: [String: String] = [:]
         for identifier in identifiers {
-            let name = nativeName(for: identifier)
+            let name = nativeName(for: identifier, hinglish: hinglish)
             if perLanguage[name, default: 0] > 1, let region = Locale(identifier: identifier).region?.identifier {
                 names[identifier] = "\(name) (\(region))"
             } else {

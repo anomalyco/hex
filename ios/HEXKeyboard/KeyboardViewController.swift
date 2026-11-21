@@ -694,9 +694,10 @@ final class KeyboardViewController: UIInputViewController {
         let translation = DictationTranslationSettings()
         let target = translation.isEnabled ? translation.targetLanguage : nil
         let pastesTranslation = translation.pastesTranslation
+        let hinglish = HinglishSettings().isEnabled
         let signature = [
             explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)",
-            target ?? "", "\(pastesTranslation)",
+            target ?? "", "\(pastesTranslation)", "\(hinglish)",
         ].joined(separator: "|")
         guard signature != languageSignature else { return }
         languageSignature = signature
@@ -704,7 +705,8 @@ final class KeyboardViewController: UIInputViewController {
             current: explicit,
             recent: recent,
             preferred: Locale.preferredLanguages,
-            supported: supported
+            supported: supported,
+            hinglish: hinglish
         )
         if viewModel.dictationLanguage != explicit { viewModel.dictationLanguage = explicit }
         if viewModel.automaticLanguage != automatic { viewModel.automaticLanguage = automatic }
