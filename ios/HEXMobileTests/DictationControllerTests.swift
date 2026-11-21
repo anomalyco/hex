@@ -838,6 +838,58 @@ final class DictationControllerTests: XCTestCase {
         }
     }
 
+    /// A microphone test reads the same from the app, where Parakeet writes "Test 1, 2, 3", and
+    /// from in-keyboard dictation, where Apple's SpeechTranscriber writes "Test one, 2, 3." and
+    /// DictationTranscriber "Test 123", in every style and with Lowercase, with Clean up what I
+    /// say and Format lists on (TestFlight, Nov 20: "Test three." in the keyboard, "test 123"
+    /// in the app).
+    func testACountReadsTheSameFromTheAppAndTheKeyboard() async throws {
+        let tagger = CleanupTaggerSettings()
+        let wasEnabled = tagger.isEnabled
+        defer { tagger.isEnabled = wasEnabled }
+        tagger.isEnabled = true
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        await transcriber.setCannedOutput("Test 1, 2, 3")
+        let lowercase = DictationLowercaseSettings(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 97_500 },
+            autoPrepareOnInit: false,
+            cleanupSettings: AppleIntelligenceCleanupSettings(defaults: defaults),
+            customVocabularySettings: CustomVocabularySettings(defaults: defaults),
+            lowercaseSettings: lowercase,
+            listSettings: DictationListSettings(defaults: defaults),
+            periodSettings: DictationPeriodSettings(defaults: defaults),
+            typingJournalSettings: TypingJournalSettings(defaults: defaults)
+        )
+        controller.prepareModel()
+        try await settle()
+
+        var outputs: [String] = []
+        for lower in [false, true] {
+            lowercase.isEnabled = lower
+            for style in [DictationStyle.polished, .casual, .notes] {
+                controller.clearTranscript()
+                controller.startRecording(keyboardJobID: "count-\(style)-\(lower)", styleOverride: style)
+                try await settle()
+                controller.finishRecording()
+                try await settle()
+                for heard in ["Test one, 2, 3.", "Test 123"] {
+                    let keyboard = await DictationPipeline(
+                        style: style, language: "en-US", lowercase: lower, formatLists: true
+                    ).run(heard).formatted
+                    XCTAssertEqual(keyboard, controller.transcript, "\(heard), \(style), lowercase \(lower)")
+                }
+                outputs.append(controller.transcript)
+            }
+        }
+        XCTAssertEqual(outputs, ["Test 1, 2, 3.", "test 1, 2, 3", "Test 1, 2, 3", "test 1, 2, 3.", "test 1, 2, 3", "test 1, 2, 3"])
+    }
+
     func testLowercaseAppliesOnlyWhenCaptured() async throws {
         let audio = FakeAudioManager()
         let transcriber = ControlledTranscriber()
@@ -1710,6 +1762,54 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(bridge.snapshot().state, .recording)
         XCTAssertEqual(bridge.snapshot().jobID, "mic-back-job")
         controller.cancelCurrentJob()
+    }
+
+    /// A warm session's microphone failed for a keyboard's dictation (another app held it):
+    /// Hex stays marked failed, and ignored every start the keyboard sent until it was opened,
+    /// while its snapshot kept saying so to every keyboard. The failure carries when it
+    /// happened, so the keyboard stops showing it, and the next Hex key is Hex's Try again.
+    func testAWarmSessionsMicrophoneFailureIsRetriedFromTheKeyboard() async throws {
+        var now = 52_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.selectWarmDuration(.fifteenMinutes)
+        try await settle()
+        XCTAssertTrue(audio.isKeepaliveRunning)
+
+        audio.captureShouldThrow = true
+        bridge.send(.start, jobID: "busy-mic", style: .polished, sentAt: now)
+        try await settle()
+        let message = "Hex couldn't start the microphone. Try again."
+        XCTAssertEqual(controller.phase, .failed(message))
+        let failed = bridge.snapshot()
+        XCTAssertEqual(failed.state, .failed)
+        XCTAssertEqual(failed.message, message)
+        XCTAssertEqual(failed.messageAt, now)
+        XCTAssertFalse(failed.hasStaleMessage(at: now + 2))
+        XCTAssertTrue(failed.hasStaleMessage(at: now + KeyboardSnapshot.messageShownFor + 1))
+        XCTAssertTrue(audio.isKeepaliveRunning, "the warm session goes on")
+
+        // The keyboard's next Hex key, with the microphone free again: Hex records.
+        audio.captureShouldThrow = false
+        now += 12
+        bridge.send(.start, jobID: "try-again", style: .polished, sentAt: now)
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        XCTAssertEqual(bridge.snapshot().jobID, "try-again")
+        XCTAssertNil(bridge.snapshot().message)
+        XCTAssertNil(bridge.snapshot().messageAt)
+        controller.endWarmSession()
     }
 
     /// A recorder's end can arrive after Hex already tore its capture down (Cancel, or the

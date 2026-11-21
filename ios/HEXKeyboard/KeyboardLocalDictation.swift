@@ -57,6 +57,8 @@ final class KeyboardLocalDictation {
     private var armedFailure: (message: String, detail: String?)?
     /// Another app played audio as this capture began, which WebKit's capture interrupts.
     private var otherAudioAtStart = false
+    /// The job whose page start waits on the audio session's queue (`begin`).
+    private var startPending: String?
     /// After a capture ends, long enough for WebKit to have let its audio session go.
     static let resumeOtherAudioDelay: TimeInterval = 0.5
     private static let audioSessionQueue = DispatchQueue(label: "anomaly.hex.keyboard.audio-session", qos: .userInitiated)
@@ -152,7 +154,7 @@ final class KeyboardLocalDictation {
                 phase = .idle
                 return nil
             }
-            return KeyboardSnapshot(state: .failed, heartbeat: now, expiresAt: until, message: message)
+            return KeyboardSnapshot(state: .failed, heartbeat: now, expiresAt: until, message: message, messageAt: now)
         }
     }
 
@@ -283,8 +285,8 @@ final class KeyboardLocalDictation {
     private func begin(in host: UIView, microphone: MicrophoneChoice, pressedAt: TimeInterval?, armed: Bool) -> String? {
         let log = KeyboardProbeLog.shared
         let appAllowed = KeyboardBridge().appMicrophoneAllowed
-        log.write("start(web\(armed ? ", touch-down" : "")): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) app=\(appAllowed ? "granted" : "no") speech=\(Self.describe(SFSpeechRecognizer.authorizationStatus())) \(KeyboardProbeLog.memory())")
         guard Self.microphoneAllowed else {
+            log.write("start(web\(armed ? ", touch-down" : "")): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) app=no")
             fail("Allow the microphone in Hex first")
             return nil
         }
@@ -307,10 +309,28 @@ final class KeyboardLocalDictation {
         capture.onEvent = { [weak self] event in
             self?.handle(event, jobID: jobID, requestedAt: requestedAt)
         }
-        let input = Self.microphone(for: microphone)
-        otherAudioAtStart = otherAudioAtStart || AVAudioSession.sharedInstance().isOtherAudioPlaying
-        // Without a name to ask for, every choice but Bluetooth asks for the iPhone's own.
-        capture.start(microphone: input?.name, builtInFallback: microphone != .bluetooth)
+        // The audio session's calls are round trips to the audio server, which can be slow to
+        // answer (a call, another app's audio, a capture that just ended): on the main thread
+        // they held every key until it did. They run on the session's queue, after any earlier
+        // capture's release there, and the page starts once they're back, unless the job was
+        // dropped, stopped or replaced meanwhile.
+        startPending = jobID
+        let label = armed ? ", touch-down" : ""
+        Self.audioSessionQueue.async { [weak self, weak capture] in
+            log.write("start(web\(label)): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) app=\(appAllowed ? "granted" : "no") speech=\(Self.describe(SFSpeechRecognizer.authorizationStatus())) \(KeyboardProbeLog.memory())")
+            let input = Self.microphone(for: microphone)
+            let otherAudio = AVAudioSession.sharedInstance().isOtherAudioPlaying
+            DispatchQueue.main.async {
+                MainActor.assumeIsolated {
+                    guard let self, let capture, self.capture === capture,
+                          self.startPending == jobID, self.isCapturing(jobID) else { return }
+                    self.startPending = nil
+                    self.otherAudioAtStart = self.otherAudioAtStart || otherAudio
+                    // Without a name to ask for, every choice but Bluetooth asks for the iPhone's own.
+                    capture.start(microphone: input?.name, builtInFallback: microphone != .bluetooth)
+                }
+            }
+        }
         return jobID
     }
 
@@ -351,7 +371,7 @@ final class KeyboardLocalDictation {
     /// Bluetooth hands-free inputs are listed only there. WebKit records in its own session,
     /// which only getUserMedia's `deviceId` steers (WebKit then prefers that input), so the
     /// page asks for this input by its name, the label WebKit gives it.
-    private static func microphone(for choice: MicrophoneChoice) -> Microphone? {
+    nonisolated private static func microphone(for choice: MicrophoneChoice) -> Microphone? {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(
@@ -442,7 +462,13 @@ final class KeyboardLocalDictation {
     }
 
     func stop() {
-        guard case .recording = phase else { return }
+        guard case .recording(let jobID, _) = phase else { return }
+        guard startPending != jobID else {
+            // Done before the page was even asked to start: nothing was recorded.
+            startPending = nil
+            finishRecording(jobID: jobID)
+            return
+        }
         capture?.stop()
     }
 
@@ -641,12 +667,12 @@ final class KeyboardLocalDictation {
         phase = .idle
     }
 
-    private static func describe(_ error: Error) -> String {
+    nonisolated private static func describe(_ error: Error) -> String {
         let ns = error as NSError
         return "\(ns.domain) \(ns.code) \(ns.localizedDescription)"
     }
 
-    private static func describe(_ permission: AVAudioApplication.recordPermission) -> String {
+    nonisolated private static func describe(_ permission: AVAudioApplication.recordPermission) -> String {
         switch permission {
         case .granted: "granted"
         case .denied: "denied"
@@ -655,7 +681,7 @@ final class KeyboardLocalDictation {
         }
     }
 
-    private static func describe(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
+    nonisolated private static func describe(_ status: SFSpeechRecognizerAuthorizationStatus) -> String {
         switch status {
         case .authorized: "authorized"
         case .denied: "denied"
@@ -899,7 +925,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
 
     private static let page = """
     <!doctype html><meta charset="utf-8"><script>
-    let ctx, stream, source, node, running = false, generation = 0;
+    let ctx, stream, source, node, running = false, generation = 0, revive = null;
     const post = (m) => webkit.messageHandlers.hex.postMessage(m);
     const release = (s, c) => {
       if (s) s.getTracks().forEach((t) => t.stop());
@@ -964,6 +990,12 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         };
         source.connect(node);
         node.connect(ctx.destination);
+        // iOS may suspend or interrupt a running context for other audio (an alert, a call's
+        // ring, another app's session) without resuming it: the page then sends no audio and the
+        // keyboard's watchdog ends the dictation 6 s later. Resume it as soon as iOS allows.
+        revive = setInterval(() => {
+          if (running && ctx && ctx.state !== "running" && ctx.state !== "closed") ctx.resume().catch(() => {});
+        }, 250);
         post({ type: "started", rate: ctx.sampleRate, device: stream.getAudioTracks()[0].label, listed, opened, mic, audio: Date.now() });
       } catch (error) {
         if (stale()) return release(s, c);
@@ -977,6 +1009,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
       generation++;
       const wasRunning = running;
       running = false;
+      if (revive) { clearInterval(revive); revive = null; }
       try { node && node.disconnect(); source && source.disconnect(); } catch (e) {}
       if (stream) stream.getTracks().forEach((t) => t.stop());
       if (ctx) { try { await ctx.close(); } catch (e) {} }

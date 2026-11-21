@@ -201,6 +201,9 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     /// Why `transcript` went in as spoken while Translate what I say was on: the keyboard
     /// says so as it inserts it.
     let translationFailure: TranslationFailure?
+    /// When `message` was written (wall clock). The keyboard says it only for
+    /// `messageShownFor` after that; nil (an earlier build's) reads as long past.
+    let messageAt: TimeInterval?
 
     init(
         state: KeyboardDictationState,
@@ -216,7 +219,8 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         message: String? = nil,
         heard: String? = nil,
         stages: DictationStages? = nil,
-        translationFailure: TranslationFailure? = nil
+        translationFailure: TranslationFailure? = nil,
+        messageAt: TimeInterval? = nil
     ) {
         self.state = state
         self.heartbeat = heartbeat
@@ -232,6 +236,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         self.heard = heard
         self.stages = stages
         self.translationFailure = translationFailure
+        self.messageAt = messageAt
     }
 
     var effectiveLoudnessDB: Float {
@@ -302,6 +307,43 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
             resultExpiresAt: resultExpiresAt,
             transcript: transcript,
             message: message,
+            heard: heard,
+            stages: stages,
+            translationFailure: translationFailure,
+            messageAt: messageAt
+        )
+    }
+
+    /// How long the keyboard says why Hex's last dictation failed ("Another app is using the
+    /// microphone. Try again."), a little longer than its own failures show.
+    static let messageShownFor: TimeInterval = 8
+
+    /// A message from more than `messageShownFor` ago, or with no time. Hex writes the
+    /// snapshot only while it runs, so a failure stayed in the App Group after Hex was
+    /// suspended: every keyboard after showed it, and the full keyboard's Hex key sent its
+    /// dictations to a Hex still marked failed, which ignored them, though dictation itself
+    /// worked (TestFlight: "showing for me all the time although it's working fine").
+    func hasStaleMessage(at now: TimeInterval) -> Bool {
+        guard message != nil || state == .failed else { return false }
+        guard let messageAt else { return true }
+        return now - messageAt > Self.messageShownFor
+    }
+
+    /// The snapshot as the keyboard shows it: a stale failure reads as offline and a stale
+    /// message is dropped. Whether a warm session is up, and any result, stay as they are.
+    func droppingStaleMessage(at now: TimeInterval) -> KeyboardSnapshot {
+        guard hasStaleMessage(at: now) else { return self }
+        return KeyboardSnapshot(
+            state: state == .failed ? .offline : state,
+            heartbeat: heartbeat,
+            expiresAt: expiresAt,
+            recordingStartedAt: recordingStartedAt,
+            audioLevel: audioLevel,
+            loudnessDB: loudnessDB,
+            jobID: jobID,
+            resultID: resultID,
+            resultExpiresAt: resultExpiresAt,
+            transcript: transcript,
             heard: heard,
             stages: stages,
             translationFailure: translationFailure

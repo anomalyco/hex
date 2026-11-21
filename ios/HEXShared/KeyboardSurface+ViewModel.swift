@@ -40,6 +40,12 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var isWarmAvailable = false
     @Published private(set) var stagePhase: StagePhase = .idle
     @Published private(set) var statusMessage: String?
+    /// A tap on Dictate or the Hex key records through Hex's warm session. Not while the last
+    /// dictation shows as failed: the keyboard's own failure keeps its snapshot live for a few
+    /// seconds, which isn't a session, and the bar already dictates in the keyboard then.
+    var dictatesThroughHex: Bool {
+        hasFullAccess && isWarmAvailable && stagePhase != .failed
+    }
     @Published var style: DictationStyle = .polished
     @Published var activeTray: PickerTray = .none
     /// Settings › Dictation language (nil for Automatic), what Automatic resolves to, and the
@@ -206,7 +212,8 @@ final class KeyboardViewModel: ObservableObject {
         // A job Hex stopped heartbeating for is over (Hex ended, crashed or was suspended
         // mid-dictation): without this its last snapshot held every keyboard in recording or
         // transcribing for good, with Done and Cancel sent to no one.
-        let newSnapshot = newSnapshot.droppingOrphanedJob(at: now)
+        // A failure Hex wrote a while ago is over too (`KeyboardSnapshot.hasStaleMessage`).
+        let newSnapshot = newSnapshot.droppingOrphanedJob(at: now).droppingStaleMessage(at: now)
         currentTimestamp = now
         currentSnapshot = newSnapshot
         liveLoudnessDB = newSnapshot.state == .recording ? newSnapshot.effectiveLoudnessDB : -62.0

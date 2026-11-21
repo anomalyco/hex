@@ -284,6 +284,46 @@ final class CleanupTaggerTests: XCTestCase {
         XCTAssertEqual(english, "Let's ship it Thursday.")
     }
 
+    /// A count said as a microphone test keeps every number and reads the same whichever speech
+    /// model heard it: Apple's SpeechTranscriber writes "Test one, 2, 3.", DictationTranscriber
+    /// "Test 123" and Parakeet "Test 1, 2, 3" (macOS 27.2, `say` voices). The tagger alone is
+    /// sure every count word but the last is a self-correction, which made "Test three." in
+    /// in-keyboard dictation before `CleanupGuard` (TestFlight, Nov 20).
+    func testCountsKeepEveryNumberFromEverySpeechModel() async throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CleanupTaggerSettings(defaults: defaults)
+        let tagger = CleanupTagger()
+
+        let words = CleanupTagger.words(in: "Test one two three.")
+        let alone = try tagger.deleteProbabilities(for: words).map { $0 > CleanupTagger.deleteThreshold }
+        XCTAssertEqual(CleanupReconstruction.reconstruct(words, deletes: alone), "Test three.", "the tagger without its guard")
+        XCTAssertEqual(try tagger.clean("Test one two three."), "Test one two three.", "the guard keeps a count in words")
+
+        for enabled in [true, false] {
+            settings.isEnabled = enabled
+            for (heard, cleaned) in [
+                ("Test one, 2, 3.", "Test 1, 2, 3."),
+                ("Test one two three.", "Test 1, 2, 3."),
+                ("Test, one, two, three.", "Test, 1, 2, 3."),
+                ("Test 123", "Test 1, 2, 3"),
+                ("Test 1, 2, 3", "Test 1, 2, 3"),
+                ("Testing 123", "Testing 1, 2, 3"),
+                ("Counting one, two, three, four.", "Counting 1, 2, 3, 4."),
+                ("One, two, three, testing.", "1, 2, 3, testing."),
+                ("1, 2, 3, testing", "1, 2, 3, testing"),
+            ] {
+                let result = await CleanupTagger.cleanIfEnabled(
+                    heard, style: .polished, language: "en-US", settings: settings, tagger: tagger
+                )
+                XCTAssertEqual(result, cleaned, "\(heard), cleanup \(enabled)")
+            }
+        }
+        let verbatim = await CleanupTagger.cleanIfEnabled("Test one, 2, 3.", style: .verbatim, settings: settings, tagger: tagger)
+        XCTAssertEqual(verbatim, "Test one, 2, 3.")
+    }
+
     func testDictationStartPreparesOnlyWhenOnAndNotForVerbatim() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

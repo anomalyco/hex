@@ -308,6 +308,56 @@ final class SpokenCleanupRulesTests: XCTestCase {
         )
     }
 
+    /// What the speech models wrote for a microphone test (macOS 27.2, `say` voices): Apple's
+    /// SpeechTranscriber mixes words and digits, Parakeet and DictationTranscriber join a quick
+    /// count into "123".
+    func testSpokenCountsBecomeDigits() {
+        for (heard, written) in [
+            ("Test one, 2, 3.", "Test 1, 2, 3."),
+            ("Test one, two, three.", "Test 1, 2, 3."),
+            ("Test, one, two, three.", "Test, 1, 2, 3."),
+            ("Testing one two three.", "Testing 1, 2, 3."),
+            ("Testing, testing, one, 2, 3.", "Testing, testing, 1, 2, 3."),
+            ("One, two, three, testing.", "1, 2, 3, testing."),
+            ("Counting one, two, three, four.", "Counting 1, 2, 3, 4."),
+            ("One, two, three, go!", "1, 2, 3, go!"),
+            ("Test 1, 2, 3", "Test 1, 2, 3"),
+            ("Test 123", "Test 1, 2, 3"),
+            ("Testing 123.", "Testing 1, 2, 3."),
+            ("Testing testing 123", "Testing testing 1, 2, 3"),
+            ("Test, 123", "Test, 1, 2, 3"),
+            ("Testing 1234, can you hear me?", "Testing 1, 2, 3, 4, can you hear me?"),
+        ] {
+            XCTAssertEqual(SpokenCleanupRules.spokenCounts(in: heard, language: "en-US"), written, heard)
+        }
+    }
+
+    func testOtherNumbersStayAsSaid() {
+        for heard in [
+            "I have two dogs and three cats.",
+            "Chapter one, two and three are done.",
+            "We'll meet at 1, 2, or 3.",
+            "One, two, buckle my shoe. Three, four, shut the door.",
+            "Two, three, four, five.",
+            "Test one, two.",
+            "Zero, one, two, three.",
+            "Twenty one two three.",
+            "One. Two. Three.",
+            "Test. 1. 2. 3.",
+            "Room 123 is free.",
+            "Test 123 passed.",
+            "This is a test. 123 people came.",
+            "Test 132.",
+            "Counting 1234",
+            "Call 1-2-3 now.",
+        ] {
+            XCTAssertEqual(SpokenCleanupRules.spokenCounts(in: heard, language: "en-US"), heard)
+        }
+        // English only: other languages keep their words.
+        XCTAssertEqual(SpokenCleanupRules.spokenCounts(in: "Prueba uno, dos, tres.", language: "es-ES"), "Prueba uno, dos, tres.")
+        XCTAssertEqual(SpokenCleanupRules.spokenCounts(in: "Test one, 2, 3.", language: "fr-FR"), "Test one, 2, 3.")
+    }
+
     /// Every style but Verbatim keeps the address whole: no capital after its dots, none on
     /// it at a sentence start, and no full stop after an address said alone.
     func testStylesKeepAnAddressWhole() {
@@ -853,6 +903,21 @@ final class SpokenListsTests: XCTestCase {
         for sentence in spanish {
             XCTAssertEqual(lists(sentence, "es-ES"), sentence)
         }
+    }
+
+    /// A counted microphone test is no list, in digits or still in words, and each style
+    /// ends it its own way.
+    func testCountsAreNoList() {
+        for heard in [
+            "Test 1, 2, 3.", "Test, 1, 2, 3.", "Test 1 2 3", "test one, two, three", "testing one two three",
+            "counting one, two, three, four", "Counting 1, 2, 3, 4.", "1, 2, 3, testing.", "One, two, three, testing.",
+        ] {
+            XCTAssertEqual(lists(heard), heard)
+        }
+        XCTAssertEqual(
+            DictationStyle.allCases.map { TranscriptFormatter.format("Test 1, 2, 3", style: $0, language: "en-US", lists: true) },
+            ["Test 1, 2, 3.", "test 1, 2, 3", "Test 1, 2, 3", "Test 1, 2, 3"]
+        )
     }
 
     /// Each style ends the lines its own way; Verbatim keeps the model's words.

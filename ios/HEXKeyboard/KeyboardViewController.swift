@@ -1181,7 +1181,7 @@ final class KeyboardViewController: UIInputViewController {
     /// the Hex key's own choice of in-keyboard dictation; a warm Hex session records instead.
     private func hexKeyPressed(at time: TimeInterval) {
         hexKeyPressedAt = time
-        guard viewModel.hasFullAccess, !viewModel.isWarmAvailable, viewModel.onLocalDictateTap != nil,
+        guard viewModel.hasFullAccess, !viewModel.dictatesThroughHex, viewModel.onLocalDictateTap != nil,
               viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
         localDictation.arm(in: view, microphone: bridge.microphone, pressedAt: time)
     }
