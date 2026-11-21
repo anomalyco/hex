@@ -14,12 +14,62 @@
         }
       }
     },
+    "Couldn't translate the last dictation. If it keeps happening, reinstall Apple's Translate app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上一次听写未能翻译。如果反复出现，请重新安装 Apple 的“翻译” App。"
+          }
+        }
+      }
+    },
+    "Couldn't translate, pasted as spoken" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法翻译，已按原话输入"
+          }
+        }
+      }
+    },
     "Dictate in the keyboard's language" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用键盘当前的语言听写"
+          }
+        }
+      }
+    },
+    "Download %@ again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新下载%@语言包"
+          }
+        }
+      }
+    },
+    "Download %@ again in Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在设置中重新下载%@"
+          }
+        }
+      }
+    },
+    "Download %@ in Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在设置中下载%@"
           }
         }
       }
@@ -74,12 +124,32 @@
         }
       }
     },
+    "Opens Hex's Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Hex 的设置"
+          }
+        }
+      }
+    },
     "Optimizing for this iPhone… about a minute" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在为这台 iPhone 优化…约需一分钟"
+          }
+        }
+      }
+    },
+    "Pick another language in Settings" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在设置中选择其他语言"
           }
         }
       }

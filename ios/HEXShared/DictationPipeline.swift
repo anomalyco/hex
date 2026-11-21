@@ -106,6 +106,8 @@ nonisolated struct DictationPipeline: Sendable {
     var hinglish = false
     /// Settings › Dictation › End with a period; off, no line ends with a full stop.
     var endsWithPeriod = true
+    /// Translate what I say's translator; nil is Apple's. Tests stand in for it.
+    var translationEngine: TranslationEngine?
 
     /// Each step's text, for Record typing logs.
     struct Stages: Equatable, Sendable {
@@ -121,6 +123,8 @@ nonisolated struct DictationPipeline: Sendable {
         /// After `refine`.
         var cleaned: String
         var translated: String?
+        /// Why it went in as spoken while Translate what I say was on.
+        var translationFailure: TranslationFailure?
         /// What Hex inserts.
         var formatted: String
     }
@@ -133,6 +137,7 @@ nonisolated struct DictationPipeline: Sendable {
         translationSource: Locale.Language? = nil,
         refine: ((String) async -> String)? = nil
     ) async -> Stages {
+        let translation = DictationTranslationSettings()
         let heard = hinglish && HinglishSettings.isHindi(language) ? HinglishRomanizer.romanize(heard) : heard
         let fixed = DictationCorrections.apply(corrections, to: heard)
         let spelled = VocabularySpelling.apply(vocabulary, to: fixed)
@@ -143,12 +148,15 @@ nonisolated struct DictationPipeline: Sendable {
             protectedTerms: DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: corrections)
         )
         let cleaned = await refine?(tagged) ?? tagged
-        let translated = await DictationTranslator.translateIfEnabled(
+        let outcome = await DictationTranslator.translate(
             cleaned,
-            source: translationSource ?? Locale(identifier: language).language
+            source: translationSource ?? Locale(identifier: language).language,
+            settings: translation,
+            engine: translationEngine
         )
+        let translated = outcome.text
         // A translation is formatted in the language it is now in.
-        let formatLanguage = translated == nil ? language : DictationTranslationSettings().targetLanguage
+        let formatLanguage = translated == nil ? language : translation.targetLanguage
         return Stages(
             heard: heard,
             fixed: fixed,
@@ -156,6 +164,7 @@ nonisolated struct DictationPipeline: Sendable {
             tagged: tagged,
             cleaned: cleaned,
             translated: translated,
+            translationFailure: outcome.failure,
             formatted: format(translated ?? cleaned, language: formatLanguage)
         )
     }

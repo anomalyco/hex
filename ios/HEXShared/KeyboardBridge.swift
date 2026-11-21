@@ -76,6 +76,9 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
     /// Opens Hex's keyboard setup screen without starting a session.
     case setup
+    /// Opens Settings › Dictation, where Translate what I say downloads its languages: the
+    /// keyboard's note after a dictation went in as spoken.
+    case translationSettings
     case startSession(requestedAt: TimeInterval?)
     case startRecording(
         jobID: String,
@@ -101,6 +104,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         switch url.path {
         case "/setup":
             self = .setup
+        case "/translation":
+            self = .translationSettings
         case "/start":
             self = .startSession(requestedAt: requestedAt)
         case "/record":
@@ -115,9 +120,17 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         }
     }
 
+    /// Opens a page of Hex, starting no session.
+    var opensPage: Bool {
+        switch self {
+        case .setup, .translationSettings: true
+        case .startSession, .startRecording: false
+        }
+    }
+
     var requestedAt: TimeInterval? {
         switch self {
-        case .setup:
+        case .setup, .translationSettings:
             nil
         case .startSession(let ts), .startRecording(_, let ts, _):
             ts
@@ -138,6 +151,9 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
         switch self {
         case .setup:
             components.path = "/setup"
+
+        case .translationSettings:
+            components.path = "/translation"
 
         case .startSession(let requestedAt):
             components.path = "/start"
@@ -182,6 +198,9 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     /// Record typing logs: what each step of the dictation made of it, sent only while
     /// that experiment is on.
     let stages: DictationStages?
+    /// Why `transcript` went in as spoken while Translate what I say was on: the keyboard
+    /// says so as it inserts it.
+    let translationFailure: TranslationFailure?
 
     init(
         state: KeyboardDictationState,
@@ -196,7 +215,8 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         transcript: String? = nil,
         message: String? = nil,
         heard: String? = nil,
-        stages: DictationStages? = nil
+        stages: DictationStages? = nil,
+        translationFailure: TranslationFailure? = nil
     ) {
         self.state = state
         self.heartbeat = heartbeat
@@ -211,6 +231,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         self.message = message
         self.heard = heard
         self.stages = stages
+        self.translationFailure = translationFailure
     }
 
     var effectiveLoudnessDB: Float {
@@ -282,7 +303,8 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
             transcript: transcript,
             message: message,
             heard: heard,
-            stages: stages
+            stages: stages,
+            translationFailure: translationFailure
         )
     }
 

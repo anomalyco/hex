@@ -168,8 +168,9 @@ struct KeyboardSnapshotStage: View {
 
 /// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one (put
 /// first when it isn't in the list, as `hi-IN` for Hinglish), otherwise Automatic, which
-/// resolves to English. `--translate-to en` turns on Translate what I say with that target,
-/// pasting translated unless `--paste-as-spoken`; without it the switch shows off, for Japanese.
+/// resolves to English. `--translate-to en` turns on Translate what I say with that target;
+/// without it the switch shows off, for Japanese. `--translation-failed` shows the note that
+/// a Chinese dictation went in as spoken, with English's language pack missing.
 enum DictationLanguageFixture {
     static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
 
@@ -197,7 +198,13 @@ enum DictationLanguageFixture {
         model.dictationLanguage = explicit
         model.automaticLanguage = "en-US"
         model.translationTarget = translationTarget
-        model.pastesTranslation = !ProcessInfo.processInfo.arguments.contains("--paste-as-spoken")
+        if ProcessInfo.processInfo.arguments.contains("--translation-failed") {
+            model.translationNote = TranslationFailure(
+                .notDownloaded,
+                source: Locale.Language(identifier: "zh-CN"),
+                target: Locale.Language(identifier: translationTarget ?? "en")
+            )
+        }
         model.translationLanguage = translationTarget ?? "ja"
         model.translationTargetChoices = DictationTranslationSettings.targetChoices(
             current: model.translationLanguage ?? "ja",

@@ -17,7 +17,14 @@ final class KeyboardLocalDictation {
         case armed(jobID: String, startedAt: TimeInterval)
         case recording(jobID: String, startedAt: TimeInterval)
         case transcribing(jobID: String)
-        case finished(jobID: String, resultID: String, transcript: String, heard: String?, stages: DictationStages?)
+        case finished(
+            jobID: String,
+            resultID: String,
+            transcript: String,
+            heard: String?,
+            stages: DictationStages?,
+            translationFailure: TranslationFailure?
+        )
         case failed(message: String, until: TimeInterval)
     }
 
@@ -116,7 +123,7 @@ final class KeyboardLocalDictation {
             )
         case .transcribing(let jobID):
             return KeyboardSnapshot(state: .transcribing, heartbeat: now, expiresAt: now + 60, jobID: jobID)
-        case .finished(let jobID, let resultID, let transcript, let heard, let stages):
+        case .finished(let jobID, let resultID, let transcript, let heard, let stages, let translationFailure):
             return KeyboardSnapshot(
                 state: .ready,
                 heartbeat: now,
@@ -125,7 +132,8 @@ final class KeyboardLocalDictation {
                 resultID: resultID,
                 transcript: transcript,
                 heard: heard,
-                stages: stages
+                stages: stages,
+                translationFailure: translationFailure
             )
         case .failed(let message, let until):
             guard until > now else {
@@ -137,7 +145,7 @@ final class KeyboardLocalDictation {
     }
 
     func markDelivered(resultID: String) {
-        if case .finished(_, let current, _, _, _) = phase, current == resultID {
+        if case .finished(_, let current, _, _, _, _) = phase, current == resultID {
             job = nil
             phase = .idle
         }
@@ -437,7 +445,7 @@ final class KeyboardLocalDictation {
             guard let job, !job.interrupted else { return }
             job.interrupted = true
             KeyboardProbeLog.shared.write("keyboard hidden while transcribing: holding its text for the next keyboard")
-        case .finished(_, let resultID, let transcript, let heard, _):
+        case .finished(_, let resultID, let transcript, let heard, _, _):
             // Shown but not yet inserted: the next keyboard inserts it.
             Self.hold(resultID: resultID, text: transcript, heard: heard, document: job?.document)
             job = nil
@@ -528,6 +536,9 @@ final class KeyboardLocalDictation {
                 let translated = steps.translated
                 let text = steps.formatted
                 KeyboardProbeLog.shared.write("transcribed in \(String(format: "%.2f", Date().timeIntervalSince(started))) s: \(text.count) chars \(KeyboardProbeLog.memory())")
+                if let failure = steps.translationFailure {
+                    KeyboardProbeLog.shared.write("pasted as spoken: \(failure.source)->\(failure.target) \(failure.reason.rawValue) \(failure.detail ?? "")")
+                }
                 guard !Task.isCancelled else { return }
                 // A translation's words can't be compared with what was heard, so it isn't learned from.
                 let resultID = UUID().uuidString
@@ -566,7 +577,8 @@ final class KeyboardLocalDictation {
                     resultID: resultID,
                     transcript: text,
                     heard: learnable,
-                    stages: stages
+                    stages: stages,
+                    translationFailure: steps.translationFailure
                 )
             } catch {
                 try? FileManager.default.removeItem(at: url)

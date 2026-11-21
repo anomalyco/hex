@@ -1,29 +1,26 @@
 import SwiftUI
 @preconcurrency import Translation
 
-/// Settings › Dictation › Translate what I say: the toggle, the target language, the switch the
-/// keyboard's menus also have (paste translated or as spoken), and the one-time download
-/// of Apple's on-device language pack.
+/// Settings › Dictation › Translate what I say: the switch (the keyboards' Translate to
+/// <language> is the same one), the target language, the one-time download of Apple's
+/// on-device language pack, and why the last dictation went in as spoken, with its fix. The
+/// keyboard's note after such a dictation opens this page.
 struct TranslateDictationRow: View {
     @State private var enabled = DictationTranslationSettings().isEnabled
     @State private var target = DictationTranslationSettings().targetLanguage
-    @State private var pastesTranslation = DictationTranslationSettings().pastesTranslation
+    @State private var lastFailure = DictationTranslationSettings().lastFailure
     @State private var languages: [Locale.Language] = []
     @State private var status: LanguageAvailability.Status?
     @State private var download: TranslationSession.Configuration?
 
-    /// What you dictate in: Settings › Dictation language, or the language it last resolved.
+    /// What you dictate in: the language of the dictation that last went in as spoken, else
+    /// Settings › Dictation language, or the language it last resolved.
     private var source: Locale.Language {
-        LanguageSettings().effectiveDictationLanguage.map { Locale(identifier: $0).language }
+        if let lastFailure, lastFailure.target == Locale.Language(identifier: target).minimalIdentifier {
+            return Locale.Language(identifier: lastFailure.source)
+        }
+        return LanguageSettings().effectiveDictationLanguage.map { Locale(identifier: $0).language }
             ?? Locale.current.language
-    }
-
-    /// "Paste in English" for what you dictate in, or nil when that is the target already.
-    private var pasteChoice: TranslationPasteChoice? {
-        TranslationPasteChoice(
-            target: target,
-            source: LanguageSettings().effectiveDictationLanguage ?? Locale.current.identifier
-        )
     }
 
     var body: some View {
@@ -40,11 +37,8 @@ struct TranslateDictationRow: View {
             }
             .tint(HexTheme.success)
             .onChange(of: enabled) { _, value in
-                DictationTranslationSettings().isEnabled = value
-                // Turning it on means translating, whatever the switch said last time.
-                if value {
-                    pastesTranslation = true
-                }
+                let settings = DictationTranslationSettings()
+                if settings.isEnabled != value { settings.isEnabled = value }
             }
 
             if enabled {
@@ -75,18 +69,6 @@ struct TranslateDictationRow: View {
                     Task { await refreshStatus() }
                 }
 
-                if let pasteChoice {
-                    Toggle(isOn: $pastesTranslation) {
-                        Text(pasteChoice.translatedTitle)
-                            .font(.system(size: 13))
-                            .foregroundStyle(HexTheme.textMuted)
-                    }
-                    .tint(HexTheme.success)
-                    .onChange(of: pastesTranslation) { _, value in
-                        DictationTranslationSettings().pastesTranslation = value
-                    }
-                }
-
                 if Locale.Language(identifier: target).languageCode == source.languageCode {
                     // You dictate in the target already: switch the dictation language from the
                     // keyboard's Hex key to speak another one and paste in this one.
@@ -95,18 +77,24 @@ struct TranslateDictationRow: View {
                         .foregroundStyle(HexTheme.textMuted)
                 } else {
                 switch status {
+                case .installed where lastFailure?.reason == .failed:
+                    // Apple's own pack is there but translating failed, as when its Translate
+                    // app was removed.
+                    Text("Couldn't translate the last dictation. If it keeps happening, reinstall Apple's Translate app.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                    downloadButton(again: true)
                 case .installed:
                     Text("Ready. Works offline.")
                         .font(.system(size: 12))
                         .foregroundStyle(HexTheme.textMuted)
                 case .supported:
-                    Button("Download \(name(of: Locale.Language(identifier: target)))") {
-                        download = TranslationSession.Configuration(
-                            source: source,
-                            target: Locale.Language(identifier: target)
-                        )
+                    if lastFailure != nil {
+                        Text(TranslationFailure.note)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
                     }
-                    .font(.system(size: 13, weight: .medium))
+                    downloadButton(again: false)
                 case .unsupported:
                     Text("Apple can't translate between these languages.")
                         .font(.system(size: 12))
@@ -123,7 +111,10 @@ struct TranslateDictationRow: View {
         }
         .onAppear(perform: reload)
         .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            // The keyboard may have changed the switch or failed to translate, and the pack
+            // may have been removed in iOS Settings meanwhile.
             reload()
+            Task { await refreshStatus() }
         }
         .task {
             // Every language, including the one you dictate in now: you can switch the
@@ -143,11 +134,32 @@ struct TranslateDictationRow: View {
         let settings = DictationTranslationSettings()
         enabled = settings.isEnabled
         target = settings.targetLanguage
-        pastesTranslation = settings.pastesTranslation
+        lastFailure = settings.lastFailure
+    }
+
+    /// Asks Apple to download the pair. Asking again for the same pair invalidates the last
+    /// request, or `translationTask` would not run it again after a cancelled download.
+    private func downloadButton(again: Bool) -> some View {
+        let language = name(of: Locale.Language(identifier: lastFailure?.language ?? target))
+        return Button(again ? "Download \(language) again" : "Download \(language)") {
+            let configuration = TranslationSession.Configuration(source: source, target: Locale.Language(identifier: target))
+            if download == configuration {
+                download?.invalidate()
+            } else {
+                download = configuration
+            }
+        }
+        .font(.system(size: 13, weight: .medium))
     }
 
     private func refreshStatus() async {
-        status = await LanguageAvailability().status(from: source, to: Locale.Language(identifier: target))
+        let current = await LanguageAvailability().status(from: source, to: Locale.Language(identifier: target))
+        status = current
+        // Downloaded now: the note about a missing pack is out of date.
+        if current == .installed, lastFailure?.reason == .notDownloaded {
+            DictationTranslationSettings().lastFailure = nil
+            lastFailure = nil
+        }
     }
 
     private func name(of language: Locale.Language) -> String {
