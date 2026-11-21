@@ -1493,6 +1493,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show in folder", "Показать в папке"),
     ("Could not transcribe {}", "Не удалось распознать {}"),
     ("A file could not be chosen.", "Не удалось выбрать файл."),
+    ("Agent tools for captures", "Инструменты агента для записей"),
+    ("Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely", "Добавляет hex annotate zoom, inspect, frames и skill, чтобы агенты для кода могли внимательно изучить запись"),
 ];
 
 #[cfg(test)]

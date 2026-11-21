@@ -193,6 +193,7 @@ impl Feature {
             Self::ModesEditor => settings.labs.modes_editor,
             Self::PasteLastPicker => settings.labs.paste_last_picker,
             Self::VocabularyFiles => settings.labs.vocabulary_files,
+            Self::AnnotateAgentTools => settings.labs.annotate_agent_tools,
         }
     }
 
@@ -278,6 +279,7 @@ impl Feature {
             &mut labs.modes_editor,
             &mut labs.paste_last_picker,
             &mut labs.vocabulary_files,
+            &mut labs.annotate_agent_tools,
         ]
     }
 
@@ -374,6 +376,7 @@ impl Feature {
             Self::ModesEditor => settings.labs.modes_editor = on,
             Self::PasteLastPicker => settings.labs.paste_last_picker = on,
             Self::VocabularyFiles => settings.labs.vocabulary_files = on,
+            Self::AnnotateAgentTools => settings.labs.annotate_agent_tools = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -563,6 +566,12 @@ static MICROPHONE_KEY: AtomicBool = AtomicBool::new(false);
 /// written by [`state`] and [`apply`].
 static PASTE_LAST_PICKER: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Agent tools for captures' switch, set beside [`STATE`] like
+/// [`SCREEN_VOCABULARY`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`]. `hex annotate inspect|zoom|frames|skill`
+/// reads it in a CLI process that never applied settings.
+static ANNOTATE_AGENT_TOOLS: AtomicBool = AtomicBool::new(false);
+
 /// The words that start a voice prompt, set beside [`STATE`] by [`state`] and
 /// [`apply`]. An invalid saved phrase reads as the default.
 static VOICE_PROMPT_PHRASE: LazyLock<RwLock<String>> =
@@ -605,6 +614,7 @@ fn state() -> u64 {
                 NEUTRAL_VOICE.store(neutral_voice_enabled(&saved), Ordering::Release);
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 PASTE_LAST_PICKER.store(paste_last_picker_enabled(&saved), Ordering::Release);
+                ANNOTATE_AGENT_TOOLS.store(annotate_agent_tools_enabled(&saved), Ordering::Release);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
                 store_stop_phrase_text(&saved.stop_phrase_text);
             }
@@ -745,6 +755,14 @@ fn paste_last_picker_enabled(settings: &LabsSettings) -> bool {
         && Feature::PasteLastPicker.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Agent tools for captures in this build,
+/// before its managed lock; the state word has no bit for it.
+fn annotate_agent_tools_enabled(settings: &LabsSettings) -> bool {
+    settings.annotate_agent_tools
+        && Feature::AnnotateAgentTools.shipped()
+        && Feature::AnnotateAgentTools.managed().is_none()
+}
+
 /// Records the trigger phrase matching reads; an invalid value never turns
 /// matching off.
 fn store_voice_prompt_phrase(phrase: &str) {
@@ -803,6 +821,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     NEUTRAL_VOICE.store(neutral_voice_enabled(settings), Ordering::Release);
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     PASTE_LAST_PICKER.store(paste_last_picker_enabled(settings), Ordering::Release);
+    ANNOTATE_AGENT_TOOLS.store(annotate_agent_tools_enabled(settings), Ordering::Release);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -2036,6 +2055,38 @@ mod tests {
             Feature::VocabularyFiles.oses(),
             &[Os::Macos, Os::Windows, Os::Linux]
         );
+    }
+
+    #[test]
+    fn agent_tools_for_captures_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!annotate_agent_tools_enabled(&labs));
+        assert!(!Feature::AnnotateAgentTools.on(&AppSettings::default()));
+        labs.annotate_agent_tools = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(annotate_agent_tools_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & SCREENSHOTS, 0);
+        assert_eq!(state & ANNOTATE_REPLAY, 0);
+        assert_eq!(state & COPY_ONLY, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(Feature::AnnotateAgentTools.on_this_os());
+        assert_eq!(Feature::AnnotateAgentTools.added(), 20261121);
+        assert_eq!(Feature::AnnotateAgentTools.audience(), Audience::Everyone);
+        assert_eq!(Feature::AnnotateAgentTools.group(), Group::Annotate);
+        assert_eq!(
+            Feature::AnnotateAgentTools.settings_key(),
+            "labs.annotate_agent_tools"
+        );
+        assert_eq!(Feature::AnnotateAgentTools.name(), "annotate-agent-tools");
+        assert_eq!(
+            Feature::AnnotateAgentTools.oses(),
+            &[Os::Macos, Os::Windows, Os::Linux]
+        );
+        assert!(!Feature::AnnotateAgentTools.title().is_empty());
+        assert!(!Feature::AnnotateAgentTools.summary().is_empty());
+        assert!(!Feature::AnnotateAgentTools.description().is_empty());
     }
 
     #[test]

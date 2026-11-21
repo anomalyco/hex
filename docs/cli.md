@@ -77,7 +77,8 @@ hex
 │   ├── list [--limit N]           the newest captures in the captures folder
 │   ├── show <capture>             one capture's words, files, and where it went
 │   ├── send <capture> [--to <session>] [--always]  send it to an OpenCode session
-│   └── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
+│   ├── route <capture> [--ask-jev]  what routing sees and decides; sends nothing
+│   └── inspect|zoom|frames|skill  Labs: read a capture for a coding agent (off by default)
 ├── screenshot [--pick]           Labs (macOS): shoot the display under the pointer and print the PNG's path; --pick opens the ⌘⇧4 picker
 ├── labs [on|off <feature>]       list Labs features or turn one on/off; edits settings.json (features/labs.md)
 │   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page on that lab's group
@@ -298,6 +299,26 @@ capsule's ⇧⏎ does. Its reply says what became of it (`Sent to …`,
 `Queued for …` when OpenCode didn't answer, which Hex retries). `route` is
 Scrawl's `route --explain` (`--explain` is accepted); `--ask-jev` asks Jev
 again, one network call. An unknown capture is refused with `not-found`.
+
+`inspect`, `zoom`, `frames`, and `skill` are Labs › Agent tools for captures
+(`labs.annotate_agent_tools`, off by default; `hex labs on
+annotate-agent-tools`). They run in the `hex` process on every OS, with Hex
+closed: they only read the bundle and decode its video, never starting a
+capture, sending one, or writing a setting. `frames` extracts with `ffmpeg`
+from PATH when one is installed, as the engine's own `extract_frames_range`
+does. While the lab is off they refuse
+with that switch's name. `inspect [<capture>]` prints `summary.md`; `--marks`
+prints one line per mark (`#2 ✎② 0:09 circled · m2`), or `No marks`; `--json`
+prints `scrawl.json` pretty, or with `--marks` the marks as a JSON array.
+`zoom [<capture>] (--at <M:SS|secs|phrase> | --mark <n|id> [--frame N])
+[--span secs] [--frames N] [--full]` writes a dense sheet of frames around
+that moment into `<bundle>/zoom/` and prints its path, `0:09.500 → 0:11.500,
+12 frames: #1 0:09.500, …`, and `Said: “…”` when anything was said over the
+window; for a mark it prints the mark's line first. `frames [<capture>]
+--from <M:SS|secs> --to <M:SS|secs> [--fps 4]` writes one PNG per frame into
+`<bundle>/zoom/range-*/`, clamped to the recording's length and at most 240
+frames a call, and prints each path. `skill` prints the
+[`hex-annotate`](../skills/hex-annotate/SKILL.md) skill this Hex ships.
 
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.

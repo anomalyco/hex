@@ -81,10 +81,11 @@ pub enum Feature {
     DropTranscribe,
     PasteLastPicker,
     VocabularyFiles,
+    AnnotateAgentTools,
 }
 
 impl Feature {
-    pub const ALL: [Self; 76] = [
+    pub const ALL: [Self; 77] = [
         Self::Meetings,
         Self::VoiceFilter,
         Self::Playground,
@@ -161,5 +162,6 @@ impl Feature {
         Self::DropTranscribe,
         Self::PasteLastPicker,
         Self::VocabularyFiles,
+        Self::AnnotateAgentTools,
     ];
 }

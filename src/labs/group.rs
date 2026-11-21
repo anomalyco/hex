@@ -116,7 +116,8 @@ impl Feature {
             | Self::AnnotateReplay
             | Self::GnomeAnnotate
             | Self::AnnotatePointerScreen
-            | Self::CopyCaptureZip => Group::Annotate,
+            | Self::CopyCaptureZip
+            | Self::AnnotateAgentTools => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
             | Self::MoreDictationShortcuts
