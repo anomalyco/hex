@@ -573,7 +573,15 @@ fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
     let [x, y, w, h] = layout.strip;
     let duration = clip.duration_ms.max(1) as f32;
     let at = |ms: u64| (ms as f32 / duration * w).clamp(0.0, w).round();
-    let cell = w / clip.frames.len().max(1) as f32;
+    // Cells keep the movie's shape at any strip width, each showing the
+    // frame nearest its middle, so a narrow editor still shows whole frames.
+    let aspect = clip
+        .frames
+        .first()
+        .map(|(_, shot)| shot.size[0] as f32 / shot.size[1].max(1) as f32)
+        .unwrap_or(16.0 / 10.0);
+    let cells = ((w / (h * aspect)).round() as usize).max(1);
+    let cell = w / cells as f32;
     let mut strip = el()
         .key("strip")
         .absolute(x, y)
@@ -582,7 +590,13 @@ fn strip_el(p: Paint, clip: &Clip, layout: Layout) -> El {
         .fill(k.c.layer_02)
         .clip_rounded(INNER_RADIUS)
         .instant_changes();
-    for (i, (_, frame)) in clip.frames.iter().enumerate() {
+    for i in 0..cells {
+        let Some((_, frame)) = clip
+            .frames
+            .get((i * 2 + 1) * clip.frames.len() / (cells * 2))
+        else {
+            continue;
+        };
         strip = strip.child(
             el().absolute((i as f32 * cell).floor(), 0.0)
                 .size(cell.ceil() + 1.0, h)

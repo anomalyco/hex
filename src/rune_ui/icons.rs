@@ -98,6 +98,7 @@ line_icon!(
         "M12 19v3",
     ]
 );
+#[cfg(target_os = "macos")]
 line_icon!(
     MIC_OFF,
     "hex-row-mic-off",
