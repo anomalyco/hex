@@ -25,6 +25,8 @@
     <string name="keyboard_space_translate">%1$s → English</string>
     <string name="keyboard_period">Period</string>
     <string name="keyboard_comma">Comma</string>
+    <string name="keyboard_at">At sign</string>
+    <string name="keyboard_slash">Slash</string>
     <string name="keyboard_correction">Correction %1$s</string>
     <string name="keyboard_return">Return</string>
     <string name="keyboard_page_numbers">123</string>
@@ -36,6 +38,7 @@
     <string name="keyboard_action_done">Done</string>
     <string name="keyboard_action_go">Go</string>
     <string name="keyboard_action_next">Next</string>
+    <string name="keyboard_action_previous">Previous</string>
     <string name="keyboard_action_search">Search</string>
     <string name="keyboard_action_send">Send</string>
     <string name="keyboard_menu_style">Style</string>
@@ -55,4 +58,7 @@
     <string name="keyboard_menu_chosen" translatable="false">✓</string>
     <string name="keyboard_menu_arrow" translatable="false">›</string>
     <string name="keyboard_menu_more_value">"%1$s  ›"</string>
+    <!-- Hex's settings › Keyboard. -->
+    <string name="settings_auto_capitalisation">Auto-capitalisation</string>
+    <string name="settings_auto_capitalisation_detail">Capitalise the start of sentences</string>
 </resources>

@@ -9,6 +9,10 @@ internal class TypingPreferences(context: Context) {
     var layout: Spoken?
         get() = Spoken.matching(prefs.getString("layout", null))
         set(value) { prefs.edit().putString("layout", value?.layoutCode).apply() }
+    /** Settings › Keyboard › Auto-capitalisation: shift comes on where the field asks for a capital. On by default. */
+    var autoCapitalize: Boolean
+        get() = prefs.getBoolean("autoCapitalize", true)
+        set(value) { prefs.edit().putBoolean("autoCapitalize", value).apply() }
     var autocorrect: Boolean
         get() = prefs.getBoolean("autocorrect", true)
         set(value) { prefs.edit().putBoolean("autocorrect", value).apply() }

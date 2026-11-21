@@ -1,5 +1,6 @@
 package ly.anoma.hex.keyboard
 
+import android.text.InputType
 import android.view.inputmethod.EditorInfo
 import ly.anoma.hex.speech.Spoken
 
@@ -15,7 +16,23 @@ internal data class EnterKey(val label: String?, val action: Int) {
     }
 }
 
-/** What the keys show: one page of one layout, with shift and the enter key. */
+/** What the key beside ?123 types on the letters page: Gboard's @ in email fields and / in web
+ * addresses, else a comma. */
+internal enum class FieldKind(val mark: String) {
+    Text(","), Email("@"), Url("/");
+    companion object {
+        fun of(inputType: Int): FieldKind {
+            if (inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_CLASS_TEXT) return Text
+            return when (inputType and InputType.TYPE_MASK_VARIATION) {
+                InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS -> Email
+                InputType.TYPE_TEXT_VARIATION_URI -> Url
+                else -> Text
+            }
+        }
+    }
+}
+
+/** What the keys show: one page of one layout, with shift, the enter key and the field's kind. */
 internal data class KeyboardPage(
     val language: Spoken,
     val symbols: Boolean,
@@ -23,6 +40,7 @@ internal data class KeyboardPage(
     val shifted: Boolean,
     val locked: Boolean,
     val enter: EnterKey,
+    val kind: FieldKind = FieldKind.Text,
 ) {
     val lines: List<String> get() {
         val code = language.layoutCode
@@ -77,6 +95,10 @@ internal object KeyboardMetrics {
     const val DELETE_CANCEL = 32f
     const val DELETE_REPEAT_DELAY = 400L
     const val DELETE_REPEAT_EVERY = 50L
+    /** A key held this long shows what it holds (Gboard's long press: between 300 and 350 ms). */
+    const val HOLD_MS = 300L
+    /** Gboard ticks again as a key lifts when it was held at least this long. */
+    const val RELEASE_TICK_MS = 200L
 
     // The bottom row, in tenths: ?123, comma, space, period, enter.
     const val MODE = 1.5f
