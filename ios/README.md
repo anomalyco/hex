@@ -624,14 +624,16 @@ never at a launch by itself.
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
   dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
-  Apple has. Apple Speech's Spanish is three variants (es-ES, es-MX, es-US), and
-  Spanish follows the iPhone rather than always Spain: a region Apple has keeps it
-  (es-CL on a Chilean phone), es-419, es-CO, es-AR and any other Latin American,
-  United States or unlisted region is the Americas' Spanish (es-US, then es-MX),
-  plain `es` is the iPhone's Region's (es-MX in Mexico, es-US in the United States,
-  Puerto Rico and Latin America, es-ES elsewhere), and only Spain and Equatorial
-  Guinea stay on es-ES (`DictationLanguageSwitch.spanishCandidates`,
-  `spanish(forRegion:)`). While
+  Apple has. Apple Speech's Spanish includes es-ES, es-MX and es-US (and es-CL on
+  recent systems), and Spanish follows the iPhone rather than always Spain: a region
+  Apple has keeps it (es-CL on a Chilean phone), es-419, es-CO, es-AR and any other
+  Latin American, United States or unlisted region is the Americas' Spanish (es-US,
+  then es-MX), plain `es` is the iPhone's Region's (es-MX in Mexico, es-US in the
+  United States, Puerto Rico and Latin America, es-ES elsewhere), and only Spain and
+  Equatorial Guinea stay on es-ES (`DictationLanguageSwitch.spanishCandidates`,
+  `spanish(forRegion:)`). Before iOS 26 `SFSpeechRecognizer` lists es-CO and es-419
+  itself, so the on-device pick keeps them, then falls through es-US, es-MX and
+  Spain's. While
   the keyboard switches between two or more languages, Automatic follows the one
   it shows (Keyboard languages, below). The menu also lists every locale
   `SpeechTranscriber` or

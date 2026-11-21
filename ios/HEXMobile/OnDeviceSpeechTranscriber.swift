@@ -86,9 +86,9 @@ nonisolated enum OnDeviceSpeechLanguages {
         return nil
     }
 
-    /// Whether `found` may stand for `candidate`: an Americas Spanish candidate keeps its own
+    /// Whether `found` may stand for `candidate`: every Spanish candidate keeps its own
     /// region (es-CO on es-CO, not the es-ES another fallback answers), so the next candidate
-    /// is tried. Spain's and every other language resolve loosely.
+    /// is tried. Only non-Spanish languages resolve loosely.
     private static func accepts(_ found: String, for candidate: String) -> Bool {
         let wanted = Locale(identifier: candidate)
         guard wanted.language.languageCode?.identifier == "es",
