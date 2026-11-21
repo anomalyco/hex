@@ -330,17 +330,24 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     read German taps too. German's model is lowercase throughout, so a noun takes its capital
     from the list beside it, whether the decoder corrected it or it was typed right ("hsus"
     reads "haus" and comes out "Haus"; "das haus" becomes "das Haus"): 95% and up anywhere,
-    and 50-94% after an article or determiner ("zu leben" stays), while Auto-capitalization
-    is on; what the list lacks keeps the dictionary's rule. The list is
+    and 50-94% after an article or determiner, while Auto-capitalization is on. A 50-94%
+    word with no determiner before it, and any word the list lacks, keeps the dictionary's
+    rule: a verb stays lowercase ("zu leben", "ich frage", "wollt ihr essen") and a word the
+    dictionary knows only capitalised still takes its capital ("heute abend" becomes "heute
+    Abend"). The builder caps a word that is also a common first-person or imperative verb
+    form ("frage", "reise", "drucke": "ich frage" stays, "die frage" becomes "Frage"), and
+    the separable prefixes "teil" and "preis" plus the adjective "klasse", at 94 so they take
+    a capital only after a determiner. The list is
     `HEXKeyboard/TypingModel/de.capitals`, built by `scripts/build-german-capitals.py`
     from the same Google Books shards: for each model word it compares the 1980–2019 counts
     of the all-lowercase and first-letter-capitalised spellings and lists
     `word<TAB>percent` for the words at least 50% capitalised and seen at least 40 times,
-    leaving out pronouns and determiners capitalised for other reasons (`FUNCTION_WORDS`:
-    "sie", "ihr", and the rest). Rebuild it from `ios/` with
+    leaving out pronouns and possessives capitalised for other reasons (`FUNCTION_WORDS`:
+    "sie", "ihr", "mein", and the rest). Rebuild it from `ios/` with
     `python3 scripts/build-german-capitals.py HEXKeyboard/TypingModel/de.hextm HEXKeyboard/TypingModel/de.capitals`;
     it streams the eight shards through curl and gzip four at a time, caches each shard's
-    counts under `scripts/.build-german-capitals`, and deletes that cache when it finishes.
+    counts under `scripts/.build-german-capitals`, keeps their merged per-token counts there
+    so a rule change renders without streaming again, and applies the caps after counting.
     Off, Deutsch keeps the dictionary engine exactly as before: no decoder, no word list for
     the letter odds or model completions, and no model for a bilingual partner. Swipe typing
     stays English and Spanish only.

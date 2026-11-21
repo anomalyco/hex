@@ -837,12 +837,16 @@ final class AutocorrectEngineTests: XCTestCase {
     }
 
     /// The capitalisation sidecar rides beside the German model (same bundle, same embedded
-    /// keyboard fallback): common nouns are written with a capital nearly always, and a verb
-    /// or function word isn't in the list at all.
+    /// keyboard fallback): common nouns are written with a capital nearly always, while a word
+    /// that is also a common verb form is in the list below that ("frage" 94, "reise" 94,
+    /// "folge" 94), and a pure verb or function word is 50-94 too ("leben" 82) or absent.
     func testTheBundledGermanCapitalsLoad() throws {
         let capitals = try XCTUnwrap(GermanCapitals.bundled(), "de.capitals is bundled with the German model")
         for noun in ["haus", "auto", "zeit"] {
             XCTAssertGreaterThanOrEqual(capitals.percent(of: noun) ?? 0, 95, noun)
+        }
+        for verbForm in ["frage", "reise", "folge"] {
+            XCTAssertLessThan(capitals.percent(of: verbForm) ?? 0, 95, verbForm)
         }
         for other in ["machen", "ist"] {
             XCTAssertNil(capitals.percent(of: other), other)
@@ -884,11 +888,14 @@ final class AutocorrectEngineTests: XCTestCase {
         let layout = KeyboardLayout(width: 393, language: .german)
         let keys = try XCTUnwrap(TypingDecoder.Keys(layout: layout))
         let checker = StubChecker()
-        checker.valid = ["ist", "das", "die", "zu", "haus", "auto", "zeit", "leben"]
-        checker.capitalised = ["Stadt"]
+        checker.valid = ["ist", "das", "die", "zu", "haus", "auto", "zeit", "leben",
+                         "ich", "frage", "wollt", "ihr", "essen", "heute"]
+        checker.capitalised = ["Stadt", "Abend"]
         let autocorrect = AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
         autocorrect.setLanguage(.german, available: ["de"])
-        autocorrect.germanCapitals = GermanCapitals(percentages: ["haus": 99, "auto": 99, "zeit": 98, "leben": 60])
+        autocorrect.germanCapitals = GermanCapitals(percentages: [
+            "haus": 99, "auto": 99, "zeit": 98, "leben": 60, "frage": 94, "essen": 61, "abend": 94,
+        ])
         autocorrect.decoder = TypingDecoder(model: try XCTUnwrap(TypingDecoderModel.bundled("de")))
         autocorrect.decoderKeys = keys
         func fix(_ before: String, taps: String) -> String? {
@@ -904,7 +911,13 @@ final class AutocorrectEngineTests: XCTestCase {
         // and the verb elsewhere ("zu leben").
         XCTAssertEqual(fix("das leben", taps: "leben"), "Leben")
         XCTAssertNil(fix("zu leben", taps: "leben"))
-        // A word the list doesn't know keeps the dictionary's rule.
+        // A 50-94% word with no determiner before it keeps the dictionary's rule: a verb form
+        // stays lowercase ("ich frage", "wollt ihr essen"), and a word the dictionary knows
+        // only capitalised still takes its capital ("heute abend" -> "heute Abend").
+        XCTAssertNil(fix("ich frage", taps: "frage"))
+        XCTAssertNil(fix("wollt ihr essen", taps: "essen"))
+        XCTAssertEqual(fix("heute abend", taps: "abend"), "Abend")
+        // A word the list doesn't know keeps the dictionary's rule too.
         XCTAssertEqual(fix("die stadt", taps: "stadt"), "Stadt")
         // Auto-capitalization off adds no capital you did not type.
         autocorrect.addsCapitals = false

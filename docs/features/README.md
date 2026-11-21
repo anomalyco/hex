@@ -2866,8 +2866,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   sidecar beside it (`de.capitals`, built by `ios/scripts/build-german-capitals.py`,
 │   each word's share written with a capital): a noun takes its capital anywhere from
 │   a 95% share and after an article or determiner from 50% ("das haus" -> "das Haus",
-│   "zu leben" stays), whether the decoder corrected it or it was typed right; a word
-│   the list lacks keeps the dictionary's rule, and Auto-capitalization off adds none.
+│   "zu leben" stays), whether the decoder corrected it or it was typed right, and a
+│   word that is also a common verb form ("frage", "reise") is capped at 94 so "ich
+│   frage" stays; a 50-94% word with no determiner, and any word the list lacks, keeps
+│   the dictionary's rule ("heute abend" -> "heute Abend"), and Auto-capitalization off
+│   adds none.
 │   Off, German keeps the dictionary engine and has no word list, so no letter odds,
 │   model completions or bilingual partner model
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every

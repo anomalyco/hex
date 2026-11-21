@@ -194,9 +194,9 @@ final class AutocorrectEngine {
     var decoderTaps: [CGPoint]? {
         didSet { partner?.decoderTaps = decoderTaps }
     }
-    /// German nouns' shares of capitalised uses (`de.capitals`, beside the German model): read
-    /// from the keyboard's bundle the first time a German word needs one, never for another
-    /// language. Tests set their own list.
+    /// German nouns' shares of capitalised uses (`de.capitals`, beside the German model): the
+    /// keyboard reads it with the German model, and a German word before that reads it itself;
+    /// never for another language. Tests set their own list.
     var germanCapitals: GermanCapitals? {
         didSet { germanCapitalsRead = true }
     }
@@ -926,14 +926,16 @@ final class AutocorrectEngine {
     /// `properNoun`, with German's noun list in front of the dictionary: a word the books write
     /// with a capital almost always takes one anywhere ("haus" -> "Haus"), and one they write
     /// that way half the time takes one after an article or determiner ("das leben" -> "das
-    /// Leben"; "zu leben" stays). `typed` is what you typed, which finds the word before it
-    /// when a correction changed `word`. Words the list doesn't know, and every other
-    /// language, keep the dictionary's rule.
+    /// Leben"; "zu leben" stays). Without a determiner a 50-94% word still takes a capital
+    /// where only the capital is a word ("abbas" -> "Abbas", "heute abend" -> "heute Abend").
+    /// `typed` is what you typed, which finds the word before it when a correction changed
+    /// `word`. Words the list doesn't know, and every other language, keep the dictionary's
+    /// rule.
     private func nounCapitalised(for word: String, typed token: String) -> String? {
         guard language == .german, let capitals = germanNouns,
-              let capitalise = capitals.capitalises(word, after: Self.previousWord(beforeInput ?? "", token: token))
+              let capitalise = capitals.capitalises(word, after: Self.previousWord(beforeInput ?? "", token: token)),
+              capitalise, let first = word.first
         else { return properNoun(for: word) }
-        guard capitalise, let first = word.first else { return nil }
         return first.uppercased() + word.dropFirst()
     }
 

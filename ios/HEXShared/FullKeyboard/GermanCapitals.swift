@@ -4,14 +4,16 @@ import Foundation
 /// beside the German typing model. One `word<TAB>percent` line per word (lowercase, sorted,
 /// written by `scripts/build-german-capitals.py`): the percent is how often the word is written
 /// with a capital in the same Google Books corpus the model was counted from, so "haus" is 99
-/// and "leben" — `Leben` the noun or `leben` the verb — is lower. German's model is lowercase
-/// throughout and Apple's German dictionary takes "haus", "auto" and "zeit" lowercase too, so
-/// this list is what knows they are nouns.
+/// and "leben" — `Leben` the noun or `leben` the verb — is lower. The builder also caps a word
+/// that is equally a common verb form ("frage", "reise", "drucke") at 94, so it takes a capital
+/// only after a determiner. German's model is lowercase throughout and Apple's German
+/// dictionary takes "haus", "auto" and "zeit" lowercase too, so this list is what knows they
+/// are nouns.
 nonisolated struct GermanCapitals: Sendable {
     /// A word the books write with a capital this often is a noun wherever it stands.
     static let alwaysShare = 95
-    /// From this share it is a noun after an article or determiner ("das leben") and the verb
-    /// or adjective with the same spelling elsewhere ("zu leben").
+    /// From this share it is a noun after an article or determiner ("das leben") and whatever
+    /// shares the spelling elsewhere ("zu leben", "ich frage").
     static let sometimesShare = 50
 
     private let percentages: [String: UInt8]
@@ -45,7 +47,8 @@ nonisolated struct GermanCapitals: Sendable {
             let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
             guard fields.count == 2, let percent = UInt8(fields[1]),
                   (Self.sometimesShare...100).contains(Int(percent)) else { continue }
-            percentages[String(fields[0]).lowercased()] = percent
+            // The builder writes every word lowercase, from a lowercase-only model.
+            percentages[String(fields[0])] = percent
         }
         guard !percentages.isEmpty else { return nil }
         self.percentages = percentages
@@ -59,8 +62,9 @@ nonisolated struct GermanCapitals: Sendable {
 
     /// Whether `word`, all lowercase, takes a capital: a noun written with one at least
     /// `alwaysShare` percent of the time anywhere, or `sometimesShare` percent of the time
-    /// after an article or determiner. Nil when the list doesn't know the word, so autocorrect
-    /// asks the dictionary as before.
+    /// after an article or determiner. Nil when the list doesn't know the word and false when
+    /// it knows it but no determiner stands before it, so autocorrect asks the dictionary for
+    /// both as before.
     func capitalises(_ word: String, after previous: String?) -> Bool? {
         guard word.count >= 2, word == word.lowercased(),
               let share = percent(of: word), share >= Self.sometimesShare else { return nil }
@@ -70,7 +74,9 @@ nonisolated struct GermanCapitals: Sendable {
 
     /// Articles, determiners, their contractions and possessives, after which German writes
     /// the noun with a capital ("das haus", "im haus", "mein haus"), so a word the books write
-    /// both ways is a noun here ("das leben", never "zu leben").
+    /// both ways is a noun here ("das leben", never "zu leben"). "ihr" is left out: it is the
+    /// possessive "her/their", but as the pronoun "you" (plural) it comes before a verb far
+    /// more often ("wollt ihr essen").
     static let determiners: Set<String> = [
         "der", "die", "das", "den", "dem", "des",
         "ein", "eine", "einen", "einem", "einer", "eines",
@@ -78,7 +84,7 @@ nonisolated struct GermanCapitals: Sendable {
         "mein", "meine", "meinen", "meinem", "meiner", "meines",
         "dein", "deine", "deinen", "deinem", "deiner", "deines",
         "sein", "seine", "seinen", "seinem", "seiner", "seines",
-        "ihr", "ihre", "ihren", "ihrem", "ihrer", "ihres",
+        "ihre", "ihren", "ihrem", "ihrer", "ihres",
         "unser", "unsere", "unseren", "unserem", "unserer", "unseres",
         "euer", "eure", "euren", "eurem", "eurer", "eures",
         "dies", "dieser", "diese", "dieses", "diesem", "diesen",
