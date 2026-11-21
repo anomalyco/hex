@@ -157,6 +157,8 @@ extension FullKeyboardEngine {
     /// Deletes a suggestion's space before `text`, one of `suggestionJoiners`, typed right
     /// after it. True when it did: the mark then goes in as typed.
     func dropsSuggestionSpace(before text: String) -> Bool {
+        // A held space (`spacePending`) has nothing to delete, and the word is finished already.
+        if spacePending, text.count == 1, let mark = text.first, Self.suggestionJoiners.contains(mark) { return true }
         guard text.count == 1, let mark = text.first, Self.suggestionJoiners.contains(mark),
               let spaced = suggestionSpaceBefore, spaced.last == " ", spaced == textBefore else { return false }
         typingLog?.edit("delete", [TypingLogField("deleted", .string(" ")), TypingLogField("src", .string("suggestion_space"))])
@@ -167,6 +169,7 @@ extension FullKeyboardEngine {
     /// Types what `insert` was given: a typed or picked quote curled, and a hyphen typed
     /// after a hyphen making both an em dash. Accent picks and emoji go in as they are.
     func typeIntoField(_ text: String, source: String?) {
+        guard !text.isEmpty else { return }
         guard source == "key" || source == "slide" || source == nil else { return target.insertText(text) }
         if text == "-", smartDashes, target.documentContextBeforeInput?.last == "-" {
             typingLog?.edit("smart_dash", [TypingLogField("deleted", .string("-")), TypingLogField("inserted", .string(SmartPunctuation.emDash))])

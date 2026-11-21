@@ -1339,6 +1339,118 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "pretty ", "a host that reports the keys' own edit leaves it swallowed")
     }
 
+    /// "brown" in "the quick brown fox" selected and typed over: the cursor sits between the
+    /// space before it and the space after it.
+    private func typeOverBrown() {
+        type("the quick  fox")
+        target.adjustTextPosition(byCharacterOffset: -4)
+        engine.textDidChange()
+    }
+
+    /// TestFlight: "Tapping on a word to select it, and then quickly typing in a correction
+    /// doesn't account for the trailing space and you end up with 2 spaces inserted."
+    func testASpaceBeforeASpaceMidSentenceIsHeldForTheNextWord() {
+        typeOverBrown()
+        type("black ")
+        XCTAssertEqual(target.text, "the quick black fox", "one space, not two")
+        tap(.space)
+        XCTAssertEqual(target.text, "the quick black fox", "nor after a second press")
+        type("cat")
+        XCTAssertEqual(target.text, "the quick black cat fox", "the next word gets the space")
+        tap(.space)
+        punctuate(",")
+        XCTAssertEqual(target.text, "the quick black cat, fox", "a mark goes against the word")
+
+        target.adjustTextPosition(byCharacterOffset: 4)
+        engine.textDidChange()
+        type(" jumps")
+        target.adjustTextPosition(byCharacterOffset: -5)
+        engine.textDidChange()
+        tap(.space)
+        XCTAssertEqual(target.text, "the quick black cat, fox  jumps", "after a space, a space you asked for")
+    }
+
+    /// A held space reads as a typed one for the strip and the keys' page: the strip offers the
+    /// next word (never the finished word's completions), a pick goes in after the held space
+    /// rather than in the finished word's place, and 123 goes back to ABC.
+    func testAHeldSpaceOffersTheNextWordAndGoesBackToLetters() throws {
+        typeOverBrown()
+        engine.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        type("thank ")
+        XCTAssertEqual(target.text, "the quick thank fox")
+        XCTAssertTrue(engine.suggestions.allSatisfy { $0.kind == .nextWord }, "\(engine.suggestions.map(\.replacement))")
+        let you = try XCTUnwrap(engine.suggestions.first { $0.replacement == "you" })
+        engine.acceptSuggestion(you)
+        XCTAssertEqual(target.text, "the quick thank you fox")
+        XCTAssertTrue(engine.suggestions.allSatisfy { $0.kind == .nextWord }, "\(engine.suggestions.map(\.replacement))")
+
+        tap(.layerSwitch(.numbers))
+        tap(.character("7"))
+        tap(.space)
+        XCTAssertEqual(target.text, "the quick thank you 7 fox")
+        XCTAssertEqual(engine.layout.layer, .letters, "a held space goes back to ABC as a typed one does")
+    }
+
+    func testAnAutocorrectionMidSentenceHoldsItsSpaceAndDeleteStillOffersTheRevert() {
+        type("see  ok")
+        target.adjustTextPosition(byCharacterOffset: -3)
+        engine.textDidChange()
+        type("teh ")
+        XCTAssertEqual(target.text, "see the ok")
+        XCTAssertNotEqual(engine.suggestions.first?.kind, .revert, "not before delete, as after a typed space")
+        tap(.delete)
+        XCTAssertEqual(target.text, "see the ok", "delete takes the held space")
+        XCTAssertEqual(engine.suggestions.first?.kind, .revert)
+        engine.acceptSuggestion(engine.suggestions[0])
+        XCTAssertEqual(target.text, "see teh ok", "the strip puts back what was typed")
+        tap(.space)
+        XCTAssertEqual(target.text, "see teh ok", "space keeps it, with no second space")
+    }
+
+    func testAPickedSuggestionMidSentenceTypesNoSecondSpace() {
+        typeOverBrown()
+        type("blac")
+        engine.acceptSuggestion(suggestion("black"))
+        XCTAssertEqual(target.text, "the quick black fox")
+        now += 0.15
+        tap(.space)
+        XCTAssertEqual(target.text, "the quick black fox", "the space after the cursor is the one")
+        type("cat")
+        XCTAssertEqual(target.text, "the quick black cat fox")
+
+        target.adjustTextPosition(byCharacterOffset: 4)
+        engine.textDidChange()
+        type(" jumps")
+        punctuate(".")
+        target.adjustTextPosition(byCharacterOffset: -1)
+        engine.textDidChange()
+        engine.acceptSuggestion(suggestion("jumped"))
+        XCTAssertEqual(target.text, "the quick black cat fox jumped.", "no space before a closing mark")
+        for mark in [",", "!", "?", ";", ":", ")", "\"", "'", "’", "”"] {
+            let field = FixtureTextTarget(text: "word" + mark)
+            field.adjustTextPosition(byCharacterOffset: -1)
+            let keys = FullKeyboardEngine(target: field, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+            XCTAssertTrue(keys.textAfterSeparates, mark)
+        }
+    }
+
+    func testFrenchKeepsTheSpaceBeforeItsSpacedMarks() {
+        engine.language = .french
+        type("vrai")
+        punctuate("?")
+        target.adjustTextPosition(byCharacterOffset: -1)
+        engine.textDidChange()
+        XCTAssertFalse(engine.textAfterSeparates, "French puts a space before ?")
+        engine.acceptSuggestion(suggestion("vraie"))
+        XCTAssertEqual(target.text, "vraie ?")
+    }
+
+    func testADictationMidSentenceAddsNoSecondSpace() {
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: "black", beforeContext: "the quick ", afterContext: " fox"), "black")
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: "black", beforeContext: "the quick", afterContext: " fox"), " black")
+        XCTAssertEqual(TranscriptFormatter.insertionText(for: "black", beforeContext: "the quick ", afterContext: ". Then"), "black")
+    }
+
     /// "th", then the e aimed a few points high 80 ms later, on the strip's lower half under
     /// its left slot. Record typing logs showed that tap picked "th" and a space, so "the"
     /// came out "th" and the space after it doubled. While you type, the keys take it.
