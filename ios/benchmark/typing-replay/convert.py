@@ -105,7 +105,7 @@ def futo(paths, writer, limit, valid_only):
                 gestures, first = [], None
                 for index in range(len(words)):
                     data = sorted(group[index]["data"], key=lambda sample: sample["t"])
-                    if len(data) < 2:
+                    if not data:
                         gestures = []
                         break
                     start = data[0]["t"]
@@ -197,7 +197,7 @@ def howweswipe_log(stream, session, writer, limit, stats):
         gestures, first = [], None
         for rows in chosen:
             rows = sorted(rows, key=lambda row: row["time"])
-            if len(rows) < 2:
+            if not rows:
                 gestures = []
                 break
             start = rows[0]["time"]
@@ -245,7 +245,7 @@ def howweswipe(paths, writer, limit):
     print(
         f"howweswipe: {writer.count} sentences, {stats['words']} words, {stats['logs']} logs, "
         f"{stats['rows']} rows, {stats['chunks']} swipes; skipped {stats['incomplete']} incomplete "
-        f"sentences, {stats['short']} short gestures",
+        f"sentences, {stats['short']} empty gestures",
         file=sys.stderr,
     )
 

@@ -1400,11 +1400,13 @@ edge (their centres at 0.05 and 0.95), y 0…1 from the top of the first letter 
 bottom of the third (row centres at 1/6, 1/2 and 5/6), t milliseconds since the finger
 landed, and the optional `start` milliseconds from the sentence's first landing to that
 one, so gestures keep the person's gaps; without it each begins 0.5 s after the previous
-lift (longer than every window a lift leaves open on the next touch). Hex's second and third
-letter rows are offset half a column and one and a half columns, as the format assumes. Tap
-recordings replace `gestures` with `taps`, one `{x, y, t}` per touch, each array holding
-that touch's samples (a tap is usually one) on the sentence's clock; y > 1 is the space bar,
-x 0.25…0.75 across it.
+lift, longer than the two windows the replay's clock drives that a lift leaves open (the
+double-space period and the strip's touch guard). A start that would put a finger down before
+the previous one came up is moved to that lift, in both modes, and `clamped` counts those. A
+gesture recorded as one point is a tap. Hex's second and third letter rows are offset half a
+column and one and a half columns, as the format assumes. Tap recordings replace `gestures`
+with `taps`, one `{x, y, t}` per touch, each array holding that touch's samples (a tap is
+usually one) on the sentence's clock; y > 1 is the space bar, x 0.25…0.75 across it.
 `TEST_RUNNER_HEX_TAP_REPLAY=/path/taps.json` does the same for taps, with Spatial
 autocorrect reading each word on its space.
 
@@ -1419,8 +1421,9 @@ gesture counted wrong — so one number matches what the person reading the fiel
 and `taps-right` are the recordings whose path never leaves its key by a swipe's pitch: the
 keyboard types that key's letter, and the field keeps it, as for a person typing a one-letter
 word. `not-swipes` counts swipe attempts the plane never took as swipes or that read nothing;
-`skipped` counts gestures that began off the letter keys. The decoder's own median and p90
-milliseconds close the line. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT`
+`skipped` counts gestures that began off the letter keys, and `clamped` the touches moved
+forward to the previous lift. The decoder's own median and p90 milliseconds close
+the line. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT`
 writes each sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
 
 The test with no recording checks Hex's key geometry against the grid and runs clean

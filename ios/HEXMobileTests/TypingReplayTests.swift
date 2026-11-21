@@ -6,13 +6,16 @@ import XCTest
 /// A touch's timestamp base, far enough from zero to look like a touch already under way.
 private let replayClockBase: TimeInterval = 100
 
-/// The gap between gestures a recording doesn't place itself, in seconds: longer than every
-/// window a lift leaves open behind it — the swipe trail's 0.45 s (`SwipeTrailView.tail`),
-/// the accent and trackpad holds (0.36 s and 0.35 s, `FullKeyboardEngine.accentHoldDelay`
-/// and `trackpadHoldDelay`), the double-space period (0.35 s) and the strip's touch guard
-/// (0.25 s) — so a gap the replay invents never places a gesture inside a rule the one before
-/// it started. Recordings should carry their own (`start`): real ones are mostly longer
-/// (FUTO's median is 0.87 s).
+/// The gap between gestures a recording doesn't place itself, in seconds: longer than the two
+/// windows a lift can leave open that the replay's clock drives — the double-space period
+/// (0.35 s, `DoubleSpacePeriod.window`, compared with `clock()` in `typeSpace`) and the
+/// strip's touch guard (0.25 s, `stripTouchGuard`, compared with the same clock in
+/// `takesStripTouch`) — so a gap the replay invents never places a gesture inside a rule the
+/// one before it started. The accent and trackpad holds (0.36 s and 0.35 s) are real-time
+/// `asyncAfter`s armed on touch-down and cancelled on lift, the swipe trail's 0.45 s runs on
+/// its own clock, and `SwipeTyping.previewInterval` (0.07 s) only throttles the strip.
+/// Recordings should carry their own (`start`): real ones are mostly longer (FUTO's median is
+/// 0.87 s).
 private let replayDefaultGestureGap: TimeInterval = 0.5
 
 /// Replaying recorded fingers through the full keyboard as it runs: the key plane's touches,
@@ -37,7 +40,9 @@ private let replayDefaultGestureGap: TimeInterval = 0.5
 /// bottom of the third (row centres at 1/6, 1/2 and 5/6), and t is milliseconds since that
 /// finger landed. A gesture's optional `start` is when that landing was, in milliseconds from
 /// the sentence's first landing, so gestures keep the person's own gaps; without one the
-/// replay begins the gesture `replayDefaultGestureGap` after the previous lift. The second
+/// replay begins the gesture `replayDefaultGestureGap` after the previous lift. A start that
+/// would put a finger down before the previous one came up is moved to that lift, in both
+/// modes, and the report counts those as `clamped`. A one-point gesture is a tap. The second
 /// and third rows sit half a column and one and a half columns right of the first, as on
 /// QWERTY
 /// (`TypingReplayGrid` checks Hex's keys against that before replaying). A tap file replaces
@@ -56,7 +61,8 @@ private let replayDefaultGestureGap: TimeInterval = 0.5
 /// tap recordings (`taps`, and how many of those left their word in the field, `taps-right`:
 /// a path that never leaves its key by a swipe's pitch is a tap, and the keyboard types its
 /// letter), the swipe attempts this keyboard missed (`not-swipes`), the gestures that began
-/// off the letter keys (`skipped`), and the decoder's own median and p90 milliseconds.
+/// off the letter keys (`skipped`), the touches moved forward to the previous lift
+/// (`clamped`), and the decoder's own median and p90 milliseconds.
 /// `HEX_REPLAY_LIMIT` caps sentences per source and `HEX_REPLAY_OUT` writes each sentence's
 /// intended and typed words as JSON.
 @MainActor
@@ -179,13 +185,13 @@ final class TypingReplayTests: XCTestCase {
         XCTAssertTrue(tapReport.words.allSatisfy(\.right), "tapped \(tapped)")
     }
 
-    /// A recorded tap — a one-letter word's still finger — is a tap, not a missed swipe: the
-    /// keyboard types its letter, as it does for a person, so it is neither a swipe that read
-    /// nothing nor one this keyboard missed.
+    /// A recorded tap — a one-letter word's still finger, often one point in FUTO — is a tap,
+    /// not a missed swipe: the keyboard types its letter, as it does for a person, so it is
+    /// neither a swipe that read nothing nor one this keyboard missed.
     func testATapIsNotAMissedSwipe() throws {
         let (_, engine, _) = try makeKeyboard()
         let grid = try TypingReplayGrid(keys: engine.swipeKeys)
-        let tap = ReplayGesture(x: [0.10, 0.10], y: [0.5, 0.5], t: [0, 40])
+        let tap = ReplayGesture(x: [0.10], y: [0.5], t: [0])
         let report = try XCTUnwrap(
             replaySwipes(
                 [SwipeReplaySentence(
@@ -224,6 +230,8 @@ final class TypingReplayTests: XCTestCase {
         /// The gesture never reached the plane: its first point wasn't on a letter key.
         var skipped: Bool
         var decodeMilliseconds: Double?
+        /// When the gesture's last point was, on the sentence's clock.
+        var lift: TimeInterval
         /// Where a gesture with no recorded start begins on the sentence's clock.
         var nextStart: TimeInterval
     }
@@ -245,13 +253,18 @@ final class TypingReplayTests: XCTestCase {
                 let grid = try TypingReplayGrid(keys: engine.swipeKeys)
                 report.sentences += 1
                 // A recording's own `start` says where the person's finger landed; without one
-                // the gesture follows the previous lift by `replayDefaultGestureGap`. Either way
-                // the clock only runs forward, as a real one does.
+                // the gesture follows the previous lift by `replayDefaultGestureGap`. A start
+                // that would put a finger down before the last one came up is moved to that
+                // lift, so the clock only runs forward and touches never overlap, as real ones
+                // can't.
                 var start = replayClockBase
+                var previousLift = replayClockBase
                 var typed: [String] = []
                 for (index, word) in sentence.words.enumerated() {
                     let gesture = sentence.gestures[index]
-                    let origin = gesture.start.map { replayClockBase + $0 / 1000 } ?? start
+                    let recorded = gesture.start.map { replayClockBase + $0 / 1000 }
+                    let origin = recorded.map { max($0, previousLift) } ?? start
+                    if let recorded, recorded < previousLift { report.clamped += 1 }
                     let result = try replaySwipe(
                         gesture,
                         intended: word,
@@ -263,6 +276,7 @@ final class TypingReplayTests: XCTestCase {
                         start: origin
                     )
                     start = result.nextStart
+                    previousLift = result.lift
                     typed.append(result.typed)
                     report.words.append(result.word)
                     if result.notSwiped { report.notSwipes += 1 }
@@ -304,11 +318,12 @@ final class TypingReplayTests: XCTestCase {
         var wasSwipe = false
         var decode: Double?
 
-        // A swipe starts only on a letter key (`SwipeTyping.began`), and a path shorter than
-        // two points can't be one. Skip the plane entirely: a first point that isn't on a
-        // letter is a key row's gap, the page or the space bar the recording's grid can't
-        // place, and it must not change the context the next word reads.
-        if samples.count >= 2, startsOnALetter(samples[0].point, engine: engine) {
+        // A swipe starts only on a letter key (`SwipeTyping.began`). A one-point gesture — FUTO
+        // records "a" and "I" as a single point — goes down and up on that point, a tap as it
+        // is on a keyboard. Skip the plane entirely when the first point isn't on a letter:
+        // that is a key row's gap, the page or the space bar the recording's grid can't place,
+        // and it must not change the context the next word reads.
+        if !samples.isEmpty, startsOnALetter(samples[0].point, engine: engine) {
             attempted = true
             setNow(samples[0].time)
             plane.began(id: id, sample: TypingLogTouchSample(point: samples[0].point, timestamp: samples[0].time))
@@ -320,6 +335,7 @@ final class TypingReplayTests: XCTestCase {
             setNow(lift.time)
             wasSwipe = plane.swipe?.owns(id) ?? false
             plane.ended(id: id, sample: TypingLogTouchSample(point: lift.point, timestamp: lift.time))
+            drainMainQueue()
             if wasSwipe, let last = plane.swipe?.lastDecodeTime {
                 decode = last * 1000
             }
@@ -371,15 +387,29 @@ final class TypingReplayTests: XCTestCase {
             notSwiped: notSwiped,
             skipped: !attempted,
             decodeMilliseconds: decode,
+            lift: samples.last?.time ?? start,
             nextStart: (samples.last?.time ?? start) + replayDefaultGestureGap
         )
+    }
+
+    /// Gives the main queue a turn after a touch, as the keyboard gets between touches.
+    /// `SwipeTyping.schedulePreview` posts its preview's completion there (SwipeTyping.swift:251),
+    /// and a synchronous replay would otherwise never run it: `previewInFlight` would stay true,
+    /// so only the first swipe ever previewed and its background decode overlapped the next
+    /// measured one. Nothing else is due here: the accent and trackpad holds are real-time
+    /// `asyncAfter`s 0.36 s and 0.35 s away (FullKeyboardEngine.swift:67, :79), and each has
+    /// been cancelled by its own touch's lift, so a turn runs only completions already posted,
+    /// which drop themselves while no swipe is under way (SwipeTyping.swift:255).
+    private func drainMainQueue() {
+        RunLoop.main.run(until: Date())
     }
 
     // MARK: - Taps
 
     /// Replays `sentences` through a fresh keyboard each, grouped by source. Every tap goes
-    /// down and up at its recorded point on the engine's clock; the last word gets the space
-    /// the keyboard would have seen, so its correction applies.
+    /// down and up at its recorded point on the engine's clock, a touch recorded before the
+    /// previous lift slid forward to it; the last word gets the space the keyboard would have
+    /// seen, so its correction applies.
     private func replayTaps(_ sentences: [TapReplaySentence], limit: Int?) throws -> [ReplayReport] {
         var reports: [ReplayReport] = []
         for group in grouped(sentences, by: \.source, limit: limit) {
@@ -389,8 +419,18 @@ final class TypingReplayTests: XCTestCase {
                 let grid = try TypingReplayGrid(keys: engine.swipeKeys)
                 guard let space = engine.layout.key(.space)?.frame else { throw ReplayError.noSpaceBar }
                 report.sentences += 1
+                var previousLift = replayClockBase
                 for (index, tap) in sentence.taps.enumerated() {
-                    let samples = try tap.samples(grid: grid, space: space)
+                    var samples = try tap.samples(grid: grid, space: space)
+                    guard let recorded = samples.first?.time else { continue }
+                    // A touch recorded before the one it follows is slid forward to that lift
+                    // with its own duration, so the clock never runs backwards and touches
+                    // never overlap.
+                    if recorded < previousLift {
+                        let shift = previousLift - recorded
+                        samples = samples.map { ReplaySample(point: $0.point, time: $0.time + shift) }
+                        report.clamped += 1
+                    }
                     guard let first = samples.first, let lift = samples.last else { continue }
                     setNow(first.time)
                     plane.began(id: index + 1, sample: TypingLogTouchSample(point: first.point, timestamp: first.time))
@@ -400,9 +440,11 @@ final class TypingReplayTests: XCTestCase {
                     }
                     setNow(lift.time)
                     plane.ended(id: index + 1, sample: TypingLogTouchSample(point: lift.point, timestamp: lift.time))
+                    previousLift = lift.time
+                    drainMainQueue()
                 }
                 if !target.text.hasSuffix(" ") {
-                    setNow(replayClockBase + (sentence.taps.last?.t.last ?? 0) / 1000 + 0.4)
+                    setNow(previousLift + 0.4)
                     let point = CGPoint(x: space.midX, y: space.midY)
                     let sample = TypingLogTouchSample(point: point, timestamp: now)
                     plane.began(id: sentence.taps.count + 1, sample: sample)
@@ -802,6 +844,8 @@ private struct ReplayReport {
     var notSwipes = 0
     /// Gestures whose first point wasn't on a letter, which the replay didn't give the plane.
     var skipped = 0
+    /// Touches moved forward because their recording began before the previous one lifted.
+    var clamped = 0
     var decodeTimes: [Double] = []
     var output: [ReplayOutput.Sentence] = []
 
@@ -830,12 +874,12 @@ private struct ReplayReport {
             line += " typed-or-offered=\(percent(attemptsOrOffered, of: attempts))%"
             line += " all-words-accuracy=\(percent(typedRight, of: inDictionary))%"
             line += " taps=\(taps) taps-right=\(tapsRight)"
-            line += " not-swipes=\(notSwipes) skipped=\(skipped)"
+            line += " not-swipes=\(notSwipes) skipped=\(skipped) clamped=\(clamped)"
             let median = String(format: "%.2f", percentile(decodeTimes, 0.5))
             let p90 = String(format: "%.2f", percentile(decodeTimes, 0.9))
             line += " decode-ms-median=\(median) decode-ms-p90=\(p90)"
         } else {
-            line += " accuracy=\(percent(typedRight, of: inDictionary))%"
+            line += " accuracy=\(percent(typedRight, of: inDictionary))% clamped=\(clamped)"
         }
         return line
     }

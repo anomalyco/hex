@@ -16,8 +16,10 @@ Times are milliseconds from the gesture's first point (swipes) or the sentence's
 touch (taps). Each swipe also records `start`: when its finger landed, in milliseconds from
 the sentence's first landing, so the replay keeps the person's own gaps between words. A file
 without `start` still replays: the test begins each gesture 0.5 s after the previous lift,
-longer than every window a lift leaves open on the next touch. A space tap has y = 1.25 and
-x along 0.25…0.75 of the dataset's own space bar.
+longer than the two windows the replay's clock drives (the double-space period and the strip's
+touch guard). A start that would overlap the previous touch is moved to its lift, and the
+report counts those as `clamped`. A space tap has y = 1.25 and x along 0.25…0.75 of the
+dataset's own space bar.
 
 Every subcommand writes the same JSON object and prints sentences, touches and
 what it skipped to stderr:
@@ -40,7 +42,7 @@ The report line’s fields are described in
 [`ios/README.md`](../../README.md#replaying-real-typing): swipes report `attempts` (the
 decoder’s denominator, missed attempts included), `all-words-accuracy` (every in-dictionary
 word, taps included and skipped gestures wrong), `taps`/`taps-right` (recordings that are
-taps), `not-swipes` and `skipped`.
+taps), `not-swipes`, `skipped` and `clamped`.
 
 ## FUTO swipe
 
@@ -78,7 +80,8 @@ assumed qwerty/English/single-finger. `swipe-5` does carry them, and records
 with another layout, another language, or `dual_finger = 1` are skipped (a
 dual-finger `data` value is an `L`/`R` object, not a point list). The dataset
 has deliberate gaps when a volunteer skipped a word, so incomplete sentences are
-common; the counts show how many were dropped.
+common; the counts show how many were dropped. A one-letter word is often recorded as
+a single point; it is kept, and the replay reads it as a tap.
 
 `dev.jsonl` is about 304 MB, so the converter streams it line by line.
 
@@ -105,10 +108,15 @@ ignored, and extra columns are ignored.
 Each gesture's `start` comes from its first row's `time`, so the replay keeps the
 gaps between words. The geometry is inferred from the study's web keyboard, not
 exported with the logs: ten columns across `keyb_width`, and three letter rows of
-pitch `(keyb_height - 4) / 3.7` starting one pixel down. The converter has not been
-run over the full `swipelogs.zip`; treat the geometry as approximate. Some touches
-have no recorded `touchstart`; the first `touchmove` still starts the gesture.
-Sentences with a missing word or fewer than two points are skipped.
+pitch `(keyb_height - 4) / 3.7` starting one pixel down; treat it as approximate.
+The converter has been run over the full `swipelogs.zip`: 1,338 logs, 20,118
+sentences, 86,831 words, 1,465 sentences skipped for a missing word, no empty
+gestures. It never reads `touchstart` rows: a swipe is its `touchmove` rows, so a
+touch whose start wasn't logged still begins at its first move. Some logs write a
+row twice — the same sentence, millisecond, point, event and word, sometimes with a
+13th column — and the converter keeps both, adding the same point and time to the
+path; taking the last attempt for a word hides the retries that differ. A word
+recorded as a single point is kept, since the replay reads it as a tap.
 
 ## Noisy Typing on QWERTY Keyboards
 
@@ -143,9 +151,10 @@ The eyes-free studies are left out unless `--eyes-free` is given:
 they only imagined, so their touches do not land where the keys are. The `small`
 and `tiny` conditions of `vt_exp3` and `vt_potential` are left out unless
 `--small-keyboards` is given: they used smaller-than-full-size keyboards, not the
-full-size sighted typing the other datasets measure. `--set test` with both filters
-off is `eyesfree_exp1` alone; read a limited cut with its filters in mind: `--limit`
-takes records in the dataset's own order, not a sample.
+full-size sighted typing the other datasets measure. `--limit` takes records in the
+dataset's own order, not a sample: with both filters off, the first ~266 phone test
+records are `eyesfree_exp1`'s sighted condition, so a small cut measures only that
+study.
 
 The logs do not always record spaces. `vt_exp1`, `vt_exp2`'s `nospace`
 condition and `vt_exp3` typed a run of letters and let their decoder choose the
@@ -191,8 +200,11 @@ stay as `prompt.split()`, including their punctuation.
   right.
 - FUTO ignores `distance`; `--valid-only` skips records marked
   `potentially_invalid_sentence` and is off by default.
-- How We Swipe's keyboard geometry is inferred from the study's web keyboard, and the
-  converter has not been run over the full logs.
+- How We Swipe's keyboard geometry is inferred from the study's web keyboard, not exported
+  with the logs.
+- How We Swipe logs some rows twice, so a swipe's path can hold the same point and time two or
+  more times; the repeat adds no new sample. Retries that differ are hidden by taking the last
+  attempt for a word.
 
 ## Pitfalls
 
