@@ -43,6 +43,18 @@ final class KeyboardViewController: UIInputViewController {
     /// How long the note that a dictation went in as spoken stays up.
     static let translationNoteDuration: TimeInterval = 8
     private var isShown = false
+    /// This appearance hasn't yet checked Settings › Keyboard › Auto-start, which waits until
+    /// its keys are up (and UIKit has named the field).
+    private var autoStartPending = false
+    private let switchGuess = KeyboardSwitchGuessStore()
+    /// Notes when the field's app goes to the background, for `KeyboardSwitchGuess`; one per process.
+    private static let hostLeaveObserver: NSObjectProtocol = NotificationCenter.default.addObserver(
+        forName: .NSExtensionHostDidEnterBackground,
+        object: nil,
+        queue: .main
+    ) { _ in
+        KeyboardSwitchGuessStore().hostLeft(at: Date().timeIntervalSince1970)
+    }
     /// The dictation bar's key haptic; the full keyboard has its own generator.
     private lazy var barHaptics = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(hapticStrength))
     /// Settings › Keyboard › Strength as of the last bridge sync.
@@ -90,6 +102,7 @@ final class KeyboardViewController: UIInputViewController {
         // Before any typing log starts: the keyboard may update before Hex is opened.
         TypingLogSettings().turnOffOnce()
         KeyboardLocalDictation.allowHapticsWhileRecording()
+        _ = Self.hostLeaveObserver
         configureView()
         syncFromBridge(animated: false)
     }
@@ -97,6 +110,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         reportFullAccess(force: true)
+        autoStartPending = true
         coldStartJobID = UUID().uuidString
         didHandOffCurrentField = false
         // The keyboard may come back for another field: settle on where the dictation was last seen.
@@ -145,14 +159,49 @@ final class KeyboardViewController: UIInputViewController {
             self.listTranslationLanguagesIfNeeded()
             self.prepareLocalDictationIfNeeded()
         }
-        launchWork = [lexicon, optional]
+        // After the optional work's turn: opening the microphone is the heaviest thing the
+        // keyboard does, and iOS gives up on a keyboard slow to draw.
+        let autoStart = DispatchWorkItem { [weak self] in
+            self?.autoStartDictationIfPending()
+        }
+        launchWork = [lexicon, optional, autoStart]
         DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.afterFirstFrame, execute: lexicon)
         DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.optionalWorkDelay, execute: optional)
+        DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.autoStartDelay, execute: autoStart)
+    }
+
+    /// Settings › Keyboard › Auto-start for this appearance: Always, or When switching if you
+    /// seem to have switched back to Hex in this field (`KeyboardSwitchGuess`).
+    private func wantsAutoStart() -> Bool {
+        switch FullKeyboardSettings().dictationBarAutoStart {
+        case .never: false
+        case .always: true
+        case .whenSwitching: switchGuess.guess.isSwitchBack(to: currentDocument)
+        }
+    }
+
+    /// Starts dictating as Dictate's tap would, only on the dictation bar, idle, and where it
+    /// dictates without leaving the field: a warm Hex session or in-keyboard dictation, never
+    /// by opening Hex.
+    private func autoStartDictationIfPending() {
+        guard autoStartPending, isShown else { return }
+        autoStartPending = false
+        guard wantsAutoStart(), fullKeyboard == nil, barEmojiPanel == nil, viewModel.hasFullAccess,
+              viewModel.stagePhase == .idle,
+              KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) != .handOff
+        else { return }
+        if viewModel.dictatesThroughHex {
+            startWarmDictation()
+        } else if let local = viewModel.onLocalDictateTap {
+            local()
+        }
     }
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         bridge.recordKeyboardHidden(at: Date().timeIntervalSince1970)
+        switchGuess.keyboardHid(in: currentDocument, at: Date().timeIntervalSince1970)
+        autoStartPending = false
         if dictationEdits.isTracking { dictationEdits.finish(editContext) }
         TypingJournal.sharedIfEnabled()?.save()
         AdaptiveTouch.current?.save()

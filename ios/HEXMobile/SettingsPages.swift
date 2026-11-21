@@ -197,6 +197,25 @@ private enum KeyboardChoice: CaseIterable {
     }
 }
 
+/// Settings › Keyboard › Auto-start, while the dictation bar is chosen.
+private extension DictationBarAutoStart {
+    var label: String {
+        switch self {
+        case .never: String(localized: "Never")
+        case .whenSwitching: String(localized: "On switch")
+        case .always: String(localized: "Always")
+        }
+    }
+
+    var detail: String {
+        switch self {
+        case .never: String(localized: "Tap Dictate to start")
+        case .whenSwitching: String(localized: "When you switch back to Hex in a field")
+        case .always: String(localized: "Each time the dictation bar opens")
+        }
+    }
+}
+
 /// Settings › Keyboard › Hex key: which end of the strip the full keyboard's Hex key sits at.
 private extension KeyHapticStrength {
     var label: String {
@@ -220,7 +239,8 @@ private enum HexKeySide: CaseIterable {
     }
 }
 
-/// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
+/// Settings › Keyboard: Full or Dictation bar (with Auto-start under the bar, On switch by
+/// default, and always on iPad, which shows the bar), the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
 /// default, as Apple's keyboard never offers them, then Vocabulary, Hex's list of your own
 /// words; Hex key, Right by default, under Languages),
@@ -241,6 +261,7 @@ struct KeyboardSettingsPage: View {
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
     @State private var hapticStrength = FullKeyboardSettings().hapticStrength
+    @State private var autoStart = FullKeyboardSettings().dictationBarAutoStart
     @State private var practiceText = ""
 
     /// The full keyboard is iPhone only: on an iPad the keyboard shows the dictation bar, whichever
@@ -279,6 +300,24 @@ struct KeyboardSettingsPage: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 10)
                 .frame(minHeight: 50)
+
+                if !fullKeyboard || Self.runsOnPad {
+                    SettingsDivider()
+
+                    HStack(spacing: 12) {
+                        SettingsRowLabel(title: String(localized: "Auto-start"), detail: autoStart.detail)
+                        Spacer(minLength: 8)
+                        SettingsSegments(
+                            items: DictationBarAutoStart.allCases,
+                            selected: autoStart,
+                            label: \.label,
+                            onSelect: { autoStart = $0 }
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 50)
+                }
 
                 if fullKeyboard {
                     KeyboardLanguagesRow()
@@ -431,6 +470,9 @@ struct KeyboardSettingsPage: View {
         .onChange(of: hapticStrength) { _, strength in
             FullKeyboardSettings().hapticStrength = strength
         }
+        .onChange(of: autoStart) { _, choice in
+            FullKeyboardSettings().dictationBarAutoStart = choice
+        }
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autoCapitalization = FullKeyboardSettings().autoCapitalization
@@ -444,6 +486,7 @@ struct KeyboardSettingsPage: View {
             emoji = FullKeyboardSettings().emoji
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
             hapticStrength = FullKeyboardSettings().hapticStrength
+            autoStart = FullKeyboardSettings().dictationBarAutoStart
         }
     }
 }

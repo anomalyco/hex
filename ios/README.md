@@ -259,6 +259,21 @@ never at a launch by itself.
     more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
+  - **Auto-start:** Settings › Keyboard › Auto-start (`FullKeyboardSettings.dictationBarAutoStart`)
+    lets the dictation bar start dictating by itself as it shows, as a tap on **Dictate**
+    would, 0.8 s after it appears (after the first frame and the launch's optional work),
+    only while idle, outside number pads and the emoji panel, and only where it dictates
+    without leaving the field (a warm session or in-keyboard dictation, never by opening
+    Hex). **Never**, **On switch** (the default) or **Always**. iOS doesn't tell a
+    keyboard whether you switched to it or a field opened with it, so On switch guesses
+    (`KeyboardSwitchGuess`): the keyboard comes back in the field it last hid in
+    (`documentIdentifier`), and the field's app didn't go to the background
+    (`NSExtensionHostDidEnterBackground`) from 2 s before that hide on. Switching to
+    another keyboard and back in one field starts; a field that opens with Hex already
+    chosen doesn't. Known gap: the first switch to Hex in a field another keyboard opened
+    is another document, so it doesn't start. Unproven on a device: whether
+    `documentIdentifier` stays the same across a keyboard switch and changes when a field
+    is focused again, which the guess relies on.
   - **Push to talk:** Holding still for 0.35 s on the full keyboard's Hex key
     or the dictation bar's **Dictate** starts dictation at once with a light
     haptic (Settings › Keyboard › Haptics), and lifting the finger finishes it as
@@ -651,7 +666,8 @@ never at a launch by itself.
     from when the full keyboard was an experiment: unset or true is Full, false
     the dictation bar, so testers who turned that experiment off keep the bar;
     on an iPad, where the keyboard always shows the dictation bar, the row says so:
-    "On iPad, Hex shows the dictation bar"), then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
+    "On iPad, Hex shows the dictation bar"), Auto-start (Never, On switch by default, or
+    Always) while the dictation bar is chosen or on an iPad, then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words, Vocabulary (Hex's custom vocabulary list, how many words it
     holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
