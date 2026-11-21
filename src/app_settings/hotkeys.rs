@@ -94,7 +94,7 @@ impl HotkeyModifiers {
         }
     }
 
-    #[cfg_attr(target_os = "windows", allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub const fn control() -> Self {
         Self {
             control: Some(ModifierSide::Either),
