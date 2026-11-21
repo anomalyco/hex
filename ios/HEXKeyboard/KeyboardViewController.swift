@@ -37,6 +37,10 @@ final class KeyboardViewController: UIInputViewController {
     /// Follows dictations for typing logs' outcomes, apart from Learn how I type's tracker.
     private let logDictationEdits = DictationEditTracker()
     private var pendingHostContext: DispatchWorkItem?
+    /// Hides the translation note (`showTranslationNote`).
+    private var translationNoteWork: DispatchWorkItem?
+    /// How long the note that a dictation went in as spoken stays up.
+    static let translationNoteDuration: TimeInterval = 8
     private var isShown = false
     /// The dictation bar's key haptic; the full keyboard has its own generator.
     private lazy var barHaptics = UIImpactFeedbackGenerator(style: .light)
@@ -446,14 +450,14 @@ final class KeyboardViewController: UIInputViewController {
             self?.syncLanguageState()
         }
         viewModel.onTranslationToggled = { [weak self] on in
-            DictationTranslationSettings().isTranslating = on
+            DictationTranslationSettings().isEnabled = on
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
         viewModel.onTranslationTargetSelected = { [weak self] target in
             let settings = DictationTranslationSettings()
             settings.targetLanguage = target
-            settings.isTranslating = true
+            settings.isEnabled = true
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
@@ -702,7 +706,14 @@ final class KeyboardViewController: UIInputViewController {
               let resultID = snap.resultID,
               let transcript = snap.transcript,
               bridge.lastInsertedResultID != resultID else { return false }
-        insertDictation(transcript, resultID: resultID, heard: snap.heard, stages: snap.stages, source: source)
+        insertDictation(
+            transcript,
+            resultID: resultID,
+            heard: snap.heard,
+            stages: snap.stages,
+            translationFailure: snap.translationFailure,
+            source: source
+        )
         if source == "keyboard" { localDictation.markDelivered(resultID: resultID) }
         return true
     }
@@ -766,6 +777,7 @@ final class KeyboardViewController: UIInputViewController {
         resultID: String,
         heard: String?,
         stages: DictationStages?,
+        translationFailure: TranslationFailure? = nil,
         source: String
     ) {
         let context = editContext
@@ -799,6 +811,23 @@ final class KeyboardViewController: UIInputViewController {
         )
         observeDictationEdits(fromKeys: true)
         bridge.lastInsertedResultID = resultID
+        showTranslationNote(translationFailure)
+    }
+
+    /// Translate what I say pasted a dictation as spoken: both keyboards say so with the fix
+    /// (Open Hex goes to Settings › Dictation) for a few seconds, or until the next dictation.
+    private func showTranslationNote(_ failure: TranslationFailure?) {
+        translationNoteWork?.cancel()
+        translationNoteWork = nil
+        if viewModel.translationNote != failure {
+            viewModel.translationNote = failure
+            fullKeyboard?.refreshStrip()
+        }
+        guard let failure else { return }
+        UIAccessibility.post(notification: .announcement, argument: "\(TranslationFailure.note). \(failure.fix)")
+        let work = DispatchWorkItem { [weak self] in self?.showTranslationNote(nil) }
+        translationNoteWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.translationNoteDuration, execute: work)
     }
 
     // MARK: - The dictation bar's emoji panel
@@ -955,14 +984,13 @@ final class KeyboardViewController: UIInputViewController {
         let supported = settings.supportedDictationLanguages
         let translation = DictationTranslationSettings()
         let target = translation.isEnabled ? translation.targetLanguage : nil
-        let pastesTranslation = translation.pastesTranslation
         // Apple's translation (iOS 26+) backs the keyboards' Translate to <language> switch.
         let translationLanguage: String? = if #available(iOS 26.0, *) { translation.targetLanguage } else { nil }
         let translationLanguages = Self.translationLanguages
         let hinglish = HinglishSettings().isEnabled
         let signature = [
             explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)",
-            target ?? "", "\(pastesTranslation)", "\(hinglish)",
+            target ?? "", "\(hinglish)",
             translationLanguage ?? "", "\(translationLanguages?.count ?? -1)",
         ].joined(separator: "|")
         guard signature != languageSignature else { return }
@@ -978,7 +1006,6 @@ final class KeyboardViewController: UIInputViewController {
         if viewModel.automaticLanguage != automatic { viewModel.automaticLanguage = automatic }
         if viewModel.languageChoices != choices { viewModel.languageChoices = choices }
         if viewModel.translationTarget != target { viewModel.translationTarget = target }
-        if viewModel.pastesTranslation != pastesTranslation { viewModel.pastesTranslation = pastesTranslation }
         if viewModel.translationLanguage != translationLanguage { viewModel.translationLanguage = translationLanguage }
         let targets = translationLanguage.map {
             DictationTranslationSettings.targetChoices(

@@ -6,6 +6,7 @@ struct HEXMobileApp: App {
     @State private var dictation = DictationController.shared
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
     @State private var showSetup = SettingsSnapshotFixture.showsSetupSheet
+    @State private var openPage: SettingsPage?
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
@@ -38,13 +39,17 @@ struct HEXMobileApp: App {
                 ContentView(
                     dictation: dictation,
                     openedFromKeyboard: $openedFromKeyboard,
-                    showSetup: $showSetup
+                    showSetup: $showSetup,
+                    openPage: $openPage
                 )
                 .onOpenURL { url in
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
                     if case .setup = request {
                         openedFromKeyboard = false
                         showSetup = true
+                    } else if case .translationSettings = request {
+                        openedFromKeyboard = false
+                        openPage = .dictation
                     } else {
                         openedFromKeyboard = true
                     }

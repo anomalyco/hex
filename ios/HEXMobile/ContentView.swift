@@ -39,6 +39,8 @@ struct ContentView: View {
     @Bindable var dictation: DictationController
     @Binding var openedFromKeyboard: Bool
     @Binding var showSetup: Bool
+    /// A settings page the keyboard asked for (`KeyboardLaunchRequest.translationSettings`).
+    var openPage: Binding<SettingsPage?> = .constant(nil)
     @State private var setupMonitor = KeyboardSetupMonitor()
     @State private var keyboardSpeech = KeyboardSpeechPreparation()
     @State private var onboardingPage = OnboardingProgress.launchPage
@@ -141,6 +143,11 @@ struct ContentView: View {
                 .navigationDestination(for: SettingsPage.self) { page in
                     settingsPage(page)
                 }
+        }
+        .onChange(of: openPage.wrappedValue, initial: true) { _, page in
+            guard let page else { return }
+            settingsPath = [page]
+            openPage.wrappedValue = nil
         }
         .tint(HexTheme.textBase)
         .sheet(isPresented: $showSetup) {

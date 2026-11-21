@@ -62,10 +62,11 @@ final class KeyboardViewModel: ObservableObject {
     @Published var dictationLanguage: String?
     @Published var automaticLanguage: String?
     @Published var languageChoices: [String] = []
-    /// Translate what I say's target (BCP 47) while it is on, else nil, and the switch that
-    /// picks translated or as spoken for the next dictations.
+    /// Translate what I say's target (BCP 47) while it is on, else nil.
     @Published var translationTarget: String?
-    @Published var pastesTranslation = true
+    /// The last dictation went in as spoken while Translate what I say was on: both keyboards
+    /// say so for a few seconds, with the fix, which opens Hex's Settings.
+    @Published var translationNote: TranslationFailure?
     /// Translate what I say's target whether it is on or off, for the keyboards' Translate to
     /// <language> switch; nil hides the switch (no Apple translation before iOS 26).
     @Published var translationLanguage: String?
@@ -145,10 +146,10 @@ final class KeyboardViewModel: ObservableObject {
         hasFullAccess && translationLanguage != nil
     }
 
-    /// Dictations paste translated: Translate what I say is on and its paste switch says
-    /// translated. The Hex key wears the target's badge ("EN") the whole time.
+    /// Dictations paste translated: Translate what I say is on. The Hex key wears the target's
+    /// badge ("EN") the whole time.
     var isTranslating: Bool {
-        hasFullAccess && translationTarget != nil && pastesTranslation
+        hasFullAccess && translationTarget != nil
     }
 
     /// The target while `isTranslating`, for the badge beside the Hex key ("EN").
@@ -160,7 +161,7 @@ final class KeyboardViewModel: ObservableObject {
     /// "Español → English".
     var languageSummary: String? {
         guard let languageLabel else { return nil }
-        guard pastesTranslation, let target = pasteChoice?.target else { return languageLabel }
+        guard let target = pasteChoice?.target else { return languageLabel }
         return "\(languageLabel) → \(DictationLanguageSwitch.nativeName(for: target))"
     }
 
@@ -756,12 +757,13 @@ struct KeyboardSurfaceView: View {
 
             Spacer(minLength: 4)
 
-            if model.showsLanguageSwitch || model.showsTranslationSwitch {
+            // The translation note takes the bar's width for its few seconds.
+            if model.showsLanguageSwitch || model.showsTranslationSwitch, model.translationNote == nil {
                 languageTrigger(palette: p)
             }
 
             styleTrigger(palette: p)
-                .hexTrayReveal(model.hasFullAccess, reduceMotion: reduceMotion, offsetY: 0)
+                .hexTrayReveal(model.hasFullAccess && model.translationNote == nil, reduceMotion: reduceMotion, offsetY: 0)
         }
         .frame(height: 26)
     }
@@ -793,10 +795,15 @@ struct KeyboardSurfaceView: View {
     private func leadingAccessory(palette p: KeyboardChromePalette) -> some View {
         let showNoAccess = !model.hasFullAccess
         let showRecordingClock = model.hasFullAccess && model.stagePhase == .recording
+        let showTranslationNote = model.hasFullAccess
+            && model.translationNote != nil
+            && model.stagePhase != .recording
+            && model.stagePhase != .transcribing
         let showWarmStatus = model.hasFullAccess
             && model.isWarmAvailable
             && model.stagePhase != .recording
             && model.stagePhase != .transcribing
+            && !showTranslationNote
 
         return ZStack(alignment: .leading) {
             HStack(spacing: 6) {
@@ -839,7 +846,36 @@ struct KeyboardSurfaceView: View {
                 }
             }
             .hexTrayReveal(showWarmStatus, reduceMotion: reduceMotion, offsetY: 2)
+
+            Group {
+                if let note = model.translationNote {
+                    translationNote(note, palette: p)
+                }
+            }
+            .hexTrayReveal(showTranslationNote, reduceMotion: reduceMotion, offsetY: 2)
         }
+    }
+
+    /// "Couldn't translate, pasted as spoken" over its fix; a tap opens Hex's Settings › Dictation.
+    private func translationNote(_ note: TranslationFailure, palette p: KeyboardChromePalette) -> some View {
+        Button {
+            model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
+        } label: {
+            VStack(alignment: .leading, spacing: 0) {
+                Text(TranslationFailure.note)
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundStyle(p.textBase)
+                Text(note.fix)
+                    .font(.system(size: 11))
+                    .foregroundStyle(p.textMuted)
+            }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
+        .accessibilityHint("Opens Hex's Settings")
     }
 
     private func styleTrigger(palette p: KeyboardChromePalette) -> some View {

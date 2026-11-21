@@ -105,6 +105,8 @@ final class DictationController {
     private var keyboardResultExpiresAt: TimeInterval?
     private var keyboardResult: String?
     private var keyboardResultHeard: String?
+    /// Why the result went in as spoken while Translate what I say was on, for the keyboard's note.
+    private var keyboardResultTranslationFailure: TranslationFailure?
     /// Record typing logs: each step of the result, for the keyboard's log; nil while off.
     private var keyboardResultStages: DictationStages?
     private var keyboardMessage: String?
@@ -514,7 +516,7 @@ final class DictationController {
     // MARK: - Keyboard Launch
 
     func handleKeyboardLaunch(_ request: KeyboardLaunchRequest) {
-        if case .setup = request {
+        if request.opensPage {
             return
         }
         // A language picked in the keyboard: prepare it before the handoff records.
@@ -534,7 +536,7 @@ final class DictationController {
         }
 
         switch request {
-        case .setup:
+        case .setup, .translationSettings:
             break
 
         case .startSession:
@@ -982,10 +984,6 @@ final class DictationController {
                 let stages = await pipeline.run(rawText) { tagged in
                     await self.cleanedTranscriptIfEnabled(tagged, session: session)
                 }
-                let corrected = stages.fixed
-                let spelled = stages.spelled
-                let tagged = stages.tagged
-                let cleaned = stages.cleaned
                 let translated = stages.translated
                 guard self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
@@ -1006,6 +1004,7 @@ final class DictationController {
                     self.keyboardResult = formatted
                     // A translation's words can't be compared with what was heard.
                     self.keyboardResultHeard = session.sharesHeard && translated == nil ? stages.heard : nil
+                    self.keyboardResultTranslationFailure = stages.translationFailure
                     self.keyboardResultStages = TypingLogSettings().isEnabled
                         ? DictationStages(
                             engine: self.engineName,
@@ -1014,10 +1013,10 @@ final class DictationController {
                             recordedMS: Int((finalDuration * 1000).rounded()),
                             transcribeMS: Int((Date().timeIntervalSince(transcribeStarted) * 1000).rounded()),
                             raw: rawText,
-                            fixed: corrected,
-                            spelled: spelled,
-                            tagged: CleanupTaggerSettings().isEnabled && session.style != .verbatim ? tagged : nil,
-                            cleaned: session.usesCleanup && session.style != .verbatim ? cleaned : nil,
+                            fixed: stages.fixed,
+                            spelled: stages.spelled,
+                            tagged: CleanupTaggerSettings().isEnabled && session.style != .verbatim ? stages.tagged : nil,
+                            cleaned: session.usesCleanup && session.style != .verbatim ? stages.cleaned : nil,
                             translated: translated,
                             formatted: formatted
                         )
@@ -1249,6 +1248,7 @@ final class DictationController {
             keyboardResultID = nil
             keyboardResult = nil
             keyboardResultHeard = nil
+            keyboardResultTranslationFailure = nil
             keyboardResultStages = nil
             keyboardResultExpiresAt = nil
         }
@@ -1309,7 +1309,8 @@ final class DictationController {
                 transcript: keyboardResult,
                 message: failureMessage,
                 heard: keyboardResultHeard,
-                stages: keyboardResultStages
+                stages: keyboardResultStages,
+                translationFailure: keyboardResultTranslationFailure
             )
         )
     }

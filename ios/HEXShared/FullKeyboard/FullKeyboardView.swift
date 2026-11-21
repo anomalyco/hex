@@ -112,6 +112,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
+        stripView.onOpenNotice = { [weak self] in
+            self?.keyFeedback()
+            self?.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
+        }
         stripView.onNextKeyboard = { [weak self] in
             self?.typingLog?.ui("next_keyboard")
             self?.hostController?.advanceToNextInputMode()
@@ -752,8 +756,16 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             showsUndo: lastDictation != nil,
             statusText: status,
             clipboard: clipboardOffer,
-            fullAccessHint: showsFullAccessHint && !model.hasFullAccess
+            fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
+            notice: translationNotice
         )
+    }
+
+    /// The last dictation went in as spoken while Translate what I say was on: what happened,
+    /// the fix, and Open Hex, which opens Settings › Dictation.
+    private var translationNotice: KeyboardStripNotice? {
+        guard model.hasFullAccess, let note = model.translationNote else { return nil }
+        return KeyboardStripNotice(title: TranslationFailure.note, detail: note.fix, button: String(localized: "Open Hex"))
     }
 
     // MARK: - Without Full Access

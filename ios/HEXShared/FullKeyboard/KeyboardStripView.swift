@@ -35,6 +35,8 @@ final class KeyboardStripView: UIView {
     var onNextKeyboard: (() -> Void)?
     /// The Full Access hint's Open Hex was tapped (it opens Hex's setup).
     var onOpenHexFromHint: (() -> Void)?
+    /// The notice's chip was tapped (`KeyboardStripNotice`).
+    var onOpenNotice: (() -> Void)?
 
     private let statusLabel = UILabel()
     private let undoChip = UIButton(type: .custom)
@@ -46,12 +48,16 @@ final class KeyboardStripView: UIView {
     private var showsFullAccessHint = false
     /// Built the first time the Hex key is tapped without Full Access.
     private var fullAccessHintView: FullAccessHintView?
+    private var notice: KeyboardStripNotice?
+    /// Built for the first notice, in the Full Access hint's shape.
+    private var noticeView: FullAccessHintView?
     /// The Hex key sits left of the strip (Settings › Keyboard › Hex key): the Full Access
     /// hint's Open Hex leads, beside the key, and the Logging mark moves to the far corner.
     var hexOnLeading = false {
         didSet {
             guard hexOnLeading != oldValue else { return }
             fullAccessHintView?.chipLeads = hexOnLeading
+            noticeView?.chipLeads = hexOnLeading
             setNeedsLayout()
         }
     }
@@ -143,27 +149,32 @@ final class KeyboardStripView: UIView {
     required init?(coder: NSCoder) { fatalError() }
 
     /// `fullAccessHint`, while true, replaces everything else in the strip with what
-    /// dictation needs (`FullAccessHintView`).
+    /// dictation needs (`FullAccessHintView`); `notice` does the same after it.
     func update(
         suggestions: [KeyboardSuggestion],
         showsUndo: Bool,
         statusText: String?,
         clipboard: KeyboardClipboardOffer? = nil,
-        fullAccessHint: Bool = false
+        fullAccessHint: Bool = false,
+        notice: KeyboardStripNotice? = nil
     ) {
         let changed = suggestions != currentSuggestions || showsUndo != self.showsUndo
             || statusText != self.statusText || clipboard != self.clipboard
-            || fullAccessHint != showsFullAccessHint
+            || fullAccessHint != showsFullAccessHint || notice != self.notice
         guard changed else { return }
         currentSuggestions = suggestions
         self.showsUndo = showsUndo
         self.statusText = statusText
         self.clipboard = clipboard
         showsFullAccessHint = fullAccessHint
+        self.notice = notice
 
         if fullAccessHint, fullAccessHintView == nil { _ = makeFullAccessHintView() }
         if let hint = fullAccessHintView { show(hint, fullAccessHint) }
-        let showsHint = fullAccessHint
+        if let notice, noticeView == nil { _ = makeNoticeView() }
+        if let notice { noticeView?.show(notice) }
+        if let noticeView { show(noticeView, notice != nil && !fullAccessHint) }
+        let showsHint = fullAccessHint || notice != nil
         show(undoChip, showsUndo && !showsHint)
         let showsClipboard = showsClipboard
         var paste = pasteControl.configuration
@@ -228,7 +239,7 @@ final class KeyboardStripView: UIView {
 
     /// Clipboard chips replace the empty strip; suggestions and status win.
     private var showsClipboard: Bool {
-        guard let clipboard, !showsUndo, statusText == nil, !showsFullAccessHint else { return false }
+        guard let clipboard, !showsUndo, statusText == nil, !showsFullAccessHint, notice == nil else { return false }
         if case .code = clipboard { return true }
         return currentSuggestions.isEmpty
     }
@@ -262,6 +273,18 @@ final class KeyboardStripView: UIView {
         return hint
     }
 
+    private func makeNoticeView() -> FullAccessHintView {
+        let view = FullAccessHintView()
+        view.chipLeads = hexOnLeading
+        view.onOpenHex = { [weak self] in self?.onOpenNotice?() }
+        view.isHidden = true
+        addSubview(view)
+        noticeView = view
+        applyPalette()
+        setNeedsLayout()
+        return view
+    }
+
     private func applyPalette() {
         statusLabel.textColor = palette.textMuted
         var paste = pasteControl.configuration
@@ -277,6 +300,7 @@ final class KeyboardStripView: UIView {
         chip?.background.backgroundColor = palette.chipFill
         undoChip.configuration = chip
         fullAccessHintView?.palette = palette
+        noticeView?.palette = palette
         loggingMark?.textColor = palette.textMuted
         for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
             slotButtons[slot].configure(with: currentSuggestions[item], palette: palette, animated: false)
@@ -333,6 +357,8 @@ final class KeyboardStripView: UIView {
         }
         fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
+        noticeView?.frame = hintFrame
+        noticeView?.chipHeight = chipH
         let slots = currentSlotFrames
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
@@ -349,7 +375,7 @@ final class KeyboardStripView: UIView {
     }
 
     override func draw(_ rect: CGRect) {
-        guard !showsUndo, !showsClipboard, !showsFullAccessHint, statusLabel.isHidden, bounds.width > 60 else { return }
+        guard !showsUndo, !showsClipboard, !showsFullAccessHint, notice == nil, statusLabel.isHidden, bounds.width > 60 else { return }
         // Hide the divider adjacent to a highlighted primary pill, matching Apple's strip.
         let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
         guard !primaryHighlighted else { return }
@@ -569,6 +595,14 @@ final class KeyboardStripView: UIView {
     }
 }
 
+/// A two-line message with a chip that replaces the strip for a few seconds, in the Full Access
+/// hint's shape: "Couldn't translate, pasted as spoken" over its fix, and Open Hex.
+struct KeyboardStripNotice: Equatable {
+    let title: String
+    let detail: String
+    let button: String
+}
+
 /// What the Hex key shows without Full Access: dictation needs Allow Full Access, where to
 /// turn it on, and an Open Hex chip, the only part that opens Hex, on the Hex key's side.
 @MainActor
@@ -616,6 +650,18 @@ final class FullAccessHintView: UIView {
 
     @objc private func handleOpen() {
         onOpenHex?()
+    }
+
+    /// Shows `notice` in place of the Full Access words.
+    func show(_ notice: KeyboardStripNotice) {
+        titleLabel.text = notice.title
+        pathLabel.text = notice.detail
+        pathLabel.accessibilityLabel = nil
+        var open = openButton.configuration
+        open?.title = notice.button
+        openButton.configuration = open
+        openButton.accessibilityHint = nil
+        setNeedsLayout()
     }
 
     private func applyPalette() {

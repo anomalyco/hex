@@ -204,6 +204,36 @@ final class KeyboardBridgeTests: XCTestCase {
         )
     }
 
+    /// Hex's result tells the keyboard why it went in as spoken, through the App Group, and a
+    /// snapshot from a build without the field still reads.
+    func testSnapshotCarriesWhyATranslationWentInAsSpoken() throws {
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let bridge = KeyboardBridge(defaults: defaults)
+        let failure = TranslationFailure(
+            .failed,
+            source: Locale.Language(identifier: "zh-CN"),
+            target: Locale.Language(identifier: "en"),
+            detail: "TranslationErrorDomain 16"
+        )
+        bridge.publish(KeyboardSnapshot(
+            state: .ready, heartbeat: 1, expiresAt: 2, resultID: "r", transcript: "我们明天见。", translationFailure: failure
+        ))
+        XCTAssertEqual(bridge.snapshot().translationFailure, failure)
+
+        let old = #"{"state":"ready","heartbeat":1,"expiresAt":2,"audioLevel":0,"resultID":"r","transcript":"hi"}"#
+        let decoded = try JSONDecoder().decode(KeyboardSnapshot.self, from: Data(old.utf8))
+        XCTAssertNil(decoded.translationFailure)
+        XCTAssertEqual(decoded.transcript, "hi")
+    }
+
+    func testTranslationSettingsLaunchOpensAPageWithoutAHandoff() {
+        let request = KeyboardLaunchRequest.translationSettings
+        XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/translation")
+        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+        XCTAssertTrue(request.opensPage)
+        XCTAssertFalse(KeyboardLaunchRequest.startSession(requestedAt: nil).opensPage)
+    }
+
     func testKeyboardSetupLaunchRoundTripsWithoutAHandoff() {
         let request = KeyboardLaunchRequest.setup
         XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/setup")
