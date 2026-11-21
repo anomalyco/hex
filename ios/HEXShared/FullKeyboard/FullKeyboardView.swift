@@ -708,7 +708,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
                 suggestions = []
             } else {
                 let emoji = emojiForFinishedWord()
-                if !emoji.isEmpty { suggestions = emoji }
+                if !emoji.isEmpty {
+                    // The finished word's emoji, with next words beside it so every slot fills:
+                    // one emoji takes the centre.
+                    let words = Array(suggestions.prefix(max(0, 3 - emoji.count)))
+                    suggestions = emoji.count == 1 && words.count == 2 ? [words[0], emoji[0], words[1]] : emoji + words
+                }
             }
         }
         stripView.update(

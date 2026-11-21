@@ -327,7 +327,12 @@ final class FullKeyboardEngine {
                 beforeInput: target.documentContextBeforeInput,
                 field: field,
                 autocorrectionType: target.autocorrectionType,
-                predictionModel: letterOdds
+                predictionModel: letterOdds,
+                capitalizesNext: AutoCapitalization.shouldCapitalize(
+                    mode: autoCapitalizationMode,
+                    before: target.documentContextBeforeInput,
+                    hasText: target.hasText
+                )
             )
         }
         if next != suggestions {
@@ -340,7 +345,9 @@ final class FullKeyboardEngine {
     func acceptSuggestion(_ suggestion: KeyboardSuggestion) {
         // A queued tap on a prediction must not replace a word started in the meantime.
         if suggestion.kind == .nextWord,
-           target.documentContextBeforeInput?.last != " " || !suggestions.contains(suggestion) { return }
+           AutocorrectEngine.currentToken(in: target.documentContextBeforeInput) != nil
+            || target.documentContextBeforeInput.map({ !($0.isEmpty || $0.last == " " || $0.last!.isNewline) }) == true
+            || !suggestions.contains(suggestion) { return }
         // The strip shows a swipe's readings: mid-swipe they're only shown, after it one
         // takes the swiped word's place.
         if isSwiping { return }
