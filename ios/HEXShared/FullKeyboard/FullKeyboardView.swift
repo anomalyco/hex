@@ -781,6 +781,9 @@ final class FullKeyboardView: UIView {
         }
         var clipboardOffer = clipboard.offer(
             textContentType: engine.target.textContentType,
+            keyboardType: engine.target.keyboardType,
+            autocorrectionType: engine.target.autocorrectionType,
+            fieldIsEmpty: !engine.target.hasText,
             hasFullAccess: model.hasFullAccess
         )
         // A dictation that didn't go in by itself comes before a copy, but not in a code field.
