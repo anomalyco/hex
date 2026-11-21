@@ -415,9 +415,12 @@ struct ContentView: View {
             .padding(.horizontal, Self.stageInset)
 
             HStack(spacing: 12) {
-                Text("Preparing model…")
+                Text(dictation.modelPreparation.detail)
                     .font(.system(size: 13, weight: .medium))
                     .foregroundStyle(HexTheme.textMuted)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .layoutPriority(1)
                 ProgressView(value: dictation.modelPreparation.fractionCompleted)
                     .tint(HexTheme.textBase)
             }
@@ -781,7 +784,7 @@ struct ContentView: View {
         case .requestingPermission:
             return String(localized: "Allow microphone access")
         case .preparingModel:
-            return String(localized: "Preparing model…")
+            return dictation.modelPreparation.detail
         case .transcribing:
             return String(localized: "Transcribing…")
         case .ready where dictation.keyboardSessionEnabled:

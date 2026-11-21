@@ -13,6 +13,9 @@ struct OnboardingModel: Equatable {
     var stage: Stage
     /// The language it's for, in Hex's interface language ("English").
     var language: String
+    /// What Hex's own model is doing ("Optimizing for this iPhone… about a minute"), while it
+    /// prepares.
+    var detail: String?
 
     var isReady: Bool { stage == .ready }
 
@@ -38,7 +41,9 @@ struct OnboardingModel: Equatable {
             app = .ready
         } else {
             switch dictation.phase {
-            case .preparingModel: app = .downloading(dictation.modelPreparation.fractionCompleted)
+            case .preparingModel:
+                app = .downloading(dictation.modelPreparation.fractionCompleted)
+                detail = dictation.modelPreparation.detail
             case .failed(let message): app = .failed(message)
             default: app = .starting
             }
@@ -61,9 +66,10 @@ struct OnboardingModel: Equatable {
         language = SpeechModelUnavailable.interfaceName(id)
     }
 
-    init(stage: Stage, language: String) {
+    init(stage: Stage, language: String, detail: String? = nil) {
         self.stage = stage
         self.language = language
+        self.detail = detail
     }
 
     /// One stage for two downloads: a failure first, then ready only when both are, else the
@@ -107,7 +113,11 @@ struct OnboardingView: View {
             )
         }
         if let fraction = fixture.modelFraction {
-            return OnboardingModel(stage: .downloading(fraction), language: english)
+            return OnboardingModel(
+                stage: .downloading(fraction),
+                language: english,
+                detail: String(localized: "Downloading the speech model")
+            )
         }
         return OnboardingModel(stage: .ready, language: english)
     }
@@ -602,10 +612,18 @@ struct OnboardingModelWait: View {
                 VStack(alignment: .leading, spacing: 8) {
                     ProgressView(value: model.fraction)
                         .tint(HexTheme.textBase)
-                    Text(model.fraction, format: .percent.precision(.fractionLength(0)))
-                        .font(.system(size: 13))
-                        .monospacedDigit()
-                        .foregroundStyle(HexTheme.textMuted)
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        if let detail = model.detail {
+                            Text(detail)
+                                .lineLimit(2)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 0)
+                        Text(model.fraction, format: .percent.precision(.fractionLength(0)))
+                            .monospacedDigit()
+                    }
+                    .font(.system(size: 13))
+                    .foregroundStyle(HexTheme.textMuted)
                 }
                 .frame(maxWidth: 260)
                 .padding(.top, 10)

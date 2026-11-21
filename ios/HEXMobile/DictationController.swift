@@ -186,7 +186,7 @@ final class DictationController {
     private let languageSettings: LanguageSettings
     private(set) var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,
-        detail: "Checking model files"
+        detail: String(localized: "Checking the speech model")
     )
 
     init(
@@ -699,7 +699,7 @@ final class DictationController {
         copied = false
         modelPreparation = ModelPreparationProgress(
             fractionCompleted: 0,
-            detail: "Checking model files"
+            detail: String(localized: "Checking the speech model")
         )
 
         Task {
