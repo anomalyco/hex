@@ -60,6 +60,18 @@ final class KeyboardLocalDictation {
     /// After a capture ends, long enough for WebKit to have let its audio session go.
     static let resumeOtherAudioDelay: TimeInterval = 0.5
     private static let audioSessionQueue = DispatchQueue(label: "anomaly.hex.keyboard.audio-session", qos: .userInitiated)
+
+    /// Keyboard dictation sets this process's audio session to record (WebKit captures for
+    /// it), and iOS mutes a recording session's haptics by default: key haptics stay on. Set
+    /// once per process on the audio session's queue: it waits on the audio server, which the
+    /// keyboard's main thread must not do while iOS waits for its first frame.
+    static func allowHapticsWhileRecording() {
+        audioSessionQueue.async { _ = hapticsAllowed }
+    }
+
+    nonisolated private static let hapticsAllowed: Void = {
+        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+    }()
     /// A touch-down capture neither kept nor dropped by then is dropped, so a lost touch never
     /// leaves the microphone open. A hold keeps it at 0.35 s.
     static let armedTimeout: TimeInterval = 3
