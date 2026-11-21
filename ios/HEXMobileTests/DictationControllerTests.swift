@@ -1874,3 +1874,66 @@ final class AppleSpeechClipTests: XCTestCase {
         try? joined.write(toFile: (folder as NSString).appendingPathComponent("transcripts.txt"), atomically: true, encoding: .utf8)
     }
 }
+
+private final class FakeAudioSession: AudioSessionControlling {
+    enum Call: Equatable {
+        case category(AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)
+        case sampleRate(Double)
+        case preferredInput
+        case active(Bool, AVAudioSession.SetActiveOptions)
+    }
+
+    var calls: [Call] = []
+    var isOtherAudioPlaying = false
+    var availableInputs: [AVAudioSessionPortDescription]? { nil }
+
+    func setCategory(
+        _ category: AVAudioSession.Category,
+        mode: AVAudioSession.Mode,
+        options: AVAudioSession.CategoryOptions
+    ) throws {
+        calls.append(.category(category, mode, options))
+    }
+
+    func setPreferredSampleRate(_ sampleRate: Double) throws {
+        calls.append(.sampleRate(sampleRate))
+    }
+
+    func setPreferredInput(_ inPort: AVAudioSessionPortDescription?) throws {
+        calls.append(.preferredInput)
+    }
+
+    func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws {
+        calls.append(.active(active, options))
+    }
+}
+
+@MainActor
+final class AudioSessionSetupTests: XCTestCase {
+    func testRecordingMixesWithOtherAppsAudioWithOrWithoutTheBluetoothMicrophone() throws {
+        for allowBluetooth in [false, true] {
+            let session = FakeAudioSession()
+            let audio = SystemAudioManager(session: session)
+            try audio.configureAudioSession(allowBluetooth: allowBluetooth)
+
+            guard case .category(let category, let mode, let options)? = session.calls.first else {
+                return XCTFail("the category is set first")
+            }
+            XCTAssertEqual(category, .playAndRecord)
+            XCTAssertEqual(mode, .measurement)
+            XCTAssertTrue(options.contains(.mixWithOthers), "never interrupts another app's video or music")
+            XCTAssertFalse(options.contains(.duckOthers))
+            XCTAssertTrue(options.contains(.allowBluetoothA2DP))
+            XCTAssertEqual(options.contains(.allowBluetoothHFP), allowBluetooth, "the Bluetooth microphone only when allowed")
+            XCTAssertEqual(session.calls.last, .active(true, []))
+        }
+    }
+
+    func testEndingTheSessionTellsInterruptedAppsTheyMayResume() {
+        let session = FakeAudioSession()
+        let audio = SystemAudioManager(session: session)
+        audio.deactivateSession()
+        XCTAssertEqual(session.calls, [.active(false, .notifyOthersOnDeactivation)])
+        XCTAssertFalse(audio.isKeepaliveRunning)
+    }
+}

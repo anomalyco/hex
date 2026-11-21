@@ -738,12 +738,14 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     audio file.
   - Phone/FaceTime/Siri audio interruptions finalize captures `>= 300 ms` so
     spoken words are not lost, cancel shorter taps cleanly out of `Listening`,
-    and resume warm keepalive when iOS signals `.shouldResume`. **Always use
-    iPhone microphone** (on by default) records from the built-in microphone in
-    `playAndRecord` with `mixWithOthers` and A2DP output, in the app and in
-    in-keyboard dictation, so music in a car or headphones keeps playing and the
-    route never drops into call audio. Turning it off allows Bluetooth HFP
-    microphones, which pause other audio.
+    and resume warm keepalive when iOS signals `.shouldResume`. Hex's own
+    recording (the app, a warm session's keepalive and captures) is
+    `playAndRecord` with `mixWithOthers` and A2DP output, never `duckOthers`,
+    so it doesn't interrupt another app's video or music, and ending a session
+    deactivates with `notifyOthersOnDeactivation`. **Always use iPhone
+    microphone** (on by default) records from the built-in microphone, so a car
+    or headphones never drop into call audio; turning it off also allows a
+    Bluetooth HFP microphone (still mixing).
 - **Action Button, Control Center, Back Tap & Live Activity:**
   - `DictateWithHexIntent` (`AudioRecordingIntent` + `LiveActivityIntent`) and
     `HexDictationControl` (`ControlWidget`) start recording on first press with

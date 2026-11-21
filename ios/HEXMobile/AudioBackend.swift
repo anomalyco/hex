@@ -130,6 +130,7 @@ private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudi
 
 @MainActor
 final class SystemAudioManager: AudioManaging {
+    private let session: any AudioSessionControlling
     private var engine = AVAudioEngine()
     private var tapInstalled = false
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
@@ -141,7 +142,8 @@ final class SystemAudioManager: AudioManaging {
         engine.isRunning
     }
 
-    init() {
+    init(session: any AudioSessionControlling = AVAudioSession.sharedInstance()) {
+        self.session = session
         installNotifications()
     }
 
@@ -206,10 +208,7 @@ final class SystemAudioManager: AudioManaging {
 
     func deactivateSession() {
         stopKeepalive()
-        try? AVAudioSession.sharedInstance().setActive(
-            false,
-            options: .notifyOthersOnDeactivation
-        )
+        try? session.setActive(false, options: .notifyOthersOnDeactivation)
     }
 
     func beginCapture(
@@ -245,35 +244,21 @@ final class SystemAudioManager: AudioManaging {
         }
     }
 
-    /// Bluetooth off (Always use iPhone microphone, the default): record from the iPhone's
-    /// microphone and mix with other audio, so music or navigation keeps playing (over A2DP
-    /// in a car or headphones) instead of pausing and dropping into call audio.
-    private func configureAudioSession(allowBluetooth: Bool) throws {
-        let session = AVAudioSession.sharedInstance()
-        if allowBluetooth {
-            try session.setCategory(.record, mode: .measurement, options: [.allowBluetoothHFP])
-        } else {
-            try session.setCategory(
-                .playAndRecord,
-                mode: .measurement,
-                options: [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
-            )
-        }
+    /// Captures and the warm keepalive record alongside other audio: `.mixWithOthers` never
+    /// interrupts another app, so its video or music keeps playing (over A2DP in a car or
+    /// headphones) with nothing to resume, and no `.duckOthers`. Always use iPhone microphone
+    /// (the default) records from the iPhone's microphone; turned off, a Bluetooth headset's
+    /// hands-free microphone is allowed too (iOS routes HFP first when a device has both).
+    func configureAudioSession(allowBluetooth: Bool) throws {
+        try session.setCategory(
+            .playAndRecord,
+            mode: .measurement,
+            options: allowBluetooth
+                ? [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
+                : [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
+        )
         try session.setPreferredSampleRate(16_000)
-        do {
-            try session.setActive(true)
-        } catch where UserFacingError.audioSessionCode(of: error) == .cannotInterruptOthers {
-            // '!int': a non-mixable session can't go active from the background while another
-            // app plays or records. Record alongside that audio instead, once.
-            try session.setCategory(
-                .playAndRecord,
-                mode: .measurement,
-                options: allowBluetooth
-                    ? [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
-                    : [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
-            )
-            try session.setActive(true)
-        }
+        try session.setActive(true, options: [])
         if !allowBluetooth, let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try? session.setPreferredInput(builtIn)
         }
