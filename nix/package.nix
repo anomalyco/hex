@@ -119,6 +119,10 @@ rustPlatform.buildRustPackage (finalAttrs: {
       ../resources
       ../assets
       ../packaging
+      # The Annotate skill the CLI reads into its instructions.
+      ../skills
+      # The iOS cleaner's instructions, compared by a test.
+      ../ios/HEXMobile/TranscriptCleanup.swift
       # The Labs registry's published copy: a Rust test compares it to the registry.
       ../site/src/labs.json
       ../macos/HexMicrophoneDriver/Info.plist
