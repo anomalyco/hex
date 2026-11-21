@@ -17,6 +17,8 @@ https://storage.googleapis.com/books/ngrams/books/datasetsv3.html
 Creative Commons Attribution 3.0 Unported: https://creativecommons.org/licenses/by/3.0/
 Changes: lowercased and summed word and word-pair counts for 1980–2019, filtered
 spellings, selected informative pairs, and quantized probabilities into HXTM v3.
+The English, Spanish and German capitalization lists (.capitals) come from the same corpus's
+word counts for 1980–2019: the share of each word written with a capital first letter.
 
 German uses the German corpus's alphabetic spellings; no external German dictionary.
 English literal validity also uses SCOWL words, proper names, uppercase forms and abbreviations

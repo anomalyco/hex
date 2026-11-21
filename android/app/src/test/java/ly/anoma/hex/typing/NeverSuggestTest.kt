@@ -224,7 +224,7 @@ class NeverSuggestTest {
         val g = word("de")
         g.reset("das ")
         for (c in "madchen") g.tap(de, c)
-        assertEquals("mädchen", g.replacement())
+        assertEquals("Mädchen", g.replacement())
     }
 
     // Types `text` at the key centres as the keyboard would: a space or closing mark finishes the
@@ -296,5 +296,144 @@ class NeverSuggestTest {
         assertEquals("a receive. approx. a,", word().typed(g, "a recieve. approx. a,"))
         assertEquals("I want ", word().typed(g, "iwant "))
         assertEquals("look at ", word().typed(g, "lookat "))
+    }
+
+    // iOS testSpatialAutocorrectCapitalisesANameTypedInLowercase: a name, day or place typed in
+    // lowercase takes its capital; a word that is also an ordinary lowercase word doesn't.
+    @Test fun aNameTypedInLowercaseTakesItsCapital() {
+        val g = layout("en")
+        assertEquals("see Mary on Monday in Boston ", word().typed(g, "see mary on monday in boston "))
+        assertEquals("we stood united in china ", word().typed(g, "we stood united in china "))
+        // A name outside the Spanish model is a word as typed, not a typo ("tom" stays, not "toma").
+        val es = layout("es")
+        assertEquals("vi a tom ayer ", word("es").typed(es, "vi a tom ayer "))
+        assertEquals("con Mary en Madrid ", word("es").typed(es, "con mary en madrid "))
+    }
+
+    // iOS testGermanSpatialAutocorrectCapitalisesTheNounItCorrects, with the shipped de.capitals.
+    @Test fun germanNounsTakeTheirCapital() {
+        val g = layout("de")
+        fun fix(before: String, taps: String): String? = word("de").run {
+            reset(before); for (c in taps) tap(g, c); replacement()
+        }
+        assertEquals("Haus", fix("das ", "haua"))
+        assertEquals("Haus", fix("das ", "hsus"))
+        assertEquals("Haus", fix("das ", "haus"))
+        // Written with a capital only some of the time: a noun after an article or determiner.
+        assertEquals("Leben", fix("das ", "leben"))
+        assertNull(fix("zu ", "leben"))
+        assertNull(fix("ich ", "frage"))
+        assertNull(fix("wollt ihr ", "essen"))
+        assertNull(fix("ich ", "kauf"))
+        assertEquals("Ruhe", fix("lass mich in ", "ruhe"))
+        assertEquals("Stadt", fix("die ", "stadt"))
+    }
+
+    // iOS testSentenceStartersAndNextWordsFillAllThreeSlots and
+    // testNextWordPredictionsUseTheActiveLanguageAndRespectBoundaries.
+    @Test fun sentenceStartersAndNextWordsFillAllThreeSlots() {
+        val w = word()
+        for (context in listOf("Done. ", "Really? ", "Wow! ", "Hi\n", "")) assertEquals(context, listOf("I", "The", "I'm"), w.predictions(context))
+        assertEquals(listOf("I", "the", "I'm"), w.predictions("Done. ", capitalize = false))
+        assertEquals("an unknown word: the commonest words", listOf("the", "to", "and"), w.predictions("zzqx "))
+        assertEquals("after a comma, words that start a clause", listOf("I", "but", "and"), w.predictions("Running late, "))
+        assertEquals("not after a number", emptyList<String>(), w.predictions("at 7 "))
+        assertEquals("no space after the period yet", emptyList<String>(), w.predictions("Done."))
+        val hi = w.predictions("say hi ")
+        assertEquals(3, hi.size)
+        assertTrue(hi.toString(), hi.all { it.first().isLowerCase() || it == "I" || it.startsWith("I'") })
+        val es = word("es")
+        assertEquals(3, es.predictions("por ").size)
+        for (context in listOf("@por ", "todo/por ", "por  ")) assertEquals(context, emptyList<String>(), es.predictions(context))
+        for (context in listOf("por. ", "hola\n")) assertEquals(context, listOf("Yo", "El", "La"), es.predictions(context))
+        assertEquals(listOf("yo", "el", "la"), es.predictions("por. ", capitalize = false))
+    }
+
+    // iOS testShortCompletionsFollowThePhraseAndKeepTheTypedCase, testTheStripNeverRepeatsWhatYouTyped
+    // and testAmbiguousContractionsSuggestWithoutAutoReplacing: the strip shows what space will do.
+    @Test fun theStripShowsWhatSpaceWillDo() {
+        fun strip(language: String, before: String, typed: String, spatial: Boolean = false) = word(language, spatial).run {
+            reset(before); explicitOrTapped(this, typed, spatial, language); strip()
+        }
+        fun first(s: List<Suggestion>) = s.first { it.kind != Suggestion.Kind.Typed }.text
+        val like = strip("en", "I would ", "li")
+        assertEquals("like", first(like))
+        assertTrue(like.toString(), like.none { it.kind == Suggestion.Kind.Fix })
+        assertEquals("Like", first(strip("en", "I would ", "Li")))
+        assertEquals("gracias", first(strip("es", "muchas ", "gr")))
+        // A word space leaves alone shows itself first; an unfinished one gets three candidates.
+        val well = strip("en", "", "well")
+        assertEquals(Suggestion("well", Suggestion.Kind.Typed), well[0])
+        assertEquals(Suggestion("we'll", Suggestion.Kind.Word), well[1])
+        val beca = strip("en", "", "beca")
+        assertEquals(beca.toString(), 3, beca.size)
+        assertTrue(beca.toString(), beca.none { it.kind == Suggestion.Kind.Typed || it.text.equals("beca", ignoreCase = true) })
+        // A fix space will apply sits after what was typed.
+        val teh = strip("en", "", "teh", spatial = true)
+        assertEquals(listOf(Suggestion("teh", Suggestion.Kind.Typed), Suggestion("the", Suggestion.Kind.Fix)), teh.take(2))
+        assertTrue(teh.toString(), teh.drop(1).none { it.text == "teh" })
+        // Nothing to offer: only what was typed.
+        assertEquals(listOf(Suggestion("kqzx", Suggestion.Kind.Typed)), strip("en", "", "kqzx"))
+        // Autocorrect off: completions, never a fix.
+        val off = word(spatial = true).run { reset(""); explicitOrTapped(this, "teh", true, "en"); strip(autocorrect = false) }
+        assertTrue(off.toString(), off.none { it.kind == Suggestion.Kind.Fix })
+    }
+
+    private fun explicitOrTapped(w: TypingWord, text: String, spatial: Boolean, language: String) {
+        if (!spatial) { w.explicit(text); return }
+        val g = layout(language)
+        for (c in text) { val p = g.centres.getValue(c.lowercaseChar()); w.letter(c.toString(), p.x, p.y, g) }
+    }
+
+    private fun personal(w: TypingWord, words: List<String>, shortcuts: Map<String, String> = emptyMap()) {
+        w.decoder.personal = PersonalWords(w.decoder.model, words, shortcuts)
+    }
+
+    // iOS testTextReplacementsGoInAsOnApplesKeyboard, testTextReplacementsTakeTheShortcutsLeadingCapital
+    // and testYourTextReplacementWinsOverShorthand, with the personal dictionary's shortcuts.
+    @Test fun textReplacementsGoInAsOnApplesKeyboard() {
+        val w = word()
+        personal(w, emptyList(), mapOf("myem" to "jason@example.com", "ad2" to "second address", "s.o" to "significant other",
+            "home" to "at my house", "brb" to "be right back", "omw" to "On my way!", "mip" to "My iPhone"))
+        for ((before, typed, phrase) in listOf(
+            Triple("hi myem", "myem", "jason@example.com"), Triple("ad2", "ad2", "second address"),
+            Triple("s.o", "s.o", "significant other"), Triple("home", "home", "at my house"),
+            Triple("ok (myem", "myem", "jason@example.com"), Triple("hi,myem", "myem", "jason@example.com"),
+            Triple("ok Brb", "Brb", "Be right back"), Triple("ok brb", "brb", "be right back"),
+            Triple("ok BRB", "BRB", "be right back"), Triple("omw", "omw", "On my way!"), Triple("OMW", "OMW", "On my way!"),
+            Triple("mip", "mip", "My iPhone"), Triple("Mip", "Mip", "My iPhone"), Triple("MIP", "MIP", "My iPhone"),
+        )) assertEquals(before, Correction(typed, phrase), w.textReplacement(before))
+        assertNull("never the end of a longer word", w.textReplacement("xmyem"))
+        assertNull("not once a space follows", w.textReplacement("myem "))
+        // The strip shows it, and space puts it in, before chat shorthand is left alone.
+        w.reset("hi "); w.explicit("myem")
+        assertEquals(listOf(Suggestion("myem", Suggestion.Kind.Typed), Suggestion("jason@example.com", Suggestion.Kind.Fix)), w.strip())
+        w.reset(""); w.explicit("brb")
+        assertEquals("be right back", w.replacement())
+        w.reset(""); w.explicit("idk")
+        assertNull("shorthand without a replacement stays", w.replacement())
+    }
+
+    // iOS testSpatialAutocorrectKnowsYourOwnWords, testYourCommonWordsStayLowercaseAndYourVocabulary
+    // KeepsItsCapitals and testYourOwnContactsAndReplacementsAreStillOffered, with personal words.
+    @Test fun yourOwnWordsAreReadSpelledYourWayAndOffered() {
+        val g = layout("en")
+        val w = word()
+        personal(w, listOf("Zorbix", "GitHub", "World", "Will", "Kate", "Dick"), mapOf("wtf" to "what the fuck"))
+        assertEquals("a slip in your word, and your word typed in lowercase", "Zorbix Zorbix ", w.typed(g, "zorbiz zorbix "))
+        assertEquals("GitHub ", w.typed(g, "github "))
+        assertEquals("your word that is also a common word stays lowercase", "will world Kate ", w.typed(g, "will world kate "))
+        w.reset("so "); w.explicit("wor")
+        assertTrue(w.strip().toString(), w.strip().none { it.text == "World" })
+        w.reset(""); w.explicit("Dic")
+        assertTrue("your own words are offered, even listed ones", w.strip().any { it.text == "Dick" })
+        w.reset(""); w.explicit("wtf")
+        assertEquals("what the fuck", w.replacement())
+        // Entries for another language stay out; Bokmål takes Norwegian's.
+        assertTrue(PersonalWords.applies(null, "en") && PersonalWords.applies("en_US", "en") && PersonalWords.applies("no_NO", "nb"))
+        assertFalse(PersonalWords.applies("es_ES", "en") || PersonalWords.applies("nn_NO", "nb"))
+        // Without your words nothing of this applies.
+        val plain = word()
+        assertEquals("zorbiz github ", plain.typed(g, "zorbiz github "))
     }
 }

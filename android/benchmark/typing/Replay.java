@@ -42,6 +42,32 @@ public final class Replay {
         System.out.printf(Locale.ROOT,"latency\t%s\t%d\t%.4f\t%.4f\t%.4f\n",
             name,ns.size(),ns.get(ns.size()/2)/1e6,ns.get(ns.size()*95/100)/1e6,ns.get(ns.size()-1)/1e6);
     }
+    // The strip as the keyboard shows it: strip() where the engine has it, else the old
+    // suggestions() with its literal chip.
+    static List<String> strip(TypingWord state) throws Exception {
+        List<String> out = new ArrayList<>();
+        try {
+            for (Object s : (List<?>) TypingWord.class.getMethod("strip", boolean.class).invoke(state, true))
+                out.add((String) s.getClass().getMethod("getText").invoke(s));
+        } catch (NoSuchMethodException old) {
+            List<String> words = state.suggestions(); String literal = state.literalChip(words);
+            if (literal != null) out.add(literal);
+            out.addAll(words);
+        }
+        return out;
+    }
+    @SuppressWarnings("unchecked")
+    static List<String> predictions(TypingWord state, String before) throws Exception {
+        try {
+            return (List<String>) TypingWord.class.getMethod("predictions", String.class, Boolean.class).invoke(state, before, null);
+        } catch (NoSuchMethodException old) {
+            return (List<String>) TypingWord.class.getMethod("predictions", String.class).invoke(state, before);
+        }
+    }
+    static boolean hit(List<String> slots, String word) {
+        for (String s : slots) if (s.toLowerCase(Locale.ROOT).replace('\u2019', '\'').equals(word)) return true;
+        return false;
+    }
     public static void main(String[] args) throws Exception {
         String lang=args[2], group=lang.equals("en") ? "test-" : lang+"-test-";
         PrintWriter outputs=args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
@@ -50,6 +76,10 @@ public final class Replay {
         KeyGrid grid=originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
         List<Long> letters=new ArrayList<>(), spaces=new ArrayList<>();
         int count=0, total=0, matches=0; int[] errors=new int[3], exact=new int[3];
+        // Strip hits, as iOS's harness counts them: the intended word among the slots once its last
+        // letter is typed, after its first two letters (words of three or more), and among the
+        // predictions after the space before it.
+        int[] hits=new int[6];
         try (BufferedReader reader=new BufferedReader(new FileReader(args[1]))) {
             String line;
             while((line=reader.readLine())!=null) {
@@ -58,6 +88,16 @@ public final class Replay {
                 String typed=r.getString("typed"); JSONArray taps=r.getJSONArray("taps");
                 if(typed.length()!=taps.length()) throw new IllegalArgumentException("Unaligned taps");
                 StringBuilder out=new StringBuilder(); state.reset("");
+                String[] planned=r.getString("intended").toLowerCase(Locale.ROOT).split(" ");
+                Map<Integer,Integer> ends=new HashMap<>(), early=new HashMap<>();
+                String want=r.optString("want","");
+                JSONArray endList=r.optJSONArray("ends");
+                if(endList!=null) for(int j=0, from=0;j<endList.length();j++) {
+                    int end=endList.getInt(j); ends.put(end,j);
+                    if(end-from>=3) early.put(from+2,j);
+                    from=end+(end<want.length()&&want.charAt(end)==' '?1:0);
+                }
+                List<String> shown=Collections.emptyList();
                 for(int i=0;i<typed.length();i++) {
                     char key=typed.charAt(i); double x=taps.getJSONArray(i).getDouble(0), y=taps.getJSONArray(i).getDouble(1);
                     long start=System.nanoTime();
@@ -67,11 +107,17 @@ public final class Replay {
                             if(!out.toString().endsWith(fix.getOriginal())) throw new IllegalStateException("Correction off the text");
                             out.replace(out.length()-fix.getOriginal().length(),out.length(),fix.getReplacement());
                         }
-                        out.append(' '); String before=out.toString(); state.reset(before); state.predictions(before);
+                        out.append(' '); String before=out.toString(); state.reset(before); shown=predictions(state,before);
                     } else {
-                        state.letter(String.valueOf(key),x,y,grid); out.append(key); state.suggestions();
+                        state.letter(String.valueOf(key),x,y,grid); out.append(key); shown=strip(state);
                     }
                     (key==' '?spaces:letters).add(System.nanoTime()-start);
+                    Integer j;
+                    if((j=early.get(i+1))!=null) { hits[4]+=hit(shown,planned[j])?1:0; hits[5]++; }
+                    if((j=ends.get(i+1))!=null) { hits[0]+=hit(shown,planned[j])?1:0; hits[1]++; }
+                    if(i<want.length()&&want.charAt(i)==' '&&(j=ends.get(i))!=null&&j+1<planned.length) {
+                        hits[2]+=hit(shown,planned[j+1])?1:0; hits[3]++;
+                    }
                 }
                 String[] ref=words(r.getString("intended")); total+=ref.length; count++;
                 String ios=r.getString("ios_shared"); hasIos|=!ios.isEmpty();
@@ -87,6 +133,7 @@ public final class Replay {
         for(int i=0;i<3;i++) if(i!=1||hasIos)
             System.out.printf(Locale.ROOT,"wer\t%s\t%d\t%d\t%.4f\t%d/%d\n",lang+"_"+names[i],errors[i],total,100.0*errors[i]/total,exact[i],count);
         if(hasIos) System.out.printf("agreement\t%s\t%d/%d\n",lang,matches,count);
+        if(hits[1]>0) System.out.printf("strip\t%s\tword %d/%d\tnext %d/%d\tafter two letters %d/%d\n",lang,hits[0],hits[1],hits[2],hits[3],hits[4],hits[5]);
         latency(lang+"_letter",letters); latency(lang+"_space",spaces);
     }
 }
