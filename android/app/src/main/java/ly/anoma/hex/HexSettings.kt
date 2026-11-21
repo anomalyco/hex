@@ -229,7 +229,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             else (listOf(null) + DictationLanguage.entries).map { Triple(it?.label, it == selectedLanguage, { speech.language = it }) }
                         choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
-                            Entry(label ?: "Automatic", if (label != null) null else if (layout) "Follow dictation language" else "Follow system language",
+                            Entry(label ?: "Automatic", if (label != null) null else if (layout) "Follow dictation language" else stringResource(R.string.dictation_language_automatic_detail),
                                 if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }

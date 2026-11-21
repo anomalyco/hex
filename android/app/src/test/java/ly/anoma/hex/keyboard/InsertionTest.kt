@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.FrenchSpacing
+import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.SpokenCleanup
 import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
@@ -459,5 +460,12 @@ class InsertionTest {
             "Actually, can you grab some ice on the way?", "It isn’t blue, I mean, it is green.", "Thanks for the gift, sorry for the delay.",
             "Hi Ana, no problem.", "Hey Tim, sorry, I'm late.", "Okay, no, Sam is right."))
             assertEquals(prose, SpokenCleanup.clean(prose, "en"))
+    }
+    @Test fun automaticDictationFollowsTheKeyboardLayout() {
+        assertEquals(DictationLanguage.Spanish, DictationLanguage.automatic(Spoken.Spanish, listOf("en")))
+        assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(Spoken.Norwegian, listOf("en")))
+        assertEquals(DictationLanguage.German, DictationLanguage.automatic(null, listOf("fr", "de", "en")))
+        assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
+        assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
     }
 }

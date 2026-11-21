@@ -31,6 +31,11 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
             "no", "nb", "nn" -> Norwegian
             else -> entries.firstOrNull { it.code == code }
         }
+        /** Automatic: the keyboard's layout when one is chosen there, as iPhone dictation follows the
+         * keyboard's language, else the first of the phone's languages Hex dictates, else English. */
+        fun automatic(keyboard: Spoken?, system: List<String>): DictationLanguage =
+            entries.firstOrNull { keyboard != null && it.layout == keyboard }
+                ?: system.firstNotNullOfOrNull(::matching) ?: English
     }
 }
 
@@ -47,12 +52,11 @@ internal class SpeechPreferences(context: Context) {
     var language: DictationLanguage?
         get() = DictationLanguage.matching(prefs.getString("spoken", null))
         set(value) { prefs.edit().putString("spoken", value?.code).apply() }
+    // Keyboard › Keyboard layout when chosen there (null while the layout follows dictation).
+    private val typing = context.getSharedPreferences("typing", Context.MODE_PRIVATE)
     val spoken: DictationLanguage
-        get() {
-            language?.let { return it }
-            val locales = Resources.getSystem().configuration.locales
-            for (i in 0 until locales.size()) DictationLanguage.matching(locales[i].language)?.let { return it }
-            return DictationLanguage.English
+        get() = language ?: Resources.getSystem().configuration.locales.let { locales ->
+            DictationLanguage.automatic(Spoken.matching(typing.getString("layout", null)), (0 until locales.size()).map { locales[it].language })
         }
     var clean: Boolean
         get() = prefs.getBoolean("clean", false)

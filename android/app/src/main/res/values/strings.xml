@@ -10,6 +10,7 @@
     <string name="dictation_vocabulary">Custom vocabulary</string>
     <string name="dictation_vocabulary_detail">Spell names and terms your way</string>
     <string name="dictation_vocabulary_hint">One name or term per line</string>
+    <string name="dictation_language_automatic_detail">Follow the keyboard layout, else the phone’s language</string>
     <string name="dictation_end_with_period">End with a period</string>
     <string name="dictation_end_with_period_detail">Off drops the final period, keeps ? and !</string>
 </resources>
