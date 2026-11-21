@@ -3,6 +3,7 @@ package ly.anoma.hex.keyboard
 import org.junit.Assert.assertEquals
 import org.junit.Test
 import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.FrenchSpacing
 import ly.anoma.hex.speech.SpokenCleanup
 import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
@@ -238,8 +239,8 @@ class InsertionTest {
             "My email is John at the rategmail.com." to "My email is john@gmail.com.",
             "Send it to Priya at signyahoo.com." to "Send it to priya@yahoo.com.",
             "My email is John at the rate gmail.com" to "My email is john@gmail.com",
-        )) assertEquals(spoken, written, SpokenCleanup.symbols(spoken, "en-IN"))
             "My email is john at therategmail.com." to "My email is john@gmail.com.",
+        )) assertEquals(spoken, written, SpokenCleanup.symbols(spoken, "en-IN"))
     }
     @Test fun atInItsOwnMeaningStays() {
         for (spoken in listOf("Prices are growing at the rate of 5% a year.", "At the rate of knots, we'll be there soon.",
@@ -364,5 +365,30 @@ class InsertionTest {
         assertEquals("iPhone is charged.", spelled("iphone is charged", Style.Polished))
         assertEquals("Ask about OpenCode and WeChat.", spelled("ask about open code and we chat", Style.Polished, terms = listOf("OpenCode", "WeChat")))
         assertEquals("Ask about open code.", spelled("ask about open code", Style.Polished, terms = emptyList()))
+    }
+
+    // iOS FrenchSpacingTests (French isn't a dictation language on Android yet; this is ready for it).
+    @Test fun frenchSpacing() {
+        val thin = "\u202F"; val nbsp = "\u00A0"
+        assertEquals("Bonjour, comment ça va${thin}? Tu viens ce soir${thin}?",
+            FrenchSpacing.apply(SpokenText.style("Bonjour, comment ça va ? Tu viens ce soir ?", Style.Polished, "fr-FR"), "fr-FR"))
+        assertEquals("Il y a trois choses${nbsp}: le pain${thin}; le lait et «${nbsp}les œufs${nbsp}»${thin}! C'est tout.",
+            FrenchSpacing.apply(SpokenText.style("il y a trois choses: le pain; le lait et «les œufs» ! c'est tout", Style.Polished, "fr-FR"), "fr-FR"))
+        assertEquals("tu viens ce soir${thin}? génial${thin}!",
+            FrenchSpacing.apply(SpokenText.style("Tu viens ce soir ? Génial !", Style.Casual, "fr-FR"), "fr-FR"))
+        assertEquals("ça va? Oui! Voici${nbsp}: «${nbsp}tout${nbsp}»", FrenchSpacing.apply("ça va ? Oui ! Voici : «tout»", "fr-CA"))
+        assertEquals("ça va${thin}? Voici${nbsp}: «${thin}tout${thin}»", FrenchSpacing.apply("ça va ? Voici : « tout »", "fr-CH"))
+        assertEquals(FrenchSpacing.Convention.France, FrenchSpacing.convention("fr-BE"))
+        assertEquals(FrenchSpacing.Convention.France, FrenchSpacing.convention("fr"))
+        assertEquals(null, FrenchSpacing.convention("en-CA"))
+        assertEquals(null, FrenchSpacing.convention(null))
+        val once = FrenchSpacing.apply("ça va  ?\nOui${nbsp}! Quoi ?!", "fr-FR")
+        assertEquals("ça va${thin}?\nOui${thin}! Quoi${thin}?!", once)
+        assertEquals(once, FrenchSpacing.apply(once, "fr-FR"))
+        for (text in listOf("Rendez-vous à 10:30 ou 18:45", "Super :) et ;-) puis :D et :(", "Va sur https://exemple.fr/page?q=1",
+            "Écris moi@exemple.fr! ou www.exemple.fr?", "Tape \u0060a ? b : c\u0060 puis \u0060x::y\u0060", "? au début\n: en début de ligne"))
+            assertEquals(text, FrenchSpacing.apply(text, "fr-FR"))
+        assertEquals("Il m'a dit «${nbsp}Tu viens${thin}?${nbsp}»", FrenchSpacing.apply("Il m'a dit «Tu viens?»", "fr-FR"))
+        assertEquals("Really? Yes.", SpokenText.format("Really ? Yes", SpeechOptions(Style.Polished, Spoken.English, false, false)))
     }
 }

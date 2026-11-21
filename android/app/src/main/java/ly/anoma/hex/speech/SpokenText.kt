@@ -13,8 +13,9 @@ internal object SpokenText {
         if (options.style == Style.Verbatim || raw.isBlank()) return finished(style(spelled, options.style, language), options)
         val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(spelled.trim(), language), language)
         val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken
-        return finished(style(cleaned, options.style, language, options.endWithPeriod, options.formatLists,
-            options.spokenPunctuation), options)
+        val styled = style(cleaned, options.style, language, options.endWithPeriod, options.formatLists, options.spokenPunctuation)
+        // French spacing goes last, since every style takes the spaces before marks out; Verbatim keeps the model's.
+        return FrenchSpacing.apply(finished(styled, options), language)
     }
 
     private fun finished(styled: String, options: SpeechOptions): String {
