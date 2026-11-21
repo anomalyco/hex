@@ -841,3 +841,102 @@ nonisolated struct TypingDecoder {
         model.length(i) >= 2 || model.unigramCost(i) < parameters.oneLetterWordCost
     }
 }
+
+extension TypingDecoder {
+    /// Whether `decide` with `keys` would put `reading` (one word) in place of what you typed:
+    /// it beats the literal by the margin. Nil for a two-word reading, which only `decide` can
+    /// tell. Adaptive touch asks with the centres read without it, so a correction it applies
+    /// is one the keyboard would apply anyway.
+    func replaces(with reading: String, taps: [CGPoint], typed: String, previous: String?, literalIsValid: Bool, keys: Keys) -> Bool? {
+        guard !reading.contains(" ") else { return nil }
+        guard taps.count == typed.count, !typed.isEmpty, let letters = model.encode(typed),
+              !letters.contains(where: { $0 == model.apostropheCode }),
+              let codes = model.encode(reading.lowercased()) else { return false }
+        let centres = codeCentres(keys)
+        let costs = taps.map { tapCosts($0, centres: centres, keys: keys) }
+        let prev = previous.flatMap { model.index(of: $0) }
+        var literalCost = 0.0
+        for (i, code) in letters.enumerated() {
+            let c = costs[i][Int(code)]
+            guard c.isFinite else { return false }
+            literalCost += c
+        }
+        let literalIndex = model.index(ofCodes: letters)
+        let literalIsYours = userWords.index(of: letters) != nil
+        var literalLM = literalIndex.map { lmCost($0, after: prev) }
+            ?? (literalIsValid ? parameters.unknownValidCost : parameters.unknownCost)
+        if literalIsYours { literalLM = min(literalLM, parameters.userWordCost) }
+        literalCost += parameters.lmWeight * literalLM
+
+        var readingLM = Double.infinity
+        if let index = model.index(ofCodes: codes), !neverSuggest.words.contains(index) {
+            readingLM = lmCost(index, after: prev)
+        }
+        if userWords.index(of: codes) != nil { readingLM = min(readingLM, parameters.userWordCost) }
+        guard readingLM.isFinite else { return false }
+        var margin = (literalIndex != nil || literalIsValid || literalIsYours) ? parameters.validMargin : parameters.autoMargin
+        if margin > parameters.accentMargin, Self.withoutAccents(reading.lowercased()) == Self.withoutAccents(typed) {
+            margin = parameters.accentMargin
+        }
+        // Usually one alignment the search would also try already clears it: no search then.
+        if let bound = alignedCost(codes, costs), literalCost - (bound + parameters.lmWeight * readingLM) >= margin {
+            return true
+        }
+        guard let spatial = search(OneWord(codes: codes), costs, range: 0..<costs.count, limit: 1, maxEdits: parameters.maxEdits).first?.1
+        else { return false }
+        return literalCost - (spatial + parameters.lmWeight * readingLM) >= margin
+    }
+
+    /// The cost of `codes` read letter for letter from the taps, or with one letter you didn't
+    /// type at its cheapest place: never below what the search finds, so a bound to clear.
+    /// Nil when neither fits (another edit, a tap past `maxTapCost`).
+    private func alignedCost(_ codes: [UInt8], _ costs: [[Double]]) -> Double? {
+        let n = costs.count
+        var letters: [Int] = []
+        letters.reserveCapacity(codes.count)
+        for (depth, code) in codes.enumerated() {
+            if code == model.apostropheCode {
+                guard depth > 0 else { return nil }
+                continue
+            }
+            letters.append(Int(code))
+        }
+        func tap(_ i: Int, _ code: Int) -> Double? {
+            let c = costs[i][code]
+            return c <= parameters.maxTapCost ? c : nil
+        }
+        if letters.count == n {
+            var total = 0.0
+            for i in 0..<n {
+                guard let c = tap(i, letters[i]) else { return nil }
+                total += c
+            }
+            return total
+        }
+        guard letters.count == n + 1, parameters.maxEdits >= 1 else { return nil }
+        var prefix = [Double](repeating: .infinity, count: n + 1)
+        prefix[0] = 0
+        for i in 0..<n {
+            guard let c = tap(i, letters[i]) else { break }
+            prefix[i + 1] = prefix[i] + c
+        }
+        var best = Double.infinity
+        var suffix = 0.0
+        for j in stride(from: n, through: 0, by: -1) {
+            if j < n {
+                guard let c = tap(j, letters[j + 1]) else { break }
+                suffix += c
+            }
+            best = min(best, prefix[j] + suffix)
+        }
+        return best.isFinite ? best + parameters.deletionCost : nil
+    }
+
+    /// One word, searched as a word list.
+    private struct OneWord: TypingDecoderWords {
+        let codes: [UInt8]
+        var wordCount: Int { 1 }
+        func length(_ i: Int) -> Int { codes.count }
+        func byte(_ i: Int, _ depth: Int) -> Int { depth < codes.count ? Int(codes[depth]) : -1 }
+    }
+}

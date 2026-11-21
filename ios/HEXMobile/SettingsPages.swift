@@ -449,6 +449,9 @@ struct ExperimentsSettingsPage: View {
     @State private var hinglish = HinglishSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+    @State private var adaptiveTouch = AdaptiveTouchSettings().isEnabled
+    @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
+    @State private var confirmingTouchReset = false
 
     var body: some View {
         SettingsPageScaffold(title: "Experiments") {
@@ -467,19 +470,80 @@ struct ExperimentsSettingsPage: View {
                     isOn: $appleIntelligenceCleanup
                 )
                 .disabled(!cleanupAvailability.isAvailable)
+
+                SettingsDivider()
+
+                SettingsToggleRow(
+                    title: String(localized: "Adaptive touch"),
+                    detail: String(localized: "Learns where you land on the keys on this device. Stores averages, not what you type."),
+                    isOn: $adaptiveTouch
+                )
+
+                if adaptiveTouch {
+                    Text(adaptiveTouchStatusText)
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 10)
+                        .accessibilityIdentifier("adaptive-touch-status")
+
+                    SettingsDivider()
+
+                    Button {
+                        confirmingTouchReset = true
+                    } label: {
+                        Text("Reset touch learning")
+                            .font(.system(size: 15, weight: .regular))
+                            .foregroundStyle(HexTheme.textBase)
+                            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                            .padding(.horizontal, 16)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .confirmationDialog("Forget where you land on the keys?", isPresented: $confirmingTouchReset, titleVisibility: .visible) {
+                        Button("Reset touch learning", role: .destructive) {
+                            AdaptiveTouchSettings().requestReset()
+                            refreshAdaptiveTouchStatus()
+                        }
+                    }
+                }
             }
         }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
         .onChange(of: appleIntelligenceCleanup) { _, enabled in
             AppleIntelligenceCleanupSettings().isEnabled = enabled
         }
         .onChange(of: hinglish) { _, enabled in
             HinglishSettings().isEnabled = enabled
         }
+        .onChange(of: adaptiveTouch) { _, enabled in
+            AdaptiveTouchSettings().isEnabled = enabled
+            refreshAdaptiveTouchStatus()
+        }
         .onAppear {
             hinglish = HinglishSettings().isEnabled
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+            adaptiveTouch = AdaptiveTouchSettings().isEnabled
+            refreshAdaptiveTouchStatus()
         }
+    }
+
+    private var adaptiveTouchStatusText: String {
+        switch adaptiveTouchStatus {
+        case .sessionOnly:
+            String(localized: "Session only: without Full Access, it forgets when the keyboard closes")
+        case .learning(let taps):
+            String(localized: "Learning: \(taps) of \(AdaptiveTouchModel.activeTaps) taps")
+        case .active:
+            String(localized: "Active: your taps are read with your own key centres")
+        }
+    }
+
+    private func refreshAdaptiveTouchStatus() {
+        adaptiveTouchStatus = SettingsSnapshotFixture.adaptiveTouchStatus
+            ?? AdaptiveTouchStatus.current(fullAccessConfirmed: KeyboardBridge().fullAccessSeenAt != nil)
     }
 }
 

@@ -1098,3 +1098,120 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "dont ")
     }
 }
+
+
+// MARK: - Adaptive touch: personal centres rank readings, never correct on their own
+
+extension AutocorrectEngineTests {
+    func testPersonalCentresNeverRewriteAWordTheStockCentresKeep() throws {
+        try useDecoder()
+        let ac = engine.autocorrect
+        let stock = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout))
+        // A profile far past the experiment's bounds: b's centre sits on m, and c's on b.
+        var personal = stock
+        personal.centres["b"] = stock.centres["m"]
+        personal.centres["c"] = stock.centres["b"]
+        ac.decoderKeys = personal
+        let bat = "bat".map { stock.centres[$0]! }
+        func atSpace(_ taps: [CGPoint], stockKeys: TypingDecoder.Keys?) -> String? {
+            ac.decoderBaselineKeys = stockKeys
+            ac.decoderTaps = taps
+            return ac.replacementOnSpace(beforeInput: "the bat", field: .text, autocorrectionType: .default)?.replacement
+        }
+        XCTAssertEqual(atSpace(bat, stockKeys: nil), "cat", "alone, the personal centres would rewrite \"bat\"")
+        let nudged = bat.map { CGPoint(x: $0.x + 0.01, y: $0.y) }
+        XCTAssertNil(atSpace(nudged, stockKeys: stock), "the stock centres keep it: no new rewrite")
+        let strip = ac.suggestions(beforeInput: "the bat", field: .text, autocorrectionType: .default)
+        XCTAssertTrue(strip.contains { $0.replacement == "cat" && !$0.willAutoReplace }, "offered, not applied: \(strip)")
+
+        // A fix both make still goes in.
+        ac.decoderKeys = stock
+        let thw = "thw".map { stock.centres[$0]! }
+        ac.decoderBaselineKeys = stock
+        ac.decoderTaps = thw
+        XCTAssertEqual(ac.replacementOnSpace(beforeInput: "see thw", field: .text, autocorrectionType: .default)?.replacement, "the")
+    }
+
+    func testTheDecodersReplacementCheckAgreesWithItsDecision() throws {
+        try useDecoder()
+        let decoder = try XCTUnwrap(engine.autocorrect.decoder)
+        let keys = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout))
+        for (typed, previous, valid) in [("thw", "see", false), ("teh", nil, false), ("bat", "the", true), ("helo", "say", false), ("ypu", "thank", false)] {
+            let taps = typed.map { keys.centres[$0]! }
+            let decision = try XCTUnwrap(decoder.decide(taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys))
+            if let replacement = decision.replacement, !replacement.contains(" ") {
+                XCTAssertEqual(decoder.replaces(with: replacement, taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys), true, typed)
+            }
+            let margin = valid || decoder.model.index(of: typed) != nil ? decoder.parameters.validMargin : decoder.parameters.autoMargin
+            for reading in decision.readings where !reading.text.contains(" ") {
+                XCTAssertEqual(
+                    decoder.replaces(with: reading.text, taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys),
+                    decision.literalCost - reading.cost >= margin, "\(typed) → \(reading.text)"
+                )
+            }
+        }
+    }
+}
+
+
+extension AutocorrectEngineTests {
+    /// A strong personal profile (every key's centre at the bound, a third of a key to the
+    /// right) leaves every word these suites protect as the stock centres do.
+    func testPersonalCentresKeepNamesYourWordsAndWordsTypedRight() throws {
+        let words = ["come", "and", "miss", "the", "quiz", "see", "mary", "on", "monday", "in", "boston", "with", "zorbix", "kit", "lol"]
+        func typed(profile: Bool) throws -> String {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+            try useDecoder()
+            engine.autocorrect.loadLexiconEntries([("Zorbix", "Zorbix"), ("Kit", "Kit")])
+            if profile { try engageStrongProfile() }
+            for word in words { typeTaps(word) }
+            return target.text
+        }
+        XCTAssertEqual(try typed(profile: true), try typed(profile: false))
+    }
+
+    /// Joining two words at a space tapped on the bar's edge ("deli ate") is the centres'
+    /// read without Adaptive touch to decide.
+    func testPersonalCentresNeverJoinWordsTheirOwnWay() throws {
+        func typed(profile: Bool) throws -> String {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+            try useDecoder()
+            engine.letterOdds = engine.autocorrect.decoder?.model
+            if profile { try engageStrongProfile() }
+            let space = try XCTUnwrap(engine.layout.key(.space))
+            typeTaps("the")
+            for ch in "deli" { tapCentre(ch) }
+            let c = try XCTUnwrap(engine.layout.key(.character("c"))).frame
+            tap(at: CGPoint(x: c.midX, y: space.hitFrame.minY + 1))
+            typeTaps("ate")
+            return target.text
+        }
+        XCTAssertEqual(try typed(profile: false), "the delicate ")
+        XCTAssertEqual(try typed(profile: true), "the delicate ")
+    }
+
+    /// Every key's personal centre at the bound, a third of a key to the right, in use.
+    private func engageStrongProfile() throws {
+        let touch = AdaptiveTouch(storage: .memory, settings: AdaptiveTouchSettings(defaults: defaults))
+        engine.adaptiveTouch = touch
+        let geometry = try XCTUnwrap(touch.geometry)
+        for n in 0..<600 {
+            if n % 150 == 0 { touch.beginSession() }
+            let s = n % geometry.letters.count
+            let f = geometry.frames[s]
+            touch.admit(slot: s, point: CGPoint(x: f.midX + 0.45 * f.width, y: f.midY), quality: AdaptiveTouch.weakQuality)
+        }
+        XCTAssertTrue(touch.isActive)
+        XCTAssertNotEqual(engine.autocorrect.decoderKeys, engine.autocorrect.decoderBaselineKeys)
+    }
+}
