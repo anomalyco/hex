@@ -180,6 +180,16 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         CGRect(x: horizontalInset, y: metrics.stripTop, width: bounds.width - 2 * horizontalInset, height: metrics.stripHeight)
     }
 
+    /// The grid's rows: four on roomy keyboards, three on compact ones.
+    var gridRows: Int {
+        metrics.keyHeight >= 40 ? 4 : 3
+    }
+
+    /// How many emoji Frequently used holds: eight columns of the grid's rows.
+    var frequentCapacity: Int {
+        gridRows * 8
+    }
+
     /// The suggestion row's and the search results' emoji size.
     var rowFontSize: CGFloat {
         metrics.keyHeight >= 40 ? 27 : 23
@@ -237,7 +247,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private func applyGridLayout(height: CGFloat) {
         let isRoomy = metrics.keyHeight >= 40
         let headerHeight: CGFloat = isRoomy ? 20 : 16
-        let rows = isRoomy ? 4 : 3
+        let rows = gridRows
         let rowHeight = max(20, (height - headerHeight) / CGFloat(rows))
         let geometry = GridGeometry(
             rows: rows,
