@@ -33,7 +33,9 @@ final class KeyboardViewModel: ObservableObject {
 
     @Published var hasFullAccess = true
     @Published var needsGlobeKey = true
-    @Published var returnKeyLabel = "Return"
+    /// The bar's return key for the field's type, as the full keyboard's, and whether it's on.
+    @Published var returnKey = ReturnKeyStyle(.default)
+    @Published var returnKeyEnabled = true
     @Published var isModelInstalled = false
     @Published private(set) var isWarmAvailable = false
     @Published private(set) var stagePhase: StagePhase = .idle

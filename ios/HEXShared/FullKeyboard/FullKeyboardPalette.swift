@@ -76,6 +76,11 @@ struct FullKeyboardPalette: Equatable {
     /// Apple system keyboard action blue (`#007AFF`).
     var actionFill: UIColor { Self.rgb(0x007AFF) }
     var actionPressedFill: UIColor { Self.rgb(0x0062CC) }
+    /// A send, go or search key that's off while the field is empty: Apple's grey (191, 192, 197;
+    /// 121 on dark, iOS 27.2).
+    var actionDisabledFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.39) : Self.rgb(0xBFC0C5) }
+    /// An off return key's glyph: barely there (10% of the label colour on Apple's, light or dark).
+    var returnDisabledInk: UIColor { textBase.withAlphaComponent(0.1) }
     var warmCore: UIColor { Self.rgb(0xFF9500) }
 
     static let cornerRadius: CGFloat = 8.5
