@@ -73,7 +73,8 @@ never at a launch by itself.
     and, where a typing model is bundled for the language, Spatial autocorrect's
     model: English and Spanish, and German with its experiment on). Words
     it learns may last only while the keyboard runs, as an iPhone may not let
-    it write the App Group; haptics, Paste and dictation need Full Access. Without Full
+    it write the App Group; haptics, key clicks (Apple's keyboard guide), Paste and
+    dictation need Full Access. Without Full
     Access the keyboard always mounts the full keyboard, whichever keyboard is
     chosen (the dictation bar types only spaces and line breaks). Dictation needs
     Full Access (Hex's App Group and the microphone): tapping the Hex key, or
@@ -933,6 +934,16 @@ never at a launch by itself.
   without the space, and turns the fix down for the session. Space keeps the fix. The offer
   comes back whenever the cursor is at the end of the latest autocorrection again, revisions
   ("well see" to "we'll see") and joins included. Text replacements offer none, as on Apple's.
+- **Key clicks:** Every key of the full keyboard (delete, shift, 123 and return included, and
+  each delete repeat), its strip, and the dictation bar's keys ask for the system click on
+  touch-down (`UIDevice.playInputClick`), which plays only because the keyboard's root view
+  (`KeyboardInputView`) adopts `UIInputViewAudioFeedback`: the full keyboard view adopted it
+  before, as a subview, and never clicked. It follows Settings › Sounds & Haptics › Keyboard
+  Feedback › Sound, with no setting of Hex's. Apple's keyboard has other sounds for delete and
+  the modifier keys, but the click is the only keyboard sound a keyboard may play, so every key
+  gets it. In the iOS 27.2 simulator each press reaches the system click (system sound 1104,
+  in the keyboard's log) with Full Access or without, and none with the Sound switch off; on
+  an iPhone, Apple's guide says it needs Allow Full Access.
 - **Slides from 123, #+= and shift (full keyboard):** As on Apple's keyboard, holding 123
   (or ABC, or #+=) shows its page, and sliding shows the pop-up of the key under the
   finger (or darkens it with Key pop-ups off); letting go types that key and goes back to

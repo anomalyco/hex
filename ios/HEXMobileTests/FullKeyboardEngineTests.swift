@@ -1450,6 +1450,26 @@ final class FullKeyboardEngineTests: XCTestCase {
         }
     }
 
+    /// TestFlight: "Cannot hear the iOS typing sound when using your keyboard." Every key asks
+    /// for the system click as it goes down, delete, shift, 123 and return too, once a press,
+    /// whatever Haptics is set to.
+    func testEveryKeyClicksOnTouchDown() {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+        view.layoutIfNeeded()
+        var clicks = 0
+        view.playInputClick = { clicks += 1 }
+        let kinds: [KeyKind] = [.character("a"), .shift, .space, .delete, .returnKey, .layerSwitch(.numbers)]
+        for (index, kind) in kinds.enumerated() {
+            let key = view.engine.layout.key(kind)!
+            let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
+            view.plane.began(id: index + 10, sample: sample)
+            XCTAssertEqual(clicks, index + 1, "\(kind) clicks going down")
+            view.plane.ended(id: index + 10, sample: sample)
+            XCTAssertEqual(clicks, index + 1, "\(kind) doesn't click again coming up")
+        }
+    }
+
     // MARK: - Delete swipe
 
     private func swipeEngine(_ text: String) -> (FixtureTextTarget, FullKeyboardEngine) {

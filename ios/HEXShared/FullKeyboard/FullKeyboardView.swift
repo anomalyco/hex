@@ -5,7 +5,7 @@ import UIKit
 /// right of space, long-press accents, and the recording panel that replaces both while Hex records.
 /// Dictation state comes from the same `KeyboardViewModel` the dictation bar uses.
 @MainActor
-final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
+final class FullKeyboardView: UIView {
     let model: KeyboardViewModel
     let engine: FullKeyboardEngine
     weak var hostController: UIInputViewController? {
@@ -306,8 +306,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }()
 
     // MARK: - Host events
-
-    var enableInputClicksWhenVisible: Bool { true }
 
     func warmUpTextCheckerAsync() {
         DispatchQueue.main.async { [weak self] in
@@ -1098,12 +1096,18 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     // MARK: - Actions
 
+    /// The system key click (`KeyboardInputView`), one for every key, delete and shift too:
+    /// Apple's keyboard plays other sounds for those, but the click is the only keyboard sound
+    /// a keyboard may play. Tests count it.
+    var playInputClick: () -> Void = { UIDevice.current.playInputClick() }
+
+    /// A key went down (or delete repeated): its click, and its tick while haptics are allowed.
     func keyFeedback() {
+        playInputClick()
         if allowsHaptics() {
             keyTicks.impactOccurred(intensity: Self.keyTickIntensity(hapticStrength))
             keyTicks.prepare()
         }
-        UIDevice.current.playInputClick()
     }
 
     func selectionFeedback() {
