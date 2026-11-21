@@ -41,6 +41,7 @@ internal data class KeyboardPage(
     val locked: Boolean,
     val enter: EnterKey,
     val kind: FieldKind = FieldKind.Text,
+    val pad: Pad? = null,
 ) {
     val lines: List<String> get() {
         val code = language.layoutCode
@@ -97,6 +98,8 @@ internal object KeyboardMetrics {
     const val DELETE_REPEAT_EVERY = 50L
     /** A key held this long shows what it holds (Gboard's long press: between 300 and 350 ms). */
     const val HOLD_MS = 300L
+    /** Gboard's pads: 53.3 dp keys on the letters' 58.9 dp rows (a 5.7 dp gap between rows). */
+    const val PAD_ROW_GAP = 5.7f
     /** Gboard ticks again as a key lifts when it was held at least this long. */
     const val RELEASE_TICK_MS = 200L
 
@@ -109,6 +112,7 @@ internal object KeyboardMetrics {
     const val ENTER = 1.5f
     /** The emoji grid's cell, as Gboard's (a 45 dp row pitch, nine across in portrait). */
     const val EMOJI_CELL = 45f
+    const val EMOJI_CELL_LANDSCAPE = 38f
     /** The emoji picker's own category bar above the grid, and a category's title in it. */
     const val EMOJI_HEADER = 42f
     const val EMOJI_TITLE = 24f

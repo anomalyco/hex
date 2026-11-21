@@ -57,6 +57,8 @@ internal class KeyboardEngine(
     private val shift = ShiftState()
     private var symbols = false
     private var more = false
+    // A number, phone or date field's pad, or the number pad the symbol page's 1234 key opens.
+    private var pad: Pad? = null
     private var selStart = -1
     private var selEnd = -1
     // Spaces, each remembered with the text before the cursor it left, so anything else in between
@@ -85,8 +87,8 @@ internal class KeyboardEngine(
                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
             attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
         resetTyping(); word = null; clearSpaces()
-        symbols = kind == InputType.TYPE_CLASS_NUMBER || kind == InputType.TYPE_CLASS_PHONE ||
-            kind == InputType.TYPE_CLASS_DATETIME
+        pad = Pad.of(attribute.inputType)
+        symbols = pad != null
         more = false; shift.reset()
         selStart = attribute.initialSelStart; selEnd = attribute.initialSelEnd
         refreshCaps(force = true)
@@ -136,7 +138,7 @@ internal class KeyboardEngine(
     }
     private fun showPlane() {
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
-            FieldKind.of(editor?.inputType ?: 0)))
+            FieldKind.of(editor?.inputType ?: 0), pad))
     }
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */
     fun shiftDown() {
@@ -151,8 +153,16 @@ internal class KeyboardEngine(
         if (was != shift.uppercase) showPlane()
     }
     fun mode() { resetTyping(); clearSpaces(); surface?.suggestions(emptyList()); symbols = !symbols; more = false; shift.forgetTap(); showPlane() }
-    /** Back to the letters page from wherever (the emoji panel's ABC). */
-    fun letters() { if (symbols) mode() }
+    /** Back to the letters page from wherever (the emoji panel's and the symbol pad's ABC). */
+    fun letters() {
+        if (pad == null && !symbols) return
+        resetTyping(); clearSpaces(); surface?.suggestions(emptyList())
+        pad = null; symbols = false; more = false; shift.forgetTap(); showPlane()
+    }
+    /** A pad's own switches: the phone pad's symbols and back, the symbol page's 1234 key. */
+    fun pad(next: Pad) { resetTyping(); clearSpaces(); surface?.suggestions(emptyList()); pad = next; symbols = true; more = false; showPlane() }
+    /** The symbol pad's !?#: back to the symbol page. */
+    fun symbolsPage() { resetTyping(); pad = null; symbols = true; more = false; showPlane() }
     private fun resetTyping() {
         cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
