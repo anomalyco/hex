@@ -1114,8 +1114,9 @@ final class FullKeyboardEngine {
         target.insertText(smartened(inserted))
         var changes: [AutocorrectEngine.AppliedCorrection.Change] = []
         if let revised {
-            changes.append(.init(from: revised.from, to: revised.to, language: autocorrect.language))
-            learning?.record(.autocorrected, typed: revised.from, final: revised.to, language: autocorrect.language.rawValue)
+            let language = autocorrect.lastRevisionLanguage ?? autocorrect.language
+            changes.append(.init(from: revised.from, to: revised.to, language: language))
+            learning?.record(.autocorrected, typed: revised.from, final: revised.to, language: language.rawValue)
         }
         if fix != nil {
             changes.append(.init(from: token, to: word, language: fixLanguage))

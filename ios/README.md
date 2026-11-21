@@ -878,7 +878,13 @@ never at a launch by itself.
   name guesses ("Zuri" for "Ziri") are never fixes; Spatial autocorrect may still read the
   taps as another word, counting the other's word as one it changes only on its valid-word
   margin; and at a sentence's start, "Im" and "Dont" are revised to "I'm" and "Don't" once
-  the next word leans English (`bilingualRevision`; German "Im Haus" stays). Held-out
+  the next word leans English (`bilingualRevision`; German "Im Haus" stays). A word kept
+  because only one language knows it as typed takes the other's accents once the next word
+  leans that one, as Apple's keyboard puts "nao sei" right at "sei" (TestFlight build 56,
+  English and Português): "voce esta" becomes "você esta" ("voce" is an English word), only
+  for a lowercase guess of that dictionary's that adds accents alone, and not when the words
+  before lean the other way (`accentRevision`). "nao" alone was already "não" beside
+  Português. Held-out
   English benchmark (2,000 Tatoeba sentences' synthetic taps, Spatial autocorrect on,
   iPhone 17 simulator, iOS 27.2, keys as of #2180): English alone 5.75% WER; with Français
   beside it 7.56% before, 5.79% now (99 correct words broken against 125 before and 113
