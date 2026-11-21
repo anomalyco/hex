@@ -254,6 +254,10 @@ private struct FullKeyboardFixture: UIViewRepresentable {
             let usage = EmojiFixture.usage()
             view.makeEmojiUsage = { usage }
         }
+        let args = ProcessInfo.processInfo.arguments
+        if let p = args.firstIndex(of: "--hex-placement"), p + 1 < args.count {
+            view.hexPlacementOverride = HexKeyPlacement(rawValue: args[p + 1])
+        }
         view.languageOverride = FullKeyboardSnapshotStage.layout
         view.appearanceOverride = darkKeyboard
         view.orientationOverride = .portrait

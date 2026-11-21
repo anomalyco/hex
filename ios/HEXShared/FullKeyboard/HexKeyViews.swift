@@ -150,8 +150,9 @@ final class HexKeyControl: UIControl {
     }
 }
 
-/// While recording, this replaces the suggestion strip only, so the keys stay put: the
-/// clock, a Dot Scope well that takes the rest of the strip, then ✕ and Done.
+/// While recording, this replaces the suggestion strip only, so the keys stay put: a Dot
+/// Scope well that takes the rest of the strip, then ✕ and Done, ✓ where the Hex key was.
+/// With the Hex key on the left it mirrors: ✓, ✕, then the well.
 @MainActor
 final class HexKeyRecordingPanel: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { applyPalette() } } }
@@ -170,7 +171,10 @@ final class HexKeyRecordingPanel: UIView {
     var sideKeyWidth: CGFloat = 50 { didSet { setNeedsLayout() } }
     var horizontalInset: CGFloat = 0 { didSet { setNeedsLayout() } }
     var metrics = KeyboardMetrics.portrait { didSet { setNeedsLayout() } }
-    /// Record typing logs is recording: the mark the strip shows, at the well's leading end.
+    /// The Hex key sits on the left (Settings › Keyboard › Hex key): ✓ and ✕ lead.
+    var hexOnLeading = false { didSet { if hexOnLeading != oldValue { setNeedsLayout() } } }
+    /// Record typing logs is recording: the mark the strip shows, at the well's end away
+    /// from ✕ and ✓.
     var showsLoggingMark = false {
         didSet {
             guard showsLoggingMark != oldValue else { return }
@@ -270,24 +274,35 @@ final class HexKeyRecordingPanel: UIView {
         // The strip's 44 pt with 4 pt above and below, as the strip's chips sit.
         let rowH = max(28, bounds.height - 8)
         let rowY = (bounds.height - rowH) / 2
-        let x = innerLeft
 
         doneButton.cornerRadius = rowH / 2
         cancelButton.cornerRadius = rowH / 2
-        doneButton.frame = CGRect(x: innerRight - rowH, y: rowY, width: rowH, height: rowH)
-        cancelButton.frame = CGRect(x: doneButton.frame.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
+        if hexOnLeading {
+            doneButton.frame = CGRect(x: innerLeft, y: rowY, width: rowH, height: rowH)
+            cancelButton.frame = CGRect(x: doneButton.frame.maxX + 6, y: rowY, width: rowH, height: rowH)
+        } else {
+            doneButton.frame = CGRect(x: innerRight - rowH, y: rowY, width: rowH, height: rowH)
+            cancelButton.frame = CGRect(x: doneButton.frame.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
+        }
         doneSpinner.center = CGPoint(x: doneButton.frame.midX, y: doneButton.frame.midY)
 
         // No room for the style chip in the strip; the Hex key's menu sets the style.
         styleButton.isHidden = true
-        let wellRight = cancelButton.frame.minX - 6
-        well.frame = CGRect(x: x, y: rowY, width: max(24, wellRight - x), height: rowH)
+        let wellLeft = hexOnLeading ? cancelButton.frame.maxX + 6 : innerLeft
+        let wellRight = hexOnLeading ? innerRight : cancelButton.frame.minX - 6
+        well.frame = CGRect(x: wellLeft, y: rowY, width: max(24, wellRight - wellLeft), height: rowH)
         if let loggingMark, showsLoggingMark {
-            // The scope starts after the mark, so its dots never run under the text.
+            // The scope stops short of the mark, so its dots never run under the text.
             let size = loggingMark.sizeThatFits(bounds.size)
-            loggingMark.frame = CGRect(x: well.frame.minX + 14, y: well.frame.midY - size.height / 2, width: size.width, height: size.height)
-            let lead = loggingMark.frame.maxX + 6 - well.frame.minX
-            scope.frame = CGRect(x: lead, y: 0, width: max(0, well.bounds.width - lead), height: well.bounds.height)
+            let markX = hexOnLeading ? well.frame.maxX - 14 - size.width : well.frame.minX + 14
+            loggingMark.frame = CGRect(x: markX, y: well.frame.midY - size.height / 2, width: size.width, height: size.height)
+            if hexOnLeading {
+                let end = loggingMark.frame.minX - 6 - well.frame.minX
+                scope.frame = CGRect(x: 0, y: 0, width: max(0, end), height: well.bounds.height)
+            } else {
+                let lead = loggingMark.frame.maxX + 6 - well.frame.minX
+                scope.frame = CGRect(x: lead, y: 0, width: max(0, well.bounds.width - lead), height: well.bounds.height)
+            }
         } else {
             scope.frame = well.bounds
         }
@@ -516,7 +531,10 @@ final class HexStyleMenuView: UIView {
         let available = opensDown ? max(80, bounds.height - anchor.maxY - 6 - 4) : max(80, anchor.minY - 6 - 4)
         let rowH = min(36, (available - 2 * padding) / CGFloat(max(1, rows.count)))
         let height = CGFloat(rows.count) * rowH + 2 * padding
-        let x = min(bounds.width - 6 - width, max(6, anchor.maxX - width))
+        // Toward the screen's middle: from the key's right edge leftward on the right, from its
+        // left edge rightward on the left.
+        let towardRight = anchor.midX < bounds.midX
+        let x = min(bounds.width - 6 - width, max(6, towardRight ? anchor.minX : anchor.maxX - width))
         let y = opensDown ? anchor.maxY + 6 : max(2, anchor.minY - 6 - height)
         panel.frame = CGRect(x: x, y: y, width: width, height: height)
         for (i, row) in rows.enumerated() {

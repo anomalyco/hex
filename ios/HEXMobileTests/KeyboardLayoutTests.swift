@@ -333,6 +333,40 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(layout.stripFrame.maxX, hex.frame.minX)
     }
 
+    /// Settings › Keyboard › Hex key › Left: the key at the strip's leading edge, the strip
+    /// after it to the keyboard's side, and every other key where Right puts it.
+    func testHexKeyOnTheLeftSitsAtTheStripsLeadingEdge() {
+        let right = KeyboardLayout(width: 402, hexPlacement: .stripTrailing)
+        let layout = KeyboardLayout(width: 402, hexPlacement: .stripLeading)
+        let hex = layout.key(.hex)!
+        XCTAssertTrue(layout.hexOnLeading)
+        XCTAssertFalse(right.hexOnLeading)
+        XCTAssertEqual(hex.row, -1)
+        XCTAssertEqual(hex.frame.minX, layout.metrics.side, accuracy: 0.001)
+        XCTAssertEqual(hex.frame.size, right.key(.hex)!.frame.size)
+        XCTAssertGreaterThanOrEqual(layout.stripFrame.minX, hex.frame.maxX)
+        XCTAssertEqual(layout.stripFrame.maxX, 402, accuracy: 0.001)
+        XCTAssertEqual(layout.stripFrame.width, right.stripFrame.width, accuracy: 0.001)
+        XCTAssertEqual(layout.keys.filter { $0.row >= 0 }, right.keys.filter { $0.row >= 0 })
+        XCTAssertNil(layout.hitTest(CGPoint(x: layout.stripFrame.maxX - 20, y: layout.stripFrame.midY)), "strip is not a key")
+    }
+
+    /// On the unfolded Duo's split keyboard, Left puts the strip and the Hex key over the left
+    /// half, mirroring Right's right half.
+    func testHexKeyOnTheLeftPutsTheSplitStripOverTheLeftHalf() {
+        let right = KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75, hexPlacement: .stripTrailing)
+        let layout = KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75, hexPlacement: .stripLeading)
+        let split = layout.split!
+        let hex = layout.key(.hex)!
+        XCTAssertEqual(hex.frame.minX, layout.metrics.side, accuracy: 0.001)
+        XCTAssertLessThan(layout.stripFrame.maxX, split.middle)
+        XCTAssertEqual(layout.stripFrame.maxX, split.leftEdge + SplitGeometry.stripLead, accuracy: 0.001)
+        XCTAssertGreaterThanOrEqual(layout.stripFrame.minX, hex.frame.maxX)
+        XCTAssertGreaterThan(right.stripFrame.minX, split.middle)
+        XCTAssertEqual(layout.stripFrame.width, right.stripFrame.width, accuracy: 0.5)
+        XCTAssertEqual(layout.keys.filter { $0.row >= 0 }, right.keys.filter { $0.row >= 0 })
+    }
+
     func testRowThreeModifiersFollowTheLayer() {
         XCTAssertNotNil(KeyboardLayout(width: 393).key(.shift))
         XCTAssertEqual(KeyboardLayout(width: 393, layer: .numbers).key(.layerSwitch(.symbols))?.row, 2)
@@ -801,6 +835,24 @@ final class FullKeyboardSettingsTests: XCTestCase {
 
         settings.autocorrect = false
         XCTAssertFalse(FullKeyboardSettings(defaults: defaults).autocorrect)
+    }
+
+    func testHexKeyIsOnTheRightByDefault() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+
+        XCTAssertFalse(settings.hexKeyOnLeft)
+        XCTAssertEqual(settings.hexKeyPlacement, .stripTrailing)
+        XCTAssertEqual(FullKeyboardSettings(defaults: nil).hexKeyPlacement, .stripTrailing, "without the App Group")
+
+        settings.hexKeyOnLeft = true
+        XCTAssertEqual(FullKeyboardSettings(defaults: defaults).hexKeyPlacement, .stripLeading)
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.hexKeyLaunchArgument, "right"])
+        XCTAssertFalse(settings.hexKeyOnLeft)
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.hexKeyLaunchArgument, "left"])
+        XCTAssertTrue(settings.hexKeyOnLeft)
     }
 
     /// Testers who turned the full keyboard experiment off chose the dictation bar and keep

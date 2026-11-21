@@ -783,6 +783,95 @@ final class FullKeyboardEngineTests: XCTestCase {
         up(1, .character("a"))
     }
 
+    /// With the Hex key on the left the strip runs to the right side, so the keys take its
+    /// lower half over p too, and the Hex key, not the keys, keeps the spot over q.
+    func testTheStripsLowerHalfRuleFollowsTheHexKeyToTheLeft() {
+        engine.hexPlacement = .stripLeading
+        type("on t")
+        tap(.character("h"))
+        let strip = engine.layout.stripFrame
+        let p = engine.layout.key(.character("p"))!
+        let q = engine.layout.key(.character("q"))!
+        let hex = engine.layout.key(.hex)!
+        let overP = CGPoint(x: p.frame.midX, y: strip.maxY - 6)
+        let overQ = CGPoint(x: q.frame.midX, y: strip.maxY - 6)
+        now += 0.08
+        XCTAssertTrue(engine.takesStripTouch(at: overP))
+        XCTAssertEqual(engine.key(at: overP)?.kind, .character("p"))
+        XCTAssertFalse(engine.takesStripTouch(at: overQ), "the Hex key's, not the strip's")
+        XCTAssertTrue(hex.hitFrame.contains(overQ))
+        now += 0.3
+        XCTAssertFalse(engine.takesStripTouch(at: overP), "after a pause a pick is a pick")
+    }
+
+    /// Left: ✓ where the Hex key was, ✕ after it, then the Dot Scope well; Right mirrors it.
+    func testTheRecordingBarMirrorsWithTheHexKey() throws {
+        for onLeft in [false, true] {
+            let panel = HexKeyRecordingPanel(loudness: { -62 })
+            defer { panel.tearDown() }
+            panel.hexOnLeading = onLeft
+            panel.showsLoggingMark = true
+            panel.frame = CGRect(x: 0, y: 0, width: 393, height: 44)
+            panel.layoutIfNeeded()
+            let done = try XCTUnwrap(panel.subviews.first { $0.accessibilityLabel == "Done" })
+            let cancel = try XCTUnwrap(panel.subviews.first { $0.accessibilityLabel == "Cancel dictation" })
+            let well = try XCTUnwrap(panel.subviews.first { $0.subviews.contains(panel.scope) })
+            let mark = try XCTUnwrap(panel.subviews.first { $0 is TypingLogMarkView })
+            if onLeft {
+                XCTAssertEqual(done.frame.minX, KeyboardMetrics.portrait.side, accuracy: 0.5)
+                XCTAssertLessThan(done.frame.maxX, cancel.frame.minX)
+                XCTAssertLessThan(cancel.frame.maxX, well.frame.minX)
+                XCTAssertGreaterThan(mark.frame.minX, well.frame.midX, "the mark at the well's far end")
+                XCTAssertLessThanOrEqual(well.frame.minX + panel.scope.frame.maxX, mark.frame.minX)
+            } else {
+                XCTAssertEqual(done.frame.maxX, 393 - KeyboardMetrics.portrait.side, accuracy: 0.5)
+                XCTAssertLessThan(cancel.frame.maxX, done.frame.minX)
+                XCTAssertLessThan(well.frame.maxX, cancel.frame.minX)
+                XCTAssertLessThan(mark.frame.maxX, well.frame.midX)
+            }
+        }
+    }
+
+    /// The Hex key's menu opens toward the screen's middle, and the Full Access hint's Open Hex
+    /// sits beside the key, on whichever side it is.
+    func testTheMenuAndFullAccessHintFollowTheHexKey() throws {
+        defer { HexKeyPlacement.current = .stripTrailing }
+        for onLeft in [false, true] {
+            let model = KeyboardViewModel()
+            let view = FullKeyboardView(model: model, target: target)
+            view.hexPlacementOverride = onLeft ? .stripLeading : .stripTrailing
+            view.frame = CGRect(x: 0, y: 0, width: 393, height: 254)
+            view.layoutIfNeeded()
+            XCTAssertEqual(view.hexKey.frame.midX < view.stripView.frame.minX, onLeft)
+            XCTAssertEqual(view.hexKey.frame.midX > view.stripView.frame.maxX, !onLeft)
+
+            view.debugShowStyleMenu()
+            view.layoutIfNeeded()
+            let menu = try XCTUnwrap(view.subviews.first { $0 is HexStyleMenuView })
+            menu.layoutIfNeeded()
+            let panel = try XCTUnwrap(menu.subviews.first)
+            let hex = view.engine.layout.key(.hex)!.frame
+            if onLeft {
+                XCTAssertLessThan(panel.frame.minX, hex.maxX, "over the key")
+                XCTAssertGreaterThan(panel.frame.maxX, hex.maxX + 100, "and out toward the middle")
+            } else {
+                XCTAssertGreaterThan(panel.frame.maxX, hex.minX, "over the key")
+                XCTAssertLessThan(panel.frame.minX, hex.minX - 100, "and out toward the middle")
+            }
+            view.dismissStyleMenu()
+
+            model.hasFullAccess = false
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            view.showFullAccessHint()
+            view.layoutIfNeeded()
+            let hint = try XCTUnwrap(view.stripView.subviews.first { $0 is FullAccessHintView })
+            hint.layoutIfNeeded()
+            let open = try XCTUnwrap(hint.subviews.first { $0 is UIButton })
+            let title = try XCTUnwrap(hint.subviews.first { ($0 as? UILabel)?.text == FullAccessHintView.title })
+            XCTAssertEqual(open.frame.maxX < title.frame.minX, onLeft, "Open Hex beside the Hex key")
+        }
+    }
+
     /// The same through the view: the key plane lies over the strip and claims its lower half
     /// while you type, so the suggestions never see the touch.
     func testTheKeysTakeTheStripsLowerHalfWhileTyping() {

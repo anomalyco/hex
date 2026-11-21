@@ -171,6 +171,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         engine.autocorrect.allowsSwearing = FullKeyboardSettings().suggestSwearWords
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
+        syncHexPlacement()
         refreshEmojiKey()
         syncSpatialAutocorrect()
         refreshLanguageSignals()
@@ -372,6 +373,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
+        syncHexPlacement()
         refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
@@ -385,6 +387,21 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         }
         syncSpatialAutocorrect()
         syncSwipeTyping()
+    }
+
+    /// Fixtures pin where the Hex key sits; otherwise Settings › Keyboard › Hex key.
+    var hexPlacementOverride: HexKeyPlacement? { didSet { syncHexPlacement() } }
+
+    /// Settings › Keyboard › Hex key: Right (the strip's trailing end) or Left (its leading
+    /// end), kept in `HexKeyPlacement.current` too for typing logs.
+    private func syncHexPlacement() {
+        let placement = hexPlacementOverride ?? FullKeyboardSettings().hexKeyPlacement
+        HexKeyPlacement.current = placement
+        guard engine.hexPlacement != placement else { return }
+        plane.cancelAllTouches()
+        dismissStyleMenu()
+        engine.hexPlacement = placement
+        setNeedsLayout()
     }
 
     /// Fixtures and tests turn Swipe typing on or off; otherwise its switch in Experiments.
@@ -544,6 +561,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         callout.frame = content
         accentCallout.frame = content
         stripView.frame = layout.stripFrame.offsetBy(dx: 0, dy: lift)
+        stripView.hexOnLeading = layout.hexOnLeading
 
         hexKey.cornerRadius = layout.metrics.cornerRadius
         if let hex = layout.key(.hex) {
@@ -564,6 +582,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             panel.horizontalInset = layout.horizontalInset
             panel.metrics = layout.metrics
             panel.sideKeyWidth = layout.letterWidth * KeyboardLayout.modifierWidthRatio
+            panel.hexOnLeading = layout.hexOnLeading
         }
         if let menu = styleMenu, let hex = layout.key(.hex) {
             menu.frame = bounds
@@ -884,6 +903,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self.model.onStyleSelected?(self.model.style.next)
         }
         panel.showsLoggingMark = model.isLoggingTyping
+        panel.hexOnLeading = engine.layout.hexOnLeading
         insertSubview(panel, belowSubview: callout)
         recordingPanel = panel
         setNeedsLayout()

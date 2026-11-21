@@ -137,14 +137,28 @@ private enum KeyboardChoice: CaseIterable {
     }
 }
 
+/// Settings › Keyboard › Hex key: which end of the strip the full keyboard's Hex key sits at.
+private enum HexKeySide: CaseIterable {
+    case left
+    case right
+
+    var label: String {
+        switch self {
+        case .left: String(localized: "Left")
+        case .right: String(localized: "Right")
+        }
+    }
+}
+
 /// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
-/// default, as Apple's keyboard never offers them), and haptics, which the dictation bar uses
-/// too.
+/// default, as Apple's keyboard never offers them; Hex key, Right by default, under Languages),
+/// and haptics, which the dictation bar uses too.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
     @State private var autoCapitalization = FullKeyboardSettings().autoCapitalization
+    @State private var hexKeyOnLeft = FullKeyboardSettings().hexKeyOnLeft
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
     @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
@@ -172,6 +186,23 @@ struct KeyboardSettingsPage: View {
 
                 if fullKeyboard {
                     KeyboardLanguagesRow()
+
+                    SettingsDivider()
+
+                    HStack(spacing: 12) {
+                        SettingsRowLabel(title: String(localized: "Hex key"))
+                        Spacer(minLength: 8)
+                        SettingsSegments(
+                            items: HexKeySide.allCases,
+                            selected: hexKeyOnLeft ? .left : .right,
+                            label: \.label,
+                            onSelect: { side in
+                                hexKeyOnLeft = side == .left
+                            }
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 50)
 
                     SettingsDivider()
 
@@ -244,6 +275,9 @@ struct KeyboardSettingsPage: View {
         .onChange(of: autoCapitalization) { _, enabled in
             FullKeyboardSettings().autoCapitalization = enabled
         }
+        .onChange(of: hexKeyOnLeft) { _, onLeft in
+            FullKeyboardSettings().hexKeyOnLeft = onLeft
+        }
         .onChange(of: autocorrect) { _, enabled in
             FullKeyboardSettings().autocorrect = enabled
         }
@@ -262,6 +296,7 @@ struct KeyboardSettingsPage: View {
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autoCapitalization = FullKeyboardSettings().autoCapitalization
+            hexKeyOnLeft = FullKeyboardSettings().hexKeyOnLeft
             autocorrect = FullKeyboardSettings().autocorrect
             spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
             suggestSwearWords = FullKeyboardSettings().suggestSwearWords

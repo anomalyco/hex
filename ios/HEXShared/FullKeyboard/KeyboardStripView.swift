@@ -33,7 +33,16 @@ final class KeyboardStripView: UIView {
     private var showsFullAccessHint = false
     /// Built the first time the Hex key is tapped without Full Access.
     private var fullAccessHintView: FullAccessHintView?
-    /// Record typing logs is recording: a small mark in the strip's leading corner.
+    /// The Hex key sits left of the strip (Settings › Keyboard › Hex key): the Full Access
+    /// hint's Open Hex leads, beside the key, and the Logging mark moves to the far corner.
+    var hexOnLeading = false {
+        didSet {
+            guard hexOnLeading != oldValue else { return }
+            fullAccessHintView?.chipLeads = hexOnLeading
+            setNeedsLayout()
+        }
+    }
+    /// Record typing logs is recording: a small mark in the strip's corner away from the Hex key.
     var showsLoggingMark = false {
         didSet {
             guard showsLoggingMark != oldValue else { return }
@@ -196,6 +205,7 @@ final class KeyboardStripView: UIView {
 
     private func makeFullAccessHintView() -> FullAccessHintView {
         let hint = FullAccessHintView()
+        hint.chipLeads = hexOnLeading
         hint.onOpenHex = { [weak self] in self?.onOpenHexFromHint?() }
         hint.isHidden = true
         addSubview(hint)
@@ -259,11 +269,14 @@ final class KeyboardStripView: UIView {
         )
         var hintFrame = bounds.insetBy(dx: 12, dy: 0)
         if let loggingMark, showsLoggingMark {
-            // Above the first slot's text, and in from the keyboard's rounded top corner.
+            // Above the outer slot's text, and in from the keyboard's rounded top corner.
             let size = loggingMark.sizeThatFits(bounds.size)
-            loggingMark.frame = CGRect(x: 18, y: 2, width: size.width, height: size.height)
+            let markX = hexOnLeading ? bounds.width - 18 - size.width : 18
+            loggingMark.frame = CGRect(x: markX, y: 2, width: size.width, height: size.height)
             bringSubviewToFront(loggingMark)
-            hintFrame = CGRect(x: loggingMark.frame.maxX + 8, y: 0, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: bounds.height)
+            hintFrame = hexOnLeading
+                ? CGRect(x: 12, y: 0, width: max(0, loggingMark.frame.minX - 8 - 12), height: bounds.height)
+                : CGRect(x: loggingMark.frame.maxX + 8, y: 0, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: bounds.height)
         }
         fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
@@ -391,7 +404,7 @@ final class KeyboardStripView: UIView {
 }
 
 /// What the Hex key shows without Full Access: dictation needs Allow Full Access, where to
-/// turn it on, and an Open Hex chip, the only part that opens Hex.
+/// turn it on, and an Open Hex chip, the only part that opens Hex, on the Hex key's side.
 @MainActor
 final class FullAccessHintView: UIView {
     static let title = "Allow Full Access to dictate"
@@ -399,6 +412,8 @@ final class FullAccessHintView: UIView {
 
     var palette = FullKeyboardPalette(isDark: false) { didSet { applyPalette() } }
     var chipHeight: CGFloat = 30 { didSet { setNeedsLayout() } }
+    /// The Hex key is on the left: Open Hex sits at the leading end, the text after it.
+    var chipLeads = false { didSet { if chipLeads != oldValue { setNeedsLayout() } } }
     var onOpenHex: (() -> Void)?
 
     private let titleLabel = UILabel()
@@ -450,16 +465,17 @@ final class FullAccessHintView: UIView {
         super.layoutSubviews()
         let buttonWidth = openButton.sizeThatFits(CGSize(width: bounds.width, height: chipHeight)).width
         openButton.frame = CGRect(
-            x: bounds.width - buttonWidth,
+            x: chipLeads ? 0 : bounds.width - buttonWidth,
             y: (bounds.height - chipHeight) / 2,
             width: buttonWidth,
             height: chipHeight
         )
-        let textWidth = max(0, openButton.frame.minX - 10)
+        let textX = chipLeads ? openButton.frame.maxX + 10 : 0
+        let textWidth = chipLeads ? max(0, bounds.width - textX) : max(0, openButton.frame.minX - 10)
         let lineHeight: CGFloat = 16
         let top = (bounds.height - 2 * lineHeight - 1) / 2
-        titleLabel.frame = CGRect(x: 0, y: top, width: textWidth, height: lineHeight)
-        pathLabel.frame = CGRect(x: 0, y: top + lineHeight + 1, width: textWidth, height: lineHeight)
+        titleLabel.frame = CGRect(x: textX, y: top, width: textWidth, height: lineHeight)
+        pathLabel.frame = CGRect(x: textX, y: top + lineHeight + 1, width: textWidth, height: lineHeight)
     }
 }
 

@@ -10,6 +10,8 @@ struct FullKeyboardSettings {
     static let launchArgument = "--experiment-full-keyboard"
     static let emojiLaunchArgument = "--experiment-emoji"
     static let swipeLaunchArgument = "--experiment-swipe"
+    /// Simulator scenes pass `--hex-key left` (or `right`) for Settings › Keyboard › Hex key.
+    static let hexKeyLaunchArgument = "--hex-key"
     /// Simulator scenes pass `--keyboard dictation-bar` (or `full`) to pick the keyboard.
     static let keyboardLaunchArgument = "--keyboard"
 
@@ -23,6 +25,7 @@ struct FullKeyboardSettings {
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
         static let swipeTyping = "experiments.swipeTyping"
+        static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
     }
 
     private let defaults: UserDefaults?
@@ -102,9 +105,22 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.swipeTyping) }
     }
 
+    /// Settings › Keyboard › Hex key: Right (false, the default) or Left. Left puts the Hex key
+    /// at the strip's leading end, for people who type with their left thumb; everything
+    /// tied to it (the recording bar's ✕ and ✓, its menu, the Full Access hint) follows.
+    var hexKeyOnLeft: Bool {
+        get { defaults?.bool(forKey: Key.hexKeyOnLeft) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.hexKeyOnLeft) }
+    }
+
+    /// Where the full keyboard's Hex key sits for `hexKeyOnLeft`.
+    var hexKeyPlacement: HexKeyPlacement {
+        hexKeyOnLeft ? .stripLeading : .stripTrailing
+    }
+
     /// Simulator scenes pass `--experiment-full-keyboard` or `--keyboard full|dictation-bar`
     /// to pick the keyboard, `--experiment-emoji` to turn the emoji experiment on, and
-    /// `--experiment-swipe` for Swipe typing.
+    /// `--experiment-swipe` for Swipe typing, and `--hex-key left|right` for the Hex key's side.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -121,6 +137,13 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.swipeLaunchArgument) {
             swipeTyping = true
+        }
+        if let index = arguments.firstIndex(of: Self.hexKeyLaunchArgument), index + 1 < arguments.count {
+            switch arguments[index + 1] {
+            case "left": hexKeyOnLeft = true
+            case "right": hexKeyOnLeft = false
+            default: break
+            }
         }
     }
 }
