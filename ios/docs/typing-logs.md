@@ -189,7 +189,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 | `return` | `inserted`: `"\n"`, `returnKeyType`, `send` (the key said Send); `ignored: true` and no `inserted` when the key was disabled (empty field) |
 | `paste` | `inserted`: the strip's Paste chip |
 | `undo_dictation` | `deleted` (the dictation), or `deletedCount` when the host showed only its end |
-| `cursor` | `offset`: characters the spacebar trackpad moved the cursor (negative is left) |
+| `cursor` | `offset`: UTF-16 units the spacebar trackpad moved the cursor (negative is left) |
 
 ### `candidates`
 
@@ -220,7 +220,7 @@ Taps that aren't text: `action`:
 - `accent_open` (`id`, `key`, `options`), `accent_pick` (`id`, `index`, `chosen`,
   `rollover` when another key committed it), `accent_cancel`;
 - `trackpad_start` (`id`; `hold: true` when holding space still for 0.4 s
-  started it), `trackpad_end` (`id`, `offset`: total characters);
+  started it), `trackpad_end` (`id`, `offset`: total UTF-16 units);
 - `language_swipe` (`id`, `step`: 1 the next language, -1 the one before) and
   `keyboard_language` (`language`: the layout it switched to), with two or more
   keyboard languages;
