@@ -62,8 +62,11 @@ public final class Replay {
                     char key=typed.charAt(i); double x=taps.getJSONArray(i).getDouble(0), y=taps.getJSONArray(i).getDouble(1);
                     long start=System.nanoTime();
                     if(key==' ') {
-                        String raw=state.getToken(), fix=state.replacement();
-                        if(fix!=null) out.replace(out.length()-raw.length(),out.length(),fix);
+                        Correction fix=state.finish(' ',new KeyPoint(x,y),grid);
+                        if(fix!=null) {
+                            if(!out.toString().endsWith(fix.getOriginal())) throw new IllegalStateException("Correction off the text");
+                            out.replace(out.length()-fix.getOriginal().length(),out.length(),fix.getReplacement());
+                        }
                         out.append(' '); String before=out.toString(); state.reset(before); state.predictions(before);
                     } else {
                         state.letter(String.valueOf(key),x,y,grid); out.append(key); state.suggestions();
