@@ -1,5 +1,7 @@
 package ly.anoma.hex.keyboard
 
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.text.InputType
 import android.view.KeyEvent
@@ -25,7 +27,14 @@ internal class KeyboardEngine(
     private val layoutLanguage: () -> Spoken,
     private val loadDecoder: (String) -> SpatialDecoder,
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
+    private val main: Handler = Handler(Looper.getMainLooper()),
 ) {
+    private companion object {
+        /** The correction chip waits for this pause in typing: working it out costs the decoder a
+         * search (2 ms median, 16 ms p95 per letter on the API 31 emulator), which shouldn't delay keys. */
+        const val CHIP_PAUSE_MS = 100L
+    }
+    private var pendingChip: Runnable? = null
     var surface: KeyboardSurface? = null
     private val models = HashMap<String, SpatialDecoder>()
     private var word: TypingWord? = null
@@ -111,8 +120,9 @@ internal class KeyboardEngine(
     }
     fun mode() { resetTyping(); surface?.suggestions(emptyList()); symbols = !symbols; more = false; lastShift = 0; showPlane() }
     private fun resetTyping() {
-        word?.reset(); undo = null; expectedCaret = -1; prefix = ""
+        cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
+    private fun cancelChip() { pendingChip?.let(main::removeCallbacks); pendingChip = null }
     fun configureTyping(keepWord: Boolean = false) {
         val language = layoutLanguage().layoutCode
         val active = word
@@ -131,10 +141,15 @@ internal class KeyboardEngine(
         showSuggestions(word)
     }
     private fun showSuggestions(w: TypingWord?) {
+        cancelChip()
         if (w != null && w.token.isNotEmpty()) {
             val choices = w.suggestions()
-            val fix = correction(w)
-            surface?.suggestions(choices, literal = if (fix != null) w.token else w.literalChip(choices), correction = fix)
+            surface?.suggestions(choices, literal = w.literalChip(choices))
+            val token = w.token
+            pendingChip = Runnable {
+                pendingChip = null
+                if (word === w && w.token == token) correction(w)?.let { surface?.suggestions(choices, literal = token, correction = it) }
+            }.also { main.postDelayed(it, CHIP_PAUSE_MS) }
             return
         }
         val b = if (w != null && !symbols && selStart == selEnd) before() else null
