@@ -369,6 +369,48 @@ internal object SpokenText {
         return text.substring(0, i) + text[i].uppercase() + text.substring(i + 1)
     }
 
+    /** The dictation as it goes in after [before] (iOS insertionText's case rule): mid-sentence, its
+     * first word is lowercased unless it is "I", an acronym, has inner capitals or [isWord] doesn't
+     * know its lowercase form (likely a name). German capitalizes nouns, so it keeps the case. */
+    fun continuing(text: String, before: String?, language: String?,
+                   isWord: (String) -> Boolean = { commonWord(it, language) }): String {
+        if (startsSentence(before) || code(language) in setOf("de", "lb")) return text
+        return continuingSentence(text, isWord)
+    }
+
+    fun continuingSentence(text: String, isWord: (String) -> Boolean): String {
+        val first = text.firstOrNull() ?: return text
+        if (!first.isUpperCase()) return text
+        val word = text.takeWhile { it.isLetter() || it == '\'' || it == '’' }
+        if (word == "I" || word.startsWith("I'") || word.startsWith("I’")) return text
+        val letters = word.filter(Char::isLetter)
+        if (letters.length >= 2 && letters == letters.uppercase(Locale.ROOT)) return text
+        if (letters.drop(1).any(Char::isUpperCase)) return text
+        if (!isWord(word.lowercase(Locale.ROOT))) return text
+        return first.lowercase() + text.substring(1)
+    }
+
+    /** Words that are never names, so a capital on them only came from Whisper starting a segment.
+     * Android has no synchronous system dictionary and the typing models are case-folded. */
+    fun commonWord(word: String, language: String?) = word in (commonWords[code(language)] ?: emptySet())
+
+    private val commonWords = mapOf(
+        "en" to ("a about after again all also am an and another any are as at be because been before being but by " +
+            "can could did do does doing don't done each even every few for from get gets getting go goes going gonna got " +
+            "had has have having he her here hers him his how however if in into is it it's its just let let's like made " +
+            "make many maybe me might more most much must my need no not now of off oh ok okay on once one only or other our " +
+            "out over please so some still such than thank thanks that that's the their them then there there's these they " +
+            "this those though through to too under until up us very was we well were what when where which while who why " +
+            "will with would yeah yes yet you your").split(' ').toSet(),
+        "es" to ("a al algo así aunque bien cada como con cuando de del desde donde el ella ellas ellos en entonces era es " +
+            "esa ese eso esta este esto está están estoy fue gracias ha hay la las le les lo los me mi mientras muy más nada " +
+            "ni no nos o otra otro para pero poco por porque pues que qué se si sin sobre solo son su sus también tan te " +
+            "tengo tiene todo todos tu un una uno vale vamos y ya yo").split(' ').toSet(),
+        "no" to ("alle at av bare da de del dem den denne der det dette du eller en er et etter for fordi fra går ha han " +
+            "har hun hva hvis hvor i igjen ikke inn ja jeg kan kanskje med men mer meg min nei når og også om opp på så " +
+            "seg skal som til takk uten var vi vil være å").split(' ').toSet(),
+    ).let { it + ("nb" to it.getValue("no")) + ("nn" to it.getValue("no")) }
+
     /** Whether text before the cursor leaves the next words at a sentence start: none (or only
      * spaces), a line break, or a sentence's mark (closing quotes or brackets after it count too). */
     fun startsSentence(before: String?): Boolean {

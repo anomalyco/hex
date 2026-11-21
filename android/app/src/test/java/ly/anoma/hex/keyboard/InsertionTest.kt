@@ -321,4 +321,34 @@ class InsertionTest {
         for (prose in listOf("A period of time passed.", "The comma is wrong.", "Use the Oxford comma.", "He has a question mark tattoo.",
             "Two comma five.", "Colon cancer is treatable.")) assertEquals(prose, SpokenPunctuation.format(prose, "en"))
     }
+
+    // iOS KeyboardBridgeTests: dictation continuing a sentence starts lowercase.
+    @Test fun dictationContinuingASentenceStartsLowercase() {
+        val words = setOf("that's", "the", "self", "a", "don't")
+        fun insert(text: String, before: String?) =
+            insertion(SpokenText.continuing(text, before, "en-US") { it in words }, before?.lastOrNull(), null)
+        assertEquals(" that's great.", insert("That's great.", "I think"))
+        assertEquals("the plan works.", insert("The plan works.", "and so "))
+        assertEquals(" self-driving cars.", insert("Self-driving cars.", "I like"))
+        assertEquals(" a dog.", insert("A dog.", "We saw"))
+        for (before in listOf(null, "", "   ", "Hello.", "Hello. ", "Really?", "Yes!", "Wait…", "Line one\n", "He said \"stop.\" ")) {
+            assertEquals(true, SpokenText.startsSentence(before))
+            assertEquals("The end.", insert("The end.", before).trim())
+        }
+        assertEquals(false, SpokenText.startsSentence("Note: "))
+        assertEquals(false, SpokenText.startsSentence("see (this)"))
+        assertEquals(" I think so.", insert("I think so.", "and"))
+        assertEquals(" I'm here.", insert("I'm here.", "and"))
+        assertEquals(" I’ll go.", insert("I’ll go.", "and"))
+        assertEquals(" NASA launched it.", insert("NASA launched it.", "and"))
+        assertEquals(" McDonald's is open.", insert("McDonald's is open.", "and"))
+        assertEquals(" Sarah said so.", insert("Sarah said so.", "and"))
+        assertEquals(" iPhone works.", insert("iPhone works.", "my"))
+        // German keeps the case; the built-in word lists know no names.
+        assertEquals("Das Haus", SpokenText.continuing("Das Haus", "und", "de-DE") { true })
+        assertEquals("the plan", SpokenText.continuing("The plan", "and", "en"))
+        assertEquals("Sarah said", SpokenText.continuing("Sarah said", "and", "en"))
+        assertEquals("que sí", SpokenText.continuing("Que sí", "Creo", "es"))
+        assertEquals("Madrid es", SpokenText.continuing("Madrid es", "en", "es"))
+    }
 }
