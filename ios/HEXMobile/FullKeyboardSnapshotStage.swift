@@ -589,6 +589,10 @@ final class FixtureTextTarget: KeyboardTextTarget {
         return String(text[..<idx])
     }
 
+    var documentContextAfterInput: String? {
+        String(text.dropFirst(max(0, min(text.count, cursorIndex))))
+    }
+
     var hasText: Bool { !text.isEmpty }
 
     func insertText(_ inserted: String) {

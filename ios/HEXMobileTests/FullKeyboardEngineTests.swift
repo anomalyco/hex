@@ -310,6 +310,50 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "hello")
     }
 
+    /// X (Brandon): "holding down on the space bar only allows scrubbing horizontally, whereas
+    /// Apple's keyboard treats it like a cursor on both x/y axes". Apple's (black box, iOS 27.2)
+    /// moves a line every 15 to 16 pt, the first after about 8, keeping the column, and keeps
+    /// the cursor on the first or last line past them; a keyboard can only move by characters,
+    /// so the line before or after is found in the text around the cursor.
+    func testTheSpaceBarTrackpadMovesUpAndDownLines() {
+        target = FixtureTextTarget(text: "one two three\nfour five\nsix seven eight nine")
+        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        engine.width = 393
+        engine.clock = { [unowned self] in self.now }
+        engine.configureForField()
+        target.adjustTextPosition(byCharacterOffset: 24 + 12 - target.cursorIndex)
+        engine.textDidChange()
+        let space = point(.space)
+        engine.touchBegan(id: 1, at: space)
+        engine.holdSpace(forTouch: 1)
+        func slide(_ dx: CGFloat, _ dy: CGFloat) -> Int {
+            engine.touchMoved(id: 1, to: CGPoint(x: space.x + dx, y: space.y + dy))
+            return target.cursorIndex
+        }
+        XCTAssertEqual(slide(0, -5), 36, "not yet")
+        XCTAssertEqual(slide(0, -8), 14 + 9, "up a line, at its end: \"four five\" is shorter")
+        XCTAssertEqual(slide(0, -24), 12, "and up again, back at the column it started at")
+        XCTAssertEqual(slide(0, -60), 12, "the first line keeps it")
+        XCTAssertEqual(slide(0, -52), 14 + 9, "coming back moves it at once")
+        XCTAssertEqual(slide(-8, -52), 14 + 8, "along the line as before")
+        XCTAssertEqual(slide(-8, -21), 24 + 8, "down a line, at the new column")
+        XCTAssertEqual(slide(-8, 30), 24 + 8, "the last line keeps it")
+        engine.touchEnded(id: 1, at: CGPoint(x: space.x - 8, y: space.y + 30))
+        XCTAssertEqual(target.text, "one two three\nfour five\nsix seven eight nine", "nothing typed")
+
+        // A line the field wraps: up by one wrapped line's worth of characters.
+        let long = String(repeating: "word ", count: 30)
+        target = FixtureTextTarget(text: long)
+        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        engine.width = 393
+        engine.configureForField()
+        engine.touchBegan(id: 2, at: space)
+        engine.holdSpace(forTouch: 2)
+        engine.touchMoved(id: 2, to: CGPoint(x: space.x, y: space.y - 10))
+        XCTAssertEqual(target.cursorIndex, long.count - TrackpadCursor.lineLength(forWidth: 393))
+        engine.touchEnded(id: 2, at: CGPoint(x: space.x, y: space.y - 10))
+    }
+
     /// With two or more languages a quick swipe along the space bar switches language (to the
     /// left the next, to the right the one before) and types nothing; a slip shorter than a
     /// swipe is still a space; a hold, then a slide, moves the cursor. With one language any

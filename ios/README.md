@@ -904,7 +904,15 @@ never at a launch by itself.
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
   the keyboard switches between two or more languages (Keyboard languages, above). The
-  dictation bar's space bar is the same trackpad (the same still hold or a 10 pt slide, a
+  full keyboard's trackpad moves up and down lines too, as Apple's does (black box, iOS 27.2:
+  a line every 15 to 16 pt, the first after about 8, staying on the first or last line past
+  them): a keyboard can only move the cursor by characters, so `TrackpadCursor` finds the
+  line before or after in the text the field shares around the cursor (a few lines; a wrapped
+  line counts about 8.2 pt a character across the screen) and keeps the column. Lines the
+  field doesn't share are out of reach. Along a line it moves by characters as before.
+  Apple's second-finger tap to select text has no counterpart: `UITextDocumentProxy` (iOS
+  27.2 SDK) can read the selection but not make one, so Hex doesn't try. The dictation bar's
+  space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
   character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
   build 56 asked for it), and a tap still types a space.
 - **Smart punctuation (full keyboard):** As on Apple's keyboard (black box, iOS 27.2), the

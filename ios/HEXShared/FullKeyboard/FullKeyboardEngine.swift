@@ -5,6 +5,7 @@ import UIKit
 @MainActor
 protocol KeyboardTextTarget: AnyObject {
     var documentContextBeforeInput: String? { get }
+    var documentContextAfterInput: String? { get }
     var hasText: Bool { get }
     var autocapitalizationType: UITextAutocapitalizationType? { get }
     var autocorrectionType: UITextAutocorrectionType? { get }
@@ -668,9 +669,9 @@ final class FullKeyboardEngine {
             return
         }
 
-        // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret. With two
-        // or more languages only once the space bar was held (`holdSpace`): a slide before
-        // that is a language swipe.
+        // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret, then along
+        // and across lines (`trackpadSteps`). With two or more languages only once the space
+        // bar was held (`holdSpace`): a slide before that is a language swipe.
         if touch.key.kind == .space {
             if touch.isLanguageSwipe {
                 touches[id] = touch
@@ -686,10 +687,8 @@ final class FullKeyboardEngine {
                 return
             }
             if touch.isTrackpad {
-                let delta = point.x - touch.trackpadAnchorX
-                let rawSteps = Int((delta / Self.trackpadPointsPerCharacter).rounded(.towardZero))
+                let rawSteps = trackpadSteps(&touch, to: point)
                 if rawSteps != 0 {
-                    touch.trackpadAnchorX += CGFloat(rawSteps) * Self.trackpadPointsPerCharacter
                     touch.trackpadOffset += rawSteps
                     touches[id] = touch
                     typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
@@ -750,6 +749,7 @@ final class FullKeyboardEngine {
     private func startTrackpad(_ touch: inout ActiveTouch, id: Int, anchorX: CGFloat, hold: Bool) {
         touch.isTrackpad = true
         touch.trackpadAnchorX = anchorX
+        touch.trackpadAnchorY = touch.point.y
         lastSpaceAt = nil
         swipedWord = nil
         touches[id] = touch

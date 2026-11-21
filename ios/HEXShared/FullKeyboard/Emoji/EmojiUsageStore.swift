@@ -93,6 +93,7 @@ final class EmojiRoutedTarget: KeyboardTextTarget {
     var isSearching: Bool { query != nil }
 
     var documentContextBeforeInput: String? { query ?? document.documentContextBeforeInput }
+    var documentContextAfterInput: String? { isSearching ? nil : document.documentContextAfterInput }
     var hasText: Bool { query.map { !$0.isEmpty } ?? document.hasText }
     var autocapitalizationType: UITextAutocapitalizationType? { isSearching ? UITextAutocapitalizationType.none : document.autocapitalizationType }
     var autocorrectionType: UITextAutocorrectionType? { isSearching ? .no : document.autocorrectionType }
