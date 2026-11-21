@@ -2931,18 +2931,24 @@ takes away one that is up.
 
 A frame-less attempt also backs the HUD off, so a GPU that can't present one
 (the discrete GPU a game saturates, a lost device) is not asked to make a new
-window, swapchain and device on every dictation: no show happens for
+window, swapchain and device on every dictation: no show starts for
 `HUD_BACKOFF` (one minute), doubled for each further attempt in a row that
-presents nothing, up to `HUD_BACKOFF_MAX` (30 minutes). A show that presents a
-frame resets the backoff, so the next failure starts from a minute again. The
-gate is `Hud::show`, shared by the start, the recording's meter re-ask and a
-position change, and no attempt opens while the HUD backs off, so a suppressed
-show costs nothing: Hex logs one warning with the cooldown when a backoff
-starts, and Settings keeps the last failure's reason meanwhile. A recording
-whose own attempt presented nothing gets no further show either, so a failed
-HUD is not rebuilt mid-dictation. This is Hex's own bound on how often the HUD
-is rebuilt, not a fix for the blocking itself: Rune still waits on the device
-and the swapchain on the loop thread and needs a change there (above). Every
+presents nothing, up to `HUD_BACKOFF_MAX` (30 minutes). Only an attempt whose
+own resolve sees a frame resets it, so the next failure starts from a minute
+again. A first frame that arrives after its attempt already resolved
+frame-less keeps the backoff for later dictations — the slow show is the cost
+being avoided — but the HUD it put up stays for that recording: a blocked show
+only stops Hex from creating one, and never hides a HUD that is up. A blocked
+start still asks Rune to place the overlay and hides once, since it clears
+`shown` first; that hide builds no window, swapchain or device. The gate is
+`Hud::show`, shared by the start, the recording's meter re-ask and a
+position change, and no attempt opens while the HUD backs off: Hex logs one
+warning with the cooldown when a backoff starts, and Settings keeps the last
+failure's reason meanwhile. A recording whose own attempt presented nothing
+gets no further show either, so a failed HUD is not rebuilt mid-dictation.
+This is Hex's own bound on how often the HUD is rebuilt, not a fix for the
+blocking itself: Rune still waits on the device and the swapchain on the loop
+thread and needs a change there (above). Every
 start also asks Rune for the HUD again, on macOS, Windows, and Linux, clearing
 `shown` first. `shown` is Hex's record of a request, not of Rune's state: it
 is set before Rune applies the show, and `show_fading` gives up when the window
@@ -2979,10 +2985,15 @@ meter. Checked by `rune_hud::tests`' first-frame, backoff and recovery tests
 `consecutive_failures_double_up_to_thirty_minutes`,
 `a_success_resets_the_backoff`,
 `a_failed_attempt_gets_no_second_show_in_its_capture`,
-`a_backing_off_hud_still_reports_its_last_failure`, and
+`a_backing_off_hud_still_reports_its_last_failure`,
+`a_late_first_frame_keeps_its_backoff_and_its_hud`,
+`a_blocked_show_keeps_a_hud_that_is_up`, and
 `a_recording_asks_again_only_when_its_frames_stop`), and
 `only_the_recording_phase_is_recording` in `dictation::indicator` pins the one
-phase a re-ask may act on, not on Windows hardware.
+phase a re-ask may act on, not on Windows hardware. The `Hud`-level gates
+(`Hud::show_blocked`, the blocked show's `shown` guard, and the meter re-ask's
+order) are Windows-only and not unit-tested; only `FirstFrame`'s decisions are,
+on every OS.
 Every OS takes dark or light and Reduce Motion from Rune, and loads
 `dot-scope.json` at launch.
 Windows and Linux drop the HUD's painter, and its buffers, bind group and

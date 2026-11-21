@@ -320,12 +320,6 @@ pub(crate) struct Hud {
     stepped_at: Option<Instant>,
     #[cfg(target_os = "windows")]
     reshown: bool,
-    /// Whether a backed-off show already told Rune to hide the HUD. A start
-    /// clears `shown` before its show, so the first suppressed show of a backoff
-    /// is the one that may leave a HUD a late frame put up: it hides it once,
-    /// and the meters after it do nothing.
-    #[cfg(target_os = "windows")]
-    latched_off: bool,
     /// When the HUD last checked which display the pointer is on.
     #[cfg(not(target_os = "macos"))]
     followed: Option<Instant>,
@@ -348,6 +342,17 @@ const RESHOW_AFTER: Duration = Duration::from_millis(250);
 #[cfg(any(target_os = "windows", test))]
 fn reshow_due(since_frame: Option<Duration>, already: bool) -> bool {
     !already && since_frame.is_some_and(|since| since >= RESHOW_AFTER)
+}
+
+/// Whether a blocked show (the HUD is backing off a failed show, or this
+/// recording's own attempt already presented nothing) hides the HUD: only when
+/// none is up. A first frame that arrives after its attempt resolved frame-less
+/// keeps its backoff for later dictations, but must not take the HUD away from
+/// the recording that is watching it. A start clears `shown` before its show, so
+/// a blocked start still runs this teardown once, and it builds nothing (#2175).
+#[cfg(any(target_os = "windows", test))]
+fn blocked_show_hides(shown: bool) -> bool {
+    !shown
 }
 
 impl Hud {
@@ -423,11 +428,14 @@ impl Hud {
             let presents = overlay.surface_stats().totals.presents;
             let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
             if watch.position != IndicatorPosition::Hidden {
-                // Every start is a fresh attempt: its own baseline, clock and
-                // hide, even when the last one never resolved. While the HUD
-                // backs off a failed show no attempt opens, so its show below
-                // costs no window, swapchain or device (#2175).
-                watch.first_frame.start(Instant::now(), presents);
+                // Every start opens a fresh attempt: its own baseline, clock
+                // and hide, even when the last one never resolved. A refused
+                // start (the HUD is backing off) opens none, so there is no
+                // first frame to wait for: its recording spends its one re-ask
+                // up front, and the show below builds nothing (#2175).
+                if !watch.first_frame.start(Instant::now(), presents) {
+                    self.reshown = true;
+                }
             }
         }
         self.model.handle(event, Instant::now(), self.reduce);
@@ -441,12 +449,12 @@ impl Hud {
         #[cfg(target_os = "windows")]
         if meter
             && self.model.recording()
-            && !self.show_blocked(Instant::now())
             && reshow_due(
                 self.last_drawn
                     .map(|at| Instant::now().saturating_duration_since(at)),
                 self.reshown,
             )
+            && !self.show_blocked(Instant::now())
         {
             self.reshown = true;
             self.shown.store(false, Ordering::Release);
@@ -520,24 +528,22 @@ impl Hud {
         }
         #[cfg(target_os = "windows")]
         if self.show_blocked(Instant::now()) {
-            // Backing off, the HUD keeps its state but makes nothing: no
-            // `overlay.show()`, and with it no window, swapchain or device to
-            // build while a saturated GPU keeps the last one from presenting.
-            // A start cleared `shown` first, so hide once anyway (cheap when
-            // nothing is up): a HUD a late frame put up must not outlive the
-            // recording that asked for it (#2175).
-            if self.latched_off {
+            // Blocked, the HUD makes nothing: no `overlay.show()`, and with it
+            // no window, swapchain or device to build while a saturated GPU
+            // keeps the last one from presenting.
+            //
+            // A HUD that is up stays up. A first frame that arrives after its
+            // attempt resolved frame-less keeps the backoff for later
+            // dictations, but it is still what this recording is watching, and
+            // taking it away is not the backoff's job. Only a start, which
+            // cleared `shown` first, tears down what an older recording left;
+            // that hide costs nothing when nothing is up (#2175).
+            if !blocked_show_hides(self.shown.load(Ordering::Acquire)) {
                 return;
             }
-            self.latched_off = true;
-            self.shown.store(false, Ordering::Release);
-            self.unplace();
             overlay.hide();
+            self.hide();
             return;
-        }
-        #[cfg(target_os = "windows")]
-        {
-            self.latched_off = false;
         }
         if !self.shown.load(Ordering::Acquire) {
             overlay.show();
@@ -748,8 +754,6 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> HudSender {
             stepped_at: None,
             #[cfg(target_os = "windows")]
             reshown: false,
-            #[cfg(target_os = "windows")]
-            latched_off: false,
         },
     );
     let this = overlay.clone();

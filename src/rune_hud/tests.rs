@@ -559,8 +559,20 @@ fn the_next_start_hides_again_after_a_hide() {
             .is_some(),
         "the first attempt presented nothing"
     );
-    // Backing off, the HUD is shown nothing more until the cooldown ends. The
-    // recovery is per start: that one gets its own hide if it is frame-less too.
+    // A start during the backoff opens no attempt, so there is no second hide
+    // to make: the blocked show builds nothing, and the HUD is shown nothing.
+    let during = start + FIRST_FRAME + Duration::from_secs(1);
+    assert!(!first_frame.start(during, 4), "the HUD is backing off");
+    assert!(
+        first_frame
+            .poll(during + FIRST_FRAME, 4, None, None)
+            .hide
+            .is_none(),
+        "a refused start has no attempt to hide"
+    );
+
+    // After the cooldown the recovery is per start: that one gets its own hide
+    // if it is frame-less too.
     let next = start + FIRST_FRAME + HUD_BACKOFF;
     assert!(first_frame.start(next, 4), "the cooldown ended");
     assert!(
@@ -585,6 +597,16 @@ fn a_stale_attempts_hide_leaves_a_newer_start_alone() {
         .hide
         .expect("the attempt presented nothing");
     assert!(first_frame.should_apply_hide(hide, 4));
+
+    // A start during the backoff opens no attempt, so it does not take the HUD
+    // over: the stale hide still applies to the attempt that decided it. That
+    // is harmless, since the refused start shows nothing (#2175).
+    let during = start + FIRST_FRAME + Duration::from_millis(120);
+    assert!(!first_frame.start(during, 4), "the HUD is backing off");
+    assert!(
+        first_frame.should_apply_hide(hide, 4),
+        "no later attempt owns the HUD"
+    );
 
     // A stale hide can still land after the cooldown, once a later dictation
     // has opened its own attempt: that start re-asserts the HUD, so the stale
@@ -625,6 +647,42 @@ fn a_hide_is_dropped_when_a_frame_presented_after_the_poll() {
     );
     // The same poll's hide still applies when nothing presented.
     assert!(first_frame.should_apply_hide(hide, 0));
+}
+
+/// The poll runs every 250 ms, so a slow first frame can present just after its
+/// attempt resolved frame-less. The queued recovery hide must not run, and the
+/// backoff stays: the show was still too slow to trust, but the HUD it put up
+/// belongs to this recording (#2175).
+#[test]
+fn a_late_first_frame_keeps_its_backoff_and_its_hud() {
+    let start = Instant::now();
+    let mut first_frame = FirstFrame::default();
+    first_frame.start(start, 0);
+    let failed = first_frame.poll(start + FIRST_FRAME, 0, None, None);
+    let hide = failed.hide.expect("the attempt presented nothing");
+    assert_eq!(failed.backoff, Some(HUD_BACKOFF));
+
+    // The first frame presents before the hide, queued for Rune's thread, lands.
+    assert!(
+        !first_frame.should_apply_hide(hide, 1),
+        "the HUD is drawing, only late"
+    );
+    assert!(first_frame.backing_off(start + FIRST_FRAME + Duration::from_secs(1)));
+    assert!(first_frame.failed(), "the show was still too slow to trust");
+    // A dictation during the backoff opens no attempt, so it shows nothing.
+    assert!(!first_frame.start(start + FIRST_FRAME + Duration::from_secs(2), 1));
+}
+
+/// A blocked show only stops Hex from creating one; it never takes down a HUD a
+/// late frame put up. A start cleared `shown` first, so its blocked show still
+/// runs the cheap hide (#2175).
+#[test]
+fn a_blocked_show_keeps_a_hud_that_is_up() {
+    assert!(!blocked_show_hides(true), "a late frame keeps its HUD");
+    assert!(
+        blocked_show_hides(false),
+        "a blocked start hides what nothing shows"
+    );
 }
 
 /// A HUD that presented nothing is not rebuilt for at least a minute: the next
@@ -817,8 +875,6 @@ fn hud(shown: bool) -> Hud {
         stepped_at: None,
         #[cfg(target_os = "windows")]
         reshown: false,
-        #[cfg(target_os = "windows")]
-        latched_off: false,
     }
 }
 
