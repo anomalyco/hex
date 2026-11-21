@@ -36,6 +36,20 @@ final class KeyboardKeyPlaneView: UIView {
     private(set) var deleteSwipe: DeleteWordSwipe?
     /// Each held key's pending hold: a letter's accents, or the space bar's trackpad.
     private var accentHoldWork: [Int: DispatchWorkItem] = [:]
+    /// Function keys just tapped, still drawn shaded (`functionLinger`).
+    private var lingeringFunctionKinds: Set<KeyKind> = []
+    private var functionLingerWork: [KeyKind: DispatchWorkItem] = [:]
+    /// Apple's delete, space, return, globe and emoji keys stay shaded about 60 ms after a tap
+    /// lifts (iOS 27.2, 60 fps: 265–284 ms shown for 200 ms taps, Hex 200–210); a delete held
+    /// long enough to repeat lets go at once.
+    static let functionLinger: TimeInterval = 0.06
+    /// The key labels' trackpad fade, out as the space bar becomes the trackpad and back in as it
+    /// lets go: about 200 ms of visible change each way on Apple's, quick at first and starting a
+    /// frame after the change (iOS 27.2, 60 fps); none with Reduce Motion.
+    static let trackpadFade: TimeInterval = 0.24
+    private var glyphAlpha: CGFloat = 1
+    private var glyphFade: (from: CGFloat, to: CGFloat, start: CFTimeInterval)?
+    private var glyphFadeLink: CADisplayLink?
     /// Settings › Keyboard › Swipe typing, while it's on for the layout's language; its trail draws
     /// above the keys.
     var swipe: SwipeTyping? {
@@ -79,11 +93,18 @@ final class KeyboardKeyPlaneView: UIView {
         let radius = layout.metrics.cornerRadius
         var pressed = engine.pressedKinds
         if let lingeringKind { pressed.insert(lingeringKind) }
-        // Like Apple's spacebar trackpad, key glyphs blank out while sliding the cursor.
+        pressed.formUnion(lingeringFunctionKinds)
+        // Like Apple's spacebar trackpad, key glyphs fade out while sliding the cursor.
         let hideGlyphs = engine.isTrackpadActive
+        let glyphAlpha = currentGlyphAlpha()
+        let showGlyphs = { () -> Bool in
+            context.setAlpha(glyphAlpha)
+            return glyphAlpha > 0
+        }
 
         for key in layout.keys {
             guard key.frame.intersects(rect) else { continue }
+            context.setAlpha(1)
             // Keycaps on whole device pixels, as Apple draws them: crisp edges, not half-covered ones.
             let frame = pixelAligned(key.frame)
             // Row 4's labels sit where they would on Apple's taller row 4 (`bottomRowTrim`).
@@ -97,9 +118,9 @@ final class KeyboardKeyPlaneView: UIView {
                 // The pressed key stays in place, grey, under iOS 27's floating pop-up.
                 let fill = pressed.contains(key.kind) ? palette.keyHeldFill : palette.keyFill
                 context.fillKeycap(frame, fill: fill, radius: radius)
-                guard !hideGlyphs else { continue }
-                var label = Self.keycapLabel(engine.displayLabel(for: key))
-                let isUpperLetter = layout.layer == .letters && engine.isUppercase && label.first?.isUppercase == true
+                guard showGlyphs() else { continue }
+                var label = Self.keycapLabel(engine.keycapLabel(for: key))
+                let isUpperLetter = layout.layer == .letters && engine.keycapsUppercase && label.first?.isUppercase == true
                 let style = isLandscape
                     ? (isUpperLetter ? Self.landscapeCapital
                         : label.first?.isLetter == true ? Self.landscapeLowercase
@@ -110,9 +131,10 @@ final class KeyboardKeyPlaneView: UIView {
                 if let shown = style.shows { label = shown }
                 drawText(label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
             case .space:
-                let fill = pressed.contains(.space) ? palette.spaceHeldFill : palette.keyFill
+                // Apple's space bar unshades as it becomes the trackpad.
+                let fill = pressed.contains(.space) && !hideGlyphs ? palette.spaceHeldFill : palette.keyFill
                 context.fillKeycap(frame, fill: fill, radius: radius)
-                guard !hideGlyphs, let spaceLabel else { continue }
+                guard showGlyphs(), let spaceLabel else { continue }
                 drawText(
                     spaceLabel,
                     in: labelFrame,
@@ -133,7 +155,7 @@ final class KeyboardKeyPlaneView: UIView {
                     palette.textBase
                 }
                 context.fillKeycap(frame, fill: fill, radius: radius)
-                guard !hideGlyphs else { continue }
+                guard showGlyphs() else { continue }
                 if let symbol = returnSymbol {
                     drawSymbol(
                         symbol,
@@ -147,25 +169,29 @@ final class KeyboardKeyPlaneView: UIView {
                     drawText(returnLabel, in: labelFrame, font: .systemFont(ofSize: isLandscape ? 14.5 : 15.5), color: ink)
                 }
             case .shift:
-                let state = engine.shift.state
-                let isPressed = pressed.contains(.shift)
+                let shift = engine.shift
+                let isPressed = pressed.contains(.shift) && !shift.pressShowsOff
                 context.fillKeycap(frame, fill: isPressed ? palette.functionHeldFill : palette.keyFill, radius: radius)
-                guard !hideGlyphs else { continue }
-                let symbol = switch state {
-                case .off: engine.shift.isHeld ? "shift.fill" : "shift"
-                case .on: "shift.fill"
-                case .locked: "capslock.fill"
+                guard showGlyphs() else { continue }
+                let symbol = if shift.pressShowsOff {
+                    "shift"
+                } else {
+                    switch shift.state {
+                    case .off: shift.isHeld ? "shift.fill" : "shift"
+                    case .on: "shift.fill"
+                    case .locked: "capslock.fill"
+                    }
                 }
                 drawSymbol(symbol, in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 18 : 19, yOffset: isLandscape ? -0.16 : 0.67)
             case .delete:
                 let lit = pressed.contains(.delete)
                 context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
-                guard !hideGlyphs else { continue }
+                guard showGlyphs() else { continue }
                 drawSymbol(lit ? "delete.left.fill" : "delete.left", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 18.5 : 19, yOffset: isLandscape ? -0.16 : 0.33)
             case .layerSwitch:
                 let lit = pressed.contains(key.kind)
                 context.fillKeycap(frame, fill: lit ? palette.keyHeldFill : palette.keyFill, radius: radius)
-                guard !hideGlyphs else { continue }
+                guard showGlyphs() else { continue }
                 let style = isLandscape
                     ? (key.label == "123" && key.row == 3 ? LabelStyle(size: 15.5, weight: UIFont.Weight(rawValue: -0.05), yOffset: 0)
                         : key.row == 3 ? LabelStyle(size: 17.75, weight: UIFont.Weight(rawValue: 0.08), yOffset: -0.83)
@@ -178,12 +204,12 @@ final class KeyboardKeyPlaneView: UIView {
             case .globe:
                 let lit = pressed.contains(.globe)
                 context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
-                guard !hideGlyphs else { continue }
+                guard showGlyphs() else { continue }
                 drawSymbol("globe", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : -1)
             case .emoji:
                 let lit = pressed.contains(.emoji)
                 context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
-                guard !hideGlyphs else { continue }
+                guard showGlyphs() else { continue }
                 drawSymbol(
                     "face.smiling", in: labelFrame, color: palette.textBase,
                     pointSize: isLandscape ? 17.5 : 18.5, weight: .semibold, yOffset: -0.67
@@ -429,10 +455,86 @@ final class KeyboardKeyPlaneView: UIView {
             return
         }
         swipe?.forget(id)
+        let lingering = lingerKind(forEnding: id)
         if engine.touches[id]?.key.kind == .delete { stopDeleteRepeat() }
         finishDeleteSwipe(for: id)
         typingLog?.touch(.ended, id: id, sample: sample, key: engine.touches[id]?.key, under: engine.layout.hitTest(sample.point))
         engine.touchEnded(id: id, at: sample.point)
+        if let lingering { linger(lingering) }
+    }
+
+    /// The function key a lifting touch leaves shaded a moment, if any.
+    private func lingerKind(forEnding id: Int) -> KeyKind? {
+        guard let touch = engine.touches[id], !touch.isTrackpad else { return nil }
+        switch touch.key.kind {
+        case .delete:
+            let repeated = CACurrentMediaTime() - deleteStartedAt >= FullKeyboardEngine.repeatDelay
+            return repeated || deleteSwipe?.touchID == id && deleteSwipe?.isActive == true ? nil : .delete
+        case .space, .returnKey, .globe, .emoji:
+            return touch.key.kind
+        default:
+            return nil
+        }
+    }
+
+    private func linger(_ kind: KeyKind) {
+        functionLingerWork.removeValue(forKey: kind)?.cancel()
+        lingeringFunctionKinds.insert(kind)
+        let work = DispatchWorkItem { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.functionLingerWork.removeValue(forKey: kind)
+                if self.lingeringFunctionKinds.remove(kind) != nil { self.setNeedsDisplay() }
+            }
+        }
+        functionLingerWork[kind] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.functionLinger, execute: work)
+        setNeedsDisplay()
+    }
+
+    private func endFunctionLingers() {
+        functionLingerWork.values.forEach { $0.cancel() }
+        functionLingerWork.removeAll()
+        if !lingeringFunctionKinds.isEmpty {
+            lingeringFunctionKinds.removeAll()
+            setNeedsDisplay()
+        }
+    }
+
+    /// The labels' opacity for this frame, easing toward hidden while the trackpad is on.
+    private func currentGlyphAlpha() -> CGFloat {
+        let target: CGFloat = engine.isTrackpadActive ? 0 : 1
+        if glyphFade?.to != target, glyphFade != nil || glyphAlpha != target {
+            if window == nil || UIAccessibility.isReduceMotionEnabled {
+                endGlyphFade(at: target)
+            } else {
+                glyphFade = (glyphAlpha, target, CACurrentMediaTime())
+                if glyphFadeLink == nil {
+                    let link = CADisplayLink(target: GlyphFadeTicker(self), selector: #selector(GlyphFadeTicker.tick))
+                    link.add(to: .main, forMode: .common)
+                    glyphFadeLink = link
+                }
+            }
+        }
+        if let fade = glyphFade {
+            let t = min(1, max(0, (CACurrentMediaTime() - fade.start) / Self.trackpadFade))
+            let eased = t * (2 - t)
+            glyphAlpha = fade.from + (fade.to - fade.from) * eased
+        }
+        return glyphAlpha
+    }
+
+    fileprivate func glyphFadeTick() {
+        guard let fade = glyphFade else { return endGlyphFade(at: glyphAlpha) }
+        if CACurrentMediaTime() - fade.start >= Self.trackpadFade { endGlyphFade(at: fade.to) }
+        setNeedsDisplay()
+    }
+
+    private func endGlyphFade(at alpha: CGFloat) {
+        glyphFade = nil
+        glyphAlpha = alpha
+        glyphFadeLink?.invalidate()
+        glyphFadeLink = nil
     }
 
     func cancelled(id: Int, sample: TypingLogTouchSample) {
@@ -462,6 +564,7 @@ final class KeyboardKeyPlaneView: UIView {
         deleteSwipe?.finish()
         deleteSwipe = nil
         swipe?.cancelAll()
+        endFunctionLingers()
         engine.cancelAllTouches()
     }
 
@@ -522,6 +625,17 @@ final class KeyboardKeyPlaneView: UIView {
     private func stopDeleteRepeat() {
         deleteTimer?.invalidate()
         deleteTimer = nil
+    }
+}
+
+/// Drives `KeyboardKeyPlaneView`'s label fade without the display link retaining the plane.
+@MainActor
+private final class GlyphFadeTicker: NSObject {
+    weak var plane: KeyboardKeyPlaneView?
+    init(_ plane: KeyboardKeyPlaneView) { self.plane = plane }
+    @objc func tick(_ link: CADisplayLink) {
+        guard let plane else { return link.invalidate() }
+        plane.glyphFadeTick()
     }
 }
 

@@ -96,7 +96,8 @@ final class FullKeyboardEngine {
     /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
     /// letting go then types no space. With two or more languages a slide moves the cursor
     /// only after it; a slide before it is a language swipe.
-    static let trackpadHoldDelay: TimeInterval = 0.4
+    /// Apple's space bar turns into the trackpad about 363 ms after touch-down (iOS 27.2, 60 fps).
+    static let trackpadHoldDelay: TimeInterval = 0.35
     /// A finger on the strip's lower half this soon after a key went down or came up (or
     /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
     static let stripTouchGuard: TimeInterval = 0.25
@@ -301,6 +302,16 @@ final class FullKeyboardEngine {
     func displayLabel(for key: KeyboardKey) -> String {
         guard let character = key.character else { return key.label }
         return isUppercase && layerState.layer == .letters ? character.uppercased() : character
+    }
+
+    /// Whether the letter keys read as capitals: as `isUppercase`, except while a press that
+    /// turns shift on is still down (`ShiftStateMachine.pressShowsOff`).
+    var keycapsUppercase: Bool { isUppercase && !shift.pressShowsOff }
+
+    /// A key's label as its keycap shows it (`keycapsUppercase`); pop-ups use `displayLabel`.
+    func keycapLabel(for key: KeyboardKey) -> String {
+        guard let character = key.character else { return key.label }
+        return keycapsUppercase ? character.uppercased() : character
     }
 
     // MARK: - Field

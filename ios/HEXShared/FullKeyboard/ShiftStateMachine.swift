@@ -18,6 +18,8 @@ nonisolated struct ShiftStateMachine: Equatable, Sendable {
     private(set) var isHeld = false
     private var typedWhileHeld = false
     private var lastTapDown: TimeInterval?
+    /// This press turned shift on (from off).
+    private var pressTurnedOn = false
 
     init(state: ShiftState = .off) {
         self.state = state
@@ -25,9 +27,16 @@ nonisolated struct ShiftStateMachine: Equatable, Sendable {
 
     var isUppercase: Bool { state != .off || isHeld }
 
+    /// Whether the keys still look as they did before this press. Apple's keyboard shows a press
+    /// that turns shift on only when it lifts (iOS 27.2: held from off, the key isn't shaded and
+    /// the letters stay lowercase), though a letter typed meanwhile is a capital; a press that
+    /// turns shift or caps lock off shades the key at once.
+    var pressShowsOff: Bool { isHeld && pressTurnedOn && !typedWhileHeld }
+
     mutating func shiftDown(now: TimeInterval) {
         isHeld = true
         typedWhileHeld = false
+        pressTurnedOn = false
         if state == .locked {
             state = .off
             lastTapDown = nil
@@ -35,6 +44,7 @@ nonisolated struct ShiftStateMachine: Equatable, Sendable {
             state = .locked
             lastTapDown = nil
         } else {
+            pressTurnedOn = state == .off
             state = state == .off ? .on : .off
             lastTapDown = now
         }
@@ -42,6 +52,7 @@ nonisolated struct ShiftStateMachine: Equatable, Sendable {
 
     mutating func shiftUp() {
         isHeld = false
+        pressTurnedOn = false
         if typedWhileHeld {
             // A chord, not a tap: it neither stays on nor counts toward a double tap.
             typedWhileHeld = false
