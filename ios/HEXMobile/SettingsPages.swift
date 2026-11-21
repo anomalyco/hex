@@ -609,7 +609,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: one shared list of learned words and fixes, as before.
                 SettingsToggleRow(
                     title: String(localized: "Learn each language separately"),
-                    detail: String(localized: "Keep learned words and fixes with the language you typed or dictated them in."),
+                    detail: String(localized: "Keeps learned words and fixes with the language you used them in."),
                     isOn: $learnPerLanguage
                 )
             }

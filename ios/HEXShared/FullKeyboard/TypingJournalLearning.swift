@@ -115,6 +115,24 @@ extension TypingJournalSnapshot {
         DictationLearningRule.learned(from: dictationFixes)
     }
 
+    /// Every language's learned fixes, one per id: with Learn each language separately on, a
+    /// fix made only in one language is listed too, and one made in two is listed once. A
+    /// journal with no tagged fixes is the shared list.
+    func learnedDictationFixesByLanguage() -> [DictationLearnedFix] {
+        let languages = Set(dictationFixes.compactMap(\.language))
+        guard !languages.isEmpty else { return learnedDictationFixes }
+        var fixes: [DictationLearnedFix] = []
+        var seen: Set<String> = []
+        for language in languages.sorted() {
+            for fix in DictationLearningRule.learned(
+                from: dictationFixes.filter { $0.language == nil || $0.language == language }
+            ) where seen.insert(fix.id).inserted {
+                fixes.append(fix)
+            }
+        }
+        return fixes
+    }
+
     /// `language` keeps a dictation's fixes to those made in it and the ones never tagged
     /// (`Learn each language separately`); nil keeps every language's.
     func dictationCorrections(disabled: Set<String>, language: String? = nil) -> [DictationCorrection] {

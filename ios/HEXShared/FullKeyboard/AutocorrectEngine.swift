@@ -436,7 +436,7 @@ final class AutocorrectEngine {
         engine.layoutLetters = layoutLetters
         engine.lexiconShortcuts = lexiconShortcuts
         engine.lexiconTerms = lexiconTerms
-        engine.learning = learning
+        if !learnsPerLanguage { engine.learning = learning }
         engine.allowsSwearing = allowsSwearing
         engine.addsCapitals = addsCapitals
         engine.decoderKeys = decoderKeys
@@ -626,6 +626,7 @@ final class AutocorrectEngine {
         predictionModel: TypingDecoderModel? = nil,
         capitalizesNext: Bool = false
     ) -> [KeyboardSuggestion] {
+        lastFixLanguage = nil
         guard field == .text, autocorrectionType != .no else { return [] }
         // Your text replacement shows as Apple's keyboard shows it ("myem": "myem", then the
         // address Space puts in), in any language and whatever the word's history.

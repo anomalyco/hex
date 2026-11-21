@@ -314,7 +314,10 @@ never at a launch by itself.
       `keyboard.learnedWords` list the first time that language is used; bilingual
       autocorrect's partner keeps its own list and its own fixes. Where fingers land and
       Adaptive touch stay shared. Delete what Hex learned erases the shared list and every
-      language's. Off, everything is the one shared list and learning it was before.
+      language's. Two limits: a dictation fix you kept as heard in one language still
+      counts against that fix in every language, and retyped words and picked suggestions
+      are tagged with the keyboard's main language, never the bilingual partner's.
+      Off, everything is the one shared list and learning it was before.
   - **Auto-capitalization (Settings › Keyboard › Auto-capitalization):** On by default,
     as Apple's (`FullKeyboardSettings.autoCapitalization`, App Group key
     `settings.keyboardAutoCapitalization`). Off, shift never turns itself on, whatever the

@@ -1133,6 +1133,7 @@ final class FullKeyboardEngine {
             return true
         }
         let fix = autocorrect.replacementOnSpace(beforeInput: before, field: field, autocorrectionType: target.autocorrectionType)
+        let fixLanguage = autocorrect.lastFixLanguage
         let word = fix?.replacement ?? token
         var revised: (from: String, to: String)?
         if let finished = finishedWord, before == finished.before + token, !finished.typed.contains("'"),
@@ -1166,8 +1167,8 @@ final class FullKeyboardEngine {
             learning?.record(.autocorrected, typed: revised.from, final: revised.to, language: autocorrect.language.rawValue)
         }
         if fix != nil {
-            changes.append(.init(from: token, to: word, language: autocorrect.lastFixLanguage))
-            learning?.record(.autocorrected, typed: token, final: word, language: autocorrect.lastFixLanguage?.rawValue)
+            changes.append(.init(from: token, to: word, language: fixLanguage))
+            learning?.record(.autocorrected, typed: token, final: word, language: fixLanguage?.rawValue)
         }
         autocorrect.recordAppliedCorrection(original: original, insertedText: inserted, changes: changes)
         swipedWord = nil

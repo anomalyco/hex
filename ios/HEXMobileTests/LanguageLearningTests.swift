@@ -207,4 +207,21 @@ final class LanguageLearningTests: XCTestCase {
         )
         XCTAssertEqual(TypingJournal(directory: directory, settings: settings).typingLearning(for: .english).typos, [:])
     }
+
+    func testEachLanguagesLearnedFixesAreListed() {
+        settings.learnsPerLanguage = true
+        let journal = TypingJournal(directory: directory, settings: settings)
+        journal.recordDictation(fix("cloud", "Claude"), language: "en")
+        journal.recordDictation(fix("cloud", "Claude"), language: "en")
+        journal.recordDictation(fix("cloud", "Claud"), language: "fr")
+        journal.recordDictation(fix("cloud", "Claud"), language: "fr")
+
+        let snapshot = TypingJournal.load(from: directory.appendingPathComponent(TypingJournal.fileName))
+        XCTAssertTrue(snapshot.learnedDictationFixes.isEmpty, "one heard word fixed two ways reads as ambiguous across languages")
+        XCTAssertEqual(
+            Set(snapshot.learnedDictationFixesByLanguage().map(\.id)),
+            ["cloud → claude", "cloud → claud"],
+            "each language's fix is listed, once"
+        )
+    }
 }
