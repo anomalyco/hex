@@ -224,6 +224,13 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         CGRect(x: horizontalInset, y: metrics.stripTop, width: bounds.width - 2 * horizontalInset, height: metrics.stripHeight)
     }
 
+    /// The row's band around the strip's words' line: the search button and suggestions centre
+    /// in it, where the strip's words were.
+    private var rowLineFrame: CGRect {
+        let band = metrics.stripLineBand
+        return CGRect(x: rowFrame.minX, y: metrics.stripTop + band.top, width: rowFrame.width, height: band.height)
+    }
+
     /// The grid's rows: four on roomy keyboards, three on compact ones.
     var gridRows: Int {
         metrics.keyHeight >= 40 ? 4 : 3
@@ -246,12 +253,13 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     override func layoutSubviews() {
         super.layoutSubviews()
         let row = rowFrame
+        let line = rowLineFrame
         let side = metrics.side
-        let buttonSide = min(36, row.height - 8)
-        searchButton.frame = CGRect(x: row.minX + side, y: row.midY - buttonSide / 2, width: buttonSide + 4, height: buttonSide)
+        let buttonSide = min(36, line.height - 8)
+        searchButton.frame = CGRect(x: row.minX + side, y: line.midY - buttonSide / 2, width: buttonSide + 4, height: buttonSide)
         searchButton.layer.cornerRadius = 10
         let rowStart = showsSearch ? searchButton.frame.maxX + 4 : row.minX + side
-        suggestionRow.frame = CGRect(x: rowStart, y: row.minY, width: row.maxX - side - rowStart, height: row.height)
+        suggestionRow.frame = CGRect(x: rowStart, y: line.minY, width: row.maxX - side - rowStart, height: line.height)
         let hairline = 1 / max(1, traitCollection.displayScale)
         rowSeparator.frame = CGRect(x: row.minX + side, y: row.maxY - hairline, width: row.width - 2 * side, height: hairline)
         suggestionRow.fontSize = rowFontSize

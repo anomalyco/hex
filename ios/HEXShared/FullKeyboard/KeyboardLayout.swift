@@ -156,15 +156,19 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// the portrait rule (`KeyboardLayout.modifierWidth`): 1.33 turned, as Apple's on every iPhone.
     var modifierLetterRatio: CGFloat?
 
-    /// The suggestion strip is the part of Apple's predictive bar below the band iOS 26 draws
-    /// over every third-party keyboard (16.3 pt on the iPhone 17 Pro, 12.5 pt on the SE, 13.3 pt
-    /// on the 17 Pro Max, iOS 27.2; nothing can draw there). Apple's bar is 44 pt from the
-    /// panel's edge, then about 8 pt to row 1's keycaps, which start 51.7, 48 and 48.3 pt down:
-    /// 35.3, 35.5 and 35 pt below this view's top on those iPhones. So the strip is 27 pt, then
-    /// the same 8 pt gap, and row 1 starts 35 pt down. Everything the strip shows (suggestions,
-    /// Undo dictation, the Full Access hint, the recording bar, the emoji panel's top row, the
-    /// Logging mark) lives in those 27 pt.
-    static let stripBarHeight: CGFloat = 27
+    /// The suggestion strip is Apple's predictive bar from the top of its suggestion pill down.
+    /// Apple's bar is 44 pt from its panel's edge, the pill around a suggested word starts 6 pt
+    /// down, and row 1's keycaps start about 8 pt under the bar (51.7 pt down, iPhone 17 Pro,
+    /// iOS 27.2). So the strip is 38 pt, then the same 8 pt gap, and row 1 starts 46 pt down.
+    /// iOS 26 and later draw about 17 pt of their own panel above a third-party keyboard in some
+    /// presentations and nothing in others (Hex, Gboard and SwiftKey alike on an iPhone 17 Pro,
+    /// iOS 27.2: Notes has it, a Safari form's first focus doesn't), and a keyboard can't tell
+    /// which, so the strip carries its own room above the words. It was 27 pt, the part of
+    /// Apple's bar below that band: without the band the words sat 9 pt under the keyboard's top
+    /// edge and a chip touched it. Everything the strip shows (suggestions, Undo dictation, the
+    /// Full Access hint, the recording bar, the emoji panel's top row, the Logging mark) lives in
+    /// those 38 pt, centred on the words' line (`stripTextCenter`).
+    static let stripBarHeight: CGFloat = 38
     static let stripGap: CGFloat = 8
     /// On the iPhone Duo iOS sets the keyboard in a platter with its own band above, and the
     /// strip is Apple's whole 44 pt bar, right on the keys.
@@ -173,31 +177,44 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// below the panel's edge (iOS 27.2), so the strip is 32 pt with the iPhone's 8 pt gap.
     static let coverStripHeight: CGFloat = 32
 
-    /// How far the strip's pills (an autocorrection, a pressed suggestion, the Hex key, the
-    /// recording bar) sit in from its top and bottom: none in the phone's portrait strip, in
-    /// the Duo's 44 pt bar 4 pt.
-    var stripInset: CGFloat { (stripHeight - stripPillHeight) / 2 }
-    /// The pills' height. Apple's pressed suggestion is a 38 pt capsule from 6 pt below the
-    /// panel's edge to 44 pt (iOS 27.2, iPhone 17 Pro); the band iOS draws takes its top 11 pt,
-    /// so in the phone's portrait strip the pill fills all 27 pt and ends where Apple's does.
-    /// Elsewhere it's the strip less half a point above and below, at most 36 pt.
-    var stripPillHeight: CGFloat { stripHeight == Self.stripBarHeight ? stripHeight : min(stripHeight - 1, 36) }
+    /// How far below the strip's top its pills (the Hex key, the recording bar) start: they
+    /// centre on the words' line, 6 pt down in the phone's portrait strip, in the Duo's 44 pt
+    /// bar 4 pt.
+    var stripInset: CGFloat { stripTextCenter - stripPillHeight / 2 }
+    /// Apple's pill starts 6 pt below its panel's edge (iOS 27.2, iPhone 17 Pro); Hex's pills
+    /// start as far below the keyboard's own top edge, which is the panel's edge whenever iOS
+    /// draws nothing above the keyboard.
+    static let barPillTop: CGFloat = 6
+    /// The pills' height. In the phone's portrait strip, even above and below the words' line
+    /// from `barPillTop` down (28 pt), inside the strip. Elsewhere it's the strip less half a
+    /// point above and below, at most 36 pt.
+    var stripPillHeight: CGFloat {
+        guard stripHeight == Self.stripBarHeight else { return min(stripHeight - 1, 36) }
+        return 2 * min(stripTextCenter - Self.barPillTop, stripHeight - stripTextCenter)
+    }
 
     /// Where the strip's words, dividers, chips and Hex mark centre. Apple's words sit midway
     /// between the panel's edge and row 1's keycaps (25.3 pt down, keycaps at 52 pt, iPhone 17
-    /// Pro, iOS 27.2), so in the phone's portrait strip they're 26 pt above row 1, 9 pt below
-    /// iOS's band. Centred in the strip (#2204) they were 5.5 pt low, with more room above than
-    /// below. Elsewhere the strip is Apple's bar and they centre in it.
+    /// Pro, iOS 27.2), so in the phone's portrait strip they're 26 pt above row 1, 20 pt below
+    /// the keyboard's top edge. Elsewhere the strip is Apple's bar and they centre in it.
     static let barTextAboveKeys: CGFloat = 26
     var stripTextCenter: CGFloat {
         stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
     }
-    /// A suggestion's chip (an autocorrection, a pressed word, a revert) and the dividers: even
-    /// above and below the words' line, so in the phone's portrait strip as tall as the 9 pt
-    /// between the line and iOS's band allows twice over (18 pt); Apple's 38 pt pill reaches
-    /// up into that band. Elsewhere the pill height.
+    /// A suggestion's chip (an autocorrection, a pressed word, a revert) and the dividers: in
+    /// the phone's portrait strip a small chip around the word, 18 pt, even above and below the
+    /// words' line (not Apple's slot-wide 38 pt pill). Elsewhere the pill height.
+    static let barChipHeight: CGFloat = 18
     var stripChipHeight: CGFloat {
-        stripHeight == Self.stripBarHeight ? 2 * stripTextCenter : stripPillHeight
+        stripHeight == Self.stripBarHeight ? Self.barChipHeight : stripPillHeight
+    }
+    /// The tallest band of the strip that is even above and below the words' line, from the
+    /// strip's top: what fills the strip (the Full Access hint, the emoji panel's top row, the
+    /// emoji search field) centres in it, so it sits on the line too. The whole strip where the
+    /// words centre in it.
+    var stripLineBand: (top: CGFloat, height: CGFloat) {
+        let half = min(stripTextCenter, stripHeight - stripTextCenter)
+        return (stripTextCenter - half, 2 * half)
     }
 
     /// Apple's keycap corners (iOS 27.2: the same on every iPhone, measured from screenshots
@@ -208,7 +225,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// (iOS 27.2) on an 844 to 874 pt iPhone (17e, 17, 17 Pro): 43 pt keycaps on a 54 pt row
     /// pitch, row 1 on the same line on screen. Apple's row 4 ends 4 pt below where a
     /// third-party keyboard's view ends, so Hex's row 4 keeps Apple's top edge and is 4 pt
-    /// shorter: 35 pt + 201 pt of keys (4 × 43 pt + 3 × 11 pt − 4 pt) = 236 pt. Hex drew iOS 26's
+    /// shorter: 46 pt + 201 pt of keys (4 × 43 pt + 3 × 11 pt − 4 pt) = 247 pt. Hex drew iOS 26's
     /// 45 pt keys on a 56 pt pitch with 5 pt under them, 11 to 17 pt above Apple's rows, so
     /// fingers used to Apple's keyboard landed low on Hex's keys.
     static let portrait = KeyboardMetrics(
@@ -887,7 +904,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             let x = placement == .stripLeading ? left : right - width
             let frame = CGRect(x: x, y: m.stripTop + m.stripInset, width: width, height: height)
             let target = frame.insetBy(dx: -4, dy: -4)
-            let hitFrame = CGRect(x: target.minX, y: target.minY, width: target.width, height: top - target.minY)
+            // Up to the strip's top at least: the room above the pill belongs to the key too.
+            let targetTop = min(target.minY, m.stripTop)
+            let hitFrame = CGRect(x: target.minX, y: targetTop, width: target.width, height: top - targetTop)
             keys.append(KeyboardKey(kind: .hex, row: -1, frame: frame, hitFrame: hitFrame, label: "hex"))
         }
         return keys

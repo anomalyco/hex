@@ -22,7 +22,8 @@ final class KeyboardViewController: UIInputViewController {
     private var heightConstraint: NSLayoutConstraint?
     /// The dictation bar's top edge, `barTopInset` below the keyboard's.
     private var barTopConstraint: NSLayoutConstraint?
-    /// Opaque, under the surface: nothing iOS leaves behind the keyboard shows through it.
+    /// A thin material under the surface: the colour of iOS's glass panel, with nothing iOS
+    /// leaves behind the keyboard readable through it.
     private let backdrop = KeyboardBackdropView()
     private var pollInterval: TimeInterval = 0
     private var didHandOffCurrentField = false
