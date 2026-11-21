@@ -1187,7 +1187,8 @@ final class DictationController {
     private func publishKeyboardSnapshot(minInterval: TimeInterval = 0) {
         let currentTime = now()
 
-        if let expires = keyboardResultExpiresAt, expires <= currentTime {
+        // Past its time to go in by itself the keyboard can still offer it as Paste dictation.
+        if let expires = keyboardResultExpiresAt, expires + KeyboardSnapshot.resultOfferWindow <= currentTime {
             keyboardResultID = nil
             keyboardResult = nil
             keyboardResultHeard = nil

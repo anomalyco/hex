@@ -166,8 +166,14 @@ final class KeyboardStripView: UIView {
         let showsHint = fullAccessHint
         show(undoChip, showsUndo && !showsHint)
         let showsClipboard = showsClipboard
-        show(pasteControl, showsClipboard && clipboard != .code(canPaste: false))
-        show(nextKeyboardChip, showsClipboard && clipboard != .paste)
+        var paste = pasteControl.configuration
+        let pasteTitle = clipboard == .dictation ? "Paste dictation" : "Paste"
+        if paste?.title != pasteTitle {
+            paste?.title = pasteTitle
+            pasteControl.configuration = paste
+        }
+        show(pasteControl, showsPasteChip)
+        show(nextKeyboardChip, showsNextKeyboardChip)
         // Words swap letter by letter (and leave the same way when a chip or status takes the
         // strip); the strip being shown for the first time just draws them.
         let animated = window != nil
@@ -225,6 +231,15 @@ final class KeyboardStripView: UIView {
         guard let clipboard, !showsUndo, statusText == nil, !showsFullAccessHint else { return false }
         if case .code = clipboard { return true }
         return currentSuggestions.isEmpty
+    }
+
+    private var showsPasteChip: Bool {
+        showsClipboard && clipboard != .code(canPaste: false)
+    }
+
+    private var showsNextKeyboardChip: Bool {
+        guard showsClipboard, case .code = clipboard else { return false }
+        return true
     }
 
     @objc private func handlePaste() {
@@ -288,8 +303,8 @@ final class KeyboardStripView: UIView {
         let pasteW = pasteControl.sizeThatFits(CGSize(width: bounds.width, height: chipH)).width
         let nextSize = nextKeyboardChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
         // Laid out for what is shown, not what is still fading out.
-        let pasteShown = showsClipboard && clipboard != .code(canPaste: false)
-        let nextShown = showsClipboard && clipboard != .paste
+        let pasteShown = showsPasteChip
+        let nextShown = showsNextKeyboardChip
         let pair = pasteShown && nextShown
         let gap: CGFloat = 8
         let total = pair ? pasteW + gap + nextSize.width : (pasteShown ? pasteW : nextSize.width)

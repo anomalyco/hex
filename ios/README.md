@@ -777,7 +777,16 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     iOS for background time to finish the text. The keyboard takes a
     recording or transcription whose heartbeat is more than 6 s old as over
     (`KeyboardSnapshot.isOrphanedJob`): a Hex that ended, crashed or was
-    suspended mid-job used to hold every keyboard in recording for good.
+    suspended mid-job used to hold every keyboard in recording for good. A
+    result that missed its 30 s to go in by itself stays offered in the full
+    keyboard's strip as **Paste dictation** for 10 minutes.
+  - An in-keyboard dictation the keyboard is dismissed from (or another app
+    comes forward) stops its capture at once, keeps what was said, and
+    finishes without the keyboard; its text is held in the App Group
+    (`keyboard.heldDictation`), goes into the same field if the keyboard
+    comes back there within 30 s, and is offered as Paste dictation
+    anywhere else or later. A capture that goes quiet for 6 s finishes with
+    what it heard, and a transcription stuck for 2 minutes is given up.
   - Phone/FaceTime/Siri audio interruptions finalize captures `>= 300 ms` so
     spoken words are not lost, cancel shorter taps cleanly out of `Listening`,
     and resume warm keepalive when iOS signals `.shouldResume`. Hex's own

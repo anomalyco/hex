@@ -94,7 +94,8 @@ final class KeyboardViewController: UIInputViewController {
         AdaptiveTouch.current?.save()
         isShown = false
         closeBarEmojiPanel()
-        localDictation.discard(reason: "keyboard hidden")
+        // A dictation under way finishes without the keyboard, and the next one delivers it.
+        localDictation.keyboardWillHide()
         endTypingLogSession(reason: "disappear", settleDictation: editContext)
         pollTimer?.invalidate()
         pollTimer = nil
@@ -402,6 +403,8 @@ final class KeyboardViewController: UIInputViewController {
         localDictation.corrections = {
             TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
         }
+        localDictation.currentDocument = { [weak self] in self?.currentDocument }
+        viewModel.onPasteDictation = { [weak self] in self?.pasteOfferedDictation() }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
         viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressed(at: at) }
         viewModel.onHexKeyAbandon = { [weak self] in self?.localDictation.discard() }
@@ -645,50 +648,27 @@ final class KeyboardViewController: UIInputViewController {
             logDictationEdits.tick { editContext }
         }
 
+        localDictation.healIfStalled(now: now)
         let localSnapshot = localDictation.snapshot(now: now)
-        let snap = localSnapshot ?? bridge.snapshot()
+        let appSnapshot = bridge.snapshot()
+        let snap = localSnapshot ?? appSnapshot
         if let timeline = warmStartTimeline, timeline.observe(snap, now: now) { warmStartTimeline = nil }
         var insertedResult = false
 
-        if snap.hasDeliverableResult(at: now),
-           let resultID = snap.resultID,
-           let rawTranscript = snap.transcript,
-           bridge.lastInsertedResultID != resultID {
-            let context = editContext
-            let insertion = TranscriptFormatter.insertionText(
-                for: rawTranscript,
-                beforeContext: context.before,
-                afterContext: context.after,
-                isWord: dictationWordCheck()
-            )
-            if learnsFromDictation {
-                dictationEdits.willInsert(heard: snap.heard, inserted: insertion, context: context)
-            } else {
-                dictationEdits.finish(context)
-            }
-            if let log = typingLog, log.isRecording {
-                // A translation can't be compared with what was heard.
-                let heard = snap.stages?.translated == nil ? (snap.heard ?? snap.stages?.raw) : nil
-                logDictationEdits.willInsert(heard: heard, inserted: insertion, context: context)
-            } else if logDictationEdits.isTracking {
-                logDictationEdits.finish(context)
-            }
-            textDocumentProxy.insertText(insertion)
-            fullKeyboard?.didInsertDictation(insertion)
-            typingLog?.dictation(
-                source: localSnapshot == nil ? "app" : "keyboard",
-                resultID: resultID,
-                style: bridge.style.rawValue,
-                stages: snap.stages,
-                delivered: rawTranscript,
-                inserted: insertion
-            )
-            observeDictationEdits(fromKeys: true)
-            bridge.lastInsertedResultID = resultID
-            localDictation.markDelivered(resultID: resultID)
+        // The keyboard's own dictation, and Hex's even while one of the keyboard's is on screen.
+        if let localSnapshot, insertResult(of: localSnapshot, source: "keyboard", now: now) {
             insertedResult = true
+        }
+        if insertResult(of: appSnapshot, source: "app", now: now) {
+            insertedResult = true
+        }
+        if isShown, insertHeldDictation(now: now) {
+            insertedResult = true
+        }
+        if insertedResult {
             coldStartJobID = UUID().uuidString
         }
+        refreshOfferedDictation(app: appSnapshot, now: now)
 
         syncLanguageState()
 
@@ -707,6 +687,118 @@ final class KeyboardViewController: UIInputViewController {
         }
         refreshColdStartURL(now: now, force: false)
         schedulePoll(force: false)
+    }
+
+    // MARK: - Delivering dictations
+
+    /// The field the keyboard is in, when UIKit names it.
+    private var currentDocument: UUID? {
+        TypingLogTraits.documentIdentifier(of: textDocumentProxy)
+    }
+
+    /// Inserts `snap`'s finished dictation once, while it's deliverable.
+    private func insertResult(of snap: KeyboardSnapshot, source: String, now: TimeInterval) -> Bool {
+        guard snap.hasDeliverableResult(at: now),
+              let resultID = snap.resultID,
+              let transcript = snap.transcript,
+              bridge.lastInsertedResultID != resultID else { return false }
+        insertDictation(transcript, resultID: resultID, heard: snap.heard, stages: snap.stages, source: source)
+        if source == "keyboard" { localDictation.markDelivered(resultID: resultID) }
+        return true
+    }
+
+    /// A dictation the keyboard finished after it hid goes into its own field while fresh;
+    /// elsewhere or later the strip offers it (`refreshOfferedDictation`).
+    private func insertHeldDictation(now: TimeInterval) -> Bool {
+        guard let held = bridge.heldDictation, bridge.lastInsertedResultID != held.id,
+              held.delivery(in: currentDocument, at: now) == .insert else { return false }
+        bridge.heldDictation = nil
+        insertDictation(held.text, resultID: held.id, heard: held.heard, stages: nil, source: "keyboard")
+        return true
+    }
+
+    private struct OfferedDictation {
+        let id: String
+        let text: String
+        let heard: String?
+        let held: Bool
+    }
+
+    /// What the strip's Paste dictation inserts.
+    private var offeredDictation: OfferedDictation?
+
+    /// A held dictation for another field or past its moment, else Hex's result that came
+    /// too late to go in by itself (the keyboard wasn't up, or came back after it). Never one
+    /// already inserted.
+    private func refreshOfferedDictation(app: KeyboardSnapshot, now: TimeInterval) {
+        var offer: OfferedDictation?
+        if let held = bridge.heldDictation {
+            if bridge.lastInsertedResultID == held.id {
+                bridge.heldDictation = nil
+            } else {
+                switch held.delivery(in: currentDocument, at: now) {
+                case .offer: offer = OfferedDictation(id: held.id, text: held.text, heard: held.heard, held: true)
+                case .expired: bridge.heldDictation = nil
+                case .insert: break
+                }
+            }
+        }
+        if offer == nil, !app.hasDeliverableResult(at: now), app.hasOfferableResult(at: now),
+           let id = app.resultID, let text = app.transcript, bridge.lastInsertedResultID != id {
+            offer = OfferedDictation(id: id, text: text, heard: app.heard, held: false)
+        }
+        offeredDictation = offer
+        if viewModel.offeredDictation != offer?.text {
+            viewModel.offeredDictation = offer?.text
+        }
+    }
+
+    private func pasteOfferedDictation() {
+        guard let offer = offeredDictation else { return }
+        if offer.held { bridge.heldDictation = nil }
+        insertDictation(offer.text, resultID: offer.id, heard: offer.heard, stages: nil, source: offer.held ? "keyboard" : "app")
+        offeredDictation = nil
+        viewModel.offeredDictation = nil
+    }
+
+    private func insertDictation(
+        _ transcript: String,
+        resultID: String,
+        heard: String?,
+        stages: DictationStages?,
+        source: String
+    ) {
+        let context = editContext
+        let insertion = TranscriptFormatter.insertionText(
+            for: transcript,
+            beforeContext: context.before,
+            afterContext: context.after,
+            isWord: dictationWordCheck()
+        )
+        if learnsFromDictation {
+            dictationEdits.willInsert(heard: heard, inserted: insertion, context: context)
+        } else {
+            dictationEdits.finish(context)
+        }
+        if let log = typingLog, log.isRecording {
+            // A translation can't be compared with what was heard.
+            let logHeard = stages?.translated == nil ? (heard ?? stages?.raw) : nil
+            logDictationEdits.willInsert(heard: logHeard, inserted: insertion, context: context)
+        } else if logDictationEdits.isTracking {
+            logDictationEdits.finish(context)
+        }
+        textDocumentProxy.insertText(insertion)
+        fullKeyboard?.didInsertDictation(insertion)
+        typingLog?.dictation(
+            source: source,
+            resultID: resultID,
+            style: bridge.style.rawValue,
+            stages: stages,
+            delivered: transcript,
+            inserted: insertion
+        )
+        observeDictationEdits(fromKeys: true)
+        bridge.lastInsertedResultID = resultID
     }
 
     // MARK: - The dictation bar's emoji panel

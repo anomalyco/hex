@@ -76,6 +76,10 @@ final class KeyboardViewModel: ObservableObject {
     @Published var isLoggingTyping = false
     /// The dictation bar's emoji key: Settings › Keyboard › Emoji, in a field that takes emoji.
     @Published var showsEmojiKey = true
+    /// A finished dictation the keyboard didn't insert by itself (it missed its moment, or
+    /// the keyboard came back in another field): the full keyboard's strip offers Paste
+    /// dictation, which calls `onPasteDictation`.
+    @Published var offeredDictation: String?
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
     // so 25–30 Hz polling never invalidates SwiftUI views mid-spring.
@@ -109,6 +113,7 @@ final class KeyboardViewModel: ObservableObject {
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
     var onOpenURL: ((URL) -> Void)?
+    var onPasteDictation: (() -> Void)?
     /// The dictation bar's light haptic for each press; the keyboard allows it with Full
     /// Access and Experiments › Haptics, as the full keyboard's keys.
     var onKeyFeedback: (() -> Void)?

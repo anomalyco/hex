@@ -53,6 +53,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
+    /// What the strip's Paste chip offers now.
+    private var stripOffer: KeyboardClipboardOffer?
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     private var showsAllowPasteHint = false
     private var allowPasteHintHideWork: DispatchWorkItem?
@@ -705,10 +707,15 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         } else {
             nil
         }
-        let clipboardOffer = clipboard.offer(
+        var clipboardOffer = clipboard.offer(
             textContentType: engine.target.textContentType,
             hasFullAccess: model.hasFullAccess
         )
+        // A dictation that didn't go in by itself comes before a copy, but not in a code field.
+        if model.hasFullAccess, model.offeredDictation != nil {
+            if case .code = clipboardOffer {} else { clipboardOffer = .dictation }
+        }
+        stripOffer = clipboardOffer
         var suggestions = engine.suggestions
         if showsAllowPasteHint, status != nil {
             // The pasted text's last word would otherwise hide where to stop Allow Paste.
@@ -769,6 +776,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     private func pasteFromClipboard() {
+        if stripOffer == .dictation {
+            keyFeedback()
+            typingLog?.ui("paste_dictation")
+            model.onPasteDictation?()
+            refreshStrip()
+            return
+        }
         let pasteboard = UIPasteboard.general
         // The read blocks while iOS asks Allow Paste, so its length tells whether it asked.
         let start = ProcessInfo.processInfo.systemUptime

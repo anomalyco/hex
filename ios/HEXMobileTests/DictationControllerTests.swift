@@ -295,8 +295,8 @@ final class DictationControllerTests: XCTestCase {
     /// TestFlight build 56's sequence from Hex's side: the keyboard couldn't dictate by itself
     /// and handed the dictation to Hex, you swiped back and tapped Done in the keyboard. Done
     /// reaches Hex in One shot as in a warm session (One shot never read it, so the recording
-    /// ran to its limit), and Hex heartbeats the job until its text is in, so the keyboard
-    /// never takes it for over.
+    /// ran to its limit), Hex heartbeats the job until its text is in, so the keyboard never
+    /// takes it for over, and the text stays on offer after its time to go in by itself.
     func testAKeyboardHandoffFinishedFromTheKeyboardDeliversItsTextInEitherMode() async throws {
         for duration in [WarmSessionDuration.off, .fifteenMinutes] {
             var now = 7_000.0
@@ -341,6 +341,13 @@ final class DictationControllerTests: XCTestCase {
             XCTAssertTrue(done.hasDeliverableResult(at: now), "\(duration)")
             XCTAssertEqual(done.transcript, controller.transcript)
 
+            now += 40
+            controller.processPendingKeyboardCommandForTesting()
+            XCTAssertFalse(bridge.snapshot().hasDeliverableResult(at: now))
+            XCTAssertTrue(bridge.snapshot().hasOfferableResult(at: now), "\(duration): offered as Paste dictation")
+            now += KeyboardSnapshot.resultOfferWindow
+            controller.processPendingKeyboardCommandForTesting()
+            XCTAssertNil(bridge.snapshot().transcript, "\(duration): not kept past the offer")
             controller.endWarmSession()
         }
     }
