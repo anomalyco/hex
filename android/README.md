@@ -1,6 +1,6 @@
 # Hex for Android
 
-Hold the Hex key, speak and release to insert text in the current app. A tap starts hands-free dictation; ✓ finishes and ✕ discards. The live dot waveform stays above the keys. While Hex transcribes, a spinner takes the checkmark’s place and ✕ still cancels.
+Hold the Hex key, speak and release to insert text in the current app. A tap starts hands-free dictation; ✓ finishes and ✕ discards. The Hex key sits at the strip’s trailing end, where Gboard has its mic; while dictating it becomes ✓ and the live dot waveform grows out of it, above the keys. While Hex transcribes, a spinner takes the checkmark’s place and ✕ still cancels. The keys are Gboard’s size and place on a Pixel (measured on an emulator), with ?123, comma, space, period and enter in the bottom row; the system’s own switcher in the navigation bar, or Hex menu › Next keyboard, changes keyboards.
 
 ## Speech model and privacy
 
@@ -10,7 +10,7 @@ Welcome explains that the internet is used only to fetch the 190 MB speech model
 
 ## Keyboard and styles
 
-**Automatic** uses the first supported Android system language, or English if none is supported. Hold the language-labelled space bar to switch immediately between Automatic, English, Español, Deutsch and Norsk (Bokmål). Swipe up on the Hex key or tap **Hex menu** to change the spoken language or style:
+**Automatic** uses the first supported Android system language, or English if none is supported. Hold the language-labelled space bar to switch immediately between Automatic, English, Español, Deutsch and Norsk (Bokmål). Slide on the Hex key or tap **Hex menu** to change the spoken language or style:
 
 - **Polished** (default): trims standalone hesitation sounds, fixes spacing/capitals and closes sentences.
 - **Casual:** lowercase texting, without the period at the end of a single statement.

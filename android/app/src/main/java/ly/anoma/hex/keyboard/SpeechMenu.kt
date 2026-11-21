@@ -52,6 +52,8 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                 row(s(R.string.keyboard_menu_translate), onOff(prefs.translation)) {
                     prefs.translation = !prefs.translation; ime.nextEnglish = null; home()
                 }
+                // The system's own switcher sits in the navigation bar; this reaches the next keyboard without it.
+                row(s(R.string.keyboard_next), "") { close(); ime.nextIme() }
             }
             Page.Feedback -> {
                 val f = ime.feedback
