@@ -470,7 +470,7 @@ impl InkOverlay {
         Self { overlay }
     }
 
-    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     /// Lets screen recordings see the ink, or keeps it out.
     pub(crate) fn show_in_recordings(&self, shown: bool) {
         self.overlay.set_exclude_from_capture(!shown);
