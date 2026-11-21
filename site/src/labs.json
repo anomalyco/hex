@@ -97,6 +97,17 @@
       "title": "Words on screen"
     },
     {
+      "added": "2026-11-21",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "learn-from-corrections",
+      "oses": [
+        "macos"
+      ],
+      "summary": "When you fix a name in text Hex just pasted, Hex adds the corrected spelling to Vocabulary. It watches only that field, for up to 5 minutes, and never sends it anywhere.",
+      "title": "Learn from corrections"
+    },
+    {
       "added": "2026-10-30",
       "group": "output",
       "groupTitle": "Output",

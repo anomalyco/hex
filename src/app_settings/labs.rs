@@ -77,6 +77,9 @@ pub struct LabsSettings {
     /// Names and terms shown in the focused window become temporary
     /// vocabulary for each dictation (macOS).
     pub screen_vocabulary: bool,
+    /// A name fixed in text Hex just pasted is added to Vocabulary, read
+    /// from that field alone for a few minutes after the paste (macOS).
+    pub learn_from_corrections: bool,
     /// The mode's OpenCode rewrite reads the text around the cursor as
     /// context (macOS); password fields are never read.
     pub cursor_context: bool,
@@ -386,6 +389,7 @@ impl Default for LabsSettings {
             playground: false,
             vocabulary_biasing: false,
             screen_vocabulary: false,
+            learn_from_corrections: false,
             cursor_context: false,
             mouse_shortcuts: false,
             unload_idle: false,

@@ -32,6 +32,9 @@ impl Feature {
             Self::ScreenVocabulary => {
                 "Names in the window you're dictating into help Hex spell them. Never saved. Parakeet needs Vocabulary help, and a dictation with terms runs after release instead of from the live stream."
             }
+            Self::LearnFromCorrections => {
+                "When you fix a name in text Hex just pasted, add the corrected spelling to Vocabulary; Hex watches only that field, for up to 5 minutes, and sends nothing anywhere"
+            }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V, for apps that ignore Ctrl+V",
             Self::KeyboardModelSwitching => {
                 "Changing the keyboard language switches to the speech model you picked for it"

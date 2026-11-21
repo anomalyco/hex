@@ -74,6 +74,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary help no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
 ├── Words on screen no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
+├── Learn from corrections no labs.learn_from_corrections (macOS) after a dictation is pasted, watch only that field for up to 5 minutes and add up to 5 names you corrected to Vocabulary; password fields, long text, and rewrites are skipped, and nothing leaves the Mac
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
 │                                        the input source picks its mapped model (#216); General shows the mappings while on
@@ -485,7 +486,7 @@ playground only after Hex restarts.
 Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
-`labs::microphone_linger()`,
+`labs::learn_from_corrections()`, `labs::microphone_linger()`,
 `labs::voice_prompt()`, `labs::stop_phrase()`,
 `app_settings::meetings_enabled()`, or
 `app_settings::hex_microphone_enabled()`.
@@ -536,6 +537,51 @@ stoplist and log levels, hashes, ordinals, times, units, random tokens, the
 `hex_never_reads_its_own_accessibility_tree` in
 [accessibility.rs](../../src/accessibility.rs). Not observed: a real Mac
 reading a real window, or a dictated word corrected by what was on screen.
+
+Learn from corrections (`learn-from-corrections`, macOS): while on, after a
+dictation is pasted, Hex watches only the field it pasted into, reading it
+about every 100 ms for up to 5 minutes. The first read retries for up to a
+second until the app shows the pasted text, since the app handles ⌘V after
+Hex's paste returns. What it compares is what Hex actually inserted (the
+continuation join's capitalization and leading space, or smart spacing,
+included), never the transcript. It stops on a focus change, an empty or
+vanished field, a newer paste, or the timeout; the lab turned off stops it
+too, and that stop learns nothing. A read that a newer paste overtook is
+discarded, so a superseded watch learns only from text read before that
+paste. It compares the final text to what it pasted and adds up to 5
+name-like corrected words to Vocabulary: capitalized mid-sentence, all caps,
+mixed case, letters with digits, and short phrases of those. A word after a
+line break, after a colon, or after a sentence end (even behind a closing
+quote or bracket) is a sentence start, so capitalizing there teaches
+nothing, and a word like I'm is never name-like. It skips password fields,
+fields over 20,000 characters (a field whose app names its character count is
+measured before its value is read), text over 400 words, rewrites (more than
+3 inserted words, and over 60% of them, changed), plain lowercase words, and
+terms already in Vocabulary. Only a Paste that left text in a field is
+watched: a copy, a Service or Print output, a YOLO send, and Hex's own window
+never start one, while every other paste into an app (Paste Last, a meeting
+turn, a capture's sheet and summary) moves the paste generation the watch
+reads. Each learned term is saved the way `hex vocabulary add` saves one
+(`vocabulary::add` on the saved list, then one `AppSettings::update` that
+writes `settings.json` and applies the list to the running app), and an open
+window adopts it. The one event it logs holds the number of terms only, never
+the field or a term. Nothing leaves the Mac. Checks:
+`learn_from_corrections_is_its_own_switch_and_macos_only` in
+[labs.rs](../../src/labs.rs), `a_tick_stops_in_the_order_the_watch_reads`,
+`a_reading_a_newer_paste_overtook_is_discarded`,
+`only_the_lab_turning_off_discards_a_correction`,
+`only_a_paste_the_person_can_still_fix_is_watched`,
+`learned_terms_join_the_list_the_way_hex_vocabulary_add_does`, and
+`a_full_list_keeps_its_terms_and_takes_no_more` in
+[correction_watch.rs](../../src/dictation/correction_watch.rs), plus
+[correction_terms.rs](../../src/dictation/correction_terms.rs)'s
+`learns_a_short_correction_past_its_sixty_percent`,
+`ignores_a_long_rewrite`, `the_pasted_text_matches_only_on_word_boundaries`,
+`a_punctuation_edge_needs_no_word_boundary`, `an_im_word_is_never_a_name`,
+`a_name_with_an_apostrophe_is_learned`, `a_line_break_starts_a_sentence`,
+`a_colon_starts_a_sentence`, and
+`a_closing_quote_after_a_period_still_starts_a_sentence`. Not observed: a
+real Mac reading a real field through a correction.
 
 Rewrite reads nearby text (`cursor-context`, macOS): while on,
 each dictation reads the focused text element once, on a background thread, at
@@ -3726,6 +3772,25 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   live stream's text, so the text arrives after release with a little more
   latency. Its read bounds and extraction are above, under "Words on
   screen".
+- Learn from corrections (macOS): after a dictation is pasted, Hex watches
+  only the field it pasted into, about every 100 ms for up to 5 minutes. The
+  first read retries for up to a second until the app shows the pasted text,
+  and the comparison uses what Hex actually inserted, not the transcript. It
+  stops on a focus change, an empty or vanished field, a newer paste, or the
+  timeout; the lab turned off stops it too and learns nothing, and a read a
+  newer paste overtook is discarded. It adds up to 5 name-like corrected
+  words to Vocabulary (capitalized mid-sentence, all caps, mixed case,
+  letters with digits, and short phrases of those; a word after a line break,
+  colon, or sentence end is never name-like, and neither is I'm); password
+  fields, fields over 20,000 characters, text over 400 words, rewrites (more
+  than 3 inserted words and over 60% changed), plain lowercase words, and
+  terms already in Vocabulary are skipped. Only a real Paste starts a watch
+  (never a copy, a Service or Print output, or a YOLO send); other pastes
+  into an app (Paste Last, a meeting turn, a capture's sheet) still move the
+  paste generation. Each learned term is saved as `hex vocabulary add` saves
+  it, which an open window adopts. The one logged event holds the term count
+  only. Nothing leaves the Mac. Off by default
+  (`labs.learn_from_corrections`).
 - Terminal paste (Windows): paste with Ctrl+Shift+V instead of Ctrl+V for
   apps that ignore a synthetic Ctrl+V (issue 477 / PR 478). Its toggle is the
   shared `paste_with_shift`; Linux keeps it as a General › Advanced row.
