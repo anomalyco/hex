@@ -65,7 +65,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     full keyboard types without Full Access or network: letters, shift and caps
     lock, numbers and symbols, accents, delete, return, the globe key, and
     suggestions and autocorrect (`UITextChecker`, the supplementary lexicon,
-    and, in English and Spanish, Spatial autocorrect's bundled model). Words
+    and, where a typing model is bundled for the language, Spatial autocorrect's
+    model: English and Spanish, and German with its experiment on). Words
     it learns may last only while the keyboard runs, as an iPhone may not let
     it write the App Group; haptics, Paste and dictation need Full Access. Without Full
     Access the keyboard always mounts the full keyboard, whichever keyboard is
@@ -317,7 +318,21 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
-    Acknowledgements below).
+    Acknowledgements below); `de.hextm` is the German model Android builds and ships
+    (`android/benchmark/typing/build-layout-model.py`), the same v3 format and, on iOS,
+    off until the experiment below is turned on.
+  - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
+    Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
+    Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
+    `HEXKeyboard/TypingModel/de.hextm`, byte-identical to
+    `android/app/src/main/assets/typing/de.hextm` and the hash its `SHA256SUMS` lists: the
+    word list feeds the decoder, the letter odds and the strip, and a bilingual partner may
+    read German taps too. German's model is lowercase throughout, so a noun it corrects to
+    takes the capital the dictionary knows only capitalised ("hsus" reads "haus" and comes
+    out "Haus"), as a name does, while Auto-capitalization is on. Off, Deutsch keeps the
+    dictionary engine exactly as before: no decoder, no word list for the letter odds or
+    model completions, and no model for a bilingual partner. Swipe typing stays English and
+    Spanish only.
   - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
     (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
     letter key, on this device, and Spatial autocorrect's decoder and the strip read your

@@ -20,6 +20,7 @@ struct FullKeyboardSettings {
         static let autocorrect = "settings.keyboardAutocorrect"
         static let autoCapitalization = "settings.keyboardAutoCapitalization"
         static let spatialAutocorrect = "experiments.spatialAutocorrect"
+        static let germanSpatialAutocorrect = "experiments.germanSpatialAutocorrect"
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
@@ -70,6 +71,26 @@ struct FullKeyboardSettings {
     var spatialAutocorrect: Bool {
         get { defaults?.object(forKey: Key.spatialAutocorrect) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.spatialAutocorrect) }
+    }
+
+    /// Settings › Experiments › German spatial autocorrect: lets the Deutsch layout read your
+    /// taps with the German model Android ships (`TypingDecoder`), as English and Spanish
+    /// already do. Off by default, like every experiment: a keyboard without it types German
+    /// exactly as before (the dictionary engine, and no word list for the letter odds, the
+    /// strip or a bilingual partner). Stored as `experiments.germanSpatialAutocorrect`.
+    var germanSpatialAutocorrect: Bool {
+        get { defaults?.object(forKey: Key.germanSpatialAutocorrect) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.germanSpatialAutocorrect) }
+    }
+
+    /// The typing model the keyboard may read `language`'s taps with: its bundled model, with
+    /// German's only while both Spatial autocorrect and the German experiment are on. English
+    /// and Spanish never wait on the experiment. The keyboard asks this for the word list, the
+    /// decoder and a bilingual partner, so one gate keeps a German model out of everything
+    /// until it is chosen; `TypingDecoderModel.bundled` still loads any bundled file for tests.
+    func typingModel(for language: KeyboardLanguage) -> TypingDecoderModel? {
+        if language == .german, !(spatialAutocorrect && germanSpatialAutocorrect) { return nil }
+        return TypingDecoderModel.bundled(language.rawValue)
     }
 
     /// Suggestions and autocorrect may offer swear words (`OffensiveWords`); slurs never.
