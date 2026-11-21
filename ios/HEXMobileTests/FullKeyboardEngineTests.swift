@@ -312,46 +312,95 @@ final class FullKeyboardEngineTests: XCTestCase {
 
     /// X (Brandon): "holding down on the space bar only allows scrubbing horizontally, whereas
     /// Apple's keyboard treats it like a cursor on both x/y axes". Apple's (black box, iOS 27.2)
-    /// moves a line every 15 to 16 pt, the first after about 8, keeping the column, and keeps
-    /// the cursor on the first or last line past them; a keyboard can only move by characters,
-    /// so the line before or after is found in the text around the cursor.
-    func testTheSpaceBarTrackpadMovesUpAndDownLines() {
-        target = FixtureTextTarget(text: "one two three\nfour five\nsix seven eight nine")
-        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
-        engine.width = 393
-        engine.clock = { [unowned self] in self.now }
-        engine.configureForField()
-        target.adjustTextPosition(byCharacterOffset: 24 + 12 - target.cursorIndex)
-        engine.textDidChange()
+    /// drags a point through the text at the text's own scale: a line per line height (the
+    /// first after half of one, from the middle of the cursor's line), keeping its x across a
+    /// short line, and stopping at a line's start, where coming back moves the cursor at once,
+    /// and past its end, where coming back takes the travel again. Laid out here with every
+    /// character 10 pt wide and 20 pt lines.
+    func testTheTrackpadMovesThroughLinesAtTheTextsOwnScale() {
+        var state = TrackpadCursor.State(before: "one two three\nfour five\nsix seven", after: " eight nine", wrapWidth: 300, lineHeight: 20, width: { _ in 10 })
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -9), at: 0), 0, "not yet: half a line from the middle")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -2), at: 0), 23 - 33, "up a line, at its end: \"four five\" is shorter")
+        XCTAssertEqual(state.move(by: CGVector(dx: -45, dy: 0), at: 0), -5, "along by the text's width: 4.5 characters, the nearer 5")
+        XCTAssertEqual(state.move(by: CGVector(dx: -100, dy: 0), at: 0), -4, "and stops at the line's start")
+        XCTAssertEqual(state.move(by: CGVector(dx: 10, dy: 0), at: 0), 1, "coming back moves it at once")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -20), at: 0), 1 - 15, "up a line, at its x")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: 40), at: 0), 25 - 1, "down two lines, at its x")
+        XCTAssertEqual(state.move(by: CGVector(dx: 200, dy: -20), at: 0), 23 - 25, "up to \"four five\", stopped at its end")
+        XCTAssertEqual(state.move(by: CGVector(dx: -100, dy: 0), at: 0), 0, "coming back takes that travel again")
+        XCTAssertEqual(state.move(by: CGVector(dx: -30, dy: 0), at: 0), -1)
+    }
+
+    /// Past the first or last line the host may have more: a host shares only the cursor's
+    /// sentence or line, so the cursor steps just past what it showed, in one move the host makes
+    /// only if there's text there. Shown it, the cursor goes on to the line there at its x; no
+    /// answer means the host never moved, and that line was the text's first.
+    func testTheTrackpadStepsPastTheTextItKnowsForTheHostToShowMore() {
+        var state = TrackpadCursor.State(before: "Lin", after: "e two is longer", wrapWidth: 300, lineHeight: 20, width: { _ in 10 })
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -25), at: 0), -4, "just past the start: the end of the line before")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -2), at: 0.01), 0, "waiting for the host")
+        XCTAssertTrue(state.catchUp(before: "Line one", after: "", width: { _ in 10 }))
+        XCTAssertEqual(state.settle(at: 0.02), 3 - 8, "the line shown, at the x it was at")
+
+        var first = TrackpadCursor.State(before: "Lin", after: "e one", wrapWidth: 300, lineHeight: 20, width: { _ in 10 })
+        XCTAssertEqual(first.move(by: CGVector(dx: 0, dy: -25), at: 0), -4)
+        XCTAssertEqual(first.settle(at: 0.5), 0, "unanswered: the host never moved, so neither did the cursor")
+        XCTAssertEqual(first.move(by: CGVector(dx: 0, dy: -40), at: 0.6), 0, "the first line keeps it")
+        XCTAssertEqual(first.move(by: CGVector(dx: 10, dy: 0), at: 0.7), 1, "and coming back moves it at once")
+    }
+
+    /// Apple's took 80 pt of finger 1.05 times as far slowly, 1.4 times at 400 pt/s, twice at
+    /// 1,000 and 2.6 times at 2,000 (iOS 27.2), from the finger's speed in whatever direction.
+    func testTheTrackpadGoesFurtherTheFasterTheFinger() {
+        XCTAssertEqual(TrackpadCursor.gain(speed: 0), 1)
+        XCTAssertEqual(TrackpadCursor.gain(speed: 400), 1.375, accuracy: 0.01)
+        XCTAssertEqual(TrackpadCursor.gain(speed: 1000), 2, accuracy: 0.01)
+        XCTAssertEqual(TrackpadCursor.gain(speed: 2000), 2.59, accuracy: 0.01)
+        XCTAssertEqual(TrackpadCursor.gain(speed: 100_000), TrackpadCursor.maxGain)
+        // Moves 7.7 pt apart at a steady 120 Hz, their times arriving 1 to 11 ms apart.
+        let times: [TimeInterval] = [0, 0.0001, 0.0089, 0.0149, 0.0254, 0.0322, 0.0381, 0.0488, 0.0554]
+        let path = times.enumerated().map { TrackpadCursor.Sample(time: $1, point: CGPoint(x: CGFloat($0) * 7.7, y: 0)) }
+        XCTAssertEqual(TrackpadCursor.speed(along: path), 924, accuracy: 120)
+        XCTAssertTrue(TrackpadCursor.isVertical([.init(time: 0, point: .zero), .init(time: 0.01, point: CGPoint(x: 3, y: -5))]))
+    }
+
+    /// The proxy moves the cursor in UTF-16 units: a 👍🏽 is four of them, so moving by
+    /// characters stalled three steps inside one. Each character's own width counts too.
+    func testTheTrackpadMovesOverAnEmojiInOneStep() {
+        var state = TrackpadCursor.State(before: "ab👍🏽cd", after: "", wrapWidth: 300, lineHeight: 20, width: { $0 == "👍🏽" ? 20 : 10 })
+        XCTAssertEqual(state.move(by: CGVector(dx: -25, dy: 0), at: 0), -2, "back over d and c")
+        XCTAssertEqual(state.move(by: CGVector(dx: -10, dy: 0), at: 0), -4, "and the emoji at once")
+    }
+
+    /// A line the field wraps: along goes on into the next row (the rows are estimates, and a
+    /// single-line field never wraps), and up and down go by rows.
+    func testTheTrackpadFollowsRowsTheFieldWraps() {
+        let long = String(repeating: "word ", count: 12)
+        var state = TrackpadCursor.State(before: long, after: "", wrapWidth: 100, lineHeight: 20, width: { _ in 10 })
+        XCTAssertEqual(state.layout.rows.count, 6, "two words a row, the space after each hanging past the edge")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -20), at: 0), -10, "up a row")
+        XCTAssertEqual(state.move(by: CGVector(dx: -10, dy: 0), at: 0), -1, "along it")
+        XCTAssertEqual(state.move(by: CGVector(dx: -100, dy: 0), at: 0), -10, "and on into the row before")
+    }
+
+    /// Apple's second finger starts a selection while the space bar is the trackpad, which a
+    /// keyboard can't make; Hex's typed the blank key under it. Nor does the trackpad tick: Apple's
+    /// keyboard asks for no feedback after the space bar's own (iOS 27.2's log).
+    func testASecondFingerOnTheTrackpadTypesNothingAndItNeverTicks() {
+        type("hello world")
+        var ticks = 0
+        engine.onSelectionStep = { ticks += 1 }
         let space = point(.space)
         engine.touchBegan(id: 1, at: space)
         engine.holdSpace(forTouch: 1)
-        func slide(_ dx: CGFloat, _ dy: CGFloat) -> Int {
-            engine.touchMoved(id: 1, to: CGPoint(x: space.x + dx, y: space.y + dy))
-            return target.cursorIndex
-        }
-        XCTAssertEqual(slide(0, -5), 36, "not yet")
-        XCTAssertEqual(slide(0, -8), 14 + 9, "up a line, at its end: \"four five\" is shorter")
-        XCTAssertEqual(slide(0, -24), 12, "and up again, back at the column it started at")
-        XCTAssertEqual(slide(0, -60), 12, "the first line keeps it")
-        XCTAssertEqual(slide(0, -52), 14 + 9, "coming back moves it at once")
-        XCTAssertEqual(slide(-8, -52), 14 + 8, "along the line as before")
-        XCTAssertEqual(slide(-8, -21), 24 + 8, "down a line, at the new column")
-        XCTAssertEqual(slide(-8, 30), 24 + 8, "the last line keeps it")
-        engine.touchEnded(id: 1, at: CGPoint(x: space.x - 8, y: space.y + 30))
-        XCTAssertEqual(target.text, "one two three\nfour five\nsix seven eight nine", "nothing typed")
-
-        // A line the field wraps: up by one wrapped line's worth of characters.
-        let long = String(repeating: "word ", count: 30)
-        target = FixtureTextTarget(text: long)
-        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
-        engine.width = 393
-        engine.configureForField()
-        engine.touchBegan(id: 2, at: space)
-        engine.holdSpace(forTouch: 2)
-        engine.touchMoved(id: 2, to: CGPoint(x: space.x, y: space.y - 10))
-        XCTAssertEqual(target.cursorIndex, long.count - TrackpadCursor.lineLength(forWidth: 393))
-        engine.touchEnded(id: 2, at: CGPoint(x: space.x, y: space.y - 10))
+        engine.touchMoved(id: 1, to: CGPoint(x: space.x - 30, y: space.y))
+        down(2, .character("k"))
+        up(2, .character("k"))
+        engine.touchMoved(id: 1, to: CGPoint(x: space.x - 60, y: space.y))
+        engine.touchEnded(id: 1, at: CGPoint(x: space.x - 60, y: space.y))
+        XCTAssertEqual(target.text, "hello world")
+        XCTAssertLessThan(target.cursorIndex, 11)
+        XCTAssertEqual(ticks, 0)
     }
 
     /// With two or more languages a quick swipe along the space bar switches language (to the
@@ -387,8 +436,10 @@ final class FullKeyboardEngineTests: XCTestCase {
         engine.touchBegan(id: 4, at: start)
         engine.holdSpace(forTouch: 4)
         XCTAssertTrue(engine.isTrackpadActive, "held first: the cursor slides")
-        engine.touchMoved(id: 4, to: CGPoint(x: start.x - 16, y: start.y))
-        engine.touchEnded(id: 4, at: CGPoint(x: start.x - 16, y: start.y))
+        // Back over " i" and a little more, at the text's own scale.
+        let back = FullKeyboardEngine.trackpadWidth(" ") + FullKeyboardEngine.trackpadWidth("i") + 1
+        engine.touchMoved(id: 4, to: CGPoint(x: start.x - back, y: start.y))
+        engine.touchEnded(id: 4, at: CGPoint(x: start.x - back, y: start.y))
         XCTAssertEqual(steps, [1, -1])
         XCTAssertEqual(target.cursorIndex, 1)
 
@@ -1611,7 +1662,7 @@ final class FullKeyboardEngineTests: XCTestCase {
 
         engine.touchBegan(id: 2, at: space)
         engine.holdSpace(forTouch: 2)
-        let left = CGPoint(x: space.x - 2 * FullKeyboardEngine.trackpadPointsPerCharacter - 1, y: space.y)
+        let left = CGPoint(x: space.x - FullKeyboardEngine.trackpadWidth(" ") - FullKeyboardEngine.trackpadWidth("o") - 1, y: space.y)
         engine.touchMoved(id: 2, to: left)
         engine.touchEnded(id: 2, at: left)
         XCTAssertEqual(target.text, "hello ")

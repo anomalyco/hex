@@ -66,11 +66,13 @@ final class FullKeyboardEngine {
     static let accentCancelDrop: CGFloat = 57.5
     static let accentSlop: CGFloat = 10
     static let trackpadActivationDistance: CGFloat = 10
+    /// The dictation bar's space bar moves the cursor a character per this many points.
     static let trackpadPointsPerCharacter: CGFloat = 7.5
     /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
     /// letting go then types no space. With two or more languages a slide moves the cursor
     /// only after it; a slide before it is a language swipe.
-    /// Apple's space bar turns into the trackpad about 363 ms after touch-down (iOS 27.2, 60 fps).
+    /// Apple's space bar turns into the trackpad 330 to 365 ms after touch-down (iOS 27.2, the
+    /// cursor's first move after holds of 250 to 550 ms), and travel before then doesn't count.
     static let trackpadHoldDelay: TimeInterval = 0.35
     /// A finger on the strip's lower half this soon after a key went down or came up (or
     /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
@@ -218,7 +220,7 @@ final class FullKeyboardEngine {
     var onChange: (() -> Void)?
     /// Called after the keys typed or deleted anything.
     var onEdit: (() -> Void)?
-    /// Called when an accent cell or spacebar trackpad step ticks, for selection haptics.
+    /// Called when an accent cell ticks, for selection haptics.
     var onSelectionStep: (() -> Void)?
     /// Called just before the return key types its line break, so a send can be noticed.
     var onReturn: (() -> Void)?
@@ -334,6 +336,7 @@ final class FullKeyboardEngine {
         adaptiveLearning?.hostChanged(before: textBefore)
         refreshAutoCapitalization()
         refreshSuggestions()
+        trackpadFieldChanged()
     }
 
     func refreshAutoCapitalization() {
@@ -539,6 +542,9 @@ final class FullKeyboardEngine {
     }
 
     func touchBegan(id: Int, at point: CGPoint) {
+        // A second finger while the space bar is the trackpad starts a selection on Apple's,
+        // which a keyboard can't make, so it's ignored rather than typing the blank key under it.
+        guard !isTrackpadActive else { return }
         let downPoint = point
         let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
@@ -651,7 +657,8 @@ final class FullKeyboardEngine {
         return under
     }
 
-    func touchMoved(id: Int, to point: CGPoint) {
+    /// `time` is the touch's own (`UITouch.timestamp`), else now.
+    func touchMoved(id: Int, to point: CGPoint, time: TimeInterval? = nil) {
         guard var touch = touches[id] else { return }
         touch.point = point
 
@@ -668,42 +675,11 @@ final class FullKeyboardEngine {
             return
         }
 
-        // 2. Spacebar cursor trackpad: horizontal drag >= 10 pt slides the text caret, then along
-        // and across lines (`trackpadSteps`). With two or more languages only once the space
-        // bar was held (`holdSpace`): a slide before that is a language swipe.
-        if touch.key.kind == .space {
-            if touch.isLanguageSwipe {
-                touches[id] = touch
-                return
-            }
-            if !touch.isTrackpad, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
-                if switchesLanguage {
-                    touch.isLanguageSwipe = true
-                    touches[id] = touch
-                    return
-                }
-                startTrackpad(&touch, id: id, anchorX: point.x, hold: false)
-                return
-            }
-            if touch.isTrackpad {
-                let rawSteps = trackpadSteps(&touch, to: point)
-                if rawSteps != 0 {
-                    touch.trackpadOffset += rawSteps
-                    touches[id] = touch
-                    typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
-                    tokenTaps.removeAll()
-                    finishedWord = nil
-                    adaptiveTouch?.forget()
-                    suggestionSpaceBefore = nil
-                    target.adjustTextPosition(byCharacterOffset: rawSteps)
-                    onSelectionStep?()
-                    refreshAutoCapitalization()
-                    refreshSuggestions()
-                    return
-                }
-                touches[id] = touch
-                return
-            }
+        // 2. Spacebar cursor trackpad (`moveSpaceBar`): a slide of 10 pt starts it, or with two
+        // or more languages is a language swipe, and once held it moves the cursor.
+        if touch.key.kind == .space, moveSpaceBar(&touch, id: id, to: point, time: time) {
+            touches[id] = touch
+            return
         }
 
         // 3. Holding 123, #+= or shift and sliding: the character key under the finger shows its
@@ -737,26 +713,25 @@ final class FullKeyboardEngine {
         touches[id] = touch
     }
 
-    /// The space bar held `trackpadHoldDelay` without sliding: the trackpad starts where the
-    /// finger is, as Apple's does, so letting go types no space (a press held to move the
-    /// cursor used to type one beside the space already there).
-    func holdSpace(forTouch id: Int) {
-        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad, !touch.isLanguageSwipe else { return }
-        startTrackpad(&touch, id: id, anchorX: touch.point.x, hold: true)
-    }
-
-    private func startTrackpad(_ touch: inout ActiveTouch, id: Int, anchorX: CGFloat, hold: Bool) {
-        touch.isTrackpad = true
-        touch.trackpadAnchorX = anchorX
-        touch.trackpadAnchorY = touch.point.y
+    /// Keeps a trackpad touch: once it `started`, a space or swiped word just typed is no
+    /// longer the last thing typed. No haptic, as on Apple's.
+    func trackpadUpdated(_ touch: ActiveTouch, id: Int, started: Bool = false) {
+        touches[id] = touch
+        guard started else { return }
         lastSpaceAt = nil
         swipedWord = nil
-        touches[id] = touch
-        var fields = [TypingLogField("id", .int(id))]
-        if hold { fields.append(TypingLogField("hold", .bool(true))) }
-        typingLog?.ui("trackpad_start", fields)
-        onSelectionStep?()
-        onChange?()
+    }
+
+    /// The trackpad moved the cursor `offset` UTF-16 units: what the keys knew of the text
+    /// by the old cursor no longer holds. No haptic per character, as on Apple's.
+    func trackpadMovedCursor(by offset: Int) {
+        tokenTaps.removeAll()
+        finishedWord = nil
+        adaptiveTouch?.forget()
+        suggestionSpaceBefore = nil
+        target.adjustTextPosition(byCharacterOffset: offset)
+        refreshAutoCapitalization()
+        refreshSuggestions()
     }
 
     func touchEnded(id: Int, at point: CGPoint) {
@@ -804,6 +779,7 @@ final class FullKeyboardEngine {
             logState("shift_key")
         case .space:
             if touch.isTrackpad {
+                liftTrackpad(&touch)
                 typingLog?.ui("trackpad_end", [
                     TypingLogField("id", .int(id)),
                     TypingLogField("offset", .int(touch.trackpadOffset)),

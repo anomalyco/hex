@@ -45,6 +45,10 @@ final class KeyboardKeyPlaneView: UIView {
     /// lets go: about 200 ms of visible change each way on Apple's, quick at first and starting a
     /// frame after the change (iOS 27.2, 60 fps); none with Reduce Motion.
     static let trackpadFade: TimeInterval = 0.24
+    /// The keycaps' opacity while the space bar is the trackpad: Apple's go from white to
+    /// (242, 242, 247) on its (226, 227, 232) light, and from 68 to 54 on 32 dark, about 60% of
+    /// the way from the backdrop to the key (iOS 27.2).
+    static let trackpadKeycapAlpha: CGFloat = 0.6
     private var glyphAlpha: CGFloat = 1
     private var glyphFade: (from: CGFloat, to: CGFloat, start: CFTimeInterval)?
     private var glyphFadeLink: CADisplayLink?
@@ -92,9 +96,11 @@ final class KeyboardKeyPlaneView: UIView {
         var pressed = engine.pressedKinds
         if let lingeringKind { pressed.insert(lingeringKind) }
         pressed.formUnion(lingeringFunctionKinds)
-        // Like Apple's spacebar trackpad, key glyphs fade out while sliding the cursor.
+        // Like Apple's spacebar trackpad, key glyphs fade out while sliding the cursor, and the
+        // keycaps fade most of the way to blank (`trackpadKeycapAlpha`).
         let hideGlyphs = engine.isTrackpadActive
         let glyphAlpha = currentGlyphAlpha()
+        let keycapAlpha = 1 - (1 - Self.trackpadKeycapAlpha) * (1 - glyphAlpha)
         let showGlyphs = { () -> Bool in
             context.setAlpha(glyphAlpha)
             return glyphAlpha > 0
@@ -102,7 +108,7 @@ final class KeyboardKeyPlaneView: UIView {
 
         for key in layout.keys {
             guard key.frame.intersects(rect) else { continue }
-            context.setAlpha(1)
+            context.setAlpha(keycapAlpha)
             // Keycaps on whole device pixels, as Apple draws them: crisp edges, not half-covered ones.
             let frame = pixelAligned(key.frame)
             // Row 4's labels sit where they would on Apple's taller row 4 (`bottomRowTrim`).
@@ -479,6 +485,8 @@ final class KeyboardKeyPlaneView: UIView {
     // and after a move, so the line names the key the finger slid onto.
 
     func began(id: Int, sample: TypingLogTouchSample) {
+        // A second finger on the trackpad's blank keys: no click, no key (`touchBegan`).
+        if engine.isTrackpadActive { return }
         // A swipe still under way types its word before this key's letter.
         swipe?.touchWillBegin()
         // The key's tick and click go first, on touch-down as Apple's do: the press's own work
@@ -511,7 +519,7 @@ final class KeyboardKeyPlaneView: UIView {
             return
         }
         let previousKey = engine.touches[id]?.key.kind
-        engine.touchMoved(id: id, to: sample.point)
+        engine.touchMoved(id: id, to: sample.point, time: sample.timestamp)
         let current = engine.touches[id]?.key
         typingLog?.touch(.moved, id: id, sample: sample, key: current, under: engine.layout.hitTest(sample.point))
         if current?.kind != previousKey {

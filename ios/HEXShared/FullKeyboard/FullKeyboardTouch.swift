@@ -26,11 +26,11 @@ extension FullKeyboardEngine {
         /// True once a spacebar press slides before its hold (`holdSpace`) while it switches
         /// language: letting go far enough along switches instead of typing a space.
         var isLanguageSwipe = false
-        var trackpadAnchorX: CGFloat = 0
-        var trackpadAnchorY: CGFloat = 0
+        /// The trackpad finger's last few moves, for its speed (`TrackpadCursor.speed(along:)`).
+        var trackpadPath: [TrackpadCursor.Sample] = []
         /// The text the trackpad moves the cursor through (`TrackpadCursor.State`).
         var trackpad: TrackpadCursor.State?
-        /// Characters the trackpad has moved the cursor, for Record typing logs.
+        /// UTF-16 units the trackpad has moved the cursor, for Record typing logs.
         var trackpadOffset = 0
         /// True when the likelier next letter claimed this touch from the key under it; a
         /// small move then keeps it rather than sliding back (`letterReach`).

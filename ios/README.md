@@ -1075,14 +1075,21 @@ never at a launch by itself.
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
   the keyboard switches between two or more languages (Keyboard languages, above). The
-  full keyboard's trackpad moves up and down lines too, as Apple's does (black box, iOS 27.2:
-  a line every 15 to 16 pt, the first after about 8, staying on the first or last line past
-  them): a keyboard can only move the cursor by characters, so `TrackpadCursor` finds the
-  line before or after in the text the field shares around the cursor (a few lines; a wrapped
-  line counts about 8.2 pt a character across the screen) and keeps the column. Lines the
-  field doesn't share are out of reach. Along a line it moves by characters as before.
-  Apple's second-finger tap to select text has no counterpart: `UITextDocumentProxy` (iOS
-  27.2 SDK) can read the selection but not make one, so Hex doesn't try. The dictation bar's
+  full keyboard's trackpad moves as Apple's does (black box, iOS 27.2): the finger drags a
+  point through the text at the text's own scale, in two dimensions, and the cursor goes to
+  the character nearest it. Slowly a point of finger is a point of text, and faster it goes
+  further (1.4 times at 400 pt/s, twice at 1,000, 2.6 times at 2,000, `TrackpadCursor.gain`);
+  a line takes the font's line height (20 pt), the first half of one; the x carries across
+  short lines; it stops at a line's start and end and at the text's first and last line. A
+  keyboard can only move the cursor by UTF-16 offsets, so `TrackpadCursor` lays out the text
+  the field shares (the body font's own widths, rows wrapped at the keyboard's width less
+  40 pt) and moves by the offset to the nearest position, a 👍🏽 in one step. The field shares
+  only the cursor's sentence or line and a little before it, so at that text's edge the cursor
+  waits for the host to show more, and past its first or last line it steps just past it in
+  one move, which the host makes only if there's text there. The keys blank to keycaps 60%
+  of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's
+  second-finger tap to select text has no counterpart: `UITextDocumentProxy` (iOS 27.2 SDK)
+  can read the selection but not make one, so a second finger does nothing. The dictation bar's
   space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
   character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
   build 56 asked for it), and a tap still types a space.
