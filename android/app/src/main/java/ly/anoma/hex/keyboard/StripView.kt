@@ -1,12 +1,16 @@
 package ly.anoma.hex.keyboard
 
+import android.animation.ValueAnimator
 import android.content.Context
 import android.content.res.ColorStateList
+import android.content.res.Configuration
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
-import android.graphics.drawable.StateListDrawable
 import android.text.TextUtils
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.View
+import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -15,93 +19,196 @@ import android.widget.TextView
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.useInter
+import kotlin.math.hypot
 import kotlin.math.roundToInt
 
-/** The strip above the keys: a hint or three suggestions and the Hex menu button, and while
- * dictating the dot waveform with cancel and finish. */
-internal class StripView(context: Context, private val ime: HexKeyboard, private val host: KeyboardView) : LinearLayout(context) {
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
+/** The strip above the keys, with the Hex mark at its trailing end where Gboard has its mic.
+ * Idle it shows three suggestions (the likeliest, or the autocorrection in a small chip, in the
+ * middle) or a hint and the Hex menu button. Dictating, the mark becomes ✓ and the strip becomes
+ * the recording bar: the dot waveform's well grows out of it, with ✕ beside ✓. */
+internal class StripView(context: Context, private val ime: HexKeyboard, private val host: KeyboardView) : FrameLayout(context) {
+    private val density = resources.displayMetrics.density
+    private fun dp(value: Int) = (value * density).roundToInt()
+    private fun px(value: Float) = (value * density).roundToInt()
     private fun color(id: Int) = context.getColor(id)
     private val ink = color(R.color.ink)
     private val quiet = color(R.color.quiet)
     private val key = color(R.color.key)
-    private val modifier = color(R.color.modifier)
-    private val suggestionCells = LinearLayout(context)
-    private var offered = emptyList<String>()
-    private var idle = true
+    private val landscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+    val stripHeight = px(if (landscape) KeyboardMetrics.STRIP_LANDSCAPE else KeyboardMetrics.STRIP)
+    private val centre = px(if (landscape) KeyboardMetrics.STRIP_CENTER_LANDSCAPE else KeyboardMetrics.STRIP_CENTER)
+    private val side = px(KeyboardMetrics.SIDE)
+    private val hexWidth = px(KeyboardMetrics.HEX_KEY)
+    private val pill = px(KeyboardMetrics.PILL)
+    private val cancelWidth = dp(40)
+
+    private val idleRow = LinearLayout(context)
     private val statusText = TextView(context)
-    private val scope = DotScopeView(context)
+    private val slotRow = LinearLayout(context)
+    private val slots = List(3) { FrameLayout(context) }
+    private val words = List(3) { TextView(context) }
+    private val dividers = List(2) { View(context) }
+    private var offered = arrayOfNulls<String>(3)
     private val menuKey = TextView(context)
-    private val cancelKey: FrameLayout
-    private val doneKey: FrameLayout
-    private val check: ImageView
+
+    private val well = FrameLayout(context)
+    private val scope = DotScopeView(context)
+    private val cancelKey = FrameLayout(context)
+    private val hexKey = FrameLayout(context)
+    private val hexFace = View(context)
+    private val mark = ImageView(context)
+    private val check = ImageView(context)
     private val spinner = ProgressBar(context, null, 0, android.R.style.Widget_Material_ProgressBar_Small)
+
+    private var idle = true
+    private var reveal: ValueAnimator? = null
     var hint = context.getString(R.string.keyboard_hint_hold)
         private set
     /** The Hex menu replaces the keys. */
     var choosing = false
-    val recording get() = scope.visibility == VISIBLE
+    val recording get() = !idle
+
+    // The Hex key: a tap dictates (✓ then finishes), a still hold of 350 ms is push to talk, and
+    // a slide of 10 dp opens the menu, as on iPhone. It stays mounted while it turns into ✓, so
+    // a hold's own finger-up finishes the dictation it started.
+    private var held = false
+    private var tracking = false
+    private var originX = 0f
+    private var originY = 0f
+    private val slide = 10 * density
+    private val hold = Runnable { if (tracking) held = ime.beginSpeech() }
 
     init {
-        gravity = Gravity.CENTER_VERTICAL
-        setPadding(dp(10), 0, dp(8), 0)
+        // Everything centres on the line Gboard's toolbar icons sit on, a little above the middle.
+        setPadding(0, 0, 0, (stripHeight - 2 * centre).coerceAtLeast(0))
+        clipChildren = false
+
         statusText.apply {
             useInter(500); setTextColor(quiet); textSize = 14f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(4), 0)
             accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+            setOnClickListener { if (choosing) host.backInMenu() }
         }
-        addView(statusText, LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f))
+        idleRow.addView(statusText, LinearLayout.LayoutParams(0, -1, 1f))
         for (i in 0..2) {
-            if (i > 0) suggestionCells.addView(View(context).apply { setBackgroundColor(modifier) }, LayoutParams(dp(1), dp(18)))
-            suggestionCells.addView(TextView(context).apply {
-                useInter(500); gravity = Gravity.CENTER; setTextColor(ink); textSize = 15f
-                maxLines = 1; ellipsize = TextUtils.TruncateAt.END; isFocusable = true
-                setPadding(dp(3), 0, dp(3), 0)
-                setOnClickListener { offered.getOrNull(i)?.let(ime.engine::pickSuggestion) }
-            }, LayoutParams(0, -1, 1f))
+            if (i > 0) slotRow.addView(dividers[i - 1].apply { setBackgroundColor(color(R.color.rule)) },
+                LinearLayout.LayoutParams(maxOf(1, dp(1) / 2 + 1), dp(20)).apply { gravity = Gravity.CENTER_VERTICAL })
+            words[i].apply {
+                useInter(450); gravity = Gravity.CENTER; setTextColor(ink); textSize = 16f
+                maxLines = 1; ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
+                setPadding(dp(10), 0, dp(10), 0); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            }
+            slots[i].apply {
+                isFocusable = true
+                setOnClickListener { offered[i]?.let(ime.engine::pickSuggestion) }
+                addView(words[i], LayoutParams(LayoutParams.WRAP_CONTENT, dp(30), Gravity.CENTER))
+            }
+            slotRow.addView(slots[i], LinearLayout.LayoutParams(0, -1, 1f))
         }
-        suggestionCells.gravity = Gravity.CENTER_VERTICAL
-        addView(suggestionCells, LayoutParams(0, -1, 1f))
+        idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
         menuKey.apply {
             useInter(550); gravity = Gravity.CENTER; textSize = 14f; setTextColor(ink)
             setOnClickListener { if (choosing) host.closeMenu() else host.openMenu() }
-            setPadding(dp(8), 0, dp(8), 0); isFocusable = true
+            setPadding(dp(8), 0, dp(8), 0); isFocusable = true; minimumWidth = dp(40)
         }
-        addView(menuKey, LayoutParams(LayoutParams.WRAP_CONTENT, -1))
-        scope.background = shape(color(R.color.sheet), 18)
-        scope.clipToOutline = true
-        addView(scope, LayoutParams(0, dp(32), 1f).apply { marginEnd = dp(4) })
-        cancelKey = panelButton(context.getString(R.string.keyboard_cancel_dictation), modifier, R.drawable.ic_cancel, ime::cancelSpeech)
-        doneKey = panelButton(context.getString(R.string.keyboard_finish_dictation), key, R.drawable.ic_check, ime::finishSpeech)
-        check = doneKey.getChildAt(1) as ImageView
-        spinner.indeterminateTintList = ColorStateList.valueOf(ink)
-        spinner.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
-        doneKey.addView(spinner, FrameLayout.LayoutParams(dp(18), dp(18), Gravity.CENTER))
-        statusText.setOnClickListener { if (choosing) host.backInMenu() }
+        idleRow.addView(menuKey, LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, -1))
+        addView(idleRow, LayoutParams(-1, -1).apply { marginStart = side; marginEnd = side + hexWidth })
+
+        well.background = shape(color(R.color.sheet), pill / 2f)
+        well.clipToOutline = true
+        well.addView(scope, LayoutParams(-1, -1).apply { marginStart = dp(10); marginEnd = dp(10) })
+        val wellStart = side + px(KeyboardMetrics.GAP / 2)
+        addView(well, LayoutParams(-1, pill, Gravity.CENTER_VERTICAL).apply {
+            marginStart = wellStart; marginEnd = side + hexWidth + cancelWidth - (cancelWidth - pill) / 2 + dp(6)
+        })
+
+        cancelKey.apply {
+            contentDescription = context.getString(R.string.keyboard_cancel_dictation); isFocusable = true
+            setOnClickListener { ime.cancelSpeech() }
+            addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(color(R.color.modifier)) },
+                LayoutParams(pill, pill, Gravity.CENTER))
+            addView(icon(R.drawable.ic_cancel), LayoutParams(dp(19), dp(19), Gravity.CENTER))
+        }
+        addView(cancelKey, LayoutParams(cancelWidth, -1, Gravity.END).apply { marginEnd = side + hexWidth })
+
+        hexKey.apply {
+            isFocusable = true
+            hexFace.isDuplicateParentStateEnabled = true
+            addView(hexFace, LayoutParams(pill, pill, Gravity.CENTER))
+            mark.setImageResource(R.drawable.hex_mark); mark.imageTintList = ColorStateList.valueOf(ink)
+            addView(mark, LayoutParams(px(KeyboardMetrics.MARK), px(KeyboardMetrics.MARK), Gravity.CENTER))
+            check.setImageResource(R.drawable.ic_check); check.imageTintList = ColorStateList.valueOf(ink)
+            addView(check, LayoutParams(dp(19), dp(19), Gravity.CENTER))
+            spinner.indeterminateTintList = ColorStateList.valueOf(ink)
+            spinner.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+            addView(spinner, LayoutParams(dp(18), dp(18), Gravity.CENTER))
+            setOnClickListener { ime.toggleSpeech() }
+            setOnTouchListener { v, e -> hexTouch(v, e) }
+        }
+        addView(hexKey, LayoutParams(hexWidth, -1, Gravity.END).apply { marginEnd = side })
+        showIdle(true)
     }
 
-    fun suggestions(words: List<String>, literal: String? = null) {
-        offered = if (literal == null) words else listOf(literal) + words.take(2)
+    private fun hexTouch(v: View, e: MotionEvent): Boolean {
+        when (e.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                held = false; tracking = true; originX = e.x; originY = e.y; v.isPressed = true
+                postDelayed(hold, 350)
+            }
+            MotionEvent.ACTION_MOVE -> if (!held && tracking && hypot(originX - e.x, originY - e.y) > slide) {
+                removeCallbacks(hold); host.openMenu()
+                tracking = false; v.isPressed = false
+            }
+            MotionEvent.ACTION_UP -> {
+                removeCallbacks(hold); v.isPressed = false
+                if (held) ime.finishSpeech() else if (tracking) v.performClick()
+                held = false; tracking = false
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                removeCallbacks(hold); if (held) ime.cancelSpeech()
+                held = false; tracking = false; v.isPressed = false
+            }
+        }
+        return true
+    }
+
+    /** [literal] is what was typed: kept on the left in quotes. [correction] is what space will put in
+     * its place, shown in a chip in the middle; without one the likeliest word takes the middle. */
+    fun suggestions(words: List<String>, literal: String? = null, correction: String? = null) {
+        val next = arrayOfNulls<String>(3)
+        var keep = -1; var chip = -1
+        when {
+            correction != null -> {
+                next[0] = literal; keep = if (literal != null) 0 else -1
+                next[1] = correction; chip = 1
+                next[2] = words.firstOrNull { !it.equals(correction, true) && !it.equals(literal, true) }
+            }
+            literal != null -> { next[0] = literal; keep = 0; next[1] = words.getOrNull(0); next[2] = words.getOrNull(1) }
+            else -> { next[0] = words.getOrNull(1); next[1] = words.getOrNull(0); next[2] = words.getOrNull(2) }
+        }
+        offered = next
         for (i in 0..2) {
-            val cell = suggestionCells.getChildAt(i * 2) as TextView
-            val s = offered.getOrNull(i).orEmpty()
-            val keep = i == 0 && literal != null
-            cell.text = if (keep) context.getString(R.string.keyboard_literal, s) else s
-            cell.contentDescription = when {
+            val s = next[i].orEmpty()
+            this.words[i].text = if (i == keep) context.getString(R.string.keyboard_literal, s) else s
+            this.words[i].background = if (i == chip) shape(key, dp(15).toFloat()) else null
+            slots[i].contentDescription = when {
                 s.isEmpty() -> null
-                keep -> context.getString(R.string.keyboard_keep, s)
+                i == keep -> context.getString(R.string.keyboard_keep, s)
+                i == chip -> context.getString(R.string.keyboard_correction, s)
                 else -> context.getString(R.string.keyboard_suggest, s)
             }
-            cell.isEnabled = s.isNotEmpty()
+            slots[i].isEnabled = s.isNotEmpty()
         }
+        dividers[0].visibility = if (chip == 0 || chip == 1) INVISIBLE else VISIBLE
+        dividers[1].visibility = if (chip == 1 || chip == 2) INVISIBLE else VISIBLE
         update()
     }
     fun update() {
-        val show = idle && !choosing && offered.isNotEmpty()
-        suggestionCells.visibility = if (show) VISIBLE else GONE
+        val show = idle && !choosing && offered.any { it != null }
+        slotRow.visibility = if (show) VISIBLE else GONE
         statusText.visibility = if (idle && !show) VISIBLE else GONE
         menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
-        menuKey.minimumWidth = dp(44)
     }
     /** The menu opened: the hint line shows its page's title and goes back a page when tapped. */
     fun menuOpened() { statusText.isClickable = true }
@@ -111,42 +218,58 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     /** Shows [phase]'s strip. The caller has already closed the menu if dictation is running. */
     fun status(phase: SpeechPhase, hint: String, menuVisible: Boolean) {
         this.hint = hint
+        val wasIdle = idleRow.visibility == VISIBLE
         idle = phase == SpeechPhase.Idle
         val processing = phase == SpeechPhase.Transcribing
-        statusText.visibility = if (idle) VISIBLE else GONE
-        menuKey.visibility = if (idle) VISIBLE else GONE
         if (!menuVisible) { statusText.isClickable = false; menuKey.text = context.getString(R.string.keyboard_menu_open); statusText.text = hint }
-        for (v in listOf(scope, cancelKey, doneKey)) v.visibility = if (idle) GONE else VISIBLE
+        if (idle != wasIdle) showIdle(idle)
         spinner.visibility = if (processing) VISIBLE else GONE
-        check.visibility = if (processing) GONE else VISIBLE
-        doneKey.isEnabled = !processing
-        doneKey.contentDescription = context.getString(if (processing) R.string.keyboard_transcribing else R.string.keyboard_finish_dictation)
+        check.visibility = if (!idle && !processing) VISIBLE else GONE
+        hexKey.contentDescription = context.getString(when {
+            idle -> R.string.keyboard_hex
+            processing -> R.string.keyboard_transcribing
+            else -> R.string.keyboard_finish_dictation
+        })
         scope.contentDescription = context.getString(if (processing) R.string.keyboard_transcribing else R.string.keyboard_recording)
         if (idle || phase == SpeechPhase.Opening) scope.clear()
     }
-    /** Before [status]: whether this phase is idle, so the caller knows to close the menu first. */
+    /** Before [status]: this phase's hint and whether it is idle, so the caller can close the menu first. */
     fun prepare(phase: SpeechPhase, hint: String) { this.hint = hint; idle = phase == SpeechPhase.Idle }
     fun setLevel(value: Float) = scope.push(value)
 
-    private fun shape(fill: Int, radius: Int) = GradientDrawable().apply {
-        setColor(fill); cornerRadius = dp(radius).toFloat()
-    }
-    private fun panelButton(label: String, fill: Int, icon: Int, action: () -> Unit): FrameLayout {
-        val target = FrameLayout(context).apply {
-            contentDescription = label; isFocusable = true; setOnClickListener { action() }
-            val face = View(context).apply {
-                isDuplicateParentStateEnabled = true
-                background = StateListDrawable().apply {
-                    addState(intArrayOf(android.R.attr.state_pressed), shape(color(R.color.pressed), 16))
-                    addState(intArrayOf(), shape(fill, 16))
-                }
+    /** Idle: suggestions and the Hex mark. Dictating: the mark is ✓ and the well grows leftwards out of it. */
+    private fun showIdle(idle: Boolean) {
+        reveal?.cancel(); reveal = null
+        idleRow.visibility = if (idle) VISIBLE else GONE
+        well.visibility = if (idle) GONE else VISIBLE
+        cancelKey.visibility = if (idle) GONE else VISIBLE
+        mark.visibility = if (idle) VISIBLE else GONE
+        hexFace.background = if (idle) pressable(android.graphics.Color.TRANSPARENT) else pressable(key)
+        well.clipBounds = null
+        if (idle || !ValueAnimator.areAnimatorsEnabled()) return
+        cancelKey.alpha = 0f
+        reveal = ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 240; interpolator = DecelerateInterpolator()
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                val w = well.width
+                if (w > 0) well.clipBounds = Rect((w * (1 - f)).roundToInt(), 0, w, well.height)
+                cancelKey.alpha = f
             }
-            addView(face, FrameLayout.LayoutParams(dp(32), dp(32), Gravity.CENTER))
-            addView(ImageView(context).apply {
-                setImageResource(icon); imageTintList = ColorStateList.valueOf(ink)
-            }, FrameLayout.LayoutParams(dp(19), dp(19), Gravity.CENTER))
+            start()
         }
-        addView(target, LayoutParams(dp(44), dp(44)))
-        return target
+    }
+
+    fun cancelGestures() {
+        removeCallbacks(hold)
+        held = false; tracking = false
+        hexKey.isPressed = false
+    }
+
+    private fun icon(res: Int) = ImageView(context).apply { setImageResource(res); imageTintList = ColorStateList.valueOf(ink) }
+    private fun shape(fill: Int, radius: Float) = GradientDrawable().apply { setColor(fill); cornerRadius = radius }
+    private fun pressable(fill: Int) = android.graphics.drawable.StateListDrawable().apply {
+        addState(intArrayOf(android.R.attr.state_pressed), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(color(R.color.pressed)) })
+        addState(intArrayOf(), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) })
     }
 }

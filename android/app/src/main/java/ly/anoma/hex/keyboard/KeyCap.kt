@@ -13,25 +13,22 @@ import android.view.View
 import android.view.ViewConfiguration
 import android.widget.FrameLayout
 import android.widget.ImageView
-import android.widget.LinearLayout
 import android.widget.TextView
 import ly.anoma.hex.R
 import ly.anoma.hex.useInter
 import kotlin.math.roundToInt
 
-/** One key. The entire cell is its hit target, including the gap around the drawn cap. */
+/** One key. The whole view is its touch target; its padding places the drawn keycap (KeyRowLayout sets it). */
 internal class KeyCap(context: Context, fill: Int, description: String, private val haptics: () -> Boolean,
                       click: () -> Unit) : FrameLayout(context) {
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     var label: TextView? = null
     val face = FrameLayout(context)
     init {
         contentDescription = description
         isFocusable = true; setOnClickListener { click() }
-        setPadding(dp(KeyboardMetrics.CAP_INSET_X), dp(KeyboardMetrics.CAP_INSET_Y), dp(KeyboardMetrics.CAP_INSET_X), dp(KeyboardMetrics.CAP_INSET_Y))
         val paints = StateListDrawable()
-        fun shape(c: Int) = GradientDrawable().apply { cornerRadius = dp(KeyboardMetrics.CORNER).toFloat(); setColor(c) }
+        fun shape(c: Int) = GradientDrawable().apply { cornerRadius = KeyboardMetrics.CORNER * resources.displayMetrics.density; setColor(c) }
         paints.addState(intArrayOf(android.R.attr.state_pressed), shape(context.getColor(R.color.pressed)))
         paints.addState(intArrayOf(), shape(fill))
         face.isDuplicateParentStateEnabled = true
@@ -61,33 +58,30 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
     override fun getAccessibilityClassName() = "android.widget.Button"
 }
 
-/** Builds key caps into rows with the keyboard's colours and haptics setting. */
+/** Builds keys with the keyboard's colours and haptics setting. */
 internal class KeyCaps(private val context: Context, private val haptics: () -> Boolean) {
     private fun dp(value: Int) = (value * context.resources.displayMetrics.density).roundToInt()
     val ink = context.getColor(R.color.ink)
     val key = context.getColor(R.color.key)
     val modifier = context.getColor(R.color.modifier)
 
-    fun cap(row: LinearLayout, weight: Float, s: String, desc: String, fill: Int = key,
-            sp: Float = 21f, click: () -> Unit): KeyCap {
+    /** Letters are Gboard's size (19.4 dp capitals); labels such as ?123 are smaller. */
+    fun cap(s: String, desc: String, fill: Int = key, sp: Float = 26f, click: () -> Unit): KeyCap {
         val c = KeyCap(context, fill, desc, haptics, click)
         c.label = TextView(context).apply {
-            text = s; textSize = sp; useInter(if (sp >= 20f) 450 else 500)
+            text = s; textSize = sp; useInter(if (sp >= 20f) 400 else 500)
             gravity = Gravity.CENTER; includeFontPadding = false
             maxLines = 1; ellipsize = TextUtils.TruncateAt.END; setTextColor(ink)
             c.face.addView(this, FrameLayout.LayoutParams(-1, -1))
         }
-        row.addView(c, LinearLayout.LayoutParams(0, -1, weight))
         return c
     }
-    fun icon(row: LinearLayout, weight: Float, res: Int, desc: String, fill: Int,
-             click: () -> Unit, tint: Int = ink, size: Int = 23): KeyCap {
+    fun icon(res: Int, desc: String, fill: Int, click: () -> Unit, tint: Int = ink, size: Int = 24): KeyCap {
         val c = KeyCap(context, fill, desc, haptics, click)
         val image = ImageView(context).apply {
             setImageResource(res); imageTintList = ColorStateList.valueOf(tint)
         }
         c.face.addView(image, FrameLayout.LayoutParams(dp(size), dp(size), Gravity.CENTER))
-        row.addView(c, LinearLayout.LayoutParams(0, -1, weight))
         return c
     }
 }

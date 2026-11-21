@@ -13,7 +13,8 @@ import ly.anoma.hex.typing.TypingWord
 /** What the engine shows: the keys' page and the strip's words. */
 internal interface KeyboardSurface {
     fun showPage(page: KeyboardPage)
-    fun suggestions(words: List<String>, literal: String? = null)
+    /** [literal]: what was typed, offered as typed; [correction]: what space will put in its place. */
+    fun suggestions(words: List<String>, literal: String? = null, correction: String? = null)
 }
 
 /** Keys in, text out: the current word, autocorrection and its undo, shift and the key pages.
@@ -132,11 +133,17 @@ internal class KeyboardEngine(
     private fun showSuggestions(w: TypingWord?) {
         if (w != null && w.token.isNotEmpty()) {
             val choices = w.suggestions()
-            surface?.suggestions(choices, literal = w.literalChip(choices))
+            val fix = correction(w)
+            surface?.suggestions(choices, literal = if (fix != null) w.token else w.literalChip(choices), correction = fix)
             return
         }
         val b = if (w != null && !symbols && selStart == selEnd) before() else null
         surface?.suggestions(if (w != null && b != null && TypingWord.boundary(b.lastOrNull()) && canEndWord()) w.predictions(b) else emptyList())
+    }
+    /** What space would put in place of the word: the strip shows it before it happens. */
+    private fun correction(w: TypingWord): String? {
+        if (!feedback.autocorrect || !canEndWord()) return null
+        return w.replacement()?.takeIf { it != w.token && !feedback.blocked(w.decoder.model.language, w.token, it) }
     }
     private fun before() = if (secure) "" else target.before(96).orEmpty()
     private fun endsWith(suffix: String) = !secure && target.before(suffix.length) == suffix

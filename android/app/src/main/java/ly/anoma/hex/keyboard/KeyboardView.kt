@@ -6,11 +6,9 @@ import android.view.WindowInsets
 import android.widget.LinearLayout
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.SpeechPhase
-import kotlin.math.roundToInt
 
 /** The keyboard's root view: the strip, then the keys or the Hex menu in their place. */
 internal class KeyboardView(context: Context, private val ime: HexKeyboard) : LinearLayout(context), KeyboardSurface {
-    private fun dp(value: Int) = (value * resources.displayMetrics.density).roundToInt()
     private val feedback = LetterFeedback(this)
     private val strip = StripView(context, ime, this)
     private val keys = KeyPlaneView(context, ime, this, feedback)
@@ -19,17 +17,17 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     init {
         orientation = VERTICAL
         layoutDirection = View.LAYOUT_DIRECTION_LTR
-        val side = dp(KeyboardMetrics.SIDE)
-        setPadding(side, 0, side, dp(KeyboardMetrics.BOTTOM))
-        // On edge-to-edge IME windows the system draws its switcher and gesture
-        // handle over the bottom of our window. Keep every key above that region.
+        // On edge-to-edge IME windows the system draws its back and switcher buttons and the
+        // gesture handle over the bottom of our window: 48 dp, which Android 14 and later report
+        // as the caption bar inside systemBars (navigationBars alone is the 24 dp handle). Keys stay
+        // above it. Where the window already ends above the navigation bar (Android 12) it is 0.
         setOnApplyWindowInsetsListener { _, insets ->
-            val nav = insets.getInsets(WindowInsets.Type.navigationBars())
-            setPadding(side + nav.left, 0, side + nav.right, dp(KeyboardMetrics.BOTTOM) + nav.bottom)
+            val bars = insets.getInsets(WindowInsets.Type.systemBars() or WindowInsets.Type.displayCutout())
+            setPadding(bars.left, 0, bars.right, bars.bottom)
             insets
         }
         setBackgroundColor(context.getColor(R.color.keyboard))
-        addView(strip, LayoutParams(LayoutParams.MATCH_PARENT, dp(KeyboardMetrics.STRIP)))
+        addView(strip, LayoutParams(LayoutParams.MATCH_PARENT, strip.stripHeight))
         addView(keys, LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         menu = SpeechMenu(context, ime, strip::title, ::closeMenu).apply { visibility = GONE }
         addView(menu, LayoutParams(-1, keys.menuHeight))
@@ -37,7 +35,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     }
 
     override fun showPage(page: KeyboardPage) = keys.showPage(page)
-    override fun suggestions(words: List<String>, literal: String?) = strip.suggestions(words, literal)
+    override fun suggestions(words: List<String>, literal: String?, correction: String?) = strip.suggestions(words, literal, correction)
 
     fun openMenu() {
         if (strip.recording) return
@@ -64,5 +62,5 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         strip.update()
     }
     fun setLevel(value: Float) = strip.setLevel(value)
-    fun cancelGestures() = keys.cancelGestures()
+    fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
 }
