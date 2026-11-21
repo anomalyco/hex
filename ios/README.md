@@ -447,8 +447,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
-    the dictation bar, so testers who turned that experiment off keep the bar),
-    then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
+    the dictation bar, so testers who turned that experiment off keep the bar;
+    on an iPad, where the keyboard always shows the dictation bar, the row says so:
+    "On iPad, Hex shows the dictation bar"), then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
     full keyboard while the dictation bar is chosen, and a field to try the keyboard in.
@@ -1019,6 +1020,11 @@ from desktop releases. The marketing version stays fixed across beta builds.
 it matches the Xcode Cloud start condition, and `ci_scripts/ci_post_clone.sh` stamps that
 version into `project.yml` before generating the project. Once Apple approves a
 version, later uploads must be higher than it. Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
+An iPad still installs it (as an iPhone app) and runs its keyboard, which there is always the
+dictation bar (the full keyboard is iPhone only). Docked, the bar keeps its top 44 pt clear:
+iPadOS adds its shortcut bar (undo, redo, paste) to a custom keyboard, usually above it but
+in some apps over its top (Notes, iPadOS 26.6), where it covered the bar's top row. A
+floating keyboard (iPhone-wide) has no shortcut bar and no strip.
 
 The Xcode Cloud workflow needs a tag start condition with prefix `ios-beta-`,
 container `ios/HEXMobile.xcodeproj`, shared scheme `HEXMobile`, an iOS Archive
