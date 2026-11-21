@@ -53,6 +53,29 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 956, height: 440)), .large)
     }
 
+    /// Where iOS gives the keyboard a shorter view than it asked for (Spotlight, iOS 27.3), every
+    /// row fits inside it under the same strip; at full height nothing moves.
+    func testRowsFitAViewShorterThanAskedFor() {
+        for size in [KeyboardPhoneSize.regular, .large, .homeButton] {
+            let full = KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size)
+            XCTAssertEqual(KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: full.totalHeight), full)
+            XCTAssertEqual(KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: 0), full)
+            let height = full.totalHeight - 20
+            let short = KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: height)
+            XCTAssertEqual(short.totalHeight, height, accuracy: 0.01, "\(size)")
+            XCTAssertEqual(short.stripFrame, full.stripFrame)
+            XCTAssertEqual(short.key(.character("q"))?.frame.minY, full.key(.character("q"))?.frame.minY)
+            XCTAssertEqual(short.keys.count, full.keys.count)
+            for key in short.keys where key.row >= 0 {
+                XCTAssertLessThanOrEqual(key.frame.maxY, height + 0.01, "\(size) \(key.label)")
+                XCTAssertLessThanOrEqual(key.hitFrame.maxY, height + 0.01, "\(size) \(key.label)")
+                XCTAssertGreaterThan(key.frame.height, 30, "\(size) \(key.label)")
+            }
+            let space = short.key(.space)
+            XCTAssertEqual(space?.hitFrame.maxY ?? 0, height, accuracy: 0.01)
+        }
+    }
+
     /// The strip is Apple's predictive bar from its suggestion pill's top down on every iPhone
     /// held upright: 38 pt (Apple's 44 pt bar less the 6 pt above its pill), then Apple's 8 pt to
     /// row 1, which starts 46 pt down. Its pills are 28 pt, on the words' line. Turned: 42 pt,

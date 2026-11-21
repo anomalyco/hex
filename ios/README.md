@@ -1069,6 +1069,10 @@ never at a launch by itself.
   same), and a keyboard can't tell which, so the strip carries its own room: the 27 pt
   strip it replaces left the words 9 pt under the edge whenever iOS added nothing.
   Turned, the strip is 42 pt and the keyboard 204 pt.
+  Where iOS gives the keyboard a shorter view than it asks for (Spotlight on an iPhone
+  17 Pro Max, iOS 27.3, TestFlight: about 20 pt short), the rows fit the height it has:
+  the strip keeps its size and the keycaps and the gaps between rows shrink alike
+  (`KeyboardMetrics.fitted`), instead of row 4 falling under iOS's globe band.
   Dictating no longer grows the keyboard. On the iPhone Duo (`KeyboardPosture`,
   model `iPhone19,4`) iOS sets third-party keyboards in an inset platter with a band
   of its own above them, so the strip has no gap there, and the keys follow Apple's
