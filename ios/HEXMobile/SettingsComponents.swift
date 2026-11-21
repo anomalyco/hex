@@ -288,5 +288,6 @@ enum SettingsSnapshotFixture {
         DictationTranslationSettings().targetLanguage = "ja"
         TypingJournalSettings().isEnabled = on
         TypingLogSettings().isEnabled = on
+        HinglishSettings().isEnabled = on
     }
 }

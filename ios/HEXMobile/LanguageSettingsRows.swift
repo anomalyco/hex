@@ -60,7 +60,7 @@ struct DictationLanguageRow: View {
                 dictation.followDictationLanguageSetting()
                 options = await AppleSpeechLanguages.options()
                 automaticName = await AppleSpeechLanguages.automatic().map {
-                    SpeechLanguagePicker.displayName(for: $0.identifier)
+                    HinglishSettings().name(for: $0.identifier) ?? SpeechLanguagePicker.displayName(for: $0.identifier)
                 }
             }
         }
@@ -68,6 +68,7 @@ struct DictationLanguageRow: View {
 
     private var selectedName: String {
         guard let id = dictation.dictationLanguage else { return String(localized: "Automatic") }
+        if let hinglish = HinglishSettings().name(for: id) { return hinglish }
         return SpeechLanguagePicker.shortNames(for: options.map(\.id))[id]
             ?? SpeechLanguagePicker.displayName(for: id)
     }

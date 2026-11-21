@@ -393,7 +393,8 @@ final class KeyboardLocalDictation {
                     language: locale,
                     vocabulary: vocabulary,
                     corrections: fixes,
-                    lowercase: DictationLowercaseSettings().isEnabled
+                    lowercase: DictationLowercaseSettings().isEnabled,
+                    hinglish: HinglishSettings().isEnabled
                 )
                 let steps = await pipeline.run(heard, translationSource: language.locale.language)
                 let translated = steps.translated
@@ -423,7 +424,7 @@ final class KeyboardLocalDictation {
                     jobID: jobID,
                     resultID: UUID().uuidString,
                     transcript: text,
-                    heard: translated == nil ? heard : nil,
+                    heard: translated == nil ? steps.heard : nil,
                     stages: stages
                 )
             } catch {

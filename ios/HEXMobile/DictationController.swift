@@ -50,6 +50,8 @@ final class DictationController {
         let usesCleanup: Bool
         /// Settings › Dictation › Lowercase, read at start.
         let lowercase: Bool
+        /// Experiments › Hinglish, read at start.
+        let hinglish: Bool
         let vocabularyTerms: [String]
         /// Learn how I type's dictation fixes, read at start; empty while it is off.
         let personalCorrections: [DictationCorrection]
@@ -74,6 +76,7 @@ final class DictationController {
     private let cleanupSettings: AppleIntelligenceCleanupSettings
     private let customVocabularySettings: CustomVocabularySettings
     private let lowercaseSettings: DictationLowercaseSettings
+    private let hinglishSettings: HinglishSettings
     private let typingJournalSettings: TypingJournalSettings
     private let learnedDictationCorrections: @MainActor () -> [DictationCorrection]
     private let audio: any AudioManaging
@@ -178,6 +181,7 @@ final class DictationController {
         cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings(),
         customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
         lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
+        hinglishSettings: HinglishSettings = HinglishSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
         learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
         languageSettings: LanguageSettings = LanguageSettings()
@@ -194,6 +198,7 @@ final class DictationController {
         self.cleanupSettings = cleanupSettings
         self.customVocabularySettings = customVocabularySettings
         self.lowercaseSettings = lowercaseSettings
+        self.hinglishSettings = hinglishSettings
         self.typingJournalSettings = typingJournalSettings
         self.learnedDictationCorrections = learnedDictationCorrections ?? {
             TypingJournal.storedDictationCorrections(settings: typingJournalSettings)
@@ -738,6 +743,7 @@ final class DictationController {
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
         let lowercase = lowercaseSettings.isEnabled
+        let hinglish = hinglishSettings.isEnabled
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
         let vocabularyTerms = customVocabularySettings.activeTerms
@@ -788,6 +794,7 @@ final class DictationController {
                     style: effectiveStyle,
                     usesCleanup: usesCleanup,
                     lowercase: lowercase,
+                    hinglish: hinglish,
                     vocabularyTerms: vocabularyTerms,
                     personalCorrections: personalCorrections,
                     recognitionHints: recognitionHints,
@@ -874,7 +881,8 @@ final class DictationController {
                     language: session.language,
                     vocabulary: session.vocabularyTerms,
                     corrections: session.personalCorrections,
-                    lowercase: session.lowercase
+                    lowercase: session.lowercase,
+                    hinglish: session.hinglish
                 )
                 let stages = await pipeline.run(rawText) { tagged in
                     await self.cleanedTranscriptIfEnabled(tagged, session: session)
@@ -902,7 +910,7 @@ final class DictationController {
                     self.keyboardResultID = UUID().uuidString
                     self.keyboardResult = formatted
                     // A translation's words can't be compared with what was heard.
-                    self.keyboardResultHeard = session.sharesHeard && translated == nil ? rawText : nil
+                    self.keyboardResultHeard = session.sharesHeard && translated == nil ? stages.heard : nil
                     self.keyboardResultStages = TypingLogSettings().isEnabled
                         ? DictationStages(
                             engine: self.engineName,

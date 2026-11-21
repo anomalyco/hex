@@ -166,9 +166,10 @@ struct KeyboardSnapshotStage: View {
     }
 }
 
-/// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one,
-/// otherwise Automatic, which resolves to English. `--translate-to en` turns on Translate
-/// what I say with that target, pasting translated unless `--paste-as-spoken`.
+/// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one (put
+/// first when it isn't in the list, as `hi-IN` for Hinglish), otherwise Automatic, which
+/// resolves to English. `--translate-to en` turns on Translate what I say with that target,
+/// pasting translated unless `--paste-as-spoken`.
 enum DictationLanguageFixture {
     static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
 
@@ -188,7 +189,11 @@ enum DictationLanguageFixture {
 
     @MainActor
     static func apply(to model: KeyboardViewModel) {
-        model.languageChoices = choices
+        if let explicit, !choices.contains(explicit) {
+            model.languageChoices = [explicit] + choices.prefix(DictationLanguageSwitch.maxChoices - 1)
+        } else {
+            model.languageChoices = choices
+        }
         model.dictationLanguage = explicit
         model.automaticLanguage = "en-US"
         model.translationTarget = translationTarget

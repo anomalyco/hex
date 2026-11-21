@@ -374,6 +374,7 @@ struct ExperimentsSettingsPage: View {
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
     @State private var swipeTyping = FullKeyboardSettings().swipeTyping
+    @State private var hinglish = HinglishSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
 
@@ -395,6 +396,14 @@ struct ExperimentsSettingsPage: View {
                 SettingsDivider()
 
                 SettingsToggleRow(
+                    title: String(localized: "Hinglish (Hindi in Latin letters)"),
+                    detail: String(localized: "Pick Hinglish as your dictation language"),
+                    isOn: $hinglish
+                )
+
+                SettingsDivider()
+
+                SettingsToggleRow(
                     title: String(localized: "Clean up with Apple Intelligence"),
                     detail: cleanupAvailability.reason ?? String(localized: "Fixes misheard words on device"),
                     isOn: $appleIntelligenceCleanup
@@ -409,9 +418,13 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: swipeTyping) { _, enabled in
             FullKeyboardSettings().swipeTyping = enabled
         }
+        .onChange(of: hinglish) { _, enabled in
+            HinglishSettings().isEnabled = enabled
+        }
         .onAppear {
             emoji = FullKeyboardSettings().emoji
             swipeTyping = FullKeyboardSettings().swipeTyping
+            hinglish = HinglishSettings().isEnabled
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
