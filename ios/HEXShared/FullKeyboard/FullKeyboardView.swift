@@ -9,7 +9,14 @@ final class FullKeyboardView: UIView {
     let model: KeyboardViewModel
     let engine: FullKeyboardEngine
     weak var hostController: UIInputViewController? {
-        didSet { configureGlobe() }
+        didSet {
+            configureGlobe()
+            // `init` resolves the language before the controller attaches (it is the caller's
+            // to set), so report what is already known, not only later changes.
+            if let reportedInputModeLanguage {
+                hostController?.primaryLanguage = reportedInputModeLanguage
+            }
+        }
     }
 
     /// Fixtures force light or dark and portrait or landscape; the keyboard follows its field.
@@ -348,6 +355,9 @@ final class FullKeyboardView: UIView {
 
     /// The languages the space bar switches between and the one typing now.
     private(set) var languages = KeyboardLanguageList(languages: [.english], current: .english)
+    /// The input mode's language last reported to the host (`UIInputViewController.primaryLanguage`),
+    /// so the host's spelling and autocorrection follow the language typing.
+    private(set) var reportedInputModeLanguage: String?
     /// The language this keyboard last switched to, ahead of the App Group's copy, which an
     /// iPhone may not let a keyboard without Full Access write.
     private var switchedLanguage: KeyboardLanguage?
@@ -380,6 +390,13 @@ final class FullKeyboardView: UIView {
         }
         // The keys' language's layout: with English and Spanish on one keyboard, the first one's.
         let letters = letterLayoutOverride.map(list.layout.offered) ?? settings.letterLayout(for: list.layout)
+        // The host spells and autocorrects in the input mode's language, which supersedes the
+        // Info.plist's en-US (`primaryLanguage`): report every change, a space-bar switch too.
+        let identifier = list.current.inputModeLanguage
+        if identifier != reportedInputModeLanguage {
+            reportedInputModeLanguage = identifier
+            hostController?.primaryLanguage = identifier
+        }
         guard list != languages || engine.language != list.current || engine.letterLayout != letters else { return }
         languages = list
         engine.switchesLanguage = list.switches

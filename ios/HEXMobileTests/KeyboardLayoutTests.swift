@@ -1444,6 +1444,22 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(KeyboardLanguage.serbianLatin.spellCheckLanguage(available: ["en_US", "sr", "hr_HR"]), "no Cyrillic or Croatian")
     }
 
+    /// The input mode's language (`UIInputViewController.primaryLanguage`) is BCP 47 and
+    /// supersedes the Info.plist's en-US, so each layout names the language the host's
+    /// spelling and autocorrection follow.
+    func testEachLanguageNamesItsInputMode() {
+        XCTAssertEqual(KeyboardLanguage.english.inputModeLanguage, "en-US")
+        XCTAssertEqual(KeyboardLanguage.italian.inputModeLanguage, "it-IT")
+        XCTAssertEqual(KeyboardLanguage.spanish.inputModeLanguage, "es-ES")
+        XCTAssertEqual(KeyboardLanguage.frenchCanadian.inputModeLanguage, "fr-CA")
+        XCTAssertEqual(KeyboardLanguage.serbianLatin.inputModeLanguage, "sr-Latn-RS")
+        XCTAssertEqual(
+            Set(KeyboardLanguage.allCases.map(\.inputModeLanguage)).count,
+            KeyboardLanguage.allCases.count,
+            "one identifier each"
+        )
+    }
+
     // MARK: - Helpers
 
     private func landscapeLayouts() -> [KeyboardLayout] {
