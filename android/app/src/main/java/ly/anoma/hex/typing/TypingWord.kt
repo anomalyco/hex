@@ -212,12 +212,12 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val lower = token.lowercase()
         val allCaps = token.length >= 2 && token.all { it.isUpperCase() }
         if (token.drop(1).any { it.isUpperCase() } && !allCaps) return null
+        if (model.language == "en" && lower in shorthand) return null
+        // A word the same letters spell with an apostrophe or an accent, or one that sounds alike,
+        // chosen by the word before when it says so clearly ("yes id" -> "yes I'd", "the id" stays).
+        if (!allCaps && '\'' !in token) ContextWords.choice(model, token, previousText, null, sentenceStart)
+            ?.takeUnless(::blocked)?.let { return it }
         if (model.language == "en") {
-            if (lower in shorthand) return null
-            // A word the same letters spell with an apostrophe, or one that sounds alike, chosen by
-            // the word before when it says so clearly ("yes id" -> "yes I'd", "the id" stays).
-            if (!allCaps && '\'' !in token) ContextWords.choice(model, token, previousText, null, sentenceStart)
-                ?.takeUnless(::blocked)?.let { return it }
             englishFixes[lower]?.takeUnless(::blocked)?.let { return if (allCaps) {
                 if (token.length >= 3) it.uppercase() else null
             } else cased(it) }
@@ -277,10 +277,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return result
     }
 
-    // The word before, revised now that `next` follows it, or null. English only: words the
-    // context decides (`ContextWords`); a word typed with its own apostrophe never gets here.
+    // The word before, revised now that `next` follows it, or null: words the context decides
+    // (`ContextWords`); a word typed with its own apostrophe never gets here.
     private fun revision(text: String, next: String): String? {
-        if (model.language != "en" || text.length < 2) return null
+        if (!ContextWords.decides(model.language) || text.isEmpty() || (model.language == "en" && text.length < 2)) return null
         if (text == text.uppercase() && text != text.lowercase() && !text.startsWith("I'")) return null
         val rest = before.dropLast(text.length + 1)
         val prev = previousWord(rest).takeIf { it.isNotEmpty() }

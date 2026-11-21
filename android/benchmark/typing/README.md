@@ -21,6 +21,7 @@ French and Italian have their own 2,000-sentence sets the same way (French on AZ
 |---|---:|---:|
 | Raw hit keys | 5,316 (38.91%) | 4,778 (39.73%) |
 | Models from Google Books, words read after an elision | 1,177 (8.62%) | 895 (7.44%) |
+| Accents the words around decide ("a"/"à", "e"/"è") | 947 (6.93%) | 789 (6.56%) |
 
 French has 13,661 reference words, Italian 12,025.
 
@@ -33,7 +34,7 @@ The replay also counts what the suggestion strip offers, as iOS's harness does: 
 | Android with `strip()` and the new predictions | 13,180 / 2,349 / 4,390 | 12,407 / 2,110 / 3,236 | 12,918 / 1,680 / 5,624 | 11,988 / 2,159 / 4,875 |
 | … and the likelier next letter's touch area | 13,219 / 2,349 / 4,686 | 12,398 / 2,112 / 3,455 | 12,941 / 1,679 / 6,019 | 11,991 / 2,165 / 5,148 |
 
-French and Italian strip hits (word / next / after two letters): 11,790 / 2,185 / 4,219 of 13,661 / 11,430 / 9,950, and 11,019 / 1,663 / 3,638 of 12,025 / 9,788 / 8,981.
+French and Italian strip hits (word / next / after two letters): 11,935 / 2,186 / 4,230 of 13,661 / 11,430 / 9,950, and 11,022 / 1,662 / 3,638 of 12,025 / 9,788 / 8,981.
 
 Out of 13,870 / 11,639 / 10,874 (English), 13,301 / 11,058 / 9,383 (Spanish), 13,550 / 11,326 / 12,413 (German) and 12,492 / 10,297 / 9,789 (Bokmål).
 

@@ -474,4 +474,16 @@ class NeverSuggestTest {
         assertEquals("c'est", fr.replacement())
     }
 
+    // French and Italian words the same letters spell with and without an accent ("a"/"à", "e"/"è"):
+    // the words around them decide, as English's apostrophes.
+    @Test fun accentsTheWordsAroundDecide() {
+        val fr = layout("fr")
+        assertEquals("je vais à Paris ", word("fr").typed(fr, "je vais a paris "))
+        assertEquals("il a faim ", word("fr").typed(fr, "il a faim "))
+        assertEquals("faire ça sera facile ", word("fr").typed(fr, "faire ca sera facile "))
+        val it = layout("it")
+        assertEquals("non è esagerato ", word("it").typed(it, "non e esagerato "))
+        assertEquals("il vostro indirizzo è cambiato ", word("it").typed(it, "il vostro indirizzo e cambiato "))
+        assertEquals("pane e burro ", word("it").typed(it, "pane e burro "))
+    }
 }
