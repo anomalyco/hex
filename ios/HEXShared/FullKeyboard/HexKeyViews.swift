@@ -16,6 +16,9 @@ final class HexKeyControl: UIControl {
     var cornerRadius: CGFloat = FullKeyboardPalette.cornerRadius { didSet { if cornerRadius != oldValue { setNeedsDisplay() } } }
     /// The drawn keycap inside the control's (larger) touch target.
     var keycapFrame: CGRect = .zero { didSet { if keycapFrame != oldValue { setNeedsDisplay() } } }
+    /// In the strip, the suggestions' line in this view's coordinates
+    /// (`KeyboardMetrics.stripTextCenter`): the mark centres on it, beside the words.
+    var markCenterY: CGFloat? { didSet { if markCenterY != oldValue { setNeedsDisplay() } } }
 
     /// The finger landed on the key, with when (wall clock, from the touch's own timestamp).
     var onPress: ((TimeInterval) -> Void)?
@@ -143,9 +146,12 @@ final class HexKeyControl: UIControl {
             palette.keyPressedFill.setFill()
             UIBezierPath(roundedRect: cap, cornerRadius: cap.height / 2).fill()
         }
-        // In the strip the mark keeps its 19 pt in the 26 pt pill as in the Duo's 36 pt one.
-        let markSize: CGFloat = inStrip ? min(19, cap.height) : min(19, cap.height * 0.56)
-        let markRect = CGRect(x: cap.midX - markSize / 2, y: cap.midY - markSize / 2, width: markSize, height: markSize)
+        // In the strip the mark sits on the suggestions' line, as tall as fits around it there
+        // (16 pt on a phone held upright, where the line is 8 pt below iOS's band), else 19 pt.
+        let markMidY = inStrip ? (markCenterY ?? cap.midY) : cap.midY
+        let room = inStrip ? 2 * min(markMidY - cap.minY, cap.maxY - markMidY) : cap.height
+        let markSize: CGFloat = inStrip ? min(19, room) : min(19, cap.height * 0.56)
+        let markRect = CGRect(x: cap.midX - markSize / 2, y: markMidY - markSize / 2, width: markSize, height: markSize)
         if isWarm {
             HexMarkPath.draw(in: context, rect: markRect, color: palette.textBase, coreColor: palette.warmCore)
         } else {
