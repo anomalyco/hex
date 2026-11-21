@@ -105,6 +105,17 @@ final class CleanupGuardTests: XCTestCase {
         return CleanupReconstruction.reconstruct(words, deletes: deletes)
     }
 
+    func testUnsetSwitchIsOnAndAStoredChoiceStays() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(CleanupTaggerSettings(defaults: defaults).isEnabled, "an unset switch is on")
+        defaults.set(false, forKey: "experiments.cleanupTagger")
+        XCTAssertFalse(CleanupTaggerSettings(defaults: defaults).isEnabled, "turning it off is kept")
+        CleanupTaggerSettings(defaults: defaults).isEnabled = true
+        XCTAssertTrue(CleanupTaggerSettings(defaults: defaults).isEnabled)
+    }
+
     func testTheModelSeesHyphenatedWordsWhole() {
         XCTAssertEqual(CleanupGuard.modelWord("Hye-jin"), "Hyejin")
         XCTAssertEqual(CleanupGuard.modelWord("follow-up,"), "followup,")

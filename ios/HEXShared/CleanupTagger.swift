@@ -15,10 +15,11 @@ nonisolated struct CleanupTaggerSettings {
         self.defaults = defaults
     }
 
-    /// Experiment: an on-device tagger removes ums, repeats, and spoken corrections after
-    /// dictation. Off by default.
+    /// An on-device tagger removes ums, repeats, and spoken corrections after dictation. On
+    /// by default since `CleanupGuard` keeps names, numbers and content words; a stored
+    /// choice, on or off, stays as it is.
     var isEnabled: Bool {
-        get { defaults?.bool(forKey: Key.enabled) ?? false }
+        get { defaults?.object(forKey: Key.enabled) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.enabled) }
     }
 }

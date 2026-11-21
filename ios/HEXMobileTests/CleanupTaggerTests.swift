@@ -207,7 +207,8 @@ final class CleanupTaggerTests: XCTestCase {
         let tagger = CleanupTagger()
         let spoken = "Let's ship it Tuesday, no wait, Thursday."
 
-        XCTAssertFalse(settings.isEnabled, "off by default")
+        XCTAssertTrue(settings.isEnabled, "on by default")
+        settings.isEnabled = false
         var result = await CleanupTagger.cleanIfEnabled(spoken, style: .polished, settings: settings, tagger: tagger)
         XCTAssertEqual(result, spoken)
         XCTAssertFalse(tagger.isLoaded, "nothing loads while the experiment is off")
@@ -239,7 +240,7 @@ final class CleanupTaggerTests: XCTestCase {
         let tagger = CleanupTagger()
         let spoken = "Mail it to john at the rate gmail dot com."
 
-        XCTAssertFalse(settings.isEnabled)
+        settings.isEnabled = false
         for style in [DictationStyle.polished, .casual, .notes] {
             let result = await CleanupTagger.cleanIfEnabled(spoken, style: style, language: "en-IN", settings: settings, tagger: tagger)
             XCTAssertEqual(result, "Mail it to john@gmail.com.", "\(style)")
@@ -290,6 +291,7 @@ final class CleanupTaggerTests: XCTestCase {
         let settings = CleanupTaggerSettings(defaults: defaults)
         let tagger = CleanupTagger()
 
+        settings.isEnabled = false
         CleanupTagger.prepareIfEnabled(style: .polished, settings: settings, tagger: tagger)
         XCTAssertFalse(tagger.isLoaded)
         settings.isEnabled = true
