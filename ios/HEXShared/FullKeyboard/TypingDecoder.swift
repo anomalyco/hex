@@ -565,6 +565,19 @@ nonisolated struct TypingDecoder {
             costs[i].enumerated().filter { $0.offset > 0 && $0.element <= parameters.maxTapCost }
                 .sorted { $0.element < $1.element }.map { ($0.offset, $0.element) }
         }
+        // Dropping a clearly aimed, distinct tap needs more evidence than dropping an
+        // accidental repeat or a tap between keys. Accents share their physical key.
+        let extraTapCosts: [Double] = maxEdits == 0 ? [] : letterChoices.indices.map { tap in
+            guard let code = letterChoices[tap].first?.0 else { return parameters.insertionCost }
+            let key = model.baseCodes[code]
+            for neighbor in [tap - 1, tap + 1] where letterChoices.indices.contains(neighbor) {
+                if let other = letterChoices[neighbor].first?.0, model.baseCodes[other] == key {
+                    return parameters.insertionCost
+                }
+            }
+            let gap = letterChoices[tap].first { model.baseCodes[$0.0] != key }?.1 ?? parameters.maxTapCost
+            return parameters.insertionCost + min(4, gap)
+        }
         let apostrophe = model.apostropheCode.map(Int.init)
         let allCodes = (1..<model.characters.count).filter { $0 != apostrophe }
         for depth in 0...maxDepth {
@@ -604,7 +617,7 @@ nonisolated struct TypingDecoder {
                 }
                 // A tap that isn't in the word.
                 if tap < n {
-                    layer.append(State(lo: s.lo, hi: s.hi, tap: s.tap + 1, edits: e, cost: Float(base + parameters.insertionCost)))
+                    layer.append(State(lo: s.lo, hi: s.hi, tap: s.tap + 1, edits: e, cost: Float(base + extraTapCosts[tap])))
                 }
                 // Two letters typed in the wrong order.
                 if tap + 1 < n, depth + 2 <= maxDepth {

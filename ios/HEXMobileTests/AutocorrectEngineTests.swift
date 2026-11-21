@@ -603,6 +603,21 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "come and miss the quiz ")
     }
 
+    func testACommonBigramDoesNotSwallowADistinctWellAimedTap() throws {
+        engine.width = 402
+        try useDecoder()
+        engine.letterOdds = engine.autocorrect.decoder?.model
+        target.insertText("I promised ")
+        // These three taps read "tom". "Promised to" is common, but the m was neither a
+        // repeat nor a touch between the neighbouring keys.
+        for (letter, dx, dy) in [("t", -7.2, 6.6), ("o", 14.5, 12.5), ("m", -10.0, 3.9)] {
+            let key = try XCTUnwrap(engine.layout.key(.character(letter)))
+            tap(at: CGPoint(x: key.frame.midX + dx, y: key.frame.midY + dy))
+        }
+        tap(.space)
+        XCTAssertEqual(target.text.lowercased(), "i promised tom ")
+    }
+
     /// The models' word lists are lowercase: a name or day typed in lowercase is still a
     /// word, capitalised as the dictionary path does, never "may" or "money".
     func testSpatialAutocorrectCapitalisesANameTypedInLowercase() throws {
