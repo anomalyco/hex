@@ -18,6 +18,7 @@ import android.widget.ProgressBar
 import android.widget.TextView
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.SpeechPhase
+import ly.anoma.hex.typing.Suggestion
 import ly.anoma.hex.useInter
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -45,7 +46,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val idleRow = LinearLayout(context)
     private val statusText = TextView(context)
     private val slotRow = LinearLayout(context)
-    private val slots = List(3) { FrameLayout(context) }
+    private val slotViews = List(3) { FrameLayout(context) }
     private val words = List(3) { TextView(context) }
     private val dividers = List(2) { View(context) }
     private var offered = arrayOfNulls<String>(3)
@@ -98,12 +99,12 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
                 setPadding(dp(10), 0, dp(10), 0); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
-            slots[i].apply {
+            slotViews[i].apply {
                 isFocusable = true
                 setOnClickListener { offered[i]?.let(ime.engine::pickSuggestion) }
                 addView(words[i], LayoutParams(LayoutParams.WRAP_CONTENT, dp(30), Gravity.CENTER))
             }
-            slotRow.addView(slots[i], LinearLayout.LayoutParams(0, -1, 1f))
+            slotRow.addView(slotViews[i], LinearLayout.LayoutParams(0, -1, 1f))
         }
         idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
         menuKey.apply {
@@ -172,32 +173,30 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         return true
     }
 
-    /** [literal] is what was typed: kept on the left in quotes. [correction] is what space will put in
-     * its place, shown in a chip in the middle; without one the likeliest word takes the middle. */
-    fun suggestions(words: List<String>, literal: String? = null, correction: String? = null) {
-        val next = arrayOfNulls<String>(3)
-        var keep = -1; var chip = -1
-        when {
-            correction != null -> {
-                next[0] = literal; keep = if (literal != null) 0 else -1
-                next[1] = correction; chip = 1
-                next[2] = words.firstOrNull { !it.equals(correction, true) && !it.equals(literal, true) }
-            }
-            literal != null -> { next[0] = literal; keep = 0; next[1] = words.getOrNull(0); next[2] = words.getOrNull(1) }
-            else -> { next[0] = words.getOrNull(1); next[1] = words.getOrNull(0); next[2] = words.getOrNull(2) }
-        }
-        offered = next
+    /** The typing model's slots in its order. With what was typed among them they show as given: typed
+     * in quotes on the left, then the fix (in a chip) or the likeliest word in the middle. Without it,
+     * the likeliest word takes the middle, the next the left, as Gboard and iPhone place them. */
+    fun suggestions(slots: List<Suggestion>) {
+        val shown = arrayOfNulls<Suggestion>(3)
+        if (slots.any { it.kind == Suggestion.Kind.Typed }) slots.take(3).forEachIndexed { i, slot -> shown[i] = slot }
+        else { shown[1] = slots.getOrNull(0); shown[0] = slots.getOrNull(1); shown[2] = slots.getOrNull(2) }
+        offered = Array(3) { shown[it]?.text }
+        var chip = -1
         for (i in 0..2) {
-            val s = next[i].orEmpty()
-            this.words[i].text = if (i == keep) context.getString(R.string.keyboard_literal, s) else s
-            this.words[i].background = if (i == chip) shape(key, dp(15).toFloat()) else null
-            slots[i].contentDescription = when {
+            val slot = shown[i]
+            val s = slot?.text.orEmpty()
+            val typed = slot?.kind == Suggestion.Kind.Typed
+            val fix = slot?.kind == Suggestion.Kind.Fix
+            if (fix) chip = i
+            this.words[i].text = if (typed) context.getString(R.string.keyboard_literal, s) else s
+            this.words[i].background = if (fix) shape(key, dp(15).toFloat()) else null
+            slotViews[i].contentDescription = when {
                 s.isEmpty() -> null
-                i == keep -> context.getString(R.string.keyboard_keep, s)
-                i == chip -> context.getString(R.string.keyboard_correction, s)
+                typed -> context.getString(R.string.keyboard_keep, s)
+                fix -> context.getString(R.string.keyboard_correction, s)
                 else -> context.getString(R.string.keyboard_suggest, s)
             }
-            slots[i].isEnabled = s.isNotEmpty()
+            slotViews[i].isEnabled = s.isNotEmpty()
         }
         dividers[0].visibility = if (chip == 0 || chip == 1) INVISIBLE else VISIBLE
         dividers[1].visibility = if (chip == 1 || chip == 2) INVISIBLE else VISIBLE

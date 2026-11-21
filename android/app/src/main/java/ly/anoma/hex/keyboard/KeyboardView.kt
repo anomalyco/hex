@@ -6,6 +6,7 @@ import android.view.WindowInsets
 import android.widget.LinearLayout
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.SpeechPhase
+import ly.anoma.hex.typing.Suggestion
 
 /** The keyboard's root view: the strip, then the keys or the Hex menu in their place. */
 internal class KeyboardView(context: Context, private val ime: HexKeyboard) : LinearLayout(context), KeyboardSurface {
@@ -35,7 +36,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     }
 
     override fun showPage(page: KeyboardPage) = keys.showPage(page)
-    override fun suggestions(words: List<String>, literal: String?, correction: String?) = strip.suggestions(words, literal, correction)
+    override fun suggestions(slots: List<Suggestion>) = strip.suggestions(slots)
 
     fun openMenu() {
         if (strip.recording) return

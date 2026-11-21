@@ -221,4 +221,28 @@ class InsertionTest {
         assertEquals(0, delete.move(870f)); assertEquals(false, delete.tap)
         assertEquals(1, delete.move(840f)); assertEquals(2, delete.move(750f)); assertEquals(0, delete.move(900f))
     }
+    @Test fun shiftChordsLockAndAutoCapitals() {
+        val shift = ShiftState()
+        shift.down(0); shift.typed(); shift.typed(); shift.up()
+        assertEquals(false, shift.uppercase)                 // a chord: capitals while held, off after
+        shift.down(1000); shift.up(); shift.down(1200); shift.up()
+        assertEquals(true, shift.locked)                     // two taps within 300 ms
+        shift.typed(); assertEquals(true, shift.uppercase)
+        shift.down(5000); shift.up(); assertEquals(false, shift.uppercase)
+        shift.down(6000); shift.up(); shift.down(6400); shift.up()
+        assertEquals(false, shift.locked)                    // 400 ms apart: two single shifts
+        shift.auto(true); assertEquals(true, shift.uppercase)
+        shift.typed(); assertEquals(false, shift.uppercase)
+    }
+    @Test fun spacesAndMarksFollowGboard() {
+        assertEquals(true, SpaceRules.periodFits("Hi "))
+        assertEquals(true, SpaceRules.periodFits("at 5 "))
+        assertEquals(false, SpaceRules.periodFits("Hi. "))
+        assertEquals(false, SpaceRules.periodFits(" "))
+        assertEquals(true, SpaceRules.separates(" fox"))
+        assertEquals(true, SpaceRules.separates(", fox"))
+        assertEquals(false, SpaceRules.separates("\nfox"))
+        assertEquals(false, SpaceRules.separates("fox"))
+        assertEquals(false, SpaceRules.separates(null))
+    }
 }
