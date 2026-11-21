@@ -99,7 +99,8 @@ pub(super) fn presence(surface: &Surface, rect: [f32; 4], reduced: bool) -> Tran
 }
 
 /// The capsule in its `PANEL_W` × `PANEL_H` panel. Its live chips and
-/// buttons and the list are the only `.hit()` boxes: a click anywhere else
+/// buttons and the list are its `.hit()` boxes (and, on Windows, the open
+/// search's field, which has no tap there to feed it): a click anywhere else
 /// on it reaches the app beneath, and hover still comes from the pointer.
 pub(super) fn capsule(
     p: Paint,
@@ -517,7 +518,17 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 }) => typed,
                 _ => &empty,
             };
-            field(p, base, typed)
+            let text = field(p, base, typed);
+            // Windows takes the field's clicks in the overlay's input shape
+            // (Rune's native regions): without a hit box there, the window
+            // stays click-through over it and a click lands on the app in
+            // front. Elsewhere the tap feeds the field and a click is the
+            // app's, so its regions stay the buttons' and the list's.
+            if cfg!(target_os = "windows") {
+                text.hit()
+            } else {
+                text
+            }
         }
         // Rows live in the list, never in the capsule.
         Id::Row(_) => base,

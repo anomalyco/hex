@@ -50,6 +50,23 @@ pub(crate) fn current() -> Option<String> {
     }
 }
 
+/// The keyboard layout of the window with keyboard focus, for reading what a
+/// key types there; this thread's layout while no window has the focus.
+pub(crate) fn foreground_layout() -> HKL {
+    // SAFETY: plain Win32 queries; a window destroyed since the read reports
+    // no thread, and `GetKeyboardLayout(0)` answers for this thread then.
+    unsafe {
+        if let Some(window) = focused_window() {
+            let mut process_id = 0;
+            let thread = GetWindowThreadProcessId(window, &mut process_id);
+            if thread != 0 {
+                return GetKeyboardLayout(thread);
+            }
+        }
+        GetKeyboardLayout(0)
+    }
+}
+
 /// The window with keyboard focus: the foreground thread's focused window,
 /// else its active one, else the foreground window. `GetGUIThreadInfo` fails
 /// when the foreground thread is out of reach, so the last is a fallback.

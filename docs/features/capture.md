@@ -266,6 +266,29 @@ On Windows                               // capture.windows
 ├── Overlays -> Rune waits for a swap-chain slot before each frame (Rune
 │   #985), so the picker, capsule, and ink's frames in flight stay bounded
 │   through a long annotation (#1833; not measured on Windows)
+├── The finished capsule -> windows/input's hooks stand in for the macOS tap
+│   (#2113): the search field takes its own clicks (its `.hit()` box is
+│   Windows-only, so the window stops being click-through over it and the
+│   click no longer lands on the app in front), a mouse button going down
+│   away from the capsule folds the list or the search (`CapsuleKey::Press`;
+│   a press on the capsule's own boxes is its click), and the keyboard hook
+│   hands the open list or the suggestions the keys `capture_host::list_key`
+│   names: text, ⌫, ↑↓, ⏎/⇧⏎ and ⇥, Escape and Shift. Text is read from
+│   `ToUnicodeEx` in the foreground window's layout with "change no state",
+│   so a key the app gets is never disturbed and a dead key (`^`, `´`, `¨`)
+│   types nothing in the search rather than half an accent landing nowhere.
+│   The search also keeps the caret's own keys from the app — ⌦, ←→, Home and
+│   End, Page Up and Page Down, Insert — though it draws no caret movement for
+│   them; over the suggestions they pass. A key that edits nothing (Caps Lock,
+│   Num Lock, Scroll Lock, the media and browser keys, Print Screen, Sleep,
+│   Apps, a function key) goes on to the app even in the search, as does a key
+│   the app already had down with its repeats and release, wherever the capsule
+│   stood when it went down. Ctrl, Alt and the Windows key make a chord and stay
+│   the app's, so AltGr types its character in the app, not the search; Hex's
+│   own shortcuts do too, and Escape over the suggestions is the app's. While
+│   a dictation records, Escape cancels that first, as it does everywhere on
+│   Windows, so it never reaches the search. Check:
+│   `windows::input::capsule`'s mapping tests; not observed on a Windows PC
 └── Gaps: no `hex annotate` (Windows has no control transport yet), no
     iPhone, keys pressed in the app are not logged. Checked only by
     cross-compiling (`cargo xwin clippy`, x86_64 and aarch64); never run on
@@ -610,6 +633,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │       press off the capsule (the tap reports mouse-downs while the list
 │   │       is open, and still delivers them) closes the list and gives the
 │   │       keys back; hiding drops the grab
+│   │   └── Windows -> windows/input's keyboard hook stands in for the tap
+│   │       (#2113): the same keys, its text read with ToUnicodeEx in the
+│   │       foreground window's layout and never with the layout's state
+│   │       changed (a dead key types nothing in the search, and AltGr's
+│   │       Ctrl+Alt stays the app's), a press kept only while no shortcut of
+│   │       Hex's claims it, and a key the app already holds left to it;
+│   │       never observed on a Windows PC
 │   ├── `offer` (a rule offer) -> not drawn; Scrawl's capsule doesn't draw it
 │   ├── The ready capsule shows a labeled Paste button, both folded and above
 │   │   the suggestions. A rule waiting to send shows Undo instead. Sending,

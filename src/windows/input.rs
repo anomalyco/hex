@@ -27,6 +27,7 @@ use crate::dictation::DictationFlavour;
 use crate::dictation::ShortcutMode;
 
 mod activity;
+mod capsule;
 mod disposition;
 mod modifiers;
 mod rearm;
@@ -777,7 +778,13 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     } else {
         event.time
     };
-    let handled = process_button(vk, left_control, is_down, time, key_down);
+    // The capture capsule's keys, once no shortcut of Hex's claimed them (#2113).
+    let handled = capsule::settle(
+        process_button(vk, left_control, is_down, time, key_down),
+        event.vkCode,
+        event.scanCode,
+        is_down,
+    );
     if handled.ends_continuation(is_down, ModifierState::is_modifier(vk), event.dwExtraInfo) {
         activity::invalidate();
     }
@@ -863,6 +870,8 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
         if crate::capture_host::wants_input() {
             report_pointer(wparam as u32, event);
         }
+        // A press may fold the capsule's list or search; the click still lands (#2113).
+        capsule::press(wparam as u32);
         if let Some((vk, down)) = mouse_message(wparam as u32, event.mouseData) {
             // A mouse event settles stale Left Ctrl bits too: a release can
             // land on another desktop and never reach the keyboard hook.

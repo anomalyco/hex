@@ -38,6 +38,12 @@ impl Handled {
         }
     }
 
+    /// Whether one of Hex's own shortcuts caused the event, even where the
+    /// hook let its key reach the app (Labs › Share shortcut).
+    pub(super) fn triggered(self) -> bool {
+        self.trigger
+    }
+
     /// Whether the event is the user's own typing or clicking, which ends a
     /// paste continuation: it reached the app in front, and no shortcut of
     /// Hex's triggered it.

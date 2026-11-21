@@ -3067,13 +3067,14 @@ impl CaptureShortcut {
 }
 
 /// The keys the capsule takes from Hex's tap while it is on screen: it never
-/// takes focus, so these never reach the app in front.
+/// takes focus, so these never reach the app in front. Windows hands them over
+/// from its keyboard hook, where the overlay never takes the keyboard either.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum CapsuleKeys {
     /// The picker: the capture shortcut ([`CapsuleKey::Shortcut`]) and Escape.
     Picker,
-    /// The open list: every key press without ⌘ or ⌃ that isn't one of
-    /// Hex's shortcuts.
+    /// The open list: every key press without ⌘ or ⌃ (Ctrl, Alt or the Windows
+    /// key on Windows) that isn't one of Hex's shortcuts.
     List,
     /// A capture's suggestions: the capture shortcut, which opens the
     /// search ([`CapsuleKey::Shortcut`]), Shift, and a mouse press
@@ -3084,8 +3085,8 @@ pub enum CapsuleKeys {
     Suggest { cycle: bool, search: bool },
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-/// A key the capsule gets from Hex's tap.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+/// A key the capsule gets from Hex's tap, or from the Windows keyboard hook.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CapsuleKey {
     /// The capture shortcut: the picker records what it is on, and the
@@ -3193,13 +3194,13 @@ pub fn wants_escape() -> bool {
     GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::Picker))
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 /// Whether the open list takes every key press at the tap.
 pub fn list_open() -> bool {
     GRAB_KEYS.load(Ordering::Acquire) == keys_code(Some(CapsuleKeys::List))
 }
 
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg_attr(target_os = "linux", allow(dead_code))]
 /// Whether the capsule's suggestions show, taking the capture shortcut.
 pub fn suggesting() -> bool {
     GRAB_KEYS.load(Ordering::Acquire)
@@ -3207,6 +3208,18 @@ pub fn suggesting() -> bool {
             cycle: false,
             search: false,
         }))
+}
+
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+/// Whether the capsule takes text now: the open list, or suggestions the
+/// pointer moved onto (`CapsuleKeys::Suggest { search: true, .. }`). The
+/// Windows hook is its only reader: the macOS tap reads the character itself.
+pub fn takes_text() -> bool {
+    grab().as_ref().is_some_and(|grab| match grab.keys {
+        CapsuleKeys::List => true,
+        CapsuleKeys::Suggest { search, .. } => search,
+        CapsuleKeys::Picker => false,
+    })
 }
 
 /// Hands `key` to the capsule if its keys include it; false otherwise.
