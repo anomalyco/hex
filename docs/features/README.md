@@ -2862,9 +2862,18 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
 │   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
 │   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file
-│   and hash as `android/app/src/main/assets/typing/de.hextm`); a noun it corrects
-│   to takes its capital ("haus" -> "Haus") while Auto-capitalization is on. Off,
-│   German keeps the dictionary engine and has no word list, so no letter odds,
+│   and hash as `android/app/src/main/assets/typing/de.hextm`) and the capitalisation
+│   sidecar beside it (`de.capitals`, built by `ios/scripts/build-german-capitals.py`,
+│   each word's share written with a capital): a noun takes its capital anywhere from
+│   a 95% share and after an article or determiner from 50% ("das haus" -> "das Haus",
+│   "zu leben" stays), whether the decoder corrected it or it was typed right, and a
+│   word that is also a common verb form or stem people type alone ("frage", "reise",
+│   "kauf", "schlaf") is capped at 94 so "ich frage" and "schlaf gut" stay, as is every
+│   two-letter word (a chat abbreviation like "gl", never a noun); "in" counts as a
+│   determiner ("in Ruhe") but "ohne" does not. A 50-94% word with no determiner, and
+│   any word the list lacks, keeps the dictionary's rule ("heute abend" -> "heute
+│   Abend"), and Auto-capitalization off adds none.
+│   Off, German keeps the dictionary engine and has no word list, so no letter odds,
 │   model completions or bilingual partner model
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after

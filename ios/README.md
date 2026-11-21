@@ -327,12 +327,34 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     `HEXKeyboard/TypingModel/de.hextm`, byte-identical to
     `android/app/src/main/assets/typing/de.hextm` and the hash its `SHA256SUMS` lists: the
     word list feeds the decoder, the letter odds and the strip, and a bilingual partner may
-    read German taps too. German's model is lowercase throughout, so a noun it corrects to
-    takes the capital the dictionary knows only capitalised ("hsus" reads "haus" and comes
-    out "Haus"), as a name does, while Auto-capitalization is on. Off, Deutsch keeps the
-    dictionary engine exactly as before: no decoder, no word list for the letter odds or
-    model completions, and no model for a bilingual partner. Swipe typing stays English and
-    Spanish only.
+    read German taps too. German's model is lowercase throughout, so a noun takes its capital
+    from the list beside it, whether the decoder corrected it or it was typed right ("hsus"
+    reads "haus" and comes out "Haus"; "das haus" becomes "das Haus"): 95% and up anywhere,
+    and 50-94% after an article or determiner, while Auto-capitalization is on. A 50-94%
+    word with no determiner before it, and any word the list lacks, keeps the dictionary's
+    rule: a verb stays lowercase ("zu leben", "ich frage", "wollt ihr essen") and a word the
+    dictionary knows only capitalised still takes its capital ("heute abend" becomes "heute
+    Abend"). The builder caps at 94, so a capital arrives only after a determiner: a word that
+    is also a common first-person or imperative verb form ("frage", "reise", "drucke") or the
+    stem people type alone ("kauf", "schlaf", "sitz": "ich kauf noch brot", "schlaf gut"); the
+    separable prefixes "teil" and "preis", the adjective "klasse", and the verb forms the
+    counts miss ("filme", "rolle", "presse", "pumpe", "campe", "pflanze", "beichte", "fische",
+    "taufe"); and every two-letter "word", a chat abbreviation ("gl", "rn") rather than a
+    noun. The determiner list includes "in" ("in Ruhe", "in Frage") but not "ohne" ("ohne
+    essen" is a verb). The list is
+    `HEXKeyboard/TypingModel/de.capitals`, built by `scripts/build-german-capitals.py`
+    from the same Google Books shards: for each model word it compares the 1980–2019 counts
+    of the all-lowercase and first-letter-capitalised spellings and lists
+    `word<TAB>percent` for the words at least 50% capitalised and seen at least 40 times,
+    leaving out pronouns and possessives capitalised for other reasons (`FUNCTION_WORDS`:
+    "sie", "ihr", "mein", and the rest). Rebuild it from `ios/` with
+    `python3 scripts/build-german-capitals.py HEXKeyboard/TypingModel/de.hextm HEXKeyboard/TypingModel/de.capitals`;
+    it streams the eight shards through curl and gzip four at a time, caches each shard's
+    counts under `scripts/.build-german-capitals`, keeps their merged per-token counts there
+    so a rule change renders without streaming again, and applies the caps after counting.
+    Off, Deutsch keeps the dictionary engine exactly as before: no decoder, no word list for
+    the letter odds or model completions, and no model for a bilingual partner. Swipe typing
+    stays English and Spanish only.
   - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
     (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
     letter key, on this device, and Spatial autocorrect's decoder and the strip read your
@@ -851,8 +873,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
 
 The app shows these under Settings › Acknowledgements (`HEXMobile/AcknowledgementsView.swift`).
 
-- **Google Books Ngram data:** Spatial autocorrect's word and word-pair frequencies come
-  from the Google Books Ngram Viewer data, version 3 (2020), by Google, licensed under
+- **Google Books Ngram data:** Spatial autocorrect's word and word-pair frequencies, and
+  German's capitalisation shares, come from the Google Books Ngram Viewer data, version 3
+  (2020), by Google, licensed under
   [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/). Counts
   are summed over 1980–2019 and kept only for words in the lists below.
 - **SCOWL:** English words are checked against SCOWL (Spell Checker Oriented Word Lists)

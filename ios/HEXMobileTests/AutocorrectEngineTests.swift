@@ -836,6 +836,24 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(model.index(of: "haua"), "not a word")
     }
 
+    /// The capitalisation sidecar rides beside the German model (same bundle, same embedded
+    /// keyboard fallback): common nouns are written with a capital nearly always, while a word
+    /// that is also a common verb form ("frage" 94, "reise" 94) or a stem people type alone
+    /// ("kauf" 94, "schlaf" 94) is in the list below that, and a pure verb or function word is
+    /// 50-94 too ("leben" 82) or absent.
+    func testTheBundledGermanCapitalsLoad() throws {
+        let capitals = try XCTUnwrap(GermanCapitals.bundled(), "de.capitals is bundled with the German model")
+        for noun in ["haus", "bild", "auto", "zeit"] {
+            XCTAssertGreaterThanOrEqual(capitals.percent(of: noun) ?? 0, 95, noun)
+        }
+        for verb in ["frage", "reise", "folge", "kauf", "schlaf", "koch", "spiel"] {
+            XCTAssertLessThan(capitals.percent(of: verb) ?? 0, 95, verb)
+        }
+        for other in ["machen", "ist"] {
+            XCTAssertNil(capitals.percent(of: other), other)
+        }
+    }
+
     /// Settings › Experiments › German spatial autocorrect, off by default, gates German alone.
     /// Without it the Deutsch layout keeps the dictionary engine exactly as before: no word
     /// list either, so no letter odds, no model completions in the strip, and no partner model.
@@ -864,30 +882,53 @@ final class AutocorrectEngineTests: XCTestCase {
     }
 
     /// German spells every noun with a capital, and its model is lowercase throughout: a noun
-    /// the decoder corrects to takes its capital as a name does while Auto-capitalization is
-    /// on ("haua" reads "haus", and the dictionary knows only "Haus"), and stays as read off.
+    /// the decoder corrects to takes its capital, and so does one typed right, as the list
+    /// beside the model (`de.capitals`) decides. Apple's German dictionary takes "haus",
+    /// "auto" and "zeit" lowercase, so it cannot be the one to tell.
     func testGermanSpatialAutocorrectCapitalisesTheNounItCorrects() throws {
         let layout = KeyboardLayout(width: 393, language: .german)
         let keys = try XCTUnwrap(TypingDecoder.Keys(layout: layout))
         let checker = StubChecker()
-        checker.valid = ["ist", "das"]
-        checker.capitalised = ["Haus"]
+        checker.valid = ["ist", "das", "die", "zu", "haus", "auto", "zeit", "leben",
+                         "ich", "frage", "wollt", "ihr", "essen", "heute", "kauf",
+                         "lass", "mich", "in"]
+        checker.capitalised = ["Stadt", "Abend"]
         let autocorrect = AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
         autocorrect.setLanguage(.german, available: ["de"])
+        autocorrect.germanCapitals = GermanCapitals(percentages: [
+            "haus": 99, "auto": 99, "zeit": 98, "leben": 60, "frage": 94, "essen": 61, "abend": 94,
+            "kauf": 94, "ruhe": 94,
+        ])
         autocorrect.decoder = TypingDecoder(model: try XCTUnwrap(TypingDecoderModel.bundled("de")))
         autocorrect.decoderKeys = keys
-        // A tap on a where s was meant: "haua" reads "haus", not the literal it spells.
-        autocorrect.decoderTaps = "haua".map { keys.centres[$0]! }
-        XCTAssertEqual(
-            autocorrect.replacementOnSpace(beforeInput: "das haua", field: .text, autocorrectionType: .default)?.replacement,
-            "Haus"
-        )
+        func fix(_ before: String, taps: String) -> String? {
+            autocorrect.decoderTaps = taps.map { keys.centres[$0]! }
+            return autocorrect.replacementOnSpace(beforeInput: before, field: .text, autocorrectionType: .default)?.replacement
+        }
+        // A tap on a where s was meant, and on s where a was meant: both read "haus".
+        XCTAssertEqual(fix("das haua", taps: "haua"), "Haus")
+        XCTAssertEqual(fix("das hsus", taps: "hsus"), "Haus")
+        // Typed right, the noun still takes its capital after the article.
+        XCTAssertEqual(fix("das haus", taps: "haus"), "Haus")
+        // Written with a capital only half the time: a noun after an article or determiner,
+        // and the verb elsewhere ("zu leben").
+        XCTAssertEqual(fix("das leben", taps: "leben"), "Leben")
+        XCTAssertNil(fix("zu leben", taps: "leben"))
+        // A 50-94% word with no determiner before it keeps the dictionary's rule: a verb form
+        // stays lowercase ("ich frage", "wollt ihr essen"), and a word the dictionary knows
+        // only capitalised still takes its capital ("heute abend" -> "heute Abend").
+        XCTAssertNil(fix("ich frage", taps: "frage"))
+        XCTAssertNil(fix("wollt ihr essen", taps: "essen"))
+        XCTAssertNil(fix("ich kauf", taps: "kauf"))
+        XCTAssertEqual(fix("heute abend", taps: "abend"), "Abend")
+        // "in" takes a noun, unlike the pronoun "ihr".
+        XCTAssertEqual(fix("lass mich in ruhe", taps: "ruhe"), "Ruhe")
+        // A word the list doesn't know keeps the dictionary's rule too.
+        XCTAssertEqual(fix("die stadt", taps: "stadt"), "Stadt")
+        // Auto-capitalization off adds no capital you did not type.
         autocorrect.addsCapitals = false
-        XCTAssertEqual(
-            autocorrect.replacementOnSpace(beforeInput: "das haua", field: .text, autocorrectionType: .default)?.replacement,
-            "haus",
-            "Auto-capitalization off adds no capital you did not type"
-        )
+        XCTAssertNil(fix("das haus", taps: "haus"))
+        XCTAssertEqual(fix("das haua", taps: "haua"), "haus")
     }
 
     func testSpatialAutocorrectKnowsYourOwnWords() throws {

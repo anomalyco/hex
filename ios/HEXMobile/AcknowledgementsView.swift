@@ -45,10 +45,10 @@ struct AcknowledgementsView: View {
         Entry(
             title: "Google Books Ngram data",
             body: """
-            Spatial autocorrect's word and word-pair frequencies come from the Google Books \
-            Ngram Viewer data, version 3 (2020), by Google, licensed under Creative Commons \
-            Attribution 3.0 (creativecommons.org/licenses/by/3.0). Hex sums the counts from \
-            1980 to 2019 and keeps only words in the lists below.
+            Spatial autocorrect's word and word-pair frequencies, and German's capitalisation \
+            shares, come from the Google Books Ngram Viewer data, version 3 (2020), by Google, \
+            licensed under Creative Commons Attribution 3.0 (creativecommons.org/licenses/by/3.0). \
+            Hex sums the counts from 1980 to 2019 and keeps only words in the lists below.
             """
         ),
         Entry(
