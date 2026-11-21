@@ -264,6 +264,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     let showsEmoji: Bool
     let horizontalInset: CGFloat
     let language: KeyboardLanguage
+    /// The letters' arrangement (Settings › Keyboard › Languages › Layout): `language`'s own
+    /// unless it offers the one asked for.
+    let letters: KeyboardLetterLayout
     let posture: KeyboardPosture
     /// Where the Hex key sits: Settings › Keyboard › Hex key picks the strip's trailing
     /// (Right) or leading (Left) end.
@@ -283,11 +286,14 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         showsEmoji: Bool = false,
         horizontalInset: CGFloat = 0,
         language: KeyboardLanguage = .english,
+        letters: KeyboardLetterLayout? = nil,
         posture: KeyboardPosture = .phone,
         windowInset: CGFloat = 0,
         hexPlacement: HexKeyPlacement = .stripTrailing
     ) {
         self.width = width
+        let letters = language.offered(letters)
+        self.letters = letters
         self.hexPlacement = hexPlacement
         self.orientation = orientation
         self.layer = layer
@@ -310,6 +316,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 showsEmoji: showsEmoji,
                 inset: self.horizontalInset,
                 language: language,
+                letters: letters,
                 hexPlacement: hexPlacement
             )
             self.keys = built.keys
@@ -324,6 +331,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 showsEmoji: showsEmoji,
                 inset: self.horizontalInset,
                 language: language,
+                letters: letters,
                 hexPlacement: hexPlacement
             )
             self.split = nil
@@ -419,10 +427,13 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// holds 11 keys (Norwegian letters).
     var characterWidth: CGFloat {
         if isSplit { return SplitGeometry.keyWidth }
+        if layer == .letters, letters == .dvorak {
+            return Self.dvorakLetterWidth(innerWidth: width - 2 * horizontalInset, metrics: metrics)
+        }
         return Self.letterWidth(
             innerWidth: width - 2 * horizontalInset,
             metrics: metrics,
-            columns: Self.columns(Self.characterRows(for: layer, language: language))
+            columns: Self.columns(Self.characterRows(for: layer, language: language, letters: letters))
         )
     }
 
@@ -461,16 +472,28 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         (innerWidth - 2 * metrics.side - CGFloat(columns - 1) * metrics.gap) / CGFloat(columns)
     }
 
+    /// Dvorak's letter keys: narrower than a 10-key row's, so shift and nine letters fill row 3
+    /// edge to edge, as on Apple's (iOS 27.0 simulator: a 38.3 pt pitch where QWERTY's is 39.5 pt
+    /// on a 402 pt iPhone).
+    static func dvorakLetterWidth(innerWidth: CGFloat, metrics: KeyboardMetrics) -> CGFloat {
+        let modifier = letterWidth(innerWidth: innerWidth, metrics: metrics) * modifierWidthRatio
+        return (innerWidth - 2 * metrics.side - modifier) / 9 - metrics.gap
+    }
+
     /// Keys across the widest of rows 1 and 2, never fewer than 10.
     static func columns(_ rows: [[String]]) -> Int {
         max(10, rows.prefix(2).map(\.count).max() ?? 10)
     }
 
-    static func characterRows(for layer: KeyboardLayer, language: KeyboardLanguage = .english) -> [[String]] {
+    static func characterRows(
+        for layer: KeyboardLayer,
+        language: KeyboardLanguage = .english,
+        letters: KeyboardLetterLayout? = nil
+    ) -> [[String]] {
         let punctuation = [".", ",", "?", "!", "'"]
         switch layer {
         case .letters:
-            return language.letterRows
+            return language.letterRows(language.offered(letters))
         case .numbers:
             return [
                 "1234567890".map(String.init),
@@ -495,14 +518,18 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         showsEmoji: Bool,
         inset: CGFloat,
         language: KeyboardLanguage,
+        letters: KeyboardLetterLayout,
         hexPlacement placement: HexKeyPlacement
     ) -> [KeyboardKey] {
         let innerWidth = width - 2 * inset
-        let rows = characterRows(for: layer, language: language)
+        let rows = characterRows(for: layer, language: language, letters: letters)
+        let dvorak = layer == .letters && letters == .dvorak
         // Modifiers and the bottom row keep the 10-key sizes; an 11-key layout narrows only
         // its character keys, and row 3's letters sit centred between shift and delete.
         let referenceW = letterWidth(innerWidth: innerWidth, metrics: m)
-        let lw = letterWidth(innerWidth: innerWidth, metrics: m, columns: columns(rows))
+        let lw = dvorak
+            ? dvorakLetterWidth(innerWidth: innerWidth, metrics: m)
+            : letterWidth(innerWidth: innerWidth, metrics: m, columns: columns(rows))
         let modW = referenceW * modifierWidthRatio
         let left = inset + m.side
         let right = width - inset - m.side
@@ -530,8 +557,20 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             return inset + (innerWidth - total) / 2
         }
 
+        if dvorak {
+            // Apple's Dvorak: row 1's seven letters end at a delete key a pitch and a half wide,
+            // row 2's ten start at the edge, and row 3 is shift and nine letters, edge to edge.
+            let pitch = lw + m.gap
+            let deleteW = 1.5 * pitch - m.gap
+            add(.delete, row: 0, x: right - deleteW, w: deleteW, label: "delete")
+            addCharacters(rows[0], row: 0, startX: right - deleteW - CGFloat(rows[0].count) * pitch, keyWidth: lw)
+            addCharacters(rows[1], row: 1, startX: left, keyWidth: lw)
+            add(.shift, row: 2, x: left, w: modW, label: "shift")
+            addCharacters(rows[2], row: 2, startX: left + modW + m.gap, keyWidth: lw)
+        }
+
         // Rows 1 and 2.
-        for row in 0..<2 {
+        for row in 0..<2 where !dvorak {
             let chars = rows[row]
             addCharacters(chars, row: row, startX: centredStart(count: chars.count, keyWidth: lw), keyWidth: lw)
         }
@@ -543,24 +582,26 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         let row3ModW = layer == .letters
             ? min(modW, (innerWidth - 2 * m.side - CGFloat(middle.count) * lw - CGFloat(middle.count + 1) * m.gap) / 2)
             : modW
-        switch layer {
-        case .letters:
-            add(.shift, row: 2, x: left, w: row3ModW, label: "shift")
-        case .numbers:
-            add(.layerSwitch(.symbols), row: 2, x: left, w: modW, label: "#+=")
-        case .symbols:
-            add(.layerSwitch(.numbers), row: 2, x: left, w: modW, label: "123")
+        if !dvorak {
+            switch layer {
+            case .letters:
+                add(.shift, row: 2, x: left, w: row3ModW, label: "shift")
+            case .numbers:
+                add(.layerSwitch(.symbols), row: 2, x: left, w: modW, label: "#+=")
+            case .symbols:
+                add(.layerSwitch(.numbers), row: 2, x: left, w: modW, label: "123")
+            }
+            if layer == .letters {
+                addCharacters(middle, row: 2, startX: centredStart(count: middle.count, keyWidth: lw), keyWidth: lw)
+            } else {
+                // Apple's punctuation row: five wide keys aligned to the s..k columns between modifiers.
+                let edgeGap = 1.5 * (lw + m.gap) - modW
+                let count = CGFloat(middle.count)
+                let middleW = (innerWidth - 2 * m.side - 2 * modW - 2 * edgeGap - (count - 1) * m.gap) / count
+                addCharacters(middle, row: 2, startX: left + modW + edgeGap, keyWidth: middleW)
+            }
+            add(.delete, row: 2, x: right - row3ModW, w: row3ModW, label: "delete")
         }
-        if layer == .letters {
-            addCharacters(middle, row: 2, startX: centredStart(count: middle.count, keyWidth: lw), keyWidth: lw)
-        } else {
-            // Apple's punctuation row: five wide keys aligned to the s..k columns between modifiers.
-            let edgeGap = 1.5 * (lw + m.gap) - modW
-            let count = CGFloat(middle.count)
-            let middleW = (innerWidth - 2 * m.side - 2 * modW - 2 * edgeGap - (count - 1) * m.gap) / count
-            addCharacters(middle, row: 2, startX: left + modW + edgeGap, keyWidth: middleW)
-        }
-        add(.delete, row: 2, x: right - row3ModW, w: row3ModW, label: "delete")
 
         // Row 4: 123/ABC, globe?, emoji?, space, field extras (@ . / . /), Hex, return.
         let isCompactBottomRow = showsGlobe || showsEmoji || field != .text
@@ -696,10 +737,12 @@ extension KeyboardLayout {
         showsEmoji: Bool,
         inset: CGFloat,
         language: KeyboardLanguage,
+        letters: KeyboardLetterLayout = .own,
         hexPlacement placement: HexKeyPlacement
     ) -> (keys: [KeyboardKey], split: SplitGeometry) {
         typealias G = SplitGeometry
-        let rows = characterRows(for: layer, language: language)
+        // Dvorak splits like the other layouts, delete ending row 3 (Apple's split Dvorak unobserved).
+        let rows = characterRows(for: layer, language: language, letters: letters)
         let left = inset + m.side
         let right = width - inset - m.side
         let p = G.pitch

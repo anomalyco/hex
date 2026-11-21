@@ -1,6 +1,7 @@
 import UIKit
 
-/// The options a held key offers after 400 ms: the language's letters (`KeyboardLanguage.letterHolds`),
+/// The options a held key offers after 400 ms: the language's letters on its layout
+/// (`KeyboardLanguage.letterHolds(on:)`),
 /// else the 123 and #+= pages' list, the system English keyboard's observed long-press options
 /// (iOS 27.2 simulator) unless the language's differ (`KeyboardLanguage.symbolHolds`).
 nonisolated enum AccentCatalog {
@@ -20,9 +21,14 @@ nonisolated enum AccentCatalog {
     ]
 
     /// The options for a held key, base first; nil when it holds nothing.
-    static func options(for base: String, uppercase: Bool, language: KeyboardLanguage = .english) -> [String]? {
+    static func options(
+        for base: String,
+        uppercase: Bool,
+        language: KeyboardLanguage = .english,
+        letters: KeyboardLetterLayout? = nil
+    ) -> [String]? {
         let key = base.lowercased()
-        guard let list = language.letterHolds[key] ?? language.symbolHolds[key] ?? symbols[key],
+        guard let list = language.letterHolds(on: language.offered(letters))[key] ?? language.symbolHolds[key] ?? symbols[key],
               list.count > 1 else { return nil }
         guard uppercase else { return list }
         return list.map { option in

@@ -44,6 +44,8 @@ final class TypingLogger {
         var showsGlobe: Bool
         var horizontalInset: CGFloat
         var placement: HexKeyPlacement
+        var language: KeyboardLanguage
+        var letters: KeyboardLetterLayout
 
         init(_ layout: KeyboardLayout) {
             width = layout.width
@@ -53,6 +55,8 @@ final class TypingLogger {
             showsGlobe = layout.showsGlobe
             horizontalInset = layout.horizontalInset
             placement = HexKeyPlacement.current
+            language = layout.language
+            letters = layout.letters
         }
     }
 
@@ -216,6 +220,7 @@ final class TypingLogger {
             TypingLogField("globe", .bool(layout.showsGlobe)),
             TypingLogField("hexPlacement", .string(HexKeyPlacement.current.rawValue)),
             TypingLogField("language", .string(layout.language.rawValue)),
+            TypingLogField("letters", .string(layout.letters.rawValue)),
         ]
         if current.shiftHeld {
             fields.insert(TypingLogField("shiftHeld", .bool(true)), at: 4)

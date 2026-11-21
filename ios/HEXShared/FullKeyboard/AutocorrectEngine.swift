@@ -160,8 +160,9 @@ final class AutocorrectEngine {
     }
     private var acceptsAnyLetters: Bool?
     /// The keys you type on, whose neighbours price a slip: `language`'s layout, or a
-    /// partner's primary's.
+    /// partner's primary's, in `layoutLetters`'s arrangement (`setKeys`).
     private(set) var layoutLanguage: KeyboardLanguage = .english
+    private(set) var layoutLetters: KeyboardLetterLayout?
     private var lexiconShortcuts: [String: String] = [:]
     private var lexiconTerms: [String] = []
     private var suppressedInSession: Set<String> = []
@@ -329,6 +330,15 @@ final class AutocorrectEngine {
         lastCorrection = nil
     }
 
+    /// The keys the letters are typed on now (`KeyboardLayout.language` and `letters`), for the
+    /// neighbouring-key cost; the partner types on the same ones.
+    func setKeys(_ language: KeyboardLanguage, letters: KeyboardLetterLayout) {
+        layoutLanguage = language
+        layoutLetters = letters
+        partner?.layoutLanguage = language
+        partner?.layoutLetters = letters
+    }
+
     /// Bilingual autocorrect's second language (`KeyboardLanguageList.partner`), or nil. It
     /// shares your words (`learnedWords`, text replacements, Learn how I type) and types on
     /// this engine's keys. None without a dictionary for either language. `checker` is for
@@ -345,7 +355,8 @@ final class AutocorrectEngine {
         guard partner?.language != other else { return }
         let engine = AutocorrectEngine(checker: checker ?? SystemTextChecker(), learnedWords: learnedWords)
         engine.setLanguage(other, available: available)
-        engine.layoutLanguage = language
+        engine.layoutLanguage = layoutLanguage
+        engine.layoutLetters = layoutLetters
         engine.lexiconShortcuts = lexiconShortcuts
         engine.lexiconTerms = lexiconTerms
         engine.learning = learning
@@ -743,7 +754,7 @@ final class AutocorrectEngine {
         let lower = token.lowercased()
         func cost(_ fix: String) -> Double {
             let normalized = fix.replacingOccurrences(of: "'", with: "").lowercased()
-            return Self.singleEditKeyboardCost(from: lower, to: normalized, language: layoutLanguage) ?? 1.0
+            return Self.singleEditKeyboardCost(from: lower, to: normalized, language: layoutLanguage, letters: layoutLetters) ?? 1.0
         }
         return cost(theirs) + 0.2 < cost(own)
     }
@@ -834,7 +845,7 @@ final class AutocorrectEngine {
         for (rank, checkerGuess) in guesses.prefix(8).enumerated() {
             guard let rawGuess = usableGuess(checkerGuess, typed: token, among: guesses), mayOffer(rawGuess, replacing: token) else { continue }
             let normalizedGuess = rawGuess.replacingOccurrences(of: "'", with: "").lowercased()
-            guard let editCost = Self.singleEditKeyboardCost(from: lower, to: normalizedGuess, language: layoutLanguage) else { continue }
+            guard let editCost = Self.singleEditKeyboardCost(from: lower, to: normalizedGuess, language: layoutLanguage, letters: layoutLetters) else { continue }
             let totalScore = editCost + Double(rank) * 0.08
             if totalScore < bestScore {
                 bestScore = totalScore
@@ -867,7 +878,7 @@ final class AutocorrectEngine {
     private func commonTwoLetterFix(for lower: String) -> String? {
         var best: (word: String, cost: Double)?
         for word in language.commonTwoLetterWords {
-            guard let cost = Self.singleEditKeyboardCost(from: lower, to: word, language: layoutLanguage),
+            guard let cost = Self.singleEditKeyboardCost(from: lower, to: word, language: layoutLanguage, letters: layoutLetters),
                   cost > 0, cost <= 0.65 else { continue }
             if best == nil || cost < best!.cost { best = (word, cost) }
         }
@@ -1161,6 +1172,7 @@ final class AutocorrectEngine {
     private func rankedGuesses(for token: String) -> [String] {
         let lower = token.lowercased()
         let language = layoutLanguage
+        let letters = layoutLetters
         let guesses = checker.guesses(for: token)
         return guesses
             .compactMap { usableGuess($0, typed: token, among: guesses) }
@@ -1170,12 +1182,14 @@ final class AutocorrectEngine {
                 let costA = Self.singleEditKeyboardCost(
                     from: lower,
                     to: a.element.replacingOccurrences(of: "'", with: "").lowercased(),
-                    language: language
+                    language: language,
+                    letters: letters
                 ) ?? (2.0 + Double(abs(a.element.count - token.count)) * 0.3)
                 let costB = Self.singleEditKeyboardCost(
                     from: lower,
                     to: b.element.replacingOccurrences(of: "'", with: "").lowercased(),
-                    language: language
+                    language: language,
+                    letters: letters
                 ) ?? (2.0 + Double(abs(b.element.count - token.count)) * 0.3)
                 return (costA + Double(a.offset) * 0.08) < (costB + Double(b.offset) * 0.08)
             }
@@ -1206,7 +1220,8 @@ final class AutocorrectEngine {
     static func singleEditKeyboardCost(
         from source: String,
         to target: String,
-        language: KeyboardLanguage = .english
+        language: KeyboardLanguage = .english,
+        letters: KeyboardLetterLayout? = nil
     ) -> Double? {
         if source == target { return 0 }
         let s = Array(source)
@@ -1233,7 +1248,7 @@ final class AutocorrectEngine {
                 // An accent or tilde you didn't add ("aqui" -> "aquí", "manana" -> "mañana")
                 // is the cheapest fix there is, not a far-away key.
                 if sameLetterIgnoringAccents(s[i], t[i]) { return 0.15 }
-                return areAdjacentKeys(s[i], t[i], language: language) ? 0.65 : 1.15
+                return areAdjacentKeys(s[i], t[i], language: language, letters: letters) ? 0.65 : 1.15
             }
             if diffs.count == 2, diffs[1] == diffs[0] + 1,
                s[diffs[0]] == t[diffs[1]], s[diffs[1]] == t[diffs[0]] {
@@ -1260,8 +1275,8 @@ final class AutocorrectEngine {
         }
         let extraIdx = skippedIndex ?? (longer.count - 1)
         let extraChar = longer[extraIdx]
-        let leftAdj = extraIdx > 0 && areAdjacentKeys(extraChar, longer[extraIdx - 1], language: language)
-        let rightAdj = extraIdx + 1 < longer.count && areAdjacentKeys(extraChar, longer[extraIdx + 1], language: language)
+        let leftAdj = extraIdx > 0 && areAdjacentKeys(extraChar, longer[extraIdx - 1], language: language, letters: letters)
+        let rightAdj = extraIdx + 1 < longer.count && areAdjacentKeys(extraChar, longer[extraIdx + 1], language: language, letters: letters)
         return (leftAdj || rightAdj) ? 0.70 : 0.90
     }
 
@@ -1278,12 +1293,25 @@ final class AutocorrectEngine {
         sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
     }
 
-    private static let keyCoordinates: [KeyboardLanguage: [Character: (Double, Double)]] = Dictionary(
-        uniqueKeysWithValues: KeyboardLanguage.allCases.map { ($0, $0.keyCoordinates) }
+    private struct LayoutKey: Hashable {
+        let language: KeyboardLanguage
+        let letters: KeyboardLetterLayout
+    }
+
+    private static let keyCoordinates: [LayoutKey: [Character: (Double, Double)]] = Dictionary(
+        uniqueKeysWithValues: KeyboardLanguage.allCases.flatMap { language in
+            language.letterLayouts.map { (LayoutKey(language: language, letters: $0), language.keyCoordinates($0)) }
+        }
     )
 
-    static func areAdjacentKeys(_ a: Character, _ b: Character, language: KeyboardLanguage = .english) -> Bool {
-        guard let keys = keyCoordinates[language], let pa = keys[a], let pb = keys[b] else { return false }
+    static func areAdjacentKeys(
+        _ a: Character,
+        _ b: Character,
+        language: KeyboardLanguage = .english,
+        letters: KeyboardLetterLayout? = nil
+    ) -> Bool {
+        let key = LayoutKey(language: language, letters: language.offered(letters))
+        guard let keys = keyCoordinates[key], let pa = keys[a], let pb = keys[b] else { return false }
         let dx = pa.1 - pb.1
         let dy = pa.0 - pb.0
         return (dx * dx + dy * dy).squareRoot() <= 1.6

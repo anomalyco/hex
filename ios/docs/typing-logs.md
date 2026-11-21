@@ -113,12 +113,14 @@ Written when the key layout or shift changes, and when a session starts.
   (view size or safe area only), `layer_key` (123/#+=/ABC pressed),
   `layer_auto` (space or return went back to letters), `layer_slide` (hold 123,
   slide, let go), `shift_key`, `typed` (a one-shot shift turned off), `auto`
-  (auto-capitalization), `cancel`, `language` (the keyboard layout changed).
+  (auto-capitalization), `cancel`, `language` (the keyboard layout changed),
+  `letters` (its letters' arrangement changed).
 - `layer` (`letters`/`numbers`/`symbols`), `shift` (`off`/`on`/`locked`),
   `shiftHeld` (only when true), `field` (`text`/`url`/`email`), `orientation`,
   `width`, `height` (the keys' layout), `view` `[w, h]`, `safeArea`,
   `horizontalInset` (landscape), `globe`, `hexPlacement`, `language`
-  (`en`/`nb`/`es`/`de`).
+  (`en`/`nb`/`es`/`de`), `letters` (`own`/`qwerty`/`qwertz`/`azerty`/`dvorak`,
+  Settings › Keyboard › Languages › Layout).
 - The first time a hash appears in a day's file the line also has:
   - `letterWidth` (a 10-key row's; 11-key Norwegian and German letters are
     narrower, see `keys`), `metrics` (`side`, `gap`, `rowGap`, `keyHeight`,
