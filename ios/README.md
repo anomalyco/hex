@@ -446,6 +446,11 @@ never at a launch by itself.
     only when the best reading beats it by a margin (more when what you typed is a word,
     including a name, day or place typed in lowercase that the dictionary knows only
     capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
+    A run that is no word and no dictionary's at all is also read as a word plus one slip
+    in the next ("specialchsracter" -> "special character") or as three to six words typed
+    together ("seeyoutomorrow" -> "see you tomorrow"), when the words without their missed
+    spaces are no less likely than the run; those can replace a run the whole-word margin
+    would keep.
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
     layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English

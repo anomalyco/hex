@@ -1417,6 +1417,98 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertTrue(target.text.hasSuffix(" I didn't "), target.text)
     }
 
+    /// A missed space with a slip in the second word, when the whole run is no word and no
+    /// dictionary's: the fallback reads the rest alone ("specialchsracter" -> "special
+    /// character").
+    func testAMissedSpaceWithASlipInTheSecondWordStillSplits() throws {
+        try useDecoder()
+        for (typed, fixed) in [
+            ("specialchsracter", "special character "),
+            ("goodmotning", "good morning "),
+            ("nextwerk", "next week "),
+            ("lookingforwsrd", "looking forward "),
+            ("emailaddtess", "email address "),
+        ] {
+            typeTaps(typed)
+            XCTAssertEqual(target.text, fixed, typed)
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+        }
+    }
+
+    /// Three or more words typed with no spaces are read as words, every one spelled as
+    /// typed ("seeyoutomorrow").
+    func testWordsTypedWithNoSpacesAreReadAsWords() throws {
+        try useDecoder()
+        for (typed, fixed) in [
+            ("seeyoutomorrow", "see you tomorrow "),
+            ("thankyouverymuch", "thank you very much "),
+            ("haveaniceday", "have a nice day "),
+            ("inthemorning", "in the morning "),
+        ] {
+            typeTaps(typed)
+            XCTAssertEqual(target.text, fixed, typed)
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+        }
+    }
+
+    /// The fallback never turns a word the decoder already reads as one back into two
+    /// ("understsnd" -> "understand").
+    func testAOneWordTypoStaysOneWord() throws {
+        try useDecoder()
+        for (typed, fixed) in [("understsnd", "understand "), ("informstion", "information ")] {
+            typeTaps(typed)
+            XCTAssertEqual(target.text, fixed, typed)
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+        }
+    }
+
+    /// A word the dictionary knows is never split by the fallback, even when its letters
+    /// could be two words ("netflix", "carlsberg").
+    func testTheFallbackNeverSplitsAWordTheDictionaryAccepts() throws {
+        let checker = StubChecker()
+        checker.valid = ["netflix", "carlsberg"]
+        target = FixtureTextTarget()
+        target.autocapitalizationType = UITextAutocapitalizationType.none
+        engine = FullKeyboardEngine(
+            target: target,
+            autocorrect: AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
+        )
+        engine.width = 393
+        engine.clock = { [unowned self] in self.now }
+        engine.configureForField()
+        try useDecoder()
+        typeTaps("netflix")
+        typeTaps("carlsberg")
+        XCTAssertEqual(target.text, "netflix carlsberg ")
+    }
+
+    /// A one-word typo is not read as a word and a rare one ("tommorow" as "tom morrow"):
+    /// without the missed spaces the two words are less likely than the run, so the fallback
+    /// declines. The keyboard's deterministic fix still puts "tomorrow" in.
+    func testTheFallbackDoesNotSplitAOneWordTypo() throws {
+        try useDecoder()
+        let decoder = try XCTUnwrap(engine.autocorrect.decoder)
+        let keys = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout))
+        let taps = try "tommorow".map { try XCTUnwrap(keys.centres[$0]) }
+        let decision = try XCTUnwrap(
+            decoder.decide(taps: taps, typed: "tommorow", previous: nil, literalIsValid: false, keys: keys)
+        )
+        XCTAssertNil(decision.replacement)
+        XCTAssertFalse(decision.readings.contains { $0.text == "tom morrow" })
+        typeTaps("tommorow")
+        XCTAssertFalse(target.text.contains("tom morrow"))
+        XCTAssertEqual(target.text, "tomorrow ")
+    }
+
+    /// The strip offers a fallback reading before space puts it in.
+    func testTheStripOffersTheFallbackReading() throws {
+        try useDecoder()
+        XCTAssertTrue(stripAfterTaps("specialchsracter").contains("special character"))
+    }
+
     func testSpatialAutocorrectReadsAnETappedHighOnTheStripAsThe() throws {
         try useDecoder()
         typeTaps("on")
