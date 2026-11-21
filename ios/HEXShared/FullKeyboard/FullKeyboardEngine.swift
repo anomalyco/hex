@@ -369,7 +369,8 @@ final class FullKeyboardEngine {
             AutoCapitalization.shouldCapitalize(
                 mode: autoCapitalizationMode,
                 before: target.documentContextBeforeInput,
-                hasText: target.hasText
+                hasText: target.hasText,
+                language: layout.language
             )
         )
         if shift != before {
@@ -393,7 +394,8 @@ final class FullKeyboardEngine {
                 capitalizesNext: AutoCapitalization.shouldCapitalize(
                     mode: autoCapitalizationMode,
                     before: target.documentContextBeforeInput,
-                    hasText: target.hasText
+                    hasText: target.hasText,
+                    language: layout.language
                 )
             )
         }
@@ -1050,10 +1052,11 @@ final class FullKeyboardEngine {
     private func commitCharacter(_ key: KeyboardKey, at point: CGPoint, down: CGPoint? = nil) {
         guard let character = key.character else { return }
         spaceAfterSwipedWord(before: character)
-        let text = layerState.layer == .letters && shift.isUppercase ? character.uppercased() : character
+        var text = layerState.layer == .letters && shift.isUppercase ? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
         }
+        if layerState.layer == .letters, layout.language == .greek, typeGreek(&text) { return }
         if !correctWord(endingWith: text) {
             autocorrect.clearPendingUndo()
             insert(text, source: "key", at: point)
@@ -1348,7 +1351,7 @@ final class FullKeyboardEngine {
         autocorrect.applyLearning(journal?.typingLearning ?? TypingLearning())
     }
 
-    private func didEdit() {
+    func didEdit() {
         suggestionSpaceBefore = nil
         refreshAutoCapitalization()
         refreshSuggestions()

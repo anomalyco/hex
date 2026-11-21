@@ -176,12 +176,13 @@ nonisolated struct DictationPipeline: Sendable {
 
     /// `text` in the style, then the vocabulary's and learned fixes' spellings again (a style
     /// can lowercase a term or capitalize a sentence start: "iPhone" -> "IPhone"), then
-    /// Lowercase.
+    /// Lowercase, with Unicode's context-aware mapping, so a word-final Σ becomes ς ("ΟΔΟΣ" ->
+    /// "οδος"), where Swift's `lowercased()` always gives σ.
     func format(_ text: String, language: String?) -> String {
         let styled = TranscriptFormatter.format(
             text, style: style, language: language, lists: formatLists, endsWithPeriod: endsWithPeriod
         )
         let spelled = VocabularySpelling.apply(vocabulary + DictationCorrections.spellings(corrections), to: styled)
-        return lowercase ? spelled.lowercased() : spelled
+        return lowercase ? spelled.lowercased(with: nil) : spelled
     }
 }

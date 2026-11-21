@@ -439,8 +439,9 @@ final class AutocorrectEngine {
 
     // MARK: - Predictions between words
 
-    /// The empty field, or after a sentence's end and a space, or a new line.
-    static func isSentenceStart(_ beforeInput: String?) -> Bool {
+    /// The empty field, or after a sentence's end and a space, or a new line. In Greek, ; is
+    /// the question mark and ends a sentence too.
+    static func isSentenceStart(_ beforeInput: String?, language: KeyboardLanguage = .english) -> Bool {
         guard let beforeInput else { return true }
         guard let last = beforeInput.last else { return true }
         if last.isNewline { return true }
@@ -449,6 +450,7 @@ final class AutocorrectEngine {
         while trimmed.last == " " { trimmed = trimmed.dropLast() }
         guard let written = trimmed.last else { return true }
         return written.isNewline || written == "." || written == "!" || written == "?"
+            || (language == .greek && (written == ";" || written == "\u{037E}"))
     }
 
     /// Common sentence-initial words per language (Hex's own short lists), lowercase except
@@ -466,6 +468,7 @@ final class AutocorrectEngine {
         case .norwegian: ["jeg", "det", "vi"]
         case .russian: ["я", "это", "мы"]
         case .ukrainian: ["я", "це", "ми"]
+        case .greek: ["θα", "δεν", "το"]
         case .serbianLatin: ["ja", "to", "da"]
         }
     }
@@ -487,6 +490,7 @@ final class AutocorrectEngine {
         case .norwegian: ["og", "men", "jeg"]
         case .russian: ["и", "но", "что"]
         case .ukrainian: ["і", "але", "що"]
+        case .greek: ["και", "αλλά", "που"]
         case .serbianLatin: ["i", "ali", "da"]
         }
     }
@@ -505,6 +509,7 @@ final class AutocorrectEngine {
         case .norwegian: ["og", "i", "det", "er", "på", "som"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
+        case .greek: ["και", "να", "το", "θα", "δεν", "η"]
         case .serbianLatin: ["i", "je", "da", "u", "se", "na"]
         }
     }
@@ -546,7 +551,7 @@ final class AutocorrectEngine {
         guard hasDictionary else { return replacementOnly ?? [] }
         // An empty field, or a new sentence (". ", "! ", "? ", a new line): three common
         // first words, as Apple's keyboard offers.
-        if Self.isSentenceStart(beforeInput) {
+        if Self.isSentenceStart(beforeInput, language: language) {
             return predictions(Self.sentenceStarters(language), previous: nil, capitalized: capitalizesNext)
         }
         if let beforeInput, beforeInput.last == " " {
@@ -1285,10 +1290,13 @@ final class AutocorrectEngine {
         let s = Array(source)
         let t = Array(target)
         // Polish: diacritics you didn't add, however many ("zolw" -> "żółw", "maly" -> "mały"),
-        // are as cheap as one missing Spanish accent, a little more for each further one.
-        if language == .polish, s.count == t.count {
+        // are as cheap as one missing Spanish accent, a little more for each further one. Greek
+        // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
+        // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος").
+        if language == .polish || language == .greek, s.count == t.count {
+            let same = language == .polish ? samePolishLetterIgnoringDiacritics : sameGreekLetterIgnoringAccents
             let missed = zip(s, t).filter { $0 != $1 }
-            if !missed.isEmpty, missed.allSatisfy({ samePolishLetterIgnoringDiacritics($0, $1) }) {
+            if !missed.isEmpty, missed.allSatisfy({ same($0, $1) }) {
                 return 0.15 + 0.05 * Double(missed.count - 1)
             }
         }
@@ -1349,6 +1357,12 @@ final class AutocorrectEngine {
     /// z/ż, l/ł: ł has no decomposition, so it is named).
     static func samePolishLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
         sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
+    }
+
+    /// Whether two lowercase letters are one Greek letter with or without its tonos or
+    /// diaeresis (α/ά, ι/ϊ/ΐ), or σ and its word-final form ς.
+    static func sameGreekLetterIgnoringAccents(_ a: Character, _ b: Character) -> Bool {
+        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["σ", "ς"]
     }
 
     private struct LayoutKey: Hashable {

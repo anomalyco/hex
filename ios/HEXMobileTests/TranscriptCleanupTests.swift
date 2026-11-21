@@ -517,6 +517,34 @@ final class SpokenCleanupRulesTests: XCTestCase {
         )
     }
 
+    /// Greek as `DictationTranscriber` writes it (macOS 27.2, Melina voice: tonos kept, no
+    /// punctuation, numbers as digits): Polished capitalizes and ends it, Casual starts each
+    /// sentence lowercase, and Lowercase lowers accented capitals (Ά Έ Ή Ί Ό Ύ Ώ Ϊ Ϋ) and
+    /// turns a word-final Σ into ς, never σ ("ΟΔΟΣ" -> "οδος").
+    func testGreekStylesAndLowercase() {
+        let heard = "Θα αργήσω 10 λεπτά θα είμαι στο σπίτι στις 7:30 ξεκινήστε χωρίς εμένα"
+        XCTAssertEqual(
+            TranscriptFormatter.format(heard, style: .polished, language: "el-GR"),
+            "Θα αργήσω 10 λεπτά θα είμαι στο σπίτι στις 7:30 ξεκινήστε χωρίς εμένα."
+        )
+        XCTAssertEqual(TranscriptFormatter.format("καλημέρα τι κάνεις", style: .polished, language: "el-GR"), "Καλημέρα τι κάνεις.")
+        XCTAssertEqual(TranscriptFormatter.format("Όλα καλά. Έλα αύριο.", style: .casual, language: "el-GR"), "όλα καλά. έλα αύριο")
+        XCTAssertEqual(TranscriptFormatter.format("Όλα καλά.", style: .verbatim, language: "el-GR"), "Όλα καλά.")
+        var pipeline = DictationPipeline(style: .polished, language: "el-GR", vocabulary: [])
+        pipeline.lowercase = true
+        XCTAssertEqual(
+            pipeline.format("ΟΔΟΣ ΚΑΙ ΘΑΛΑΣΣΑ, ΤΟΥΣ ΦΙΛΟΥΣ ΤΟΥΣ", language: "el-GR"),
+            "οδος και θαλασσα, τους φιλους τους."
+        )
+        XCTAssertEqual(
+            pipeline.format("Άλλος Έλα Ήλιος Ίσως Όλα Ύπνος Ώρα Ϊ Ϋ", language: "el-GR"),
+            "άλλος έλα ήλιος ίσως όλα ύπνος ώρα ϊ ϋ."
+        )
+        XCTAssertEqual(pipeline.format("Σ", language: "el-GR"), "σ.", "a lone Σ is no word's end")
+        pipeline.language = "en-US"
+        XCTAssertEqual(pipeline.format("Text JOHN about the IPHONE", language: "en-US"), "text john about the iphone.")
+    }
+
     /// Lowercase comes after the style and the vocabulary's spellings, as desktop's Lowercase
     /// step lowercases the final text, custom vocabulary included.
     func testLowercaseRunsAfterTheStyleAndVocabulary() {

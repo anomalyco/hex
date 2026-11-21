@@ -5,9 +5,9 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|ro|ru|uk|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|ro|ru|uk|el|sr-Latn|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
-/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, or `t` on Romanian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, or `t` on Romanian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Settings › Keyboard › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
@@ -154,6 +154,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Запізнююсь на десять хвил"
             case "accents": "Сім"
             default: "Запізнююсь на десять хвилин, "
+            }
+        case .greek:
+            return switch state {
+            case "inserted": "Θα αργήσω δέκα λεπτά, θα είμαι σπίτι στις 19:30. Ξεκινήστε χωρίς εμένα."
+            case "numbers": "Θα αργήσω δέκα λεπτά, θα είμαι σπίτι στις 19:3"
+            case "shift": "Θα αργήσω δέκα λεπτά. "
+            case "typing": "Θα αργήσω δέκα λεπ"
+            case "accents": Self.accentKey == "σ" ? "Θα αργήσω δέκα λεπτά, θα είμαι σπίτι στι" : "Καλημ"
+            default: "Θα αργήσω δέκα λεπτά, "
             }
         case .serbianLatin:
             return switch state {
@@ -305,6 +314,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 let ownLetters: [String: String] = switch FullKeyboardSnapshotStage.layout {
                 case .polish: ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
                 case .romanian: ["a": "ă", "i": "î", "s": "ș", "t": "ț"]
+                case .greek: ["ε": "έ", "α": "ά", "ο": "ό", "η": "ή", "ι": "ί", "υ": "ύ", "ω": "ώ", "σ": "ς", "κ": "ϗ"]
                 default: [:]
                 }
                 let pick = ownLetters[key] ?? [

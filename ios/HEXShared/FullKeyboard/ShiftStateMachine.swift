@@ -106,8 +106,9 @@ nonisolated enum AutoCapitalization {
 
     /// Whether the next letter should be a capital. `before` is the text before the cursor,
     /// which web views sometimes report as `nil` even when the field has text: only the
-    /// start of an empty field capitalizes then.
-    static func shouldCapitalize(mode: Mode, before: String?, hasText: Bool) -> Bool {
+    /// start of an empty field capitalizes then. In Greek, ; is the question mark and ends a
+    /// sentence too, as on the system Greek keyboard ("Τι κάνεις; Καλά").
+    static func shouldCapitalize(mode: Mode, before: String?, hasText: Bool, language: KeyboardLanguage = .english) -> Bool {
         switch mode {
         case .none:
             return false
@@ -132,7 +133,7 @@ nonisolated enum AutoCapitalization {
             trimmed = trimmed.dropLast()
         }
         guard let ender = trimmed.last else { return false }
-        return sentenceEnders.contains(ender)
+        return sentenceEnders.contains(ender) || (language == .greek && (ender == ";" || ender == "\u{037E}"))
     }
 }
 

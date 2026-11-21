@@ -479,6 +479,78 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.spaceLabel, "English")
     }
 
+    /// Settings › Keyboard › Languages with English and Greek: the space bar says "Ελληνικά", the
+    /// keys are the system Greek keyboard's, and its typing rules are the system keyboard's as
+    /// observed: ´ after a vowel accents it (ϊ´ is ΐ) and after anything else types ´, σ types
+    /// ς while it ends the word and turns back into σ when a letter follows, and a held σ
+    /// offers ς. No partner, no typing model, and Switch dictation too dictates el-GR.
+    func testGreekTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .greek]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "el-GR"]
+        let model = KeyboardViewModel()
+        var picked: [String?] = []
+        model.onLanguageSelected = { picked.append($0) }
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .greek)
+        XCTAssertEqual(view.plane.spaceLabel, "Ελληνικά")
+        XCTAssertNil(view.engine.partnerLanguage)
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Greek typing model: the dictionary engine")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "el-GR")
+        XCTAssertEqual(picked, [], "Automatic already follows")
+        var id = 500
+        func press(_ character: String) {
+            let key = view.engine.layout.key(.character(character))!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        for character in ["κ", "α", "λ", "η", "μ", "ε", "´", "ρ", "α"] { press(character) }
+        XCTAssertEqual(field.text, "καλημέρα")
+        for character in ["λ", "ο", "´", "γ", "ο", "σ"] { press(character) }
+        XCTAssertEqual(field.text, "καλημέραλόγος", "final sigma")
+        press("ι")
+        XCTAssertEqual(field.text, "καλημέραλόγοσι", "σ again once a letter follows")
+        hold("ι", pick: "ϊ")
+        press("´")
+        XCTAssertEqual(field.text, "καλημέραλόγοσιΐ")
+        press("´")
+        XCTAssertEqual(field.text, "καλημέραλόγοσιΐ´", "an accented vowel takes no second tonos")
+        press("ρ")
+        press("´")
+        hold("σ", pick: "ς")
+        XCTAssertEqual(field.text, "καλημέραλόγοσιΐ´ρ´ς")
+        XCTAssertEqual(Array(field.text.unicodeScalars.suffix(4)).map(\.value), [0x00B4, 0x03C1, 0x00B4, 0x03C2])
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+        press("s")
+        XCTAssertEqual(field.text, "καλημέραλόγοσιΐ´ρ´ςs", "English's s is never a final sigma")
+        // Greek's ; ends a sentence: the strip offers sentence starters after it, not clause ones.
+        XCTAssertTrue(AutocorrectEngine.isSentenceStart("Τι κάνεις; ", language: .greek))
+        XCTAssertFalse(AutocorrectEngine.isSentenceStart("first; "))
+    }
+
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
@@ -831,7 +903,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.engine.autocorrect.decoder)
         // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
         // next-letter odds move French targets (AZERTY's letters aren't theirs).
-        for language in [KeyboardLanguage.russian, .ukrainian, .polish, .romanian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
+        for language in [KeyboardLanguage.russian, .ukrainian, .greek, .polish, .romanian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")
@@ -1307,9 +1379,9 @@ final class FullKeyboardEngineTests: XCTestCase {
                 return true
             }
             // Russian and Ukrainian have no Latin letters: press their own а and hold their own
-            // е (Ukrainian's ʼ, its only key with long-press options).
-            let cyrillic = !language.isLatin
-            for (id, kind) in [KeyKind.character(cyrillic ? "а" : "a"), .space, .delete].enumerated() {
+            // е (Ukrainian's ʼ, its only key with long-press options); Greek its α and ε.
+            let first = language == .greek ? "α" : language.isLatin ? "a" : "а"
+            for (id, kind) in [KeyKind.character(first), .space, .delete].enumerated() {
                 let key = view.engine.layout.key(kind)!
                 let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
                 view.plane.began(id: id + 10, sample: sample)
@@ -1322,6 +1394,7 @@ final class FullKeyboardEngineTests: XCTestCase {
             case .russian: "е"
             case .serbianLatin: "c"
             case .romanian: "s"
+            case .greek: "ε"
             default: "e"
             }
             view.debugHoldAccent(held, selectIndex: 1)

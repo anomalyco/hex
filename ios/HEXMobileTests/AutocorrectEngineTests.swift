@@ -407,6 +407,35 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(polish, "zolw"), "three diacritics are three edits on another layout")
     }
 
+    /// Greek types with iOS's el dictionary, and a tonos or diaeresis left out is the cheapest
+    /// fix there is, however many ("καλημερα" -> "καλημέρα", "αυπνια" -> "αϋπνία"), as a
+    /// missing Polish diacritic is, and so is σ where the word ends in ς; other languages keep
+    /// one edit. The fixes run against a stub dictionary answering as an iPhone's would.
+    func testGreekRestoresAMissingTonos() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "καλημερα", to: "καλημέρα", language: .greek)!, 0.15, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "αυπνια", to: "αϋπνία", language: .greek)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "λογοσ", to: "λόγος", language: .greek)!, 0.20, accuracy: 0.001)
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "αυπνια", to: "αϋπνία", language: .english), "two edits elsewhere")
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "καλημερα", to: "καλημέρες", language: .greek), "not only accents")
+        engine.language = .greek
+        XCTAssertEqual(engine.autocorrect.language, .greek)
+        XCTAssertNil(engine.autocorrect.decoder, "no Greek typing model")
+        XCTAssertNil(engine.autocorrect.partner, "Greek letters have no bilingual partner")
+
+        let greek = stubbed {
+            $0.valid = ["καλημέρα", "τι", "κάνεις", "αϋπνία", "λόγος", "λόγοι", "και"]
+            // "λόγοι" is listed first; "λόγος" only differs by its tonos and final ς.
+            $0.guessTable = ["καλημερα": ["καλημέρα"], "κανεις": ["κάνεις"], "αυπνια": ["αϋπνία"], "λογοσ": ["λόγοι", "λόγος"]]
+        }
+        greek.setLanguage(.greek, available: ["el", "en_US"])
+        XCTAssertEqual(fix(greek, "καλημερα"), "καλημέρα")
+        XCTAssertEqual(fix(greek, "Καλημερα"), "Καλημέρα")
+        XCTAssertEqual(fix(greek, "κανεις"), "κάνεις")
+        XCTAssertEqual(fix(greek, "αυπνια"), "αϋπνία")
+        XCTAssertEqual(fix(greek, "λογοσ"), "λόγος")
+        XCTAssertNil(fix(greek, "και"), "a word stays")
+    }
+
     /// Serbian (Latin) has no dictionary on iOS: nothing is "corrected", into English or anything else.
     func testSerbianLatinWithoutADictionaryCorrectsNothing() {
         engine.language = .serbianLatin

@@ -313,7 +313,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     including a name, day or place typed in lowercase that the dictionary knows only
     capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська) keep the dictionary
+    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
@@ -661,7 +661,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   stayed after Spanish was unticked or the switch turned off). **Bilingual autocorrect:**
   the first other chosen language with Latin letters and
   an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
-  English; none for Русский, Українська, Srpski, or two French layouts) is checked on the same keys,
+  English; none for Русский, Українська, Ελληνικά, Srpski, or two French layouts) is checked on the same keys,
   with its Spatial model where it has one, as Apple's "Français et English" keyboard does: a
   word either language knows as typed is never changed, a typo only one can fix gets that
   fix ("teh" → "the" while French types), and when both can, the language of the last words
@@ -678,7 +678,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Apple's
   "– French" variants add only the ´ key Hex leaves out); Italiano and Português QWERTY,
   AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Srpski QWERTZ (Hex's, though
-  Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский and Українська keep their
+  Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский, Українська and Ελληνικά keep their
   one layout (Apple also offers a phonetic "Russian – QWERTY", not built). The plain
   layouts are the same 26 letters in every language, with the language's bottom row and
   123 pages; only the letters move (`KeyboardLetterLayout`, `KeyboardLanguage.letterRows(_:)`).
@@ -719,11 +719,23 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   ș on S and ț on T right after the base, the comma-below ș and ț (U+0219, U+021B), never the
   cedilla ş ţ, and nothing on the other letters; Apple's Romanian layout with keys of its own
   for them is the iPad's; its currency key is €, held for € $ £ ¥ ₩ ₽ as Polish's is, and its
-  held " offers " „ ” » « “) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  held " offers " „ ” » « “), Ελληνικά (it matches the standard Greek layout and the system
+  keyboard's observed long-press options, in the rows the iOS 27.2 simulator's own Greek
+  keyboard shows: `ερτυθιοπ´`, `ασδφγηξκλ`, `ζχψωβνμ`, nine, nine and seven keys, with no ;
+  or ς key; the tonos key ´ (U+00B4) accents the vowel right before it, α´ → ά, Α´ → Ά,
+  ϊ´ → ΐ, and after anything else, an accented vowel included, types ´ itself, as the system
+  keyboard was observed to with real touches in Messages (no dead key, no ¨ key); held, each
+  vowel offers its tonos form, ι and υ also ϊ ΐ and ϋ ΰ, σ offers ς and κ the kai sign ϗ, and
+  in capitals Σ offers nothing and Ι, Υ only Ί Ϊ, Ύ Ϋ, each callout laid out as the system's,
+  the key's own on the left (`AccentCatalog.arrangement`, as for English and Spanish); σ types ς while it ends the word and
+  turns back into σ when another letter follows, as the system keyboard does; its 123 page
+  has the ano teleia · in ;'s place and ; (the Greek question mark, which also starts the next
+  sentence with a capital) in ?'s, its #+= page ? in |'s, its currency key is $ held as
+  English's, and its held " offers French's order) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
-  Automatic follows the dictation language (Hebrew, Greek, Cyrillic Serbian and other
+  Automatic follows the dictation language (Hebrew, Cyrillic Serbian and other
   languages without a layout get English; Serbian only in Latin script, `sr-Latn`);
   before any dictation language is known, the first iPhone
   keyboard, then preferred language, that has a layout. It never follows Hex's own
@@ -742,7 +754,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   letter at the end under the thumb, in one row where the system wraps a long list
   (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `pl`, `ro`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `pl`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
@@ -751,11 +763,13 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   dictionary knows, such as "esta", is never changed); in Polish every missing
   diacritic in a word counts as one such fix ("zolw" → "żółw", "maly" → "mały"). The
   iOS 27.2 simulator lists `pl_PL` but its checker flags no word, so Polish fixes are
-  checked against a stub dictionary there. A two-letter non-word one
+  checked against a stub dictionary there. Greek likewise: every tonos or diaeresis left out
+  counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
+  "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
   ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
   Spanish and Italian only). Auto-capitalization is unchanged.
-  The 123 and #+= pages are English's in every language; their held keys follow each
+  The 123 and #+= pages are English's in every language but Greek (above); their held keys follow each
   language's system keyboard where it differs (# holds № in Russian and Ukrainian, the
   digits º and ª in Spanish and Italian, . holds · in French, $ holds ₴ in Ukrainian and
   kr in Norwegian).
@@ -1032,6 +1046,10 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   Polish is too (macOS 27.2.1 lists `pl-PL` for `DictationTranscriber` only):
   `say -v Zosia` clips came back with every diacritic (ą ć ę ł ń ó ś ź ż), numbers as
   digits ("10 min", "19:30"), and no punctuation.
+  Greek is too (macOS 27.2 lists `el-GR` for `DictationTranscriber` only): `say -v Melina`
+  clips came back with every tonos, final ς, numbers as digits ("10 λεπτά", "7:30"), and no
+  punctuation. Lowercase lowers with Unicode's context-aware mapping, so a word-final Σ
+  becomes ς ("ΟΔΟΣ" → "οδος"), as desktop's `to_lowercase` does.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
