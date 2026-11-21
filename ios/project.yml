@@ -69,7 +69,7 @@ targets:
         CODE_SIGN_ENTITLEMENTS: HEXMobile/HEXMobile.entitlements
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.2.0
+        MARKETING_VERSION: 0.2.2
         TARGETED_DEVICE_FAMILY: "1"
         OTHER_LDFLAGS: $(inherited) -weak_framework FoundationModels
         OTHER_SWIFT_FLAGS: $(inherited) -Xfrontend -disable-autolink-framework -Xfrontend FoundationModels
@@ -109,7 +109,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.2.0
+        MARKETING_VERSION: 0.2.2
         TARGETED_DEVICE_FAMILY: "1"
         PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.keyboard
         PRODUCT_NAME: HEXKeyboard
@@ -135,7 +135,7 @@ targets:
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
         GENERATE_INFOPLIST_FILE: NO
-        MARKETING_VERSION: 0.2.0
+        MARKETING_VERSION: 0.2.2
         TARGETED_DEVICE_FAMILY: "1"
         PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.widgets
         PRODUCT_NAME: HEXWidgets
