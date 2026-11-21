@@ -572,6 +572,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .romanian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"],
             .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"],
+            .greek: ["ερτυθιοπ´", "ασδφγηξκλ", "ζχψωβνμ"],
             .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
         ]
         for (language, expected) in rows {
@@ -602,6 +603,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .norwegian: [.own],
             .russian: [.own],
             .ukrainian: [.own],
+            .greek: [.own],
         ]
         for language in KeyboardLanguage.allCases {
             XCTAssertEqual(language.letterLayouts, offered[language], "\(language)")
@@ -863,6 +865,47 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    /// The standard Greek layout in the rows the system Greek keyboard shows on an iPhone 17
+    /// Pro (iOS 27.2 simulator, 402 pt, read through accessibility): rows 1 and 2 are nine
+    /// letter-wide keys at the same places (ε over α where English has A, the tonos key ´ over λ),
+    /// row 3 starts under σ, and the bottom row is English's. Its 123 page has the ano teleia ·
+    /// where English has ;, and ; (the Greek question mark) where English has ?; its #+= page
+    /// has ? where English has |.
+    func testGreeksRowsAndPagesMatchApples() throws {
+        for width in portraitWidths {
+            let layout = KeyboardLayout(width: width, language: .greek)
+            let english = KeyboardLayout(width: width)
+            XCTAssertEqual(layout.characterWidth, english.characterWidth, accuracy: 0.001)
+            let row1 = layout.keys.filter { $0.row == 0 }.map(\.frame)
+            let row2 = layout.keys.filter { $0.row == 1 }.map(\.frame)
+            XCTAssertEqual(row1.map(\.minX), row2.map(\.minX), "\(width): row 1 over row 2")
+            XCTAssertEqual(layout.key(.character("ζ"))!.frame.minX, layout.key(.character("σ"))!.frame.minX, accuracy: 0.001)
+            XCTAssertEqual(layout.key(.shift)!.frame, english.key(.shift)!.frame)
+            XCTAssertEqual(layout.keys.filter { $0.row == 3 }.map(\.frame), english.keys.filter { $0.row == 3 }.map(\.frame))
+        }
+        let pro = KeyboardLayout(width: 402, language: .greek)
+        let qwerty = KeyboardLayout(width: 402)
+        XCTAssertEqual(try XCTUnwrap(pro.key(.character("ε"))).frame.minX, try XCTUnwrap(qwerty.key(.character("a"))).frame.minX, accuracy: 0.001)
+        XCTAssertEqual(try XCTUnwrap(pro.key(.character("´"))).frame.minX, try XCTUnwrap(qwerty.key(.character("l"))).frame.minX, accuracy: 0.001)
+        XCTAssertEqual(Array("´".unicodeScalars).map(\.value), [0x00B4])
+        XCTAssertNil(pro.key(.character("ς")), "ς is held on σ")
+        XCTAssertNil(pro.key(.character(";")))
+        let numbers = KeyboardLayout.characterRows(for: .numbers, language: .greek)
+        XCTAssertEqual(numbers[1], ["-", "/", ":", "·", "(", ")", "$", "&", "@", "\""])
+        XCTAssertEqual(numbers[2], [".", ",", ";", "!", "'"])
+        let symbols = KeyboardLayout.characterRows(for: .symbols, language: .greek)
+        XCTAssertEqual(symbols[1], ["_", "\\", "?", "~", "<", ">", "€", "£", "¥", "•"])
+        XCTAssertEqual(symbols[2], [".", ",", ";", "!", "'"])
+        for layer in [KeyboardLayer.numbers, .symbols] {
+            XCTAssertEqual(
+                KeyboardLayout(width: 402, layer: layer, language: .greek).keys.map(\.frame),
+                KeyboardLayout(width: 402, layer: layer).keys.map(\.frame),
+                "the same keys, a few characters changed"
+            )
+            XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .ukrainian).keys, KeyboardLayout(width: 402, layer: layer).keys)
+        }
+    }
+
     /// Apple's AZERTY on the tester's iPhone 17 Pro (402 pt; their French and English
     /// keyboard): rows 1 and 2 run edge to edge, W to N sit under E to I, and shift and
     /// delete keep their English size with a gap beside them. A tap in that gap goes to the
@@ -1037,6 +1080,25 @@ final class KeyboardLayoutTests: XCTestCase {
             XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .romanian), letter)
         }
         XCTAssertEqual(AccentCatalog.options(for: "€", uppercase: false, language: .romanian), ["€", "$", "£", "¥", "₩", "₽"])
+        // Greek: each vowel's tonos form, ι and υ also with diaeresis and both, ς on σ and ϗ
+        // on κ; in capitals Σ holds nothing and Ι, Υ only Ί Ϊ, Ύ Ϋ, as on the system keyboard.
+        // The tonos key holds nothing; a held " is French's order.
+        XCTAssertEqual(AccentCatalog.options(for: "α", uppercase: false, language: .greek), ["α", "ά"])
+        XCTAssertEqual(AccentCatalog.options(for: "σ", uppercase: false, language: .greek), ["σ", "ς"])
+        XCTAssertNil(AccentCatalog.options(for: "σ", uppercase: true, language: .greek))
+        XCTAssertEqual(AccentCatalog.options(for: "υ", uppercase: false, language: .greek), ["υ", "ύ", "ϋ", "ΰ"])
+        XCTAssertEqual(AccentCatalog.options(for: "υ", uppercase: true, language: .greek), ["Υ", "Ύ", "Ϋ"])
+        XCTAssertEqual(shownHolds("ι", .greek), ["ί", "ϊ", "ΐ"])
+        XCTAssertEqual(AccentCatalog.options(for: "ι", uppercase: true, language: .greek), ["Ι", "Ϊ", "Ί"])
+        XCTAssertEqual(AccentCatalog.options(for: "κ", uppercase: true, language: .greek), ["Κ", "Ϗ"])
+        XCTAssertEqual(AccentCatalog.options(for: "ω", uppercase: true, language: .greek), ["Ω", "Ώ"])
+        let greek: Set<String> = ["ε", "υ", "ι", "ο", "α", "σ", "η", "κ", "ω"]
+        for letter in KeyboardLanguage.greek.letterRows.joined() where !greek.contains(letter) {
+            XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .greek), letter)
+        }
+        XCTAssertEqual(AccentCatalog.options(for: "\"", uppercase: false, language: .greek), ["\"", "»", "«", "”", "“", "„"])
+        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .greek), AccentCatalog.options(for: "$", uppercase: false))
+        XCTAssertEqual(AccentCatalog.options(for: "?", uppercase: false, language: .greek), ["?", "¿"])
         XCTAssertEqual(
             AccentCatalog.options(for: "\"", uppercase: false, language: .romanian),
             ["\"", "„", "”", "»", "«", "“"]
@@ -1054,6 +1116,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .serbianLatin: ["c", "d", "s", "z"],
             .polish: ["a", "c", "e", "l", "n", "o", "s", "z"],
             .romanian: ["a", "i", "s", "t"],
+            .greek: ["ε", "υ", "ι", "ο", "α", "σ", "η", "κ", "ω"],
         ]
         for width in portraitWidths {
             for (language, characters) in keys {
@@ -1111,6 +1174,10 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic(nil, preferred: ["pl-PL", "en-US"]), .polish)
         XCTAssertEqual(automatic("ro-RO", modes: ["en-US"]), .romanian)
         XCTAssertEqual(automatic("ro_RO"), .romanian)
+        XCTAssertEqual(automatic("el-GR", modes: ["en-US"]), .greek)
+        XCTAssertEqual(automatic("el_GR"), .greek)
+        XCTAssertEqual(automatic(nil, modes: ["emoji", "el_GR", "en-US"]), .greek)
+        XCTAssertEqual(automatic("en-US", modes: ["el-GR"]), .english, "the dictation language still wins")
         // Before Hex knows the dictation language: the first keyboard, then language, with a layout.
         XCTAssertEqual(automatic(nil, modes: ["emoji", "nb-NO", "en-US"]), .norwegian)
         XCTAssertEqual(automatic(nil, preferred: ["nn-NO"]), .norwegian)
@@ -1122,7 +1189,8 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic(nil, preferred: ["ru-RU"]), .russian)
         XCTAssertEqual(automatic(nil, modes: ["emoji", "sr-Latn"], preferred: ["en-US"]), .serbianLatin)
         XCTAssertEqual(automatic(nil, modes: ["sr"], preferred: ["en-US"]), .english, "Apple's Cyrillic Serbian keyboard")
-        XCTAssertEqual(automatic(nil, preferred: ["el-GR"]), .english)
+        XCTAssertEqual(automatic(nil, preferred: ["el-GR"]), .greek)
+        XCTAssertEqual(automatic(nil, preferred: ["he-IL"]), .english, "Hebrew has no layout yet")
     }
 
     /// Settings › Keyboard › Languages: empty is Automatic (one language, as before); the
@@ -1166,6 +1234,8 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(partner([.english, .serbianLatin], .english))
         XCTAssertNil(partner([.ukrainian, .english], .ukrainian), "Cyrillic has no bilingual partner")
         XCTAssertNil(partner([.english, .ukrainian], .english))
+        XCTAssertNil(partner([.greek, .english], .greek, ["en_US", "el"]), "Greek letters have no bilingual partner")
+        XCTAssertNil(partner([.english, .greek], .english, ["en_US", "el"]))
         XCTAssertEqual(partner([.polish, .english], .polish, ["en_US", "pl"]), .english, "Polish has Latin letters")
         XCTAssertEqual(partner([.english, .polish], .english, ["en_US", "pl"]), .polish)
         XCTAssertNil(partner([.polish, .english], .polish), "no Polish dictionary on this iPhone")
@@ -1266,6 +1336,13 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.polish.dictationLanguage(supported: supported + ["pl-PL"], preferred: ["pl-PL"]), "pl-PL")
         XCTAssertEqual(KeyboardLanguage.polish.dictationLanguage(supported: [], preferred: []), "pl-PL", "not listed yet")
         XCTAssertEqual(KeyboardLanguage.polish.displayName, "Polski")
+        XCTAssertEqual(
+            KeyboardLanguage.suggested(inputModes: ["el_GR", "emoji"], preferred: ["el-GR", "en-US"]),
+            [.greek, .english]
+        )
+        XCTAssertEqual(KeyboardLanguage.greek.dictationLanguage(supported: supported + ["el-GR"], preferred: ["el-GR"]), "el-GR")
+        XCTAssertEqual(KeyboardLanguage.greek.dictationLanguage(supported: [], preferred: []), "el-GR", "not listed yet")
+        XCTAssertEqual(KeyboardLanguage.greek.displayName, "Ελληνικά")
     }
 
     /// The languages read the one layout chosen before them, and write their first for an
@@ -1306,6 +1383,9 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "pl-PL", available: ["en_US", "pl"]), "pl")
         XCTAssertNil(KeyboardLanguage.ukrainian.spellCheckLanguage(available: ["en_US", "ru_RU"]), "never Russian or English")
         XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "uk-UA", available: ["en_US", "uk_UA"]), "uk_UA")
+        XCTAssertEqual(KeyboardLanguage.greek.spellCheckLanguage(available: ["en_US", "el"]), "el")
+        XCTAssertNil(KeyboardLanguage.greek.spellCheckLanguage(available: ["en_US"]), "never English")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "el-GR", available: ["en_US", "el"]), "el")
         XCTAssertEqual(KeyboardLanguage.serbianLatin.spellCheckLanguage(available: ["en_US", "sr_Latn"]), "sr_Latn")
         XCTAssertNil(KeyboardLanguage.serbianLatin.spellCheckLanguage(available: ["en_US", "sr", "hr_HR"]), "no Cyrillic or Croatian")
     }

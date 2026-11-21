@@ -123,6 +123,10 @@ final class ShiftStateMachineTests: XCTestCase {
         XCTAssertTrue(AutoCapitalization.shouldCapitalize(mode: .allCharacters, before: "abc", hasText: true))
         XCTAssertTrue(AutoCapitalization.shouldCapitalize(mode: .words, before: "Jane ", hasText: true))
         XCTAssertFalse(AutoCapitalization.shouldCapitalize(mode: .words, before: "Ja", hasText: true))
+        // Greek's ; is its question mark: the system Greek keyboard capitalizes after "; ".
+        XCTAssertTrue(AutoCapitalization.shouldCapitalize(mode: .sentences, before: "Τι κάνεις; ", hasText: true, language: .greek))
+        XCTAssertTrue(AutoCapitalization.shouldCapitalize(mode: .sentences, before: "Τι κάνεις\u{037E} ", hasText: true, language: .greek))
+        XCTAssertFalse(AutoCapitalization.shouldCapitalize(mode: .sentences, before: "first; ", hasText: true))
         XCTAssertEqual(AutoCapitalization.Mode(UITextAutocapitalizationType.none), .none)
         XCTAssertEqual(AutoCapitalization.Mode(nil), .sentences)
     }

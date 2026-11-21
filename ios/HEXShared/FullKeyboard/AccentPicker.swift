@@ -28,10 +28,19 @@ nonisolated enum AccentCatalog {
         letters: KeyboardLetterLayout? = nil
     ) -> [String]? {
         let key = base.lowercased()
-        guard let list = language.letterHolds(on: language.offered(letters))[key] ?? language.symbolHolds[key] ?? symbols[key],
-              list.count > 1 else { return nil }
+        guard var list = language.letterHolds(on: language.offered(letters))[key] ?? language.symbolHolds[key] ?? symbols[key] else {
+            return nil
+        }
+        if uppercase, language == .greek {
+            list.removeAll(where: greekWithoutCapitals.contains)
+        }
+        guard list.count > 1 else { return nil }
         return uppercase ? list.map(upper) : list
     }
+
+    /// Greek capitals: ς is Σ itself and ΐ ΰ have no capital of their own, so the system
+    /// keyboard's held Σ offers nothing, and Ι and Υ only Ί Ϊ and Ύ Ϋ.
+    private static let greekWithoutCapitals: Set<String> = ["ς", "ΐ", "ΰ"]
 
     // ẞ, Unicode's capital ß; İ for the dotless ı, as the system keyboard shows it in capitals.
     private static func upper(_ option: String) -> String {

@@ -439,8 +439,9 @@ final class AutocorrectEngine {
 
     // MARK: - Predictions between words
 
-    /// The empty field, or after a sentence's end and a space, or a new line.
-    static func isSentenceStart(_ beforeInput: String?) -> Bool {
+    /// The empty field, or after a sentence's end and a space, or a new line. In Greek, ; is
+    /// the question mark and ends a sentence too.
+    static func isSentenceStart(_ beforeInput: String?, language: KeyboardLanguage = .english) -> Bool {
         guard let beforeInput else { return true }
         guard let last = beforeInput.last else { return true }
         if last.isNewline { return true }
@@ -449,6 +450,7 @@ final class AutocorrectEngine {
         while trimmed.last == " " { trimmed = trimmed.dropLast() }
         guard let written = trimmed.last else { return true }
         return written.isNewline || written == "." || written == "!" || written == "?"
+            || (language == .greek && (written == ";" || written == "\u{037E}"))
     }
 
     /// Common sentence-initial words per language (Hex's own short lists), lowercase except
@@ -466,6 +468,7 @@ final class AutocorrectEngine {
         case .norwegian: ["jeg", "det", "vi"]
         case .russian: ["я", "это", "мы"]
         case .ukrainian: ["я", "це", "ми"]
+        case .greek: ["θα", "δεν", "το"]
         case .serbianLatin: ["ja", "to", "da"]
         }
     }
@@ -487,6 +490,7 @@ final class AutocorrectEngine {
         case .norwegian: ["og", "men", "jeg"]
         case .russian: ["и", "но", "что"]
         case .ukrainian: ["і", "але", "що"]
+        case .greek: ["και", "αλλά", "που"]
         case .serbianLatin: ["i", "ali", "da"]
         }
     }
@@ -505,6 +509,7 @@ final class AutocorrectEngine {
         case .norwegian: ["og", "i", "det", "er", "på", "som"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
+        case .greek: ["και", "να", "το", "θα", "δεν", "η"]
         case .serbianLatin: ["i", "je", "da", "u", "se", "na"]
         }
     }
@@ -546,7 +551,7 @@ final class AutocorrectEngine {
         guard hasDictionary else { return replacementOnly ?? [] }
         // An empty field, or a new sentence (". ", "! ", "? ", a new line): three common
         // first words, as Apple's keyboard offers.
-        if Self.isSentenceStart(beforeInput) {
+        if Self.isSentenceStart(beforeInput, language: language) {
             return predictions(Self.sentenceStarters(language), previous: nil, capitalized: capitalizesNext)
         }
         if let beforeInput, beforeInput.last == " " {

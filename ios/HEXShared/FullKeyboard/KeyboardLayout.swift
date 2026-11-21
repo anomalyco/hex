@@ -607,20 +607,23 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         language: KeyboardLanguage = .english,
         letters: KeyboardLetterLayout? = nil
     ) -> [[String]] {
-        let punctuation = [".", ",", "?", "!", "'"]
+        // Greek's pages, as the system Greek keyboard shows them: ; is its question mark, so it
+        // takes ?'s key on both, the ano teleia · takes ;'s key on 123, and ? takes |'s on #+=.
+        let greek = language == .greek
+        let punctuation = [".", ",", greek ? ";" : "?", "!", "'"]
         switch layer {
         case .letters:
             return language.letterRows(language.offered(letters))
         case .numbers:
             return [
                 "1234567890".map(String.init),
-                ["-", "/", ":", ";", "(", ")", "$", "&", "@", "\""],
+                ["-", "/", ":", greek ? "·" : ";", "(", ")", "$", "&", "@", "\""],
                 punctuation,
             ]
         case .symbols:
             return [
                 ["[", "]", "{", "}", "#", "%", "^", "*", "+", "="],
-                ["_", "\\", "|", "~", "<", ">", "€", "£", "¥", "•"],
+                ["_", "\\", greek ? "?" : "|", "~", "<", ">", "€", "£", "¥", "•"],
                 punctuation,
             ]
         }
