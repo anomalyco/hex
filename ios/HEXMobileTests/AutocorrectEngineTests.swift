@@ -1159,6 +1159,33 @@ final class AutocorrectEngineTests: XCTestCase {
         tap(.delete)
         XCTAssertEqual(target.text, "be right back idk omg", "one backspace puts back the shortcut")
     }
+
+    /// A text replacement's case, as Apple's keyboard writes it (black box, iOS 27.2): a
+    /// leading capital, typed or auto-capitalised ("Brb"), capitalises its first letter; a
+    /// shortcut in lowercase or all caps ("BRB") gets it as stored; stored capitals stay.
+    func testTextReplacementsTakeTheShortcutsLeadingCapital() {
+        engine.autocorrect.loadLexiconEntries([("brb", "be right back"), ("omw", "On my way!"), ("mip", "My iPhone")])
+        typeWord("Brb")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "Be right back")
+        for (typed, expected) in [("Brb", "Be right back"), ("brb", "be right back"), ("BRB", "be right back"),
+                                  ("omw", "On my way!"), ("OMW", "On my way!"), ("mip", "My iPhone"),
+                                  ("Mip", "My iPhone"), ("MIP", "My iPhone")] {
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+            typeWord("ok " + typed + " ")
+            XCTAssertEqual(target.text, "ok \(expected) ", typed)
+        }
+
+        // Auto-capitalised at a sentence start, with Autocorrect on and off.
+        target.autocapitalizationType = .sentences
+        for autocorrect in [true, false] {
+            engine.autocorrect.isEnabled = autocorrect
+            while target.hasText { target.deleteBackward() }
+            engine.configureForField()
+            typeWord("brb ")
+            XCTAssertEqual(target.text, "Be right back ", "autocorrect \(autocorrect)")
+        }
+    }
 }
 
 
