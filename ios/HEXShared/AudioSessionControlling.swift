@@ -3,17 +3,29 @@ import AVFAudio
 /// The `AVAudioSession` calls Hex makes, so tests can check how it records and lets go.
 protocol AudioSessionControlling: AnyObject {
     var isOtherAudioPlaying: Bool { get }
-    var availableInputs: [AVAudioSessionPortDescription]? { get }
+    /// The inputs the current category offers.
+    var microphones: [Microphone] { get }
     func setCategory(
         _ category: AVAudioSession.Category,
         mode: AVAudioSession.Mode,
         options: AVAudioSession.CategoryOptions
     ) throws
-    func setPreferredInput(_ inPort: AVAudioSessionPortDescription?) throws
+    /// Records from `microphone`, or from iOS's choice for nil.
+    func prefer(_ microphone: Microphone?) throws
     func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws
 }
 
-extension AVAudioSession: AudioSessionControlling {}
+extension AVAudioSession: AudioSessionControlling {
+    var microphones: [Microphone] {
+        (availableInputs ?? []).map(Microphone.init)
+    }
+
+    func prefer(_ microphone: Microphone?) throws {
+        try setPreferredInput(microphone.flatMap { wanted in
+            availableInputs?.first { $0.uid == wanted.uid }
+        })
+    }
+}
 
 /// Lets other apps' audio that in-keyboard dictation interrupted play again.
 ///

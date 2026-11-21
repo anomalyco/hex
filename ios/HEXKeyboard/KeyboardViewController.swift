@@ -941,7 +941,7 @@ final class KeyboardViewController: UIInputViewController {
             guard let self else { return }
             self.localDictation.start(
                 in: self.view,
-                allowBluetoothMic: self.bridge.allowBluetoothMic,
+                microphone: self.bridge.microphone,
                 pressedAt: self.takeHexKeyPress()
             )
         } : nil
@@ -1120,7 +1120,7 @@ final class KeyboardViewController: UIInputViewController {
         hexKeyPressedAt = time
         guard viewModel.hasFullAccess, !viewModel.isWarmAvailable, viewModel.onLocalDictateTap != nil,
               viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
-        localDictation.arm(in: view, allowBluetoothMic: bridge.allowBluetoothMic, pressedAt: time)
+        localDictation.arm(in: view, microphone: bridge.microphone, pressedAt: time)
     }
 
     /// The touch-down that led to this start, if it was the Hex key's in the last 2 s.

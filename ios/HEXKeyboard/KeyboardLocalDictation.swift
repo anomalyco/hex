@@ -203,28 +203,29 @@ final class KeyboardLocalDictation {
     /// The keyboard extension itself may not record (audiomxd: "it is an extension and
     /// doesn't have entitlements to record audio"), so capture runs in WebKit's media
     /// process through getUserMedia, attributed to Hex's microphone permission.
-    /// With Always use iPhone microphone (the app's default), the page asks for the iPhone's own
-    /// microphone, so a car or headset doesn't switch to call audio, which stalls the start.
+    /// The page asks for Settings › Microphone's input by name (`microphone(for:)`): left to
+    /// itself, WebKit takes the input of the route already playing, the iPhone's microphone
+    /// while a car or headphones play over A2DP, whatever the setting.
     /// WebKit's capture session doesn't mix: other apps' video and music pause while it
     /// records, and `releaseAudioSession` asks them to resume afterwards.
     /// `pressedAt` is the Hex key's touch-down (wall clock), where the start's timeline begins.
     /// A capture armed at touch-down becomes this dictation.
-    func start(in host: UIView, allowBluetoothMic: Bool, pressedAt: TimeInterval? = nil) {
+    func start(in host: UIView, microphone: MicrophoneChoice, pressedAt: TimeInterval? = nil) {
         if case .armed(let jobID, let startedAt) = phase {
             keepArmed(jobID: jobID, startedAt: startedAt)
             return
         }
         guard !isActive else { return }
-        begin(in: host, allowBluetoothMic: allowBluetoothMic, pressedAt: pressedAt, armed: false)
+        begin(in: host, microphone: microphone, pressedAt: pressedAt, armed: false)
     }
 
     /// Touch-down on the Hex key: capture starts now, unseen, so the first words aren't lost
     /// while the touch becomes a tap or a hold (`start` keeps it) or a slide or a cancelled
     /// touch (`discard` drops it, with nothing transcribed). The microphone opens here.
-    func arm(in host: UIView, allowBluetoothMic: Bool, pressedAt: TimeInterval) {
+    func arm(in host: UIView, microphone: MicrophoneChoice, pressedAt: TimeInterval) {
         // Without the microphone, the tap's own start says so.
         guard !isActive, Self.microphoneAllowed else { return }
-        guard let jobID = begin(in: host, allowBluetoothMic: allowBluetoothMic, pressedAt: pressedAt, armed: true) else { return }
+        guard let jobID = begin(in: host, microphone: microphone, pressedAt: pressedAt, armed: true) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.armedTimeout) { [weak self] in
             guard let self, case .armed(let current, _) = self.phase, current == jobID else { return }
             self.discard(reason: "never kept")
@@ -267,7 +268,7 @@ final class KeyboardLocalDictation {
 
     /// Opens the microphone for a new job, armed (touch-down) or recording; nil when it can't.
     @discardableResult
-    private func begin(in host: UIView, allowBluetoothMic: Bool, pressedAt: TimeInterval?, armed: Bool) -> String? {
+    private func begin(in host: UIView, microphone: MicrophoneChoice, pressedAt: TimeInterval?, armed: Bool) -> String? {
         let log = KeyboardProbeLog.shared
         let appAllowed = KeyboardBridge().appMicrophoneAllowed
         log.write("start(web\(armed ? ", touch-down" : "")): mic=\(Self.describe(AVAudioApplication.shared.recordPermission)) app=\(appAllowed ? "granted" : "no") speech=\(Self.describe(SFSpeechRecognizer.authorizationStatus())) \(KeyboardProbeLog.memory())")
@@ -294,11 +295,10 @@ final class KeyboardLocalDictation {
         capture.onEvent = { [weak self] event in
             self?.handle(event, jobID: jobID, requestedAt: requestedAt)
         }
-        if !allowBluetoothMic {
-            Self.preferBuiltInMicrophone()
-        }
+        let input = Self.microphone(for: microphone)
         otherAudioAtStart = otherAudioAtStart || AVAudioSession.sharedInstance().isOtherAudioPlaying
-        capture.start(preferBuiltIn: !allowBluetoothMic)
+        // Without a name to ask for, every choice but Bluetooth asks for the iPhone's own.
+        capture.start(microphone: input?.name, builtInFallback: microphone != .bluetooth)
         return jobID
     }
 
@@ -334,19 +334,28 @@ final class KeyboardLocalDictation {
         }
     }
 
-    private static func preferBuiltInMicrophone() {
+    /// The input Settings › Microphone takes on this route (`MicrophoneRoute.capture`), read
+    /// from the keyboard's own session with the category Hex records in: CarPlay's and
+    /// Bluetooth hands-free inputs are listed only there. WebKit records in its own session,
+    /// which only getUserMedia's `deviceId` steers (WebKit then prefers that input), so the
+    /// page asks for this input by its name, the label WebKit gives it.
+    private static func microphone(for choice: MicrophoneChoice) -> Microphone? {
         let session = AVAudioSession.sharedInstance()
         do {
             try session.setCategory(
                 .playAndRecord,
                 mode: .measurement,
-                options: [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
+                options: MicrophoneRoute.categoryOptions(allowingBluetooth: choice.allowsBluetooth)
             )
-            if let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
-                try session.setPreferredInput(builtIn)
-            }
+            let inputs = session.microphones
+            let input = MicrophoneRoute.capture(choice, from: inputs)
+            try? session.prefer(input)
+            let listed = inputs.map { "\($0.name) (\($0.port.rawValue))" }.joined(separator: ", ")
+            KeyboardProbeLog.shared.write("microphone \(choice.rawValue): \(input?.name ?? "none") of [\(listed)]")
+            return input
         } catch {
-            KeyboardProbeLog.shared.write("built-in mic preference failed: \(describe(error))")
+            KeyboardProbeLog.shared.write("microphone \(choice.rawValue) unknown: \(describe(error))")
+            return nil
         }
     }
 
@@ -645,7 +654,7 @@ final class KeyboardLocalDictation {
 }
 
 /// What the page timed while starting (wall clock): the device list, the first
-/// getUserMedia, the stream kept (after a second one for the built-in microphone) and the
+/// getUserMedia, the stream kept (after a second one for the chosen microphone) and the
 /// audio context running.
 struct CaptureSteps {
     var listedAt: TimeInterval?
@@ -788,16 +797,23 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         webView.loadHTMLString(Self.page, baseURL: URL(string: "https://keyboard.hex.local/"))
     }
 
-    private var preferBuiltIn = true
+    private var microphone: String?
+    private var builtInFallback = true
 
-    func start(preferBuiltIn: Bool) {
-        self.preferBuiltIn = preferBuiltIn
+    /// Records from the input labelled `microphone` (`KeyboardLocalDictation.microphone(for:)`),
+    /// else, with `builtInFallback`, the iPhone's own microphone, else WebKit's default.
+    func start(microphone: String?, builtInFallback: Bool) {
+        self.microphone = microphone
+        self.builtInFallback = builtInFallback
         guard isLoaded else {
             startWhenLoaded = true
             return
         }
         scriptAt = Date().timeIntervalSince1970
-        webView.evaluateJavaScript("hexStart(\(preferBuiltIn))")
+        let label = microphone
+            .flatMap { try? JSONEncoder().encode($0) }
+            .flatMap { String(data: $0, encoding: .utf8) } ?? "null"
+        webView.evaluateJavaScript("hexStart(\(label), \(builtInFallback))")
     }
 
     func stop() {
@@ -823,7 +839,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         onEvent?(.loaded)
         if startWhenLoaded {
             startWhenLoaded = false
-            start(preferBuiltIn: preferBuiltIn)
+            start(microphone: microphone, builtInFallback: builtInFallback)
         }
     }
 
@@ -877,12 +893,15 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
       if (c) c.close().catch(() => {});
     };
     const base = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
-    async function builtInMicrophone() {
+    // The input named `label`, else (with `builtIn`) the iPhone's own. Labels stay empty
+    // until this page has had the microphone once.
+    async function chosenMicrophone(label, builtIn) {
       const inputs = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === "audioinput");
-      const found = inputs.find((d) => /iphone|ipad|built-in/i.test(d.label));
+      const found = (label && inputs.find((d) => d.label === label))
+        || (builtIn && inputs.find((d) => /iphone|ipad|built-in/i.test(d.label)));
       return found ? found.deviceId : null;
     }
-    async function hexStart(preferBuiltIn) {
+    async function hexStart(label, builtIn) {
       if (running) return;
       running = true;
       // A hexStop while this start waits (a slide off the Hex key right after touch-down)
@@ -891,14 +910,15 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
       const stale = () => start !== generation;
       let s = null, c = null;
       try {
-        let id = preferBuiltIn ? await builtInMicrophone() : null;
+        const choosing = !!label || builtIn;
+        let id = choosing ? await chosenMicrophone(label, builtIn) : null;
         if (stale()) return;
         const listed = Date.now();
         s = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base });
         if (stale()) return release(s);
         const opened = Date.now();
-        if (preferBuiltIn && !id) {
-          id = await builtInMicrophone();
+        if (choosing && !id) {
+          id = await chosenMicrophone(label, builtIn);
           if (stale()) return release(s);
           if (id && s.getAudioTracks()[0].getSettings().deviceId !== id) {
             s.getTracks().forEach((t) => t.stop());
