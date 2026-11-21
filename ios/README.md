@@ -353,12 +353,14 @@ never at a launch by itself.
     "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
     the list is also sent as a best-effort recognition hint; Parakeet's batch
     path gets no hint.
-  - **Learn how I type (Settings › Privacy › Learn how I type):** Off by default, and
-    shown whether or not the full keyboard is on. A private journal in the App
-    Group (`typing-journal.json`) that never stores what you write: per-key tap
-    offsets, and word-level pairs with counts and at most one word of context on
-    each side. Only plain text fields that allow autocorrect count
-    (`TypingJournal.allows`). Nothing leaves the iPhone.
+  - **Learn how I type (Settings › Privacy › Learn how I type):** On by default (an
+    unset switch reads on; turning it off is saved and stays off), and
+    shown whether or not the full keyboard is on. It learns only from typing and
+    dictating with Hex, on this iPhone, never from what you write elsewhere. A
+    private journal in the App Group (`typing-journal.json`) that never stores
+    what you write: per-key tap offsets, and word-level pairs with counts and at
+    most one word of context on each side. Only plain text fields that allow
+    autocorrect count (`TypingJournal.allows`). Nothing leaves the iPhone.
     - **Typing:** words you erase and retype, autocorrect fixes you undo from the
       strip, suggestions you pick, and autocorrections you turn down by
       tapping what you typed. A typo you fixed the same way twice (never a
