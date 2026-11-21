@@ -153,7 +153,9 @@ private enum HexKeySide: CaseIterable {
 /// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
 /// default, as Apple's keyboard never offers them; Hex key, Right by default, under Languages),
-/// and haptics, which the dictation bar uses too.
+/// and haptics, which the dictation bar uses too. Below, Swipe typing and Emoji (on by
+/// default, with Clear emoji history while it's on), which say they need the full keyboard
+/// while the dictation bar is chosen.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
@@ -164,6 +166,9 @@ struct KeyboardSettingsPage: View {
     @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
     @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var haptics = FullKeyboardSettings().haptics
+    @State private var swipeTyping = FullKeyboardSettings().swipeTyping
+    @State private var emoji = FullKeyboardSettings().emoji
+    @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
     @State private var practiceText = ""
 
     var body: some View {
@@ -256,6 +261,20 @@ struct KeyboardSettingsPage: View {
                 )
             }
 
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Swipe typing"),
+                    detail: fullKeyboard
+                        ? String(localized: "Slide across a word's letters, in English and Spanish")
+                        : String(localized: "Needs the full keyboard"),
+                    isOn: $swipeTyping
+                )
+
+                SettingsDivider()
+
+                EmojiRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty, fullKeyboard: fullKeyboard)
+            }
+
             TextField("Test keyboard…", text: $practiceText, axis: .vertical)
                 .font(.system(size: 15))
                 .foregroundStyle(HexTheme.textBase)
@@ -269,6 +288,7 @@ struct KeyboardSettingsPage: View {
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: fullKeyboard)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: autocorrect)
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: emoji)
         .onChange(of: fullKeyboard) { _, enabled in
             FullKeyboardSettings().isEnabled = enabled
         }
@@ -293,6 +313,9 @@ struct KeyboardSettingsPage: View {
         .onChange(of: haptics) { _, enabled in
             FullKeyboardSettings().haptics = enabled
         }
+        .onChange(of: swipeTyping) { _, enabled in
+            FullKeyboardSettings().swipeTyping = enabled
+        }
         .onAppear {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autoCapitalization = FullKeyboardSettings().autoCapitalization
@@ -302,6 +325,9 @@ struct KeyboardSettingsPage: View {
             suggestSwearWords = FullKeyboardSettings().suggestSwearWords
             keyPopups = FullKeyboardSettings().keyPopups
             haptics = FullKeyboardSettings().haptics
+            swipeTyping = FullKeyboardSettings().swipeTyping
+            emoji = FullKeyboardSettings().emoji
+            emojiHistoryEmpty = EmojiUsageStore().isEmpty
         }
     }
 }
@@ -406,9 +432,6 @@ struct PrivacySettingsPage: View {
 /// Group so the keyboard reads them too.
 struct ExperimentsSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var emoji = FullKeyboardSettings().emoji
-    @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
-    @State private var swipeTyping = FullKeyboardSettings().swipeTyping
     @State private var hinglish = HinglishSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
@@ -416,20 +439,6 @@ struct ExperimentsSettingsPage: View {
     var body: some View {
         SettingsPageScaffold(title: "Experiments") {
             SettingsCard {
-                EmojiExperimentRows(emoji: $emoji, historyEmpty: $emojiHistoryEmpty)
-
-                SettingsDivider()
-
-                SettingsToggleRow(
-                    title: String(localized: "Swipe typing"),
-                    detail: FullKeyboardSettings().isEnabled
-                        ? String(localized: "Slide across a word's letters, in English and Spanish")
-                        : String(localized: "Needs the full keyboard"),
-                    isOn: $swipeTyping
-                )
-
-                SettingsDivider()
-
                 SettingsToggleRow(
                     title: String(localized: "Hinglish (Hindi in Latin letters)"),
                     detail: String(localized: "Pick Hinglish as your dictation language"),
@@ -446,36 +455,30 @@ struct ExperimentsSettingsPage: View {
                 .disabled(!cleanupAvailability.isAvailable)
             }
         }
-        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: emoji)
         .onChange(of: appleIntelligenceCleanup) { _, enabled in
             AppleIntelligenceCleanupSettings().isEnabled = enabled
-        }
-        .onChange(of: swipeTyping) { _, enabled in
-            FullKeyboardSettings().swipeTyping = enabled
         }
         .onChange(of: hinglish) { _, enabled in
             HinglishSettings().isEnabled = enabled
         }
         .onAppear {
-            emoji = FullKeyboardSettings().emoji
-            swipeTyping = FullKeyboardSettings().swipeTyping
             hinglish = HinglishSettings().isEnabled
-            emojiHistoryEmpty = EmojiUsageStore().isEmpty
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         }
     }
 }
 
-/// Experiments › Emoji: the full keyboard's emoji key, and while it's on, Clear emoji history.
-private struct EmojiExperimentRows: View {
+/// Keyboard › Emoji: the full keyboard's emoji key, and while it's on, Clear emoji history.
+private struct EmojiRows: View {
     @Binding var emoji: Bool
     @Binding var historyEmpty: Bool
+    let fullKeyboard: Bool
 
     var body: some View {
         SettingsToggleRow(
             title: String(localized: "Emoji"),
-            detail: FullKeyboardSettings().isEnabled
+            detail: fullKeyboard
                 ? String(localized: "An emoji key with suggestions as you type")
                 : String(localized: "Needs the full keyboard"),
             isOn: $emoji

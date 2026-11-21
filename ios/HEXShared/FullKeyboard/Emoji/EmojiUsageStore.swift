@@ -2,7 +2,7 @@ import UIKit
 
 /// The emoji you use, kept in the App Group on this iPhone: a count that fades by half every
 /// ten days (so both how often and how lately count) and the skin tone you last picked for
-/// each emoji. No words, nothing about what you write. Experiments › Clear emoji history
+/// each emoji. No words, nothing about what you write. Settings › Keyboard › Clear emoji history
 /// empties it.
 @MainActor
 final class EmojiUsageStore {

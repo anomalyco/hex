@@ -1,7 +1,7 @@
 import QuartzCore
 import UIKit
 
-/// Experiments › Swipe typing: slide from a letter through the letters of a word and lift,
+/// Settings › Keyboard › Swipe typing: slide from a letter through the letters of a word and lift,
 /// and the word goes in, as with Apple's QuickPath and Gboard's glide typing. English and
 /// Spanish layouts only (the languages with a typing model); every other layout keeps a drag
 /// as a slide to another key.

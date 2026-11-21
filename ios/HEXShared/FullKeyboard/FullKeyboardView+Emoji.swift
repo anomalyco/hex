@@ -1,7 +1,7 @@
 import QuartzCore
 import UIKit
 
-/// Experiments › Emoji in the full keyboard: the emoji key, its panel, the emoji search
+/// Settings › Keyboard › Emoji in the full keyboard: the emoji key, its panel, the emoji search
 /// (the letter keys type into it while the results sit above), and an emoji in the empty
 /// strip for the word just finished ("pizza " offers 🍕).
 ///

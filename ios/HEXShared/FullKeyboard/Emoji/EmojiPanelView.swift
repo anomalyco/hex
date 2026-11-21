@@ -1,6 +1,6 @@
 import UIKit
 
-/// The emoji panel (Experiments › Emoji), in place of the strip and the keys: a row of
+/// The emoji panel (Settings › Keyboard › Emoji), in place of the strip and the keys: a row of
 /// emoji for what you just typed, then a grid that scrolls sideways through what you use
 /// most and every category, and a bar with ABC, the categories and delete. Holding an emoji
 /// that has skin tones offers them; the one you pick is remembered for it.

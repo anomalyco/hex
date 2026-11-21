@@ -11,10 +11,10 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
         case secondary
         /// A word that can follow the one just finished. Only an explicit pick inserts it.
         case nextWord
-        /// An emoji for the word just finished (Experiments › Emoji), offered after a space,
+        /// An emoji for the word just finished (Settings › Keyboard › Emoji), offered after a space,
         /// when the strip has no words to show.
         case emoji
-        /// Another reading of the word just swiped (Experiments › Swipe typing): tapping it
+        /// Another reading of the word just swiped (Settings › Keyboard › Swipe typing): tapping it
         /// puts it in that word's place.
         case swiped
     }

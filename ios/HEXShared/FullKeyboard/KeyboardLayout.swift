@@ -30,7 +30,7 @@ nonisolated enum KeyKind: Equatable, Hashable, Sendable {
     case returnKey
     case hex
     case globe
-    /// Opens the emoji panel (Experiments › Emoji).
+    /// Opens the emoji panel (Settings › Keyboard › Emoji).
     case emoji
 }
 
