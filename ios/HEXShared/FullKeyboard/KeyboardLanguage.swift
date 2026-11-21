@@ -12,6 +12,9 @@ import Foundation
 /// other apostrophes on a held ʼ, and no ы, э, ъ or ё); Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
 /// its own for č ć đ š ž: they are held on c, d, s and z, as on Apple's. Polish types on the
 /// English letters (the standard Polish layout is QWERTY) with ą ć ę ł ń ó ś ź ż on held keys.
+/// Romanian is QWERTY too, its own ă â î ș ț held on a, i, s and t (the comma-below ș and ț, not
+/// the cedilla ş ţ), as on Apple's iPhone keyboard; Apple's Romanian layout with keys of its own
+/// for them is the iPad's.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
     case norwegian = "nb"
@@ -23,6 +26,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case frenchSwiss = "fr-CH"
     case portuguese = "pt"
     case polish = "pl"
+    case romanian = "ro"
     case russian = "ru"
     case ukrainian = "uk"
     case serbianLatin = "sr-Latn"
@@ -40,6 +44,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .frenchSwiss: "Français (Suisse)"
         case .portuguese: "Português"
         case .polish: "Polski"
+        case .romanian: "Română"
         case .russian: "Русский"
         case .ukrainian: "Українська"
         case .serbianLatin: "Srpski"
@@ -84,6 +89,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .frenchSwiss: "fr-CH"
         case .portuguese: "pt-BR"
         case .polish: "pl-PL"
+        case .romanian: "ro-RO"
         case .russian: "ru-RU"
         case .ukrainian: "uk-UA"
         case .serbianLatin: "sr-Latn-RS"
@@ -107,7 +113,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// German and Russian layouts) or 12 (Ukrainian); row 3 sits between shift and delete.
     var letterRows: [[String]] {
         let rows = switch self {
-        case .english, .italian, .frenchCanadian, .portuguese, .polish: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        case .english, .italian, .frenchCanadian, .portuguese, .polish, .romanian:
+            ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         // Apple's French keyboards also hold a ´ dead key (AZERTY's row 3, the end of the
         // others' row 2), which its French and English keyboard leaves out (a TestFlight
         // tester's screenshot). Hex leaves it out too: accents are on a held letter.
@@ -246,6 +253,16 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "c": ["c", "ć", "ç", "č"],
                 "n": ["n", "ń", "ñ"],
             ]
+        case .romanian:
+            // Romanian's own letters right after the base: ă and â on A, î on I, ș on S and ț on
+            // T (comma-below, never the cedilla ş ţ); every other letter holds nothing. Its held
+            // ß comes out ẞ in capitals, as every layout's does (Apple's uppercase S leaves it out).
+            [
+                "a": ["a", "ă", "â", "à", "á", "ä", "æ", "ã", "å", "ā"],
+                "i": ["i", "î", "ï", "ì", "í", "į", "ī"],
+                "s": ["s", "ș", "ß", "ś", "š"],
+                "t": ["t", "ț"],
+            ]
         case .russian:
             [
                 "й": ["й", "ї", "ј", "ѵ"],
@@ -341,6 +358,13 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             [
                 "€": ["€", "$", "£", "¥", "₩", "₽"],
             ]
+        case .romanian:
+            // Its currency key is €, held for € $ £ ¥ ₩ ₽ as Polish's is, and a held " offers
+            // Romanian's order.
+            [
+                "€": ["€", "$", "£", "¥", "₩", "₽"],
+                "\"": ["\"", "„", "”", "»", "«", "“"],
+            ]
         case .russian:
             [
                 "#": ["#", "№"],
@@ -367,6 +391,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // Brazil's spelling first, Portugal's where only it is installed.
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
         case .polish: ["pl", "pl_PL"]
+        case .romanian: ["ro", "ro_RO"]
         case .russian: ["ru", "ru_RU"]
         case .ukrainian: ["uk", "uk_UA"]
         // Latin only: a Cyrillic `sr` dictionary would reject every Latin word.
@@ -410,7 +435,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
         case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .russian, .ukrainian, .serbianLatin:
+             .romanian, .russian, .ukrainian, .serbianLatin:
             []
         }
     }
@@ -456,6 +481,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             return .french
         case "pt": return .portuguese
         case "pl": return .polish
+        case "ro": return .romanian
         case "ru": return .russian
         case "uk": return .ukrainian
         case "sr": return parts.contains("latn") ? .serbianLatin : nil

@@ -310,7 +310,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     including a name, day or place typed in lowercase that the dictionary knows only
     capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Русский, Українська) keep the dictionary
+    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
@@ -602,7 +602,12 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   standard Polish layout is, on the English letters; it matches the system keyboard's
   observed long-press options: Polish's own letter right after the base on A, C, E, L, N, O,
   S and Z, so ą ć ę ł ń ó ś ż, with ź after ż, and nothing on U, I or Y; its currency key
-  is €, held for € $ £ ¥ ₩ ₽ and no zł, which Hex holds on the #+= page's €) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  is €, held for € $ £ ¥ ₩ ₽ and no zł, which Hex holds on the #+= page's €), Română (QWERTY
+  on the English letters, as Apple's iPhone Romanian keyboard is: ă and â held on A, î on I,
+  ș on S and ț on T right after the base, the comma-below ș and ț (U+0219, U+021B), never the
+  cedilla ş ţ, and nothing on the other letters; Apple's Romanian layout with keys of its own
+  for them is the iPad's; its currency key is €, held for € $ £ ¥ ₩ ₽ as Polish's is, and its
+  held " offers " „ ” » « “) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -625,7 +630,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   letter at the end under the thumb, in one row where the system wraps a long list
   (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `pl`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `pl`, `ro`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow

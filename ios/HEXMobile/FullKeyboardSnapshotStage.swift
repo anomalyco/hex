@@ -5,8 +5,8 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|ru|uk|sr-Latn|en` pins it; drafts are in the layout's language.
-/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|ro|ru|uk|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, or `t` on Romanian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Settings › Keyboard › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
@@ -126,6 +126,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Spóźnię się dziesięć min"
             case "accents": Self.accentKey == "e" ? "Prosz" : "Za"
             default: "Spóźnię się dziesięć minut, "
+            }
+        case .romanian:
+            return switch state {
+            case "inserted": "Întârzii zece minute, ajung acasă la 19:30. Începeți fără mine."
+            case "numbers": "Întârzii zece minute, ajung acasă la 19:3"
+            case "shift": "Întârzii zece minute. "
+            case "typing": "Întârzii zece min"
+            case "accents": Self.accentKey == "t" ? "Mul" : "Cas"
+            default: "Întârzii zece minute, "
             }
         case .russian:
             return switch state {
@@ -290,10 +299,12 @@ private struct FullKeyboardFixture: UIViewRepresentable {
             case "accents":
                 let key = FullKeyboardSnapshotStage.accentKey
                 let serbian = FullKeyboardSnapshotStage.layout == .serbianLatin
-                let polish: [String: String] = FullKeyboardSnapshotStage.layout == .polish
-                    ? ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
-                    : [:]
-                let pick = polish[key] ?? [
+                let ownLetters: [String: String] = switch FullKeyboardSnapshotStage.layout {
+                case .polish: ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
+                case .romanian: ["a": "ă", "i": "î", "s": "ș", "t": "ț"]
+                default: [:]
+                }
+                let pick = ownLetters[key] ?? [
                     "e": "é", "s": serbian ? "š" : "ß", "ø": "ö", "æ": "ä", "a": "á", "o": "ó", "n": "ñ", "u": "ú",
                     "i": "ì", "е": "ё", "ь": "ъ", "c": "ć", "ʼ": "’",
                 ][key]

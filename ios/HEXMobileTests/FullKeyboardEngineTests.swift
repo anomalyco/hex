@@ -690,7 +690,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.engine.autocorrect.decoder)
         // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
         // next-letter odds move French targets (AZERTY's letters aren't theirs).
-        for language in [KeyboardLanguage.russian, .ukrainian, .polish, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
+        for language in [KeyboardLanguage.russian, .ukrainian, .polish, .romanian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")
@@ -1166,8 +1166,15 @@ final class FullKeyboardEngineTests: XCTestCase {
                 view.plane.began(id: id + 10, sample: sample)
                 view.plane.ended(id: id + 10, sample: sample)
             }
-            // Serbian's e holds nothing, as on the system keyboard; its c holds č and ć.
-            let held = language == .ukrainian ? "ʼ" : cyrillic ? "е" : language == .serbianLatin ? "c" : "e"
+            // Serbian's and Romanian's e hold nothing, as on the system keyboard; Serbian's c
+            // holds č and ć, Romanian's s ș.
+            let held: String = switch language {
+            case .ukrainian: "ʼ"
+            case .russian: "е"
+            case .serbianLatin: "c"
+            case .romanian: "s"
+            default: "e"
+            }
             view.debugHoldAccent(held, selectIndex: 1)
             counts[language] = asked
         }
