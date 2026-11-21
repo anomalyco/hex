@@ -1125,6 +1125,14 @@ final class AutocorrectEngine {
         "shell": "she'll",
     ]
 
+    /// Words a period after them makes an abbreviation ("approx.", "etc."): a period never
+    /// corrects them.
+    static let abbreviations: Set<String> = [
+        "approx", "appt", "apt", "assn", "asst", "ave", "blvd", "cf", "co", "corp", "dept", "dr",
+        "eg", "est", "etc", "fig", "govt", "ie", "inc", "jr", "lb", "lbs", "ltd", "misc", "mr",
+        "mrs", "ms", "mt", "no", "nr", "oz", "pp", "prof", "pt", "rd", "sr", "st", "vol", "vs", "wk", "yr",
+    ]
+
     /// Common chat & engineering shorthand that cautious autocorrect never rewrites.
     static let shorthandAllowlist: Set<String> = [
         "ok", "okay", "ty", "thx", "pls", "plz", "tmrw", "tbh", "idk", "imo", "imho",

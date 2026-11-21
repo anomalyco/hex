@@ -752,8 +752,10 @@ final class FullKeyboardEngine {
             // a slide: nothing, and back too. Off the keys: nothing, and the page stays.
             if let returnLayer = touch.returnLayer {
                 if let under = slideTarget(for: touch, at: point), let character = under.character {
-                    autocorrect.clearPendingUndo()
-                    insert(character, source: "slide")
+                    if !correctWord(endingWith: character) {
+                        autocorrect.clearPendingUndo()
+                        insert(character, source: "slide")
+                    }
                     layerState.switchTo(returnLayer)
                     rebuildLayout(cause: "layer_slide")
                     refreshAutoCapitalization()
@@ -925,9 +927,54 @@ final class FullKeyboardEngine {
         if layerState.layer == .letters {
             shift.didType()
         }
-        autocorrect.clearPendingUndo()
-        insert(text, source: "key", at: point)
+        if !correctWord(endingWith: text) {
+            autocorrect.clearPendingUndo()
+            insert(text, source: "key", at: point)
+        }
         logState("typed")
+    }
+
+    /// Punctuation that closes a word, as Apple's keyboard treats it: , . ! ? ; : ) and ".
+    static let wordEnders: Set<Character> = [",", ".", "!", "?", ";", ":", ")", "\""]
+
+    /// Punctuation right after a word corrects it as space does ("teh," becomes "the,"), and
+    /// goes in after the fix. Backspace right after takes back both, as after a space ("teh").
+    /// False when there is nothing to fix: the caller types the mark as usual.
+    private func correctWord(endingWith text: String) -> Bool {
+        guard text.count == 1, let mark = text.first, Self.wordEnders.contains(mark), swipedWord == nil else { return false }
+        let before = target.documentContextBeforeInput
+        guard let last = before?.last, last.isLetter, let token = AutocorrectEngine.currentToken(in: before) else { return false }
+        // "approx." and "etc." are abbreviations, not typos.
+        if mark == ".", AutocorrectEngine.abbreviations.contains(token.lowercased()) { return false }
+        learning?.didFinish(word: token)
+        syncLearning()
+        autocorrect.decoderTaps = currentTokenTaps
+        guard let (original, replacement) = autocorrect.replacementOnSpace(
+            beforeInput: before,
+            field: field,
+            autocorrectionType: target.autocorrectionType
+        ) else { return false }
+        for _ in 0..<original.count {
+            target.deleteBackward()
+        }
+        let inserted = replacement + text
+        tokenTaps.removeAll()
+        typingLog?.edit("autocorrect", [
+            TypingLogField("from", .string(original)),
+            TypingLogField("to", .string(replacement)),
+            TypingLogField("deleted", .string(original)),
+            TypingLogField("inserted", .string(inserted)),
+            TypingLogField("ending", .string(text)),
+        ])
+        target.insertText(inserted)
+        autocorrect.recordAppliedCorrection(original: original, insertedText: inserted)
+        learning?.record(.autocorrected, typed: original, final: replacement)
+        swipedWord = nil
+        lastSpaceAt = nil
+        layerState.didInsert(text)
+        rebuildLayoutIfNeeded()
+        didEdit()
+        return true
     }
 
     /// The taps of the word being typed when every letter came from a key, else nil.

@@ -1243,6 +1243,56 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hi ther")
     }
 
+    /// Types a mark from the 123 page; the next space goes back to the letters.
+    private func punctuate(_ mark: String) {
+        if engine.layout.layer == .letters { tap(.layerSwitch(.numbers)) }
+        tap(.character(mark))
+        now += 0.5
+    }
+
+    /// X (Erick): "If I add punctuation after a typo autocorrect does not fix the typo." A
+    /// mark that closes a word fixes it as space does and goes in after the fix, as on Apple's
+    /// keyboard; backspace right after takes both back, as after a space.
+    func testPunctuationAfterATypoFixesItFirst() {
+        for mark in [",", ".", "!", "?", ";", ":", ")", "\""] {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+            type("see teh")
+            punctuate(mark)
+            XCTAssertEqual(target.text, "see the" + mark, mark)
+            type(" ok")
+            XCTAssertEqual(target.text, "see the\(mark) ok", mark)
+        }
+
+        type(" recieve")
+        punctuate(".")
+        XCTAssertTrue(target.text.hasSuffix(" receive."))
+        tap(.delete)
+        XCTAssertTrue(target.text.hasSuffix(" recieve"), "one backspace takes back the mark and the fix")
+        punctuate(".")
+        XCTAssertTrue(target.text.hasSuffix(" recieve."), "the word you kept stays")
+
+        type(" approx")
+        punctuate(".")
+        XCTAssertTrue(target.text.hasSuffix(" approx."), "an abbreviation's period")
+        type(" a")
+        punctuate(",")
+        XCTAssertTrue(target.text.hasSuffix(" a,"))
+    }
+
+    func testPunctuationNeverChangesASwipedWord() throws {
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.autocorrect.loadLexiconEntries([("hello", "Hello, friend")])
+        swipe("hello", on: plane)
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character(","), on: plane)
+        XCTAssertEqual(field.text, "hello,", "a swiped word is a reading, not a typo")
+    }
+
     func testDeleteSwipeWordsMatchOptionDelete() {
         XCTAssertNil(DeleteWordSwipe.wordLength(before: ""))
         XCTAssertEqual(DeleteWordSwipe.wordLength(before: "Hello, world. "), 7)
