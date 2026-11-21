@@ -500,6 +500,8 @@ enum Media {
       result["width"] = Int(abs(shown.width).rounded())
       result["height"] = Int(abs(shown.height).rounded())
       result["fps"] = Double(try await track.load(.nominalFrameRate))
+      let range = try await track.load(.timeRange)
+      result["videoMs"] = Int(((range.end.seconds.isFinite ? range.end.seconds : 0) * 1000).rounded())
     }
     result["audioTracks"] = try await asset.loadTracks(withMediaType: .audio).count
     return result
@@ -692,15 +694,56 @@ enum Media {
             let queue = DispatchQueue(label: "shrink.\(index)", qos: .utility)
             var kept: Double?
             var told = -1
+            // A screen recording only has a frame where the screen changed, so the frame showing
+            // at the span's start can come before it: it's held and moved to the start. The last
+            // frame is repeated at the span's end, so the video lasts as long as the span.
+            var held: CMSampleBuffer?
+            var last: CMSampleBuffer?
+            var queued: [CMSampleBuffer] = []
+            var ended = false
+            func next() -> CMSampleBuffer? {
+              if !queued.isEmpty { return queued.removeFirst() }
+              guard !ended else { return nil }
+              while let buffer = output.copyNextSampleBuffer() {
+                guard video, CMSampleBufferGetNumSamples(buffer) > 0 else { return buffer }
+                let at = CMSampleBufferGetPresentationTimeStamp(buffer)
+                if at < range.start {
+                  held = Media.retimed(buffer, to: range.start) ?? held
+                  continue
+                }
+                last = buffer
+                if let first = held {
+                  held = nil
+                  if at > range.start {
+                    queued.append(buffer)
+                    return first
+                  }
+                }
+                return buffer
+              }
+              ended = true
+              guard video else { return nil }
+              if let first = held {
+                held = nil
+                last = first
+                queued.append(first)
+              }
+              if let final = last, CMSampleBufferGetPresentationTimeStamp(final) < range.end,
+                let repeated = Media.retimed(final, to: range.end)
+              {
+                queued.append(repeated)
+              }
+              return queued.isEmpty ? nil : queued.removeFirst()
+            }
             input.requestMediaDataWhenReady(on: queue) {
               while input.isReadyForMoreMediaData {
-                guard let buffer = output.copyNextSampleBuffer() else {
+                guard let buffer = next() else {
                   input.markAsFinished()
                   done.resume()
                   return
                 }
                 let at = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
-                if video, let interval, CMSampleBufferGetNumSamples(buffer) > 0 {
+                if video, let interval, !ended, CMSampleBufferGetNumSamples(buffer) > 0 {
                   if let kept, at - kept < interval { continue }
                   kept = at
                 }
@@ -743,6 +786,15 @@ enum Media {
       "durationMs": Int((written.seconds * 1000).rounded()),
       "ms": Int(Date().timeIntervalSince(started) * 1000),
     ]
+  }
+
+  /// `buffer` shown at `time` instead.
+  static func retimed(_ buffer: CMSampleBuffer, to time: CMTime) -> CMSampleBuffer? {
+    var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+    var copy: CMSampleBuffer?
+    let status = CMSampleBufferCreateCopyWithNewTiming(
+      allocator: nil, sampleBuffer: buffer, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &copy)
+    return status == noErr ? copy : nil
   }
 
   /// Copies the span of `movie` from `fromMs` to `toMs` into `out` as an MPEG-4, without
