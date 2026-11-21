@@ -11,8 +11,9 @@ use cpal::traits::{DeviceTrait, HostTrait};
 
 use super::call_input;
 use super::fixture;
+use super::routes::avoid_bluetooth_microphone;
 use super::transport::{Transport, transport};
-use super::{AudioInput, Opened, Selection, avoid_bluetooth_microphone};
+use super::{AudioInput, Opened, Selection};
 
 pub(super) type InputOpenResult = (u64, Result<Opened, String>);
 
@@ -456,3 +457,6 @@ pub(super) fn open_selected<T>(
     tracing::debug!(%error, device, "the saved microphone would not open");
     open_default()
 }
+
+#[cfg(test)]
+mod tests;

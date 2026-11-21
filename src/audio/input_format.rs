@@ -12,7 +12,8 @@ use cpal::{
     SupportedStreamConfig, SupportedStreamConfigRange,
 };
 
-use super::{CaptureInstant, StreamErrorReporter, build_stream};
+use super::CaptureInstant;
+use super::stream::{StreamErrorReporter, build_stream};
 
 /// A running microphone stream; dropping it stops capture.
 pub(super) enum InputStream {

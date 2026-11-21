@@ -125,3 +125,14 @@ impl Add<Duration> for CaptureInstant {
             .expect("capture instant overflowed")
     }
 }
+
+#[cfg(all(test, target_os = "macos"))]
+mod tests {
+    use super::scale_mach_ticks;
+
+    #[test]
+    fn mach_event_ticks_are_converted_to_nanoseconds() {
+        assert_eq!(scale_mach_ticks(72_000_000, 125, 3), 3_000_000_000);
+        assert_eq!(scale_mach_ticks(3_000_000_000, 1, 1), 3_000_000_000);
+    }
+}
