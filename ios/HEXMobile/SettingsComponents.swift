@@ -278,6 +278,7 @@ enum SettingsSnapshotFixture {
             .flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } == "left"
         keyboard.autocorrect = true
         keyboard.spatialAutocorrect = true
+        keyboard.germanSpatialAutocorrect = on
         keyboard.suggestSwearWords = on
         keyboard.keyPopups = true
         keyboard.haptics = true

@@ -866,10 +866,18 @@ final class AutocorrectEngine {
                 if language.usesEnglishFixes, cased.contains(" ") {
                     cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
                 }
+                // German spells every noun with a capital, and the German model is lowercase
+                // throughout like the English one: a corrected word the dictionary knows only
+                // capitalised is a noun ("hsus" -> "haus" -> "Haus"), as the no-replacement
+                // path does below. One word only: a split reading keeps its second word as read.
+                if addsCapitals, !cased.contains(" "), decoder?.model.language == KeyboardLanguage.german.rawValue {
+                    cased = properNoun(for: cased) ?? cased
+                }
                 return withoutAddedCapitals(cased, typed: token)
             }
-            // A name, day or place its lowercase word list lacks, typed in lowercase, is
-            // capitalised as the dictionary path does ("mary" -> "Mary"), unless
+            // A word the model knows lowercase that the dictionary knows only capitalised
+            // (a name, day or place; a German noun), typed in lowercase, is capitalised as
+            // the dictionary path does ("mary" -> "Mary", "haus" -> "Haus"), unless
             // Auto-capitalization is off.
             return addsCapitals ? properNoun(for: token) : nil
         }
@@ -967,7 +975,8 @@ final class AutocorrectEngine {
     }
 
     /// `token` capitalised when it is all lowercase and the dictionary knows it only that way
-    /// (a name, day or place: "mary" -> "Mary", "monday" -> "Monday"), else nil.
+    /// (a name, day or place: "mary" -> "Mary", "monday" -> "Monday"; a German noun:
+    /// "haus" -> "Haus"), else nil.
     private func properNoun(for token: String) -> String? {
         guard token.count >= 2, token == token.lowercased(), let first = token.first else { return nil }
         let capitalised = first.uppercased() + token.dropFirst()

@@ -485,6 +485,7 @@ struct ExperimentsSettingsPage: View {
     @State private var adaptiveTouch = AdaptiveTouchSettings().isEnabled
     @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
     @State private var confirmingTouchReset = false
+    @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
 
     var body: some View {
         SettingsPageScaffold(title: "Experiments") {
@@ -541,6 +542,16 @@ struct ExperimentsSettingsPage: View {
                         }
                     }
                 }
+
+                SettingsDivider()
+
+                // Off by default: German keeps the dictionary engine until this is on, and
+                // then only while Spatial autocorrect is on too (Settings › Keyboard).
+                SettingsToggleRow(
+                    title: String(localized: "German spatial autocorrect"),
+                    detail: String(localized: "Uses where you tap on the Deutsch keyboard"),
+                    isOn: $germanSpatialAutocorrect
+                )
             }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
@@ -554,12 +565,16 @@ struct ExperimentsSettingsPage: View {
             AdaptiveTouchSettings().isEnabled = enabled
             refreshAdaptiveTouchStatus()
         }
+        .onChange(of: germanSpatialAutocorrect) { _, enabled in
+            FullKeyboardSettings().germanSpatialAutocorrect = enabled
+        }
         .onAppear {
             hinglish = HinglishSettings().isEnabled
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
             adaptiveTouch = AdaptiveTouchSettings().isEnabled
             refreshAdaptiveTouchStatus()
+            germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
         }
     }
 

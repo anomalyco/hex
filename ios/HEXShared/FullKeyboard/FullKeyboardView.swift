@@ -419,11 +419,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// Settings › Keyboard › Swipe typing (on by default): on the English and Spanish layouts, a
     /// drag across the letters types a word, read with the layout language's bundled model.
-    /// Off under VoiceOver, which has its own way to type.
+    /// Off under VoiceOver, which has its own way to type. German stays out of it:
+    /// `supportsSwipeTyping` lists English and Spanish only, and the experiment does not add it.
     private func syncSwipeTyping() {
-        let on = (swipeOverride ?? FullKeyboardSettings().swipeTyping) && engine.language.supportsSwipeTyping
+        let settings = FullKeyboardSettings()
+        let on = (swipeOverride ?? settings.swipeTyping) && engine.language.supportsSwipeTyping
             && !UIAccessibility.isVoiceOverRunning
-        let model = on ? TypingDecoderModel.bundled(engine.language.rawValue) : nil
+        let model = on ? settings.typingModel(for: engine.language) : nil
         if plane.swipe?.model !== model {
             plane.swipe = model.map { SwipeTyping(engine: engine, model: $0) }
         } else {
@@ -432,23 +434,25 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     /// Settings › Keyboard › Spatial autocorrect (on by default): maps the layout language's
-    /// bundled model when the keyboard opens (English and Spanish today; others keep `UITextChecker`),
-    /// and moves the keys' centres to where Learn how I type saw you tap. The same word list
-    /// lets the likely next letter claim a few points of its neighbour's touch target whether
-    /// or not the experiment is on (`FullKeyboardEngine.letterOdds`; only while autocorrecting).
+    /// bundled model when the keyboard opens (English, Spanish, and German while its experiment
+    /// in Settings › Experiments is on; others keep `UITextChecker`), and moves the keys'
+    /// centres to where Learn how I type saw you tap. The same word list lets the likely next
+    /// letter claim a few points of its neighbour's touch target whether or not Spatial
+    /// autocorrect is on (`FullKeyboardEngine.letterOdds`; only while autocorrecting).
     private func syncSpatialAutocorrect() {
-        let words = TypingDecoderModel.bundled(engine.language.rawValue)
+        let settings = FullKeyboardSettings()
+        let words = settings.typingModel(for: engine.language)
         if engine.letterOdds !== words {
             engine.letterOdds = words
         }
-        let model = FullKeyboardSettings().spatialAutocorrect ? words : nil
+        let model = settings.spatialAutocorrect ? words : nil
         if engine.autocorrect.decoder?.model !== model {
             engine.autocorrect.decoder = model.map { TypingDecoder(model: $0) }
             engine.refreshSuggestions()
         }
         // Bilingual autocorrect reads the same taps with the other language's model, where it has one.
         if let partner = engine.autocorrect.partner {
-            let theirs = FullKeyboardSettings().spatialAutocorrect ? TypingDecoderModel.bundled(partner.language.rawValue) : nil
+            let theirs = settings.spatialAutocorrect ? settings.typingModel(for: partner.language) : nil
             if partner.decoder?.model !== theirs {
                 partner.decoder = theirs.map { TypingDecoder(model: $0) }
                 engine.refreshSuggestions()

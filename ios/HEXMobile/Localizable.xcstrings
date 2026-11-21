@@ -2964,6 +2964,26 @@
           }
         }
       }
+    },
+    "German spatial autocorrect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "德语按触点自动改正"
+          }
+        }
+      }
+    },
+    "Uses where you tap on the Deutsch keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用你在 Deutsch 键盘上的触点位置"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
