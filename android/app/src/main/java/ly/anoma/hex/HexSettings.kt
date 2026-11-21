@@ -70,6 +70,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val clean = remember(revision) { speech.clean }
     val lowercase = remember(revision) { speech.lowercase }
     val endWithPeriod = remember(revision) { speech.endWithPeriod }
+    val formatLists = remember(revision) { speech.formatLists }
+    val spokenPunctuation = remember(revision) { speech.spokenPunctuation }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
     val spatial = remember(revision) { typing.spatial }
@@ -141,6 +143,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry("Style", value = style.name, action = { open(Page.Styles) })
                             Rule(); Toggle(stringResource(R.string.dictation_lowercase), stringResource(R.string.dictation_lowercase_detail),
                                 lowercase) { speech.lowercase = it }
+                            Rule(); Toggle(stringResource(R.string.dictation_format_lists), stringResource(R.string.dictation_format_lists_detail),
+                                formatLists) { speech.formatLists = it }
+                            Rule(); Toggle(stringResource(R.string.dictation_spoken_punctuation), stringResource(R.string.dictation_spoken_punctuation_detail),
+                                spokenPunctuation) { speech.spokenPunctuation = it }
                             Rule(); Toggle(stringResource(R.string.dictation_end_with_period), stringResource(R.string.dictation_end_with_period_detail),
                                 endWithPeriod) { speech.endWithPeriod = it }
                             Rule(); Entry("Dictation language", if (selectedLanguage == null) automatic.label else null,

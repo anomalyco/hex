@@ -11,25 +11,31 @@ internal object SpokenText {
         if (options.style == Style.Verbatim || raw.isBlank()) return lowercased(style(raw, options.style, language), options)
         val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(raw.trim(), language), language)
         val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken
-        return lowercased(style(cleaned, options.style, language, options.endWithPeriod), options)
+        return lowercased(style(cleaned, options.style, language, options.endWithPeriod, options.formatLists,
+            options.spokenPunctuation), options)
     }
 
     private fun lowercased(text: String, options: SpeechOptions) = if (options.lowercase) text.lowercase(Locale.ROOT) else text
 
-    /** TranscriptFormatter.format. With [endsWithPeriod] off no line ends with a full stop,
-     * though "?" and "!" stay; Verbatim keeps the model's. */
-    fun style(raw: String, style: Style, language: String? = null, endsWithPeriod: Boolean = true): String {
-        val styled = styled(raw, style, language)
+    /** TranscriptFormatter.format. [lists] (SpokenLists) then [punctuation] (SpokenPunctuation) run
+     * after the fillers, in every style but Verbatim. With [endsWithPeriod] off no line ends with a
+     * full stop, though "?" and "!" stay; Verbatim keeps the model's. */
+    fun style(raw: String, style: Style, language: String? = null, endsWithPeriod: Boolean = true,
+              lists: Boolean = false, punctuation: Boolean = false): String {
+        val styled = styled(raw, style, language, lists, punctuation)
         if (endsWithPeriod || style == Style.Verbatim) return styled
         return styled.split('\n').joinToString("\n", transform = ::droppingFinalFullStop)
     }
 
-    private fun styled(raw: String, style: Style, language: String?): String {
+    private fun styled(raw: String, style: Style, language: String?, lists: Boolean, punctuation: Boolean): String {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return ""
         val english = code(language) == "en"
         if (style == Style.Verbatim) return collapse(trimmed)
-        val cleaned = stripFillers(trimmed, fillers(language))
+        // Lists first, so "dash … dash …" stays a list and "comma, new line" keeps its comma.
+        val stripped = stripFillers(trimmed, fillers(language))
+        val listed = if (lists) SpokenLists.format(stripped, language) else stripped
+        val cleaned = if (punctuation) SpokenPunctuation.format(listed, language) else listed
         return when (style) {
             Style.Polished -> polish(cleaned, english)
             Style.Casual -> casual(cleaned, english)

@@ -17,7 +17,8 @@ internal enum class Spoken(val code: String, val label: String) {
     }
 }
 internal data class SpeechOptions(val style: Style, val spoken: Spoken, val clean: Boolean, val translate: Boolean,
-                                   val lowercase: Boolean = false, val endWithPeriod: Boolean = true)
+                                   val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
+                                   val formatLists: Boolean = false, val spokenPunctuation: Boolean = false)
 internal class SpeechPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)
     var style: Style
@@ -48,6 +49,14 @@ internal class SpeechPreferences(context: Context) {
     var endWithPeriod: Boolean
         get() = prefs.getBoolean("endWithPeriod", true)
         set(value) { prefs.edit().putBoolean("endWithPeriod", value).apply() }
+    // Say "first, second" or "bullet" for a list (English and Spanish).
+    var formatLists: Boolean
+        get() = prefs.getBoolean("formatLists", true)
+        set(value) { prefs.edit().putBoolean("formatLists", value).apply() }
+    // Say "comma" or "question mark" for the mark.
+    var spokenPunctuation: Boolean
+        get() = prefs.getBoolean("spokenPunctuation", true)
+        set(value) { prefs.edit().putBoolean("spokenPunctuation", value).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
-        translation && spoken == Spoken.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod)
+        translation && spoken == Spoken.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation)
 }
