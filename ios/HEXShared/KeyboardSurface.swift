@@ -74,6 +74,8 @@ final class KeyboardViewModel: ObservableObject {
     /// Record typing logs is recording this field: both keyboards show a small mark the
     /// whole time, so logging is never hidden.
     @Published var isLoggingTyping = false
+    /// The dictation bar's emoji key: Settings › Keyboard › Emoji, in a field that takes emoji.
+    @Published var showsEmojiKey = true
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
     // so 25–30 Hz polling never invalidates SwiftUI views mid-spring.
@@ -100,6 +102,10 @@ final class KeyboardViewModel: ObservableObject {
     /// A target picked in the Hex key menu; it also turns translation on.
     var onTranslationTargetSelected: ((String) -> Void)?
     var onSpace: (() -> Void)?
+    /// A punctuation key on the dictation bar.
+    var onInsertText: ((String) -> Void)?
+    /// The dictation bar's emoji key: the full keyboard's emoji panel opens in its place.
+    var onEmojiTap: (() -> Void)?
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
     var onOpenURL: ((URL) -> Void)?
@@ -450,7 +456,7 @@ private struct RepeatDeleteKey: View {
         Image(systemName: "delete.left")
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(palette.textBase)
-            .frame(width: 52, height: 42)
+            .frame(width: 44, height: 42)
             .background(
                 isPressing ? palette.keyPressedFill : palette.keyFill,
                 in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
@@ -1170,17 +1176,63 @@ struct KeyboardSurfaceView: View {
 
     // MARK: - Bottom Utility Key Row (42 pt, shadow-grounded keycaps with zero strokes)
 
+    /// The bar's punctuation keys, the commonest first: as many as leave the space bar
+    /// `minSpaceWidth` (five on a 402 pt iPhone, three on the SE beside its globe).
+    private static let punctuation = [",", ".", "?", "!", "'", "\"", "@", "#"]
+    private static let punctuationKeyWidth: CGFloat = 30
+    private static let minSpaceWidth: CGFloat = 60
+
     private var utilityRow: some View {
+        ViewThatFits(in: .horizontal) {
+            utilityKeys(punctuation: 8)
+            utilityKeys(punctuation: 6)
+            utilityKeys(punctuation: 5)
+            utilityKeys(punctuation: 4)
+            utilityKeys(punctuation: 3)
+            utilityKeys(punctuation: 2)
+        }
+    }
+
+    private func utilityKeys(punctuation count: Int) -> some View {
         let p = palette
-        return HStack(spacing: 6) {
+        return HStack(spacing: 5) {
             if model.needsGlobeKey {
                 GlobeKeyRepresentable(controller: model.inputViewController, isDark: p.isDark)
-                    .frame(width: 44, height: 42)
+                    .frame(width: 38, height: 42)
                     .background(
                         p.keyFill,
                         in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
                     )
                     .shadow(color: p.keyShadow, radius: 0.5, x: 0, y: 1)
+            }
+
+            if model.showsEmojiKey {
+                Button {
+                    model.onKeyFeedback?()
+                    model.onEmojiTap?()
+                } label: {
+                    Image(systemName: "face.smiling")
+                        .font(.system(size: 17, weight: .regular))
+                        .foregroundStyle(p.textBase)
+                        .frame(width: 38, height: 42)
+                        .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
+                }
+                .buttonStyle(KeyboardKeyButtonStyle(palette: p))
+                .accessibilityLabel("Emoji")
+            }
+
+            ForEach(Self.punctuation.prefix(count), id: \.self) { mark in
+                Button {
+                    model.onKeyFeedback?()
+                    model.onInsertText?(mark)
+                } label: {
+                    Text(mark)
+                        .font(.system(size: 19, weight: .regular))
+                        .foregroundStyle(p.textBase)
+                        .frame(width: Self.punctuationKeyWidth, height: 42)
+                        .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
+                }
+                .buttonStyle(KeyboardKeyButtonStyle(palette: p))
             }
 
             Button {
@@ -1190,7 +1242,8 @@ struct KeyboardSurfaceView: View {
                 Text("space")
                     .font(.system(size: 15, weight: .regular))
                     .foregroundStyle(p.textMuted)
-                    .frame(maxWidth: .infinity)
+                    .lineLimit(1)
+                    .frame(minWidth: Self.minSpaceWidth, maxWidth: .infinity)
                     .frame(height: 42)
                     .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }
@@ -1208,7 +1261,7 @@ struct KeyboardSurfaceView: View {
                 Image(systemName: "return")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(p.textBase)
-                    .frame(width: 56, height: 42)
+                    .frame(width: 48, height: 42)
                     .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }
             .buttonStyle(KeyboardKeyButtonStyle(palette: p))

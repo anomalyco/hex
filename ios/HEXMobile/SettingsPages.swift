@@ -181,9 +181,9 @@ private enum HexKeySide: CaseIterable {
 /// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
 /// default, as Apple's keyboard never offers them; Hex key, Right by default, under Languages),
-/// and haptics, which the dictation bar uses too. Below, Swipe typing and Emoji (on by
-/// default, with Clear emoji history while it's on), which say they need the full keyboard
-/// while the dictation bar is chosen.
+/// and haptics, which the dictation bar uses too. Below, Swipe typing, which says it needs
+/// the full keyboard while the dictation bar is chosen, and Emoji (on by default, with Clear
+/// emoji history while it's on), the bar's emoji key too.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
@@ -572,7 +572,7 @@ private struct EmojiRows: View {
             title: String(localized: "Emoji"),
             detail: fullKeyboard
                 ? String(localized: "An emoji key with suggestions as you type")
-                : String(localized: "Needs the full keyboard"),
+                : String(localized: "An emoji key on the dictation bar"),
             isOn: $emoji
         )
         .onChange(of: emoji) { _, enabled in

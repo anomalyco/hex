@@ -420,6 +420,16 @@
         }
       }
     },
+    "An emoji key on the dictation bar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在听写栏上显示表情符号键"
+          }
+        }
+      }
+    },
     "An emoji key with suggestions as you type" : {
       "localizations" : {
         "zh-Hans" : {
