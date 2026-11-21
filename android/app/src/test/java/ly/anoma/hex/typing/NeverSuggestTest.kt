@@ -224,7 +224,7 @@ class NeverSuggestTest {
         val g = word("de")
         g.reset("das ")
         for (c in "madchen") g.tap(de, c)
-        assertEquals("mädchen", g.replacement())
+        assertEquals("Mädchen", g.replacement())
     }
 
     // Types `text` at the key centres as the keyboard would: a space or closing mark finishes the
@@ -296,5 +296,36 @@ class NeverSuggestTest {
         assertEquals("a receive. approx. a,", word().typed(g, "a recieve. approx. a,"))
         assertEquals("I want ", word().typed(g, "iwant "))
         assertEquals("look at ", word().typed(g, "lookat "))
+    }
+
+    // iOS testSpatialAutocorrectCapitalisesANameTypedInLowercase: a name, day or place typed in
+    // lowercase takes its capital; a word that is also an ordinary lowercase word doesn't.
+    @Test fun aNameTypedInLowercaseTakesItsCapital() {
+        val g = layout("en")
+        assertEquals("see Mary on Monday in Boston ", word().typed(g, "see mary on monday in boston "))
+        assertEquals("we stood united in china ", word().typed(g, "we stood united in china "))
+        // A name outside the Spanish model is a word as typed, not a typo ("tom" stays, not "toma").
+        val es = layout("es")
+        assertEquals("vi a tom ayer ", word("es").typed(es, "vi a tom ayer "))
+        assertEquals("con Mary en Madrid ", word("es").typed(es, "con mary en madrid "))
+    }
+
+    // iOS testGermanSpatialAutocorrectCapitalisesTheNounItCorrects, with the shipped de.capitals.
+    @Test fun germanNounsTakeTheirCapital() {
+        val g = layout("de")
+        fun fix(before: String, taps: String): String? = word("de").run {
+            reset(before); for (c in taps) tap(g, c); replacement()
+        }
+        assertEquals("Haus", fix("das ", "haua"))
+        assertEquals("Haus", fix("das ", "hsus"))
+        assertEquals("Haus", fix("das ", "haus"))
+        // Written with a capital only some of the time: a noun after an article or determiner.
+        assertEquals("Leben", fix("das ", "leben"))
+        assertNull(fix("zu ", "leben"))
+        assertNull(fix("ich ", "frage"))
+        assertNull(fix("wollt ihr ", "essen"))
+        assertNull(fix("ich ", "kauf"))
+        assertEquals("Ruhe", fix("lass mich in ", "ruhe"))
+        assertEquals("Stadt", fix("die ", "stadt"))
     }
 }

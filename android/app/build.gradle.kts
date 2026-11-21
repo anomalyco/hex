@@ -101,7 +101,7 @@ android {
     }
     packaging.resources.excludes += "DebugProbesKt.bin"
     buildFeatures { compose = true }
-    androidResources { noCompress += listOf("bin", "hextm", "valid") }
+    androidResources { noCompress += listOf("bin", "hextm", "valid", "capitals") }
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.
     sourceSets["main"].assets.srcDir(rootProject.file("play/policy"))
@@ -126,7 +126,7 @@ val verifyInter by tasks.registering {
 // Pin the licensed HXTM files. An older prototype word-pair list cannot slip into an APK.
 val verifyTypingModels by tasks.registering {
     val dir = file("src/main/assets/typing")
-    val names = listOf("en.hextm", "es.hextm", "de.hextm", "nb.hextm", "en.valid")
+    val names = listOf("en.hextm", "es.hextm", "de.hextm", "nb.hextm", "en.valid", "en.capitals", "es.capitals", "de.capitals")
     val manifest = dir.resolve("SHA256SUMS")
     inputs.files(names.map(dir::resolve) + manifest)
     doLast {
