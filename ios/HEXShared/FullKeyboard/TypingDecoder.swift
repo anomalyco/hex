@@ -166,6 +166,53 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return best.map(\.text)
     }
 
+    /// Complete a short prefix with the word frequencies, backed by the previous word's
+    /// bigrams when available. Word indices and each bigram row have the same sort order:
+    /// walk only the matching prefix range, creating strings only for contenders.
+    func completions(of prefix: String, after previous: String?, allowing: (String) -> Bool) -> [String] {
+        guard let codes = encode(prefix), (1...3).contains(codes.count) else { return [] }
+        var lo = 0, hi = wordCount
+        for (depth, code) in codes.enumerated() {
+            (lo, hi) = narrow(lo, hi, depth: depth, byte: Int(code))
+            if lo == hi { return [] }
+        }
+        var link = 0, end = 0
+        if let previous, let a = index(of: previous) {
+            link = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * a, as: UInt32.self))
+            end = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * (a + 1), as: UInt32.self))
+            guard link <= end, end <= bigramCount else { return [] }
+            var upper = end
+            while link < upper {
+                let mid = (link + upper) / 2
+                if follower(mid) < lo { link = mid + 1 } else { upper = mid }
+            }
+        }
+        var best: [(rank: Int, text: String)] = []
+        var next = link < end ? follower(link) : hi
+        for i in lo..<hi {
+            let unigram = Int(base.load(fromByteOffset: unigramAt + i, as: UInt8.self))
+            var cost = unigram + 7 // 0.92 nats of unigram backoff, in eighths of a nat.
+            if i == next {
+                cost = min(cost, Int(base.load(fromByteOffset: pairCostsAt + link, as: UInt8.self)))
+                link += 1
+                next = link < end ? follower(link) : hi
+            }
+            let rank = cost * 256 + unigram
+            guard length(i) > codes.count, length(i) <= codes.count + 8,
+                  best.count < 2 || rank < best[1].rank else { continue }
+            let text = word(i)
+            guard allowing(text) else { continue }
+            let at = best.firstIndex { rank < $0.rank } ?? best.count
+            best.insert((rank, text), at: at)
+            if best.count > 2 { best.removeLast() }
+        }
+        return best.map(\.text)
+    }
+
+    @inline(__always) private func follower(_ link: Int) -> Int {
+        Int(base.loadUnaligned(fromByteOffset: pairWordsAt + 4 * link, as: UInt32.self))
+    }
+
     /// How much of the word list's frequency continues `prefix` with each letter, by letter
     /// code. Nil when no word starts with `prefix`, or one ends there and none goes on.
     func continuations(after prefix: [UInt8]) -> [Double]? {

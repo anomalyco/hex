@@ -455,8 +455,8 @@ final class AutocorrectEngine {
         if let partner {
             // Both languages' candidates, those of the language the words before are in
             // first; spelling guesses only for a word neither knows.
-            let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2)
-            let theirs = partner.candidates(for: token, autoFix: autoFix, guesses: !knowsAsTyped(token), limit: 2)
+            let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2, model: predictionModel)
+            let theirs = partner.candidates(for: token, autoFix: autoFix, guesses: !knowsAsTyped(token), limit: 2, model: partner.decoder?.model)
             let leansPartner = languageLean(partner, token: token) > 0
             let (first, second) = leansPartner ? (theirs, mine) : (mine, theirs)
             for index in 0..<max(first.count, second.count) {
@@ -466,7 +466,7 @@ final class AutocorrectEngine {
                 }
             }
         } else {
-            pool += candidates(for: token, autoFix: autoFix, guesses: true, limit: 2 - pool.count)
+            pool += candidates(for: token, autoFix: autoFix, guesses: true, limit: 2 - pool.count, model: predictionModel)
         }
 
         let literal = KeyboardSuggestion(displayText: "“\(token)”", replacement: token, kind: .keepLiteral)
@@ -489,7 +489,7 @@ final class AutocorrectEngine {
     /// strip), at most `limit`: a learned fix or contraction space won't apply, Spatial
     /// autocorrect's other readings of your taps, spelling guesses for a word the dictionary
     /// doesn't know (only with `guesses`), then completions.
-    private func candidates(for token: String, autoFix: String?, guesses: Bool, limit: Int) -> [String] {
+    private func candidates(for token: String, autoFix: String?, guesses: Bool, limit: Int, model: TypingDecoderModel?) -> [String] {
         let lower = token.lowercased()
         var pool: [String] = autoFix.map { [$0] } ?? []
         let start = pool.count
@@ -505,6 +505,16 @@ final class AutocorrectEngine {
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
                 pool.append(Self.matchCase(of: token, onto: suggested))
             }
+        }
+
+        // A short prefix is usually an unfinished word. Reserve a slot for its most likely
+        // completion in this phrase without changing what space does to the literal.
+        var predictions: [String] = []
+        if pool.count < end, token.count <= 3, let model, model.language == language.rawValue {
+            let previous = Self.previousWord(beforeInput ?? "", token: token)
+            predictions = model.completions(of: lower, after: previous, allowing: { mayOffer($0, after: previous) })
+                .map { Self.matchCase(of: token, onto: $0) }
+            if autoFix == nil, let first = predictions.first(where: { !has($0) }) { pool.append(first) }
         }
 
         // Spatial autocorrect's other readings of your taps.
@@ -532,6 +542,7 @@ final class AutocorrectEngine {
         }
 
         // Completions of what you're typing, the likeliest first.
+        for item in predictions where pool.count < end && !has(item) { pool.append(item) }
         if pool.count < end {
             for item in rankedCompletions(for: token) where item != token && !has(item) {
                 pool.append(item)

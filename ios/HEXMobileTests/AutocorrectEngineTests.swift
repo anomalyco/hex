@@ -557,6 +557,22 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(strip(engine.autocorrect, "Th").dropFirst().first, "The")
     }
 
+    func testShortCompletionsFollowThePhraseAndKeepTheTypedCase() throws {
+        engine.autoCapitalizes = false
+        engine.autocorrect.isEnabled = false
+        for (language, prefix, expected) in [(KeyboardLanguage.english, "I would li", "like"),
+                                               (.english, "I would Li", "Like"),
+                                               (.spanish, "muchas gr", "gracias")] {
+            engine.language = language
+            let model = try XCTUnwrap(TypingDecoderModel.bundled(language.rawValue))
+            let strip = engine.autocorrect.suggestions(
+                beforeInput: prefix, field: .text, autocorrectionType: .default, predictionModel: model
+            )
+            XCTAssertEqual(strip.dropFirst().first?.replacement, expected)
+            XCTAssertFalse(strip.contains { $0.willAutoReplace })
+        }
+    }
+
     // MARK: - Spatial autocorrect (the bundled models)
 
     private func useDecoder(_ language: KeyboardLanguage = .english) throws {
