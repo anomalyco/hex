@@ -2704,7 +2704,10 @@ final class KeyboardClipboardTests: XCTestCase {
         defer { UIPasteboard.remove(withName: pasteboard.name) }
         let tracker = KeyboardClipboardTracker(defaults: defaults)
         func offer(appleKeyboard: Bool) -> KeyboardClipboardOffer? {
-            tracker.offer(textContentType: .oneTimeCode, hasFullAccess: true, hasAppleKeyboard: { appleKeyboard }, pasteboard: pasteboard)
+            tracker.offer(
+                textContentType: .oneTimeCode, keyboardType: .numberPad, autocorrectionType: .default, fieldIsEmpty: true,
+                hasFullAccess: true, hasAppleKeyboard: { appleKeyboard }, pasteboard: pasteboard
+            )
         }
         XCTAssertEqual(offer(appleKeyboard: true), .code(canPaste: false))
         XCTAssertNil(offer(appleKeyboard: false), "Hex and Emoji only: the next keyboard gets no code (TestFlight build 56)")
@@ -2712,9 +2715,38 @@ final class KeyboardClipboardTests: XCTestCase {
         XCTAssertEqual(offer(appleKeyboard: true), .code(canPaste: true))
         XCTAssertEqual(offer(appleKeyboard: false), .paste, "a copied code still pastes")
         XCTAssertEqual(
-            tracker.offer(textContentType: nil, hasFullAccess: true, hasAppleKeyboard: { XCTFail("asked outside a code field"); return true }, pasteboard: pasteboard),
+            tracker.offer(
+                textContentType: nil, keyboardType: .default, autocorrectionType: .default, fieldIsEmpty: true,
+                hasFullAccess: true, hasAppleKeyboard: { XCTFail("asked outside a code field"); return true }, pasteboard: pasteboard
+            ),
             .paste
         )
+    }
+
+    /// TestFlight build 56: ChatGPT's and Capy's message boxes kept Paste and Code from Messages
+    /// in place of suggestions. A `.oneTimeCode` box with letters and default autocorrection is
+    /// a chat box; Paste shows only while the field is empty, as Apple's keyboard offers a copy.
+    func testChipsGiveWayToSuggestionsInAChatBox() {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        let tracker = KeyboardClipboardTracker(defaults: defaults)
+        func offer(
+            _ keyboardType: UIKeyboardType, _ autocorrection: UITextAutocorrectionType, empty: Bool = true
+        ) -> KeyboardClipboardOffer? {
+            tracker.offer(
+                textContentType: .oneTimeCode, keyboardType: keyboardType, autocorrectionType: autocorrection, fieldIsEmpty: empty,
+                hasFullAccess: true, hasAppleKeyboard: { true }, pasteboard: pasteboard
+            )
+        }
+        XCTAssertNil(offer(.default, .default), "a chat box with nothing copied: suggestions")
+        XCTAssertEqual(offer(.default, .yes), .code(canPaste: false), "Safari's autocomplete=one-time-code")
+        XCTAssertEqual(offer(.default, .no), .code(canPaste: false))
+        XCTAssertEqual(offer(.asciiCapableNumberPad, .default), .code(canPaste: false))
+        XCTAssertNil(offer(.numberPad, .default, empty: false), "typing a code by hand")
+        pasteboard.string = "See you at 7"
+        XCTAssertEqual(offer(.default, .default), .paste)
+        XCTAssertNil(offer(.default, .default, empty: false), "after a word the strip suggests")
+        XCTAssertEqual(offer(.numberPad, .default), .code(canPaste: true))
     }
 
     func testApplesKeyboardIsNotEmojiOrAnExtension() {

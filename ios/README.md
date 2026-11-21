@@ -288,7 +288,12 @@ never at a launch by itself.
     while the bar shows the Full Access hint or a notice. A tap there does nothing,
     a slide cancels it, and a word's slot keeps its tap and its hold (Add to
     vocabulary). The bar's Paste is plain text on the words' line, and Paste and
-    Next keyboard centre on the keyboard's middle, not the strip's.
+    Next keyboard centre on the keyboard's middle, not the strip's. Paste shows
+    only while the field is empty, as Apple's keyboard offers a copy, and Code
+    from Messages only in an empty one-time-code field with a number pad or with
+    autocorrection set either way (as WebKit sets it on Safari's
+    `autocomplete="one-time-code"`): a chat box that marks itself one-time-code
+    keeps its suggestions.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly
