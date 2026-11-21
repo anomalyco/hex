@@ -1019,6 +1019,14 @@ final class AutocorrectEngine {
         if source == target { return 0 }
         let s = Array(source)
         let t = Array(target)
+        // Polish: diacritics you didn't add, however many ("zolw" -> "żółw", "maly" -> "mały"),
+        // are as cheap as one missing Spanish accent, a little more for each further one.
+        if language == .polish, s.count == t.count {
+            let missed = zip(s, t).filter { $0 != $1 }
+            if !missed.isEmpty, missed.allSatisfy({ samePolishLetterIgnoringDiacritics($0, $1) }) {
+                return 0.15 + 0.05 * Double(missed.count - 1)
+            }
+        }
         let ds = s.count - t.count
         guard abs(ds) <= 1 else { return nil }
 
@@ -1070,6 +1078,12 @@ final class AutocorrectEngine {
         guard a != b else { return false }
         let base: (Character) -> Unicode.Scalar? = { String($0).decomposedStringWithCanonicalMapping.unicodeScalars.first }
         return base(a) == base(b)
+    }
+
+    /// Whether two lowercase letters are one Polish letter with or without its diacritic (a/ą,
+    /// z/ż, l/ł: ł has no decomposition, so it is named).
+    static func samePolishLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
+        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
     }
 
     private static let keyCoordinates: [KeyboardLanguage: [Character: (Double, Double)]] = Dictionary(

@@ -583,7 +583,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
   the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
   is the cheapest fix of all ("aqui" → "aquí", "manana" → "mañana"; a word the
-  dictionary knows, such as "esta", is never changed). A two-letter non-word one
+  dictionary knows, such as "esta", is never changed); in Polish every missing
+  diacritic in a word counts as one such fix ("zolw" → "żółw", "maly" → "mały"). The
+  iOS 27.2 simulator lists `pl_PL` but its checker flags no word, so Polish fixes are
+  checked against a stub dictionary there. A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
   ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
   Spanish and Italian only). Auto-capitalization is unchanged.

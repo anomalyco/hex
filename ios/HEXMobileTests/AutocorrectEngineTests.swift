@@ -281,6 +281,37 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Привіт як справи мʼясо їжак єнот ґанок дякую сімʼя на і ")
     }
 
+    /// Polish types with iOS's pl dictionary, and missing diacritics are the cheapest fix there
+    /// is, however many a word lacks ("zolw" -> "żółw", "maly" -> "mały": ł has no
+    /// decomposition), as a missing Spanish accent is; other languages keep one edit. The
+    /// iOS 27.2 simulator lists pl_PL but its checker flags no word and offers no Polish
+    /// guess, so the fixes run against a stub dictionary answering as an iPhone's would.
+    func testPolishRestoresMissingDiacritics() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "maly", to: "mały", language: .polish)!, 0.15, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "zolw", to: "żółw", language: .polish)!, 0.25, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "dzien", to: "dzień", language: .polish)!, 0.15, accuracy: 0.001)
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "zolw", to: "żółw", language: .english), "three edits elsewhere")
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "zolw", to: "żółt", language: .polish), "w and t aren't one letter")
+        engine.language = .polish
+        XCTAssertEqual(engine.autocorrect.language, .polish)
+        XCTAssertTrue(engine.autocorrect.hasDictionary)
+        XCTAssertNil(engine.autocorrect.decoder, "no Polish typing model")
+
+        let polish = stubbed {
+            $0.valid = ["żółw", "mały", "mamy", "dzień", "jest", "dobry"]
+            // "mamy" is one far key from "maly" and listed first; "mały" only lacks its ł.
+            $0.guessTable = ["zolw": ["żółw"], "maly": ["mamy", "mały"], "dzien": ["dzień"]]
+        }
+        polish.setLanguage(.polish, available: ["pl_PL", "en_US"])
+        XCTAssertEqual(fix(polish, "zolw"), "żółw")
+        XCTAssertEqual(fix(polish, "Zolw"), "Żółw")
+        XCTAssertEqual(fix(polish, "maly"), "mały")
+        XCTAssertEqual(fix(polish, "dzien"), "dzień")
+        XCTAssertNil(fix(polish, "jest"), "a word stays")
+        polish.setLanguage(.spanish, available: ["pl_PL", "es_ES"])
+        XCTAssertNil(fix(polish, "zolw"), "three diacritics are three edits on another layout")
+    }
+
     /// Serbian (Latin) has no dictionary on iOS: nothing is "corrected", into English or anything else.
     func testSerbianLatinWithoutADictionaryCorrectsNothing() {
         engine.language = .serbianLatin
