@@ -133,13 +133,17 @@ nonisolated struct DictationPipeline: Sendable {
     /// `language`.
     @MainActor
     func run(
-        _ heard: String,
+        _ spoken: String,
         translationSource: Locale.Language? = nil,
         refine: ((String) async -> String)? = nil
     ) async -> Stages {
         let translation = DictationTranslationSettings()
-        let heard = hinglish && HinglishSettings.isHindi(language) ? HinglishRomanizer.romanize(heard) : heard
-        let fixed = DictationCorrections.apply(corrections, to: heard)
+        let romanizes = hinglish && HinglishSettings.isHindi(language)
+        // Apple translates Hindi from Devanagari, not Hinglish's Latin letters: a dictation that
+        // may go into another language keeps its Devanagari, romanized only if it goes in as spoken.
+        let translatesHindi = romanizes && translation.isEnabled && !HinglishSettings.isHindi(translation.targetLanguage)
+        let heard = romanizes ? HinglishRomanizer.romanize(spoken) : spoken
+        let fixed = DictationCorrections.apply(corrections, to: translatesHindi ? spoken : heard)
         let spelled = VocabularySpelling.apply(vocabulary, to: fixed)
         let tagged = await CleanupTagger.cleanIfEnabled(
             spelled,
@@ -147,14 +151,15 @@ nonisolated struct DictationPipeline: Sendable {
             language: language,
             protectedTerms: DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: corrections)
         )
-        let cleaned = await refine?(tagged) ?? tagged
+        let refined = await refine?(tagged) ?? tagged
         let outcome = await DictationTranslator.translate(
-            cleaned,
+            refined,
             source: translationSource ?? Locale(identifier: language).language,
             settings: translation,
             engine: translationEngine
         )
         let translated = outcome.text
+        let cleaned = translatesHindi && translated == nil ? HinglishRomanizer.romanize(refined) : refined
         // A translation is formatted in the language it is now in.
         let formatLanguage = translated == nil ? language : translation.targetLanguage
         return Stages(

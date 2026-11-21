@@ -594,7 +594,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   Dictation (`hex-dictation://keyboard/translation`). Settings keeps the
   last failure (`experiments.translateDictation.lastFailure`, with Apple's
   error code, never the text) beside the download until a dictation
-  translates. Where you dictate, a "Translate to
+  translates. With Hinglish on, Hindi going into another language is
+  translated from its Devanagari, and romanized only if it goes in as
+  spoken. Where you dictate, a "Translate to
   English" switch turns it on or off without opening Hex (testers asked for
   a button, not a setting): a row in the full keyboard's Hex key menu, lit
   with a checkmark while on, and a chip in the dictation bar's language tray.

@@ -627,6 +627,36 @@ final class HinglishRomanizerTests: XCTestCase {
         XCTAssertEqual(settings.name(for: "hi-IN"), "Hinglish")
         XCTAssertNil(settings.name(for: "en-IN"))
     }
+
+    /// Apple translates Hindi from Devanagari, not Hinglish's Latin letters: a Hindi dictation
+    /// going into English is translated from what Apple Speech wrote, and one that goes in as
+    /// spoken is still Hinglish.
+    @MainActor
+    func testHinglishTranslatesFromDevanagari() async {
+        let translation = DictationTranslationSettings()
+        let wasEnabled = translation.isEnabled, wasTarget = translation.targetLanguage, wasFailure = translation.lastFailure
+        defer {
+            translation.isEnabled = wasEnabled
+            translation.targetLanguage = wasTarget
+            translation.lastFailure = wasFailure
+        }
+        translation.isEnabled = true
+        translation.targetLanguage = "en"
+        let heard = "मेरा फ़ोन चार्ज नहीं हो रहा"
+        let stub = StubTranslator()
+        stub.replies = [.success("my phone isn't charging")]
+        var pipeline = DictationPipeline(style: .polished, language: "hi-IN", hinglish: true)
+        pipeline.translationEngine = stub.engine
+        var stages = await pipeline.run(heard)
+        XCTAssertEqual(stub.inputs, [heard])
+        XCTAssertEqual(stages.formatted, "My phone isn't charging.")
+        XCTAssertEqual(stages.heard, "mera phone charge nahi ho raha", "learning still compares Latin words")
+
+        stub.status = .supported
+        stages = await pipeline.run(heard)
+        XCTAssertEqual(stages.formatted, "Mera phone charge nahi ho raha.", "as spoken, in Hinglish")
+        XCTAssertEqual(stages.translationFailure?.fix, "Download Hindi in Settings")
+    }
 }
 
 
