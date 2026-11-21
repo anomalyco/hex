@@ -115,7 +115,9 @@ final class KeyboardViewModel: ObservableObject {
     /// A target picked in the Hex key menu; it also turns translation on.
     var onTranslationTargetSelected: ((String) -> Void)?
     var onSpace: (() -> Void)?
-    /// A long press that opened Remove, for the selection haptic.
+    /// The dictation bar's space bar slid as a trackpad: move the cursor by this many characters.
+    var onMoveCursor: ((Int) -> Void)?
+    /// A trackpad step or a long press that opened Remove, for the selection haptic.
     var onSelectionStep: (() -> Void)?
     /// A punctuation key on the dictation bar.
     var onInsertText: ((String) -> Void)?
@@ -469,6 +471,7 @@ private struct TopBarTriggerButtonStyle: ButtonStyle {
 
 private struct RepeatDeleteKey: View {
     let palette: KeyboardChromePalette
+    var glyphOpacity: Double = 1
     let onDelete: () -> Void
     @State private var isPressing = false
     @State private var repeatTask: Task<Void, Never>?
@@ -477,6 +480,7 @@ private struct RepeatDeleteKey: View {
         Image(systemName: "delete.left")
             .font(.system(size: 15, weight: .medium))
             .foregroundStyle(palette.textBase)
+            .opacity(glyphOpacity)
             .frame(width: 44, height: 42)
             .background(
                 isPressing ? palette.keyPressedFill : palette.keyFill,
@@ -505,6 +509,112 @@ private struct RepeatDeleteKey: View {
                     }
             )
             .accessibilityLabel("Delete")
+    }
+}
+
+/// The dictation bar's space bar, a cursor trackpad like the full keyboard's
+/// (`FullKeyboardEngine`): sliding `trackpadActivationDistance`, or holding still for
+/// `trackpadHoldDelay`, starts it, and each `trackpadPointsPerCharacter` along moves the cursor
+/// a character with a selection tick. Letting go of a trackpad types nothing; a tap types a space.
+private struct TrackpadSpaceKey: View {
+    let palette: KeyboardChromePalette
+    let minWidth: CGFloat
+    @Binding var isTrackpad: Bool
+    let onPress: () -> Void
+    let onSpace: () -> Void
+    let onMove: (Int) -> Void
+    let onStep: () -> Void
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @GestureState private var isTouching = false
+    @State private var isPressing = false
+    @State private var startX: CGFloat = 0
+    @State private var anchorX: CGFloat = 0
+    @State private var lastX: CGFloat = 0
+    @State private var holdTask: Task<Void, Never>?
+
+    var body: some View {
+        Text("space")
+            .font(.system(size: 15, weight: .regular))
+            .foregroundStyle(palette.textMuted)
+            .lineLimit(1)
+            .opacity(isTrackpad ? 0 : 1)
+            .frame(minWidth: minWidth, maxWidth: .infinity)
+            .frame(height: 42)
+            .background(
+                isPressing ? palette.keyPressedFill : palette.keyFill,
+                in: RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous)
+            )
+            .shadow(color: palette.keyShadow, radius: 0.5, x: 0, y: 1)
+            .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .updating($isTouching) { _, touching, _ in touching = true }
+                    .onChanged { value in moved(to: value.location.x, from: value.startLocation.x) }
+                    .onEnded { _ in finish(typesSpace: true) }
+            )
+            .onChange(of: isTouching) { _, touching in
+                guard !touching else { return }
+                // A cancelled touch never reaches onEnded, and types nothing; an ended one already finished.
+                DispatchQueue.main.async { finish(typesSpace: false) }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction { onSpace() }
+    }
+
+    private func moved(to x: CGFloat, from start: CGFloat) {
+        lastX = x
+        if !isPressing {
+            isPressing = true
+            startX = start
+            onPress()
+            holdTask?.cancel()
+            holdTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(FullKeyboardEngine.trackpadHoldDelay))
+                guard !Task.isCancelled, isPressing, !isTrackpad else { return }
+                begin(at: lastX)
+            }
+        }
+        guard isTrackpad else {
+            if abs(x - startX) >= FullKeyboardEngine.trackpadActivationDistance {
+                begin(at: x)
+            }
+            return
+        }
+        let step = FullKeyboardEngine.trackpadPointsPerCharacter
+        let steps = Int(((x - anchorX) / step).rounded(.towardZero))
+        guard steps != 0 else { return }
+        anchorX += CGFloat(steps) * step
+        onMove(steps)
+        onStep()
+    }
+
+    private func begin(at x: CGFloat) {
+        holdTask?.cancel()
+        holdTask = nil
+        anchorX = x
+        setTrackpad(true)
+        onStep()
+    }
+
+    private func finish(typesSpace: Bool) {
+        holdTask?.cancel()
+        holdTask = nil
+        guard isPressing else { return }
+        isPressing = false
+        if isTrackpad {
+            setTrackpad(false)
+        } else if typesSpace {
+            onSpace()
+        }
+    }
+
+    /// The glyphs blank at once under Reduce Motion, as the full keyboard's do, else fade quickly.
+    private func setTrackpad(_ on: Bool) {
+        withAnimation(reduceMotion ? nil : .easeOut(duration: 0.12)) {
+            isTrackpad = on
+        }
     }
 }
 
@@ -684,6 +794,8 @@ struct KeyboardSurfaceView: View {
     @GestureState private var isPressingWell = false
     /// That long press's own touch-up, so it doesn't also pick the language.
     @State private var removeTookPress = false
+    /// The space bar slides the cursor: the keys' glyphs blank out, as on the full keyboard.
+    @State private var isTrackpadActive = false
 
     private static let wellHeight: CGFloat = 44
     private static let controlHeight: CGFloat = 34
@@ -1393,6 +1505,9 @@ struct KeyboardSurfaceView: View {
     private static let minSpaceWidth: CGFloat = 60
     private static let keyHeight: CGFloat = 42
 
+    /// The keys' glyphs while the space bar slides the cursor: blank, as on the full keyboard.
+    private var glyphOpacity: Double { isTrackpadActive ? 0 : 1 }
+
     private var utilityRow: some View {
         ViewThatFits(in: .horizontal) {
             utilityKeys(punctuation: 8)
@@ -1409,6 +1524,7 @@ struct KeyboardSurfaceView: View {
         return HStack(spacing: 5) {
             if model.needsGlobeKey {
                 GlobeKeyRepresentable(controller: model.inputViewController, isDark: p.isDark)
+                    .opacity(glyphOpacity)
                     .frame(width: 38, height: 42)
                     .background(
                         p.keyFill,
@@ -1425,6 +1541,7 @@ struct KeyboardSurfaceView: View {
                     Image(systemName: "face.smiling")
                         .font(.system(size: 17, weight: .regular))
                         .foregroundStyle(p.textBase)
+                        .opacity(glyphOpacity)
                         .frame(width: 38, height: 42)
                         .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
                 }
@@ -1440,27 +1557,24 @@ struct KeyboardSurfaceView: View {
                     Text(mark)
                         .font(.system(size: 19, weight: .regular))
                         .foregroundStyle(p.textBase)
+                        .opacity(glyphOpacity)
                         .frame(width: Self.punctuationKeyWidth, height: 42)
                         .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
                 }
                 .buttonStyle(KeyboardKeyButtonStyle(palette: p))
             }
 
-            Button {
-                model.onKeyFeedback?()
-                model.onSpace?()
-            } label: {
-                Text("space")
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(p.textMuted)
-                    .lineLimit(1)
-                    .frame(minWidth: Self.minSpaceWidth, maxWidth: .infinity)
-                    .frame(height: 42)
-                    .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
-            }
-            .buttonStyle(KeyboardKeyButtonStyle(palette: p))
+            TrackpadSpaceKey(
+                palette: p,
+                minWidth: Self.minSpaceWidth,
+                isTrackpad: $isTrackpadActive,
+                onPress: { model.onKeyFeedback?() },
+                onSpace: { model.onSpace?() },
+                onMove: { model.onMoveCursor?($0) },
+                onStep: { model.onSelectionStep?() }
+            )
 
-            RepeatDeleteKey(palette: p) {
+            RepeatDeleteKey(palette: p, glyphOpacity: glyphOpacity) {
                 model.onKeyFeedback?()
                 model.onDelete?()
             }
@@ -1472,6 +1586,7 @@ struct KeyboardSurfaceView: View {
                 Image(systemName: "return")
                     .font(.system(size: 15, weight: .medium))
                     .foregroundStyle(p.textBase)
+                    .opacity(glyphOpacity)
                     .frame(width: 48, height: 42)
                     .contentShape(RoundedRectangle(cornerRadius: HexTheme.controlRadius, style: .continuous))
             }

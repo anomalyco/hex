@@ -493,6 +493,13 @@ final class KeyboardViewController: UIInputViewController {
             self?.observeDictationEdits(fromKeys: true)
             self?.typingLog?.context("space")
         }
+        viewModel.onMoveCursor = { [weak self] offset in
+            self?.typingLog?.edit("cursor", [
+                TypingLogField("offset", .int(offset)),
+                TypingLogField("src", .string("bar")),
+            ])
+            self?.textDocumentProxy.adjustTextPosition(byCharacterOffset: offset)
+        }
         viewModel.onInsertText = { [weak self] text in
             self?.typingLog?.edit("insert", [
                 TypingLogField("inserted", .string(text)),

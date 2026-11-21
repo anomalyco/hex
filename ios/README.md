@@ -813,7 +813,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   keyboard; it still counts towards double-space for a period. Holding the space bar
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
-  the keyboard switches between two or more languages (Keyboard languages, above).
+  the keyboard switches between two or more languages (Keyboard languages, above). The
+  dictation bar's space bar is the same trackpad (the same still hold or a 10 pt slide, a
+  character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
+  build 56 asked for it), and a tap still types a space.
 - **Slides from 123, #+= and shift (full keyboard):** As on Apple's keyboard, holding 123
   (or ABC, or #+=) shows its page, and sliding shows the pop-up of the key under the
   finger (or darkens it with Key pop-ups off); letting go types that key and goes back to
