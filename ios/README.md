@@ -271,8 +271,8 @@ never at a launch by itself.
     offsets, and word-level pairs with counts and at most one word of context on
     each side. Only plain text fields that allow autocorrect count
     (`TypingJournal.allows`). Nothing leaves the iPhone.
-    - **Typing:** words you erase and retype, autocorrect fixes you undo with one
-      backspace, suggestions you pick, and autocorrections you turn down by
+    - **Typing:** words you erase and retype, autocorrect fixes you undo from the
+      strip, suggestions you pick, and autocorrections you turn down by
       tapping what you typed. A typo you fixed the same way twice (never a
       completion, never fixed two ways) becomes a fix on space, only a suggestion
       when what you typed is a real word; an autocorrection you turned down twice
@@ -404,7 +404,7 @@ never at a launch by itself.
       letter meant, and only once the next word shows the word stood: a word left as typed
       (letters the key under the finger typed, not ones the next-letter odds claimed), a
       picked suggestion of the same length (at most two letters changed), a word kept over
-      an autocorrection by undoing it or tapping it, and a letter erased and retyped as a
+      an autocorrection by reverting it from the strip or tapping it, and a letter erased and retyped as a
       neighbour (the erased tap is labelled with the letter that replaced it). Never an
       autocorrection left in place (or a word before it revised, or two joined), a swipe, a
       slide, a strip touch, an accent pick, or a password, code, email, URL, secure or
@@ -907,6 +907,13 @@ never at a launch by itself.
   dictation bar's space bar is the same trackpad (the same still hold or a 10 pt slide, a
   character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
   build 56 asked for it), and a tap still types a space.
+- **Delete after an autocorrection (full keyboard):** As on Apple's keyboard (black box,
+  iOS 27.2), delete takes only the space or mark after the corrected words, and the strip's
+  left slot offers what you typed, highlighted with an undo arrow (Apple's text view shows
+  it in a bubble under the word, which a keyboard can't draw); tapping it puts that back,
+  without the space, and turns the fix down for the session. Space keeps the fix. The offer
+  comes back whenever the cursor is at the end of the latest autocorrection again, revisions
+  ("well see" to "we'll see") and joins included. Text replacements offer none, as on Apple's.
 - **Slides from 123, #+= and shift (full keyboard):** As on Apple's keyboard, holding 123
   (or ABC, or #+=) shows its page, and sliding shows the pop-up of the key under the
   finger (or darkens it with Key pop-ups off); letting go types that key and goes back to

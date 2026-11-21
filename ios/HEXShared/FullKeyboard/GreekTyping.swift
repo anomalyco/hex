@@ -43,7 +43,6 @@ extension FullKeyboardEngine {
     func typeGreek(_ text: inout String) -> Bool {
         let before = target.documentContextBeforeInput
         if let vowel = GreekTyping.accenting(text, after: before) {
-            autocorrect.clearPendingUndo()
             target.deleteBackward()
             target.insertText(vowel)
             didEdit()

@@ -1481,7 +1481,7 @@ final class FullKeyboardEngineTests: XCTestCase {
 
     /// X (Erick): "If I add punctuation after a typo autocorrect does not fix the typo." A
     /// mark that closes a word fixes it as space does and goes in after the fix, as on Apple's
-    /// keyboard; backspace right after takes both back, as after a space.
+    /// keyboard; delete right after takes the mark, and the strip offers the typo back.
     func testPunctuationAfterATypoFixesItFirst() {
         for mark in [",", ".", "!", "?", ";", ":", ")", "\""] {
             target = FixtureTextTarget()
@@ -1501,7 +1501,10 @@ final class FullKeyboardEngineTests: XCTestCase {
         punctuate(".")
         XCTAssertTrue(target.text.hasSuffix(" receive."))
         tap(.delete)
-        XCTAssertTrue(target.text.hasSuffix(" recieve"), "one backspace takes back the mark and the fix")
+        XCTAssertTrue(target.text.hasSuffix(" receive"), "delete takes the mark")
+        XCTAssertEqual(engine.suggestions.first?.kind, .revert)
+        engine.acceptSuggestion(engine.suggestions[0])
+        XCTAssertTrue(target.text.hasSuffix(" recieve"), "the strip puts back what was typed")
         punctuate(".")
         XCTAssertTrue(target.text.hasSuffix(" recieve."), "the word you kept stays")
 
@@ -2257,6 +2260,8 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(learned(touch).weak, 0, "an autocorrection left in place can't confirm itself")
         type("teh ")
         engine.deleteBackward()
+        XCTAssertEqual(engine.suggestions.first?.kind, .revert)
+        engine.acceptSuggestion(engine.suggestions[0])
         type(" dog it ")
         XCTAssertEqual(target.text, "the cat teh dog it ")
         XCTAssertEqual(learned(touch).weak, 3 + 3, "cat and dog, as typed")

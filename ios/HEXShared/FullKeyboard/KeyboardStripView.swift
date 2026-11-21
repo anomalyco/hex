@@ -231,9 +231,9 @@ final class KeyboardStripView: UIView {
     }
 
     /// Which slot shows each suggestion: in order, except a lone emoji, swiped word or reading
-    /// of one, which takes the centre.
+    /// of one, which takes the centre. A revert keeps the left slot.
     static func slots(for suggestions: [KeyboardSuggestion]) -> [Int] {
-        if suggestions.count == 1, suggestions[0].kind != .keepLiteral, suggestions[0].kind != .secondary { return [1] }
+        if suggestions.count == 1, ![.keepLiteral, .secondary, .revert].contains(suggestions[0].kind) { return [1] }
         return Array(suggestions.indices.prefix(3))
     }
 
@@ -376,9 +376,11 @@ final class KeyboardStripView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard !showsUndo, !showsClipboard, !showsFullAccessHint, notice == nil, statusLabel.isHidden, bounds.width > 60 else { return }
-        // Hide the divider adjacent to a highlighted primary pill, matching Apple's strip.
+        // Hide the divider adjacent to a highlighted primary pill, matching Apple's strip, and the
+        // one beside a revert's.
         let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
         guard !primaryHighlighted else { return }
+        let reverting = currentSuggestions.first?.kind == .revert
 
         // Apple's dividers: 1 pt wide, ending on the slot boundary, 24 pt tall on the text's centre.
         let lineH: CGFloat = min(24, bounds.height - 2)
@@ -388,7 +390,7 @@ final class KeyboardStripView: UIView {
         // field it offers nothing for).
         let filled = Set(Self.slots(for: currentSuggestions))
         for (index, slot) in currentSlotFrames.prefix(2).enumerated()
-        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) {
+        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) && !(reverting && index == 0) {
             UIRectFill(CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH))
         }
     }
@@ -447,6 +449,7 @@ final class KeyboardStripView: UIView {
             isAccessibilityElement = suggestion != nil
             isUserInteractionEnabled = suggestion != nil
             accessibilityLabel = suggestion?.displayText
+            accessibilityHint = suggestion?.kind == .revert ? "Undoes the autocorrection" : nil
             if old?.displayText != suggestion?.displayText {
                 if animated, window != nil, !UIAccessibility.isReduceMotionEnabled {
                     outgoing = old
@@ -497,9 +500,11 @@ final class KeyboardStripView: UIView {
             // Apple's words are all SF 17 pt regular, the one in the capsule included.
             let font = UIFont.systemFont(ofSize: suggestion.kind == .emoji ? 22 : 17, weight: .regular)
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
-            // The word centres in the slot, less any room the Logging mark takes.
-            let textMidX = (leadingRoom + bounds.width - trailingRoom) / 2
-            let maxTextW = max(20, min(bounds.width - 12, bounds.width - leadingRoom - trailingRoom - 8))
+            // The word centres in the slot, less any room the Logging mark takes; a revert's
+            // with its arrow after it.
+            let arrowRoom = suggestion.kind == .revert ? Self.revertArrowSize + Self.revertArrowGap : 0
+            let textMidX = (leadingRoom + bounds.width - trailingRoom - arrowRoom) / 2
+            let maxTextW = max(20, min(bounds.width - 12, bounds.width - leadingRoom - trailingRoom - 8) - arrowRoom)
             let text = suggestion.displayText
             let size = (text as NSString).size(withAttributes: attributes)
             guard size.width > maxTextW else {
@@ -546,9 +551,22 @@ final class KeyboardStripView: UIView {
             return CGFloat(x * x * (3 - 2 * x))
         }
 
+        static let revertArrowSize: CGFloat = 13
+        static let revertArrowGap: CGFloat = 5
+
+        /// Apple's revert bubble's undo arrow, after the word.
+        private func drawRevertArrow(after word: Word, ink: UIColor) {
+            let config = UIImage.SymbolConfiguration(pointSize: Self.revertArrowSize, weight: .medium)
+            guard let arrow = UIImage(systemName: "arrow.uturn.backward", withConfiguration: config)?
+                .withTintColor(ink, renderingMode: .alwaysOriginal) else { return }
+            let textWidth = word.truncatedRect?.width ?? (word.text as NSString).size(withAttributes: word.attributes).width
+            let x = word.origin.x + textWidth + Self.revertArrowGap
+            arrow.draw(at: CGPoint(x: x, y: bounds.height * 0.5 - arrow.size.height / 2))
+        }
+
         override func draw(_ rect: CGRect) {
             let midY = bounds.height * 0.5
-            let pilled = suggestion != nil && (isHighlighted || suggestion?.willAutoReplace == true)
+            let pilled = suggestion != nil && (isHighlighted || suggestion?.willAutoReplace == true || suggestion?.kind == .revert)
             if pilled {
                 // Like Apple's, the highlight is a capsule as wide as its slot.
                 let pillH = max(22, bounds.height - 2 * pillInset)
@@ -558,6 +576,7 @@ final class KeyboardStripView: UIView {
             }
             let ink = pilled ? palette.stripPillText : palette.stripText
             let incoming = suggestion.map { layout($0, ink: ink) }
+            if let incoming, suggestion?.kind == .revert { drawRevertArrow(after: incoming, ink: ink) }
             guard var leaving = outgoing.map({ layout($0, ink: ink) }) else {
                 if let incoming { draw(incoming) { _ in 1 } }
                 return

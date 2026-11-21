@@ -33,7 +33,6 @@ final class DeleteWordSwipe {
         if !isActive {
             guard wanted > 0 else { return false }
             isActive = true
-            engine.autocorrect.clearPendingUndo()
             engine.typingLog?.ui("delete_swipe_start", [TypingLogField("id", .int(touchID))])
         }
         var changed = false

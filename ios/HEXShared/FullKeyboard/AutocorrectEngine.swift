@@ -17,6 +17,9 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
         /// Another reading of the word just swiped (Settings › Keyboard › Swipe typing): tapping it
         /// puts it in that word's place.
         case swiped
+        /// What you typed before autocorrect changed it, offered once the cursor is back at the
+        /// end of the corrected words (delete takes only their space): tapping it puts it back.
+        case revert
     }
 
     let displayText: String
@@ -151,21 +154,6 @@ final class LearnedWordsStore {
 /// deterministic contractions/transpositions, QWERTY-ranked `UITextChecker`, and `LearnedWordsStore`.
 @MainActor
 final class AutocorrectEngine {
-    struct AppliedCorrection: Equatable {
-        /// One word backspace puts back as typed (`from`), and what autocorrect made it.
-        struct Change: Equatable {
-            let from: String
-            let to: String
-            /// The language the fix was made in, for what the keys learn from undoing it.
-            var language: KeyboardLanguage? = nil
-        }
-
-        let original: String
-        let insertedText: String
-        /// The words in `original` that autocorrect changed; backspace keeps each as typed.
-        let changes: [Change]
-    }
-
     let checker: TextChecking
     /// The words kept in this engine's language: the one shared list, or with Learn each
     /// language separately on, this language's own (`learnsPerLanguage`).
@@ -365,16 +353,17 @@ final class AutocorrectEngine {
         return nil
     }
 
-    func clearPendingUndo() {
+    func forgetCorrection() {
         lastCorrection = nil
     }
 
-    func recordAppliedCorrection(original: String, insertedText: String, changes: [AppliedCorrection.Change]) {
-        lastCorrection = AppliedCorrection(original: original, insertedText: insertedText, changes: changes)
+    func recordAppliedCorrection(original: String, corrected: String, anchor: String, changes: [AppliedCorrection.Change]) {
+        lastCorrection = AppliedCorrection(original: original, corrected: corrected, changes: changes, anchor: anchor)
     }
 
-    func consumePendingUndo() -> AppliedCorrection? {
-        defer { lastCorrection = nil }
+    /// The latest autocorrection when the cursor is right after it (`AppliedCorrection.isAtEnd`).
+    func revertibleCorrection(before: String?) -> AppliedCorrection? {
+        guard let lastCorrection, lastCorrection.isAtEnd(of: before) else { return nil }
         return lastCorrection
     }
 

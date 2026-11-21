@@ -355,6 +355,8 @@ final class TypingLogger {
                 fields.append(TypingLogField("kind", .string("emoji")))
             case .swiped:
                 fields.append(TypingLogField("kind", .string("swiped")))
+            case .revert:
+                fields.append(TypingLogField("kind", .string("revert")))
             }
             return .object(fields)
         })
