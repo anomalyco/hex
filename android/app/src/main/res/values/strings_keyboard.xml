@@ -1,0 +1,56 @@
+<resources>
+    <!-- The keyboard's own strings, apart from the app's so each can change without the other. -->
+    <string name="keyboard_hint_hold">Hold Hex to talk</string>
+    <string name="keyboard_hint_password">Dictation off in password fields</string>
+    <string name="keyboard_hint_microphone">Allow the microphone in Hex</string>
+    <string name="keyboard_cancel_dictation">Cancel dictation</string>
+    <string name="keyboard_finish_dictation">Finish dictation</string>
+    <string name="keyboard_transcribing">Transcribing</string>
+    <string name="keyboard_recording">Recording</string>
+    <string name="keyboard_literal">“%1$s”</string>
+    <string name="keyboard_keep">Keep %1$s</string>
+    <string name="keyboard_suggest">Suggest %1$s</string>
+    <string name="keyboard_menu">Hex menu</string>
+    <string name="keyboard_menu_open">"Hex menu  ›"</string>
+    <string name="keyboard_menu_done">Done</string>
+    <string name="keyboard_menu_more" translatable="false">⋯</string>
+    <string name="keyboard_numbers_label">\?123</string>
+    <string name="keyboard_numbers">Numbers and symbols</string>
+    <string name="keyboard_letters_label">ABC</string>
+    <string name="keyboard_letters">Letters</string>
+    <string name="keyboard_next">Next keyboard</string>
+    <string name="keyboard_hex">Hex dictation</string>
+    <string name="keyboard_space">Space</string>
+    <string name="keyboard_space_language">Space, %1$s. Hold to switch dictation language</string>
+    <string name="keyboard_space_translate">%1$s → English</string>
+    <string name="keyboard_period">Period</string>
+    <string name="keyboard_return">Return</string>
+    <string name="keyboard_page_numbers">123</string>
+    <string name="keyboard_page_symbols">=\\&lt;</string>
+    <string name="keyboard_more_symbols">More symbols</string>
+    <string name="keyboard_caps_lock">Caps lock</string>
+    <string name="keyboard_shift">Shift</string>
+    <string name="keyboard_delete">Delete</string>
+    <string name="keyboard_action_done">Done</string>
+    <string name="keyboard_action_go">Go</string>
+    <string name="keyboard_action_next">Next</string>
+    <string name="keyboard_action_search">Search</string>
+    <string name="keyboard_action_send">Send</string>
+    <string name="keyboard_menu_style">Style</string>
+    <string name="keyboard_menu_language">Language</string>
+    <string name="keyboard_menu_next_dictation">Next dictation</string>
+    <string name="keyboard_menu_feedback">Typing feedback</string>
+    <string name="keyboard_menu_accents">Accents</string>
+    <string name="keyboard_menu_automatic">Automatic</string>
+    <string name="keyboard_paste_english">Paste in English</string>
+    <string name="keyboard_paste_spoken">Paste as spoken</string>
+    <string name="keyboard_menu_clean">Clean up what I say</string>
+    <string name="keyboard_menu_translate">Translate what I say</string>
+    <string name="keyboard_menu_popups">Key pop-ups</string>
+    <string name="keyboard_menu_haptics">Key haptics</string>
+    <string name="keyboard_on">On</string>
+    <string name="keyboard_off">Off</string>
+    <string name="keyboard_menu_chosen" translatable="false">✓</string>
+    <string name="keyboard_menu_arrow" translatable="false">›</string>
+    <string name="keyboard_menu_more_value">"%1$s  ›"</string>
+</resources>
