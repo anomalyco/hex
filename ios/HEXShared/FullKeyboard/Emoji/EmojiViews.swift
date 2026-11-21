@@ -242,25 +242,36 @@ final class EmojiRowView: UIView, UICollectionViewDataSource, UICollectionViewDe
     }
 }
 
-/// The bar under the grid: one icon per section, the current one on a chip.
+/// The bar under the grid: one icon per section, the current one on a chip. It tracks the
+/// finger itself, as the system emoji keyboard's does (black box, iOS 27.2 simulator): a tap
+/// on a category jumps the grid to its start when the finger lifts, and a finger that slides
+/// along the bar scrubs the grid live, each icon's slot running through its own section from
+/// start to end. The panel sends it every touch in the band under the grid.
 @MainActor
 final class EmojiCategoryBar: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { refresh() } } }
+    /// A tap picked the category.
     var onSelect: ((Int) -> Void)?
+    /// A slide is over the category, this far (0 to 1) across its slot.
+    var onScrub: ((Int, CGFloat) -> Void)?
+    /// A slide moved onto another category (a light tick).
+    var onScrubStep: (() -> Void)?
     var selected = 0 {
         didSet { if selected != oldValue { refresh() } }
     }
 
-    /// How far above and below the bar a touch still counts as on its buttons.
-    var hitOutsets: UIEdgeInsets = .zero {
-        didSet { for button in buttons { button.hitOutsets = hitOutsets } }
-    }
+    /// Whether a finger is sliding along the bar: the grid follows it, not the other way.
+    private(set) var isScrubbing = false
+    /// How far (points) a finger moves along the bar before a tap becomes a slide.
+    static let scrubThreshold: CGFloat = 8
+    private var touchStartX: CGFloat?
 
     private final class BarButton: UIButton {
-        var hitOutsets: UIEdgeInsets = .zero
+        var activate: (() -> Void)?
 
-        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
-            bounds.inset(by: UIEdgeInsets(top: -hitOutsets.top, left: 0, bottom: -hitOutsets.bottom, right: 0)).contains(point)
+        override func accessibilityActivate() -> Bool {
+            activate?()
+            return true
         }
     }
 
@@ -269,6 +280,7 @@ final class EmojiCategoryBar: UIView {
 
     init(items: [(symbol: String, title: String)]) {
         super.init(frame: .zero)
+        isMultipleTouchEnabled = false
         chip.isUserInteractionEnabled = false
         chip.layer.cornerCurve = .continuous
         addSubview(chip)
@@ -280,7 +292,9 @@ final class EmojiCategoryBar: UIView {
                 UIImage(systemName: item.symbol, withConfiguration: UIImage.SymbolConfiguration(pointSize: 17, weight: .medium)),
                 for: .normal
             )
-            button.addTarget(self, action: #selector(tapped(_:)), for: .touchUpInside)
+            // The bar takes the touches; the buttons draw and speak (VoiceOver activates them).
+            button.isUserInteractionEnabled = false
+            button.activate = { [weak self] in self?.onSelect?(index) }
             addSubview(button)
             buttons.append(button)
         }
@@ -290,15 +304,65 @@ final class EmojiCategoryBar: UIView {
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
 
-    @objc private func tapped(_ sender: UIButton) {
-        onSelect?(sender.tag)
+    /// The section whose slot is under `x` (the bar's coordinates; outside it, the nearest),
+    /// and how far across that slot `x` is.
+    func slot(atX x: CGFloat) -> (index: Int, fraction: CGFloat) {
+        guard !buttons.isEmpty, bounds.width > 0 else { return (0, 0) }
+        let width = bounds.width / CGFloat(buttons.count)
+        let position = min(max(0, x), bounds.width - 0.001) / width
+        let index = min(buttons.count - 1, Int(position))
+        return (index, position - CGFloat(index))
     }
 
-    /// The section button under `x`, in the bar's coordinates.
-    func button(atX x: CGFloat) -> UIButton? {
-        guard !buttons.isEmpty, bounds.width > 0 else { return nil }
-        let index = Int(x / (bounds.width / CGFloat(buttons.count)))
-        return buttons[min(max(0, index), buttons.count - 1)]
+    // MARK: - Touches (UIKit's, or a test's)
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        touchBegan(atX: touch.location(in: self).x)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        touchMoved(toX: touch.location(in: self).x)
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        touchEnded(atX: touch.location(in: self).x)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        touchCancelled()
+    }
+
+    func touchBegan(atX x: CGFloat) {
+        touchStartX = x
+        isScrubbing = false
+    }
+
+    func touchMoved(toX x: CGFloat) {
+        guard let start = touchStartX else { return }
+        if !isScrubbing {
+            guard abs(x - start) > Self.scrubThreshold else { return }
+            isScrubbing = true
+        }
+        let (index, fraction) = slot(atX: x)
+        if index != selected {
+            selected = index
+            onScrubStep?()
+        }
+        onScrub?(index, fraction)
+    }
+
+    func touchEnded(atX x: CGFloat) {
+        defer { touchCancelled() }
+        guard touchStartX != nil, !isScrubbing else { return }
+        onSelect?(slot(atX: x).index)
+    }
+
+    func touchCancelled() {
+        touchStartX = nil
+        isScrubbing = false
     }
 
     private func refresh() {

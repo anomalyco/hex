@@ -16,15 +16,24 @@ import Foundation
 /// 3. Each is scored on where its ideal path runs against the gesture (location: a quick
 ///    point-by-point pass, then dynamic time warping for the best few, which follows a
 ///    finger that hurries and slows), on its shape alone (both paths moved to one centre
-///    and size), and on how near the finger went down and lifted to its first and last keys,
-/// 4. and weighed with the model's frequency of the word after the word before.
+///    and size), and on how near the finger went down and lifted to its first and last keys;
+/// 4. the best few also on how their keys account for where the finger turned and where it
+///    slowed (`Evidence`, from the touches' times): a turn or a pause needs a key of the
+///    word near it, and a key the word goes straight through needs a pause on it. A
+///    straight stroke runs over the letters between its ends, so the path alone can't tell
+///    "tired" from "tied" (one line from i to e) or "wire" from "write"; the finger slowing
+///    on r can,
+/// 5. and weighed with the model's frequency of the word after the word before.
 ///
 /// Nothing is built ahead or kept: each swipe reads the memory-mapped model in place
 /// (`TypingDecoderModel.withCodes`), so the decoder holds no memory between swipes.
 nonisolated struct SwipeDecoder: Sendable {
     /// Tuned on synthetic swipes of the autocorrect benchmark's held-out dev sentences
     /// (English and Spanish; clean, neat, typical and sloppy fingers; experiment folder
-    /// 2026-11-20-hex-swipe-typing), never on its test sentences.
+    /// 2026-11-20-hex-swipe-typing), never on its test sentences; the turn and pause
+    /// parameters also on mined dev sets of words that share a path, with fingers that stop
+    /// at every key, keep most of their speed through a straight-on key, or hesitate between
+    /// keys.
     struct Parameters: Equatable, Sendable {
         /// Points the gesture and each word's ideal path are resampled to.
         var samples = 32
@@ -49,10 +58,10 @@ nonisolated struct SwipeDecoder: Sendable {
         var stray = 0.25
         /// Nats per mean squared pitch between the paths, and per mean squared distance
         /// between their shapes (each scaled to a unit box).
-        var locationWeight = 40.0
+        var locationWeight = 30.0
         var shapeWeight = 60.0
         /// Weight of the word model's cost, -ln P(word | word before).
-        var lmWeight = 1.1
+        var lmWeight = 1.0
         /// Words of the quick pass the aligned pass scores again.
         var shortlist = 80
         /// Past this many words, only the likeliest by how near their keys lie to the path
@@ -66,6 +75,40 @@ nonisolated struct SwipeDecoder: Sendable {
         /// model's pairs costs this much more: those first words follow thousands of words, so
         /// a missing pair is evidence against it ("with us in", not "with us I'm").
         var contractionMissingPair = 3.0
+
+        // Where the finger turned or slowed (`Evidence`): the keys of the word read must
+        // account for them, in order.
+        /// The path is read for turns and pauses every this many pitches.
+        var evidenceStep = 0.1
+        /// A turn is the change of direction between this much path before a point and after it:
+        /// none under `turnFrom` degrees, full evidence from `turnFull`.
+        var turnWindow = 0.2
+        var turnFrom = 35.0
+        var turnFull = 120.0
+        /// A pause is time spent per pitch over this much path each side, against the swipe's
+        /// median: none under `dwellFrom` times the median, full evidence from `dwellFull`.
+        var dwellWindow = 0.1
+        var dwellFrom = 1.3
+        var dwellFull = 4.0
+        /// Weaker turns and pauses are ignored, and of two nearer than `evidenceSpacing`
+        /// (pitches along the path) only the stronger counts; none counts this near either end,
+        /// which the first and last keys account for.
+        var evidenceFloor = 0.1
+        var evidenceSpacing = 0.8
+        var evidenceGuard = 0.7
+        /// How far a key may lie from the turn or pause it accounts for (pitches): a spread,
+        /// and the farthest.
+        var evidenceSigma = 0.35
+        var evidenceReach = 1.4
+        /// Nats for a full-strength turn or pause no key of the word accounts for (the finger
+        /// slowed on a letter the word lacks), for a key the word goes straight through with
+        /// no pause there (only when the path has times), and for a key the word turns at
+        /// without a turn or pause there.
+        var unexplainedCost = 6.0
+        var straightKeyCost = 2.5
+        var cornerKeyCost = 2.0
+        /// A word's key it turns at by less than this (degrees) is one it goes straight through.
+        var straightAngle = 20.0
 
         /// -ln of a point landing `squared` (pitches²) from a key's centre, under the mixture
         /// of a tight spread and a stray one; 0 at the centre.
@@ -184,19 +227,21 @@ nonisolated struct SwipeDecoder: Sendable {
     }
 
     /// The likeliest words for a swipe along `path` (the touch's points, first to last, in
-    /// the keys' coordinates), best first; empty when it can't be read as one.
-    func decode(_ path: [CGPoint], keys: TypingDecoder.Keys, previous: String? = nil, limit: Int = 4) -> [Candidate] {
-        read(path, keys: keys, previous: previous, limit: limit).candidates
+    /// the keys' coordinates), best first; empty when it can't be read as one. `times` (each
+    /// point's `UITouch.timestamp`) show where the finger paused; without them only its turns
+    /// count.
+    func decode(_ path: [CGPoint], times: [TimeInterval]? = nil, keys: TypingDecoder.Keys, previous: String? = nil, limit: Int = 4) -> [Candidate] {
+        read(path, times: times, keys: keys, previous: previous, limit: limit).candidates
     }
 
-    func read(_ path: [CGPoint], keys: TypingDecoder.Keys, previous: String? = nil, limit: Int = 4) -> Reading {
+    func read(_ path: [CGPoint], times: [TimeInterval]? = nil, keys: TypingDecoder.Keys, previous: String? = nil, limit: Int = 4) -> Reading {
         let p = parameters
         let none = Reading(candidates: [], scored: 0)
         let pitch = Vec(x: Double(keys.pitch.width), y: Double(keys.pitch.height))
         guard pitch.x > 0, pitch.y > 0, path.count >= 2, limit > 0, p.samples >= 4 else { return none }
         let grid = KeyGrid(keys, model: model, pitch: pitch)
         guard grid.centres.count >= 2, grid.centres.count <= 64 else { return none }
-        guard let gesture = Gesture(path, pitch: pitch, samples: p.samples), gesture.length >= p.minimumLength,
+        guard let gesture = Gesture(path, times: times, pitch: pitch, parameters: p), gesture.length >= p.minimumLength,
               let start = gesture.raw.first, let end = gesture.raw.last else { return none }
 
         // 1. The keys the word may start and end on, and how near the path passes each key.
@@ -271,6 +316,7 @@ nonisolated struct SwipeDecoder: Sendable {
         var template = [Vec](repeating: Vec(x: 0, y: 0), count: n)
         var vertices = [Vec](repeating: Vec(x: 0, y: 0), count: 64)
         var rows = ([Double](repeating: 0, count: n), [Double](repeating: 0, count: n))
+        var evidenceRows = ([Double](repeating: 0, count: gesture.evidence.count + 1), [Double](repeating: 0, count: gesture.evidence.count + 1))
         func spatial(_ c: Int, aligned: Bool) -> Double {
             let from = Int(offsets[c]), to = Int(offsets[c + 1])
             for v in from..<to { vertices[v - from] = grid.centres[Int(sequence[v])] }
@@ -279,8 +325,11 @@ nonisolated struct SwipeDecoder: Sendable {
                 ? Self.warpedDistance(gesture.points, template, band: max(1, Int(p.band * Double(n))), rows: &rows)
                 : Self.meanSquaredDistance(gesture.points, template)
             let shape = Self.shapeDistance(gesture.shape, template)
+            let evidence = aligned
+                ? Self.evidenceCost(vertices, count: to - from, gesture: gesture, parameters: p, rows: &evidenceRows)
+                : 0
             return startCost[Int(sequence[from])] + endCost[Int(sequence[to - 1])]
-                + p.locationWeight * location + p.shapeWeight * shape
+                + p.locationWeight * location + p.shapeWeight * shape + evidence
         }
         var pool = Array(words.indices)
         if pool.count > p.prefilter {
@@ -369,15 +418,22 @@ nonisolated struct SwipeDecoder: Sendable {
         }
     }
 
-    /// The finger's path in pitches without repeated points, resampled, and its shape.
+    /// The finger's path in pitches without repeated points, resampled, its shape, and where
+    /// it turned or paused.
     private struct Gesture {
         var raw: [Vec] = []
         var length = 0.0
         var points: [Vec]
         var shape: [Vec]
+        var evidence: [Evidence] = []
+        /// Whether the path's times showed where it paused: without them a key the word goes
+        /// straight through can't have shown itself.
+        var timed = false
 
-        init?(_ path: [CGPoint], pitch: Vec, samples: Int) {
-            for point in path {
+        init?(_ path: [CGPoint], times: [TimeInterval]?, pitch: Vec, parameters p: Parameters) {
+            let times = times?.count == path.count ? times : nil
+            var stamps: [Double] = []
+            for (i, point) in path.enumerated() {
                 let v = Vec(x: Double(point.x) / pitch.x, y: Double(point.y) / pitch.y)
                 if let last = raw.last {
                     let step = SwipeDecoder.distance(last, v)
@@ -385,12 +441,136 @@ nonisolated struct SwipeDecoder: Sendable {
                     length += step
                 }
                 raw.append(v)
+                // A still finger sends no points: the time it stayed goes to the next one's step.
+                if let times { stamps.append(max(times[i], stamps.last ?? times[i])) }
             }
             guard raw.count >= 2, length > 0 else { return nil }
-            points = [Vec](repeating: Vec(x: 0, y: 0), count: samples)
+            points = [Vec](repeating: Vec(x: 0, y: 0), count: p.samples)
             SwipeDecoder.resample(raw, count: raw.count, length: length, into: &points)
             shape = SwipeDecoder.normalized(points)
+            let duration = (stamps.last ?? 0) - (stamps.first ?? 0)
+            timed = duration > 0.02
+            evidence = SwipeDecoder.evidence(raw, times: timed ? stamps : nil, length: length, parameters: p)
         }
+    }
+
+    /// A point where the finger turned or slowed: a key it meant, most likely. `strength`
+    /// is 0 to 1.
+    struct Evidence: Equatable, Sendable {
+        var point: Vec
+        var strength: Double
+    }
+
+    /// The path's turns and pauses, in order along it: the path is read every
+    /// `evidenceStep` pitches; a point scores by how sharply the path turns there and how
+    /// long the finger took over it against the rest of the swipe; the strongest points
+    /// at least `evidenceSpacing` apart, away from the ends, count.
+    static func evidence(_ raw: [Vec], times: [Double]?, length: Double, parameters p: Parameters) -> [Evidence] {
+        let count = Int(length / p.evidenceStep) + 1
+        guard count >= 5 else { return [] }
+        var points = [Vec](repeating: Vec(x: 0, y: 0), count: count)
+        resample(raw, count: raw.count, length: length, into: &points)
+        let step = length / Double(count - 1)
+        var score = [Double](repeating: 0, count: count)
+        let k = max(1, Int((p.turnWindow / step).rounded()))
+        if count > 2 * k {
+            for i in k..<(count - k) {
+                let a = Vec(x: points[i].x - points[i - k].x, y: points[i].y - points[i - k].y)
+                let b = Vec(x: points[i + k].x - points[i].x, y: points[i + k].y - points[i].y)
+                let angle = atan2(abs(a.x * b.y - a.y * b.x), a.x * b.x + a.y * b.y) * 180 / .pi
+                score[i] = min(1, max(0, (angle - p.turnFrom) / (p.turnFull - p.turnFrom)))
+            }
+        }
+        let guardCount = Int((p.evidenceGuard / step).rounded(.up))
+        guard count > 2 * guardCount + 1 else { return [] }
+        if let times {
+            // The time at each point read, from the raw points' times along the path.
+            var at = [Double](repeating: 0, count: count)
+            var segment = 0
+            var walked = 0.0
+            var span = distance(raw[0], raw[1])
+            for i in 0..<count {
+                let target = step * Double(i)
+                while walked + span < target, segment < raw.count - 2 {
+                    walked += span
+                    segment += 1
+                    span = distance(raw[segment], raw[segment + 1])
+                }
+                let t = span > 0 ? min(1, max(0, (target - walked) / span)) : 0
+                at[i] = times[segment] + t * (times[min(segment + 1, raw.count - 1)] - times[segment])
+            }
+            let w = max(1, Int((p.dwellWindow / step).rounded()))
+            var perPitch = [Double](repeating: 0, count: count)
+            for i in 0..<count {
+                let lo = max(0, i - w), hi = min(count - 1, i + w)
+                perPitch[i] = (at[hi] - at[lo]) / (step * Double(hi - lo))
+            }
+            var middle = Array(perPitch[guardCount..<(count - guardCount)])
+            middle.sort()
+            let median = middle[middle.count / 2]
+            if median > 0 {
+                let from = log(p.dwellFrom), full = log(p.dwellFull)
+                for i in guardCount..<(count - guardCount) where perPitch[i] > 0 {
+                    let dwell = min(1, max(0, (log(perPitch[i] / median) - from) / (full - from)))
+                    score[i] = max(score[i], dwell)
+                }
+            }
+        }
+        // The strongest first, each keeping its neighbours within the spacing out.
+        let spacing = max(1, Int((p.evidenceSpacing / step).rounded()))
+        var order = Array(guardCount..<(count - guardCount)).filter { score[$0] >= p.evidenceFloor }
+        order.sort { score[$0] != score[$1] ? score[$0] > score[$1] : $0 < $1 }
+        var taken: [Int] = []
+        for i in order where taken.allSatisfy({ abs($0 - i) >= spacing }) {
+            taken.append(i)
+        }
+        taken.sort()
+        return taken.map { Evidence(point: points[$0], strength: score[$0]) }
+    }
+
+    /// Nats for how well a word's keys (`keys[0..<count]`, in pitches) account for the
+    /// path's turns and pauses, in order: an edit distance where a key accounts for the turns
+    /// or pauses near it (by how far it lies from each), a turn or pause no key accounts for
+    /// costs by its strength, and a key with none costs `cornerKeyCost` where the word
+    /// turns, `straightKeyCost` where it goes straight on (and the path's times would have
+    /// shown a pause). The first and last keys cost nothing without one.
+    private static func evidenceCost(_ keys: [Vec], count m: Int, gesture: Gesture, parameters p: Parameters, rows: inout ([Double], [Double])) -> Double {
+        let evidence = gesture.evidence
+        let n = evidence.count
+        guard m >= 2 else { return 0 }
+        let reach = p.evidenceReach * p.evidenceReach
+        let spread = 2 * p.evidenceSigma * p.evidenceSigma
+        let straight = cos(p.straightAngle * .pi / 180)
+        func missing(_ i: Int) -> Double {
+            guard i > 0, i < m - 1 else { return 0 }
+            let a = Vec(x: keys[i].x - keys[i - 1].x, y: keys[i].y - keys[i - 1].y)
+            let b = Vec(x: keys[i + 1].x - keys[i].x, y: keys[i + 1].y - keys[i].y)
+            let la = (a.x * a.x + a.y * a.y).squareRoot(), lb = (b.x * b.x + b.y * b.y).squareRoot()
+            guard la > 1e-6, lb > 1e-6 else { return 0 }
+            let goesStraight = (a.x * b.x + a.y * b.y) / (la * lb) >= straight
+            return goesStraight ? (gesture.timed ? p.straightKeyCost : 0) : p.cornerKeyCost
+        }
+        func accounts(_ i: Int, _ j: Int) -> Double {
+            let d = squared(keys[i], evidence[j].point)
+            return d <= reach ? d / spread : .infinity
+        }
+        func unexplained(_ j: Int) -> Double { p.unexplainedCost * evidence[j].strength }
+        // Row i: keys 0...i placed; column j: the first j turns and pauses read.
+        rows.0[0] = 0
+        for j in 0..<n { rows.0[j + 1] = rows.0[j] + min(unexplained(j), accounts(0, j)) }
+        for i in 1..<m {
+            let skip = missing(i)
+            rows.1[0] = rows.0[0] + skip
+            for j in 0..<n {
+                let near = accounts(i, j)
+                var best = rows.0[j + 1] + skip
+                best = min(best, rows.0[j] + near)
+                best = min(best, rows.1[j] + min(unexplained(j), near))
+                rows.1[j + 1] = best
+            }
+            swap(&rows.0, &rows.1)
+        }
+        return rows.0[n]
     }
 
     @inline(__always) static func distance(_ a: Vec, _ b: Vec) -> Double {

@@ -274,28 +274,105 @@ final class EmojiSuggesterTests: XCTestCase {
     }
 
     /// A tap a little under or over the bar's icons, or beside ABC and delete, still lands
-    /// on them (it used to hit nothing, so a category could take two taps).
+    /// on them (it used to hit nothing, so a category could take two taps): the whole band
+    /// under the grid, each category across the full width of its slot.
     func testTheBarsKeysTakeTheWholeBandUnderTheGrid() throws {
         let library = try library()
         let panel = EmojiPanelView(library: library, usage: EmojiUsageStore(defaults: UserDefaults(suiteName: "anomaly.hex.tests.emoji-band")))
         panel.frame = CGRect(x: 0, y: 0, width: 402, height: 300)
         panel.show(suggestions: [], frequent: [])
         panel.layoutIfNeeded()
-        let buttons = panel.subviews.compactMap { $0 as? EmojiCategoryBar }.first?.subviews.compactMap { $0 as? UIButton } ?? []
+        let bar = try XCTUnwrap(panel.subviews.compactMap { $0 as? EmojiCategoryBar }.first)
+        let buttons = bar.subviews.compactMap { $0 as? UIButton }
         XCTAssertEqual(buttons.count, EmojiCategory.allCases.count + 1)
         let grid = try XCTUnwrap(panel.subviews.compactMap { $0 as? UICollectionView }.first { !($0.superview is EmojiRowView) })
-        for button in buttons {
+        for (index, button) in buttons.enumerated() {
             let frame = button.convert(button.bounds, to: panel)
             // The bar reaches the panel's bottom edge, as row 4 does, so nothing is under it there.
-            for y in [grid.frame.maxY + 1, frame.minY - 1, frame.maxY + 1, panel.bounds.maxY - 1] where y < panel.bounds.maxY {
-                let hit = panel.hitTest(CGPoint(x: frame.midX, y: y), with: nil)
-                XCTAssertTrue(hit === button, "\(button.accessibilityLabel ?? "") at y \(y): \(String(describing: hit))")
+            for y in [grid.frame.maxY + 1, frame.minY - 1, frame.midY, frame.maxY + 1, panel.bounds.maxY - 1] where y < panel.bounds.maxY {
+                for x in [frame.minX + 0.5, frame.midX, frame.maxX - 0.5] {
+                    let point = CGPoint(x: x, y: y)
+                    let hit = panel.hitTest(point, with: nil)
+                    XCTAssertTrue(hit === bar, "\(button.accessibilityLabel ?? "") at \(point): \(String(describing: hit))")
+                    XCTAssertEqual(bar.slot(atX: panel.convert(point, to: bar).x).index, index, "\(button.accessibilityLabel ?? "") at \(point)")
+                }
             }
         }
         let below = panel.bounds.maxY - 1
         XCTAssertEqual(panel.hitTest(CGPoint(x: 20, y: below), with: nil)?.accessibilityLabel, "Letters")
         XCTAssertEqual(panel.hitTest(CGPoint(x: 390, y: below), with: nil)?.accessibilityLabel, "Delete")
         XCTAssertTrue(panel.hitTest(CGPoint(x: 200, y: grid.frame.midY), with: nil)?.isDescendant(of: grid) ?? false)
+    }
+
+    /// As on the system emoji keyboard: a tap on a category jumps the grid there when the
+    /// finger lifts; a finger sliding along the bar scrubs the grid through every category
+    /// live, with a light tick for each new one and no key click; and the bar follows the
+    /// grid when it scrolls by hand.
+    func testSlidingAlongTheBarScrubsTheGrid() throws {
+        let library = try library()
+        let panel = EmojiPanelView(library: library, usage: EmojiUsageStore(defaults: UserDefaults(suiteName: "anomaly.hex.tests.emoji-scrub")))
+        panel.frame = CGRect(x: 0, y: 0, width: 402, height: 300)
+        panel.show(suggestions: [], frequent: [])
+        panel.layoutIfNeeded()
+        var clicks = 0, ticks = 0
+        panel.onKeyDown = { clicks += 1 }
+        panel.onSelectionStep = { ticks += 1 }
+        let bar = try XCTUnwrap(panel.subviews.compactMap { $0 as? EmojiCategoryBar }.first)
+        let grid = try XCTUnwrap(panel.subviews.compactMap { $0 as? UICollectionView }.first { !($0.superview is EmojiRowView) })
+        grid.layoutIfNeeded()
+        let count = EmojiCategory.allCases.count + 1
+        let slot = bar.bounds.width / CGFloat(count)
+        let food = 1 + EmojiCategory.foodDrink.rawValue
+        let foodX = slot * (CGFloat(food) + 0.5)
+
+        bar.touchBegan(atX: foodX)
+        bar.touchMoved(toX: foodX + 4)
+        XCTAssertEqual(grid.contentOffset.x, 0, "a finger that hardly moves is a tap")
+        XCTAssertEqual(bar.selected, 0)
+        bar.touchEnded(atX: foodX + 4)
+        XCTAssertEqual(bar.selected, food, "a tap picks its category as it lifts")
+        let foodStart = grid.contentOffset.x
+        XCTAssertGreaterThan(foodStart, 0)
+        XCTAssertEqual(clicks, 1)
+        XCTAssertEqual(ticks, 0)
+
+        // From Smileys to the far end of Flags, a few points a move.
+        var x = slot * 1.1
+        bar.touchBegan(atX: x)
+        var offsets: [CGFloat] = []
+        var seen: [Int] = []
+        while x < bar.bounds.width + 20 {
+            x += 3
+            bar.touchMoved(toX: x)
+            guard bar.isScrubbing else { continue }
+            offsets.append(grid.contentOffset.x)
+            if seen.last != bar.selected { seen.append(bar.selected) }
+        }
+        XCTAssertEqual(seen, Array(1..<count), "the chip follows the finger through every category")
+        XCTAssertEqual(ticks, count - 1, "a tick for each new category (Food and drink to Smileys first)")
+        XCTAssertEqual(offsets, offsets.sorted(), "the grid only moves on as the finger does")
+        XCTAssertGreaterThan(Set(offsets).count, 40, "the grid moves within each category too, not only between them")
+        let maxX = grid.contentSize.width - grid.bounds.width
+        XCTAssertEqual(offsets.last ?? 0, maxX, accuracy: 1, "the end of the bar is the end of the grid")
+        XCTAssertTrue(bar.isScrubbing)
+        bar.touchEnded(atX: x)
+        XCTAssertFalse(bar.isScrubbing)
+        XCTAssertEqual(bar.selected, count - 1, "lifting keeps the grid and the chip where the slide left them")
+        XCTAssertEqual(grid.contentOffset.x, maxX, accuracy: 1)
+        XCTAssertEqual(clicks, 1, "a slide types no key click")
+
+        // A slide back stops at Food and drink's start where its slot begins.
+        bar.touchBegan(atX: bar.bounds.width - 1)
+        bar.touchMoved(toX: slot * CGFloat(food) + 0.01)
+        XCTAssertEqual(bar.selected, food)
+        XCTAssertEqual(grid.contentOffset.x, foodStart, accuracy: 1)
+        bar.touchCancelled()
+
+        // The grid scrolled by hand moves the chip.
+        grid.setContentOffset(CGPoint(x: 0, y: 0), animated: false)
+        XCTAssertEqual(bar.selected, 0)
+        grid.setContentOffset(CGPoint(x: foodStart, y: 0), animated: false)
+        XCTAssertEqual(bar.selected, food)
     }
 
     private static func footprint() -> Double {

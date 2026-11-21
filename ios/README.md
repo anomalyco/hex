@@ -448,7 +448,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     (`KeyboardLayout.joinedForSwipe`), so either half's G and V is the one letter, as for
     Spatial autocorrect's taps. Taps, holds for accents, slides
     shorter than a key, delete's word slide, the space bar's trackpad, 123 and the Hex key
-    work as before: no swipe starts on them, and none once an accent menu is open.
+    work as before: no swipe starts on them, and none once an accent menu is open. A swipe
+    that lifts on the key it went down on, never more than 1.6 key pitches from it, is a
+    tap that slid: its letter goes in as a tap's would ("a" dragged a little too far and
+    back), unless it read as a word that starts and ends on that key ("lol").
     `SwipeDecoder` is a shape-matching decoder after SHARK2: the path is resampled to 32
     points in key pitches; words come from the language's typing model by the keys the
     path starts and ends near (each start letter is one range of the sorted word list,
@@ -456,13 +459,24 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     swipes), kept when every key lies near the path and their ideal path (the polyline
     through their keys' centres) is about as long; each is scored on location (point by
     point, then dynamic time warping for the best 80), shape, and how near its first and
-    last keys the finger went down and lifted, and weighed with the model's word-pair
-    frequency after the word before. English contractions, which the Google Books model
-    barely counts, and your own words (Contacts names and other `UILexicon` terms, one-word
+    last keys the finger went down and lifted, the best 80 also on how their keys account
+    for where the finger turned and, from the touches' times, where it slowed (an edit
+    distance: a turn or pause no key of the word explains costs, and so does a key the word
+    goes straight through without a pause on it), and weighed with the model's word-pair
+    frequency after the word before. A straight stroke runs over the letters between its
+    ends, so the path alone can't tell "tired" from "tied" or "wire" from "write" (X
+    tester: guesses didn't account for the letters under the swipe); a pause on r can.
+    English contractions, which the Google Books model barely counts, and your own words
+    (Contacts names and other `UILexicon` terms, one-word
     text replacements, words you kept) are read beside it. It never reads a slur, and reads
     swear words only with Suggest swear words on (`TypingDecoder.NeverSuggest` and
     `mayOffer`, as the strip). Its weights are tuned on synthetic swipes of the
-    autocorrect benchmark's held-out dev sentences; Record typing logs keeps a swipe's
+    autocorrect benchmark's held-out dev sentences and on mined sets of common words that
+    share a path; on the held-out test sentences (typical fingers, 390 pt) top-1 is 97.1%
+    in English and 94.2% in Spanish (94.9 and 90.9 without the turns and pauses), and on
+    held-out words that share a path 96.0% and 94.5% (85.1 and 81.2); a decode takes
+    0.91 ms at the median and 2.85 ms at p99 on an M5 Max (experiment folder
+    2026-11-20-hex-swipe-typing, results/2026-11-21). Record typing logs keeps a swipe's
     touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
     real fingers.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
@@ -888,7 +902,12 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   Frequently used (eight columns: your emoji, then common ones) and the eight
   categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
   delete below, drawn without keycaps as the system's are; a tap anywhere under the
-  grid goes to the key under it. The row reads the last eight words (the newest counts most), their plurals
+  grid goes to the key under it, each category the full width of its slot. As on the
+  system emoji keyboard (iOS 27.2 simulator), a tap on a category jumps the grid there as
+  the finger lifts, and a finger sliding along the bar scrubs the grid live, each icon's
+  slot running through its own category from start to end, with the chip on the category
+  under the finger and a light tick for each new one (`EmojiCategoryBar`); scrolling the
+  grid moves the chip. The row reads the last eight words (the newest counts most), their plurals
   and endings, letters held down ("lmaooo"), phrases ("new year") and the word still
   being typed, matched against Unicode's CLDR names and keywords for the layout's
   language and English and against Hex's own chat words ("congrats", "bday"), one
@@ -1221,7 +1240,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   2 MB least-recently-used cache of the bitmaps, freed with the panel and on a memory
   warning. Two runs: typing 30.6–34.6 MB, the panel open 36.4–40.0 MB, every category
   39.4–43.0 MB, every emoji 40.0–42.8 MB (peak 44.3–47.9), 31.9–35.3 MB once closed, and
-  an in-keyboard dictation after it no higher. `EmojiSuggesterTests` check that a cell
+  an in-keyboard dictation after it no higher. Measured again with the bar's scrubbing
+  (one run, same setup): tapping every category peaked at 44.5 MB and scrolling past
+  every emoji at 44.4; one slide across five categories peaked at 46.0, three slides
+  back and forth across the bar at 47.5 and ten at 48.3, each back to 42–43 MB resident
+  after. `EmojiSuggesterTests` check that a cell
   lands where a label drew its emoji and that drawing every emoji stays in the cache's
   limit; `--snap-state full-keyboard-emoji-probe` prints the app's footprint, the
   renderer's counts and each frame's work scrolling every emoji at 40 pt a frame
