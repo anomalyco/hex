@@ -29,6 +29,15 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     var onDeleteRepeat: ((TimeInterval) -> Void)?
     var onLetters: (() -> Void)?
     var onSearch: (() -> Void)?
+    /// The search button, whose search the letter keys type into: the dictation bar, which has
+    /// none, hides it and the suggestions take its room.
+    var showsSearch = true {
+        didSet {
+            guard showsSearch != oldValue else { return }
+            searchButton.isHidden = !showsSearch
+            setNeedsLayout()
+        }
+    }
     /// A key went down (click and haptic), or a tone was stepped over.
     var onKeyDown: (() -> Void)?
     var onSelectionStep: (() -> Void)?
@@ -143,6 +152,27 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     // MARK: - Content
 
+    /// Fills the panel for the text before the cursor and your use: the row's suggestions, and
+    /// a full block of Frequently used, as the system keyboard's (your emoji, then common
+    /// ones, then the first smileys).
+    func fill(before: String?) {
+        var scores: [Int: Float] = [:]
+        var frequent: [Int] = []
+        let capacity = frequentCapacity
+        for (emoji, score) in usage.ranked(limit: capacity) {
+            guard let entry = library.entryByEmoji[emoji], scores[entry] == nil else { continue }
+            scores[entry] = score
+            frequent.append(entry)
+        }
+        let common = EmojiSuggester.defaults.compactMap { library.entryByEmoji[$0] }
+            + library.entries.indices.lazy.filter { self.library.entries[$0].category == .smileysPeople }.prefix(capacity)
+        for entry in common where frequent.count < capacity && !frequent.contains(entry) {
+            frequent.append(entry)
+        }
+        let context = EmojiContext(before: before, stopwords: library.stopwords)
+        show(suggestions: EmojiSuggester.suggestions(context: context, library: library, usage: scores, limit: 10), frequent: frequent)
+    }
+
     /// Fills the panel: `suggestions` for the row, `frequent` for the grid's first section.
     func show(suggestions: [Int], frequent: [Int]) {
         self.suggestions = suggestions
@@ -208,7 +238,8 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         let buttonSide = min(36, row.height - 8)
         searchButton.frame = CGRect(x: row.minX + side, y: row.midY - buttonSide / 2, width: buttonSide + 4, height: buttonSide)
         searchButton.layer.cornerRadius = 10
-        suggestionRow.frame = CGRect(x: searchButton.frame.maxX + 4, y: row.minY, width: row.maxX - side - searchButton.frame.maxX - 4, height: row.height)
+        let rowStart = showsSearch ? searchButton.frame.maxX + 4 : row.minX + side
+        suggestionRow.frame = CGRect(x: rowStart, y: row.minY, width: row.maxX - side - rowStart, height: row.height)
         let hairline = 1 / max(1, traitCollection.displayScale)
         rowSeparator.frame = CGRect(x: row.minX + side, y: row.maxY - hairline, width: row.width - 2 * side, height: hairline)
         suggestionRow.fontSize = rowFontSize

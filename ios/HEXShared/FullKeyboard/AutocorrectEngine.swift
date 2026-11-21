@@ -209,6 +209,9 @@ final class AutocorrectEngine {
 
     let checker: TextChecking
     let learnedWords: LearnedWordsStore
+    /// Settings › Keyboard › Autocorrect. Off, only your text replacements still show in the
+    /// strip and apply on space or a closing mark, as Apple's keyboard does with Auto-Correction
+    /// off; a field that turns autocorrection off gets none, as there.
     var isEnabled = true
     /// The keyboard layout's language: its dictionary, and whether English fixes apply.
     private(set) var language: KeyboardLanguage = .english
@@ -574,14 +577,14 @@ final class AutocorrectEngine {
         self.beforeInput = beforeInput
 
         let lower = token.lowercased()
-        let allowAuto = isEnabled
-            && !suppressedInSession.contains(lower)
+        let allowAuto = !suppressedInSession.contains(lower)
             && !learning.rejected.contains(lower)
             && !learnedWords.contains(lower)
             && !Self.shorthandAllowlist.contains(lower)
 
         partner?.beforeInput = beforeInput
-        let autoFix = allowAuto ? cautiousReplacement(for: token) : nil
+        // Autocorrect off: your text replacements only.
+        let autoFix = !allowAuto ? nil : isEnabled ? cautiousReplacement(for: token) : lexiconShortcuts[lower]
         var pool: [String] = autoFix.map { [$0] } ?? []
 
         if let partner = workingPartner {
@@ -710,13 +713,14 @@ final class AutocorrectEngine {
         return (common + yours + names).map { Self.matchCase(of: token, onto: $0) }
     }
 
-    /// Returns `(tokenToDelete, replacement)` only when cautious autocorrect is confident.
+    /// Returns `(tokenToDelete, replacement)` only when cautious autocorrect is confident, or
+    /// for a text replacement (with Autocorrect off too).
     func replacementOnSpace(
         beforeInput: String?,
         field: KeyboardFieldKind,
         autocorrectionType: UITextAutocorrectionType?
     ) -> (original: String, replacement: String)? {
-        guard isEnabled, field == .text, autocorrectionType != .no else { return nil }
+        guard field == .text, autocorrectionType != .no else { return nil }
         guard let token = Self.currentToken(in: beforeInput) else { return nil }
         self.beforeInput = beforeInput
         partner?.beforeInput = beforeInput
@@ -725,7 +729,7 @@ final class AutocorrectEngine {
               !learning.rejected.contains(lower),
               !learnedWords.contains(lower),
               !Self.shorthandAllowlist.contains(lower) else { return nil }
-        guard hasDictionary else {
+        guard isEnabled, hasDictionary else {
             return lexiconShortcuts[lower].map { (token, $0) }
         }
         guard let fix = cautiousReplacement(for: token) else { return nil }

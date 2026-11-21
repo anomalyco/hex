@@ -83,26 +83,7 @@ extension FullKeyboardView {
     /// The row's suggestions for the text before the cursor and your use, and the grid's
     /// Frequently used.
     func fillEmojiPanel() {
-        guard let panel = emojiPanel else { return }
-        let library = panel.library
-        var usage: [Int: Float] = [:]
-        var frequent: [Int] = []
-        let capacity = panel.frequentCapacity
-        for (emoji, score) in panel.usage.ranked(limit: capacity) {
-            guard let entry = library.entryByEmoji[emoji], usage[entry] == nil else { continue }
-            usage[entry] = score
-            frequent.append(entry)
-        }
-        // A full block, as the system keyboard's: your emoji, then common ones, then the
-        // first smileys.
-        let fill = EmojiSuggester.defaults.compactMap { library.entryByEmoji[$0] }
-            + library.entries.indices.lazy.filter { library.entries[$0].category == .smileysPeople }.prefix(capacity)
-        for entry in fill where frequent.count < capacity && !frequent.contains(entry) {
-            frequent.append(entry)
-        }
-        let context = EmojiContext(before: routedTarget.document.documentContextBeforeInput, stopwords: library.stopwords)
-        let suggestions = EmojiSuggester.suggestions(context: context, library: library, usage: usage, limit: 10)
-        panel.show(suggestions: suggestions, frequent: frequent)
+        emojiPanel?.fill(before: routedTarget.document.documentContextBeforeInput)
     }
 
     func closeEmojiPanel() {

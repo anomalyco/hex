@@ -13,6 +13,10 @@ final class KeyboardViewController: UIInputViewController {
     private var lastFullAccessNote: TimeInterval = 0
     private var surface: UIView?
     private var fullKeyboard: FullKeyboardView?
+    /// The dictation bar's emoji panel, at the full keyboard's height while it's open, and
+    /// the index it reads (kept while the keyboard runs, as the full keyboard's).
+    private var barEmojiPanel: EmojiPanelView?
+    private var barEmojiLibrary: EmojiLibrary?
     private var heightConstraint: NSLayoutConstraint?
     /// Opaque, under the surface: nothing iOS leaves behind the keyboard shows through it.
     private let backdrop = KeyboardBackdropView()
@@ -83,6 +87,7 @@ final class KeyboardViewController: UIInputViewController {
         TypingJournal.sharedIfEnabled()?.save()
         AdaptiveTouch.current?.save()
         isShown = false
+        closeBarEmojiPanel()
         localDictation.discard(reason: "keyboard hidden")
         endTypingLogSession(reason: "disappear", settleDictation: editContext)
         pollTimer?.invalidate()
@@ -92,6 +97,8 @@ final class KeyboardViewController: UIInputViewController {
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
         fullKeyboard?.handleMemoryWarning()
+        closeBarEmojiPanel()
+        barEmojiLibrary = nil
         typingLog?.flush()
     }
 
@@ -422,6 +429,15 @@ final class KeyboardViewController: UIInputViewController {
             self?.observeDictationEdits(fromKeys: true)
             self?.typingLog?.context("space")
         }
+        viewModel.onInsertText = { [weak self] text in
+            self?.typingLog?.edit("insert", [
+                TypingLogField("inserted", .string(text)),
+                TypingLogField("src", .string("bar")),
+            ])
+            self?.textDocumentProxy.insertText(text)
+            self?.observeDictationEdits(fromKeys: true)
+        }
+        viewModel.onEmojiTap = { [weak self] in self?.openBarEmojiPanel() }
         viewModel.onDelete = { [weak self] in
             if let self, let log = self.typingLog {
                 let deleted = self.textDocumentProxy.documentContextBeforeInput?.last.map { String($0) }
@@ -463,6 +479,7 @@ final class KeyboardViewController: UIInputViewController {
             && UIDevice.current.userInterfaceIdiom == .phone
         guard surface == nil || wantsFull != (fullKeyboard != nil) else { return }
         guard surface == nil || viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
+        closeBarEmojiPanel()
 
         // Hex's own views only (UIKit may keep views of its own here): the surface, and any
         // keyboard or bar an earlier mount left behind.
@@ -638,8 +655,73 @@ final class KeyboardViewController: UIInputViewController {
             animated: animated
         )
 
+        if viewModel.stagePhase == .recording || viewModel.stagePhase == .transcribing {
+            closeBarEmojiPanel()
+        }
         refreshColdStartURL(now: now, force: false)
         schedulePoll(force: false)
+    }
+
+    // MARK: - The dictation bar's emoji panel
+
+    /// The full keyboard's emoji panel in place of the dictation bar, at the full keyboard's
+    /// height (the bar's 140 pt can't hold its grid); its ABC key goes back to the bar. No
+    /// search: its query is typed on letter keys the bar doesn't have.
+    private func openBarEmojiPanel() {
+        guard barEmojiPanel == nil, fullKeyboard == nil, let surface else { return }
+        let language = viewModel.effectiveLanguage
+            .flatMap { Locale(identifier: $0).language.languageCode?.identifier } ?? "en"
+        guard let library = barEmojiLibrary?.language == language ? barEmojiLibrary
+            : EmojiLibrary.load(language: language, bundle: Bundle(for: FullKeyboardView.self)) else { return }
+        barEmojiLibrary = library
+        typingLog?.ui("emoji_open")
+        let orientation = FullKeyboardView.orientation(for: traitCollection)
+        let panel = EmojiPanelView(library: library, usage: EmojiUsageStore())
+        panel.metrics = KeyboardMetrics.for(orientation, innerWidth: view.bounds.width)
+        panel.palette = FullKeyboardPalette(isDark: FullKeyboardPalette.isDark(traits: traitCollection))
+        panel.showsKeyPopups = FullKeyboardSettings().keyPopups
+        panel.showsSearch = false
+        panel.onKeyDown = { [weak self] in self?.viewModel.onKeyFeedback?() }
+        panel.onSelectionStep = { [weak self] in self?.viewModel.onKeyFeedback?() }
+        panel.onInsert = { [weak self, weak panel] text, entry, source in
+            guard let self else { return }
+            self.typingLog?.edit("insert", [
+                TypingLogField("inserted", .string(text)),
+                TypingLogField("src", .string("emoji_\(source)")),
+            ])
+            self.textDocumentProxy.insertText(text)
+            self.observeDictationEdits(fromKeys: true)
+            if let panel, entry < panel.library.entries.count {
+                panel.usage.record(panel.library.entries[entry].emoji)
+            }
+        }
+        panel.onDelete = { [weak self] in self?.viewModel.onDelete?() }
+        panel.onDeleteRepeat = { [weak self] _ in self?.viewModel.onDelete?() }
+        panel.onLetters = { [weak self] in
+            self?.typingLog?.ui("emoji_close")
+            self?.closeBarEmojiPanel()
+        }
+        panel.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(panel, aboveSubview: surface)
+        NSLayoutConstraint.activate([
+            panel.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            panel.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            panel.topAnchor.constraint(equalTo: view.topAnchor),
+            panel.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        surface.isHidden = true
+        barEmojiPanel = panel
+        applyHeight(KeyboardLayout.height(for: orientation))
+        panel.fill(before: textDocumentProxy.documentContextBeforeInput)
+    }
+
+    private func closeBarEmojiPanel() {
+        guard let panel = barEmojiPanel else { return }
+        panel.tearDown()
+        panel.removeFromSuperview()
+        barEmojiPanel = nil
+        surface?.isHidden = false
+        if fullKeyboard == nil { applyHeight(140) }
     }
 
     // MARK: - In-keyboard dictation
@@ -839,6 +921,15 @@ final class KeyboardViewController: UIInputViewController {
         }
         if viewModel.returnKeyLabel != nextReturn {
             viewModel.returnKeyLabel = nextReturn
+        }
+        // As the full keyboard's emoji key: fields that take any text, on an iPhone.
+        let takesEmoji: Bool = {
+            guard case .keys(.text, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) else { return false }
+            return textDocumentProxy.keyboardType != .asciiCapable
+        }()
+        let showsEmoji = FullKeyboardSettings().emoji && takesEmoji && UIDevice.current.userInterfaceIdiom == .phone
+        if viewModel.showsEmojiKey != showsEmoji {
+            viewModel.showsEmojiKey = showsEmoji
         }
     }
 

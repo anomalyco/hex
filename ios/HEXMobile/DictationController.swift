@@ -52,6 +52,8 @@ final class DictationController {
         let lowercase: Bool
         /// Settings › Dictation › Format lists, read at start.
         let formatLists: Bool
+        /// Settings › Dictation › End with a period, read at start.
+        let endsWithPeriod: Bool
         /// Experiments › Hinglish, read at start.
         let hinglish: Bool
         let vocabularyTerms: [String]
@@ -79,6 +81,7 @@ final class DictationController {
     private let customVocabularySettings: CustomVocabularySettings
     private let lowercaseSettings: DictationLowercaseSettings
     private let listSettings: DictationListSettings
+    private let periodSettings: DictationPeriodSettings
     private let hinglishSettings: HinglishSettings
     private let typingJournalSettings: TypingJournalSettings
     private let learnedDictationCorrections: @MainActor () -> [DictationCorrection]
@@ -185,6 +188,7 @@ final class DictationController {
         customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
         lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
         listSettings: DictationListSettings = DictationListSettings(),
+        periodSettings: DictationPeriodSettings = DictationPeriodSettings(),
         hinglishSettings: HinglishSettings = HinglishSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
         learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
@@ -203,6 +207,7 @@ final class DictationController {
         self.customVocabularySettings = customVocabularySettings
         self.lowercaseSettings = lowercaseSettings
         self.listSettings = listSettings
+        self.periodSettings = periodSettings
         self.hinglishSettings = hinglishSettings
         self.typingJournalSettings = typingJournalSettings
         self.learnedDictationCorrections = learnedDictationCorrections ?? {
@@ -749,6 +754,7 @@ final class DictationController {
         let usesCleanup = cleanupSettings.isEnabled
         let lowercase = lowercaseSettings.isEnabled
         let formatLists = listSettings.isEnabled
+        let endsWithPeriod = periodSettings.isEnabled
         let hinglish = hinglishSettings.isEnabled
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
@@ -801,6 +807,7 @@ final class DictationController {
                     usesCleanup: usesCleanup,
                     lowercase: lowercase,
                     formatLists: formatLists,
+                    endsWithPeriod: endsWithPeriod,
                     hinglish: hinglish,
                     vocabularyTerms: vocabularyTerms,
                     personalCorrections: personalCorrections,
@@ -890,7 +897,8 @@ final class DictationController {
                     corrections: session.personalCorrections,
                     lowercase: session.lowercase,
                     formatLists: session.formatLists,
-                    hinglish: session.hinglish
+                    hinglish: session.hinglish,
+                    endsWithPeriod: session.endsWithPeriod
                 )
                 let stages = await pipeline.run(rawText) { tagged in
                     await self.cleanedTranscriptIfEnabled(tagged, session: session)

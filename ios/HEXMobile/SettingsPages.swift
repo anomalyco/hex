@@ -8,6 +8,7 @@ struct DictationSettingsPage: View {
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
     @State private var lowercase = DictationLowercaseSettings().isEnabled
     @State private var formatLists = DictationListSettings().isEnabled
+    @State private var endsWithPeriod = DictationPeriodSettings().isEnabled
 
     var body: some View {
         SettingsPageScaffold(title: "Dictation") {
@@ -50,6 +51,15 @@ struct DictationSettingsPage: View {
                     title: String(localized: "Format lists"),
                     detail: String(localized: "Say “first, second” or “bullet” for a list"),
                     isOn: $formatLists
+                )
+
+                SettingsDivider()
+
+                // Inside the style, on every path but Verbatim (`TranscriptFormatter`).
+                SettingsToggleRow(
+                    title: String(localized: "End with a period"),
+                    detail: String(localized: "Off drops the final period, keeps ? and !"),
+                    isOn: $endsWithPeriod
                 )
 
                 DictationLanguageRow(dictation: dictation)
@@ -128,11 +138,15 @@ struct DictationSettingsPage: View {
         .onChange(of: formatLists) { _, enabled in
             DictationListSettings().isEnabled = enabled
         }
+        .onChange(of: endsWithPeriod) { _, enabled in
+            DictationPeriodSettings().isEnabled = enabled
+        }
         .onAppear {
             cleanupTagger = CleanupTaggerSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
             lowercase = DictationLowercaseSettings().isEnabled
             formatLists = DictationListSettings().isEnabled
+            endsWithPeriod = DictationPeriodSettings().isEnabled
         }
     }
 }
@@ -167,9 +181,9 @@ private enum HexKeySide: CaseIterable {
 /// Settings › Keyboard: Full or Dictation bar, the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
 /// default, as Apple's keyboard never offers them; Hex key, Right by default, under Languages),
-/// and haptics, which the dictation bar uses too. Below, Swipe typing and Emoji (on by
-/// default, with Clear emoji history while it's on), which say they need the full keyboard
-/// while the dictation bar is chosen.
+/// and haptics, which the dictation bar uses too. Below, Swipe typing, which says it needs
+/// the full keyboard while the dictation bar is chosen, and Emoji (on by default, with Clear
+/// emoji history while it's on), the bar's emoji key too.
 struct KeyboardSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
@@ -558,7 +572,7 @@ private struct EmojiRows: View {
             title: String(localized: "Emoji"),
             detail: fullKeyboard
                 ? String(localized: "An emoji key with suggestions as you type")
-                : String(localized: "Needs the full keyboard"),
+                : String(localized: "An emoji key on the dictation bar"),
             isOn: $emoji
         )
         .onChange(of: emoji) { _, enabled in

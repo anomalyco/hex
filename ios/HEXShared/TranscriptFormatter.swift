@@ -47,7 +47,23 @@ nonisolated enum TranscriptFormatter {
     /// `lists` (Settings › Dictation › Format lists) writes spoken lists and line breaks as
     /// lines (`SpokenLists`) after the fillers and before the style's punctuation, in every
     /// style but Verbatim, which keeps the model's exact words.
-    static func format(_ raw: String, style: DictationStyle, language: String? = nil, lists: Bool = false) -> String {
+    ///
+    /// `endsWithPeriod` (Settings › Dictation › End with a period) off, no line ends with a full
+    /// stop ("." or "。"), whether the speech model or the style put it there: a question or an
+    /// exclamation keeps its mark, and marks inside a line stay. Verbatim keeps the model's.
+    static func format(
+        _ raw: String,
+        style: DictationStyle,
+        language: String? = nil,
+        lists: Bool = false,
+        endsWithPeriod: Bool = true
+    ) -> String {
+        let styled = formatted(raw, style: style, language: language, lists: lists)
+        guard !endsWithPeriod, style != .verbatim else { return styled }
+        return styled.components(separatedBy: "\n").map(droppingFinalFullStop).joined(separator: "\n")
+    }
+
+    private static func formatted(_ raw: String, style: DictationStyle, language: String?, lists: Bool) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         let fillers = fillerPattern(for: language)
@@ -211,6 +227,27 @@ nonisolated enum TranscriptFormatter {
         guard let last = line.last, !sentenceClosers.contains(last) else { return line }
         if line.contains("@"), !line.contains(where: \.isWhitespace) { return line }
         return line + (usesIdeographicFullStop(last) ? "。" : ".")
+    }
+
+    /// `line` without the full stop that ends it ("." "。" "．" "｡", before any closing quotes or
+    /// brackets). An ellipsis, an abbreviation's ("etc.") or an initialism's ("U.S.") stays.
+    static func droppingFinalFullStop(_ line: String) -> String {
+        var chars = Array(line)
+        var stop = chars.count - 1
+        while stop >= 0, "\"”’')]」』）".contains(chars[stop]) { stop -= 1 }
+        guard stop >= 0, ".。．｡".contains(chars[stop]) else { return line }
+        if chars[stop] == "." {
+            var start = stop
+            while start > 0, !chars[start - 1].isWhitespace { start -= 1 }
+            let word = String(chars[start..<stop]).lowercased()
+            let initials = word.split(separator: ".", omittingEmptySubsequences: false)
+            let isInitialism = initials.count >= 2 && initials.allSatisfy { $0.count == 1 && $0.first!.isLetter }
+            if word.hasSuffix(".") || isInitialism || abbreviations.contains(word) {
+                return line
+            }
+        }
+        chars.remove(at: stop)
+        return String(chars)
     }
 
     /// What may end a sentence already: its mark, or a closing quote or bracket after one.

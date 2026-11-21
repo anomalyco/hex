@@ -420,6 +420,16 @@
         }
       }
     },
+    "An emoji key on the dictation bar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在听写栏上显示表情符号键"
+          }
+        }
+      }
+    },
     "An emoji key with suggestions as you type" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1413,12 +1423,32 @@
         }
       }
     },
+    "End with a period" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "句末加句号"
+          }
+        }
+      }
+    },
     "Format lists" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "整理列表"
+          }
+        }
+      }
+    },
+    "Off drops the final period, keeps ? and !" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭后去掉末尾的句号，保留问号和感叹号"
           }
         }
       }
