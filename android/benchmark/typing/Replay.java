@@ -100,12 +100,34 @@ public final class Replay {
             return (Character) m.invoke(state, before, hit, near(grid, hit, x, y), grid.getCentres().keySet());
         } catch (NoSuchMethodException old) { return hit; }
     }
+    // `memory MODEL SET LANG ...`: every language's replay in one process, each kept loaded, then the
+    // process's resident memory with all of them, against before the first.
+    static final List<Object> kept=new ArrayList<>();
+    static String memory() throws IOException {
+        StringBuilder b=new StringBuilder();
+        for(String l:java.nio.file.Files.readAllLines(java.nio.file.Paths.get("/proc/self/status")))
+            if(l.startsWith("VmRSS")||l.startsWith("RssAnon")||l.startsWith("RssFile")) b.append(l.replaceAll("\\s+"," ")).append("; ");
+        for(String l:java.nio.file.Files.readAllLines(java.nio.file.Paths.get("/proc/self/smaps_rollup")))
+            if(l.startsWith("Pss:")) b.append(l.replaceAll("\\s+"," "));
+        return b.toString();
+    }
     public static void main(String[] args) throws Exception {
+        if(args[0].equals("memory")) {
+            System.out.println("memory\tbefore\t"+memory());
+            for(int i=1;i+2<args.length;i+=3) replay(new String[]{args[i],args[i+1],args[i+2]});
+            System.gc();
+            System.out.println("memory\tall loaded\t"+memory());
+            return;
+        }
+        replay(args);
+    }
+    static void replay(String[] args) throws Exception {
         String lang=args[2], group=lang.equals("en") ? "test-" : lang+"-test-";
         PrintWriter outputs=args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
         boolean hasIos=false;
         TypingModel model=TypingModel.Companion.file(new File(args[0]),lang);
         KeyGrid grid=originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
+        kept.add(state);
         List<Long> letters=new ArrayList<>(), spaces=new ArrayList<>();
         int count=0, total=0, matches=0; int[] errors=new int[3], exact=new int[3];
         // Strip hits, as iOS's harness counts them: the intended word among the slots once its last

@@ -31,8 +31,8 @@ commoner model word is held, so "ecole" isn't written "Ecole" (books drop accent
 import hashlib, math, multiprocessing, os, re, struct, subprocess, sys, tarfile, unicodedata
 
 BASE = "https://storage.googleapis.com/books/ngrams/books/20200217"
-FILES = {"en": ("eng", 24), "es": ("spa", 3), "fr": ("fre", 6), "it": ("ita", 2)}
-LETTERS = {"en": "a-z", "es": "a-zñáéíóúü", "fr": "a-zàâçéèêëîïôùûüÿœæ", "it": "a-zàèéìíîòóùú"}
+FILES = {"en": ("eng", 24), "es": ("spa", 3), "de": ("ger", 8), "fr": ("fre", 6), "it": ("ita", 2)}
+LETTERS = {"en": "a-z", "es": "a-zñáéíóúü", "de": "a-zäöüß", "fr": "a-zàâçéèêëîïôùûüÿœæ", "it": "a-zàèéìíîòóùú"}
 FIRST_YEAR, LAST_YEAR = 1980, 2019
 MIN_TOTAL = 40
 SOMETIMES = 50
@@ -127,9 +127,9 @@ def count_shard(job):
     return out
 
 
-def main():
-    lang, model, work, output = sys.argv[1:5]
-    lowercase = scowl_lowercase(sys.argv[5]) if lang == "en" else set()
+def merged_counts(lang, work):
+    """WORK/counts.tsv: each lowercase spelling with its 1980-2019 lowercase and capitalised counts,
+    counted once from the language's 1-gram shards. build-valid-words.py reads it too."""
     os.makedirs(work, exist_ok=True)
     merged = os.path.join(work, "counts.tsv")
     if not os.path.exists(merged):
@@ -149,6 +149,13 @@ def main():
             for key in set(low) | set(cap):
                 f.write(f"{key}\t{low.get(key, 0)}\t{cap.get(key, 0)}\n")
         os.replace(merged + ".part", merged)
+    return merged
+
+
+def main():
+    lang, model, work, output = sys.argv[1:5]
+    lowercase = scowl_lowercase(sys.argv[5]) if lang == "en" else set()
+    merged = merged_counts(lang, work)
     unigram, pair = model_words(model)
     words = set(unigram)
     def folded(w):

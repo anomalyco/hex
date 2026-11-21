@@ -28,9 +28,10 @@ class NeverSuggestTest {
             "de" -> listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm")
             "es" -> listOf("qwertyuiop", "asdfghjklñ", "zxcvbnm")
             "fr" -> listOf("azertyuiop", "qsdfghjklm", "wxcvbn")
+            "nb" -> listOf("qwertyuiopå", "asdfghjkløæ", "zxcvbnm")
             else -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         }
-        val pitch = if (language == "de") 36.0 else 39.5
+        val pitch = if (language == "de" || language == "nb") 36.0 else 39.5
         return KeyGrid(buildMap {
             for ((row, letters) in rows.withIndex()) for ((i, c) in letters.withIndex())
                 put(c, KeyPoint(201 + (i - (letters.length - 1) / 2.0) * pitch, 66.5 + 56 * row))
@@ -515,5 +516,22 @@ class NeverSuggestTest {
         w.reset("")
         for (c in "specialchsracter") w.tap(g, c)
         assertTrue(w.suggestions().joinToString(), w.suggestions().any { it.equals("special character", ignoreCase = true) })
+    }
+
+    // Rare words the books use, outside the models (<lang>.valid), kept as typed: each of these is read
+    // as a commoner word, or words run together, without its list. A model word typed without its
+    // accent still gets it.
+    @Test fun rareWordsTheBooksUseAreKept() {
+        for ((lang, typed) in listOf("es" to "caminad", "es" to "vanesa", "it" to "scherzate", "it" to "antidepressivo",
+            "de" to "analysiere", "de" to "handelst", "nb" to "navar", "nb" to "støyet")) {
+            val w = word(lang)
+            w.reset("")
+            for (c in typed) w.tap(layout(lang), c)
+            assertNull("$lang $typed", w.replacement())
+        }
+        val es = word("es")
+        es.reset("")
+        for (c in "volvere") es.tap(layout("es"), c)
+        assertEquals("volveré", es.replacement())
     }
 }

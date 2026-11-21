@@ -13,14 +13,15 @@ mkdir -p "$work/classes"; adb shell mkdir -p "$dev"
 adb push "$work/replay-dex.jar" "$dev/replay.jar" >/dev/null
 adb shell chmod 444 "$dev/replay.jar"
 apk=$(adb shell pm path ly.anoma.hex | tr -d '\r' | sed 's/^package://')
-adb push app/src/main/assets/typing/en.valid "$dev/en.valid" >/dev/null
 adb push app/src/main/assets/typing/never-suggest.tsv "$dev/never-suggest.tsv" >/dev/null
 mkdir -p "$T/outputs"
 for lang in en es de nb fr it; do
     [ -f "$T/bench/$lang.jsonl" ] || continue
     adb push "app/src/main/assets/typing/$lang.hextm" "$dev/$lang.hextm" >/dev/null
-    adb shell rm -f "$dev/$lang.capitals"
-    [ ! -f "app/src/main/assets/typing/$lang.capitals" ] || adb push "app/src/main/assets/typing/$lang.capitals" "$dev/$lang.capitals" >/dev/null
+    for side in capitals valid; do
+        adb shell rm -f "$dev/$lang.$side"
+        [ ! -f "app/src/main/assets/typing/$lang.$side" ] || adb push "app/src/main/assets/typing/$lang.$side" "$dev/$lang.$side" >/dev/null
+    done
     adb push "$T/bench/$lang.jsonl" "$dev/$lang.jsonl" >/dev/null
     adb shell "CLASSPATH=$dev/replay.jar:$apk app_process /system/bin local.hex.bench.Replay $dev/$lang.hextm $dev/$lang.jsonl $lang $dev/$lang.out"
     adb pull "$dev/$lang.out" "$T/outputs/$lang.tsv" >/dev/null
