@@ -16,7 +16,8 @@ internal enum class Spoken(val code: String, val label: String) {
         }
     }
 }
-internal data class SpeechOptions(val style: Style, val spoken: Spoken, val clean: Boolean, val translate: Boolean)
+internal data class SpeechOptions(val style: Style, val spoken: Spoken, val clean: Boolean, val translate: Boolean,
+                                   val lowercase: Boolean = false, val endWithPeriod: Boolean = true)
 internal class SpeechPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)
     var style: Style
@@ -39,6 +40,14 @@ internal class SpeechPreferences(context: Context) {
     var translation: Boolean
         get() = prefs.getBoolean("translation", false)
         set(value) { prefs.edit().putBoolean("translation", value).apply() }
+    // Settings › Dictation › Lowercase: everything dictation writes, after the style.
+    var lowercase: Boolean
+        get() = prefs.getBoolean("lowercase", false)
+        set(value) { prefs.edit().putBoolean("lowercase", value).apply() }
+    // Off, no line ends with a full stop; "?" and "!" stay.
+    var endWithPeriod: Boolean
+        get() = prefs.getBoolean("endWithPeriod", true)
+        set(value) { prefs.edit().putBoolean("endWithPeriod", value).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
-        translation && spoken == Spoken.Spanish && (nextEnglish ?: true))
+        translation && spoken == Spoken.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod)
 }
