@@ -7,6 +7,9 @@
     <string name="dictation_format_lists_detail">Say “first, second” or “bullet” for a list</string>
     <string name="dictation_spoken_punctuation">Spoken punctuation</string>
     <string name="dictation_spoken_punctuation_detail">Say “comma” or “question mark” for the mark</string>
+    <string name="dictation_vocabulary">Custom vocabulary</string>
+    <string name="dictation_vocabulary_detail">Spell names and terms your way</string>
+    <string name="dictation_vocabulary_hint">One name or term per line</string>
     <string name="dictation_end_with_period">End with a period</string>
     <string name="dictation_end_with_period_detail">Off drops the final period, keeps ? and !</string>
 </resources>

@@ -4,18 +4,23 @@ import java.util.Locale
 
 /** iOS's DictationPipeline and TranscriptFormatter: string rules only, no learned or remote rewriting. */
 internal object SpokenText {
-    /** Spoken symbols and counts, cleanup, the style, then Lowercase, the same wherever Hex
-     * dictates. Translation already happened in Whisper, so a translated dictation is English. */
+    /** Custom vocabulary, spoken symbols and counts, cleanup, the style, the vocabulary's spellings
+     * again (a style can capitalize "iPhone"), then Lowercase, the same wherever Hex dictates.
+     * Translation already happened in Whisper, so a translated dictation is English. */
     fun format(raw: String, options: SpeechOptions): String {
         val language = if (options.translate) "en" else options.spoken.code
-        if (options.style == Style.Verbatim || raw.isBlank()) return lowercased(style(raw, options.style, language), options)
-        val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(raw.trim(), language), language)
+        val spelled = VocabularySpelling.apply(options.vocabulary, raw)
+        if (options.style == Style.Verbatim || raw.isBlank()) return finished(style(spelled, options.style, language), options)
+        val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(spelled.trim(), language), language)
         val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken
-        return lowercased(style(cleaned, options.style, language, options.endWithPeriod, options.formatLists,
+        return finished(style(cleaned, options.style, language, options.endWithPeriod, options.formatLists,
             options.spokenPunctuation), options)
     }
 
-    private fun lowercased(text: String, options: SpeechOptions) = if (options.lowercase) text.lowercase(Locale.ROOT) else text
+    private fun finished(styled: String, options: SpeechOptions): String {
+        val text = VocabularySpelling.apply(options.vocabulary, styled)
+        return if (options.lowercase) text.lowercase(Locale.ROOT) else text
+    }
 
     /** TranscriptFormatter.format. [lists] (SpokenLists) then [punctuation] (SpokenPunctuation) run
      * after the fillers, in every style but Verbatim. With [endsWithPeriod] off no line ends with a

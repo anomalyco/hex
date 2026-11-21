@@ -18,7 +18,8 @@ internal enum class Spoken(val code: String, val label: String) {
 }
 internal data class SpeechOptions(val style: Style, val spoken: Spoken, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
-                                   val formatLists: Boolean = false, val spokenPunctuation: Boolean = false)
+                                   val formatLists: Boolean = false, val spokenPunctuation: Boolean = false,
+                                   val vocabulary: List<String> = emptyList())
 internal class SpeechPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("speech", Context.MODE_PRIVATE)
     var style: Style
@@ -57,6 +58,14 @@ internal class SpeechPreferences(context: Context) {
     var spokenPunctuation: Boolean
         get() = prefs.getBoolean("spokenPunctuation", true)
         set(value) { prefs.edit().putBoolean("spokenPunctuation", value).apply() }
+    // Custom vocabulary: names and terms spelled your way, kept even while the switch is off.
+    var customVocabulary: Boolean
+        get() = prefs.getBoolean("customVocabulary", false)
+        set(value) { prefs.edit().putBoolean("customVocabulary", value).apply() }
+    var vocabularyTerms: List<String>
+        get() = prefs.getString("vocabularyTerms", null)?.split('\n').orEmpty().filter(String::isNotEmpty)
+        set(value) { prefs.edit().putString("vocabularyTerms", VocabularySpelling.sanitize(value).joinToString("\n")).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
-        translation && spoken == Spoken.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation)
+        translation && spoken == Spoken.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,
+        if (customVocabulary) vocabularyTerms else emptyList())
 }

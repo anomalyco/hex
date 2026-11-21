@@ -351,4 +351,18 @@ class InsertionTest {
         assertEquals("que sí", SpokenText.continuing("Que sí", "Creo", "es"))
         assertEquals("Madrid es", SpokenText.continuing("Madrid es", "en", "es"))
     }
+
+    // iOS TranscriptCleanupTests and CustomVocabularyTests: vocabulary before cleanup and after the style.
+    @Test fun vocabularySpellsBeforeAndAfterTheStyle() {
+        fun spelled(text: String, style: Style, lowercase: Boolean = false, terms: List<String> = listOf("iPhone")) =
+            SpokenText.format(text, SpeechOptions(style, Spoken.English, false, false, lowercase, vocabulary = terms))
+        val heard = "Yeah, text John about the iphone order."
+        assertEquals("Yeah, text John about the iPhone order.", spelled(heard, Style.Polished))
+        assertEquals("yeah, text john about the iphone order.", spelled(heard, Style.Polished, lowercase = true))
+        assertEquals("yeah text john about the iphone order", spelled(heard, Style.Casual, lowercase = true))
+        assertEquals("yeah, text john about the iphone order.", spelled(heard, Style.Verbatim, lowercase = true))
+        assertEquals("iPhone is charged.", spelled("iphone is charged", Style.Polished))
+        assertEquals("Ask about OpenCode and WeChat.", spelled("ask about open code and we chat", Style.Polished, terms = listOf("OpenCode", "WeChat")))
+        assertEquals("Ask about open code.", spelled("ask about open code", Style.Polished, terms = emptyList()))
+    }
 }
