@@ -266,6 +266,21 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Привет опаздываю на десять минут буду дома в восемь хорошо спасибо ")
     }
 
+    /// Ukrainian types with iOS's uk_UA dictionary, never Russian's or English's: its words
+    /// stay, ʼ (Apple's apostrophe key) included. The iOS 27.2 simulator lists uk_UA but
+    /// flags no word and offers no guess, so its typo fixes are checked on an iPhone only.
+    func testUkrainianTypesInUkrainianNeverRussianOrEnglish() {
+        engine.language = .ukrainian
+        XCTAssertEqual(engine.autocorrect.language, .ukrainian)
+        XCTAssertTrue(engine.autocorrect.hasDictionary)
+        XCTAssertNil(engine.partnerLanguage)
+        for word in ["Привіт", "як", "справи", "мʼясо", "їжак", "єнот", "ґанок", "дякую", "сімʼя", "на", "і"] {
+            typeWord(word)
+            tap(.space)
+        }
+        XCTAssertEqual(target.text, "Привіт як справи мʼясо їжак єнот ґанок дякую сімʼя на і ")
+    }
+
     /// Serbian (Latin) has no dictionary on iOS: nothing is "corrected", into English or anything else.
     func testSerbianLatinWithoutADictionaryCorrectsNothing() {
         engine.language = .serbianLatin

@@ -279,7 +279,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     including a name, day or place typed in lowercase that the dictionary knows only
     capitalised, which is capitalised as the dictionary path does: "mary" -> "Mary").
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português, Русский) keep the dictionary
+    layouts (Norsk, Deutsch, Italiano, Français, Português, Русский, Українська) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
@@ -496,7 +496,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   iPhone's region where Apple Speech has it (`KeyboardLanguage.dictationLanguage`; none for
   Srpski). **Bilingual autocorrect:** the first other chosen language with Latin letters and
   an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
-  English; none for Русский, Srpski, or two French layouts) is checked on the same keys,
+  English; none for Русский, Українська, Srpski, or two French layouts) is checked on the same keys,
   with its Spatial model where it has one, as Apple's "Français et English" keyboard does: a
   word either language knows as typed is never changed, a typo only one can fix gets that
   fix ("teh" → "the" while French types), and when both can, the language of the last words
@@ -513,7 +513,12 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   leaves out), Français (Canada) on QWERTY and Français (Suisse) on QWERTZ, as on Apple's
   (automatic picks them for `fr-CA` and `fr-CH`, AZERTY for any other French, Belgium
   included), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
-  held е, ъ on a held ь) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  held е, ъ on a held ь), Українська (the standard Ukrainian ЙЦУКЕН, ДСТУ 4862:2007, in the
+  rows the iOS 27.2 simulator's own Ukrainian keyboard shows: 12, 12 and 10 keys,
+  `йцукенгшщзхї`, `фівапролджєʼ`, `ячсмитьбюґ`, with ʼ the U+02BC apostrophe Ukrainian
+  spells with; as the system keyboard's long-press options were observed, only ʼ offers
+  anything, the other apostrophes (' ’ ‘ and the backtick), and ₴, the system keyboard's
+  currency key, is held on $; no ы, э, ъ or ё) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z, and only the iPad's Croatian layouts give them keys), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -524,14 +529,15 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   input mode, whose `primaryLanguage` is always the Info.plist's en-US. Rows of 11 keys narrow
   only the letters: shift, delete and the bottom row keep their English sizes,
   and row 3's letters sit centred between shift and delete. Russian's nine-letter row 3
-  wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's. Long-press accents
+  wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's;
+  Ukrainian's twelve-key rows leave them one letter wide, as on Apple's. Long-press accents
   drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
   Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º; Italian
   à, è, ì, ò, ù; French é, à, î, ô, û in Apple's order; Portuguese á, ã, é, ó, õ, ú; Russian and
   Serbian copy Apple's lists from the simulator's `TextInput_ru` and `TextInput_sr`,
   base letter first), and German keeps ß on a held S. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `ru`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
@@ -541,7 +547,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   neighbouring key (or one swap) from a very common two-letter word is fixed too
   ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
   Spanish and Italian only). Auto-capitalization is unchanged.
-  The 123 and #+= pages are English's in every language, and the accent lists
+  The 123 and #+= pages are English's in every language (the system Ukrainian keyboard
+  shows ₴ on its currency key; Hex holds it on $), and the accent lists
   come from Apple's layouts as remembered, not checked against a device.
 - **Size (full keyboard):** The suggestion strip is Apple's 44 pt predictive bar in
   every state (suggestions, Undo dictation, the Full Access hint, the recording bar,
