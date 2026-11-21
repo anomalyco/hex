@@ -398,6 +398,26 @@ enum EmojiFixture {
             steps.append((0.3, { view.emojiPanel?.debugJump(toSection: section) }))
         }
         steps.append((0.5, { log("panel open, every section drawn") }))
+        // Every emoji: the grid scrolled from the first column to the last, a screen at a time.
+        steps.append((0.3, { view.emojiPanel?.debugJump(toSection: 0) }))
+        for page in 0..<60 {
+            steps.append((0.05, { view.emojiPanel?.debugScroll(toPage: page) }))
+        }
+        steps.append((0.5, {
+            guard let glyphs = view.emojiPanel?.glyphs else { return }
+            let average = glyphs.renders > 0 ? glyphs.renderTime / Double(glyphs.renders) * 1000 : 0
+            log("panel open, every emoji drawn, renders=\(glyphs.renders) fonts=\(glyphs.fontsMade) slowest font=\(String(format: "%.2f", glyphs.slowestFont * 1000))ms private=\(glyphs.hasPrivateFont) render avg=\(String(format: "%.2f", average))ms max=\(String(format: "%.2f", glyphs.slowestRender * 1000))ms cached=\(glyphs.cachedCount) \(glyphs.cachedBytes / 1024)KB")
+        }))
+        // A fast fling's pace, 40 pt a frame from the start to the end: each frame's work.
+        steps.append((0.3, { view.emojiPanel?.debugJump(toSection: 1) }))
+        steps.append((0.5, {
+            FrameProbe.run(step: { view.emojiPanel?.debugScroll(by: 40) ?? false }) { work, gaps in
+                let sorted = work.sorted()
+                func ms(_ value: Double) -> String { String(format: "%.2f", value * 1000) }
+                log("scrolled every emoji at 40 pt a frame, frames=\(sorted.count) work p50=\(ms(sorted[sorted.count / 2]))ms p95=\(ms(sorted[sorted.count * 95 / 100]))ms max=\(ms(sorted.last ?? 0))ms frames over 16.7ms=\(sorted.filter { $0 > 1.0 / 60 }.count) late frames=\(gaps)")
+            }
+        }))
+        steps.append((6.0, {}))
         steps.append((0.2, {
             view.beginEmojiSearch()
             for character in "pizza" { view.routedTarget.insertText(String(character)) }
@@ -432,6 +452,45 @@ enum EmojiFixture {
             }
         }
         run(0)
+    }
+}
+
+/// Probes: calls `step` once a frame until it returns false, timing each call, then
+/// reports the times and how many frames came late (over 1.5 frames after the last).
+@MainActor
+final class FrameProbe: NSObject {
+    private let step: () -> Bool
+    private let done: ([Double], Int) -> Void
+    private var link: CADisplayLink?
+    private var work: [Double] = []
+    private var last: CFTimeInterval = 0
+    private var late = 0
+    private static var running: [FrameProbe] = []
+
+    private init(step: @escaping () -> Bool, done: @escaping ([Double], Int) -> Void) {
+        self.step = step
+        self.done = done
+    }
+
+    static func run(step: @escaping () -> Bool, done: @escaping ([Double], Int) -> Void) {
+        let probe = FrameProbe(step: step, done: done)
+        running.append(probe)
+        let link = CADisplayLink(target: probe, selector: #selector(tick(_:)))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 60, preferred: 60)
+        link.add(to: .main, forMode: .common)
+        probe.link = link
+    }
+
+    @objc private func tick(_ link: CADisplayLink) {
+        if last > 0, link.timestamp - last > 1.5 / 60 { late += 1 }
+        last = link.timestamp
+        let started = CACurrentMediaTime()
+        let more = step()
+        work.append(CACurrentMediaTime() - started)
+        guard !more else { return }
+        link.invalidate()
+        done(work, late)
+        Self.running.removeAll { $0 === self }
     }
 }
 

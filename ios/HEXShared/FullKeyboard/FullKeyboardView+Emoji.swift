@@ -155,6 +155,7 @@ extension FullKeyboardView {
         addSubview(field)
         emojiSearchField = field
         let results = EmojiRowView()
+        results.renderer = panel.glyphs
         results.palette = palette
         results.fontSize = panel.rowFontSize
         results.emptyText = "No emoji"

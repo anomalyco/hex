@@ -35,6 +35,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     let library: EmojiLibrary
     let usage: EmojiUsageStore
+    /// The panel's emoji bitmaps, shared with its suggestion row and the search's results,
+    /// and gone with the panel.
+    let glyphs = EmojiGlyphRenderer()
     private(set) var sections: [Section] = []
     private(set) var suggestions: [Int] = []
 
@@ -83,6 +86,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         searchButton.addTarget(self, action: #selector(searchTapped), for: .touchUpInside)
         addSubview(searchButton)
 
+        suggestionRow.renderer = glyphs
         suggestionRow.onPick = { [weak self] index in self?.pickSuggestion(index) }
         addSubview(suggestionRow)
         rowSeparator.isUserInteractionEnabled = false
@@ -91,7 +95,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         grid.backgroundColor = .clear
         grid.showsHorizontalScrollIndicator = false
         grid.delaysContentTouches = false
-        // Each drawn cell holds a bitmap of its emoji; only the visible ones should.
+        // Cells draw their emoji when they're configured; only the visible ones should.
         grid.isPrefetchingEnabled = false
         grid.hideEdgeEffects()
         grid.dataSource = self
@@ -303,7 +307,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
                 emoji: display(for: entry),
                 name: library.name(of: entry),
                 fontSize: layoutKey?.fontSize ?? 29,
-                palette: palette
+                palette: palette,
+                renderer: glyphs,
+                scale: collectionView.traitCollection.displayScale
             )
         }
         return cell
@@ -502,6 +508,23 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// Fixtures and probes: the section the grid shows first.
     func debugJump(toSection section: Int) {
         jump(toSection: section)
+    }
+
+    /// Probes: the grid scrolled to its `page`th screen (clamped to the end).
+    func debugScroll(toPage page: Int) {
+        grid.layoutIfNeeded()
+        let maxX = max(0, grid.contentSize.width - grid.bounds.width)
+        grid.setContentOffset(CGPoint(x: min(maxX, CGFloat(page) * grid.bounds.width), y: 0), animated: false)
+        grid.layoutIfNeeded()
+    }
+
+    /// Probes: the grid scrolled `dx` points on; false once it's at the end.
+    func debugScroll(by dx: CGFloat) -> Bool {
+        let maxX = max(0, grid.contentSize.width - grid.bounds.width)
+        guard grid.contentOffset.x < maxX else { return false }
+        grid.setContentOffset(CGPoint(x: min(maxX, grid.contentOffset.x + dx), y: 0), animated: false)
+        grid.layoutIfNeeded()
+        return true
     }
 
     // MARK: - Keys

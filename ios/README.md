@@ -896,15 +896,23 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   Apple's on-device word embedding (`EmojiSemanticIndex`, app and tests only) changed
   none of these, cost 5.3 MB that stayed after release and 100–120 ms to build, so the
   keyboard doesn't use it; Apple's sentence embedding scored 18/40. In the keyboard
-  extension (Release, iPhone 17 simulator, iOS 27.2, no GPU memory, no headroom
-  reading) the footprint was 19.0 MB with the emoji key, 28.7 MB with the panel open,
-  22.7 MB after picking suggestions and closing it, 41.6 MB (peak 48.4) after
-  scrolling every section and 36.5 MB once closed: about 350 emoji glyph images the
-  system's text rendering caches process-wide (18.7 MB), which no public API frees
-  and neither a smaller size nor a font instance of the panel's own changed. Whether
-  iOS purges them under memory pressure, and so whether browsing everything leaves
-  in-keyboard dictation short of its 32 MB, is unverified on an iPhone. The panel
-  opened in 22–26 ms the first time and 12–14 ms after (about 21 ms until on screen).
+  extension (Release, iPhone 17 Pro simulator, iOS 27.2, Full Access, a hosted field, no
+  GPU memory, no headroom reading, `footprint` resident and peak): drawn as text, each
+  emoji's image (about 48 KB) stayed in a cache of the shared emoji font that nothing
+  public empties, so browsing every category reached 62.7 MB (peak 67.5) and scrolling
+  past every emoji 137.7 MB (peak 142.3), still held once closed. The panel now draws
+  its emoji itself (`EmojiGlyphRenderer`): a private copy of the emoji font, from the same
+  memory-mapped file, replaced every 32 emoji and once drawing pauses for 0.3 s, and a
+  2 MB least-recently-used cache of the bitmaps, freed with the panel and on a memory
+  warning. Two runs: typing 30.6–34.6 MB, the panel open 36.4–40.0 MB, every category
+  39.4–43.0 MB, every emoji 40.0–42.8 MB (peak 44.3–47.9), 31.9–35.3 MB once closed, and
+  an in-keyboard dictation after it no higher. `EmojiSuggesterTests` check that a cell
+  lands where a label drew its emoji and that drawing every emoji stays in the cache's
+  limit; `--snap-state full-keyboard-emoji-probe` prints the app's footprint, the
+  renderer's counts and each frame's work scrolling every emoji at 40 pt a frame
+  (p50 1.6–1.8 ms, p95 2.5–6 ms against 0.6–1.0 ms drawn as text). The panel opens in
+  24–29 ms the first time and 15–17 ms after (8–9 ms drawn as text, which reused the
+  shared font's images).
 - **No iOS CI:** Custom vocabulary is covered by unit tests only. No CI job
   compiles or tests the iOS targets, so these checks run only in a local
   `xcodebuild test`.
