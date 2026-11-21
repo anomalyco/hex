@@ -1152,3 +1152,38 @@ extension AutocorrectEngineTests {
         }
     }
 }
+
+
+extension AutocorrectEngineTests {
+    /// A strong personal profile (every key's centre at the bound, a third of a key to the
+    /// right) leaves every word these suites protect as the stock centres do.
+    func testPersonalCentresKeepNamesYourWordsAndWordsTypedRight() throws {
+        let words = ["come", "and", "miss", "the", "quiz", "see", "mary", "on", "monday", "in", "boston", "with", "zorbix", "kit", "lol"]
+        func typed(profile: Bool) throws -> String {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+            try useDecoder()
+            engine.autocorrect.loadLexiconEntries([("Zorbix", "Zorbix"), ("Kit", "Kit")])
+            if profile {
+                let touch = AdaptiveTouch(storage: .memory, settings: AdaptiveTouchSettings(defaults: defaults))
+                engine.adaptiveTouch = touch
+                let geometry = try XCTUnwrap(touch.geometry)
+                for n in 0..<600 {
+                    if n % 150 == 0 { touch.beginSession() }
+                    let s = n % geometry.letters.count
+                    let f = geometry.frames[s]
+                    touch.admit(slot: s, point: CGPoint(x: f.midX + 0.45 * f.width, y: f.midY), quality: AdaptiveTouch.weakQuality)
+                }
+                XCTAssertTrue(touch.isActive)
+                XCTAssertNotEqual(engine.autocorrect.decoderKeys, engine.autocorrect.decoderBaselineKeys)
+            }
+            for word in words { typeTaps(word) }
+            return target.text
+        }
+        XCTAssertEqual(try typed(profile: true), try typed(profile: false))
+    }
+}

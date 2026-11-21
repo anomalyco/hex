@@ -875,8 +875,8 @@ extension TypingDecoder {
         if userWords.index(of: codes) != nil { readingLM = min(readingLM, parameters.userWordCost) }
         guard readingLM.isFinite else { return false }
         var margin = (literalIndex != nil || literalIsValid || literalIsYours) ? parameters.validMargin : parameters.autoMargin
-        if Self.withoutAccents(reading.lowercased()) == Self.withoutAccents(typed) {
-            margin = min(margin, parameters.accentMargin)
+        if margin > parameters.accentMargin, Self.withoutAccents(reading.lowercased()) == Self.withoutAccents(typed) {
+            margin = parameters.accentMargin
         }
         // Usually one alignment the search would also try already clears it: no search then.
         if let bound = alignedCost(codes, costs), literalCost - (bound + parameters.lmWeight * readingLM) >= margin {

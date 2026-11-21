@@ -707,9 +707,11 @@ final class AdaptiveTouch {
             model.contexts[c].inUse = false
             didChange = true
         }
-        // The window and its newest quarter agree the learning profile stopped fitting.
+        // The window and its newest quarter agree the learning profile, which had the evidence
+        // to be used, stopped fitting. (Before that, a new grip only mixes into what is learned
+        // and nothing is in use.)
         if mode == .learn, let learning = regimes.first(where: { model.contexts[$0].learning }),
-           model.contexts[learning].hasSnapshot, gainCount[learning] >= Self.monitorMinimum + 8,
+           model.contexts[learning].isActiveEligible, gainCount[learning] >= Self.monitorMinimum + 8,
            misfits(learning, axis: Self.switchAxis, total: Self.switchGain), recentGain(learning) < 0 {
             let regime: UInt8 = model.contexts[learning].regime == 0 ? 1 : 0
             let next: Int
