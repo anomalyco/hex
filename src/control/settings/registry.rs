@@ -609,6 +609,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: hex annotate inspect, zoom, frames, and skill read a capture bundle in the CLI process, for a coding agent (macOS, Linux, Windows)",
     ),
     key(
+        "labs.annotate_agent_install",
+        Kind::Bool,
+        "Labs: Annotate gains an Agents section that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, copies the npx skills add command, and on macOS links hex onto PATH without replacing another program's hex (macOS, Linux, Windows)",
+    ),
+    key(
         "labs.gnome_clipboard_restore",
         Kind::Bool,
         "Labs: on Wayland desktops without data-control, such as GNOME, a paste restores the previous clipboard through XWayland while it is already running (Linux)",

@@ -319,7 +319,9 @@ window; for a mark it prints the mark's line first. `frames [<capture>]
 --from <M:SS|secs> --to <M:SS|secs> [--fps 4]` writes one PNG per frame into
 `<bundle>/zoom/range-*/`, clamped to the recording's length and at most 240
 frames a call, and prints each path. `skill` prints the
-[`hex-annotate`](../skills/hex-annotate/SKILL.md) skill this Hex ships.
+[`hex-annotate`](../skills/hex-annotate/SKILL.md) skill this Hex ships: the
+same guide the Annotate pane's Agents section writes into a coding agent's
+folder while Labs › Install agent skill from Annotate is on.
 
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar
 state, the recording capsule, and Stop & Transcribe all apply to it.

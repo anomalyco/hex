@@ -319,6 +319,20 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // lines, every refusal), control::cli::annotate_read's clap conflicts, and
 │                                        // agent_tools_for_captures_is_its_own_switch_and_everywhere (labs.rs); the video decode
 │                                        // path is unverified on a real bundle, and no capture was recorded for this change
+├── Install agent skill from Annotate no labs.annotate_agent_install (every OS)
+│                                        Annotate gains an Agents section: one row per coding agent writes the
+│                                        hex-annotate skill into its own skills folder (Claude Code, OpenCode; Codex and
+│                                        Pi use the shared ~/.agents/skills), a row copies npx skills add
+│                                        anomalyco/hex --skill hex-annotate, and on macOS Command-line tool links hex
+│                                        onto PATH (/opt/homebrew/bin, /usr/local/bin, else ~/.local/bin), never
+│                                        replacing another program's hex and never linking an App Translocation copy.
+│                                        Off, the pane is exactly as before
+│                                        // checks: agent_install's unit tests (finding, installing, an outdated file,
+│                                        // other files left alone, the shared copy, a symlinked skill, a dangling Hex
+│                                        // link, App Translocation, a foreign hex, the link folder); rune_ui::scrawl's
+│                                        // the_agents_section_needs_its_lab, installing_writes_each_checked_agents_skill,
+│                                        // an_agents_row_checks_only_that_agent, a_linked_skill_has_no_switch; not run on
+│                                        // a real Mac, and no agent read a capture after this installed the skill
 ├── Terminal paste  no    paste_with_shift             (Windows) paste with Ctrl+Shift+V (#477/#478; Linux keeps it in General);
 │                                         Java games (javaw/java, e.g. Minecraft) still get Ctrl+V (#1362)
 │                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
@@ -3433,6 +3447,38 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `latest`, in `capture.folder`) and refuses an unknown one with
   `not-found`. While the lab is off all four print how to turn it on and exit
   1.
+- Install agent skill from Annotate: the Annotate pane gains an **Agents**
+  section (every OS; off by default, `labs.annotate_agent_install`, in the
+  Annotate group). Off, the pane is exactly as before. One row per coding
+  agent says whether its folder exists and whether it already has this Hex's
+  skill: Claude Code at `$CLAUDE_CONFIG_DIR` or `~/.claude` plus
+  `skills/hex-annotate/SKILL.md`, Codex at
+  `~/.agents/skills/hex-annotate/SKILL.md` (found with `~/.codex` or
+  `$CODEX_HOME`; `$CODEX_HOME/skills` is the legacy place),
+  OpenCode at `$XDG_CONFIG_HOME` or `~/.config` plus
+  `opencode/skills/hex-annotate/SKILL.md`, and Pi at
+  `~/.pi/agent/skills/hex-annotate/SKILL.md` (`$PI_CODING_AGENT_DIR` or
+  `~/.pi`). `npx skills` writes Codex and Pi skills to
+  `~/.agents/skills`, so a copy there counts for either: read by content,
+  never duplicated, and an outdated shared copy is the one installing updates.
+  A found agent without the skill reads Not installed and starts checked; a
+  different file reads Update available. **Install** writes the same embedded
+  `skills/hex-annotate/SKILL.md` that `hex annotate skill` prints into each
+  checked agent's folder — directories created, a staging file renamed into
+  place, no other file touched — and a not-found agent has no switch, is never
+  checked, and gets no folder; Install is disabled while nothing is checked.
+  A symlinked `SKILL.md` or `hex-annotate` folder is managed elsewhere: the
+  row says Managed elsewhere, it has no switch, and nothing is written through
+  the link. Beside it, `npx skills add anomalyco/hex --skill
+  hex-annotate` has Copy, for people who manage skills themselves. On macOS,
+  **Command-line tool** links `hex` (this app's executable) into
+  `/opt/homebrew/bin` or `/usr/local/bin` when one exists and is writable,
+  else `~/.local/bin`, and never replaces a `hex` another program owns; a
+  link whose target is gone counts only when it names a Hex app, a Hex running
+  from App Translocation refuses to link and says to move Hex to Applications
+  first, and a `~/.local/bin` link `$PATH` doesn't name says so. While Labs ›
+  Agent tools for captures is off, a note names that switch for the skill's
+  `zoom`/`inspect`/`frames` commands.
 - Vocabulary files: the Vocabulary sheet gains **Import…** and **Export…**
   beside Add term (every OS; off by default, `labs.vocabulary_files`). Off,
   the sheet is exactly as before. Import opens one CSV or TXT file, refuses

@@ -8,6 +8,10 @@ const VERSION: &str = env!("HEX_BUILD_VERSION");
 
 #[cfg(target_os = "macos")]
 mod accessibility;
+/// The Annotate pane's Agents section: the hex-annotate skill in coding
+/// agents' folders and hex on PATH (`capture.agents`).
+#[cfg(hex_capture)]
+mod agent_install;
 mod app_paths;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 mod app_settings;

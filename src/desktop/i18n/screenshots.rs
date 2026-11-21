@@ -4,12 +4,26 @@
 
 use std::collections::HashMap;
 
+/// The language whose own table (here, and in the Annotate Agents section)
+/// merges over the main rows.
+#[derive(Clone, Copy)]
+pub(super) enum Language {
+    French,
+    Portuguese,
+    Russian,
+}
+
 /// A one-language table with these strings added.
 pub(super) fn merged(
     table: &[(&'static str, &'static str)],
-    extra: &[(&'static str, &'static str)],
+    language: Language,
 ) -> HashMap<&'static str, &'static str> {
-    table.iter().chain(extra).copied().collect()
+    let (extra, agents) = match language {
+        Language::French => (FRENCH, super::agents::FRENCH),
+        Language::Portuguese => (PORTUGUESE, super::agents::PORTUGUESE),
+        Language::Russian => (RUSSIAN, super::agents::RUSSIAN),
+    };
+    table.iter().chain(extra).chain(agents).copied().collect()
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.

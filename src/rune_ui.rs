@@ -693,6 +693,10 @@ pub(crate) struct Ui {
     drop: drop_transcribe::DropTranscribe,
     #[cfg(hex_capture)]
     captures: captures::CapturesPane,
+    /// The Annotate pane's Agents section: coding agents' skill folders and
+    /// the hex link, read when the pane opens and after an install.
+    #[cfg(hex_capture)]
+    agents: scrawl::Agents,
     modes: modes::ModesPane,
     output: output::OutputPane,
     picker: picker::Picker,
@@ -822,6 +826,8 @@ impl Ui {
             drop: drop_transcribe::DropTranscribe::default(),
             #[cfg(hex_capture)]
             captures: captures::CapturesPane::default(),
+            #[cfg(hex_capture)]
+            agents: scrawl::Agents::default(),
             modes,
             output: output::OutputPane::default(),
             picker: picker::Picker::default(),
@@ -1201,9 +1207,14 @@ impl Ui {
             Pane::History => self.history.reload(self.settings.labs.history_stats),
             Pane::HudLab => self.ask(platform::PlatformRequest::ConfigureHud(self.platform.hud)),
             #[cfg(hex_capture)]
-            Pane::Annotate => self.ask(platform::PlatformRequest::Scrawl(
-                platform::ScrawlRequest::Refresh,
-            )),
+            Pane::Annotate => {
+                self.ask(platform::PlatformRequest::Scrawl(
+                    platform::ScrawlRequest::Refresh,
+                ));
+                if self.settings.labs.annotate_agent_install {
+                    self.agents.refresh();
+                }
+            }
             _ => {}
         }
     }
@@ -1596,6 +1607,9 @@ fn window_focused(ui: &mut Ui, focused: bool, tx: &mut Tx) {
         ui.ask(platform::PlatformRequest::Scrawl(
             platform::ScrawlRequest::Refresh,
         ));
+        if ui.settings.labs.annotate_agent_install {
+            ui.agents.refresh();
+        }
     }
 }
 

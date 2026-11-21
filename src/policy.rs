@@ -148,6 +148,7 @@ impl Policy {
             crate::labs::Feature::AnnotateReplay
                 | crate::labs::Feature::AnnotatePointerScreen
                 | crate::labs::Feature::AnnotateAgentTools
+                | crate::labs::Feature::AnnotateAgentInstall
         ) && self.locks(Lock::Annotate)
         {
             return Some(Lock::Annotate);
@@ -181,6 +182,7 @@ impl Policy {
                 &mut settings.labs.annotate_replay,
                 &mut settings.labs.annotate_pointer_screen,
                 &mut settings.labs.annotate_agent_tools,
+                &mut settings.labs.annotate_agent_install,
             ],
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),

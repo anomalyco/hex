@@ -7,7 +7,7 @@
 //! heard no speech. Nothing here launches Hex except `start` and `restart`.
 
 use std::io::Write;
-mod annotate_read;
+pub(crate) mod annotate_read;
 mod completions;
 mod embedded;
 mod human;

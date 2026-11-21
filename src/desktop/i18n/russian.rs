@@ -1,16 +1,16 @@
-//! Russian (ru) interface strings, keyed by the English source string like
-//! [`super::TRANSLATIONS`]; used for any Russian system language. Not yet
-//! reviewed by a native speaker. Terms: dictation is "диктовка", shortcut
-//! "сочетание клавиш", Settings "Настройки", meetings "встречи", and
-//! vocabulary "словарь".
+//! Russian (ru) interface strings; not yet reviewed by a native speaker.
+//! Terms: dictation is "диктовка", shortcut "сочетание клавиш", Settings
+//! "Настройки", meetings "встречи", and vocabulary "словарь".
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use super::screenshots::{Language, merged};
+
 /// The Russian strings by their English source.
 pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| super::screenshots::merged(TRANSLATIONS, super::screenshots::RUSSIAN))
+    TABLE.get_or_init(|| merged(TRANSLATIONS, Language::Russian))
 }
 
 #[rustfmt::skip]
