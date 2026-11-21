@@ -27,6 +27,7 @@ class NeverSuggestTest {
         val rows = when (language) {
             "de" -> listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm")
             "es" -> listOf("qwertyuiop", "asdfghjklñ", "zxcvbnm")
+            "fr" -> listOf("azertyuiop", "qsdfghjklm", "wxcvbn")
             else -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
         }
         val pitch = if (language == "de") 36.0 else 39.5
@@ -43,7 +44,8 @@ class NeverSuggestTest {
     @Test fun completionsRespectBothCategoriesInEveryShippedModel() {
         for ((lang, swear, slur) in listOf(
             Triple("en", "fuck", "nigger"), Triple("es", "mierda", "maricón"),
-            Triple("de", "scheiße", "neger"), Triple("nb", "faen", "neger")
+            Triple("de", "scheiße", "neger"), Triple("nb", "faen", "neger"),
+            Triple("fr", "merde", "nègre"), Triple("it", "cazzo", "frocio")
         )) {
             val w = word(lang, spatial = false)
             assertTrue("$lang still knows the slur", w.decoder.model.index(slur) >= 0)
@@ -113,7 +115,7 @@ class NeverSuggestTest {
     @Test fun everyListedLiteralIsKeptSeparatelyFromRankedSuggestions() {
         val rows = File("src/main/assets/typing/never-suggest.tsv").readLines()
             .filterNot { it.isBlank() || it.startsWith('#') }.map { it.split('\t') }
-        for (lang in listOf("en", "es", "de", "nb")) {
+        for (lang in listOf("en", "es", "de", "nb", "fr", "it")) {
             val w = word(lang)
             for ((layout, kind, entry) in rows) {
                 if (layout != "*" && layout != lang) continue
@@ -169,7 +171,8 @@ class NeverSuggestTest {
         for ((lang, prefix, expected) in listOf(
             Triple("en", "assu", "assume"), Triple("en", "vulv", "vulva"),
             Triple("en", "fuc", "fuchsia"), Triple("es", "negro", "negro"),
-            Triple("de", "dick", "dick"), Triple("nb", "fag", "fag")
+            Triple("de", "dick", "dick"), Triple("nb", "fag", "fag"),
+            Triple("fr", "pédal", "pédale"), Triple("it", "finocch", "finocchio")
         )) {
             val w = word(lang, spatial = false)
             w.explicit(prefix)
@@ -448,4 +451,27 @@ class NeverSuggestTest {
         assertEquals('E', w.likelierKey("TH", 'D', mapOf('e' to 2.0), keys))
         assertEquals("inside a number", 'd', w.likelierKey("th3", 'd', mapOf('e' to 2.0), keys))
     }
+
+    // French and Italian elide: a word starts right after "l'", "qu'" or "dell'", and is read there.
+    @Test fun aWordStartsAfterAnElision() {
+        val fr = word("fr")
+        assertTrue(fr.startsWord("le chat de l'"))
+        assertTrue(fr.startsWord("qu'"))
+        assertFalse("not after any apostrophe", fr.startsWord("aujourd'"))
+        assertFalse("English has none", word("en").startsWord("l'"))
+        assertTrue(word("it").startsWord("dell'"))
+        assertEquals("l", TypingWord.previousWord("le chat de l'"))
+        val g = KeyGrid(buildMap {
+            for ((row, letters) in listOf("azertyuiop", "qsdfghjklm", "wxcvbn").withIndex())
+                for ((i, c) in letters.withIndex()) put(c, KeyPoint(201 + (i - (letters.length - 1) / 2.0) * 39.5, 66.5 + 56 * row))
+        }, 39.5, 56.0)
+        fr.reset("le chat de l'")
+        for ((c, aimed) in "hpmme".zip("homme")) { val p = g.centres.getValue(aimed); fr.letter(c.toString(), p.x, p.y, g) }
+        assertEquals("homme", fr.replacement())
+        // The same letters run together with the apostrophe left out ("cest") are left to the decoder.
+        fr.reset("")
+        for (c in "cest") { val p = g.centres.getValue(c); fr.letter(c.toString(), p.x, p.y, g) }
+        assertEquals("c'est", fr.replacement())
+    }
+
 }

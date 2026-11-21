@@ -9,16 +9,19 @@ import java.util.*;
 public final class Replay {
     static KeyGrid originalGeometry(String language) {
         // Portrait KeyboardLayout at 402 pt (side 6.5, gap 6, letter height 45, row gap 11), and its
-        // space bar. German and Bokmål have Android's eleven-key rows at a 36 pt pitch.
+        // space bar. German and Bokmål have Android's eleven-key rows at a 36 pt pitch; French is
+        // AZERTY, its bottom row's apostrophe key (never typed) left out of the letters.
         boolean wide = language.equals("de") || language.equals("nb");
         double pitch = wide ? 36 : 39.5; Map<Character,KeyPoint> points = new LinkedHashMap<>();
         String[] rows = language.equals("de") ? new String[]{"qwertzuiopü", "asdfghjklöä", "yxcvbnm"}
             : language.equals("nb") ? new String[]{"qwertyuiopå", "asdfghjkløæ", "zxcvbnm"}
+            : language.equals("fr") ? new String[]{"azertyuiop", "qsdfghjklm", "wxcvbn'"}
             : new String[]{"qwertyuiop", language.equals("es") ? "asdfghjklñ" : "asdfghjkl", "zxcvbnm"};
         for (int row=0; row<rows.length; row++) {
             String letters=rows[row];
             for (int i=0; i<letters.length(); i++)
-                points.put(letters.charAt(i),new KeyPoint(201 + (i-(letters.length()-1)/2.0)*pitch,66.5+56*row));
+                if (letters.charAt(i) != '\'')
+                    points.put(letters.charAt(i),new KeyPoint(201 + (i-(letters.length()-1)/2.0)*pitch,66.5+56*row));
         }
         return new KeyGrid(points, pitch, 56, new KeyRect(64.76, 212, 303.1, 257));
     }
@@ -81,6 +84,14 @@ public final class Replay {
         }
         return out;
     }
+    // Whether a letter after `before` starts a word the keyboard reads (startsWord, else a boundary).
+    static boolean startsWord(TypingWord state, String before) throws Exception {
+        try {
+            return (Boolean) TypingWord.class.getMethod("startsWord", String.class).invoke(state, before);
+        } catch (NoSuchMethodException old) {
+            return TypingWord.Companion.boundary(before.isEmpty() ? null : before.charAt(before.length() - 1));
+        }
+    }
     static boolean letterOdds = true;
     static char likelierKey(TypingWord state, String before, char hit, double x, double y, KeyGrid grid) throws Exception {
         if (!letterOdds) return hit;
@@ -119,10 +130,20 @@ public final class Replay {
                     from=end+(end<want.length()&&want.charAt(end)==' '?1:0);
                 }
                 List<String> shown=Collections.emptyList();
+                // As the keyboard: a letter starts a word it reads only after a space, an opening
+                // mark or (French, Italian) an elision; anything else is typed as it is until the next
+                // space. An apostrophe ends the word as typed.
+                boolean tracked=true;
                 for(int i=0;i<typed.length();i++) {
                     char key=typed.charAt(i); double x=taps.getJSONArray(i).getDouble(0), y=taps.getJSONArray(i).getDouble(1);
                     long start=System.nanoTime();
-                    if(key==' ') {
+                    if(key!=' '&&!Character.isLetter(key)) {
+                        out.append(key); state.reset(out.toString()); tracked=false; shown=Collections.emptyList();
+                    } else if(key==' '&&!tracked) {
+                        out.append(' '); String before=out.toString(); state.reset(before); shown=predictions(state,before); tracked=true;
+                    } else if(key!=' '&&state.getToken().isEmpty()&&!startsWord(state,out.toString())&&!(tracked&&out.length()==0)) {
+                        out.append(key); tracked=false; shown=Collections.emptyList();
+                    } else if(key==' ') {
                         Correction fix=state.finish(' ',new KeyPoint(x,y),grid);
                         if(fix!=null) {
                             if(!out.toString().endsWith(fix.getOriginal())) throw new IllegalStateException("Correction off the text");
@@ -130,6 +151,7 @@ public final class Replay {
                         }
                         out.append(' '); String before=out.toString(); state.reset(before); shown=predictions(state,before);
                     } else {
+                        tracked=true;
                         key=likelierKey(state,out.toString(),key,x,y,grid);
                         state.letter(String.valueOf(key),x,y,grid); out.append(key); shown=strip(state);
                     }

@@ -3,7 +3,7 @@
 1-grams (2020-02-17, CC BY 3.0), the corpus its .hextm model was counted from.
 
     python3 build-capitals.py en MODEL.hextm WORKDIR OUTPUT.capitals scowl-2020.12.07.tar.gz
-    python3 build-capitals.py es MODEL.hextm WORKDIR OUTPUT.capitals
+    python3 build-capitals.py {es|fr|it} MODEL.hextm WORKDIR OUTPUT.capitals
 
 Every shard is streamed (curl | gzip -dc, never stored) and its 1980-2019 counts of all-lowercase
 tokens and of tokens with only the first letter capitalised are cached in WORKDIR, so a rerun
@@ -23,14 +23,16 @@ UTF-8 bytes, with a trailing newline, as German's de.capitals:
 The keyboard capitalises a word typed in lowercase only where iOS's dictionary would know it only
 with a capital, so a word that is also an ordinary lowercase word is held at 94% (listed, never
 capitalised on its own): in English, one SCOWL (sizes through 70, the lists en.valid comes from)
-spells in lowercase ("united", "jersey", "china"); in Spanish, a model word under 98% ("lima",
-"granada", "san").
+spells in lowercase ("united", "jersey", "china"); in Spanish, French and Italian, a model word
+under 98% ("lima", "granada", "san"). In French and Italian, a word whose accented spelling is a
+commoner model word is held, so "ecole" isn't written "Ecole" (books drop accents on capitals:
+"Ecole" is "école").
 """
-import hashlib, math, multiprocessing, os, re, struct, subprocess, sys, tarfile
+import hashlib, math, multiprocessing, os, re, struct, subprocess, sys, tarfile, unicodedata
 
 BASE = "https://storage.googleapis.com/books/ngrams/books/20200217"
-FILES = {"en": ("eng", 24), "es": ("spa", 3)}
-LETTERS = {"en": "a-z", "es": "a-zñáéíóúü"}
+FILES = {"en": ("eng", 24), "es": ("spa", 3), "fr": ("fre", 6), "it": ("ita", 2)}
+LETTERS = {"en": "a-z", "es": "a-zñáéíóúü", "fr": "a-zàâçéèêëîïôùûüÿœæ", "it": "a-zàèéìíîòóùú"}
 FIRST_YEAR, LAST_YEAR = 1980, 2019
 MIN_TOTAL = 40
 SOMETIMES = 50
@@ -38,7 +40,7 @@ NAME_SHARE = 90
 NAME_PER_MILLION = 1
 ALWAYS, HELD = 95, 94
 JOINED = 10
-MODEL_ALWAYS = {"en": 95, "es": 98}
+MODEL_ALWAYS = {"en": 95, "es": 98, "fr": 98, "it": 98}
 SCOWL_SHA256 = "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc"
 
 
@@ -149,6 +151,15 @@ def main():
         os.replace(merged + ".part", merged)
     unigram, pair = model_words(model)
     words = set(unigram)
+    def folded(w):
+        return "".join(c for c in unicodedata.normalize("NFD", w) if not unicodedata.combining(c))
+    accented_twin = set()
+    if lang in ("fr", "it"):
+        twins = {}
+        for w in words:
+            twins.setdefault(folded(w), []).append(w)
+        accented_twin = {w for group in twins.values() if len(group) > 1 for w in group
+                         if w == folded(w) and any(o != w and unigram[o] < unigram[w] for o in group)}
     corpus = 0
     for line in open(merged, encoding="utf-8"):
         _, lo, ca = line.rstrip("\n").split("\t")
@@ -169,7 +180,7 @@ def main():
         elif (len(key) < 3 or share < NAME_SHARE or total * 1_000_000 < NAME_PER_MILLION * corpus
               or joined(key, total / corpus, unigram, pair)):
             continue
-        if key in lowercase:
+        if key in lowercase or key in accented_twin:
             share = min(share, HELD)
         rows.append((key, share))
     rows.sort(key=lambda r: r[0].encode("utf-8"))

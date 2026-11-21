@@ -176,6 +176,17 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return if (hit.isUpperCase()) best.uppercaseChar() else best
     }
 
+    /** Whether a letter typed after `before` starts a word the keyboard should read: after a space or
+     * an opening mark (`boundary`), and in French and Italian also right after an elided article
+     * or pronoun ("l'", "qu'", "dell'"), so "l'hpmme" is read as "homme" after "l'". */
+    fun startsWord(before: String): Boolean {
+        if (boundary(before.lastOrNull())) return true
+        val elisions = ELISIONS[model.language] ?: return false
+        if (before.lastOrNull() != '\'' && before.lastOrNull() != '\u2019') return false
+        val prefix = before.dropLast(1).takeLastWhile { it.isLetter() }.lowercase()
+        return prefix in elisions && before.dropLast(1 + prefix.length).lastOrNull().let { boundary(it) }
+    }
+
     /** Your text replacement whose shortcut ends `before` (the text before the cursor), from the personal
      * dictionary: on space, a closing mark or return, put it in before anything else, autocorrect on
      * or off (iOS #2152, #2173). Null when no shortcut ends the text. */
@@ -367,7 +378,14 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             else -> target
         }
         private val shorthand = "ok okay ty thx pls plz tmrw tbh idk imo imho lol lmao omg brb btw afaik fyi nvm rn irl jk np yw smh ikr ngl fr gg dm pr prs ci ui ux ios macos api apis url urls json sql ssh cli gpu cpu ram sdk hex wisp seer rune kit gonna wanna gotta kinda sorta yeah yep nope nah hey yo".split(' ').toSet()
-        fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' }.lowercase()
+        // The word before the cursor, lowercase; an elided one without its apostrophe ("l'" as "l").
+        fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
+            .lowercase().replace('\u2019', '\'').trimEnd('\'')
+        // The articles and pronouns French and Italian elide before a vowel; a word starts after them.
+        private val ELISIONS = mapOf(
+            "fr" to setOf("c", "d", "j", "l", "m", "n", "s", "t", "qu", "jusqu", "lorsqu", "puisqu", "quoiqu", "presqu"),
+            "it" to setOf("c", "d", "l", "m", "n", "s", "t", "v", "un", "all", "dall", "dell", "nell", "sull", "coll",
+                "quest", "quell", "bell", "sant", "tutt", "nessun", "buon"))
         fun boundary(c: Char?) = c == null || c.isWhitespace() || c in "([{“‘\",;!?"
     }
 }

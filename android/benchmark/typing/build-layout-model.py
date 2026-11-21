@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
-"""Build German and Bokmål HXTM v3 files with the shared iOS count reader / model writer.
-    python3 build-layout-model.py {de|nb} SOURCE_CACHE OUTPUT.hextm
-German: every untagged German Google Books v3 shard, 1980–2019. Bokmål: NB N-gram
-2026 digibok, language nob, same years, filtered by Norsk ordbank full forms.
+"""Build German, French, Italian and Bokmål HXTM v3 files with the shared iOS count reader / model writer.
+    python3 build-layout-model.py {de|fr|it|nb} SOURCE_CACHE OUTPUT.hextm
+German, French and Italian: every untagged Google Books v3 shard of the language, 1980–2019,
+spellings from the corpus alone (no second dictionary). French and Italian keep elided forms
+as the books' tokens have them ("c'est", "l'homme", "dell'anno"), the apostrophe only between
+letters. Bokmål: NB N-gram 2026 digibok, language nob, same years, filtered by Norsk ordbank
+full forms.
 """
 import collections
 import concurrent.futures
@@ -26,12 +29,64 @@ builder = importlib.import_module("build-typing-model")
 builder.FILES["de"] = ("ger", 8, 181)
 builder.LETTERS["de"] = "abcdefghijklmnopqrstuvwxyzäöüß"
 builder.MAX_WORDS["de"] = 95_000
-# German uses only the corpus, without importing another spelling dictionary.
-# The iOS reader lowercases before adding counts; keep the same alphabet rule
-# on Unicode scalars before the shared writer assigns their compact codes.
-def german_words(lang, work):
-    return re.compile(r"[a-zäöüß]{1,32}\Z").fullmatch
-builder.word_list = german_words
+builder.FILES["fr"] = ("fre", 6, 115)
+builder.LETTERS["fr"] = "abcdefghijklmnopqrstuvwxyzàâæçéèêëîïôœùûüÿ'"
+builder.MAX_WORDS["fr"] = 100_000
+builder.FILES["it"] = ("ita", 2, 60)
+builder.LETTERS["it"] = "abcdefghijklmnopqrstuvwxyzàèéìíîòóùú'"
+builder.MAX_WORDS["it"] = 100_000
+# German, French and Italian use only the corpus, without importing another spelling
+# dictionary. The iOS reader lowercases before adding counts; keep the same alphabet rule
+# on Unicode scalars before the shared writer assigns their compact codes. An apostrophe
+# stands only between letters (an elision), never alone or at a word's edge.
+CORPUS_WORDS = {
+    "de": r"[a-zäöüß]{1,32}\Z",
+    "fr": r"(?=.{1,32}\Z)[a-zàâæçéèêëîïôœùûüÿ]+(?:'[a-zàâæçéèêëîïôœùûüÿ]+)?\Z",
+    "it": r"(?=.{1,32}\Z)[a-zàèéìíîòóùú]+(?:'[a-zàèéìíîòóùú]+)?\Z",
+}
+def corpus_words(lang, work):
+    return re.compile(CORPUS_WORDS[lang]).fullmatch
+builder.word_list = corpus_words
+
+# The articles and pronouns French and Italian elide before a vowel ("c'est", "dell'anno").
+ELISIONS = {
+    "fr": ["c", "d", "j", "l", "m", "n", "s", "t", "qu", "jusqu", "lorsqu", "puisqu", "quoiqu", "presqu"],
+    "it": ["c", "d", "l", "m", "n", "s", "t", "v", "un", "all", "dall", "dell", "nell", "sull", "coll",
+           "quest", "quell", "bell", "sant", "tutt", "nessun", "buon"],
+}
+
+def run_together(word, vocab, elisions):
+    """Whether `word` is an elision typed without its apostrophe ("cest", "quil", "dellanno"): the
+    same letters with the apostrophe are a model word at least ten times as common. Scanned books
+    and typists both drop it; as a word of its own it would keep the keyboard from putting it back."""
+    if "'" in word:
+        return False
+    return any(word.startswith(p) and len(word) > len(p) and vocab.get(p + "'" + word[len(p):], 0) >= 10 * vocab[word]
+               for p in elisions)
+
+def refine(lang, work, out):
+    """Rewrites the model without run-together elisions, from the counts the shared builder cached."""
+    work = Path(work)
+    total = 0
+    for path in sorted((work / "uni").glob("*.tsv")):
+        for line in open(path, "rb"):
+            total += int(line.rstrip(b"\n").split(b"\t")[1])
+    vocab = {}
+    for line in open(work / "vocab.tsv", encoding="utf-8"):
+        w, c = line.rstrip("\n").split("\t")
+        vocab[w] = int(c)
+    dropped = sorted(w for w in vocab if run_together(w, vocab, ELISIONS[lang]))
+    for w in dropped:
+        del vocab[w]
+    pairs = {}
+    for path in sorted((work / "bi").glob("*.tsv")):
+        for line in open(path, "rb"):
+            k, c = line.rstrip(b"\n").split(b"\t")
+            a, b = k.decode("utf-8").split(" ")
+            if a in vocab and b in vocab:
+                pairs[k] = pairs.get(k, 0) + int(c)
+    print(f"{lang}: {len(dropped)} run-together elisions left out: {' '.join(dropped[:40])}", flush=True)
+    builder.write_model(lang, vocab, total, pairs, str(out))
 
 NB = "https://www.nb.no/sbfil/ngram/ngram_2026/digibok-"
 ORDBANK = "https://www.nb.no/sbfil/leksikalske_databaser/ordbank/20220201_norsk_ordbank_nob_2005.tar.gz"
@@ -138,10 +193,12 @@ def norwegian(work, out):
     builder.write_model("nb", vocab, total, pairs, str(out))
 
 if __name__ == "__main__":
-    if len(sys.argv) != 4 or sys.argv[1] not in ("de", "nb"):
+    if len(sys.argv) != 4 or sys.argv[1] not in ("de", "fr", "it", "nb"):
         sys.exit(__doc__)
     lang, work, out = sys.argv[1:]
-    if lang == "de":
+    if lang in ("de", "fr", "it"):
         builder.main(lang, work, out)
+        if lang in ELISIONS:
+            refine(lang, work, out)
     else:
         norwegian(Path(work), Path(out))

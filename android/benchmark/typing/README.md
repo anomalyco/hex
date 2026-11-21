@@ -4,7 +4,7 @@
 
 ## Against today's iOS engine
 
-The same 2,000 held-out English and Spanish sentences, typed by today's iOS engine (`origin/dev` 96b4f365, Spatial autocorrect on, iPhone 17 simulator, its taps moved onto today's layout key by key) and by the Android replay, which finishes each word with `TypingWord.finish` and moves each letter tap to the likelier next letter (`likelierKey`, touch areas tiling the rows) as the keyboard does. German and Bokmål have their own 2,000-sentence sets ([synthetic_de_nb.py](synthetic_de_nb.py)): held-out Tatoeba sentences typed with the same touch model on Android's eleven-key rows at a 36 pt pitch. iOS ships no Bokmål model and keeps German's behind an experiment, so those two have no iOS column.
+The same 2,000 held-out English and Spanish sentences, typed by today's iOS engine (`origin/dev` 96b4f365, Spatial autocorrect on, iPhone 17 simulator, its taps moved onto today's layout key by key) and by the Android replay, which finishes each word with `TypingWord.finish` and moves each letter tap to the likelier next letter (`likelierKey`, touch areas tiling the rows) as the keyboard does. German and Bokmål have their own 2,000-sentence sets ([synthetic_sets.py](synthetic_sets.py)): held-out Tatoeba sentences typed with the same touch model on Android's eleven-key rows at a 36 pt pitch. iOS ships no Bokmål model and keeps German's behind an experiment, so those two have no iOS column.
 
 | Engine | English errors (WER) | Spanish | German | Bokmål |
 |---|---:|---:|---:|---:|
@@ -15,6 +15,15 @@ The same 2,000 held-out English and Spanish sentences, typed by today's iOS engi
 | Names kept as typed, and capitals from the books | 770 (5.55%) | 1,133 (8.52%) | 774 (5.71%) | 654 (5.24%) |
 | The likelier next letter claims up to 5 dp of its neighbour's touch area | 721 (5.20%) | 1,090 (8.19%) | 729 (5.38%) | 647 (5.18%) |
 
+French and Italian have their own 2,000-sentence sets the same way (French on AZERTY, Italian on QWERTY; accented letters typed as their base key, elisions with their apostrophe). iOS types both with Apple's spelling dictionary and no typing model, and its harness maps only English and Spanish layouts, so there is no iOS column.
+
+| French and Italian | French | Italian |
+|---|---:|---:|
+| Raw hit keys | 5,316 (38.91%) | 4,778 (39.73%) |
+| Models from Google Books, words read after an elision | 1,177 (8.62%) | 895 (7.44%) |
+
+French has 13,661 reference words, Italian 12,025.
+
 The replay also counts what the suggestion strip offers, as iOS's harness does: the intended word among the slots once its last letter is typed, after its first two letters (words of three letters or more), and among the next-word predictions after the space before it.
 
 | Strip hits | English | Spanish | German | Bokmål |
@@ -23,6 +32,8 @@ The replay also counts what the suggestion strip offers, as iOS's harness does: 
 | Android before the strip work | 12,070 / 2,338 / 3,789 | 11,603 / 2,116 / 2,606 | 12,204 / 1,679 / 5,026 | 11,172 / 2,160 / 4,380 |
 | Android with `strip()` and the new predictions | 13,180 / 2,349 / 4,390 | 12,407 / 2,110 / 3,236 | 12,918 / 1,680 / 5,624 | 11,988 / 2,159 / 4,875 |
 | … and the likelier next letter's touch area | 13,219 / 2,349 / 4,686 | 12,398 / 2,112 / 3,455 | 12,941 / 1,679 / 6,019 | 11,991 / 2,165 / 5,148 |
+
+French and Italian strip hits (word / next / after two letters): 11,790 / 2,185 / 4,219 of 13,661 / 11,430 / 9,950, and 11,019 / 1,663 / 3,638 of 12,025 / 9,788 / 8,981.
 
 Out of 13,870 / 11,639 / 10,874 (English), 13,301 / 11,058 / 9,383 (Spanish), 13,550 / 11,326 / 12,413 (German) and 12,492 / 10,297 / 9,789 (Bokmål).
 
@@ -85,6 +96,10 @@ All four HXTM v3 assets are uncompressed and memory-mapped from the APK; Gradle 
 | Spanish | 110,000 | 326,366 | Google Books v3, 3 / 73 shards; existing model unchanged | RLA-ES Hunspell |
 | German | 95,000 | 368,534 | Google Books v3, all 8 / 181 German shards | German alphabetic corpus spellings |
 | Bokmål | 95,000 | 370,560 | NB N-gram 2026 book unigrams and bigrams, language `nob` | Norsk ordbank, Bokmål full forms |
+| French | 99,974 | 380,439 | Google Books v3, all 6 / 115 French shards | French corpus spellings, with the books' elided forms |
+| Italian | 99,996 | 371,292 | Google Books v3, all 2 / 60 Italian shards | Italian corpus spellings, with the books' elided forms |
+
+French and Italian go through the same German adapter: every untagged shard of the language, 1980–2019, spellings from the corpus alone. The books keep many elisions as one token ("c'est", "qu'il", Italian "dell'anno"; French "l'" and "d'" are split off), so those stay words with their apostrophe, which the decoder reads without it being typed. The same letters run together without the apostrophe, ten times rarer ("cest", "quil", 26 French and 4 Italian forms), are left out so space puts it back. A word typed right after an elided article or pronoun ("l'", "qu'", "dell'") is read as a word of its own (`TypingWord.startsWord`).
 
 The [shared iOS builder](build-typing-model.py), SHA-256 `cba009fe227632d9f8d176055f26ca34d5eb6f88a7cbd947955d8f9142878317`, sums counts from 1980–2019, selects informative pairs and writes quantized probabilities. The [German/Bokmål adapter](build-layout-model.py) uses the same writer. For German, it uses the iOS shard reader and filters lowercased words to its alphabet. For Bokmål, it NFC-normalizes and lowercases the words, filters vocabulary to standard Bokmål forms in the 1 February 2022 Ordbank `fullformsliste.txt` (`OPPSLAG`, normative and current in that snapshot), and only retains pairs whose two words are in that vocabulary. The September 2026 inflection export alone dropped common uninflected words such as `og`, `på` and `det`; it was not used in the shipped model. The complete snapshot supplied 617,139 distinct forms. Of 20,096,783 observed in-vocabulary pair types, 394,825 met the shared writer’s count and information thresholds; 370,560 fit the model budget.
 
@@ -131,7 +146,7 @@ adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOB
    sh benchmark/typing/replay.sh
    ```
 
-   For German and Bokmål, put Tatoeba's `deu.tsv` and `nob.tsv` in `$T/tatoeba` and run `python3 benchmark/typing/synthetic_de_nb.py "$IOS_BENCH/input.json" "$T/tatoeba" "$T/bench"` first; the replay runs every set it finds and writes each sentence's output to `$T/outputs`.
+   For German, Bokmål, French and Italian, put Tatoeba's `deu.tsv`, `nob.tsv`, `fra.tsv` and `ita.tsv` in `$T/tatoeba` and run `python3 benchmark/typing/synthetic_sets.py "$IOS_BENCH/input.json" "$T/tatoeba" "$T/bench"` first; the replay runs every set it finds and writes each sentence's output to `$T/outputs`.
 
    The Java replay shim executes the installed APK’s Kotlin classes with Android’s `app_process`. The output is aggregate WER, normalized sentences matching iOS and per-key timing (median/p95/max). Timings exclude loading, JSON parsing, evaluation, editor IPC and screen paint. Phase 3 timed the separate editor’s text-change callback from key-up (letter median/p95: 1.409/2.589 ms; space: 3.161/4.428 ms). The Phase 4 replay measures decoder work, not that end-to-end path or a physical handset.
 
@@ -141,10 +156,14 @@ adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOB
    mkdir -p "$T/models" "$T/source"
    python3 benchmark/typing/build-layout-model.py de "$T/source/de" "$T/models/de.hextm"
    python3 benchmark/typing/build-layout-model.py nb "$T/source/nb" "$T/models/nb.hextm"
+   python3 benchmark/typing/build-layout-model.py fr "$T/source/fr" "$T/models/fr.hextm"
+   python3 benchmark/typing/build-layout-model.py it "$T/source/it" "$T/models/it.hextm"
    curl -fsSL https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz -o "$T/source/scowl.tar.gz"
    python3 benchmark/typing/build-valid-words.py "$T/source/scowl.tar.gz" \
      app/src/main/assets/typing/en.hextm "$T/models/en.valid"
    python3 benchmark/typing/build-capitals.py en app/src/main/assets/typing/en.hextm "$T/capitals/en" \
      "$T/models/en.capitals" "$T/source/scowl.tar.gz"
-   python3 benchmark/typing/build-capitals.py es app/src/main/assets/typing/es.hextm "$T/capitals/es" "$T/models/es.capitals"
+   for lang in es fr it; do
+     python3 benchmark/typing/build-capitals.py $lang app/src/main/assets/typing/$lang.hextm "$T/capitals/$lang" "$T/models/$lang.capitals"
+   done
    ```
