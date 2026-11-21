@@ -692,6 +692,35 @@ final class FullKeyboardEngineTests: XCTestCase {
         KeyboardSuggestion(displayText: kind == .keepLiteral ? "“\(text)”" : text, replacement: text, kind: kind)
     }
 
+    func testNextWordSuggestionsAppendOnlyOnAPickInTheSameWordGap() throws {
+        engine.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        type("thank ")
+        let you = try XCTUnwrap(engine.suggestions.first { $0.replacement == "you" })
+        XCTAssertEqual(you.kind, .nextWord)
+        XCTAssertFalse(you.willAutoReplace)
+        XCTAssertEqual(target.text, "thank ")
+        engine.acceptSuggestion(you)
+        XCTAssertEqual(target.text, "thank you ")
+        type("f")
+        engine.acceptSuggestion(you)
+        XCTAssertEqual(target.text, "thank you f")
+    }
+
+    func testNextWordPredictionsUseTheActiveLanguageAndRespectBoundaries() throws {
+        engine.language = .spanish
+        engine.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("es"))
+        type("por ")
+        XCTAssertFalse(engine.suggestions.isEmpty)
+        XCTAssertTrue(engine.suggestions.allSatisfy { $0.kind == .nextWord })
+        for context in ["por. ", "hola\n", "@por ", "todo/por ", "por  "] {
+            XCTAssertTrue(engine.autocorrect.suggestions(beforeInput: context, field: .text,
+                autocorrectionType: .default, predictionModel: engine.letterOdds).isEmpty, context)
+        }
+        target.autocorrectionType = .no
+        engine.refreshSuggestions()
+        XCTAssertTrue(engine.suggestions.isEmpty)
+    }
+
     /// A suggestion types its word and a space, so a space pressed right after it (a pick,
     /// then space out of habit) is swallowed, as on Apple's keyboard. Record typing logs
     /// showed every double space came from this: a word, what was typed, or an emoji picked,

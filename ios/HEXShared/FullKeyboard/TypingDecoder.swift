@@ -142,6 +142,77 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         return index(ofCodes: bytes)
     }
 
+    /// The three most probable allowed continuations of a completed word. Scan just its
+    /// mapped bigram row and keep three entries, even for a word with thousands of followers.
+    func nextWords(after previous: String, allowing: (String) -> Bool) -> [String] {
+        guard let a = index(of: previous) else { return [] }
+        let start = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * a, as: UInt32.self))
+        let end = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * (a + 1), as: UInt32.self))
+        guard start <= end, end <= bigramCount else { return [] }
+        var best: [(rank: Int, text: String)] = []
+        for i in start..<end {
+            let cost = Int(base.load(fromByteOffset: pairCostsAt + i, as: UInt8.self))
+            let b = Int(base.loadUnaligned(fromByteOffset: pairWordsAt + 4 * i, as: UInt32.self))
+            guard b < wordCount else { continue }
+            // Prefer the commoner word when two pair probabilities quantize to the same byte.
+            let rank = cost * 256 + Int(base.load(fromByteOffset: unigramAt + b, as: UInt8.self))
+            if best.count == 3, rank >= best[2].rank { continue }
+            let text = word(b)
+            guard allowing(text) else { continue }
+            let at = best.firstIndex { rank < $0.rank } ?? best.count
+            best.insert((rank, text), at: at)
+            if best.count > 3 { best.removeLast() }
+        }
+        return best.map(\.text)
+    }
+
+    /// Complete a short prefix with the word frequencies, backed by the previous word's
+    /// bigrams when available. Word indices and each bigram row have the same sort order:
+    /// walk only the matching prefix range, creating strings only for contenders.
+    func completions(of prefix: String, after previous: String?, allowing: (String) -> Bool) -> [String] {
+        guard let codes = encode(prefix), (1...3).contains(codes.count) else { return [] }
+        var lo = 0, hi = wordCount
+        for (depth, code) in codes.enumerated() {
+            (lo, hi) = narrow(lo, hi, depth: depth, byte: Int(code))
+            if lo == hi { return [] }
+        }
+        var link = 0, end = 0
+        if let previous, let a = index(of: previous) {
+            link = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * a, as: UInt32.self))
+            end = Int(base.loadUnaligned(fromByteOffset: pairRowsAt + 4 * (a + 1), as: UInt32.self))
+            guard link <= end, end <= bigramCount else { return [] }
+            var upper = end
+            while link < upper {
+                let mid = (link + upper) / 2
+                if follower(mid) < lo { link = mid + 1 } else { upper = mid }
+            }
+        }
+        var best: [(rank: Int, text: String)] = []
+        var next = link < end ? follower(link) : hi
+        for i in lo..<hi {
+            let unigram = Int(base.load(fromByteOffset: unigramAt + i, as: UInt8.self))
+            var cost = unigram + 7 // 0.92 nats of unigram backoff, in eighths of a nat.
+            if i == next {
+                cost = min(cost, Int(base.load(fromByteOffset: pairCostsAt + link, as: UInt8.self)))
+                link += 1
+                next = link < end ? follower(link) : hi
+            }
+            let rank = cost * 256 + unigram
+            guard length(i) > codes.count, length(i) <= codes.count + 8,
+                  best.count < 2 || rank < best[1].rank else { continue }
+            let text = word(i)
+            guard allowing(text) else { continue }
+            let at = best.firstIndex { rank < $0.rank } ?? best.count
+            best.insert((rank, text), at: at)
+            if best.count > 2 { best.removeLast() }
+        }
+        return best.map(\.text)
+    }
+
+    @inline(__always) private func follower(_ link: Int) -> Int {
+        Int(base.loadUnaligned(fromByteOffset: pairWordsAt + 4 * link, as: UInt32.self))
+    }
+
     /// How much of the word list's frequency continues `prefix` with each letter, by letter
     /// code. Nil when no word starts with `prefix`, or one ends there and none goes on.
     func continuations(after prefix: [UInt8]) -> [Double]? {
@@ -541,6 +612,19 @@ nonisolated struct TypingDecoder {
             costs[i].enumerated().filter { $0.offset > 0 && $0.element <= parameters.maxTapCost }
                 .sorted { $0.element < $1.element }.map { ($0.offset, $0.element) }
         }
+        // Dropping a clearly aimed, distinct tap needs more evidence than dropping an
+        // accidental repeat or a tap between keys. Accents share their physical key.
+        let extraTapCosts: [Double] = maxEdits == 0 ? [] : letterChoices.indices.map { tap in
+            guard let code = letterChoices[tap].first?.0 else { return parameters.insertionCost }
+            let key = model.baseCodes[code]
+            for neighbor in [tap - 1, tap + 1] where letterChoices.indices.contains(neighbor) {
+                if let other = letterChoices[neighbor].first?.0, model.baseCodes[other] == key {
+                    return parameters.insertionCost
+                }
+            }
+            let gap = letterChoices[tap].first { model.baseCodes[$0.0] != key }?.1 ?? parameters.maxTapCost
+            return parameters.insertionCost + min(4, gap)
+        }
         let apostrophe = model.apostropheCode.map(Int.init)
         let allCodes = (1..<model.characters.count).filter { $0 != apostrophe }
         for depth in 0...maxDepth {
@@ -580,7 +664,7 @@ nonisolated struct TypingDecoder {
                 }
                 // A tap that isn't in the word.
                 if tap < n {
-                    layer.append(State(lo: s.lo, hi: s.hi, tap: s.tap + 1, edits: e, cost: Float(base + parameters.insertionCost)))
+                    layer.append(State(lo: s.lo, hi: s.hi, tap: s.tap + 1, edits: e, cost: Float(base + extraTapCosts[tap])))
                 }
                 // Two letters typed in the wrong order.
                 if tap + 1 < n, depth + 2 <= maxDepth {

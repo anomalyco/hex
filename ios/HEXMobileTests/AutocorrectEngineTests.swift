@@ -557,6 +557,22 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(strip(engine.autocorrect, "Th").dropFirst().first, "The")
     }
 
+    func testShortCompletionsFollowThePhraseAndKeepTheTypedCase() throws {
+        engine.autoCapitalizes = false
+        engine.autocorrect.isEnabled = false
+        for (language, prefix, expected) in [(KeyboardLanguage.english, "I would li", "like"),
+                                               (.english, "I would Li", "Like"),
+                                               (.spanish, "muchas gr", "gracias")] {
+            engine.language = language
+            let model = try XCTUnwrap(TypingDecoderModel.bundled(language.rawValue))
+            let strip = engine.autocorrect.suggestions(
+                beforeInput: prefix, field: .text, autocorrectionType: .default, predictionModel: model
+            )
+            XCTAssertEqual(strip.dropFirst().first?.replacement, expected)
+            XCTAssertFalse(strip.contains { $0.willAutoReplace })
+        }
+    }
+
     // MARK: - Spatial autocorrect (the bundled models)
 
     private func useDecoder(_ language: KeyboardLanguage = .english) throws {
@@ -601,6 +617,21 @@ final class AutocorrectEngineTests: XCTestCase {
         try useDecoder()
         for word in ["come", "and", "miss", "the", "quiz"] { typeTaps(word) }
         XCTAssertEqual(target.text, "come and miss the quiz ")
+    }
+
+    func testACommonBigramDoesNotSwallowADistinctWellAimedTap() throws {
+        engine.width = 402
+        try useDecoder()
+        engine.letterOdds = engine.autocorrect.decoder?.model
+        target.insertText("I promised ")
+        // These three taps read "tom". "Promised to" is common, but the m was neither a
+        // repeat nor a touch between the neighbouring keys.
+        for (letter, dx, dy) in [("t", -7.2, 6.6), ("o", 14.5, 12.5), ("m", -10.0, 3.9)] {
+            let key = try XCTUnwrap(engine.layout.key(.character(letter)))
+            tap(at: CGPoint(x: key.frame.midX + dx, y: key.frame.midY + dy))
+        }
+        tap(.space)
+        XCTAssertEqual(target.text.lowercased(), "i promised tom ")
     }
 
     /// The models' word lists are lowercase: a name or day typed in lowercase is still a
