@@ -1237,7 +1237,7 @@ so audio idle inhibitors couldn't be told to ignore it and the screen never
 locked. Every ALSA stream Hex opens now carries `application.name` and
 `node.name` `hex` (`PIPEWIRE_ALSA`, set at startup beside
 `state.restore-target`). Check: `streams_carry_a_stable_name_without_spaces`
-in [linux/input_route.rs](../../src/linux/input_route.rs) (property string
+in [linux/input/route.rs](../../src/linux/input/route.rs) (property string
 only; not run against PipeWire or an inhibitor).
 
 **Fixed November 4, 2026 (issue 1309):** on Linux (PipeWire), about a second
@@ -2471,7 +2471,7 @@ Windows: moving the pointer ends the join as a click does, input sent in the
 same burst between two of Hex's own events is not seen, and a window that takes
 focus with no input does not end it. X11, and a desktop without the protocol,
 paste without joining, as before. Sources:
-[linux/input_activity.rs](../../src/linux/input_activity.rs) and
+[linux/input/activity.rs](../../src/linux/input/activity.rs) and
 `paste_dictation` in [linux/paste.rs](../../src/linux/paste.rs). Checks:
 `back_to_back_dictations_join`,
 `the_persons_input_between_dictations_ends_the_join`,

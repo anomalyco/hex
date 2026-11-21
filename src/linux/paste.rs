@@ -19,10 +19,10 @@ use x11rb::rust_connection::RustConnection;
 
 use crate::continuation::Continuation;
 use crate::linux::clipboard::{Selection, Snapshot};
+use crate::linux::input::activity;
 use crate::linux::input::{
     KEY_PRESS, KEY_RELEASE, Keymap, ShortcutKeys, XK_CONTROL_L, XK_SHIFT_L, connect_x11,
 };
-use crate::linux::input_activity;
 use crate::linux::remote_desktop::RemoteDesktop;
 use crate::linux::session::LinuxSession;
 
@@ -566,7 +566,7 @@ impl LinuxPaster {
             Backend::X11(paster) => paster.chord(chord, &self.stop, &self.keys),
             Backend::Wayland(wayland) => {
                 self.keys.settle(&self.stop)?;
-                input_activity::sending(|| wayland.send(&self.stop, chord, false))
+                activity::sending(|| wayland.send(&self.stop, chord, false))
             }
         }
     }
@@ -584,9 +584,9 @@ impl LinuxPaster {
 
     /// Pastes a dictation, joined onto the one before it when the person
     /// did nothing in between, as macOS and Windows join them. Only where
-    /// [`input_activity`] reports their input; elsewhere it pastes as is.
+    /// [`activity`] reports their input; elsewhere it pastes as is.
     pub(crate) fn paste_dictation(&mut self, text: &str, shift: bool) -> Result<()> {
-        let Some(revision) = input_activity::revision() else {
+        let Some(revision) = activity::revision() else {
             return self.paste(text, shift);
         };
         let text = self
@@ -689,10 +689,8 @@ impl LinuxPaster {
                 // wl-copy's parent exits only after the selection is installed.
                 // Never read a pipe inherited by its clipboard-serving daemon.
                 self.keys.settle(&self.stop)?;
-                input_activity::sending(|| {
-                    wayland.send(&self.stop, Chord::Paste, paste_with_shift)
-                })
-                .map_err(|error| copied_only(error, paste_with_shift))?;
+                activity::sending(|| wayland.send(&self.stop, Chord::Paste, paste_with_shift))
+                    .map_err(|error| copied_only(error, paste_with_shift))?;
             }
         }
         Ok(())

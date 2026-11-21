@@ -404,7 +404,7 @@ substitute for source inspection or a second roadmap.
 - `linux/audio_control`: While-dictating mute through `wpctl`/`pactl`, Lower
   audio through `audio/output_ducking`, and MPRIS pause over D-Bus (zbus),
   restoring only what it changed, plus idle-sleep prevention for dictations.
-- `linux/input_route`: System default's Bluetooth avoidance on Linux. ALSA's
+- `linux/input/route`: System default's Bluetooth avoidance on Linux. ALSA's
   default cannot name another PipeWire source, so Hex marks its ALSA streams
   (`PIPEWIRE_ALSA`: `state.restore-target = false` and its PID, set on the
   main thread at startup) and moves them off a Bluetooth default source to

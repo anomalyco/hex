@@ -922,7 +922,7 @@ fn main() -> Result<()> {
     // portal or rtkit.
     // SAFETY: Before any other thread exists to read the environment.
     unsafe { std::env::set_var("DISABLE_RTKIT", "1") };
-    linux::input_route::mark_streams();
+    linux::input::route::mark_streams();
     linux::run(&SHUTDOWN)
 }
 
