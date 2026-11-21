@@ -36,11 +36,11 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs253PointsAndLandscapeIs187Points() {
+    func testPortraitIs245PointsAndLandscapeIs187Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 245, "width \(width)")
         }
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 245)
         XCTAssertEqual(KeyboardLayout.height(for: .landscape), 187)
     }
 
@@ -201,13 +201,16 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardPosture.current(screenSize: CGSize(width: 669, height: 951), isFoldable: true), .unfoldedTall)
     }
 
-    func testPortraitMetricsMatchAppleIOS26() {
+    func testPortraitMetricsMatchApple() {
         let proMax = KeyboardLayout(width: 440)
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
         XCTAssertEqual(q.frame.minY, 35, accuracy: 0.001)
-        XCTAssertEqual(q.frame.height, 45)
+        XCTAssertEqual(q.frame.height, 43)
+        // Apple's 54 pt row pitch, and 5 pt under row 4.
+        XCTAssertEqual(proMax.key(.character("a"))!.frame.minY - q.frame.minY, 54, accuracy: 0.001)
+        XCTAssertEqual(proMax.totalHeight - proMax.key(.space)!.frame.maxY, 5, accuracy: 0.001)
         let shift = proMax.key(.shift)!
         XCTAssertEqual(shift.frame.width, proMax.letterWidth * 1.34, accuracy: 0.001)
     }

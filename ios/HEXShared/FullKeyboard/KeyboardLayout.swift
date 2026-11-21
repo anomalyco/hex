@@ -143,10 +143,16 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// the phone's portrait strip, 36 pt in landscape and in the Duo's 44 pt bar).
     var stripPillHeight: CGFloat { min(stripHeight - 1, 36) }
 
-    /// iOS 26 key geometry under the pinned strip: 35 pt + 218 pt of keys
-    /// (4 × 45 pt + 3 × 11 pt + 5 pt) = 253 pt.
+    /// iPhone key geometry under the pinned strip: 35 pt + 210 pt of keys
+    /// (4 × 43 pt + 3 × 11 pt + 5 pt) = 245 pt. Apple's keycaps beside Hex in the same field
+    /// (iPhone 17, iOS 27.2) are 43 pt on a 54 pt row pitch; with iOS 26's 45 pt on 56 pt,
+    /// Hex's rows sat 11 to 17 pt above Apple's, so fingers used to Apple's keyboard landed
+    /// low on Hex's keys and crossed into the row below. Row 4 keeps 5 pt under it: Apple's
+    /// row 4 ends 3 pt below where a third-party keyboard's view ends, so Hex's can't reach
+    /// it, and a space bar on the bottom edge lost the taps that land low (the held-out tap
+    /// benchmark got worse).
     static let portrait = KeyboardMetrics(
-        side: 6.5, gap: 6, rowGap: 11, keyHeight: 45,
+        side: 6.5, gap: 6, rowGap: 11, keyHeight: 43,
         stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
         keysTop: 0, keysBottom: 5, cornerRadius: 8.5
     )
@@ -199,7 +205,10 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             case .unfoldedWide:
                 keyHeight = 39
                 rowGap = 12.7
-            case .cover, .phone:
+            case .cover:
+                keyHeight = 45
+                rowGap = 11
+            case .phone:
                 break
             }
         }

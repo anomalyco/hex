@@ -71,8 +71,10 @@ enum AdaptiveTouchStatus: Equatable {
 
 /// The letter keys of one letters page, as Adaptive touch reads taps on it: their physical
 /// slots (a split layout's G and V twice), frames, rows and pitch. `key` names the geometry
-/// coarsely (letters, posture, orientation, split, Hex key side, width), so a new key plane
-/// of the same size keeps what was learned: offsets are in keycap widths and heights.
+/// coarsely (letters, posture, orientation, split, Hex key side, width, key height and row
+/// pitch), so a new key plane of the same size and rows keeps what was learned: offsets are in
+/// keycap widths and heights. Rows of another size (Hex's 45 pt keys on a 56 pt pitch, before
+/// they took Apple's) are another context, so those offsets aren't read on these keys.
 nonisolated struct AdaptiveTouchGeometry: Equatable {
     var key: UInt64
     var letters: [Unicode.Scalar]
@@ -91,7 +93,9 @@ nonisolated struct AdaptiveTouchGeometry: Equatable {
         var frames: [CGRect] = []
         var hitFrames: [CGRect] = []
         var groups: [Int] = []
-        var signature = "\(layout.posture)|\(layout.orientation)|\(layout.isSplit)|\(layout.hexPlacement)|\(Int((layout.width / 10).rounded()))|"
+        let m = layout.metrics
+        let rows = "\(Int((m.keyHeight * 4).rounded())):\(Int(((m.keyHeight + m.rowGap) * 4).rounded()))"
+        var signature = "\(layout.posture)|\(layout.orientation)|\(layout.isSplit)|\(layout.hexPlacement)|\(Int((layout.width / 10).rounded()))|\(rows)|"
         for key in layout.keys {
             guard let c = key.character, c.count == 1, c.first?.isLetter == true,
                   let scalar = c.lowercased().unicodeScalars.first,
@@ -113,7 +117,6 @@ nonisolated struct AdaptiveTouchGeometry: Equatable {
         self.groups = groups
         self.duplicated = duplicated
         key = Self.hash(signature)
-        let m = layout.metrics
         pitch = CGSize(width: layout.isSplit ? SplitGeometry.pitch : layout.letterWidth + m.gap, height: m.keyHeight + m.rowGap)
         touchTop = layout.touchAreaFrame.minY
     }
