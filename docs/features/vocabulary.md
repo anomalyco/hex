@@ -41,9 +41,10 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   │   "Added 3 terms, updated 2", "Updated 2 terms, skipped 1", "No new terms in that
 │   │   file" only when nothing changed, "No terms found in that file", or the error; a
 │   │   failed save says so instead of reporting success
-│   └── Export… -> a save dialog named hex-vocabulary.csv; appends .csv when the name has
-│       no extension, writes the four-column header then term, spellings joined by ", ",
-│       and two empty cells, quoting what needs it, atomically; "Exported N terms"
+│   └── Export… -> a save dialog named hex-vocabulary.csv; appends .csv only when the
+│       name has no extension and <name>.csv doesn't exist, writes the four-column
+│       header then term, spellings joined by ", ", and two empty cells, quoting what
+│       needs it, atomically; "Exported N terms"
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing

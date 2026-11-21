@@ -464,7 +464,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Couldn't export the vocabulary: {}", "Impossible d’exporter le vocabulaire : {}"),
     ("the file is larger than 1 MB", "le fichier dépasse 1 Mo"),
     ("the file isn't UTF-8 text", "le fichier n'est pas du texte UTF-8"),
-    ("a quote is never closed", "une guillemet n'est jamais fermée"),
+    ("a quote is never closed", "un guillemet n'est jamais fermé"),
     ("it isn't a regular file", "ce n'est pas un fichier ordinaire"),
     ("Couldn't save the vocabulary: {}", "Impossible d’enregistrer le vocabulaire : {}"),
     ("No terms found in that file", "Aucun terme trouvé dans ce fichier"),

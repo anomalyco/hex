@@ -3398,9 +3398,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   new terms in that file" only when nothing changed at all, "No terms found
   in that file", or what failed.
   Export opens a save dialog named `hex-vocabulary.csv` (starting in
-  Downloads), appends `.csv` to a name without an extension, and writes the
-  header plus one row per entry, its spellings joined by ", " and two empty
-  cells, quoting what needs it. The file is written atomically
+  Downloads), appends `.csv` only when the name has no extension and
+  `<name>.csv` doesn't already exist, and writes the header plus one row per
+  entry, its spellings joined by ", " and two empty cells, quoting what needs
+  it. The file is written atomically
   (`durable::write`), and the sheet says "Exported N terms" or the error.
   The CSV parser, merge, and writer are `dictation::vocabulary::csv`, with
   no new dependency; the save dialog is the same native

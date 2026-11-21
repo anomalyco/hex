@@ -439,6 +439,7 @@ const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 const FASTER_LIVE_TEXT: u64 = 1 << 23;
 /// Importing and exporting the vocabulary as a CSV file, on the bit More
 /// call apps left free.
+// Kept only for the state-word encoding; no gate reads it.
 const VOCABULARY_FILES: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 // 1 << 26 is free (Vocabulary in meeting notes graduated).
