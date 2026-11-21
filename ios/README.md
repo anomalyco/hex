@@ -334,10 +334,14 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     word with no determiner before it, and any word the list lacks, keeps the dictionary's
     rule: a verb stays lowercase ("zu leben", "ich frage", "wollt ihr essen") and a word the
     dictionary knows only capitalised still takes its capital ("heute abend" becomes "heute
-    Abend"). The builder caps a word that is also a common first-person or imperative verb
-    form ("frage", "reise", "drucke": "ich frage" stays, "die frage" becomes "Frage"), and
-    the separable prefixes "teil" and "preis" plus the adjective "klasse", at 94 so they take
-    a capital only after a determiner. The list is
+    Abend"). The builder caps at 94, so a capital arrives only after a determiner: a word that
+    is also a common first-person or imperative verb form ("frage", "reise", "drucke") or the
+    stem people type alone ("kauf", "schlaf", "sitz": "ich kauf noch brot", "schlaf gut"); the
+    separable prefixes "teil" and "preis", the adjective "klasse", and the verb forms the
+    counts miss ("filme", "rolle", "presse", "pumpe", "campe", "pflanze", "beichte", "fische",
+    "taufe"); and every two-letter "word", a chat abbreviation ("gl", "rn") rather than a
+    noun. The determiner list includes "in" ("in Ruhe", "in Frage") but not "ohne" ("ohne
+    essen" is a verb). The list is
     `HEXKeyboard/TypingModel/de.capitals`, built by `scripts/build-german-capitals.py`
     from the same Google Books shards: for each model word it compares the 1980–2019 counts
     of the all-lowercase and first-letter-capitalised spellings and lists

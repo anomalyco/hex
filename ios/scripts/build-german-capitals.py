@@ -15,8 +15,8 @@ MIN_TOTAL (40 occurrences across 40 years of books, below which the share is mos
 except pronouns and possessives that are capitalized for other reasons (FUNCTION_WORDS).
 
 The counts decide every percentage; the caps below are applied after them, and the merged
-counts are kept, so a rule can change without streaming the shards again. Two kinds of word
-are capped at CAP (94%) so the keyboard only capitalizes them after an article or
+counts are kept, so a rule can change without streaming the shards again. Three kinds of
+word are capped at CAP (94%) so the keyboard only capitalizes them after an article or
 determiner, because they are also common lowercase words:
 
 - a verb form: a word ending in "e" whose word+"n" is its infinitive, where both readings
@@ -28,7 +28,13 @@ determiner, because they are also common lowercase words:
   a conjugation fills (frage 2.8x, drucke 23x). A noun without a verb of its own is outside
   it: "hause" is 0.6% lowercase, and "wegen" and "lagen" are 250x and 43x the lowercase
   "wege" and "lage", so "haus", "hause", "wege" and "lage" keep their capitals.
-- ALSO_LOWERCASE: words whose lowercase use is common but no verb form shows it.
+- a stem: the same test for a consonant stem and its word+"en" ("kauf"/"kaufen", "schlaf"/
+  "schlafen", "sitz"/"sitzen"), the imperative and casual first person people type. Most
+  nouns are built from a verb stem too, so its band is wider (STEM_*): "kaufen" may be 38x
+  the lowercase "kauf". A noun the books nearly always capitalize stays: "bild" is 0.6%
+  lowercase, "bericht" 1.1%, "tisch" has "tischen" at only 0.9x it.
+- ALSO_LOWERCASE: words whose lowercase use is common but no rule above sees it, and every
+  two-letter word, which is a chat abbreviation ("gl", "rn"), never a noun.
 
 Each line is `word<TAB>percent`, sorted by word, with a trailing newline.
 
@@ -49,6 +55,10 @@ VERB_MIN_LOW = 200_000      # lowercase uses of the infinitive over 40 years, 5,
 VERB_MIN_SHARE = 14         # in tenths of a percent: 1.4% of the word's uses lowercase
 VERB_MIN_RATIO = 2          # the infinitive at least twice the lowercase -e form
 VERB_MAX_RATIO = 24         # and at most 24 times it
+STEM_MIN_LOW = 140_000      # a consonant infinitive's lowercase uses, 3,500 a year
+STEM_MIN_SHARE = 13         # in tenths of a percent: 1.3% of the stem's uses lowercase
+STEM_MIN_RATIO = 2          # the infinitive at least twice the lowercase stem
+STEM_MAX_RATIO = 60         # and at most 60 times it: the imperative is rarer than "ich kaufe"
 SHARDS = 4                  # shards streamed at once
 WORK = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".build-german-capitals")
 FUNCTION_WORDS = frozenset("""
@@ -57,11 +67,16 @@ FUNCTION_WORDS = frozenset("""
     sich mein meine meinen meinem meiner meines
 """.split())
 # Words the books capitalize nearly always whose lowercase use is still common, and that
-# the verb rule above cannot see: "teil" and "preis" stand alone as the separable prefixes
-# of "teilnehmen" and "preisgeben" ("ich nehme teil", "er gibt es preis"), and "klasse" is
-# the adjective and adverb before "Klasse" ("das ist klasse").
+# the two rules above cannot see:
+# - "teil" and "preis" stand alone as the separable prefixes of "teilnehmen" and
+#   "preisgeben" ("ich nehme teil", "er gibt es preis");
+# - "klasse" is the adjective and adverb before "Klasse" ("das ist klasse");
+# - filme, rolle, presse, pumpe, campe, pflanze, beichte, fische and taufe are first person and
+#   imperative too ("ich filme", "roll!"), but their infinitives are too rare or their -e
+#   word is too rarely lowercase for the verb rule. "erbe" stays out: people type "das Erbe"
+#   and "der Erbe".
 ALSO_LOWERCASE = frozenset("""
-    klasse  preis  teil
+    beichte  campe  filme  fische  klasse  pflanze  presse  preis  pumpe  rolle  taufe  teil
 """.split())
 
 
@@ -213,32 +228,53 @@ def share_of(word, low, cap):
     return percent(cap[word], total) if total else 0
 
 
+def conjugation(word, low, cap, infinitive, min_low, min_share, min_ratio, max_ratio):
+    """Whether the lowercase `word` and `infinitive` look like one verb's conjugation.
+
+    The infinitive has to be common in the books, the word itself has to be typed lowercase
+    often enough to be a verb of its own, and it has to be between `min_ratio` and
+    `max_ratio` times the lowercase word, the band a real conjugation fills.
+    """
+    if infinitive not in low or low[infinitive] < min_low:
+        return False
+    total = low[word] + cap[word]
+    if low[word] * 1000 < total * min_share:
+        return False
+    return min_ratio * low[word] <= low[infinitive] <= max_ratio * low[word]
+
+
 def verb_form(word, low, cap):
     """Whether `word` is also the common lowercase first person and imperative of a verb.
 
     "frage" is "fragen" (ich frage, frage!), "reise" is "reisen", "drucke" is "drucken".
     A plural noun takes the same ending, so the infinitive's capitalised share says nothing
     ("Fragen" outnumbers "fragen"), and a noun can sit next to an unrelated verb form
-    ("gebete" next to "gebeten"). The counts tell a conjugation from those: the -e word is
-    typed lowercase often enough to be a verb of its own, the infinitive is common in the
-    books, and it is between VERB_MIN_RATIO and VERB_MAX_RATIO times the lowercase -e word,
-    the band a real conjugation fills. "hause" (0.6% lowercase) and "hausen" fall outside it,
-    so "haus" and "hause" keep their capitals; so do "wege" and "lage", whose -n forms are
-    the preposition "wegen" and the past "lagen".
-
-    A consonant stem ("bild"/"bilden", "erfolg"/"erfolgen") is deliberately not tested: most
-    German nouns are built from a verb stem, so that test would cap real nouns by the hundred.
-    The separable prefixes it would also miss are in ALSO_LOWERCASE.
+    ("gebete" next to "gebeten"). The counts tell a conjugation from those. "hause" (0.6%
+    lowercase) and "hausen" fall outside it, so "haus" and "hause" keep their capitals; so do
+    "wege" and "lage", whose -n forms are the preposition "wegen" and the past "lagen".
     """
     if not word.endswith("e"):
         return False
-    infinitive = word + "n"
-    if infinitive not in low or low[infinitive] < VERB_MIN_LOW:
+    return conjugation(word, low, cap, word + "n",
+                       VERB_MIN_LOW, VERB_MIN_SHARE, VERB_MIN_RATIO, VERB_MAX_RATIO)
+
+
+def stem_form(word, low, cap):
+    """Whether `word` is a consonant stem people type alone as a verb.
+
+    "kauf" is "kaufen" ("ich kauf noch brot"), "schlaf" is "schlafen" ("schlaf gut"), "sitz"
+    is "sitzen", "druck" is "drucken". Most German nouns are built from a verb stem too
+    ("bild"/"bilden", "erfolg"/"erfolgen"), so the band is wider and the infinitive may be
+    much more common than the stem (kaufen 38x "kauf", spielen 47x "spiel"), but a noun the
+    books capitalize nearly always keeps its capital: "bild" is 0.6% lowercase, "bericht"
+    1.1%, "tisch" 1.8% with "tischen" only 0.9x it, and "haus", "zeit" and "freund" fall out
+    by their own or their -en form's counts. The words the counts still miss are in
+    ALSO_LOWERCASE.
+    """
+    if word.endswith("e"):
         return False
-    total = low[word] + cap[word]
-    if low[word] * 1000 < total * VERB_MIN_SHARE:
-        return False
-    return VERB_MIN_RATIO * low[word] <= low[infinitive] <= VERB_MAX_RATIO * low[word]
+    return conjugation(word, low, cap, word + "en",
+                       STEM_MIN_LOW, STEM_MIN_SHARE, STEM_MIN_RATIO, STEM_MAX_RATIO)
 
 
 def build(model_path, out_path):
@@ -259,9 +295,21 @@ def build(model_path, out_path):
         p = share_of(w, low, cap)
         if p < SOMETIMES:
             continue
-        if p > CAP and (w in ALSO_LOWERCASE or verb_form(w, low, cap)):
-            p = CAP
-            capped.append((w, total))
+        if p > CAP:
+            # A two-letter "word" is an abbreviation ("gl", "rn"), never a noun.
+            if len(w) == 2:
+                reason = "short"
+            elif w in ALSO_LOWERCASE:
+                reason = "list"
+            elif verb_form(w, low, cap):
+                reason = "verb"
+            elif stem_form(w, low, cap):
+                reason = "stem"
+            else:
+                reason = None
+            if reason:
+                p = CAP
+                capped.append((w, total, reason))
         rows.append((w, p))
     rows.sort()
     with open(out_path + ".part", "w", encoding="utf-8", newline="\n") as f:
@@ -270,11 +318,17 @@ def build(model_path, out_path):
     os.replace(out_path + ".part", out_path)
     high = sum(1 for _, p in rows if p >= CAP + 1)
     capped.sort(key=lambda row: -row[1])
+    counts_by_reason = {
+        reason: sum(1 for _, _, r in capped if r == reason)
+        for reason in ("verb", "stem", "list", "short")
+    }
     print(f"{out_path}: {len(rows):,} of {len(words):,} words, {high:,} at 95% or more, "
           f"{len(rows) - high:,} at 50-94%, {len(counts):,} tokens summed")
-    print(f"{len(capped):,} words moved from 95% or more to {CAP}%:")
-    for w, total in capped[:200]:
-        print(f"    {w} ({total:,})")
+    print(f"{len(capped):,} words moved from 95% or more to {CAP}% "
+          f"({counts_by_reason['verb']} verb forms, {counts_by_reason['stem']} stems, "
+          f"{counts_by_reason['list']} listed, {counts_by_reason['short']} short):")
+    for w, total, reason in capped[:250]:
+        print(f"    {w} ({total:,}, {reason})")
 
 
 if __name__ == "__main__":

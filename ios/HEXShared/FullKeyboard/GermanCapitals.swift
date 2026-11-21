@@ -5,10 +5,10 @@ import Foundation
 /// written by `scripts/build-german-capitals.py`): the percent is how often the word is written
 /// with a capital in the same Google Books corpus the model was counted from, so "haus" is 99
 /// and "leben" — `Leben` the noun or `leben` the verb — is lower. The builder also caps a word
-/// that is equally a common verb form ("frage", "reise", "drucke") at 94, so it takes a capital
-/// only after a determiner. German's model is lowercase throughout and Apple's German
-/// dictionary takes "haus", "auto" and "zeit" lowercase too, so this list is what knows they
-/// are nouns.
+/// that is equally a common verb form or stem ("frage", "reise", "kauf") or a two-letter
+/// abbreviation ("gl") at 94, so it takes a capital only after a determiner. German's model is
+/// lowercase throughout and Apple's German dictionary takes "haus", "auto" and "zeit" lowercase
+/// too, so this list is what knows they are nouns.
 nonisolated struct GermanCapitals: Sendable {
     /// A word the books write with a capital this often is a noun wherever it stands.
     static let alwaysShare = 95
@@ -74,9 +74,10 @@ nonisolated struct GermanCapitals: Sendable {
 
     /// Articles, determiners, their contractions and possessives, after which German writes
     /// the noun with a capital ("das haus", "im haus", "mein haus"), so a word the books write
-    /// both ways is a noun here ("das leben", never "zu leben"). "ihr" is left out: it is the
-    /// possessive "her/their", but as the pronoun "you" (plural) it comes before a verb far
-    /// more often ("wollt ihr essen").
+    /// both ways is a noun here ("das leben", never "zu leben"). "in" is in: "in Ruhe", "in
+    /// Frage", and a verb rarely follows it. "ihr" is left out: it is the possessive
+    /// "her/their", but as the pronoun "you" (plural) it comes before a verb far more often
+    /// ("wollt ihr essen"). "ohne" is out too: "ohne essen" is a verb, "without eating".
     static let determiners: Set<String> = [
         "der", "die", "das", "den", "dem", "des",
         "ein", "eine", "einen", "einem", "einer", "eines",
@@ -89,6 +90,6 @@ nonisolated struct GermanCapitals: Sendable {
         "euer", "eure", "euren", "eurem", "eurer", "eures",
         "dies", "dieser", "diese", "dieses", "diesem", "diesen",
         "jeder", "jede", "jedes", "jedem", "jeden",
-        "im", "am", "zum", "zur", "vom", "beim", "ins", "ans",
+        "im", "in", "am", "zum", "zur", "vom", "beim", "ins", "ans",
     ]
 }

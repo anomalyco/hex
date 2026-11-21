@@ -281,6 +281,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         DispatchQueue.main.async { [weak self] in
             guard let self, let checker = self.engine.autocorrect.checker as? SystemTextChecker else { return }
             checker.warmUp()
+            // German's capitalisation list reads with the dictionary, off the open path, and only
+            // while the German model is on: the dictionary engine never asks for it.
+            if self.engine.language == .german, self.engine.letterOdds != nil,
+               self.engine.autocorrect.germanCapitals == nil {
+                self.engine.autocorrect.germanCapitals = GermanCapitals.bundled()
+            }
             self.engine.refreshSuggestions()
         }
     }
@@ -442,11 +448,6 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private func syncSpatialAutocorrect() {
         let settings = FullKeyboardSettings()
         let words = settings.typingModel(for: engine.language)
-        // German's capitalisation list reads beside its model, off the first space you type, and
-        // only while that model is on: the dictionary engine never asks for it.
-        if engine.language == .german, words != nil, engine.autocorrect.germanCapitals == nil {
-            engine.autocorrect.germanCapitals = GermanCapitals.bundled()
-        }
         if engine.letterOdds !== words {
             engine.letterOdds = words
         }
