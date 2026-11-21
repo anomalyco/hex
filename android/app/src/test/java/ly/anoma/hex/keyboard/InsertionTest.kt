@@ -168,4 +168,56 @@ class InsertionTest {
         assertEquals("i'm gonna be late, wanna start without me?", styled(heard, Style.Casual, "en-US"))
         assertEquals(heard, styled(heard, Style.Verbatim, "en-US"))
     }
+
+    // iOS TranscriptCleanupTests: spoken "@" and counts (English only, every style but Verbatim).
+    @Test fun spokenAtSignsBecomeAddresses() {
+        for ((spoken, written) in listOf(
+            "john at the rate gmail dot com" to "john@gmail.com",
+            "Mail it to John at the rate Gmail dot com." to "Mail it to john@gmail.com.",
+            "My email is priya dot sharma at the rate company dot co dot in, call me too" to
+                "My email is priya.sharma@company.co.in, call me too",
+            "Write to support at the rate hex.app today" to "Write to support@hex.app today",
+            "rahul123 at sign yahoo dot com" to "rahul123@yahoo.com",
+            "At the rate gmail dot com addresses work" to "@gmail.com addresses work",
+            "Type the at sign, then your name" to "Type the @, then your name",
+            "Press at sign." to "Press @.",
+            "ravi at the rate, gmail dot com" to "ravi@gmail.com",
+            "My email is John at the rategmail.com." to "My email is john@gmail.com.",
+            "Send it to Priya at signyahoo.com." to "Send it to priya@yahoo.com.",
+            "My email is John at the rate gmail.com" to "My email is john@gmail.com",
+        )) assertEquals(spoken, written, SpokenCleanup.symbols(spoken, "en-IN"))
+    }
+    @Test fun atInItsOwnMeaningStays() {
+        for (spoken in listOf("Prices are growing at the rate of 5% a year.", "At the rate of knots, we'll be there soon.",
+            "We are spending at the rate we planned.", "At the rate you're going, you'll finish early.",
+            "Meet me at the office at 5.", "Look at that dot on the map.", "I'm good at sign language.",
+            "john at the rate gmail", "Send it at the rate", "Wait at the gate dot com", "Send it to priya@yahoo.com",
+            "My email is john at gmail.com.", "Prices Are growing at the rate of5% a year",
+            "Rates went up at the ratepayers' meeting.")) assertEquals(spoken, SpokenCleanup.symbols(spoken, "en-IN"))
+        assertEquals("john at the rate gmail dot com", SpokenCleanup.symbols("john at the rate gmail dot com", "es"))
+    }
+    @Test fun spokenCountsBecomeDigits() {
+        for ((heard, written) in listOf("Test one, 2, 3." to "Test 1, 2, 3.", "Test one, two, three." to "Test 1, 2, 3.",
+            "Test, one, two, three." to "Test, 1, 2, 3.", "Testing one two three." to "Testing 1, 2, 3.",
+            "Testing, testing, one, 2, 3." to "Testing, testing, 1, 2, 3.", "One, two, three, testing." to "1, 2, 3, testing.",
+            "Counting one, two, three, four." to "Counting 1, 2, 3, 4.", "One, two, three, go!" to "1, 2, 3, go!",
+            "Test 1, 2, 3" to "Test 1, 2, 3", "Test 123" to "Test 1, 2, 3", "Testing 123." to "Testing 1, 2, 3.",
+            "Testing testing 123" to "Testing testing 1, 2, 3", "Test, 123" to "Test, 1, 2, 3",
+            "Testing 1234, can you hear me?" to "Testing 1, 2, 3, 4, can you hear me?",
+        )) assertEquals(heard, written, SpokenCleanup.counts(heard, "en-US"))
+    }
+    @Test fun otherNumbersStayAsSaid() {
+        for (heard in listOf("I have two dogs and three cats.", "Chapter one, two and three are done.", "We'll meet at 1, 2, or 3.",
+            "One, two, buckle my shoe. Three, four, shut the door.", "Two, three, four, five.", "Test one, two.",
+            "Zero, one, two, three.", "Twenty one two three.", "One. Two. Three.", "Test. 1. 2. 3.", "Room 123 is free.",
+            "Test 123 passed.", "This is a test. 123 people came.", "Test 132.", "Counting 1234", "Call 1-2-3 now.",
+        )) assertEquals(heard, SpokenCleanup.counts(heard, "en-US"))
+        assertEquals("Prueba uno, dos, tres.", SpokenCleanup.counts("Prueba uno, dos, tres.", "es"))
+    }
+    @Test fun symbolsAndCountsRunInTheStylesButNotVerbatim() {
+        assertEquals("Mail it to john@gmail.com.", pipeline("mail it to John at the rate Gmail dot com", Style.Polished))
+        assertEquals("testing 1, 2, 3", pipeline("Testing one two three.", Style.Casual))
+        assertEquals("john at the rate gmail dot com", pipeline("john at the rate gmail dot com", Style.Verbatim))
+        assertEquals("Test 1, 2, 3.", SpokenText.format("Test one, two, three.", SpeechOptions(Style.Polished, Spoken.English, true, false)))
+    }
 }

@@ -4,15 +4,17 @@ import java.util.Locale
 
 /** iOS's DictationPipeline and TranscriptFormatter: string rules only, no learned or remote rewriting. */
 internal object SpokenText {
-    /** Cleanup, the style, then Lowercase, the same wherever Hex dictates. Translation already
-     * happened in Whisper, so a translated dictation is formatted as English. */
+    /** Spoken symbols and counts, cleanup, the style, then Lowercase, the same wherever Hex
+     * dictates. Translation already happened in Whisper, so a translated dictation is English. */
     fun format(raw: String, options: SpeechOptions): String {
         val language = if (options.translate) "en" else options.spoken.code
-        val cleaned = if (options.clean && options.style != Style.Verbatim && raw.isNotBlank())
-            SpokenCleanup.clean(raw.trim(), language) else raw
-        val styled = style(cleaned, options.style, language, options.endWithPeriod)
-        return if (options.lowercase) styled.lowercase(Locale.ROOT) else styled
+        if (options.style == Style.Verbatim || raw.isBlank()) return lowercased(style(raw, options.style, language), options)
+        val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(raw.trim(), language), language)
+        val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken
+        return lowercased(style(cleaned, options.style, language, options.endWithPeriod), options)
     }
+
+    private fun lowercased(text: String, options: SpeechOptions) = if (options.lowercase) text.lowercase(Locale.ROOT) else text
 
     /** TranscriptFormatter.format. With [endsWithPeriod] off no line ends with a full stop,
      * though "?" and "!" stay; Verbatim keeps the model's. */
