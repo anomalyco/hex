@@ -151,7 +151,14 @@ pub fn merge(list: &mut Vec<VocabularyEntry>, terms: &[ImportedTerm]) -> Merged 
             .flat_map(|spelling| spelling.split(','))
         {
             let spelling = super::clean(spelling);
-            if spelling.is_empty() || spelling.to_lowercase() == key {
+            if spelling.is_empty() {
+                continue;
+            }
+            if spelling.chars().count() > MAX_TERM_CHARS {
+                merged.clamped = true;
+                continue;
+            }
+            if spelling.to_lowercase() == key {
                 continue;
             }
             if entry
@@ -196,6 +203,9 @@ fn records(
     let mut at_field_start = true;
     let mut at_record_start = true;
     let mut truncated = false;
+    // Records with a term count toward the cap; one with a blank first cell
+    // is skipped later, so it must not use the room for a header plus terms.
+    let mut kept = 0;
     let mut chars = text.chars().peekable();
     while let Some(character) = chars.next() {
         if in_quotes {
@@ -209,7 +219,8 @@ fn records(
             }
             continue;
         }
-        if at_record_start && character == '#' {
+        if at_record_start && fields.is_empty() && field.trim().is_empty() && character == '#' {
+            field.clear();
             while let Some(next) = chars.next() {
                 match next {
                     '\n' => break,
@@ -224,7 +235,9 @@ fn records(
             }
             continue;
         }
-        at_record_start = false;
+        if !character.is_whitespace() || delimiter == Some(character) {
+            at_record_start = false;
+        }
         match character {
             // Whitespace before an opening quote is dropped, as spreadsheet
             // exports often leave it after a delimiter.
@@ -245,10 +258,14 @@ fn records(
                     chars.next();
                 }
                 fields.push(std::mem::take(&mut field));
+                let first_kept = fields.first().is_some_and(|field| !field.trim().is_empty());
                 if fields.iter().any(|field| !field.trim().is_empty()) {
-                    if records.len() >= limit {
-                        truncated = true;
-                        break;
+                    if first_kept {
+                        if kept >= limit {
+                            truncated = true;
+                            break;
+                        }
+                        kept += 1;
                     }
                     records.push(Record {
                         fields: std::mem::take(&mut fields),
@@ -272,14 +289,15 @@ fn records(
     }
     if !field.is_empty() || !fields.is_empty() {
         fields.push(field);
+        let first_kept = fields.first().is_some_and(|field| !field.trim().is_empty());
         if fields.iter().any(|field| !field.trim().is_empty()) {
-            if records.len() < limit {
+            if first_kept && kept >= limit {
+                truncated = true;
+            } else {
                 records.push(Record {
                     fields,
                     first_quoted,
                 });
-            } else {
-                truncated = true;
             }
         }
     }
@@ -299,7 +317,7 @@ fn delimiter(text: &str) -> Option<char> {
     if let Some(delimiter) = line_delimiter(first) {
         return Some(delimiter);
     }
-    if header_word(first) {
+    if !first.starts_with('"') && one_column_header(first) {
         return lines.find_map(line_delimiter);
     }
     None
@@ -342,7 +360,7 @@ fn spellings(fields: &[String], header: Option<&[String]>) -> Vec<String> {
             let named: Vec<usize> = header
                 .iter()
                 .enumerate()
-                .filter(|(_, name)| name.as_str() == "sounds like")
+                .filter(|(_, name)| name.starts_with("sounds like"))
                 .map(|(index, _)| index)
                 .collect();
             if named.is_empty() {
@@ -376,11 +394,14 @@ fn is_header(record: &Record) -> bool {
     if !header_word(first) {
         return false;
     }
-    record.fields.len() >= 2
-        || matches!(
-            normalize(first).as_str(),
-            "term (required)" | "display form"
-        )
+    record.fields.len() >= 2 || one_column_header(first)
+}
+
+/// Whether one cell is a one-column header: the words that are unambiguous
+/// alone. A lone "Term" or "Word" is a term, because a one-column file is a
+/// plain list.
+fn one_column_header(cell: &str) -> bool {
+    matches!(normalize(cell).as_str(), "term (required)" | "display form")
 }
 
 fn header_word(cell: &str) -> bool {
@@ -412,6 +433,20 @@ mod tests {
 
     fn parsed(text: &str) -> Vec<ImportedTerm> {
         parse(text).unwrap().terms
+    }
+
+    /// What the sheet's rows keep after saving and reloading: each entry's
+    /// spellings joined with commas, split again, and added back.
+    fn project_like_the_sheet(entries: &[VocabularyEntry]) -> Vec<VocabularyEntry> {
+        let mut kept = Vec::new();
+        for entry in entries {
+            let _ = super::super::add_clamped(
+                &mut kept,
+                &entry.term,
+                &super::super::parse_sounds_like(&entry.sounds_like.join(", ")),
+            );
+        }
+        kept
     }
 
     #[test]
@@ -452,15 +487,30 @@ mod tests {
     }
 
     #[test]
-    fn a_one_column_header_word_finds_the_next_line_s_delimiter() {
+    fn a_one_column_header_is_skipped_and_sets_the_next_line_s_delimiter() {
         assert_eq!(
             parsed("Term (required)\nRune;roon\n"),
             [imported("Rune", &["roon"])]
         );
-        // An ordinary lone word is a term, not a header, so it stays.
         assert_eq!(
-            parsed("Term\nRune;roon\n"),
-            [imported("Term", &[]), imported("Rune", &["roon"])]
+            parsed("Display Form\nRune;roon\n"),
+            [imported("Rune", &["roon"])]
+        );
+    }
+
+    #[test]
+    fn a_plain_list_starting_with_a_header_word_and_a_comma_stays_one_column() {
+        assert_eq!(
+            parsed("Word\nAcme, Inc.\n"),
+            [imported("Word", &[]), imported("Acme, Inc.", &[])]
+        );
+    }
+
+    #[test]
+    fn a_leading_space_still_starts_a_comment() {
+        assert_eq!(
+            parsed("  # note with a \"quote\"\nRune\n"),
+            [imported("Rune", &[])]
         );
     }
 
@@ -530,6 +580,11 @@ mod tests {
                 imported("Viva Glint", &["Vee-Vah-Glint"])
             ]
         );
+        // A Sounds like column may name what it holds.
+        assert_eq!(
+            parsed("Term,Sounds like (optional),Long form\nTAC,Tee-Ay-Cee,Teams Admin Center\n"),
+            [imported("TAC", &["Tee-Ay-Cee"])]
+        );
         // A header without a Sounds like column leaves every further cell a
         // spelling, as an unheadered row's do.
         assert_eq!(
@@ -550,6 +605,14 @@ mod tests {
             parsed("\"#hashtag\", hash tag\n# comment\nRune"),
             [imported("#hashtag", &["hash tag"]), imported("Rune", &[])]
         );
+    }
+
+    #[test]
+    fn records_with_a_blank_first_cell_do_not_use_the_row_cap() {
+        let text = (0..=MAX_ROWS).map(|_| ",x\n").collect::<String>() + "Rune\n";
+        let parsed = parse(&text).unwrap();
+        assert_eq!(parsed.terms, [imported("Rune", &[])]);
+        assert!(!parsed.capped);
     }
 
     #[test]
@@ -634,11 +697,16 @@ mod tests {
 
     #[test]
     fn merging_matches_add_clamped() {
+        let long = "s".repeat(65);
+        let many: Vec<String> = (0..17).map(|n| format!("many {n}")).collect();
+        let many_refs: Vec<&str> = many.iter().map(String::as_str).collect();
         let terms = [
             imported(" Rune  ", &["roon", "rooney"]),
             imported("cappuccino", &["capuchin", "cap a chino"]),
             imported("Rune", &["ROON", "rune"]),
             imported(&"x".repeat(70), &[]),
+            imported("Rune", &[long.as_str()]),
+            imported("Rune", &many_refs),
         ];
         let original = vec![VocabularyEntry {
             term: "Rune".into(),
@@ -657,5 +725,12 @@ mod tests {
         slow_merged.changed = slow != original;
         assert_eq!(fast, slow);
         assert_eq!(fast_merged, slow_merged);
+        assert!(fast_merged.clamped);
+        assert!(
+            fast.iter()
+                .flat_map(|entry| &entry.sounds_like)
+                .all(|spelling| spelling.chars().count() <= MAX_TERM_CHARS)
+        );
+        assert_eq!(project_like_the_sheet(&fast), fast);
     }
 }

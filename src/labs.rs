@@ -438,7 +438,7 @@ const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 /// graduated meeting labs left free.
 const FASTER_LIVE_TEXT: u64 = 1 << 23;
 /// The Vocabulary sheet offers Import…, adding terms from a CSV or text
-/// file.
+/// file, on the bit More call apps freed.
 const IMPORT_VOCABULARY: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 // 1 << 26 is free (Vocabulary in meeting notes graduated).

@@ -3681,14 +3681,17 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   path, not on the typing debounce. The first column is the term and further
   columns are "sounds like" spellings; the delimiter comes from the first line
   that isn't blank or a # comment, quotes follow RFC 4180, blank and # comment
-  lines are skipped before tokenizing, and an unterminated quote is refused. A
-  first line with no delimiter makes the whole file one column, so a plain
-  list keeps "Acme, Inc." as one term. A header is skipped only when its first
+  lines (leading spaces allowed) are skipped before tokenizing, and an
+  unterminated quote is refused. A first line with no delimiter makes the
+  whole file one column, so a plain list keeps "Acme, Inc." as one term; only
+  a one-column Term (required) or Display Form header is skipped and lets the
+  next line with a delimiter decide. A header is skipped only when its first
   cell is unquoted and its row has another column, or when it reads exactly
   Term (required) or Display Form; a lone Word or Term stays a term. A header
-  that names a Sounds like column, as Microsoft Teams' custom dictionary
-  does, makes that column the only spelling source, so Teams' Long form of the
-  term and Definition and context columns are ignored. Imported spellings
+  that names a Sounds like column (a cell starting with "sounds like"), as
+  Microsoft Teams' custom dictionary does, makes that column the only
+  spelling source, so Teams' Long form of the term and Definition and context
+  columns are ignored. Imported spellings
   split on commas, which is how the sheet saves them. Files over 1 MiB, files
   that aren't UTF-8 (a UTF-16 or Windows-1252 export), and files with an
   unterminated quote show Couldn't read that file. The sheet says Added 12

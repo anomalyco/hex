@@ -38,18 +38,19 @@ General › Vocabulary   // vocabulary.settings; after Language
 │   │   comma, semicolon, or tab; RFC 4180 quotes, so quoted delimiters and
 │   │   line breaks stay in a term
 │   ├── A first line with no delimiter makes the whole file one column, so a
-│   │   plain list keeps "Acme, Inc." as one term; a one-column header word
-│   │   (Term, Term (required), Display Form) lets the next line with a
-│   │   delimiter decide
-│   ├── Blank lines and # comment lines are skipped before tokenizing; plain
-│   │   text with one term a line reads the same, and a quoted # stays a term
+│   │   plain list keeps "Acme, Inc." as one term; only a one-column header
+│   │   that is itself skipped (Term (required) or Display Form) lets the next
+│   │   line with a delimiter decide, and that header is never a term
+│   ├── Blank lines and # comment lines (leading spaces allowed) are skipped
+│   │   before tokenizing; plain text with one term a line reads the same, and
+│   │   a quoted # stays a term
 │   ├── A header is skipped only when its first cell is unquoted and its row
 │   │   has another column, or when it reads exactly Term (required) or
 │   │   Display Form; a lone Word or Term stays a term for a plain list. When
-│   │   the header names a Sounds like column, only that column supplies
-│   │   spellings, so Microsoft Teams' custom dictionary CSV imports its Term
-│   │   and Sounds like columns and leaves Long form of the term and
-│   │   Definition and context out
+│   │   the header names a Sounds like column (any cell starting with "sounds
+│   │   like"), only that column supplies spellings, so Microsoft Teams' custom
+│   │   dictionary CSV imports its Term and Sounds like columns and leaves
+│   │   Long form of the term and Definition and context out
 │   ├── Each row merges with add_clamped's rules: repeats in any case join the
 │   │   existing term, imported spellings split on commas, and 500 terms, 64
 │   │   characters, and 16 spellings hold; once the list is full, new terms are
