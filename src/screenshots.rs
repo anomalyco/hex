@@ -20,6 +20,7 @@ mod recording;
 pub(crate) mod save;
 pub(crate) mod system_shortcut;
 mod toolbar;
+mod toolbar_level;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};

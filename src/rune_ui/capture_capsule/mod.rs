@@ -47,10 +47,10 @@ use rune_kit::TextInput;
 use self::flow::{Action, Cue, Done, Flow, Footer, Input, Lead, List, Mode, Pres};
 use self::list_view::*;
 use self::surface::{
-    CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LIST_PAD, LIST_Y, PANEL_H, PANEL_W,
-    PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H, THUMB_RADIUS,
-    THUMB_W, THUMB_X, chord, clock_style, clock_width, corner, done_style, done_text_x, ellipsize,
-    measure, medium, processing, small,
+    CHIP_H, CHIP_PX, HEADER_H, HINT_GAP, Id, LEAD_TEXT_X, LEVEL_GAP, LEVEL_W, LIST_PAD, LIST_Y,
+    PANEL_H, PANEL_W, PROCESSING_TEXT_X, ROW_H, SEG_ICON, SEG_ICON_GAP, Shown, Surface, THUMB_H,
+    THUMB_RADIUS, THUMB_W, THUMB_X, chord, clock_style, clock_width, corner, done_style,
+    done_text_x, ellipsize, measure, medium, processing, small,
 };
 use self::tuning::ListFooter;
 use self::view::*;
@@ -115,6 +115,13 @@ struct Meter {
     shimmer_at: [f32; GLYPHS],
     /// The glow inside the capsule's edge while it changes width.
     glow: Live<f32>,
+    /// The microphone's level after the timer: each bar's rect, and how
+    /// lit they are.
+    level_bars: [Live<[f32; 4]>; 3],
+    level_ink: Live<f32>,
+    /// The level the bars show and the animation second it was last
+    /// followed at.
+    heard: Arc<Mutex<(f32, f64)>>,
     /// A morph's settle time in seconds (`f32` bits) for the thread to
     /// start a glow; 0 when none.
     kick: Arc<AtomicU32>,
@@ -158,6 +165,9 @@ impl Meter {
                 std::array::from_fn(|k| (glyphs[k].1 + glyphs[k].2 * 0.5) / total)
             },
             glow: Live::new(0.0),
+            level_bars: std::array::from_fn(|k| Live::new(level_bar(k, 0.0))),
+            level_ink: Live::new(level_ink(0.0)),
+            heard: Arc::default(),
             kick: Arc::default(),
             activity: Arc::default(),
             reduced: Arc::default(),
@@ -204,9 +214,14 @@ impl Meter {
     /// Everything at animation second `t`: the loops while something runs,
     /// and the edge glow while a morph lights it. False when idle.
     fn advance(&self, t: f64) -> bool {
-        let active = self.activity.load(Ordering::Relaxed) != 0;
+        let activity = self.activity.load(Ordering::Relaxed);
+        let active = activity != 0;
         if active {
             self.publish(t);
+        }
+        if activity == 1 {
+            let peak = crate::capture_host::recording_level().unwrap_or(0.0);
+            self.hear(peak, t);
         }
         let kick = f32::from_bits(self.kick.swap(0, Ordering::AcqRel));
         let mut glow = self.glowing.lock().unwrap_or_else(|e| e.into_inner());
@@ -250,11 +265,52 @@ impl Meter {
         }
     }
 
+    /// Follows the microphone's latest `peak` at animation second `t`:
+    /// the bars rise at once and fall over a third of a second.
+    fn hear(&self, peak: f32, t: f64) {
+        let mut heard = self.heard.lock().unwrap_or_else(|e| e.into_inner());
+        let (level, at) = *heard;
+        let dt = (t - at).clamp(0.0, 0.1) as f32;
+        let level = (peak * 3.0).clamp(0.0, 1.0).max(level - dt * 3.0);
+        *heard = (level, t);
+        self.show_level(level);
+    }
+
+    /// The bars at `level`, 0 to 1.
+    fn show_level(&self, level: f32) {
+        for (k, bar) in self.level_bars.iter().enumerate() {
+            bar.set(level_bar(k, level));
+        }
+        self.level_ink.set(level_ink(level));
+    }
+
     fn wake(&self) {
         if let Some(thread) = self.thread.get() {
             thread.unpark();
         }
     }
+}
+
+/// The level meter's bars: uneven at rest too, so they never read as an
+/// ellipsis.
+const LEVEL_WEIGHTS: [f32; 3] = [0.6, 1.0, 0.75];
+
+/// Bar `k`'s rect in the meter's box at `level`, in whole points so a
+/// level that rounds the same draws nothing new.
+fn level_bar(k: usize, level: f32) -> [f32; 4] {
+    let weight = LEVEL_WEIGHTS[k];
+    let height = (2.0 + weight * 3.0 + level * weight * 9.0).round();
+    [
+        k as f32 * 4.0,
+        ((CHIP_H - height) * 0.5).round(),
+        2.0,
+        height,
+    ]
+}
+
+/// How lit the bars are at `level`: dim while nothing is heard.
+fn level_ink(level: f32) -> f32 {
+    ((0.4 + 0.6 * (level * 3.0).min(1.0)) * 20.0).round() / 20.0
 }
 
 /// What the capsule draws beside its `Surface`: the live values and the
@@ -411,6 +467,16 @@ impl CapsuleState {
             #[cfg(target_os = "macos")]
             playground: None,
         }
+    }
+
+    /// A recording still that shows its microphone at `level`, 0 to 1.
+    #[cfg(test)]
+    pub(crate) fn hearing(mut self, level: f32) -> Self {
+        let pres = self.surface.pres.clone();
+        self.surface.metered = true;
+        self.surface = std::mem::take(&mut self.surface).settled(pres);
+        self.live.meter.show_level(level);
+        self
     }
 
     /// `pres` at rest with the timer at `clock`, as a still.
@@ -580,6 +646,14 @@ fn poll(s: &mut CapsuleState, now: f64, tx: &mut Tx) -> bool {
     for input in std::mem::take(&mut s.inbox) {
         s.apply(input, now);
         changed = true;
+    }
+    // Set before the recording shows, so it comes in with its level, and
+    // kept while it stops, so its width changes once.
+    if s.overlay.is_some() {
+        let metered = crate::capture_host::recording_level().is_some();
+        if metered || !matches!(s.surface.pres, Pres::Recording { .. }) {
+            changed |= s.surface.set_metered(metered, now);
+        }
     }
     changed |= s.flow.tick(now);
     s.sound();

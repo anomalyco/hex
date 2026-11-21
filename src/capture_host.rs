@@ -71,6 +71,7 @@ use scrawl_capture::transcribe::Transcriber;
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
 mod microphone;
+pub(crate) use microphone::recording_level;
 #[cfg(target_os = "macos")]
 pub(crate) mod paste_source;
 mod permissions;
@@ -1935,6 +1936,7 @@ impl CaptureHost {
             && let Some(active) = self.active.take()
         {
             self.input.recording(None);
+            microphone::hide_level();
             let _ = active.microphone.close(audio, now);
             self.ended.push(active.collector);
         }
@@ -2103,6 +2105,9 @@ impl CaptureHost {
                 })?
         };
         tracing::info!(bundle = %bundle.display(), ?target, "capture started");
+        if let Some(microphone) = &microphone {
+            microphone.show_level(clip);
+        }
         self.active = Some(Active {
             bundle,
             t0: now,
@@ -2147,6 +2152,7 @@ impl CaptureHost {
         };
         // Input after the stop belongs to no capture.
         self.input.recording(None);
+        microphone::hide_level();
         drop(active.quiet.take());
         let microphone =
             std::mem::replace(&mut active.microphone, microphone::Microphone::Timeline);

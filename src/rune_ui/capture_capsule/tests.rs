@@ -782,6 +782,45 @@ fn the_capsule_draws_keycaps_only_on_search_and_hints() {
     }
 }
 
+/// `HEX_CAPSULE_RENDERS=<folder>` draws a recording that shows its
+/// microphone's level, quiet and speaking, light and dark. No golden checks
+/// it; the plain recording's golden covers the capsule without one.
+#[test]
+#[ignore = "writes stills only when asked"]
+fn renders_the_recording_level() {
+    let Some(folder) = std::env::var_os("HEX_CAPSULE_RENDERS") else {
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+        eprintln!("skipping the level stills: no GPU adapter");
+        return;
+    };
+    let (_, pres) = stills()
+        .into_iter()
+        .find(|(name, _)| *name == "recording")
+        .unwrap();
+    for (name, level) in [("quiet", 0.0), ("speaking", 0.8)] {
+        for dark in [false, true] {
+            let theme = if dark { "dark" } else { "light" };
+            let state = CapsuleState::still(pres.clone(), "0:07", None).hearing(level);
+            let mut rt = crate::rune_ui::offscreen::runtime(
+                state,
+                view,
+                (PANEL_W, PANEL_H),
+                env(dark),
+                text(),
+            );
+            rt.settle_all();
+            rt.frame(0.0);
+            let (w, h, pixels) = draw(&gpu, &mut rt, TOP + 40.0 + 36.0);
+            let path = folder.join(format!("capsule-level-{name}-{theme}.png"));
+            rune::render::write_png(&path, w, h, &pixels).unwrap();
+        }
+    }
+}
+
 /// Pixels of the panel's top `height` points, at 2×.
 fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>) {
     let height = match &pres {
@@ -795,6 +834,7 @@ fn render(gpu: &rune::render::Gpu, pres: Pres, dark: bool) -> (u32, u32, Vec<u8>
             let (shell, _) = layout_at(
                 &pres,
                 "0:00",
+                false,
                 anchor_for(&pres, Anchor::Top),
                 super::notch::Geometry::default(),
             );
