@@ -21,6 +21,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -67,6 +68,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val style = remember(revision) { speech.style }
     val translate = remember(revision) { speech.translation }
     val clean = remember(revision) { speech.clean }
+    val lowercase = remember(revision) { speech.lowercase }
+    val endWithPeriod = remember(revision) { speech.endWithPeriod }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
     val spatial = remember(revision) { typing.spatial }
@@ -136,6 +139,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                     Page.Dictation -> {
                         Card {
                             Entry("Style", value = style.name, action = { open(Page.Styles) })
+                            Rule(); Toggle(stringResource(R.string.dictation_lowercase), stringResource(R.string.dictation_lowercase_detail),
+                                lowercase) { speech.lowercase = it }
+                            Rule(); Toggle(stringResource(R.string.dictation_end_with_period), stringResource(R.string.dictation_end_with_period_detail),
+                                endWithPeriod) { speech.endWithPeriod = it }
                             Rule(); Entry("Dictation language", if (selectedLanguage == null) automatic.label else null,
                                 selectedLanguage?.label ?: "Automatic", { open(Page.Language) })
                         }

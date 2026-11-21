@@ -1,4 +1,8 @@
 <resources>
     <string name="app_name">Hex</string>
     <string name="full_keyboard">Full keyboard</string>
+    <string name="dictation_lowercase">Lowercase</string>
+    <string name="dictation_lowercase_detail">Lowercases everything</string>
+    <string name="dictation_end_with_period">End with a period</string>
+    <string name="dictation_end_with_period_detail">Off drops the final period, keeps ? and !</string>
 </resources>
