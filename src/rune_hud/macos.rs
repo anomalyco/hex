@@ -12,7 +12,7 @@ use objc2_app_kit::{
     NSApplication, NSEvent, NSScreen, NSStatusBar, NSWindow, NSWindowCollectionBehavior,
 };
 use objc2_foundation::{NSNumber, NSRect, NSString};
-use rune::{DisplayTarget, OverlayHandle, OverlayPlacement};
+use rune::{DisplayTarget, NativeDisplayId, OverlayHandle, OverlayPlacement};
 
 use super::{Hud, HudEvent, HudSender, LIVE_TEXT_GAP, WINDOW, rehome, set_live_text};
 use crate::app_settings::IndicatorPosition;
@@ -360,7 +360,7 @@ impl Hud {
     }
 
     pub(super) fn place_on_pointer_screen(&mut self, overlay: &OverlayHandle<Hud>) {
-        let Some((mut metrics, primary_top, _, _)) =
+        let Some((mut metrics, primary_top, _, display)) =
             MainThreadMarker::new().and_then(pointer_screen)
         else {
             return;
@@ -388,6 +388,9 @@ impl Hud {
             )
         });
         set_live_text(live_text_beside(&placed, &metrics, content, primary_top));
+        // `placed` carries the display's absolute coordinates, so moving the
+        // pointer to another display changes it (a mirrored set is one
+        // NSScreen); the pinned display is re-sent with the new rect.
         if self.placed == Some(placed) {
             return;
         }
@@ -398,14 +401,33 @@ impl Hud {
         self.placed = Some(placed);
         self.layout = placed.layout;
         self.model.set_island(placed.layout.island);
-        // Rune's global rect: points from the primary screen's top-left, y down.
         let (x, top) = placed.top_left;
-        overlay.set_display(DisplayTarget::Primary);
-        overlay.set_placement(Some(OverlayPlacement::Rect {
-            x: x as f32,
-            y: (primary_top - top) as f32,
-            width,
-            height,
-        }));
+        match display {
+            // Pin the overlay to the screen the placement was measured on,
+            // with a rect in that screen's own top-down points. In Rune's
+            // AppKit path this resolves to the same frame as the global Primary
+            // rect; the pin keeps the request's display explicit.
+            Some(id) => {
+                let (local_x, local_y) = hud_placement::local_rect(placed.top_left, metrics.frame);
+                overlay.set_display(DisplayTarget::Native(NativeDisplayId::MacOS(id)));
+                overlay.set_placement(Some(OverlayPlacement::Rect {
+                    x: local_x as f32,
+                    y: local_y as f32,
+                    width,
+                    height,
+                }));
+            }
+            // No screen number: keep the old global rect against the primary,
+            // the only space Rune documents for a Rect there.
+            None => {
+                overlay.set_display(DisplayTarget::Primary);
+                overlay.set_placement(Some(OverlayPlacement::Rect {
+                    x: x as f32,
+                    y: (primary_top - top) as f32,
+                    width,
+                    height,
+                }));
+            }
+        }
     }
 }
