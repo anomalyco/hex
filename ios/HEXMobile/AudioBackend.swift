@@ -249,6 +249,12 @@ final class SystemAudioManager: AudioManaging {
     /// headphones) with nothing to resume, and no `.duckOthers`. Always use iPhone microphone
     /// (the default) records from the iPhone's microphone; turned off, a Bluetooth headset's
     /// hands-free microphone is allowed too (iOS routes HFP first when a device has both).
+    ///
+    /// No preferred sample rate: `.playAndRecord` runs the microphone and the output at one
+    /// hardware rate, so asking for 16 kHz moved everything the iPhone played and recorded (a
+    /// screen recording's audio too) to 16 kHz for as long as Hex held the session, and back
+    /// at its end. The hardware keeps its own rate: the recorder writes 16 kHz itself, and the
+    /// keepalive taps whatever format the hardware reports.
     func configureAudioSession(allowBluetooth: Bool) throws {
         try session.setCategory(
             .playAndRecord,
@@ -257,7 +263,6 @@ final class SystemAudioManager: AudioManaging {
                 ? [.mixWithOthers, .allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker]
                 : [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]
         )
-        try session.setPreferredSampleRate(16_000)
         try session.setActive(true, options: [])
         if !allowBluetooth, let builtIn = session.availableInputs?.first(where: { $0.portType == .builtInMic }) {
             try? session.setPreferredInput(builtIn)

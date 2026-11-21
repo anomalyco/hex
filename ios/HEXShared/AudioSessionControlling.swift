@@ -9,7 +9,6 @@ protocol AudioSessionControlling: AnyObject {
         mode: AVAudioSession.Mode,
         options: AVAudioSession.CategoryOptions
     ) throws
-    func setPreferredSampleRate(_ sampleRate: Double) throws
     func setPreferredInput(_ inPort: AVAudioSessionPortDescription?) throws
     func setActive(_ active: Bool, options: AVAudioSession.SetActiveOptions) throws
 }

@@ -38,6 +38,9 @@ private final class FakeAudioManager: AudioManaging {
     var captureShouldThrow = false
     var deactivateCount = 0
     var createdCaptures: [FakeAudioCapture] = []
+    var keepaliveStarts = 0
+    /// An engine that stops again by itself as soon as it starts.
+    var keepaliveStopsRightAway = false
 
     var onSystemEvent: ((AudioSystemEvent) -> Void)?
     var onUnexpectedCaptureEnd: ((URL, Bool) -> Void)?
@@ -47,11 +50,12 @@ private final class FakeAudioManager: AudioManaging {
     }
 
     func startKeepalive(allowBluetooth: Bool) throws {
+        keepaliveStarts += 1
         if keepaliveShouldThrow {
             isKeepaliveRunning = false
             throw keepaliveError
         }
-        isKeepaliveRunning = true
+        isKeepaliveRunning = !keepaliveStopsRightAway
     }
 
     func stopKeepalive() {
@@ -1329,6 +1333,61 @@ final class DictationControllerTests: XCTestCase {
         controller.cancelCurrentJob()
     }
 
+    /// A keepalive that keeps stopping by itself (another app changing the hardware's format,
+    /// say) is restarted at once, then less and less often instead of every 100 ms: each
+    /// restart activates the session and reopens the microphone under a screen recording.
+    func testAKeepaliveThatKeepsStoppingIsRestartedLessAndLessOften() async throws {
+        var now = 52_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.selectWarmDuration(.fifteenMinutes)
+        try await settle()
+        XCTAssertTrue(audio.isKeepaliveRunning)
+        let started = audio.keepaliveStarts
+
+        audio.keepaliveStopsRightAway = true
+        audio.isKeepaliveRunning = false
+        try await settle(twice: true)
+        XCTAssertEqual(audio.keepaliveStarts, started + 1, "restarted at once")
+        now += 0.5
+        try await settle(twice: true)
+        XCTAssertEqual(audio.keepaliveStarts, started + 1, "stopped again: the next waits 1 s")
+        now += 0.7
+        try await settle(twice: true)
+        XCTAssertEqual(audio.keepaliveStarts, started + 2)
+        now += 1.8
+        try await settle(twice: true)
+        XCTAssertEqual(audio.keepaliveStarts, started + 2, "then 2 s")
+        now += 0.4
+        try await settle(twice: true)
+        XCTAssertEqual(audio.keepaliveStarts, started + 3)
+        XCTAssertTrue(controller.keyboardSessionEnabled, "the warm session goes on")
+
+        audio.keepaliveStopsRightAway = false
+        now += 4.1
+        try await settle(twice: true)
+        XCTAssertEqual(audio.keepaliveStarts, started + 4, "then 4 s, and now it runs")
+        XCTAssertTrue(audio.isKeepaliveRunning)
+
+        now += 60
+        try await settle()
+        audio.isKeepaliveRunning = false
+        try await settle()
+        XCTAssertEqual(audio.keepaliveStarts, started + 5, "one that ran a while restarts at once")
+        XCTAssertTrue(audio.isKeepaliveRunning)
+        controller.endWarmSession()
+    }
+
     /// A recorder that stopped, or failed to start, outlives the capture that dropped it,
     /// so callbacks its audio queue already fetched still find it; then it goes.
     func testARetiredRecorderOutlivesItsTeardownWhileItsQueueCanCallBack() async throws {
@@ -1359,8 +1418,9 @@ final class DictationControllerTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
-    private func settle() async throws {
-        for _ in 0..<8 {
+    /// `twice` lets the warm session loop (every 100 ms) look at least twice.
+    private func settle(twice: Bool = false) async throws {
+        for _ in 0..<(twice ? 16 : 8) {
             try await Task.sleep(for: .milliseconds(25))
         }
     }
@@ -1878,7 +1938,6 @@ final class AppleSpeechClipTests: XCTestCase {
 private final class FakeAudioSession: AudioSessionControlling {
     enum Call: Equatable {
         case category(AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)
-        case sampleRate(Double)
         case preferredInput
         case active(Bool, AVAudioSession.SetActiveOptions)
     }
@@ -1893,10 +1952,6 @@ private final class FakeAudioSession: AudioSessionControlling {
         options: AVAudioSession.CategoryOptions
     ) throws {
         calls.append(.category(category, mode, options))
-    }
-
-    func setPreferredSampleRate(_ sampleRate: Double) throws {
-        calls.append(.sampleRate(sampleRate))
     }
 
     func setPreferredInput(_ inPort: AVAudioSessionPortDescription?) throws {
@@ -1927,6 +1982,29 @@ final class AudioSessionSetupTests: XCTestCase {
             XCTAssertEqual(options.contains(.allowBluetoothHFP), allowBluetooth, "the Bluetooth microphone only when allowed")
             XCTAssertEqual(session.calls.last, .active(true, []))
         }
+    }
+
+    /// `.playAndRecord` runs the microphone and the output at one rate: a preferred 16 kHz
+    /// moved everything the iPhone played and recorded, a screen recording's audio too, to
+    /// 16 kHz while Hex held the session (the simulator went from 48 kHz to 16 kHz).
+    func testRecordingLeavesTheHardwareAtItsOwnSampleRate() throws {
+        let session = FakeAudioSession()
+        try SystemAudioManager(session: session).configureAudioSession(allowBluetooth: false)
+        XCTAssertEqual(session.calls, [
+            .category(.playAndRecord, .measurement, [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]),
+            .active(true, []),
+        ], "no preferred sample rate")
+
+        let shared = AVAudioSession.sharedInstance()
+        let before = shared.sampleRate
+        do {
+            try SystemAudioManager().configureAudioSession(allowBluetooth: false)
+        } catch {
+            throw XCTSkip("No audio session to activate here: \(error)")
+        }
+        defer { try? shared.setActive(false, options: .notifyOthersOnDeactivation) }
+        XCTAssertEqual(shared.preferredSampleRate, 0)
+        XCTAssertEqual(shared.sampleRate, before, "the session records at the rate the hardware already ran")
     }
 
     func testEndingTheSessionTellsInterruptedAppsTheyMayResume() {

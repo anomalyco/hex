@@ -761,7 +761,15 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     recording (the app, a warm session's keepalive and captures) is
     `playAndRecord` with `mixWithOthers` and A2DP output, never `duckOthers`,
     so it doesn't interrupt another app's video or music, and ending a session
-    deactivates with `notifyOthersOnDeactivation`. **Always use iPhone
+    deactivates with `notifyOthersOnDeactivation`. It sets no preferred sample
+    rate: `playAndRecord` runs the microphone and the output at one rate, and
+    the 16 kHz it used to ask for moved everything the iPhone played and
+    recorded (a screen recording's audio too) to 16 kHz while Hex held the
+    session (48 kHz to 16 kHz in the simulator). The recorder writes 16 kHz
+    itself, and the keepalive is input only (an `AVAudioEngine` input tap, no
+    output node: its output element is off). A keepalive that keeps stopping by
+    itself is restarted at once, then after 1 s, 2 s, … up to 30 s, not every
+    100 ms. **Always use iPhone
     microphone** (on by default) records from the built-in microphone, so a car
     or headphones never drop into call audio; turning it off also allows a
     Bluetooth HFP microphone (still mixing). In-keyboard dictation records
@@ -852,6 +860,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   `AVAudioRecorder.isRecording` changes during warm handoff or Bluetooth route
   changes have not been reproduced on hardware; the meter recovery tests inject
   that condition through `ActiveAudioCapture`.
+- **Screen recordings with the microphone:** The simulator can't screen-record,
+  so whether one picks up noise while Hex records shows only on an iPhone:
+  record with the microphone on with Hex closed, Hex open and idle, a warm
+  session on, and during in-keyboard dictation (WebKit's `videoChat` session,
+  which Hex can't change), and compare.
 - **In-keyboard dictation's start time:** The simulator's WebKit captures from a
   mock microphone, and on a Mac without a microphone the warm session's
   recorder can't start, so how long a real microphone takes to open
