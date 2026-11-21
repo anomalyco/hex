@@ -246,7 +246,7 @@ pub(crate) fn run(
     let (result_sender, results) = mpsc::channel();
     let worker_stop = output.stop.clone();
     output.worker = Some(thread::spawn(move || {
-        crate::linux::input_activity::start();
+        crate::linux::input::activity::start();
         let mut paster = LinuxPaster::new(worker_stop.clone(), worker_paste_with_shift, paste_keys);
         let mut last_dictation: Option<String> = None;
         while let Ok(job) = job_receiver.recv() {
