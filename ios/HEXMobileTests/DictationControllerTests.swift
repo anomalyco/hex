@@ -1878,7 +1878,6 @@ final class AppleSpeechClipTests: XCTestCase {
 private final class FakeAudioSession: AudioSessionControlling {
     enum Call: Equatable {
         case category(AVAudioSession.Category, AVAudioSession.Mode, AVAudioSession.CategoryOptions)
-        case sampleRate(Double)
         case preferredInput
         case active(Bool, AVAudioSession.SetActiveOptions)
     }
@@ -1893,10 +1892,6 @@ private final class FakeAudioSession: AudioSessionControlling {
         options: AVAudioSession.CategoryOptions
     ) throws {
         calls.append(.category(category, mode, options))
-    }
-
-    func setPreferredSampleRate(_ sampleRate: Double) throws {
-        calls.append(.sampleRate(sampleRate))
     }
 
     func setPreferredInput(_ inPort: AVAudioSessionPortDescription?) throws {
@@ -1927,6 +1922,29 @@ final class AudioSessionSetupTests: XCTestCase {
             XCTAssertEqual(options.contains(.allowBluetoothHFP), allowBluetooth, "the Bluetooth microphone only when allowed")
             XCTAssertEqual(session.calls.last, .active(true, []))
         }
+    }
+
+    /// `.playAndRecord` runs the microphone and the output at one rate: a preferred 16 kHz
+    /// moved everything the iPhone played and recorded, a screen recording's audio too, to
+    /// 16 kHz while Hex held the session (the simulator went from 48 kHz to 16 kHz).
+    func testRecordingLeavesTheHardwareAtItsOwnSampleRate() throws {
+        let session = FakeAudioSession()
+        try SystemAudioManager(session: session).configureAudioSession(allowBluetooth: false)
+        XCTAssertEqual(session.calls, [
+            .category(.playAndRecord, .measurement, [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker]),
+            .active(true, []),
+        ], "no preferred sample rate")
+
+        let shared = AVAudioSession.sharedInstance()
+        let before = shared.sampleRate
+        do {
+            try SystemAudioManager().configureAudioSession(allowBluetooth: false)
+        } catch {
+            throw XCTSkip("No audio session to activate here: \(error)")
+        }
+        defer { try? shared.setActive(false, options: .notifyOthersOnDeactivation) }
+        XCTAssertEqual(shared.preferredSampleRate, 0)
+        XCTAssertEqual(shared.sampleRate, before, "the session records at the rate the hardware already ran")
     }
 
     func testEndingTheSessionTellsInterruptedAppsTheyMayResume() {
