@@ -608,12 +608,14 @@ fn card_key(code: u16, flags: u64) -> Option<CardKey> {
 }
 
 /// What's open that takes keys: the picker, the recording toolbar, or
-/// neither.
+/// neither. While one of the toolbar's menus is open, Escape and Return are
+/// the menu's.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Open {
     Nothing,
     Picker,
     Toolbar,
+    ToolbarMenu,
 }
 
 /// The keys this took the press of, so their releases go too.
@@ -652,8 +654,10 @@ impl Taken {
         let alone = key.flags & MODIFIERS == 0;
         let effect = match key.code {
             _ if (shot || record) && open == Open::Picker => Effect::None,
-            _ if record && open == Open::Toolbar => Effect::CloseToolbar,
-            _ if shot && open == Open::Toolbar => Effect::None,
+            _ if record && matches!(open, Open::Toolbar | Open::ToolbarMenu) => {
+                Effect::CloseToolbar
+            }
+            _ if shot && matches!(open, Open::Toolbar | Open::ToolbarMenu) => Effect::None,
             _ if shot => Effect::Begin,
             _ if record => Effect::Record,
             ESCAPE if open == Open::Picker => Effect::Cancel,
@@ -689,7 +693,11 @@ pub(crate) fn key(key: Key) -> Take {
     let open = if picking() {
         Open::Picker
     } else if toolbar::is_open() {
-        Open::Toolbar
+        if crate::rune_ui::capture_capsule::toolbar::menu_open() {
+            Open::ToolbarMenu
+        } else {
+            Open::Toolbar
+        }
     } else {
         Open::Nothing
     };
@@ -973,6 +981,15 @@ mod tests {
             shot: Some(HotkeyBinding::screenshot_default().runtime()),
             record: Some(HotkeyBinding::screenshot_record_default().runtime()),
         };
+        // With one of its menus open, Escape and Return go to the menu.
+        let menu = Open::ToolbarMenu;
+        for code in [ESCAPE, RETURN] {
+            assert_eq!(
+                taken.decide(press(code, 0), shortcuts, menu, false, false),
+                (Take::No, Effect::None)
+            );
+            taken.decide(release(code), shortcuts, menu, false, false);
+        }
         let toolbar = Open::Toolbar;
         assert_eq!(
             taken.decide(press(ESCAPE, 0), shortcuts, toolbar, false, false),

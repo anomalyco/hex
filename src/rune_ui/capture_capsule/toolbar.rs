@@ -10,6 +10,7 @@ use crate::app_settings::{
     RECORD_MICROPHONE_DEFAULT, RECORD_MICROPHONE_NONE, RecordKind, RecordingQuality,
 };
 use rune::{PopupItem, PopupMenu};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The window, in points: the island, its Record label in the longest
 /// translation, and room for its shadow.
@@ -110,6 +111,19 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) -> OverlayHandle<Toolb
     })
     .animate_reveal();
     app.overlay(spec, Toolbar::default())
+}
+
+/// Whether one of the toolbar's menus is open (its callback, picked or
+/// dismissed, closes it), so Escape and Return reach the menu.
+static MENU_OPEN: AtomicBool = AtomicBool::new(false);
+
+pub(crate) fn menu_open() -> bool {
+    MENU_OPEN.load(Ordering::Acquire)
+}
+
+/// A toolbar opening has no menu open yet, whatever a hidden one left.
+pub(crate) fn forget_menu() {
+    MENU_OPEN.store(false, Ordering::Release);
 }
 
 /// Takes a toolbar choice at once (`screenshot_settings` shows it, so a
@@ -403,7 +417,9 @@ fn display_menu(s: &Toolbar, tx: &mut Tx) {
         .enumerate()
         .map(|(index, display)| (index.to_string(), display.name.clone()));
     let menu = PopupMenu::picker(names, &s.display.to_string());
+    MENU_OPEN.store(true, Ordering::Release);
     tx.popup_menu(menu, "display", |s: &mut Toolbar, picked, _| {
+        MENU_OPEN.store(false, Ordering::Release);
         if let Some(index) = picked.and_then(|picked| picked.parse().ok()) {
             s.act(ToolbarAction::Display(index));
         }
@@ -440,7 +456,9 @@ fn audio_menu(s: &Toolbar, tx: &mut Tx) {
     let menu = menu
         .separator()
         .item(PopupItem::new(COMPUTER, tr("Record computer audio")).checked(s.system_audio));
+    MENU_OPEN.store(true, Ordering::Release);
     tx.popup_menu(menu, "audio", |s: &mut Toolbar, picked, _| {
+        MENU_OPEN.store(false, Ordering::Release);
         let action = match picked {
             Some(COMPUTER) => ToolbarAction::SystemAudio(!s.system_audio),
             Some(NONE) => ToolbarAction::Microphone(RECORD_MICROPHONE_NONE.into()),
@@ -477,7 +495,9 @@ fn options_menu(s: &Toolbar, tx: &mut Tx) {
                 .checked(s.quality == quality),
         );
     }
+    MENU_OPEN.store(true, Ordering::Release);
     tx.popup_menu(menu, "options", |s: &mut Toolbar, picked, _| {
+        MENU_OPEN.store(false, Ordering::Release);
         let Some(picked) = picked else { return };
         let action = if picked == "one-x" {
             ToolbarAction::OneX(!s.one_x)

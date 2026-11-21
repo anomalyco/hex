@@ -35,6 +35,7 @@ pub(super) fn open() -> bool {
     if OPEN.swap(true, Ordering::AcqRel) {
         return false;
     }
+    toolbar::forget_menu();
     // Off the tap's thread: the permission and the microphones take a moment.
     let spawned = std::thread::Builder::new()
         .name("hex-record-toolbar".into())
