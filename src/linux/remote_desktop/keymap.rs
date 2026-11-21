@@ -6,8 +6,9 @@
 //! layouts — Dvorak puts `v` on `KEY_DOT`, AZERTY puts `a` on `KEY_Q` — so a
 //! fixed code is wrong there. [`resolve`] names one code only when every group
 //! that has the letter agrees on it, and [`every_group`] confirms the modifier
-//! and Return keys the keymap options may have moved; otherwise paste sends the
-//! keysym, which the desktop resolves in the group that is active.
+//! and Return keys the keymap options may have moved. When [`resolve`] names no
+//! key, paste sends the keysym, which the desktop resolves in the active group,
+//! unless no group has the letter at all, when it uses the letter's pc105 key.
 
 use std::io::ErrorKind;
 use std::os::fd::{AsRawFd, OwnedFd};

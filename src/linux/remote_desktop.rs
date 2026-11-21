@@ -12,9 +12,9 @@
 //! and Ctrl, Shift, and Enter where their keymap options leave them — and
 //! otherwise as keysyms, which the desktop resolves in the active group; KWin's
 //! lookup for a Latin `v` on a Russian layout can lose the held Ctrl. A letter
-//! no group has at all still goes out on its pc105 key, since no keysym could
-//! name it. [`keymap`] reads and resolves the keymap; a chord never mixes the
-//! two.
+//! no group has at all still goes out on its pc105 key: the desktop's keysym
+//! lookup searches only the active group, where it would find no key for it.
+//! [`keymap`] reads and resolves the keymap; a chord never mixes the two.
 
 mod keymap;
 
