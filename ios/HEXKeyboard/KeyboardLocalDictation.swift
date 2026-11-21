@@ -30,6 +30,11 @@ final class KeyboardLocalDictation {
     private var timeline: CaptureTimeline?
     /// A failure while armed, shown only if the touch is kept: a slide to the menu drops it.
     private var armedFailure: (message: String, detail: String?)?
+    /// Another app played audio as this capture began, which WebKit's capture interrupts.
+    private var otherAudioAtStart = false
+    /// After a capture ends, long enough for WebKit to have let its audio session go.
+    static let resumeOtherAudioDelay: TimeInterval = 0.5
+    private static let audioSessionQueue = DispatchQueue(label: "anomaly.hex.keyboard.audio-session", qos: .userInitiated)
     /// A touch-down capture neither kept nor dropped by then is dropped, so a lost touch never
     /// leaves the microphone open. A hold keeps it at 0.35 s.
     static let armedTimeout: TimeInterval = 3
@@ -169,9 +174,10 @@ final class KeyboardLocalDictation {
     /// The keyboard extension itself may not record (audiomxd: "it is an extension and
     /// doesn't have entitlements to record audio"), so capture runs in WebKit's media
     /// process through getUserMedia, attributed to Hex's microphone permission.
-    /// With Always use iPhone microphone (the app's default), capture uses the iPhone's own
-    /// microphone and mixes with other audio, so a car or headset keeps playing music
-    /// instead of switching to call audio, which pauses it and stalls the start.
+    /// With Always use iPhone microphone (the app's default), the page asks for the iPhone's own
+    /// microphone, so a car or headset doesn't switch to call audio, which stalls the start.
+    /// WebKit's capture session doesn't mix: other apps' video and music pause while it
+    /// records, and `releaseAudioSession` asks them to resume afterwards.
     /// `pressedAt` is the Hex key's touch-down (wall clock), where the start's timeline begins.
     /// A capture armed at touch-down becomes this dictation.
     func start(in host: UIView, allowBluetoothMic: Bool, pressedAt: TimeInterval? = nil) {
@@ -209,7 +215,7 @@ final class KeyboardLocalDictation {
         timeline = nil
         armedFailure = nil
         phase = .idle
-        Self.releaseAudioSession()
+        releaseAudioSession()
         KeyboardProbeLog.shared.write("touch-down capture discarded after \(Int((Date().timeIntervalSince1970 - startedAt) * 1000)) ms (\(reason))")
     }
 
@@ -259,13 +265,41 @@ final class KeyboardLocalDictation {
         if !allowBluetoothMic {
             Self.preferBuiltInMicrophone()
         }
+        otherAudioAtStart = otherAudioAtStart || AVAudioSession.sharedInstance().isOtherAudioPlaying
         capture.start(preferBuiltIn: !allowBluetoothMic)
         return jobID
     }
 
-    /// Lets music or navigation that the capture paused resume.
-    private static func releaseAudioSession() {
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+    /// Asks the video or music the capture interrupted to resume (`InterruptedAudio`), once
+    /// WebKit has let its session go and unless another capture has started.
+    private func releaseAudioSession() {
+        guard otherAudioAtStart else { return }
+        otherAudioAtStart = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumeOtherAudioDelay) { [weak self] in
+            guard let self else { return }
+            switch self.phase {
+            case .armed, .recording:
+                // Another capture started: its end asks instead.
+                self.otherAudioAtStart = true
+                return
+            default:
+                break
+            }
+            Self.audioSessionQueue.async {
+                let session = AVAudioSession.sharedInstance()
+                guard InterruptedAudio.shouldAskToResume(playingAtStart: true, playingNow: session.isOtherAudioPlaying) else {
+                    KeyboardProbeLog.shared.write("other audio kept playing through the capture")
+                    return
+                }
+                do {
+                    try InterruptedAudio.askToResume(session)
+                    KeyboardProbeLog.shared.write("asked the audio the capture interrupted to resume")
+                } catch {
+                    let ns = error as NSError
+                    KeyboardProbeLog.shared.write("asking interrupted audio to resume failed: \(ns.domain) \(ns.code)")
+                }
+            }
+        }
     }
 
     private static func preferBuiltInMicrophone() {
@@ -348,7 +382,7 @@ final class KeyboardLocalDictation {
         if let url = pcmFile?.url { try? FileManager.default.removeItem(at: url) }
         pcmFile = nil
         phase = .idle
-        Self.releaseAudioSession()
+        releaseAudioSession()
         KeyboardProbeLog.shared.write("cancelled")
     }
 
@@ -364,7 +398,7 @@ final class KeyboardLocalDictation {
             return
         }
         pcmFile = nil
-        Self.releaseAudioSession()
+        releaseAudioSession()
         let seconds = Date().timeIntervalSince1970 - startedAt
         let frames = file.close()
         KeyboardProbeLog.shared.write("stopped after \(String(format: "%.1f", seconds)) s, frames=\(frames) \(KeyboardProbeLog.memory())")
@@ -450,18 +484,18 @@ final class KeyboardLocalDictation {
         if case .armed = phase {
             // Shown only if the touch is kept.
             armedFailure = (message, detail)
-            Self.releaseAudioSession()
+            releaseAudioSession()
             KeyboardProbeLog.shared.write("FAILED at touch-down (held): \(detail ?? message) \(KeyboardProbeLog.memory())")
             return
         }
-        Self.releaseAudioSession()
+        releaseAudioSession()
         KeyboardProbeLog.shared.write("FAILED: \(detail ?? message) \(KeyboardProbeLog.memory())")
         phase = .failed(message: message, until: Date().timeIntervalSince1970 + 6)
     }
 
     /// Nothing to insert and nothing wrong: back to idle without a message.
     private func endQuietly(_ reason: String) {
-        Self.releaseAudioSession()
+        releaseAudioSession()
         KeyboardProbeLog.shared.write("ended quietly: \(reason)")
         // For onboarding's practice only; the keyboard shows nothing.
         KeyboardBridge().lastEmptyDictationAt = Date().timeIntervalSince1970
