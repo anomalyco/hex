@@ -499,4 +499,12 @@ class InsertionTest {
         assertEquals(",", FieldKind.of(text or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES).mark)
         assertEquals(",", FieldKind.of(android.text.InputType.TYPE_CLASS_NUMBER).mark)
     }
+    @Test fun deleteTakesAWholeEmoji() {
+        assertEquals(4, DeleteSlide.lastCharacter("a\uD83D\uDC4D\uD83C\uDFFD"))                  // 👍🏽
+        assertEquals(4, DeleteSlide.lastCharacter("\uD83C\uDDEB\uD83C\uDDF7"))                   // 🇫🇷
+        assertEquals(8, DeleteSlide.lastCharacter("\uD83D\uDC68\u200D\uD83D\uDC69\u200D\uD83D\uDC67")) // 👨‍👩‍👧
+        assertEquals(7, DeleteSlide.lastCharacter("\uD83D\uDE4B\uD83C\uDFFC\u200D\u2640\uFE0F")) // 🙋🏼‍♀️
+        assertEquals(1, DeleteSlide.lastCharacter("ab"))
+        assertEquals(0, DeleteSlide.lastCharacter(""))
+    }
 }

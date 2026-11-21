@@ -8,6 +8,7 @@
     <color name="keyboard">#E5E8EC</color>
     <color name="key">#FFFFFF</color>
     <color name="modifier">#CED3DA</color>
+    <color name="emoji_pressed">#33191C20</color>
     <color name="pressed">#B7BDC6</color>
     <color name="launcher_background">#191C20</color>
 </resources>

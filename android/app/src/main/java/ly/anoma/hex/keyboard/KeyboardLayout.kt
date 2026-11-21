@@ -100,12 +100,20 @@ internal object KeyboardMetrics {
     /** Gboard ticks again as a key lifts when it was held at least this long. */
     const val RELEASE_TICK_MS = 200L
 
-    // The bottom row, in tenths: ?123, comma, space, period, enter.
+    // The bottom row, in tenths: ?123, comma, emoji, space, period, enter (Gboard's with its emoji key).
     const val MODE = 1.5f
     const val COMMA = 1f
-    const val SPACE = 5f
+    const val EMOJI = 1f
+    const val SPACE = 4f
     const val PERIOD = 1f
     const val ENTER = 1.5f
+    /** The emoji grid's cell, as Gboard's (a 45 dp row pitch, nine across in portrait). */
+    const val EMOJI_CELL = 45f
+    /** The emoji picker's own category bar above the grid, and a category's title in it. */
+    const val EMOJI_HEADER = 42f
+    const val EMOJI_TITLE = 24f
+    /** Gboard's emoji panel stands this much taller than its keyboard (Pixel 8 emulator: 325 px). */
+    const val EMOJI_GROW = 124f
 
     /** Cells across the letter rows: the longer of rows 1 and 2. */
     fun columns(lines: List<String>) = maxOf(lines[0].length, lines[1].length)

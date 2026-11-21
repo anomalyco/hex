@@ -18,6 +18,7 @@
     <string name="keyboard_numbers">Numbers and symbols</string>
     <string name="keyboard_letters_label">ABC</string>
     <string name="keyboard_letters">Letters</string>
+    <string name="keyboard_emoji">Emoji</string>
     <string name="keyboard_next">Next keyboard</string>
     <string name="keyboard_hex">Hex dictation</string>
     <string name="keyboard_space">Space</string>

@@ -43,7 +43,7 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
         face.background = paints
         addView(face, LayoutParams(-1, -1))
     }
-    private fun vibrates() = haptics() && Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0
+    private fun vibrates() = vibrates(context, haptics())
     // A tap as each key goes down, as on Gboard. The click is the system's own, so it follows Touch
     // sounds as iPhone Hex's follows Keyboard clicks (AudioManager.playSoundEffect checks the setting).
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
@@ -86,6 +86,10 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
     }
     override fun getAccessibilityClassName() = "android.widget.Button"
 }
+
+/** Hex's Haptics setting and the system's Keyboard vibration both on. */
+internal fun vibrates(context: Context, haptics: Boolean) =
+    haptics && Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0
 
 /** Builds keys with the keyboard's colours and haptics setting. */
 internal class KeyCaps(private val context: Context, private val haptics: () -> Boolean) {
