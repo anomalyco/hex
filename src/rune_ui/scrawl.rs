@@ -546,16 +546,13 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(&settings).unwrap(), before);
 
-        // With the Lab off, the saved record shortcut still holds the key:
-        // Annotate can't take it until the record shortcut is cleared.
+        // With the Lab off, every Mac's saved record shortcut doesn't hold
+        // the key, and turning the Lab on lets the record shortcut go.
         settings.labs.screenshots = false;
-        assert!(
-            set_enabled(&mut settings, true)
-                .unwrap_err()
-                .contains("already in use")
-        );
-        settings.screenshots.record_hotkey = None;
         set_enabled(&mut settings, true).unwrap();
+        assert!(settings.capture.enabled);
+        crate::labs::Feature::Screenshots.set(&mut settings, true);
+        assert_eq!(settings.screenshots.record_hotkey, None);
         assert!(settings.capture.enabled);
     }
 

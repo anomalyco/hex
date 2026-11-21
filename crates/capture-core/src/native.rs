@@ -153,6 +153,7 @@ impl Recorder {
                         _ => None,
                     },
                     encoder: sources[index].encoder,
+                    quality: sources[index].quality,
                     system_audio: audio.system && index == 0,
                     system_writer: (index == 0).then(|| active.system_audio.clone()).flatten(),
                     collector: Arc::clone(&collectors[index]),
@@ -401,6 +402,8 @@ struct SourceContext<'a> {
     region: Option<Rect>,
     fps: u32,
     encoder: Encoder,
+    /// [`SourcePlan::quality`].
+    quality: f64,
     cursor: CursorDrawing,
     telemetry: bool,
     /// The device and its warm-up.
@@ -468,6 +471,7 @@ fn start_source(target: &Target, context: SourceContext<'_>) -> Result<SourceRun
                     &context.path,
                     (target.width, target.height),
                     context.fps,
+                    context.quality,
                     sender.clone(),
                 )
                 .map_err(Error::ConfigureRecording)?,

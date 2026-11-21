@@ -500,6 +500,8 @@ enum Media {
       result["width"] = Int(abs(shown.width).rounded())
       result["height"] = Int(abs(shown.height).rounded())
       result["fps"] = Double(try await track.load(.nominalFrameRate))
+      let range = try await track.load(.timeRange)
+      result["videoMs"] = Int(((range.end.seconds.isFinite ? range.end.seconds : 0) * 1000).rounded())
     }
     result["audioTracks"] = try await asset.loadTracks(withMediaType: .audio).count
     return result
@@ -583,26 +585,49 @@ enum Media {
     try pixels.write(to: url)
   }
 
+  /// How `shrink` re-encodes, beyond its size. `quality` (0–1) encodes at a constant quality as a
+  /// screen recording does (no reordering, a keyframe at least every 2 s) in place of a bit rate;
+  /// `fps` drops frames closer together than its interval; `span` keeps only that part, in ms.
+  struct ShrinkOptions {
+    var quality: Double?
+    var fps: Int?
+    var span: (Int, Int)?
+    /// Prints `{"progress": 0…1}` lines while it works.
+    var progress = false
+  }
+
   /// Re-encodes a movie's video to HEVC with its long edge at most `maxEdge`, copying every audio
   /// track as it is. Each sample keeps its presentation time, so the timeline (and every time in
-  /// `scrawl.json`) still lines up. Fails rather than writing a movie of a different length.
-  static func shrink(movie: URL, out: URL, maxEdge: Int, bitRate: Int) async throws -> [String: Any] {
+  /// `scrawl.json`) still lines up; a `span` starts at its own start. Fails rather than writing a
+  /// movie of a different length. An `.mp4` `out` is an MPEG-4, anything else a QuickTime movie.
+  static func shrink(movie: URL, out: URL, maxEdge: Int, bitRate: Int, options: ShrinkOptions = ShrinkOptions()) async throws -> [String: Any] {
     let started = Date()
     let asset = AVURLAsset(url: movie)
     guard let videoTrack = try await asset.loadTracks(withMediaType: .video).first else { throw HelperError("Movie has no video") }
     let audioTracks = try await asset.loadTracks(withMediaType: .audio)
     let (natural, transform) = try await videoTrack.load(.naturalSize, .preferredTransform)
-    let duration = try await asset.load(.duration)
+    let whole = try await asset.load(.duration)
     let (w, h) = (abs(natural.width), abs(natural.height))
     let scale = min(1, Double(maxEdge) / Double(max(w, h)))
     func even(_ v: Double) -> Int { max(2, Int((v / 2).rounded()) * 2) }
     let (outW, outH) = (even(w * scale), even(h * scale))
+    var range = CMTimeRange(start: .zero, duration: whole)
+    if let (from, to) = options.span {
+      guard to > from else { throw HelperError("The span is empty") }
+      range = CMTimeRange(
+        start: CMTime(value: CMTimeValue(from), timescale: 1000),
+        end: CMTimeMinimum(CMTime(value: CMTimeValue(to), timescale: 1000), whole)
+      )
+    }
+    let duration = range.duration
 
     try? FileManager.default.removeItem(at: out)
     let reader = try AVAssetReader(asset: asset)
-    let writer = try AVAssetWriter(outputURL: out, fileType: .mov)
-    writer.movieTimeScale = duration.timescale
-    writer.metadata = (try? await asset.load(.metadata)) ?? []
+    reader.timeRange = range
+    let mp4 = out.pathExtension.lowercased() == "mp4"
+    let writer = try AVAssetWriter(outputURL: out, fileType: mp4 ? .mp4 : .mov)
+    writer.movieTimeScale = whole.timescale
+    if !mp4 { writer.metadata = (try? await asset.load(.metadata)) ?? [] }
 
     let videoOut = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: [
       kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarVideoRange,
@@ -611,15 +636,27 @@ enum Media {
     ])
     videoOut.alwaysCopiesSampleData = false
     reader.add(videoOut)
+    var compression: [String: Any] = [
+      AVVideoAverageBitRateKey: bitRate,
+      AVVideoMaxKeyFrameIntervalDurationKey: 2,
+      AVVideoAllowFrameReorderingKey: true,
+    ]
+    if let quality = options.quality {
+      // A screen recording's own settings (capture-core's `add_hevc_input`), so an export at a
+      // quality is the size a recording at it would be.
+      compression = [
+        AVVideoQualityKey: quality,
+        AVVideoMaxKeyFrameIntervalDurationKey: 2,
+        AVVideoAllowFrameReorderingKey: false,
+        AVVideoProfileLevelKey: "HEVC_Main_AutoLevel",
+      ]
+    }
+    if let fps = options.fps { compression[AVVideoExpectedSourceFrameRateKey] = fps }
     let videoIn = AVAssetWriterInput(mediaType: .video, outputSettings: [
       AVVideoCodecKey: AVVideoCodecType.hevc,
       AVVideoWidthKey: outW,
       AVVideoHeightKey: outH,
-      AVVideoCompressionPropertiesKey: [
-        AVVideoAverageBitRateKey: bitRate,
-        AVVideoMaxKeyFrameIntervalDurationKey: 2,
-        AVVideoAllowFrameReorderingKey: true,
-      ],
+      AVVideoCompressionPropertiesKey: compression,
     ])
     videoIn.transform = transform
     videoIn.expectsMediaDataInRealTime = false
@@ -639,22 +676,83 @@ enum Media {
 
     guard reader.startReading() else { throw HelperError(reader.error?.localizedDescription ?? "Could not read the movie") }
     guard writer.startWriting() else { throw HelperError(writer.error?.localizedDescription ?? "Could not write the movie") }
-    writer.startSession(atSourceTime: .zero)
+    writer.startSession(atSourceTime: range.start)
 
+    // Frames closer than this to the last one kept are dropped; a little slack keeps a steady
+    // 60 fps source at 30, not 20.
+    let interval = options.fps.map { 0.9 / Double(max(1, $0)) }
+    let progress = options.progress
+    let (spanStart, spanSeconds) = (range.start.seconds, max(duration.seconds, 0.001))
     await withTaskGroup(of: Void.self) { group in
       for (index, (output, input)) in pairs.enumerated() {
         nonisolated(unsafe) let output = output
         nonisolated(unsafe) let input = input
         nonisolated(unsafe) let reader = reader
+        let video = index == 0
         group.addTask {
           await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
             let queue = DispatchQueue(label: "shrink.\(index)", qos: .utility)
+            var kept: Double?
+            var told = -1
+            // A screen recording only has a frame where the screen changed, so the frame showing
+            // at the span's start can come before it: it's held and moved to the start. The last
+            // frame is repeated at the span's end, so the video lasts as long as the span.
+            var held: CMSampleBuffer?
+            var last: CMSampleBuffer?
+            var queued: [CMSampleBuffer] = []
+            var ended = false
+            func next() -> CMSampleBuffer? {
+              if !queued.isEmpty { return queued.removeFirst() }
+              guard !ended else { return nil }
+              while let buffer = output.copyNextSampleBuffer() {
+                guard video, CMSampleBufferGetNumSamples(buffer) > 0 else { return buffer }
+                let at = CMSampleBufferGetPresentationTimeStamp(buffer)
+                if at < range.start {
+                  held = Media.retimed(buffer, to: range.start) ?? held
+                  continue
+                }
+                last = buffer
+                if let first = held {
+                  held = nil
+                  if at > range.start {
+                    queued.append(buffer)
+                    return first
+                  }
+                }
+                return buffer
+              }
+              ended = true
+              guard video else { return nil }
+              if let first = held {
+                held = nil
+                last = first
+                queued.append(first)
+              }
+              if let final = last, CMSampleBufferGetPresentationTimeStamp(final) < range.end,
+                let repeated = Media.retimed(final, to: range.end)
+              {
+                queued.append(repeated)
+              }
+              return queued.isEmpty ? nil : queued.removeFirst()
+            }
             input.requestMediaDataWhenReady(on: queue) {
               while input.isReadyForMoreMediaData {
-                guard let buffer = output.copyNextSampleBuffer() else {
+                guard let buffer = next() else {
                   input.markAsFinished()
                   done.resume()
                   return
+                }
+                let at = CMSampleBufferGetPresentationTimeStamp(buffer).seconds
+                if video, let interval, !ended, CMSampleBufferGetNumSamples(buffer) > 0 {
+                  if let kept, at - kept < interval { continue }
+                  kept = at
+                }
+                if video && progress {
+                  let percent = Int(((at - spanStart) / spanSeconds * 100).rounded(.down))
+                  if percent > told && percent >= 0 && percent < 100 {
+                    told = percent
+                    emit(["progress": Double(percent) / 100])
+                  }
                 }
                 if !input.append(buffer) {
                   reader.cancelReading()
@@ -669,6 +767,7 @@ enum Media {
       }
     }
     if reader.status == .failed { writer.cancelWriting(); throw HelperError(reader.error?.localizedDescription ?? "Reading the movie failed") }
+    writer.endSession(atSourceTime: range.end)
     await writer.finishWriting()
     guard writer.status == .completed else { throw HelperError(writer.error?.localizedDescription ?? "Writing the movie failed") }
 
@@ -687,6 +786,15 @@ enum Media {
       "durationMs": Int((written.seconds * 1000).rounded()),
       "ms": Int(Date().timeIntervalSince(started) * 1000),
     ]
+  }
+
+  /// `buffer` shown at `time` instead.
+  static func retimed(_ buffer: CMSampleBuffer, to time: CMTime) -> CMSampleBuffer? {
+    var timing = CMSampleTimingInfo(duration: .invalid, presentationTimeStamp: time, decodeTimeStamp: .invalid)
+    var copy: CMSampleBuffer?
+    let status = CMSampleBufferCreateCopyWithNewTiming(
+      allocator: nil, sampleBuffer: buffer, sampleTimingEntryCount: 1, sampleTimingArray: &timing, sampleBufferOut: &copy)
+    return status == noErr ? copy : nil
   }
 
   /// Copies the span of `movie` from `fromMs` to `toMs` into `out` as an MPEG-4, without

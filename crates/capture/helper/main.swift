@@ -9,7 +9,8 @@
 //   scrawl-helper frames MOVIE --out-dir DIR (--every MS | --at MS,MS…) [--max-edge PX]
 //   scrawl-helper audio MOVIE OUT.wav                   16 kHz mono PCM of every audio track, mixed
 //   scrawl-helper probe MOVIE                           duration and video size
-//   scrawl-helper shrink MOVIE --out FILE.mov [--max-edge PX] [--bitrate BPS]   HEVC copy, same timeline
+//   scrawl-helper shrink MOVIE --out FILE.mov|.mp4 [--max-edge PX] [--bitrate BPS | --quality 0-1]
+//                        [--fps N] [--from MS --to MS] [--progress]   HEVC copy, same timeline
 //   scrawl-helper export PLAN.json                      shareable .mp4: crop/camera, burned-in ink, audio (Export.swift)
 //   scrawl-helper permissions                           what Scrawl has been granted, as JSON
 //   scrawl-helper sck-probe [--watch SECONDS]           can this process capture with ScreenCaptureKit (ScreenProbe.swift)
@@ -140,8 +141,15 @@ case "shrink":
   guard arguments.count >= 2, let out = option("--out", in: arguments) else { fail("shrink needs MOVIE --out FILE.mov") }
   let maxEdge = option("--max-edge", in: arguments).flatMap(Int.init) ?? 1600
   let bitRate = option("--bitrate", in: arguments).flatMap(Int.init) ?? 2_500_000
+  var options = Media.ShrinkOptions()
+  options.quality = option("--quality", in: arguments).flatMap(Double.init)
+  options.fps = option("--fps", in: arguments).flatMap(Int.init)
+  if let from = option("--from", in: arguments).flatMap(Int.init), let to = option("--to", in: arguments).flatMap(Int.init) {
+    options.span = (from, to)
+  }
+  options.progress = arguments.contains("--progress")
   runAsync {
-    emit(try await Media.shrink(movie: URL(filePath: arguments[1]), out: URL(filePath: out), maxEdge: maxEdge, bitRate: bitRate))
+    emit(try await Media.shrink(movie: URL(filePath: arguments[1]), out: URL(filePath: out), maxEdge: maxEdge, bitRate: bitRate, options: options))
   }
 case "trim":
   guard arguments.count >= 2, let out = option("--out", in: arguments),
@@ -154,6 +162,17 @@ case "trim":
 case "export":
   guard arguments.count >= 2 else { fail("export needs PLAN.json") }
   runAsync { try await Exporter.run(plan: URL(filePath: arguments[1])) }
+case "mux":
+  // mux MOVIE --out FILE.mp4 [--audio FILE --offset MS]…
+  guard arguments.count >= 2, let out = option("--out", in: arguments) else {
+    fail("mux needs MOVIE --out FILE.mp4 [--audio FILE --offset MS]…")
+  }
+  var audio: [Mux.Audio] = []
+  for (index, argument) in arguments.enumerated() where argument == "--audio" && index + 1 < arguments.count {
+    let offset = index + 3 < arguments.count && arguments[index + 2] == "--offset" ? Int(arguments[index + 3]) ?? 0 : 0
+    audio.append(Mux.Audio(url: URL(filePath: arguments[index + 1]), offsetMs: offset))
+  }
+  runAsync { emit(try await Mux.run(movie: URL(filePath: arguments[1]), audio: audio, out: URL(filePath: out))) }
 case "probe":
   guard arguments.count >= 2 else { fail("probe needs MOVIE") }
   runAsync { emit(try await Media.probe(URL(filePath: arguments[1]))) }
@@ -168,5 +187,5 @@ case "qr":
   }
   emit(["qr": qr])
 default:
-  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|trim|permissions|sck-probe|qr …")
+  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|trim|mux|permissions|sck-probe|qr …")
 }

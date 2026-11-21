@@ -26,6 +26,8 @@ pub const MAX_CAPTURE_SCALE: f64 = 2.0;
 
 /// ScreenCaptureKit records a frame only when the screen changes, at most this often.
 const RECORDING_FPS: u32 = 60;
+/// The bundle file a [`super::MovieSize::system_audio`] recording writes.
+const SYSTEM_AUDIO_FILE: &str = "system.m4a";
 
 /// Where a session's clicks and keys come from, for the log.
 pub(super) const MOUSE_SOURCE: &str = "the mouse monitor";
@@ -1408,23 +1410,34 @@ fn recording_long_edge(mode: CaptureMode) -> u32 {
     }
 }
 
-/// The movie's size and encoder: compact H.264 for agents, or every pixel as HEVC.
+/// The movie's size, encoder, and frame rate: compact H.264 for agents at
+/// [`RECORDING_FPS`], or HEVC at the size, frame rate, and quality asked.
+/// `points` is the source's size in points.
 fn recording_plan(
     source: capture_core::Source,
     mode: CaptureMode,
+    points: (f64, f64),
     quality: super::MovieQuality,
-) -> capture_core::SourcePlan {
+) -> (capture_core::SourcePlan, u32) {
     match quality {
-        super::MovieQuality::Compact => capture_core::SourcePlan {
-            source,
-            long_edge: Some(recording_long_edge(mode)),
-            encoder: capture_core::Encoder::System,
-        },
-        super::MovieQuality::Full => capture_core::SourcePlan {
-            source,
-            long_edge: None,
-            encoder: capture_core::Encoder::Hevc,
-        },
+        super::MovieQuality::Compact => (
+            capture_core::SourcePlan {
+                source,
+                long_edge: Some(recording_long_edge(mode)),
+                encoder: capture_core::Encoder::System,
+                quality: capture_core::HEVC_QUALITY,
+            },
+            RECORDING_FPS,
+        ),
+        super::MovieQuality::Full(size) => (
+            capture_core::SourcePlan {
+                source,
+                long_edge: size.long_edge_for(points),
+                encoder: capture_core::Encoder::Hevc,
+                quality: f64::from(size.quality.min(100)) / 100.0,
+            },
+            size.fps.clamp(1, RECORDING_FPS),
+        ),
     }
 }
 
@@ -1440,17 +1453,27 @@ fn start_recording(
     let (Some(dir), Some(name)) = (path.parent(), path.file_name()) else {
         return None;
     };
+    let points = match source {
+        capture_core::Source::Region { rect, .. } => (rect.width, rect.height),
+        _ => (target.frame.width, target.frame.height),
+    };
+    let (source, fps) = recording_plan(source, target.mode, points, quality);
+    let system_audio = matches!(quality, super::MovieQuality::Full(size) if size.system_audio);
     let plan = capture_core::Plan {
-        sources: vec![recording_plan(source, target.mode, quality)],
+        sources: vec![source],
         cursor: capture_core::CursorDrawing::Baked,
-        audio: capture_core::AudioPlan::default(),
+        audio: capture_core::AudioPlan {
+            system: system_audio,
+            ..capture_core::AudioPlan::default()
+        },
         input: capture_core::Input::None,
         frames: None,
         exclude,
-        fps: RECORDING_FPS,
+        fps,
         dir: dir.to_path_buf(),
         names: capture_core::Names {
             videos: vec![name.to_string_lossy().into_owned()],
+            system_audio: system_audio.then(|| SYSTEM_AUDIO_FILE.to_owned()),
             ..capture_core::Names::default()
         },
     };
@@ -2084,19 +2107,58 @@ mod tests {
     }
 
     #[test]
-    fn a_full_quality_movie_keeps_every_pixel_as_hevc() {
-        use super::super::MovieQuality;
+    fn a_full_quality_movie_records_hevc_at_the_size_asked() {
+        use super::super::{MovieQuality, MovieSize};
         let source = capture_core::Source::Display(1);
-        let compact = recording_plan(source, CaptureMode::Region, MovieQuality::Compact);
+        let points = (2560.0, 1440.0);
+        let (compact, fps) =
+            recording_plan(source, CaptureMode::Region, points, MovieQuality::Compact);
         assert_eq!(
-            (compact.long_edge, compact.encoder),
-            (Some(1280), capture_core::Encoder::System)
+            (compact.long_edge, compact.encoder, fps),
+            (Some(1280), capture_core::Encoder::System, 60)
         );
-        let full = recording_plan(source, CaptureMode::Region, MovieQuality::Full);
+        let every_pixel = MovieQuality::Full(MovieSize::default());
+        let (full, fps) = recording_plan(source, CaptureMode::Region, points, every_pixel);
         assert_eq!(
-            (full.long_edge, full.encoder),
-            (None, capture_core::Encoder::Hevc)
+            (full.long_edge, full.encoder, full.quality, fps),
+            (None, capture_core::Encoder::Hevc, 0.7, 60)
         );
+        let small = MovieQuality::Full(MovieSize {
+            one_x: true,
+            long_edge: None,
+            fps: 30,
+            quality: 55,
+            system_audio: false,
+        });
+        let (one_x, fps) = recording_plan(source, CaptureMode::Display, points, small);
+        assert_eq!(
+            (one_x.long_edge, one_x.quality, fps),
+            (Some(2560), 0.55, 30)
+        );
+    }
+
+    #[test]
+    fn one_x_and_a_long_edge_take_the_smaller() {
+        use super::super::MovieSize;
+        let size = |one_x, long_edge| MovieSize {
+            one_x,
+            long_edge,
+            ..MovieSize::default()
+        };
+        assert_eq!(size(true, None).long_edge_for((800.0, 400.0)), Some(800));
+        assert_eq!(
+            size(true, Some(1920)).long_edge_for((2560.0, 1440.0)),
+            Some(1920)
+        );
+        assert_eq!(
+            size(true, Some(1920)).long_edge_for((800.0, 400.0)),
+            Some(800)
+        );
+        assert_eq!(
+            size(false, Some(1280)).long_edge_for((800.0, 400.0)),
+            Some(1280)
+        );
+        assert_eq!(size(false, None).long_edge_for((800.0, 400.0)), None);
     }
 
     /// A paste never goes to the host, even with its Settings window in front: it goes to the

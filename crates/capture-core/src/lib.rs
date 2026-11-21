@@ -50,8 +50,8 @@ pub use manifest::{
 };
 pub use native::Recorder;
 pub use plan::{
-    AudioPlan, CursorDrawing, Encoder, Exclusions, ExternalMic, Input, MANIFEST_NAME, MIC_WARMUP,
-    Mic, Names, Plan, Rect, Source, SourcePlan,
+    AudioPlan, CursorDrawing, Encoder, Exclusions, ExternalMic, HEVC_QUALITY, Input, MANIFEST_NAME,
+    MIC_WARMUP, Mic, Names, Plan, Rect, Source, SourcePlan,
 };
 pub use screenshot::{Image, screenshot, screenshot_with};
 pub use session::{Finished, Finishing, Recording, SourceCursor};

@@ -373,6 +373,9 @@ enum SelectedFallback {
     Immediate,
     /// Other opens retry briefly first.
     AfterRetries,
+    /// Never: only the named input opens (a Screenshots recording's own).
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    Never,
 }
 
 impl AudioInput {
@@ -1311,6 +1314,10 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         }
     }
     let plan = resolve(request.selected_device.as_deref())?;
+    if request.fallback == SelectedFallback::Never && !matches!(plan.target, InputTarget::Named(_))
+    {
+        return Err(eyre!("the microphone isn't connected"));
+    }
     let (Some(selected), InputTarget::Named(_), None) = (
         request.selected_device.as_deref(),
         plan.target,
@@ -1329,6 +1336,29 @@ fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         },
         std::thread::sleep,
     )
+}
+
+/// Opens `device` alone, or fails: never the system default or another
+/// input in its place, so nothing else is opened on the way.
+#[cfg(target_os = "macos")]
+pub fn open_named_input(device: &str) -> Result<AudioInput> {
+    let opened = open_configured_input(&OpenRequest {
+        device_override: None,
+        selected_device: Some(device.to_owned()),
+        fallback: SelectedFallback::Never,
+        keep: None,
+        avoids_bluetooth: false,
+        call_input: None,
+        renegotiate_rate: false,
+    })?;
+    match opened {
+        Opened::Input(input) if input.device_name == device => Ok(*input),
+        Opened::Input(input) => Err(eyre!(
+            "{device} wouldn't open ({} stood in)",
+            input.device_name
+        )),
+        Opened::Unchanged { .. } => Err(eyre!("{device} resolved to no new input")),
+    }
 }
 
 /// Opens the microphone a meeting records: the input its call app records
@@ -1378,6 +1408,9 @@ fn open_selected<T>(
             }
         }
     };
+    if fallback == SelectedFallback::Never {
+        return Err(error);
+    }
     let error = format!("{error:#}");
     tracing::debug!(%error, device, "the saved microphone would not open");
     open_default()

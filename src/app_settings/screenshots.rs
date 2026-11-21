@@ -1,4 +1,5 @@
-//! Labs › Screenshots' settings (macOS): its shortcut and folder.
+//! Labs › Screenshots' settings (macOS): its shortcut and folder, and how
+//! a recording is encoded.
 
 use super::*;
 
@@ -9,18 +10,224 @@ use super::*;
 pub struct ScreenshotSettings {
     /// Starts a screenshot: Command-Shift-4 by default.
     pub hotkey: HotkeyBinding,
-    /// Starts a recording of an area or a window; unbound by default.
+    /// Opens the recording toolbar: Command-Shift-5 by default.
     pub record_hotkey: Option<HotkeyBinding>,
     /// Where screenshots are saved; `None` is the Desktop.
     pub folder: Option<PathBuf>,
+    /// A recording keeps one pixel a point, so a Retina display records at
+    /// its size in points: a quarter of the pixels.
+    pub scale_to_1x: bool,
+    /// The largest a recording is.
+    pub max_resolution: MaxResolution,
+    /// A recording's frames a second: 30 or 60.
+    pub frame_rate: u32,
+    pub quality: RecordingQuality,
+    /// The size the editor last exported a recording at.
+    pub export_size: ExportSize,
+    /// What the recording toolbar records, as last chosen.
+    pub record_kind: RecordKind,
+    /// The microphone a recording keeps: `none`, `default` (the one
+    /// dictation uses), or an input device's name.
+    pub record_microphone: String,
+    /// A recording keeps what the computer plays.
+    pub record_system_audio: bool,
 }
 
 impl Default for ScreenshotSettings {
     fn default() -> Self {
         Self {
             hotkey: HotkeyBinding::screenshot_default(),
-            record_hotkey: None,
+            record_hotkey: Some(HotkeyBinding::screenshot_record_default()),
             folder: None,
+            scale_to_1x: true,
+            max_resolution: MaxResolution::Original,
+            frame_rate: 30,
+            quality: RecordingQuality::High,
+            export_size: ExportSize::Original,
+            record_kind: RecordKind::Area,
+            record_microphone: RECORD_MICROPHONE_DEFAULT.into(),
+            record_system_audio: false,
+        }
+    }
+}
+
+/// `record_microphone`'s value for no microphone.
+pub const RECORD_MICROPHONE_NONE: &str = "none";
+/// `record_microphone`'s value for the microphone dictation uses.
+pub const RECORD_MICROPHONE_DEFAULT: &str = "default";
+
+/// What a recording takes: an area dragged out, a window, or a whole
+/// display.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordKind {
+    #[default]
+    Area,
+    Window,
+    Screen,
+}
+
+impl RecordKind {
+    /// Every choice, in the order the toolbar shows them.
+    pub const ALL: [Self; 3] = [Self::Area, Self::Window, Self::Screen];
+
+    /// The English label the toolbar shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Area => "Area",
+            Self::Window => "Window",
+            Self::Screen => "Full screen",
+        }
+    }
+
+    /// The `hex settings` value.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Area => "area",
+            Self::Window => "window",
+            Self::Screen => "screen",
+        }
+    }
+}
+
+/// The largest a Screenshots recording is, by its long edge.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum MaxResolution {
+    #[default]
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "1440p")]
+    P1440,
+    #[serde(rename = "1080p")]
+    P1080,
+    #[serde(rename = "720p")]
+    P720,
+}
+
+impl MaxResolution {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 4] = [Self::Original, Self::P1440, Self::P1080, Self::P720];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Original => "Original",
+            Self::P1440 => "1440p",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The `hex settings` value.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::P1440 => "1440p",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The longest side in pixels, of a 16:9 picture that size; `None`
+    /// keeps the source's.
+    pub const fn long_edge(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::P1440 => Some(2560),
+            Self::P1080 => Some(1920),
+            Self::P720 => Some(1280),
+        }
+    }
+}
+
+/// How much detail a Screenshots recording keeps, as HEVC's constant
+/// quality. Measured on a 46 s recording with nearly every pixel moving
+/// (1920×1016, 30 fps), a worst case: High kept small changing digits
+/// crisp (93 MB, 16 Mbit/s), Medium ghosted them while they changed, as a
+/// 6 Mbit/s H.264 export does (35 MB, 6.1 Mbit/s), and Low smeared them
+/// (21 MB, 3.7 Mbit/s). A mostly still screen takes far less.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingQuality {
+    #[default]
+    High,
+    Medium,
+    Low,
+}
+
+impl RecordingQuality {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 3] = [Self::High, Self::Medium, Self::Low];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+
+    /// HEVC's constant quality, in hundredths.
+    pub const fn hundredths(self) -> u8 {
+        match self {
+            Self::High => 50,
+            Self::Medium => 30,
+            Self::Low => 20,
+        }
+    }
+
+    /// Bits a pixel a second at 30 fps, measured on the recording above:
+    /// close to the most a screen recording takes at this quality.
+    pub const fn bits_per_pixel_second(self) -> f64 {
+        match self {
+            Self::High => 8.22,
+            Self::Medium => 3.12,
+            Self::Low => 1.90,
+        }
+    }
+}
+
+/// The size the editor exports a recording at: as recorded, or shrunk.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ExportSize {
+    #[default]
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "1080p")]
+    P1080,
+    #[serde(rename = "720p")]
+    P720,
+}
+
+impl ExportSize {
+    /// Every choice, in the order the editor shows them.
+    pub const ALL: [Self; 3] = [Self::Original, Self::P1080, Self::P720];
+
+    /// The English label the editor shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Original => "Original",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The `hex settings` value.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The longest side in pixels; `None` copies the recording as it is.
+    pub const fn long_edge(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::P1080 => Some(1920),
+            Self::P720 => Some(1280),
         }
     }
 }
@@ -44,6 +251,24 @@ impl ScreenshotSettings {
             .clone()
             .unwrap_or_else(crate::app_paths::desktop_dir)
     }
+
+    /// A recording's frames a second: 60 when asked for more than 45,
+    /// else 30.
+    pub fn fps(&self) -> u32 {
+        if self.frame_rate > 45 { 60 } else { 30 }
+    }
+
+    /// How a recording's movie is made.
+    #[cfg(hex_capture)]
+    pub fn movie_size(&self) -> scrawl_capture::capture::MovieSize {
+        scrawl_capture::capture::MovieSize {
+            one_x: self.scale_to_1x,
+            long_edge: self.max_resolution.long_edge(),
+            fps: self.fps(),
+            quality: self.quality.hundredths(),
+            system_audio: self.record_system_audio,
+        }
+    }
 }
 
 impl AppSettings {
@@ -53,9 +278,10 @@ impl AppSettings {
     /// and a record saved on the replay shortcut turned replay off with the
     /// Lab off. Runs after every repair that can reset `capture.hotkey`, since
     /// a reset puts Annotate back on its default and the record shortcut may
-    /// be saved there.
+    /// be saved there, and when the Lab turns on, since with it off Annotate
+    /// may take the record shortcut's key.
     #[cfg(hex_capture)]
-    pub(super) fn clear_record_shortcut_sharing_capture(&mut self) {
+    pub(crate) fn clear_record_shortcut_sharing_capture(&mut self) {
         let shared = self
             .screenshots
             .record_hotkey
@@ -105,10 +331,12 @@ impl AppSettings {
     }
 
     /// The shortcuts `slot` counts because of the Screenshots record
-    /// shortcut. A saved record shortcut and Annotate's capture shortcuts
-    /// never share a key, whether Annotate or the Lab is on, so either one
-    /// counts the other; the record shortcut counts for every other shortcut
-    /// only while a recording is available (the Lab and Annotate on).
+    /// shortcut. The record shortcut counts Annotate's capture shortcuts
+    /// always, and they count it while the Lab is on: every Mac has one
+    /// saved (⌘⇧5), which mustn't hold Annotate's key while the Lab is off.
+    /// Turning the Lab on clears a record shortcut Annotate took meanwhile.
+    /// It counts for every other shortcut only while a recording is
+    /// available (the Lab and Annotate on).
     pub(super) fn screenshots_record_counterparts(&self, slot: HotkeySlot) -> Vec<HotkeyBinding> {
         let mut others = Vec::new();
         if !cfg!(target_os = "macos") {
@@ -116,7 +344,9 @@ impl AppSettings {
         }
         #[cfg(hex_capture)]
         if slot.is_annotate_capture() {
-            if let Some(record) = &self.screenshots.record_hotkey {
+            if self.labs.screenshots
+                && let Some(record) = &self.screenshots.record_hotkey
+            {
                 others.push(record.clone());
             }
         } else if slot == HotkeySlot::ScreenshotRecord {
@@ -149,13 +379,50 @@ impl HotkeySlot {
     }
 }
 
-/// The saved screenshot settings.
+/// The saved screenshot settings, with every choice made but not saved yet.
 pub fn screenshot_settings() -> ScreenshotSettings {
-    SCREENSHOT_SETTINGS
+    // Held while reading, so a choice is either still pending or already in
+    // what was saved and applied.
+    let pending = lock_pending();
+    let mut settings = SCREENSHOT_SETTINGS
         .get_or_init(Default::default)
         .read()
         .unwrap_or_else(|error| error.into_inner())
-        .clone()
+        .clone();
+    for choice in pending.iter() {
+        choice(&mut settings);
+    }
+    settings
+}
+
+/// A change to the screenshot settings made before it's saved.
+pub type ScreenshotChoice = Arc<dyn Fn(&mut ScreenshotSettings) + Send + Sync>;
+
+static PENDING: std::sync::Mutex<Vec<ScreenshotChoice>> = std::sync::Mutex::new(Vec::new());
+
+fn lock_pending() -> std::sync::MutexGuard<'static, Vec<ScreenshotChoice>> {
+    PENDING.lock().unwrap_or_else(|error| error.into_inner())
+}
+
+#[cfg(target_os = "macos")]
+/// Shows `choice` in [`screenshot_settings`] at once, until it's saved.
+pub fn queue_screenshot_choice(choice: ScreenshotChoice) {
+    lock_pending().push(choice);
+}
+
+#[cfg(target_os = "macos")]
+/// The choices waiting to be saved, oldest first.
+pub fn pending_screenshot_choices() -> Vec<ScreenshotChoice> {
+    lock_pending().clone()
+}
+
+#[cfg(target_os = "macos")]
+/// Forgets the oldest `count` pending choices, once they're saved (or
+/// can't be).
+pub fn settle_screenshot_choices(count: usize) {
+    let mut pending = lock_pending();
+    let count = count.min(pending.len());
+    pending.drain(..count);
 }
 
 /// The screenshot shortcut the session tap takes, while the Lab is on.

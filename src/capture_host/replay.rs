@@ -376,7 +376,7 @@ impl Controller {
             let job = FinishJob {
                 bundle: bundle.clone(),
                 capture: sealed,
-                audio: RecordedAudio::default(),
+                audio: Some(RecordedAudio::default()),
                 look,
             };
             match jobs.try_send(job) {
@@ -541,7 +541,7 @@ impl Controller {
         let job = FinishJob {
             bundle: active.bundle.clone(),
             capture: sealed,
-            audio: recorded,
+            audio: Some(recorded),
             look,
         };
         match jobs.try_send(job) {
@@ -831,7 +831,10 @@ impl Sealed for SealedReplay {
         remove_bundle(&self.bundle);
     }
 
-    fn finish(self: Box<Self>, audio: RecordedAudio) -> anyhow::Result<Written> {
+    fn finish(self: Box<Self>, audio: Option<RecordedAudio>) -> anyhow::Result<Written> {
+        // A replay always copies the dictation timeline.
+        let audio = audio
+            .unwrap_or_else(|| RecordedAudio::new(Vec::new(), super::SAMPLE_RATE, 0, Vec::new()));
         let result = self.finish_inner(audio);
         if result.is_err() {
             remove_bundle(&self.bundle);

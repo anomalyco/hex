@@ -26,9 +26,10 @@ use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
 pub(crate) const AUDIO_SAMPLE_RATE: u32 = 48_000;
 pub(crate) const AUDIO_CHANNELS: u32 = 2;
 const AAC_BIT_RATE: u32 = 192_000;
-/// HEVC's constant quality, from 0 to 1.
-const HEVC_QUALITY: f64 = 0.7;
-const HEVC_KEYFRAME_SECONDS: f64 = 5.0;
+/// A trim without re-encoding starts at the keyframe before its cut, so they come often enough
+/// to cut close; on a busy screen 2 s costs about 5% over 5 s, and a still one only gets them
+/// when it changes.
+const HEVC_KEYFRAME_SECONDS: f64 = 2.0;
 /// Every frame time at up to 120 fps, to a sixtieth of a millisecond.
 const VIDEO_TIMESCALE: i32 = 60_000;
 
@@ -67,13 +68,19 @@ impl AvWriter {
     }
 
     /// A writer with one hardware HEVC input for `width`×`height` screen frames arriving at up
-    /// to `fps`, sized for crisp text: constant quality 0.7, Rec. 709 tags, no frame reordering,
-    /// and a keyframe at least every 5 s.
-    pub(crate) fn hevc(path: &Path, width: u32, height: u32, fps: u32) -> Result<Self, String> {
+    /// to `fps`, at constant `quality` (0 to 1; [`crate::HEVC_QUALITY`] is sized for crisp
+    /// Retina text), Rec. 709 tags, no frame reordering, and a keyframe at least every 2 s.
+    pub(crate) fn hevc(
+        path: &Path,
+        width: u32,
+        height: u32,
+        fps: u32,
+        quality: f64,
+    ) -> Result<Self, String> {
         // SAFETY: An immutable framework constant.
         let file_type = unsafe { AVFileTypeMPEG4 }.ok_or("AVFileTypeMPEG4 is unavailable")?;
         let writer = create(path, file_type)?;
-        let input = add_hevc_input(&writer, width, height, fps)?;
+        let input = add_hevc_input(&writer, width, height, fps, quality)?;
         Ok(Self {
             writer,
             audio: None,
@@ -277,6 +284,7 @@ fn add_hevc_input(
     width: u32,
     height: u32,
     fps: u32,
+    quality: f64,
 ) -> Result<Retained<AVAssetWriterInput>, String> {
     // SAFETY: Framework constants are immutable process-lifetime objects.
     let (media_type, codec, codec_key, width_key, height_key) = unsafe {
@@ -319,7 +327,7 @@ fn add_hevc_input(
     // VideoToolbox's keys by value: `objc2-video-toolbox` is not a dependency.
     let realtime_key = NSString::from_str("RealTime");
     let main_profile = NSString::from_str("HEVC_Main_AutoLevel");
-    let quality = NSNumber::new_f64(HEVC_QUALITY);
+    let quality = NSNumber::new_f64(quality.clamp(0.0, 1.0));
     let rate = NSNumber::new_u32(fps);
     let keyframe = NSNumber::new_f64(HEVC_KEYFRAME_SECONDS);
     let off = NSNumber::new_bool(false);

@@ -23,6 +23,8 @@ pub(crate) mod picker;
 #[cfg(target_os = "macos")]
 pub(crate) mod playground;
 pub(crate) mod surface;
+#[cfg(target_os = "macos")]
+pub(crate) mod toolbar;
 pub(crate) mod tuning;
 mod undo_ring;
 mod view;

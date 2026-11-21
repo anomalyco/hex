@@ -2,9 +2,11 @@
 //! while macOS's own screenshot shortcut takes the same keys first.
 
 use rune::{El, col, row, text};
+use rune_kit::{ControlSize, Switch};
 
 use super::super::controls::{
-    ButtonKind, DESCRIPTION, Paint, button, folder_label, icon_button, note,
+    ButtonKind, DESCRIPTION, Paint, button, folder_label, icon_button, note, segmented,
+    value_button,
 };
 use super::super::general::keys_button;
 use super::super::{ShortcutTarget, Ui};
@@ -69,6 +71,10 @@ pub(super) fn body(ui: &Ui, p: Paint, system_takes_shortcut: bool) -> El {
                     |ui: &mut Ui, _| choose_folder(ui),
                 )),
         ));
+    // How a recording is made, only while one can be.
+    if ui.settings.capture_on() {
+        body = body.child(recording(ui, p));
+    }
     if let Some(error) = &ui.screenshot_folder.error {
         body = body.child(note("screenshot-folder-error", error, p.danger()));
     } else if let Some((failed, error)) = crate::screenshots::save_error() {
@@ -236,6 +242,91 @@ fn clear_record_shortcut(p: Paint) -> El {
             ui.update(|settings| settings.screenshots.record_hotkey = None);
         },
     )
+}
+
+/// How a recording is made: at one pixel a point, its largest size, its
+/// frame rate, and its quality. Each applies from the next recording.
+fn recording(ui: &Ui, p: Paint) -> El {
+    use crate::app_settings::{MaxResolution, RecordingQuality};
+    let s = &ui.settings.screenshots;
+    let one_x = Switch::new(s.scale_to_1x)
+        .control_size(ControlSize::Mini)
+        .label(tr("Scale Retina to 1x"))
+        .hide_label()
+        .on_toggle(|ui: &mut Ui| {
+            ui.update(|settings| {
+                settings.screenshots.scale_to_1x = !settings.screenshots.scale_to_1x;
+            });
+        })
+        .build(p.k)
+        .key("switch");
+    let chosen = s.max_resolution;
+    let sizes: Vec<(String, String)> = MaxResolution::ALL
+        .iter()
+        .map(|size| (size.id().to_owned(), tr(size.name()).to_owned()))
+        .collect();
+    let max_resolution = value_button(
+        p,
+        "max-resolution-control",
+        tr("Max resolution"),
+        tr(chosen.name()),
+        &rune_theme_opencode::icons::CHEVRON_GRABBER_VERTICAL,
+        |_: &mut Ui| {},
+    )
+    .on_press_tx(move |_: &mut Ui, tx| {
+        let menu = rune::PopupMenu::picker(sizes.clone(), chosen.id());
+        tx.popup_menu(menu, "max-resolution-control", |ui: &mut Ui, picked, _| {
+            if let Some(size) = MaxResolution::ALL
+                .into_iter()
+                .find(|size| Some(size.id()) == picked)
+            {
+                ui.update(|settings| settings.screenshots.max_resolution = size);
+            }
+        });
+    });
+    let rates = [tr("30 fps"), tr("60 fps")];
+    let rate = usize::from(s.fps() == 60);
+    let qualities: Vec<&str> = RecordingQuality::ALL
+        .iter()
+        .map(|quality| tr(quality.name()))
+        .collect();
+    let quality = RecordingQuality::ALL
+        .iter()
+        .position(|quality| *quality == s.quality)
+        .unwrap_or(0);
+    col()
+        .key("recording")
+        .gap(12.0)
+        .child(
+            text(tr("Recording"))
+                .key("title")
+                .font(p.k.ty.ui_medium)
+                .color(p.text()),
+        )
+        .child(fact(p, "scale-to-1x", tr("Scale Retina to 1x"), one_x))
+        .child(fact(
+            p,
+            "max-resolution",
+            tr("Max resolution"),
+            max_resolution,
+        ))
+        .child(fact(
+            p,
+            "frame-rate",
+            tr("Frame rate"),
+            segmented(p, "frame-rate", &rates, rate, |ui, index| {
+                ui.update(|settings| settings.screenshots.frame_rate = [30, 60][index]);
+            }),
+        ))
+        .child(fact(
+            p,
+            "quality",
+            tr("Quality"),
+            segmented(p, "quality", &qualities, quality, |ui, index| {
+                let quality = RecordingQuality::ALL[index];
+                ui.update(|settings| settings.screenshots.quality = quality);
+            }),
+        ))
 }
 
 fn fact(p: Paint, key: &str, label: &str, value: El) -> El {

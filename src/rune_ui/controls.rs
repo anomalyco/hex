@@ -1300,3 +1300,9 @@ pub(super) static PLAY: rune::Icon = rune::Icon {
     view: 20.0,
     body: r#"<path d="M6.5 5.1v9.8c0 .5.5.8.9.5l7.6-4.9c.4-.2.4-.8 0-1L7.4 4.6c-.4-.3-.9 0-.9.5Z" fill="currentColor"/>"#,
 };
+
+pub(super) static PAUSE: rune::Icon = rune::Icon {
+    name: "hex-pause",
+    view: 20.0,
+    body: r#"<rect x="5.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/><rect x="11.5" y="4.5" width="3" height="11" rx="1" fill="currentColor"/>"#,
+};

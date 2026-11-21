@@ -282,6 +282,9 @@ pub struct Probe {
     /// The video track's nominal frame rate (0 when unknown).
     #[serde(default)]
     pub fps: f64,
+    /// Where the video track ends on the movie's timeline.
+    #[serde(default)]
+    pub video_ms: u64,
 }
 
 pub fn probe(movie: &Path) -> Result<Probe> {
@@ -309,6 +312,113 @@ pub fn shrink(movie: &Path, out: &Path, max_edge: u32) -> Result<crate::retentio
     )
 }
 
+/// How [`reencode`] writes a movie: a screen recording's own HEVC settings at `quality`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Reencode {
+    /// The longest side in pixels; a smaller movie keeps its own.
+    pub max_edge: u32,
+    /// HEVC's constant quality, from 0 to 1.
+    pub quality: f64,
+    /// At most this many frames a second.
+    pub fps: u32,
+    /// Only this span, in ms; `None` is the whole movie.
+    pub span: Option<[u64; 2]>,
+}
+
+/// The longest a [`reencode`] may take, as for [`shrink`].
+const REENCODE_TIMEOUT: Duration = Duration::from_secs(1800);
+
+/// Re-encodes `movie` into `out` (an `.mp4`) as [`Reencode`] says, audio copied, handing
+/// `progress` the share done (0 to 1) as it goes. Runs at utility priority.
+pub fn reencode(
+    movie: &Path,
+    out: &Path,
+    how: Reencode,
+    mut progress: impl FnMut(f64),
+) -> Result<crate::retention::Shrunk> {
+    use std::io::BufRead;
+    let numbers = [
+        how.max_edge.to_string(),
+        how.quality.clamp(0.0, 1.0).to_string(),
+        how.fps.max(1).to_string(),
+    ];
+    let span = how
+        .span
+        .map(|[from, to]| [from.to_string(), to.to_string()]);
+    let helper = path()?;
+    let mut args = vec![
+        os("-c"),
+        os("utility"),
+        helper.as_os_str(),
+        os("shrink"),
+        movie.as_os_str(),
+        os("--out"),
+        out.as_os_str(),
+        os("--max-edge"),
+        os(&numbers[0]),
+        os("--quality"),
+        os(&numbers[1]),
+        os("--fps"),
+        os(&numbers[2]),
+        os("--progress"),
+    ];
+    if let Some([from, to]) = &span {
+        args.extend([os("--from"), os(from), os("--to"), os(to)]);
+    }
+    let mut child = Command::new("/usr/sbin/taskpolicy")
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Could not start scrawl-helper")?;
+    let stdout = child.stdout.take().context("No helper stdout")?;
+    let mut stderr = child.stderr.take().context("No helper stderr")?;
+    let errors = std::thread::spawn(move || {
+        let mut message = String::new();
+        let _ = stderr.read_to_string(&mut message);
+        message
+    });
+    let (lines, read) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        for line in std::io::BufReader::new(stdout)
+            .lines()
+            .map_while(Result::ok)
+        {
+            if lines.send(line).is_err() {
+                break;
+            }
+        }
+    });
+    let deadline = Instant::now() + REENCODE_TIMEOUT;
+    let mut last = None;
+    loop {
+        let line = match read.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+            Ok(line) => line,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                bail!("scrawl-helper shrink timed out");
+            }
+        };
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        match value.get("progress").and_then(serde_json::Value::as_f64) {
+            Some(share) => progress(share.clamp(0.0, 1.0)),
+            None => last = Some(value),
+        }
+    }
+    let status = child.wait()?;
+    let message = errors.join().unwrap_or_default();
+    if !status.success() {
+        bail!("{}", message.trim());
+    }
+    serde_json::from_value(last.context("scrawl-helper wrote no result")?)
+        .context("Invalid scrawl-helper output")
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Trimmed {
@@ -331,6 +441,43 @@ pub fn trim(movie: &Path, out: &Path, from_ms: u64, to_ms: u64) -> Result<Trimme
         ],
         Duration::from_secs(300),
     )
+}
+
+/// One audio file [`mux`] lays into a movie: its time zero sits `offset_ms` after the movie's
+/// start, or before it when negative.
+pub struct MuxAudio<'a> {
+    pub file: &'a Path,
+    pub offset_ms: i64,
+}
+
+/// `movie`'s video copied into `out` (an `.mp4`) with `audio` mixed into one AAC track,
+/// trimmed to the movie. Runs at utility priority.
+pub fn mux(movie: &Path, audio: &[MuxAudio<'_>], out: &Path) -> Result<()> {
+    let helper = path()?;
+    let offsets: Vec<String> = audio.iter().map(|a| a.offset_ms.to_string()).collect();
+    let mut args = vec![
+        os("-c"),
+        os("utility"),
+        helper.as_os_str(),
+        os("mux"),
+        movie.as_os_str(),
+        os("--out"),
+        out.as_os_str(),
+    ];
+    for (input, offset) in audio.iter().zip(&offsets) {
+        args.extend([
+            os("--audio"),
+            input.file.as_os_str(),
+            os("--offset"),
+            os(offset),
+        ]);
+    }
+    let _: serde_json::Value = run_program(
+        Path::new("/usr/sbin/taskpolicy"),
+        &args,
+        Duration::from_secs(600),
+    )?;
+    Ok(())
 }
 
 /// Mixes a movie's audio to 16 kHz mono WAV, aligned to the movie's start.
@@ -477,5 +624,59 @@ mod tests {
         .unwrap();
         assert!(started.elapsed() < Duration::from_secs(5));
         assert_eq!(lines[0].status, "downloading");
+    }
+
+    /// A screen recording has a frame only where the screen changed, so a span after the last
+    /// change starts with no frame of its own; its video must still last the whole span.
+    #[test]
+    fn a_span_after_the_last_change_keeps_a_whole_video_track() {
+        let has_ffmpeg = Command::new("ffmpeg")
+            .arg("-version")
+            .stdout(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        if !has_ffmpeg || path().is_err() {
+            eprintln!("skipped: needs ffmpeg and scrawl-helper");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("scrawl-vfr-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let movie = dir.join("vfr.mov");
+        // Frames at 0, 1 and 2 s, then the screen sits still until a held frame at 10 s.
+        let made = Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i"])
+            .arg("testsrc=size=320x180:rate=1:duration=4")
+            .args([
+                "-vf",
+                "setpts='if(eq(N,3),10/TB,N/TB)'",
+                "-fps_mode",
+                "passthrough",
+            ])
+            .args([
+                "-c:v",
+                "libx265",
+                "-tag:v",
+                "hvc1",
+                "-x265-params",
+                "log-level=error",
+            ])
+            .arg(&movie)
+            .status()
+            .unwrap();
+        assert!(made.success());
+        for (span, ms) in [([5_000, 8_000], 3_000), ([1_500, 6_000], 4_500)] {
+            let out = dir.join(format!("out-{}.mp4", span[0]));
+            let how = Reencode {
+                max_edge: 320,
+                quality: 0.5,
+                fps: 30,
+                span: Some(span),
+            };
+            reencode(&movie, &out, how, |_| {}).unwrap();
+            let probed = probe(&out).unwrap();
+            assert_eq!(probed.duration_ms, ms, "{span:?}");
+            assert!(probed.video_ms.abs_diff(ms) <= 20, "{span:?}: {probed:?}");
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

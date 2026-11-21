@@ -46,7 +46,13 @@ pub use meetings::*;
 pub(crate) use microphone_key::{MicrophoneKey, MicrophoneKeyTap};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{
-    ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey, screenshot_settings,
+    ExportSize, MaxResolution, RECORD_MICROPHONE_DEFAULT, RECORD_MICROPHONE_NONE, RecordKind,
+    RecordingQuality, ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey,
+    screenshot_settings,
+};
+#[cfg(target_os = "macos")]
+pub use screenshots::{
+    pending_screenshot_choices, queue_screenshot_choice, settle_screenshot_choices,
 };
 pub use typing_speed::{
     DEFAULT_TYPING_WPM, MAX_TYPING_WPM, MIN_TYPING_WPM, clamp as clamp_typing_wpm,
@@ -1951,11 +1957,11 @@ mod tests {
         settings.capture.replay_hotkey = Some(replay.clone());
         settings.screenshots.record_hotkey = Some(record.clone());
         if cfg!(target_os = "macos") {
-            // Annotate's checks count the saved record shortcut with
-            // Annotate and the Lab off, so neither can take it when it's
-            // turned on.
-            assert!(settings.hotkey_in_use(HotkeySlot::Capture, &record));
-            assert!(settings.hotkey_in_use(HotkeySlot::CaptureReplay, &record));
+            // With the Lab off, every Mac's saved record shortcut doesn't
+            // hold Annotate's keys; turning the Lab on clears one Annotate
+            // took.
+            assert!(!settings.hotkey_in_use(HotkeySlot::Capture, &record));
+            assert!(!settings.hotkey_in_use(HotkeySlot::CaptureReplay, &record));
             // The record check counts Annotate's saved shortcuts the same
             // way.
             assert!(settings.hotkey_in_use(HotkeySlot::ScreenshotRecord, &settings.capture.hotkey));
@@ -1965,11 +1971,11 @@ mod tests {
             assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &record));
             settings.labs.screenshots = true;
             assert!(!settings.hotkey_in_use(HotkeySlot::RawDictation, &record));
+            // With the Lab on, Annotate's checks count it, Annotate on or off.
+            assert!(settings.hotkey_in_use(HotkeySlot::Capture, &record));
+            assert!(settings.hotkey_in_use(HotkeySlot::CaptureReplay, &record));
             settings.capture.enabled = true;
             assert!(settings.hotkey_in_use(HotkeySlot::RawDictation, &record));
-            // Annotate's check still counts the record key with the Lab off.
-            settings.labs.screenshots = false;
-            assert!(settings.hotkey_in_use(HotkeySlot::Capture, &record));
         } else {
             assert!(!settings.hotkey_in_use(HotkeySlot::Capture, &record));
             assert!(
@@ -2019,7 +2025,9 @@ mod tests {
 
         let (saved, loaded) = load(replay.clone(), Some(replay.clone()));
         if cfg!(target_os = "macos") {
-            assert!(saved.hotkey_in_use(HotkeySlot::CaptureReplay, &replay));
+            let mut lab = saved.clone();
+            lab.labs.screenshots = true;
+            assert!(lab.hotkey_in_use(HotkeySlot::CaptureReplay, &replay));
         }
         assert_eq!(loaded.screenshots.record_hotkey, None);
         assert!(!loaded.hotkey_in_use(HotkeySlot::CaptureReplay, &replay));

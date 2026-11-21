@@ -591,6 +591,7 @@ fn records_a_region_at_its_long_edge() {
         },
         long_edge: Some(1_280),
         encoder: crate::Encoder::System,
+        quality: crate::HEVC_QUALITY,
     }];
     let recording = crate::Recorder::start(plan).unwrap();
     thread::sleep(Duration::from_secs(1));
@@ -619,6 +620,7 @@ fn records_a_region_as_native_hevc() {
         },
         long_edge: None,
         encoder: crate::Encoder::Hevc,
+        quality: crate::HEVC_QUALITY,
     }];
     let recording = crate::Recorder::start(plan).unwrap();
     thread::sleep(Duration::from_secs(2));

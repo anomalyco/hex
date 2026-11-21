@@ -796,6 +796,34 @@ impl HotkeyBinding {
         binding
     }
 
+    /// Command-Shift-5, macOS's own screenshot toolbar (Labs › Screenshots
+    /// records with it): the "5" key's ANSI position. Elsewhere
+    /// Control-Shift-5, though nothing records there.
+    pub fn screenshot_record_default() -> Self {
+        #[cfg(target_os = "macos")]
+        let binding = Self {
+            modifiers: HotkeyModifiers {
+                command: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            key: Some(HotkeyKey {
+                code: 23,
+                label: "5".into(),
+            }),
+        };
+        #[cfg(not(target_os = "macos"))]
+        let binding = Self::chord(
+            HotkeyModifiers {
+                control: Some(ModifierSide::Either),
+                shift: Some(ModifierSide::Either),
+                ..Default::default()
+            },
+            "5",
+        );
+        binding
+    }
+
     /// Escape, with no modifier.
     pub fn cancel_default() -> Self {
         #[cfg(target_os = "macos")]

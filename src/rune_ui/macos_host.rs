@@ -1328,7 +1328,9 @@ impl ScrawlHost {
 /// Saves one change to the settings; the runtime publishes it to the
 /// window.
 #[cfg(hex_capture)]
-fn save_settings(change: impl FnOnce(&mut crate::app_settings::AppSettings)) -> Result<(), String> {
+pub(in crate::rune_ui) fn save_settings(
+    change: impl FnOnce(&mut crate::app_settings::AppSettings),
+) -> Result<(), String> {
     let mut settings =
         crate::app_settings::AppSettings::load().map_err(|error| format!("{error:#}"))?;
     let base = settings.clone();

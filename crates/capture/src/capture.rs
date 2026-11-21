@@ -364,8 +364,50 @@ pub enum MovieQuality {
     /// Sized for agents: H.264, 1280 px long edge (2560 for a whole display, for crops).
     #[default]
     Compact,
-    /// For people: every pixel, as hardware HEVC (`capture_core::Encoder::Hevc`).
-    Full,
+    /// For people: hardware HEVC (`capture_core::Encoder::Hevc`) at the size, frame rate, and
+    /// quality asked.
+    Full(MovieSize),
+}
+
+/// A [`MovieQuality::Full`] movie's size, frame rate, and quality.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MovieSize {
+    /// At most one pixel a point, so a Retina display records at its size in points.
+    pub one_x: bool,
+    /// The longest side in pixels; `None` keeps the source's (or one pixel a point's).
+    pub long_edge: Option<u32>,
+    pub fps: u32,
+    /// HEVC's constant quality, in hundredths.
+    pub quality: u8,
+    /// Also records other apps' audio (never Hex's) into `system.m4a`.
+    pub system_audio: bool,
+}
+
+impl Default for MovieSize {
+    /// Every pixel at up to 60 fps, at `capture_core`'s quality for Retina text.
+    fn default() -> Self {
+        Self {
+            one_x: false,
+            long_edge: None,
+            fps: 60,
+            quality: 70,
+            system_audio: false,
+        }
+    }
+}
+
+impl MovieSize {
+    /// The long edge a source `points` large records at: one pixel a point with
+    /// [`Self::one_x`], capped at [`Self::long_edge`]. `None` keeps every pixel.
+    pub fn long_edge_for(self, points: (f64, f64)) -> Option<u32> {
+        let longest = points.0.max(points.1);
+        let one_x =
+            (self.one_x && longest.is_finite() && longest >= 1.0).then(|| longest.round() as u32);
+        match (one_x, self.long_edge) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+    }
 }
 
 mod start;

@@ -1294,7 +1294,11 @@ CoreAudio formats, AppleScript details, or event serialization.
   microphone, installs a tap of its own, or loads a model: it copies the dictation
   timeline through a bounded sink that records a gap rather than block, so a
   stalled capture never stalls dictation, and while a sink is open the
-  release-while-idle close waits for it. While a capture records it holds a
+  release-while-idle close waits for it. One exception: a Labs › Screenshots
+  recording whose toolbar names another microphone
+  (`screenshots.record_microphone`) opens that device for that recording
+  only (never the one dictation has open), closes it at stop, cancel, or
+  quit, and records a gap while it fails; "none" keeps no microphone. While a capture records it holds a
   recording-environment session with the same "While dictating" policy
   (`recording_audio_behavior`, read at each start; no capture setting),
   released at stop, cancel, or quit; it composes with dictation's,

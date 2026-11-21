@@ -79,7 +79,39 @@ fn a_trim_keeps_the_words_inside_it_and_shows_the_frame_at_its_handle() {
     assert_eq!(recording.trim, [8_500, 9_000]);
     recording.drag(clip::Handle::End, 99_000);
     assert_eq!(recording.trim[1], 12_400);
-    assert_eq!(recording.nearer(12_000), clip::Handle::End);
+    assert_eq!(
+        recording.grip(12_000, 500),
+        clip::Grip::Handle(clip::Handle::End)
+    );
+    assert_eq!(recording.grip(4_000, 500), clip::Grip::Playhead);
+}
+
+#[test]
+fn playing_moves_the_playhead_through_the_span_and_stops_at_its_end() {
+    let mut recording = clip();
+    recording.drag(clip::Handle::Start, 2_000);
+    recording.drag(clip::Handle::End, 4_000);
+    recording.scrub(3_000);
+    assert_eq!(clip::position_label(recording.at_ms), "0:03");
+    recording.toggle_play();
+    assert!(
+        !recording.tick(10.0),
+        "the first tick only starts the clock"
+    );
+    assert!(recording.tick(10.5));
+    assert_eq!(recording.at_ms, 3_500);
+    assert_eq!(recording.shown, recording.frame_at(3_500));
+    recording.tick(12.0);
+    assert_eq!(recording.at_ms, 4_000);
+    assert!(!recording.playing);
+    // Played again at the end, it starts over from the span's start.
+    recording.toggle_play();
+    assert_eq!(recording.at_ms, 2_000);
+    recording.toggle_play();
+    assert!(!recording.playing);
+    // A scrub stays inside the span kept.
+    recording.scrub(100);
+    assert_eq!(recording.at_ms, 2_000);
 }
 
 #[test]
@@ -97,7 +129,7 @@ fn a_recording_sends_a_sheet_of_the_frames_it_keeps() {
 }
 
 #[test]
-fn a_recording_has_no_marks_and_no_copy() {
+fn a_recording_has_no_marks_and_copies_its_movie() {
     let mut editor = Editor {
         clip: Some(clip()),
         screen: [960.0, 640.0],
@@ -112,11 +144,49 @@ fn a_recording_has_no_marks_and_no_copy() {
         editor.draft.is_none(),
         "nothing draws on a recording's frame"
     );
+    // An export already under way, so the test's ⌘C reaches no clipboard.
+    editor.exporting = Some((Pressed::Save, 0.4));
     let mut tx = Tx::default();
     assert!(
-        !on_key(&mut editor, &key(Key::Command('c')), &mut tx),
-        "⌘C copies nothing"
+        on_key(&mut editor, &key(Key::Command('c')), &mut tx),
+        "⌘C copies the movie"
     );
+    assert_eq!(
+        editor.exporting,
+        Some((Pressed::Save, 0.4)),
+        "one export at a time"
+    );
+}
+
+#[test]
+fn an_export_estimate_follows_the_span_kept_and_the_size() {
+    use crate::app_settings::{ExportSize, RecordingQuality};
+    let mut recording = clip();
+    recording.duration_ms = 60_000;
+    recording.trim = [0, 60_000];
+    recording.bytes = 100_000_000;
+    recording.pixels = [2560, 1440];
+    let high = RecordingQuality::High;
+    assert_eq!(
+        recording.estimate(ExportSize::Original, high, 30),
+        100_000_000
+    );
+    // A 1080p shrink keeps (1920 / 2560)² of the pixels.
+    assert_eq!(recording.estimate(ExportSize::P1080, high, 30), 56_250_000);
+    // Low never takes more than it was measured to: 1.9 bits a pixel a second.
+    let low = recording.estimate(ExportSize::P1080, RecordingQuality::Low, 30);
+    assert_eq!(low, (1.9 * 1920.0 * 1080.0 * 60.0 / 8.0_f64).round() as u64);
+    recording.trim = [0, 30_000];
+    assert_eq!(
+        recording.estimate(ExportSize::Original, high, 30),
+        50_000_000
+    );
+    // A movie already 720p keeps its pixels, but no more than High takes.
+    recording.pixels = [1280, 720];
+    assert_eq!(recording.estimate(ExportSize::P720, high, 30), 28_408_320);
+    assert_eq!(clip::size_label(56_250_000), "56 MB");
+    assert_eq!(clip::size_label(1_340_000_000), "1.3 GB");
+    assert_eq!(clip::size_label(820_000), "820 KB");
 }
 
 #[test]
@@ -731,5 +801,64 @@ fn editor_frames() {
         rt.frame(1.0 / 60.0);
         let pixels = crate::rune_ui::offscreen::paint(&gpu, &mut renderer, &target, &mut rt);
         rune::render::write_png(&out.join(format!("{index:04}.png")), w, h, &pixels).unwrap();
+    }
+}
+
+/// `HEX_SCREENSHOT_SNAPS=<folder>` writes the editor open on a recording,
+/// light and dark: its bar's export size and estimate, and the same bar
+/// while a 1080p copy is 42% done.
+#[test]
+fn recording_editor_snapshots() {
+    use crate::app_settings::ExportSize;
+    use crate::rune_ui::offscreen;
+    let Some(folder) = std::env::var_os("HEX_SCREENSHOT_SNAPS") else {
+        return;
+    };
+    let folder = std::path::PathBuf::from(folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+        eprintln!("skipping editor snapshots: no GPU adapter");
+        return;
+    };
+    let size = (1280.0, 800.0);
+    for (slug, export_size, exporting) in [
+        ("editor-recording", ExportSize::Original, None),
+        ("editor-recording-1080p", ExportSize::P1080, None),
+        (
+            "editor-recording-exporting",
+            ExportSize::P1080,
+            Some((Pressed::Copy, 0.42)),
+        ),
+    ] {
+        for dark in [false, true] {
+            let mut recording = clip();
+            recording.bytes = 93_000_000;
+            recording.pixels = [2560, 1600];
+            recording.drag(clip::Handle::Start, 1_200);
+            recording.drag(clip::Handle::End, 9_800);
+            recording.scrub(4_300);
+            let editor = Editor {
+                clip: Some(recording),
+                screen: [size.0, size.1],
+                on: true,
+                export_size,
+                exporting,
+                ..Editor::default()
+            };
+            let env = rune::Env {
+                system_dark: dark,
+                scale: 2.0,
+            };
+            let text = rune::text::TextSystem::new(
+                rune_theme_opencode::FONTS,
+                rune_theme_opencode::FAMILIES,
+            );
+            let mut rt = offscreen::runtime(editor, view::view, size, env, text);
+            let (w, h) = ((size.0 * 2.0) as u32, (size.1 * 2.0) as u32);
+            let pixels = offscreen::draw(&gpu, &mut rt, w, h);
+            let theme = if dark { "dark" } else { "light" };
+            rune::render::write_png(&folder.join(format!("{slug}-{theme}.png")), w, h, &pixels)
+                .unwrap();
+        }
     }
 }
