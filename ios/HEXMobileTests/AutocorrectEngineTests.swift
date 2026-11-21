@@ -867,6 +867,12 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertTrue(target.text.hasSuffix(" I want "), target.text)
         typeTaps("lookat")
         XCTAssertTrue(target.text.hasSuffix(" look at "), target.text)
+        // A closing mark from the 123 page reads the word's taps as space does.
+        for ch in "ofthe" { tapCentre(ch) }
+        tap(.layerSwitch(.numbers))
+        tap(.character("."))
+        XCTAssertTrue(target.text.hasSuffix(" of the."), target.text)
+        tap(.space)
         // A word with a bottom-row letter stays one word.
         for word in ["number", "cabin", "seven", "become"] { typeTaps(word) }
         XCTAssertTrue(target.text.hasSuffix(" number cabin seven become "), target.text)

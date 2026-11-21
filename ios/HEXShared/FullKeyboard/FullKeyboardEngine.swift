@@ -1414,9 +1414,11 @@ final class FullKeyboardEngine {
     }
 
     /// The letter keys Spatial autocorrect scores taps against: this layout's, moved by
-    /// `tapOffsets`. None off the letters page.
+    /// `tapOffsets`. Off the letters page the last letters page's stay: a closing mark from
+    /// the 123 page still reads the word's taps ("ofthe." -> "of the.").
     private func syncDecoderKeys() {
-        autocorrect.decoderKeys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets)
+        guard let keys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets) else { return }
+        autocorrect.decoderKeys = keys
     }
 
     /// Hands the layout and shift to typing logs, which writes a line when either changed.
