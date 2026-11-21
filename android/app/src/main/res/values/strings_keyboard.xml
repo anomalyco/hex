@@ -24,6 +24,8 @@
     <string name="keyboard_space_language">Space, %1$s. Hold to switch dictation language</string>
     <string name="keyboard_space_translate">%1$s → English</string>
     <string name="keyboard_period">Period</string>
+    <string name="keyboard_comma">Comma</string>
+    <string name="keyboard_correction">Correction %1$s</string>
     <string name="keyboard_return">Return</string>
     <string name="keyboard_page_numbers">123</string>
     <string name="keyboard_page_symbols">=\\&lt;</string>

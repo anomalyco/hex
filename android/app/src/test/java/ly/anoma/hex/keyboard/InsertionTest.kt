@@ -168,4 +168,57 @@ class InsertionTest {
         assertEquals("i'm gonna be late, wanna start without me?", styled(heard, Style.Casual, "en-US"))
         assertEquals(heard, styled(heard, Style.Verbatim, "en-US"))
     }
+
+    // The space bar (SpaceGesture, CursorSlide). These belong in a KeyboardGestureTest once new test files are agreed.
+    @Test fun quickSpaceTapsThatDriftStillTypeTheirSpace() {
+        for (ms in listOf(60L, 100L, 150L)) for (drift in listOf(8f, 21f, 42f, 63f)) {
+            val space = SpaceGesture(start = 45f, step = 33f, stillSlop = 21f)
+            space.down(500f, 50f, 0)
+            for (t in 10L..ms step 10L) assertEquals(null, space.move(500f - drift * t / ms, 50f, t))
+            assertEquals(true, space.up())
+        }
+    }
+    @Test fun aSpaceSlideMovesTheCursorAtGboardsSteps() {
+        val space = SpaceGesture(start = 45f, step = 33f, stillSlop = 21f)
+        space.down(500f, 50f, 0)
+        assertEquals(null, space.move(458f, 50f, 300))
+        assertEquals(-1, space.move(455f, 50f, 310))
+        assertEquals(-3, space.move(374f, 50f, 320))
+        assertEquals(-15, space.move(-25f, 50f, 330))
+        assertEquals(2, space.move(580f, 50f, 340))
+        assertEquals(false, space.up())
+    }
+    @Test fun aCursorSlideStepsOverWholeCharacters() {
+        val moves = ArrayList<Int>()
+        val text = "ab\uD83D\uDC4D\uD83C\uDFFDcd"
+        val target = object : KeyboardTextTarget {
+            override val connected = true
+            override fun before(length: Int) = text
+            override fun after(length: Int) = ""
+            override fun selected() = ""
+            override fun capsMode(mask: Int) = 0
+            override fun commit(text: String) = true
+            override fun deleteBefore(length: Int) = true
+            override fun deleteCodePointsBefore(count: Int) = true
+            override fun beginBatch() {}
+            override fun endBatch() {}
+            override fun setSelection(start: Int, end: Int) = moves.add(start)
+            override fun performEditorAction(id: Int) = true
+            override fun defaultEditorAction() = true
+            override fun sendKey(code: Int) {}
+        }
+        val slide = CursorSlide(target, text.length, text.length, readable = true)
+        for (n in listOf(-1, -2, -3, -4, -5, -9, 1)) slide.moveTo(n)
+        assertEquals(listOf(7, 6, 2, 1, 0, 8), moves)
+    }
+    @Test fun aDeleteSlideSelectsWholeWordsWithTheirSpaces() {
+        assertEquals(listOf(4, 9, 14), DeleteSlide.wordLengths("far away from home").take(3))
+        assertEquals(listOf(7, 14), DeleteSlide.wordLengths("Hello, world. ").toList())
+        assertEquals(listOf(6), DeleteSlide.wordLengths("don't ").toList())
+        val delete = DeleteGesture(start = 140f, step = 95f, cancel = 84f, stillSlop = 21f)
+        delete.down(1000f)
+        assertEquals(0, delete.move(940f)); assertEquals(true, delete.tap)
+        assertEquals(0, delete.move(870f)); assertEquals(false, delete.tap)
+        assertEquals(1, delete.move(840f)); assertEquals(2, delete.move(750f)); assertEquals(0, delete.move(900f))
+    }
 }

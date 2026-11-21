@@ -15,6 +15,7 @@ internal interface KeyboardTextTarget {
     fun deleteCodePointsBefore(count: Int): Boolean
     fun beginBatch()
     fun endBatch()
+    fun setSelection(start: Int, end: Int): Boolean
     fun performEditorAction(id: Int): Boolean
     fun defaultEditorAction(): Boolean
     fun sendKey(code: Int)
@@ -33,6 +34,7 @@ internal class InputConnectionTarget(private val ime: InputMethodService) : Keyb
     override fun deleteCodePointsBefore(count: Int) = ic?.deleteSurroundingTextInCodePoints(count, 0) ?: false
     override fun beginBatch() { ic?.beginBatchEdit() }
     override fun endBatch() { ic?.endBatchEdit() }
+    override fun setSelection(start: Int, end: Int) = ic?.setSelection(start, end) ?: false
     override fun performEditorAction(id: Int) = ic?.performEditorAction(id) ?: false
     override fun defaultEditorAction() = ime.sendDefaultEditorAction(true)
     override fun sendKey(code: Int) = ime.sendDownUpKeyEvents(code)

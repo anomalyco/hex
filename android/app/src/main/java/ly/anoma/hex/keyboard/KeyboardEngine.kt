@@ -1,5 +1,7 @@
 package ly.anoma.hex.keyboard
 
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.text.InputType
 import android.view.KeyEvent
@@ -13,7 +15,8 @@ import ly.anoma.hex.typing.TypingWord
 /** What the engine shows: the keys' page and the strip's words. */
 internal interface KeyboardSurface {
     fun showPage(page: KeyboardPage)
-    fun suggestions(words: List<String>, literal: String? = null)
+    /** [literal]: what was typed, offered as typed; [correction]: what space will put in its place. */
+    fun suggestions(words: List<String>, literal: String? = null, correction: String? = null)
 }
 
 /** Keys in, text out: the current word, autocorrection and its undo, shift and the key pages.
@@ -24,7 +27,14 @@ internal class KeyboardEngine(
     private val layoutLanguage: () -> Spoken,
     private val loadDecoder: (String) -> SpatialDecoder,
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
+    private val main: Handler = Handler(Looper.getMainLooper()),
 ) {
+    private companion object {
+        /** The correction chip waits for this pause in typing: working it out costs the decoder a
+         * search (2 ms median, 16 ms p95 per letter on the API 31 emulator), which shouldn't delay keys. */
+        const val CHIP_PAUSE_MS = 100L
+    }
+    private var pendingChip: Runnable? = null
     var surface: KeyboardSurface? = null
     private val models = HashMap<String, SpatialDecoder>()
     private var word: TypingWord? = null
@@ -110,8 +120,9 @@ internal class KeyboardEngine(
     }
     fun mode() { resetTyping(); surface?.suggestions(emptyList()); symbols = !symbols; more = false; lastShift = 0; showPlane() }
     private fun resetTyping() {
-        word?.reset(); undo = null; expectedCaret = -1; prefix = ""
+        cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
+    private fun cancelChip() { pendingChip?.let(main::removeCallbacks); pendingChip = null }
     fun configureTyping(keepWord: Boolean = false) {
         val language = layoutLanguage().layoutCode
         val active = word
@@ -130,13 +141,24 @@ internal class KeyboardEngine(
         showSuggestions(word)
     }
     private fun showSuggestions(w: TypingWord?) {
+        cancelChip()
         if (w != null && w.token.isNotEmpty()) {
             val choices = w.suggestions()
             surface?.suggestions(choices, literal = w.literalChip(choices))
+            val token = w.token
+            pendingChip = Runnable {
+                pendingChip = null
+                if (word === w && w.token == token) correction(w)?.let { surface?.suggestions(choices, literal = token, correction = it) }
+            }.also { main.postDelayed(it, CHIP_PAUSE_MS) }
             return
         }
         val b = if (w != null && !symbols && selStart == selEnd) before() else null
         surface?.suggestions(if (w != null && b != null && TypingWord.boundary(b.lastOrNull()) && canEndWord()) w.predictions(b) else emptyList())
+    }
+    /** What space would put in place of the word: the strip shows it before it happens. */
+    private fun correction(w: TypingWord): String? {
+        if (!feedback.autocorrect || !canEndWord()) return null
+        return w.replacement()?.takeIf { it != w.token && !feedback.blocked(w.decoder.model.language, w.token, it) }
     }
     private fun before() = if (secure) "" else target.before(96).orEmpty()
     private fun endsWith(suffix: String) = !secure && target.before(suffix.length) == suffix
@@ -232,6 +254,24 @@ internal class KeyboardEngine(
             if (editor?.inputType == InputType.TYPE_NULL) target.sendKey(KeyEvent.KEYCODE_ENTER)
             else type("\n")
         }
+    }
+
+    /** A space-bar slide starts moving the cursor: the word in progress stays as typed. */
+    fun cursorSlide(): CursorSlide {
+        resetTyping(); surface?.suggestions(emptyList())
+        return CursorSlide(target, minOf(selStart, selEnd), maxOf(selStart, selEnd), readable = !secure)
+    }
+
+    /** A slide left from delete: null where it can't run (a password field, a selection, no known cursor). */
+    fun deleteSlide(): DeleteSlide? {
+        if (secure || selStart < 0 || selStart != selEnd || !target.connected) return null
+        resetTyping(); surface?.suggestions(emptyList())
+        return DeleteSlide(target, selStart, target.before(2000).orEmpty())
+    }
+    /** The delete slide lifted with words selected: they go. */
+    fun deleteSelection() {
+        if (!target.connected) return
+        target.commit(""); resetTyping(); surface?.suggestions(emptyList())
     }
 
     /** Dictation starts: the word in progress is left as typed. */
