@@ -580,13 +580,19 @@ nonisolated struct TypingDecoder {
         }
         // Nothing above could read a word that is no word and no dictionary's: a missed
         // space may still explain it, with a slip in the second word or three or more
-        // words run together. Never second-guess a dictionary word or one of yours.
+        // words run together. Never second-guess a dictionary word, one of yours, or a
+        // likelier reading that only missed the margin. German is left out: its model is
+        // lowercase and its nouns take their capital in the single-word path.
         if replacement == nil, literalIndex == nil, !literalIsValid, !literalIsYours,
-           parameters.splits, letters.count >= 5,
+           model.language != "de", parameters.splits, letters.count >= 5,
            let fallback = missedSpaceReading(costs: costs, letters: letters, prev: prev, literalCost: literalCost) {
-            replacement = fallback.text
-            readings.removeAll { $0.text.lowercased() == fallback.text.lowercased() }
-            readings.insert(fallback, at: 0)
+            let best = readings.first
+            if best == nil || fallback.cost <= best!.cost
+                || best!.text.lowercased() == fallback.text.lowercased() {
+                replacement = fallback.text
+                readings.removeAll { $0.text.lowercased() == fallback.text.lowercased() }
+                readings.insert(fallback, at: 0)
+            }
         }
         return Decision(replacement: replacement, readings: Array(readings.prefix(3)), literalCost: literalCost)
     }
@@ -876,9 +882,10 @@ nonisolated struct TypingDecoder {
     }
 
     /// The first letters as a word and the rest read as one word after it, when the rest is
-    /// one slip from a word and clears the margin `decide` would give that word typed alone
+    /// one slip from a word and clears the margin it would get typed after that first word
     /// ("specialchsracter" -> "special character"). A rest that is already a word is left to
-    /// `splitReadings`: there is nothing there to fix.
+    /// `splitReadings`: there is nothing there to fix. The first word is at least two letters:
+    /// a lone "i" with a slip after it would read almost any run as two words.
     private func slippedSecondWord(_ costs: [[Double]], letters: [UInt8], prev: Int?) -> Reading? {
         let n = letters.count
         guard n >= 5 else { return nil }
@@ -886,6 +893,7 @@ nonisolated struct TypingDecoder {
         for k in 2...(n - 3) {
             guard let left = model.index(ofCodes: Array(letters[0..<k])),
                   canStandAlone(left), !neverSuggest.words.contains(left),
+                  !neverSuggest.follows(left, after: prev),
                   model.index(ofCodes: Array(letters[k...])) == nil else { continue }
             var leftSpatial = 0.0, rightLiteral = 0.0
             for i in 0..<k { leftSpatial += costs[i][Int(letters[i])] }
@@ -921,25 +929,38 @@ nonisolated struct TypingDecoder {
     /// through that last word, and only their count decides whether one can still grow.
     private func exactSegmentation(_ costs: [[Double]], letters: [UInt8], prev: Int?) -> Reading? {
         let n = letters.count
-        guard n >= 5 else { return nil }
+        guard n >= 5, n <= 32 else { return nil }
         var spatial = [Double](repeating: 0, count: n + 1)
         for i in 0..<n { spatial[i + 1] = spatial[i] + costs[i][Int(letters[i])] }
         var states = [[SegmentKey: SegmentPath]](repeating: [:], count: n + 1)
         states[0][SegmentKey(last: -1, count: 0)] = SegmentPath(words: [], cost: 0)
         var best: SegmentPath?
         for start in 0..<n {
-            for (key, path) in states[start] where key.count < 6 {
-                for end in (start + 1)...n {
-                    guard let word = model.index(ofCodes: Array(letters[start..<end])),
-                          canStandAlone(word), !neverSuggest.words.contains(word) else { continue }
-                    if key.last >= 0, neverSuggest.follows(word, after: key.last) { continue }
+            guard !states[start].isEmpty else { continue }
+            // Every word that starts here, found by narrowing the model's list one letter at
+            // a time: the prefix walk stops as soon as no word carries those letters.
+            var ends: [(end: Int, word: Int)] = []
+            var lo = 0, hi = model.wordCount
+            for end in (start + 1)...n {
+                (lo, hi) = model.narrow(lo, hi, depth: end - start - 1, byte: Int(letters[end - 1]))
+                guard lo < hi else { break }
+                if model.length(lo) == end - start, canStandAlone(lo), !neverSuggest.words.contains(lo) {
+                    ends.append((end, lo))
+                }
+            }
+            guard !ends.isEmpty else { continue }
+            for (key, path) in states[start] {
+                for (end, word) in ends {
+                    if neverSuggest.follows(word, after: key.last >= 0 ? key.last : prev) { continue }
                     var words = path.words
                     words.append(word)
                     let cost = path.cost + (spatial[end] - spatial[start])
                         + parameters.lmWeight * lmCost(word, after: key.last >= 0 ? key.last : prev)
                         + (key.count == 0 ? 0 : parameters.spaceOmissionCost)
                     if end == n {
-                        if words.count >= 3, best == nil || cost < best!.cost { best = SegmentPath(words: words, cost: cost) }
+                        if words.count >= 3, words.count <= 6, best == nil || cost < best!.cost {
+                            best = SegmentPath(words: words, cost: cost)
+                        }
                         continue
                     }
                     guard words.count < 6 else { continue }

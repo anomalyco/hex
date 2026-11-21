@@ -1465,11 +1465,12 @@ final class AutocorrectEngineTests: XCTestCase {
         }
     }
 
-    /// A word the dictionary knows is never split by the fallback, even when its letters
-    /// could be two words ("netflix", "carlsberg").
+    /// A run the dictionary knows is never split by the fallback, even when its letters
+    /// are words the fallback does split when nothing knows the run ("seeyoutomorrow",
+    /// "specialchsracter").
     func testTheFallbackNeverSplitsAWordTheDictionaryAccepts() throws {
         let checker = StubChecker()
-        checker.valid = ["netflix", "carlsberg"]
+        checker.valid = ["seeyoutomorrow", "specialchsracter"]
         target = FixtureTextTarget()
         target.autocapitalizationType = UITextAutocapitalizationType.none
         engine = FullKeyboardEngine(
@@ -1480,9 +1481,9 @@ final class AutocorrectEngineTests: XCTestCase {
         engine.clock = { [unowned self] in self.now }
         engine.configureForField()
         try useDecoder()
-        typeTaps("netflix")
-        typeTaps("carlsberg")
-        XCTAssertEqual(target.text, "netflix carlsberg ")
+        typeTaps("seeyoutomorrow")
+        typeTaps("specialchsracter")
+        XCTAssertEqual(target.text, "seeyoutomorrow specialchsracter ")
     }
 
     /// A one-word typo is not read as a word and a rare one ("tommorow" as "tom morrow"):
@@ -1501,6 +1502,22 @@ final class AutocorrectEngineTests: XCTestCase {
         typeTaps("tommorow")
         XCTAssertFalse(target.text.contains("tom morrow"))
         XCTAssertEqual(target.text, "tomorrow ")
+    }
+
+    /// A reading that only missed the margin still says what the taps read: the fallback
+    /// ("the her on") may not overrule the likelier "the heron" just because it failed by
+    /// less than the margin.
+    func testTheFallbackDoesNotOverruleALikelierReading() throws {
+        try useDecoder()
+        let decoder = try XCTUnwrap(engine.autocorrect.decoder)
+        let keys = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout))
+        let taps = try "theheron".map { try XCTUnwrap(keys.centres[$0]) }
+        let decision = try XCTUnwrap(
+            decoder.decide(taps: taps, typed: "theheron", previous: nil, literalIsValid: false, keys: keys)
+        )
+        XCTAssertNil(decision.replacement)
+        XCTAssertEqual(decision.readings.first?.text, "the heron")
+        XCTAssertFalse(decision.readings.contains { $0.text == "the her on" })
     }
 
     /// The strip offers a fallback reading before space puts it in.

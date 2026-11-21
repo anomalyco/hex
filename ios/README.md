@@ -450,7 +450,8 @@ never at a launch by itself.
     in the next ("specialchsracter" -> "special character") or as three to six words typed
     together ("seeyoutomorrow" -> "see you tomorrow"), when the words without their missed
     spaces are no less likely than the run; those can replace a run the whole-word margin
-    would keep.
+    would keep. Deutsch keeps the ordinary readings: its lowercase model cannot give a
+    split's nouns their capitals.
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
     layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
