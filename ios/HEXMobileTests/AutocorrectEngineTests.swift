@@ -615,6 +615,50 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(fix(english, before: "teh"), "the")
     }
 
+    /// X (Philippe), English with French or German beside it: the other dictionary takes many
+    /// English typos for words ("dont" and "im" are French and German words, iOS's French and
+    /// German dictionaries take "dk", "dl" and "ro"), so they were kept and the held-out English
+    /// benchmark went from 5.24% to 7.07% WER with French beside it. Once the words before are
+    /// English, its sure fixes apply again (missing apostrophes, common slips, two letters);
+    /// the other language's longer words stay, and at a sentence's start the next word decides.
+    func testBesideAnotherLanguageEnglishStillFixesItsOwnTypos() {
+        let available = ["en_US", "fr_FR", "de_DE"]
+        let english = stubbed {
+            $0.valid = ["we", "said", "that", "do", "not", "know", "going", "home", "the", "to"]
+            $0.guessTable = ["mervi": ["mercy"]]
+        }
+        english.setLanguage(.english, available: available)
+        let french = StubChecker()
+        french.valid = ["dont", "im", "dk", "est", "merci", "je", "pense", "que", "mervi"]
+        english.setPartner(.french, available: available, checker: french)
+
+        XCTAssertEqual(fix(english, before: "we said that dont"), "don't", "the words before are English")
+        XCTAssertEqual(fix(english, before: "we said that im"), "I'm")
+        XCTAssertEqual(fix(english, before: "we said that dk"), "do", "a two-letter slip")
+        XCTAssertNil(fix(english, before: "we said that est"), "a longer French word stays")
+        XCTAssertNil(fix(english, before: "we said that merci"))
+        XCTAssertNil(fix(english, before: "je pense que dont"), "French words before: French \"dont\" stays")
+        XCTAssertNil(fix(english, before: "dont"), "nothing before tells: kept for now")
+        XCTAssertEqual(fix(english, before: "dk"), "do", "a partner's word without a vowel (an abbreviation) is no word")
+
+        func revised(_ word: String, next: String) -> String? {
+            english.revision(of: word, before: word, next: next, field: .text, autocorrectionType: .default)
+        }
+        XCTAssertEqual(revised("Dont", next: "know"), "Don't", "an English word after it says it was English")
+        XCTAssertEqual(revised("Im", next: "going"), "I'm")
+        XCTAssertNil(revised("Dont", next: "je"), "a French word after it")
+        XCTAssertNil(revised("Dont", next: "est"), "a word both or only French know tells nothing")
+        XCTAssertNil(english.revision(of: "dont", before: "je pense que dont", next: "know", field: .text, autocorrectionType: .default),
+                     "French words before it")
+
+        let german = StubChecker()
+        german.valid = ["im", "haus", "sommer"]
+        english.setPartner(.german, available: available, checker: german)
+        XCTAssertNil(revised("Im", next: "Haus"), "German \"Im Haus\" stays")
+        XCTAssertEqual(revised("Im", next: "going"), "I'm")
+        XCTAssertEqual(fix(english, before: "we said that im"), "I'm")
+    }
+
     /// How often one language's keyboard changes the other's words, against iOS's own
     /// dictionaries and English's Spatial autocorrect model: common French words typed on the
     /// English keyboard and common English words on the French one (taps where the layout has

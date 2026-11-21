@@ -680,7 +680,36 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   only one dictionary knows wins, else the clearly cheaper slip, else the keyboard's own;
   the strip shows both languages' fixes and completions. In the simulator the English
   keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
-  80 English words; with both chosen, none.
+  80 English words; with both chosen, none. Any two Latin-script languages with an iOS
+  dictionary pair this way (English with Français, Deutsch, Italiano, Português, Polski,
+  Norsk, Română, Español, or two of those), whatever their order; Polski's simulator
+  dictionary takes every word, so the any-word guard (#2143) leaves it out there. The words before
+  count for a language when only its dictionary knows them, or, from three letters, when
+  both do but only its typing model has them among its commonest (iOS's French and German
+  dictionaries take "the", "you", "your" and "please"). Once they are the keyboard's own
+  language, a word the other dictionary knows still gets its sure fixes (a missing
+  apostrophe or common slip from `unambiguousFixes`, a two-letter slip); a word without
+  a vowel never counts as the other's ("dk", "tkm" are abbreviations there); the other's
+  name guesses ("Zuri" for "Ziri") are never fixes; Spatial autocorrect may still read the
+  taps as another word, counting the other's word as one it changes only on its valid-word
+  margin; and at a sentence's start, "Im" and "Dont" are revised to "I'm" and "Don't" once
+  the next word leans English (`bilingualRevision`; German "Im Haus" stays). Held-out
+  English benchmark (2,000 Tatoeba sentences' synthetic taps, Spatial autocorrect on,
+  iPhone 17 simulator, iOS 27.2, keys as of #2180): English alone 5.75% WER; with Français
+  beside it 7.56% before, 5.79% now (99 correct words broken against 125 before and 113
+  alone); with Deutsch 7.53% before, 5.79% now; with the German Spatial experiment on,
+  7.18% before, 5.70% now. Typed at a key's centre after "we said that", 1 of 80 common
+  French words changes ("dont" to "don't") and 3 of 72 German ones ("auch", "ist", "habe"),
+  none before; none at a message's start or after French or German words, and a slip in a
+  French or German word at a message's start is fixed as often as before (26 of 50, 18 of
+  40). Per-letter engine p95 with a partner 4.1-5.4 ms (3.9-5.1 ms before), 2.2 ms alone.
+  Black box (iOS 27.2 simulator): Settings › Keyboards offers "Add to English (US)
+  Keyboard" for French (France, Canada, Switzerland), "Type in English and French on the
+  same keyboard", which makes one "English & French" bilingual keyboard on English's QWERTY
+  with no language switch; Portuguese, Polish and Turkish offer "Add to Existing
+  Keyboard". There it fixed "I dont know" and "Dont do it" to "don't", kept "est" and
+  "merci" after English words, and wrote "Im" as "I m"; the simulator's French word data is
+  thin ("je pense" became "he pence"), so how it weighs French there is unverified.
 - **Layout per language (Settings › Keyboard › Languages › Layout):** each language the keys
   show (every chosen one, Automatic's while none is, and only the first of English and
   Español together) gets a menu of the layouts Apple's Keyboard Layout list offers for it

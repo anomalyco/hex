@@ -230,7 +230,7 @@ final class AutocorrectEngine {
     var addsCapitals = true {
         didSet { partner?.addsCapitals = addsCapitals }
     }
-    private var decoderCache: (before: String, taps: [CGPoint], decision: TypingDecoder.Decision?)?
+    private var decoderCache: (before: String, taps: [CGPoint], partnerWord: Bool, decision: TypingDecoder.Decision?)?
 
     init(
         checker: TextChecking? = nil,
@@ -746,21 +746,84 @@ final class AutocorrectEngine {
 
     /// What space puts in place of `token`, if anything. With a partner (bilingual
     /// autocorrect), a word either language knows as typed stays as it is (your text
-    /// replacements still apply); a typo either can fix gets the fix, and when both can, the
-    /// fix in the language of the words before it, else the cheaper slip on these keys, else
-    /// the keyboard's own language's.
+    /// replacements still apply), except a sure fix of this language's (`isSureFix`) once
+    /// the words before are in it: the other dictionary takes many of its typos for words
+    /// ("dont", "im", "dk" in French, "im", "tkm" in German), and kept them. A typo either can
+    /// fix gets the fix, though never the other's guess of a name ("Zuri" for "Ziri"); when both
+    /// can, the fix in the language of the words before it, else the cheaper slip on these
+    /// keys, else the keyboard's own language's. Held-out English benchmark, French beside it:
+    /// 7.56% WER before, 5.79% now, against 5.75% alone.
     private func cautiousReplacement(for token: String) -> String? {
         guard let partner = workingPartner else { return ownReplacement(for: token) }
         if let shortcut = shortcut(for: token) {
             return shortcut
         }
+        let lean = languageLean(partner, token: token)
         // One-letter words are left to the keyboard's own language: `UITextChecker` takes
         // every letter as a word, so English "i" would never become "I" beside French.
-        if token.count >= 2, partner.knowsAsTyped(token) { return nil }
+        if token.count >= 2, partner.knowsAsTyped(token), Self.hasVowel(token) {
+            if lean < 0, isSureFix(token), let own = ownReplacement(for: token) { return own }
+            // Spatial autocorrect may still read the taps as another word, counting the other
+            // language's word as one it changes only on a clear margin, as it does its own
+            // words: "tkm" (German) becomes "Tom", "merci" stays. Not a sure fix's word, which
+            // the next word decides ("Im" stays for "I'm going", not "In").
+            guard lean <= 0, !isAllCapsOrMixed(token),
+                  !(language.usesEnglishFixes && Self.unambiguousFixes[token.lowercased()] != nil),
+                  let replacement = decoderDecision(for: token, partnerWord: true)?.replacement,
+                  mayOffer(replacement, replacing: token) else { return nil }
+            return withoutAddedCapitals(cased(replacement, typed: token), typed: token)
+        }
         let own = ownReplacement(for: token)
-        guard token.count >= 2, !knowsAsTyped(token), let theirs = partner.ownReplacement(for: token) else { return own }
+        // A name the other dictionary guesses ("Zuri" for "Ziri") is no fix of yours.
+        guard token.count >= 2, !knowsAsTyped(token), let theirs = partner.ownReplacement(for: token),
+              !partner.isName(theirs) else { return own }
         guard let own, own.caseInsensitiveCompare(theirs) != .orderedSame else { return own ?? theirs }
-        return prefersPartner(partner, token: token, own: own, theirs: theirs) ? theirs : own
+        return prefersPartner(lean, token: token, own: own, theirs: theirs) ? theirs : own
+    }
+
+    /// Whether this language's dictionary knows `word` only with a capital, and German's noun
+    /// list doesn't call it a noun: a name.
+    private func isName(_ word: String) -> Bool {
+        let lower = word.lowercased()
+        guard lower.count >= 2, let first = lower.first else { return false }
+        guard checker.isWordValid(first.uppercased() + lower.dropFirst()), !checker.isWordValid(lower) else { return false }
+        return !(language == .german && germanNouns?.capitalises(lower, after: nil) == true)
+    }
+
+    /// Whether `token` has a vowel. iOS's French and German dictionaries take abbreviations
+    /// without one ("dk", "dl", "tkm"), which beside English kept its slips ("Tkm" for "Tom"),
+    /// so a partner's word without a vowel doesn't count as a word. Serbian's vowelless words
+    /// ("prst") never meet this: it has no dictionary, so it is never a partner.
+    static func hasVowel(_ token: String) -> Bool {
+        token.lowercased().folding(options: .diacriticInsensitive, locale: nil).contains { "aeiouy".contains($0) }
+    }
+
+    /// ALL-CAPS ("API") or with capitals inside ("iOS"), which Spatial autocorrect leaves alone.
+    private func isAllCapsOrMixed(_ token: String) -> Bool {
+        token.dropFirst().contains(where: \.isUppercase)
+    }
+
+    /// A fix this language makes of `token` even where the other one knows the word: a
+    /// contraction typed without its apostrophe or a common slip (`unambiguousFixes`: "dont",
+    /// "im"), or a two-letter word ("dk" -> "do"), which in the other dictionary is mostly an
+    /// abbreviation. Longer words of the other language ("est", "merci") stay as typed.
+    private func isSureFix(_ token: String) -> Bool {
+        token.count == 2 || (language.usesEnglishFixes && Self.unambiguousFixes[token.lowercased()] != nil)
+    }
+
+    /// Bilingual autocorrect: `word`, which the partner's dictionary knew, was left as typed
+    /// at a sentence's start (no words before to tell the languages apart), and `next` now
+    /// leans this language (`languageLean`): its sure fix (`unambiguousFixes`), as "Im
+    /// going" becomes "I'm going" and "Dont do" "Don't do", while German "Im Haus" stays.
+    private func bilingualRevision(of word: String, before: String, next: String) -> String? {
+        guard let partner = workingPartner, language.usesEnglishFixes, !word.contains("'"),
+              let fixed = Self.unambiguousFixes[word.lowercased()], word.count >= 2 else { return nil }
+        let lower = word.lowercased()
+        guard !suppressedInSession.contains(lower), !learning.rejected.contains(lower), !learnedWords.contains(lower),
+              partner.knowsAsTyped(word), next.count >= 2, languageLean(partner, before: next, commonFrom: 2) < 0 else { return nil }
+        let rest = before.hasSuffix(word) ? String(before.dropLast(word.count)) : before
+        guard languageLean(partner, before: rest) == 0, mayOffer(fixed, after: Self.previousWord(before, token: word)) else { return nil }
+        return withoutAddedCapitals(Self.matchCase(of: word, onto: fixed), typed: word)
     }
 
     /// Whether `token` is a word in this language as typed: the dictionary's, one of your
@@ -773,23 +836,49 @@ final class AutocorrectEngine {
     }
 
     /// Which language the words before `token` are in: above zero the partner's, below this
-    /// one's, counting the last four that only one of the dictionaries knows.
+    /// one's, counting the last four that only one of the dictionaries knows, or, of three
+    /// letters or more, that both know but only one language's typing model has among its
+    /// common words: iOS's French and German dictionaries take "the", "you", "your", "not"
+    /// and "please" (iOS 27.2 simulator), so English sentences rarely leaned English.
     private func languageLean(_ partner: AutocorrectEngine, token: String) -> Int {
         let before = (beforeInput ?? "").suffix(120)
-        let rest = before.hasSuffix(token) ? before.dropLast(token.count) : before
+        return languageLean(partner, before: String(before.hasSuffix(token) ? before.dropLast(token.count) : before))
+    }
+
+    /// `commonFrom`: the fewest letters a word both dictionaries know needs to count by the
+    /// typing models. Three, as French "de", "la" and "et" are common in the English model's
+    /// books, except for the word after a sentence's first (`bilingualRevision`: "Im in").
+    private func languageLean(_ partner: AutocorrectEngine, before: String, commonFrom: Int = 3) -> Int {
         var lean = 0
-        for word in rest.split(whereSeparator: { !$0.isLetter && $0 != "'" }).suffix(4) where word.count >= 2 {
+        for word in before.suffix(120).split(whereSeparator: { !$0.isLetter && $0 != "'" }).suffix(4) where word.count >= 2 {
             let mine = checker.isWordValid(String(word))
             let theirs = partner.checker.isWordValid(String(word))
-            if theirs && !mine { lean += 1 } else if mine && !theirs { lean -= 1 }
+            if theirs && !mine {
+                lean += 1
+            } else if mine && !theirs {
+                lean -= 1
+            } else if mine, word.count >= commonFrom {
+                let myCommon = isCommon(String(word))
+                if myCommon != partner.isCommon(String(word)) { lean += myCommon ? -1 : 1 }
+            }
         }
         return lean
     }
 
+    /// Whether this language's typing model (`contextModel`, else Spatial autocorrect's)
+    /// has `word` among its commonest, about the top 2,000 (-ln P at most 10 nats: English
+    /// "please" 9.25, "capable" 9.9). False without a model for the language.
+    private func isCommon(_ word: String) -> Bool {
+        guard let model = contextModel ?? decoder?.model, model.language == language.rawValue,
+              let index = model.index(of: word.lowercased()) else { return false }
+        return model.unigramCost(index) <= Self.commonWordCost
+    }
+
+    static let commonWordCost = 10.0
+
     /// Both languages can fix the typo: the partner's fix when the words before are in its
     /// language, or, without a lean, when its fix is clearly the cheaper slip on these keys.
-    private func prefersPartner(_ partner: AutocorrectEngine, token: String, own: String, theirs: String) -> Bool {
-        let lean = languageLean(partner, token: token)
+    private func prefersPartner(_ lean: Int, token: String, own: String, theirs: String) -> Bool {
         if lean != 0 { return lean > 0 }
         let lower = token.lowercased()
         func cost(_ fix: String) -> Double {
@@ -951,12 +1040,13 @@ final class AutocorrectEngine {
     /// What spatial autocorrect makes of `token`'s taps, or nil when it doesn't apply: off,
     /// another language's model, an apostrophe or one letter typed, a letter the model lacks,
     /// or taps that don't match the word.
-    private func decoderDecision(for token: String) -> TypingDecoder.Decision? {
+    /// `partnerWord`: the bilingual partner knows `token` as typed, so it counts as a word.
+    private func decoderDecision(for token: String, partnerWord: Bool = false) -> TypingDecoder.Decision? {
         syncUserWords()
         guard let decoder, let keys = decoderKeys, let taps = decoderTaps, decoder.model.language == language.rawValue,
               token.count >= 2, taps.count == token.count, !token.contains("'") else { return nil }
         let before = beforeInput ?? ""
-        if let cache = decoderCache, cache.before == before, cache.taps == taps { return cache.decision }
+        if let cache = decoderCache, cache.before == before, cache.taps == taps, cache.partnerWord == partnerWord { return cache.decision }
         let lower = token.lowercased()
         // Whether what you typed is a word at all, which `properNoun` already answers for a noun
         // the dictionary knows only capitalised. German's list only decides the capital its
@@ -964,7 +1054,7 @@ final class AutocorrectEngine {
         // here.
         let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower)
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
-            || properNoun(for: token) != nil
+            || properNoun(for: token) != nil || partnerWord
         let previous = Self.previousWord(before, token: token)
         var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
         if let baseline = decoderBaselineKeys, let replacement = decision?.replacement {
@@ -983,7 +1073,7 @@ final class AutocorrectEngine {
                 decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)?.replacement
             }
         }
-        decoderCache = (before, taps, decision)
+        decoderCache = (before, taps, partnerWord, decision)
         return decision
     }
 
@@ -1122,6 +1212,7 @@ final class AutocorrectEngine {
         let isAllCaps = word == word.uppercased() && word != word.lowercased() && !word.hasPrefix("I'")
         guard !isAllCaps, let nextWord = next.split(separator: " ").first.map(String.init) else { return nil }
         let previous = Self.previousWord(before, token: word)
+        if let fixed = bilingualRevision(of: word, before: before, next: nextWord) { return fixed }
         guard let choice = contextChoice(
             for: word, previous: previous, next: nextWord.lowercased(),
             startsSentence: Self.startsSentence(before: before, token: word)
