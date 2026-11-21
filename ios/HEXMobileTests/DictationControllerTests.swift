@@ -1719,6 +1719,219 @@ final class DictationControllerTests: XCTestCase {
         try? FileManager.default.removeItem(at: url)
     }
 
+    // MARK: - Which engine dictates (SpeechEngineChoice)
+
+    private static let gigabyte: UInt64 = 1 << 30
+
+    /// An iPhone XR reports 2.8 GB; a 6 GB iPhone about 5.5 GB.
+    private func device(
+        system: Int = 18,
+        memory: UInt64 = 5_500 << 20,
+        available: UInt64 = 0,
+        setAside: Bool = false
+    ) -> SpeechEngineChoice {
+        SpeechEngineChoice(system: system, physicalMemory: memory, availableMemory: available, parakeetSetAside: setAside)
+    }
+
+    func testBeforeIOS26EnglishStaysOnParakeetOnlyWhereItHasRoom() {
+        XCTAssertEqual(device().engine(for: "en-US", appleSpeechPicks: false), .parakeet, "a 6 GB iPhone on iOS 18, as before")
+        XCTAssertEqual(device().engine(for: nil, appleSpeechPicks: false), .parakeet, "no language reads as English")
+        XCTAssertEqual(device(available: 3 * Self.gigabyte).engine(for: "en-GB", appleSpeechPicks: false), .parakeet)
+        XCTAssertEqual(
+            device(memory: 2_813 << 20).engine(for: "en-US", appleSpeechPicks: false),
+            .onDeviceRecognizer,
+            "iPhone XR, 3 GB: iOS ended Hex while Parakeet loaded (build 56)"
+        )
+        XCTAssertEqual(device(memory: 3 * Self.gigabyte).engine(for: "en-US", appleSpeechPicks: false), .onDeviceRecognizer)
+        XCTAssertEqual(
+            device(memory: 3_700 << 20, available: 1_100 << 20).engine(for: "en-US", appleSpeechPicks: false),
+            .onDeviceRecognizer,
+            "less left than loading Parakeet takes"
+        )
+        XCTAssertEqual(
+            device(memory: 3_700 << 20, available: 1_900 << 20).engine(for: "en-US", appleSpeechPicks: false),
+            .parakeet
+        )
+    }
+
+    func testBeforeIOS26EveryOtherLanguageGoesToTheOnDeviceRecognizer() {
+        for language in ["zh-CN", "zh-Hans-CN", "es-ES", "fr-FR", "ja-JP"] {
+            XCTAssertEqual(device(memory: 8 * Self.gigabyte).engine(for: language, appleSpeechPicks: false), .onDeviceRecognizer, language)
+        }
+        XCTAssertNil(device().notice(for: "zh-CN"), "nothing to say: Parakeet never had Chinese")
+        XCTAssertNil(device(memory: 2_813 << 20).notice(for: "en-US"), "nor on an iPhone it never fit")
+    }
+
+    func testFromIOS26TheRecognizerIsNeverPickedSoSpeechRecognitionIsNeverAsked() async {
+        for system in [26, 27] {
+            for memory in [2_813 << 20, 3_700 << 20, 5_500 << 20] as [UInt64] {
+                for setAside in [false, true] {
+                    for language in ["en-US", "zh-CN", nil] as [String?] {
+                        let choice = device(system: system, memory: memory, available: 1 << 20, setAside: setAside)
+                        XCTAssertEqual(choice.engine(for: language, appleSpeechPicks: true), .appleSpeech)
+                        XCTAssertEqual(choice.engine(for: language, appleSpeechPicks: false), .parakeet)
+                        XCTAssertNil(choice.notice(for: language))
+                    }
+                }
+            }
+        }
+        XCTAssertTrue(device(system: 26, memory: 5_500 << 20).parakeetFitsBesideAppleSpeech)
+        XCTAssertFalse(device(system: 26, memory: 3_700 << 20).parakeetFitsBesideAppleSpeech, "iPhone 11, as before")
+        XCTAssertFalse(device(system: 26, setAside: true).parakeetFitsBesideAppleSpeech, "Apple Speech after a load that ended Hex")
+        XCTAssertFalse(device(system: 26, available: 1 << 30).parakeetFitsBesideAppleSpeech)
+        if #available(iOS 26.0, *) {
+            // Only `OnDeviceSpeechTranscriber.prepare` asks for Speech Recognition; iOS 26's
+            // default engine is never it, whatever this iPhone's languages.
+            let transcriber = await DictationController.defaultTranscriber()
+            XCTAssertFalse(transcriber is OnDeviceSpeechTranscriber, "\(type(of: transcriber))")
+        }
+    }
+
+    func testAParakeetLoadThatEndedHexMovesEnglishToTheRecognizerBeforeIOS26() {
+        let loads = ParakeetLoadGuard(defaults: defaults)
+        loads.begin()
+        let nextLaunch = ParakeetLoadGuard(defaults: defaults)
+        nextLaunch.noteLaunch()
+        let choice = device(setAside: nextLaunch.lastLoadWasInterrupted)
+        XCTAssertEqual(choice.engine(for: "en-US", appleSpeechPicks: false), .onDeviceRecognizer)
+        XCTAssertEqual(
+            choice.notice(for: "en-US"),
+            "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead."
+        )
+        let transcriber = DictationController.transcriberBeforeAppleSpeech(choice: choice, suite: suiteName, resolve: { _ in "en-US" })
+        XCTAssertTrue(transcriber is OnDeviceSpeechTranscriber)
+        XCTAssertTrue(DictationController.transcriberBeforeAppleSpeech(choice: device(), suite: suiteName) is ParakeetTranscriber)
+
+        // Too little memory at the load counts the same way, before anything loads.
+        let fresh = ParakeetLoadGuard(defaults: UserDefaults(suiteName: "\(suiteName).fresh")!)
+        fresh.setAside()
+        XCTAssertTrue(fresh.lastLoadWasInterrupted)
+        UserDefaults(suiteName: "\(suiteName).fresh")!.removePersistentDomain(forName: "\(suiteName).fresh")
+        XCTAssertTrue(ParakeetTranscriber.hasRoomToLoad(available: 0), "the simulator says nothing")
+        XCTAssertFalse(ParakeetTranscriber.hasRoomToLoad(available: 1_200 << 20))
+        XCTAssertTrue(ParakeetTranscriber.hasRoomToLoad(available: 2 << 30))
+    }
+
+    func testParakeetWithoutRoomPreparesApplesEngineInsteadOfLoading() async throws {
+        let apple = ControlledTranscriber()
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: apple,
+            transcriberFactory: {
+                made += 1
+                return made == 1 ? UnpreparableTranscriber(error: ParakeetTranscriber.TranscriberError.notEnoughMemory) : apple
+            },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(made, 2, "prepared again with what Hex picks now")
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertEqual(
+            controller.languageNotice,
+            "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead."
+        )
+    }
+
+    func testTheRecognizerAsksForSpeechRecognitionOnlyAsItGetsReady() async throws {
+        let access = CountingSpeechAccess(answer: .denied)
+        let xr = device(memory: 2_813 << 20)
+        let transcriber = DictationController.transcriberBeforeAppleSpeech(
+            choice: xr,
+            suite: suiteName,
+            access: access.access,
+            resolve: { _ in "zh-CN" }
+        )
+        XCTAssertEqual(access.requests, 0, "picking the engine asks nothing")
+        let details = DetailLog()
+        do {
+            try await transcriber.prepare { details.append($0.detail) }
+            XCTFail("prepared without Speech Recognition")
+        } catch {
+            XCTAssertEqual(error as? OnDeviceSpeechTranscriber.TranscriberError, .notAllowed)
+            XCTAssertEqual(
+                UserFacingError.message(for: error, context: .model),
+                "Allow Speech Recognition for Hex in Settings. It runs on this iPhone."
+            )
+        }
+        XCTAssertEqual(access.requests, 1)
+        XCTAssertEqual(
+            details.values,
+            ["Checking Apple's on-device speech", "Allow Speech Recognition. It stays on this iPhone."],
+            "says it stays on the iPhone before iOS asks"
+        )
+        let languageID = await transcriber.languageIdentifier
+        XCTAssertEqual(languageID, "zh-CN")
+
+        // English on an iPhone Parakeet fits never asks at all.
+        let parakeet = DictationController.transcriberBeforeAppleSpeech(choice: device(), suite: suiteName, access: access.access)
+        XCTAssertTrue(parakeet is ParakeetTranscriber)
+        XCTAssertEqual(access.requests, 1)
+        XCTAssertTrue(OnDeviceSpeechTranscriber.isNoSpeech(NSError(domain: "kAFAssistantErrorDomain", code: 1110)))
+    }
+
+    func testTheRecognizerFindsChineseAndEnglishAsAppleListsThem() {
+        let supported = ["en-AU", "en-GB", "en-IN", "en-US", "fr-CA", "fr-FR", "yue-CN", "zh-CN", "zh-HK", "zh-TW"]
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("zh-Hans-CN", in: supported), "zh-CN", "a Simplified Chinese iPhone")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("zh-Hans", in: supported), "zh-CN")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("zh-Hant-TW", in: supported), "zh-TW")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("zh-Hant", in: supported), "zh-TW")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("zh-Hant-HK", in: supported), "zh-HK")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("en-GB", in: supported), "en-GB")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("en", in: supported), "en-US")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("en-NZ", in: supported), "en-US")
+        XCTAssertEqual(OnDeviceSpeechLanguages.match("fr-BE", in: supported), "fr-FR")
+        XCTAssertNil(OnDeviceSpeechLanguages.match("he-IL", in: supported))
+
+        let languages = LanguageSettings(defaults: defaults)
+        let onDevice: (String) -> Bool = { $0 != "fr-CA" }
+        XCTAssertEqual(
+            OnDeviceSpeechLanguages.resolve(settings: languages, preferred: ["zh-Hans-CN", "en-CN"], supported: supported, onDevice: onDevice),
+            "zh-CN"
+        )
+        XCTAssertEqual(
+            OnDeviceSpeechLanguages.resolve(settings: languages, preferred: ["he-IL", "fr-CA"], supported: supported, onDevice: onDevice),
+            "en-US",
+            "neither Hebrew nor Canadian French on device: English, which every iPhone on iOS 18 has"
+        )
+        languages.markUnavailable("zh-CN")
+        XCTAssertEqual(
+            OnDeviceSpeechLanguages.resolve(settings: languages, preferred: ["zh-Hans-CN", "en-CN"], supported: supported, onDevice: onDevice),
+            "en-US",
+            "Automatic passes over a language set aside"
+        )
+        languages.chooseDictationLanguage("zh-Hans-CN")
+        XCTAssertEqual(
+            OnDeviceSpeechLanguages.resolve(settings: languages, preferred: ["en-US"], supported: supported, onDevice: onDevice),
+            "zh-CN",
+            "a choice made by hand is tried as it is"
+        )
+    }
+
+    func testBeforeIOS26ATranslationWithoutHexsWindowSaysSo() async {
+        XCTAssertEqual(DictationTranslator.reason(for: TranslationEngine.NoSession()), .needsHexOpen)
+        let failure = TranslationFailure(.needsHexOpen, source: Locale.Language(identifier: "zh"), target: Locale.Language(identifier: "en"))
+        XCTAssertEqual(failure.fix, "iOS 18 translates only with Hex open")
+        XCTAssertLessThanOrEqual(failure.fix.count, 40, "fits the keyboard's second line")
+
+        let settings = DictationTranslationSettings(defaults: defaults)
+        settings.isEnabled = true
+        settings.targetLanguage = "en"
+        let stub = StubTranslator()
+        stub.replies = [.failure(TranslationEngine.NoSession()), .failure(TranslationEngine.NoSession())]
+        let outcome = await DictationTranslator.translate(
+            "我们明天见。",
+            source: Locale.Language(identifier: "zh-CN"),
+            settings: settings,
+            engine: stub.engine
+        )
+        XCTAssertEqual(outcome.failure?.reason, .needsHexOpen)
+        XCTAssertEqual(stub.inputs.count, 1, "not tried again: another wait wouldn't bring a session")
+        XCTAssertEqual(settings.lastFailure?.reason, .needsHexOpen, "Settings says why")
+    }
+
     /// `twice` lets the warm session loop (every 100 ms) look at least twice.
     private func settle(twice: Bool = false) async throws {
         for _ in 0..<(twice ? 16 : 8) {
@@ -2420,4 +2633,39 @@ final class AudioSessionSetupTests: XCTestCase {
             .active(false, .notifyOthersOnDeactivation),
         ])
     }
+}
+
+/// Counts Speech Recognition requests and answers each with `answer`.
+private final class CountingSpeechAccess: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    private var status: SFSpeechRecognizerAuthorizationStatus = .notDetermined
+    let answer: SFSpeechRecognizerAuthorizationStatus
+
+    init(answer: SFSpeechRecognizerAuthorizationStatus) {
+        self.answer = answer
+    }
+
+    var requests: Int { lock.withLock { count } }
+
+    var access: SpeechRecognitionAccess {
+        SpeechRecognitionAccess(
+            status: { self.lock.withLock { self.status } },
+            request: {
+                self.lock.withLock {
+                    self.count += 1
+                    self.status = self.answer
+                    return self.answer
+                }
+            }
+        )
+    }
+}
+
+private final class DetailLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stored: [String] = []
+
+    func append(_ value: String) { lock.withLock { stored.append(value) } }
+    var values: [String] { lock.withLock { stored } }
 }

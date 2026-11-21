@@ -259,31 +259,7 @@ final class DictationController {
         }
 
         if autoPrepareOnInit {
-            // A launch after Hex ended while loading Parakeet doesn't load it again by itself,
-            // or it would end the same way at every launch.
-            let parakeetLoads = ParakeetLoadGuard()
-            parakeetLoads.noteLaunch()
-            let parakeetInterrupted = parakeetLoads.lastLoadWasInterrupted
-            if hasCachedModel && !parakeetInterrupted {
-                engineName = "Parakeet V2"
-                prepareModel()
-            } else if #available(iOS 26.0, *) {
-                Task { [weak self] in
-                    guard let self else { return }
-                    if await Self.appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) != nil {
-                        self.engineName = "Apple Speech"
-                        self.prepareModel()
-                    } else {
-                        self.engineName = "Parakeet V2"
-                        if hasCachedModel {
-                            self.phase = .failed(ParakeetLoadGuard.message)
-                        }
-                    }
-                }
-            } else if hasCachedModel {
-                engineName = "Parakeet V2"
-                phase = .failed(ParakeetLoadGuard.message)
-            }
+            prepareAtLaunch(hasCachedModel: hasCachedModel)
         }
     }
 
@@ -738,9 +714,10 @@ final class DictationController {
             } catch {
                 guard self.modelPrepGeneration == prepGen else { return }
                 let unavailable = error as? SpeechModelUnavailable
-                if let unavailable, unavailable.switchedAutomatically, fallbacksLeft > 0 {
-                    // Automatic set the language aside: prepare the one it picks now.
-                    self.languageNotice = UserFacingError.message(for: unavailable, context: .model)
+                if fallbacksLeft > 0, let notice = Self.switchNotice(for: error) {
+                    // Automatic set the language aside, or Parakeet had no room: prepare what
+                    // Hex picks now.
+                    self.languageNotice = notice
                     self.prepareModel(fallbacksLeft: fallbacksLeft - 1)
                     return
                 }
@@ -772,35 +749,6 @@ final class DictationController {
     nonisolated static func isDownloadInterruption(_ error: Error) -> Bool {
         if error is StallWatch.Stalled || error is URLError { return true }
         return (error as? ParakeetTranscriber.TranscriberError) == .downloadFailed
-    }
-
-    private static func defaultTranscriber() async -> any LocalTranscribing {
-        if #available(iOS 26.0, *),
-           let language = await appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) {
-            return AppleSpeechTranscriber(language: language)
-        }
-        return ParakeetTranscriber()
-    }
-
-    /// The language Apple Speech dictates in, or nil for Parakeet V2, which knows only
-    /// English: Apple Speech's pick, unless it is English that Parakeet takes
-    /// (`AppleSpeechTranscriber.shouldUse`). With no pick (Speech not answering), English goes
-    /// to Parakeet and any other language (`wanted`: the one set, else the keyboard's
-    /// Automatic follows, else the iPhone's) stays on Apple Speech, which says it can't
-    /// dictate it rather than Parakeet hearing Spanish as English words.
-    @available(iOS 26.0, *)
-    nonisolated static func appleSpeechLanguage(
-        picked: SpeechLanguage?,
-        wanted: String? = LanguageSettings().dictationLanguage
-            ?? LanguageSettings().keyboardDictationLanguage()
-            ?? Locale.preferredLanguages.first,
-        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
-    ) -> SpeechLanguage? {
-        if let picked {
-            return AppleSpeechTranscriber.shouldUse(picked, parakeetFits: parakeetFits) ? picked : nil
-        }
-        guard let wanted, !SpeechLanguagePicker.isEnglish(wanted) else { return nil }
-        return SpeechLanguage(locale: Locale(identifier: wanted), module: .dictation)
     }
 
     // MARK: - Capture & Generation-Scoped Transcription

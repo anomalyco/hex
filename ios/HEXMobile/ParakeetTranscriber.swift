@@ -35,6 +35,7 @@ actor ParakeetTranscriber: LocalTranscribing {
         case notPrepared
         case emptyTranscript
         case downloadFailed
+        case notEnoughMemory
 
         var errorDescription: String? {
             switch self {
@@ -44,6 +45,8 @@ actor ParakeetTranscriber: LocalTranscribing {
                 String(localized: "Parakeet did not detect any speech.")
             case .downloadFailed:
                 String(localized: "Parakeet V2 didn't download. Check your connection and try again.")
+            case .notEnoughMemory:
+                String(localized: "Parakeet V2 needs more memory than Hex has here.")
             }
         }
     }
@@ -52,6 +55,18 @@ actor ParakeetTranscriber: LocalTranscribing {
     /// 5.5 GB, 4 GB ones (iPhone 11, 12, 13) under 4 GB.
     nonisolated static var fitsInMemory: Bool {
         ProcessInfo.processInfo.physicalMemory >= 5 << 30
+    }
+
+    /// What loading Parakeet V2 takes in Hex: its encoder is 425 MB on disk, 6-bit palettized,
+    /// and 1.19 GB of 16-bit weights once Core ML compiles it (the simulator's compiled program),
+    /// which an iPhone's Neural Engine holds unpacked before the A17; then the other three
+    /// models and a first transcription (70 MB more in the simulator).
+    nonisolated static let loadMemory: UInt64 = 1_400 << 20
+
+    /// Whether `available` (`os_proc_available_memory`) leaves room to load it. 0 means iOS
+    /// didn't say (the simulator).
+    nonisolated static func hasRoomToLoad(available: UInt64) -> Bool {
+        available == 0 || available >= loadMemory
     }
 
     /// How long the download may sit at one fraction before Hex stops waiting. Core ML's
@@ -96,6 +111,11 @@ actor ParakeetTranscriber: LocalTranscribing {
         // Only the load, where iOS can end Hex short of memory, counts for the guard: a
         // download cut off by a quit or a suspended app ending resumes at the next one.
         let loads = ParakeetLoadGuard()
+        // Too little left to load it: Hex would end, so it takes another engine instead.
+        guard Self.hasRoomToLoad(available: UInt64(max(0, os_proc_available_memory()))) else {
+            loads.setAside()
+            throw TranscriberError.notEnoughMemory
+        }
         loads.begin()
         var loaded = false
         defer { loads.end(loaded: loaded) }
@@ -325,8 +345,9 @@ nonisolated struct ParakeetCompileRecord {
 
 /// Notes a Parakeet load that ended with Hex itself. iOS ends an app that passes its memory
 /// limit while Core ML compiles the model (an iPhone 11 sat at "50%", then closed), and a
-/// launch that loaded it again at once ended the same way every time. After that, Hex waits
-/// for a tap on Set up instead of loading it at launch. In the app's own defaults.
+/// launch that loaded it again at once ended the same way every time. After that, Hex takes
+/// another engine (`SpeechEngineChoice`): Apple's, where it has the language, else it waits
+/// for a tap on Set up instead of loading Parakeet at launch. In the app's own defaults.
 nonisolated struct ParakeetLoadGuard {
     private static let loadingKey = "parakeet.loadStartedAt"
     private static let interruptedKey = "parakeet.loadInterrupted"
@@ -352,6 +373,12 @@ nonisolated struct ParakeetLoadGuard {
 
     func begin() {
         defaults.set(Date().timeIntervalSince1970, forKey: Self.loadingKey)
+    }
+
+    /// Too little memory left to load Parakeet: counts as an interrupted load, so Hex picks
+    /// another engine (`SpeechEngineChoice`) instead of loading it.
+    func setAside() {
+        defaults.set(true, forKey: Self.interruptedKey)
     }
 
     /// A load that returned, loaded or not; only a loaded one clears the interruption.

@@ -2,8 +2,8 @@ import SwiftUI
 import UIKit
 
 /// Settings › Dictation language: Automatic, the first iPhone language Apple Speech
-/// transcribes, or any language `SpeechTranscriber` or `DictationTranscriber` has. Shown
-/// on iOS 26, where Hex dictates with Apple Speech; before it, Parakeet is English only.
+/// transcribes, or any language `SpeechTranscriber` or `DictationTranscriber` has (before
+/// iOS 26, any language Apple's recognizer has on the iPhone: `OnDeviceSpeechLanguages`).
 /// Remove from keyboard takes a language off the keyboard's quick switch.
 struct DictationLanguageRow: View {
     @Bindable var dictation: DictationController
@@ -11,81 +11,99 @@ struct DictationLanguageRow: View {
     @State private var automaticName: String?
     /// The keyboard's quick switch (`LanguageSettings.keyboardLanguageChoices`).
     @State private var keyboardChoices: [String] = []
+    /// Before iOS 26: where the languages come from.
+    @State private var listsOnDeviceLanguages = false
 
     var body: some View {
-        if #available(iOS 26.0, *) {
-            VStack(spacing: 0) {
-                LanguageRowDivider()
-                HStack(spacing: 12) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Dictation language")
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(HexTheme.textBase)
-                        if dictation.dictationLanguage == nil, let automaticName {
-                            Text(automaticName)
-                                .font(.system(size: 12))
-                                .foregroundStyle(HexTheme.textMuted)
-                                .lineLimit(1)
-                        }
+        VStack(spacing: 0) {
+            LanguageRowDivider()
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Dictation language")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(HexTheme.textBase)
+                    if dictation.dictationLanguage == nil, let automaticName {
+                        Text(automaticName)
+                            .font(.system(size: 12))
+                            .foregroundStyle(HexTheme.textMuted)
+                            .lineLimit(1)
                     }
-                    Spacer(minLength: 8)
-                    Menu {
-                        Button {
-                            dictation.setDictationLanguage(nil)
-                        } label: {
-                            if dictation.dictationLanguage == nil {
-                                Label("Automatic", systemImage: "checkmark")
-                            } else {
-                                Text("Automatic")
-                            }
-                        }
-                        if !keyboardChoices.isEmpty {
-                            // The keyboard's quick switch: take a language off it here too.
-                            Menu("Remove from keyboard") {
-                                ForEach(keyboardChoices, id: \.self) { id in
-                                    Button(role: .destructive) {
-                                        let settings = LanguageSettings()
-                                        settings.removeDictationLanguage(id)
-                                        if dictation.dictationLanguage != nil, settings.dictationLanguage == nil {
-                                            dictation.setDictationLanguage(nil)
-                                        }
-                                        keyboardChoices = settings.keyboardLanguageChoices()
-                                    } label: {
-                                        Text(name(for: id))
-                                    }
-                                }
-                            }
-                        }
-                        Divider()
-                        ForEach(options) { option in
-                            Button {
-                                dictation.setDictationLanguage(option.id)
-                            } label: {
-                                if dictation.dictationLanguage == option.id {
-                                    Label(option.name, systemImage: "checkmark")
-                                } else {
-                                    Text(option.name)
-                                }
-                            }
-                        }
+                }
+                Spacer(minLength: 8)
+                Menu {
+                    Button {
+                        dictation.setDictationLanguage(nil)
                     } label: {
-                        LanguageMenuValue(value: selectedName)
+                        if dictation.dictationLanguage == nil {
+                            Label("Automatic", systemImage: "checkmark")
+                        } else {
+                            Text("Automatic")
+                        }
                     }
+                    if !keyboardChoices.isEmpty {
+                        // The keyboard's quick switch: take a language off it here too.
+                        Menu("Remove from keyboard") {
+                            ForEach(keyboardChoices, id: \.self) { id in
+                                Button(role: .destructive) {
+                                    let settings = LanguageSettings()
+                                    settings.removeDictationLanguage(id)
+                                    if dictation.dictationLanguage != nil, settings.dictationLanguage == nil {
+                                        dictation.setDictationLanguage(nil)
+                                    }
+                                    keyboardChoices = settings.keyboardLanguageChoices()
+                                } label: {
+                                    Text(name(for: id))
+                                }
+                            }
+                        }
+                    }
+                    Divider()
+                    ForEach(options) { option in
+                        Button {
+                            dictation.setDictationLanguage(option.id)
+                        } label: {
+                            if dictation.dictationLanguage == option.id {
+                                Label(option.name, systemImage: "checkmark")
+                            } else {
+                                Text(option.name)
+                            }
+                        }
+                    }
+                } label: {
+                    LanguageMenuValue(value: selectedName)
                 }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 48)
             }
-            .onChange(of: dictation.dictationLanguage) { _, _ in
-                keyboardChoices = LanguageSettings().keyboardLanguageChoices()
+            .padding(.horizontal, 16)
+            .frame(minHeight: 48)
+            if listsOnDeviceLanguages {
+                Text("The languages Apple's on-device speech has on this iPhone. One shows here once its keyboard and dictation are on in Settings › General › Keyboard.")
+                    .font(.system(size: 12))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
             }
-            .task {
-                // The keyboard may have switched the language while Hex was away.
-                dictation.followDictationLanguageSetting()
-                options = await AppleSpeechLanguages.options()
-                keyboardChoices = LanguageSettings().keyboardLanguageChoices()
-                automaticName = await AppleSpeechLanguages.automatic().map {
-                    HinglishSettings().name(for: $0.identifier) ?? SpeechLanguagePicker.displayName(for: $0.identifier)
-                }
+        }
+        .onChange(of: dictation.dictationLanguage) { _, _ in
+            guard #available(iOS 26.0, *) else { return }
+            keyboardChoices = LanguageSettings().keyboardLanguageChoices()
+        }
+        .task {
+            // The keyboard may have switched the language while Hex was away.
+            dictation.followDictationLanguageSetting()
+            guard #available(iOS 26.0, *) else {
+                // Apple's on-device recognizer (OnDeviceSpeechTranscriber); the keyboard's quick
+                // switch is iOS 26's.
+                options = OnDeviceSpeechLanguages.options()
+                listsOnDeviceLanguages = true
+                automaticName = OnDeviceSpeechLanguages.automatic().map { SpeechLanguagePicker.displayName(for: $0) }
+                return
+            }
+            options = await AppleSpeechLanguages.options()
+            keyboardChoices = LanguageSettings().keyboardLanguageChoices()
+            automaticName = await AppleSpeechLanguages.automatic().map {
+                HinglishSettings().name(for: $0.identifier) ?? SpeechLanguagePicker.displayName(for: $0.identifier)
             }
         }
     }

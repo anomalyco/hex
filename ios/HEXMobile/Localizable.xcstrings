@@ -14,12 +14,52 @@
         }
       }
     },
+    "Checking Apple's on-device speech" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 Apple 的设备端语音识别"
+          }
+        }
+      }
+    },
+    "Allow Speech Recognition. It stays on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请允许语音识别。识别全程在这台 iPhone 上进行。"
+          }
+        }
+      }
+    },
+    "Allow Speech Recognition for Hex in Settings. It runs on this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“设置”中允许 Hex 使用语音识别。识别在这台 iPhone 上进行。"
+          }
+        }
+      }
+    },
     "Couldn't translate the last dictation. If it keeps happening, reinstall Apple's Translate app." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "上一次听写未能翻译。如果反复出现，请重新安装 Apple 的“翻译” App。"
+          }
+        }
+      }
+    },
+    "iOS 18 couldn't translate the last dictation while Hex was in the background. Dictations you finish in Hex translate." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 在后台时，iOS 18 未能翻译上一次听写。在 Hex 中完成的听写会被翻译。"
           }
         }
       }
@@ -60,6 +100,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在设置中重新下载%@"
+          }
+        }
+      }
+    },
+    "iOS 18 translates only with Hex open" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 18 仅在 Hex 打开时翻译"
           }
         }
       }
@@ -1000,6 +1050,16 @@
         }
       }
     },
+    "The languages Apple's on-device speech has on this iPhone. One shows here once its keyboard and dictation are on in Settings › General › Keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 设备端语音识别在这台 iPhone 上支持的语言。在“设置”›“通用”›“键盘”中打开某种语言的键盘和听写后，它就会显示在这里。"
+          }
+        }
+      }
+    },
     "Dictation language: %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1935,6 +1995,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Parakeet V2 未能下载。请检查网络连接后重试。"
+          }
+        }
+      }
+    },
+    "Parakeet V2 needs more memory than Hex has here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet V2 需要的内存比 Hex 在这台 iPhone 上可用的更多。"
+          }
+        }
+      }
+    },
+    "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet 需要的内存比 Hex 在这台 iPhone 上可用的更多，Hex 改用 Apple 的设备端语音识别。"
           }
         }
       }
@@ -3001,6 +3081,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "语音模型下载完成前，听写无法使用。"
+          }
+        }
+      }
+    },
+    "Dictation won't work until speech recognition is ready." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音识别就绪前，听写无法使用。"
           }
         }
       }

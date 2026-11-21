@@ -76,6 +76,14 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .background {
+            // Translate what I say's session before iOS 26 (TranslationSessionHost).
+            if #available(iOS 26.0, *) {
+                EmptyView()
+            } else {
+                TranslationSessionHostView()
+            }
+        }
         .task { keyboardSpeech.start { dictation.engineName } }
         .animation(HexMotion.reducedFade, value: openedFromKeyboard)
         .animation(HexMotion.reducedFade, value: onboardingPage == nil)

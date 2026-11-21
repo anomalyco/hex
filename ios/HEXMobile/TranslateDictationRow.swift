@@ -77,6 +77,11 @@ struct TranslateDictationRow: View {
                         .foregroundStyle(HexTheme.textMuted)
                 } else {
                 switch status {
+                case .installed where lastFailure?.reason == .needsHexOpen:
+                    // Before iOS 26 the session lives in Hex's window (TranslationSessionHost).
+                    Text("iOS 18 couldn't translate the last dictation while Hex was in the background. Dictations you finish in Hex translate.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
                 case .installed where lastFailure?.reason == .failed:
                     // Apple's own pack is there but translating failed, as when its Translate
                     // app was removed.
