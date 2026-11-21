@@ -2,6 +2,16 @@
 
 **On the same iOS R1 word models and synthetic taps, Android with its default suggestion filter has 135 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
 
+## Against today's iOS engine
+
+The same 2,000 held-out English and Spanish sentences, typed by today's iOS engine (`origin/dev` 96b4f365, Spatial autocorrect on, iPhone 17 simulator, its taps moved onto today's layout key by key) and by the Android replay. German and Bokmål have their own 2,000-sentence sets ([synthetic_de_nb.py](synthetic_de_nb.py)): held-out Tatoeba sentences typed with the same touch model on Android's eleven-key rows at a 36 pt pitch. iOS ships no Bokmål model and keeps German's behind an experiment, so those two have no iOS column.
+
+| Engine | English errors (WER) | Spanish | German | Bokmål |
+|---|---:|---:|---:|---:|
+| iOS today | 798 (5.75%) | 1,205 (9.06%) | — | — |
+| Android before the parity work | 1,028 (7.41%) | 1,374 (10.33%) | 825 (6.09%) | 692 (5.54%) |
+| Aimed taps, accents from the base key, a space read on the bottom row | 913 (6.58%) | 1,373 (10.32%) | 812 (5.99%) | 678 (5.43%) |
+
 ## Same-model results
 
 Each language has 2,000 held-out synthetic Tatoeba sentences. English has 13,870 reference words; Spanish has 13,301. Errors are word insertions, deletions and substitutions, ignoring case and terminal punctuation. A missing space can change the word count. No user-specific offsets are applied.
@@ -104,6 +114,8 @@ adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOB
    adb install --no-incremental -r app/build/outputs/apk/debug/app-debug.apk
    sh benchmark/typing/replay.sh
    ```
+
+   For German and Bokmål, put Tatoeba's `deu.tsv` and `nob.tsv` in `$T/tatoeba` and run `python3 benchmark/typing/synthetic_de_nb.py "$IOS_BENCH/input.json" "$T/tatoeba" "$T/bench"` first; the replay runs every set it finds and writes each sentence's output to `$T/outputs`.
 
    The Java replay shim executes the installed APK’s Kotlin classes with Android’s `app_process`. The output is aggregate WER, normalized sentences matching iOS and per-key timing (median/p95/max). Timings exclude loading, JSON parsing, evaluation, editor IPC and screen paint. Phase 3 timed the separate editor’s text-change callback from key-up (letter median/p95: 1.409/2.589 ms; space: 3.161/4.428 ms). The Phase 4 replay measures decoder work, not that end-to-end path or a physical handset.
 
