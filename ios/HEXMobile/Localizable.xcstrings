@@ -3034,6 +3034,26 @@
           }
         }
       }
+    },
+    "Layout" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘布局"
+          }
+        }
+      }
+    },
+    "Moves the letters. Accents and autocorrect stay the language's." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只移动字母的位置，重音字母和自动更正仍跟随该语言。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -650,6 +650,32 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   the strip shows both languages' fixes and completions. In the simulator the English
   keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
   80 English words; with both chosen, none.
+- **Layout per language (Settings › Keyboard › Languages › Layout):** each language the keys
+  show (every chosen one, Automatic's while none is, and only the first of English and
+  Español together) gets a menu of the layouts Apple's Keyboard Layout list offers for it
+  (iOS 27.0 simulator, black box), its own (today's) first: English QWERTY, AZERTY, QWERTZ,
+  Dvorak; Deutsch "QWERTZ – Deutsch" (with ü ö ä), QWERTZ, QWERTY, AZERTY; Español
+  "QWERTY – Español" (with ñ), QWERTY, AZERTY, QWERTZ; Français (France) AZERTY, QWERTY,
+  QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Apple's
+  "– French" variants add only the ´ key Hex leaves out); Italiano and Português QWERTY,
+  AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Srpski QWERTZ (Hex's, though
+  Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский and Українська keep their
+  one layout (Apple also offers a phonetic "Russian – QWERTY", not built). The plain
+  layouts are the same 26 letters in every language, with the language's bottom row and
+  123 pages; only the letters move (`KeyboardLetterLayout`, `KeyboardLanguage.letterRows(_:)`).
+  Holds and autocorrect stay the language's: English on QWERTZ (the TestFlight request,
+  build 56) holds what English QWERTY does, and a plain layout without the language's own
+  letter keys holds them right after their base letter, as Apple's does (German QWERTZ:
+  A Ä À…, O Ö…, U Ü…; Spanish QWERTY: N Ñ Ń). Apple's Dvorak is P Y F G C R L and delete,
+  A O E U I D H T N S from the edge, shift and Q J K X B M W V Z, on keys narrowed so that
+  row fits (38.3 pt pitch on a 402 pt iPhone); split on the Duo it keeps delete on row 3
+  (Apple's split Dvorak unobserved). Kept per language in the App Group
+  (`settings.keyboardLanguages.layouts`, `LanguageSettings.letterLayout(for:)`); unset,
+  not offered, or unreadable (an iPhone that keeps the App Group from a keyboard without
+  Full Access), a language types on its own layout. Spatial autocorrect, the touch decoder,
+  swipe typing, next-key growth and the neighbouring-key cost read the keys as drawn, and
+  Adaptive touch learns each arrangement as its own key plane; typing logs' `layout` lines
+  name it (`letters`).
 - **Keyboard layouts (each language's letters):** English,
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2; beside English, the
   first of the two's keys, above),

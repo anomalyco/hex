@@ -591,6 +591,85 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(view.engine.switchesLanguage)
     }
 
+    /// With English and Spanish on one keyboard, both type on the first one's layout as chosen
+    /// in Settings › Keyboard › Languages › Layout (`KeyboardLanguageList.layout`).
+    func testTheSharedKeysTakeTheFirstLanguagesLayout() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .spanish]
+        settings.setLetterLayout(.qwertz, for: .english)
+        settings.setLetterLayout(.azerty, for: .spanish)
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        XCTAssertEqual(view.engine.layout.letters, .qwertz)
+        XCTAssertEqual(view.engine.layout.key(.character("z"))?.row, 0)
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .spanish)
+        XCTAssertEqual(view.engine.layout.letters, .qwertz, "Spanish types on English's QWERTZ")
+        XCTAssertEqual(view.engine.layout.key(.character("z"))?.row, 0)
+        XCTAssertEqual(view.engine.autocorrect.layoutLetters, .qwertz)
+        XCTAssertEqual(view.engine.autocorrect.partner?.layoutLetters, .qwertz)
+
+        settings.keyboardLanguages = [.spanish, .english]
+        view.syncSettings()
+        XCTAssertEqual(view.engine.layout.letters, .azerty, "Spanish leads: its AZERTY for English too")
+        XCTAssertEqual(view.engine.layout.key(.character("a"))?.row, 0)
+        XCTAssertNil(view.engine.layout.key(.character("ñ")), "a plain layout: no ñ key")
+
+        settings.setLetterLayout(.own, for: .spanish)
+        view.syncSettings()
+        XCTAssertEqual(view.engine.layout.letters, .own)
+        XCTAssertNotNil(view.engine.layout.key(.character("ñ")))
+    }
+
+    /// The TestFlight request (build 56): English on QWERTZ. The keys, Spatial autocorrect's
+    /// centres, a held key's accents and the touch decoder all read the QWERTZ keys.
+    func testEnglishOnQWERTZTypesOnItsOwnKeys() throws {
+        engine.width = 402
+        engine.letterLayout = .qwertz
+        let z = try XCTUnwrap(engine.layout.key(.character("z")))
+        let y = try XCTUnwrap(engine.layout.key(.character("y")))
+        XCTAssertEqual(z.row, 0)
+        XCTAssertEqual(y.row, 2)
+        type("zany yak ")
+        XCTAssertEqual(target.text, "zany yak ")
+        let keys = try XCTUnwrap(engine.autocorrect.decoderKeys)
+        XCTAssertEqual(keys.centres["z"], CGPoint(x: z.frame.midX, y: z.frame.midY))
+        XCTAssertEqual(keys.centres["y"], CGPoint(x: y.frame.midX, y: y.frame.midY))
+        XCTAssertEqual(engine.swipeKeys, keys, "swipes read the same keys")
+        XCTAssertEqual(engine.autocorrect.layoutLetters, .qwertz)
+
+        engine.touchBegan(id: 7, at: CGPoint(x: y.frame.midX, y: y.frame.midY))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        XCTAssertEqual(engine.activeAccentMenu?.options.first, "y")
+        XCTAssertEqual(Set(engine.activeAccentMenu?.options ?? []), ["y", "ý", "ŷ", "ÿ"], "English's holds")
+        engine.touchCancelled(id: 7)
+
+        engine.letterLayout = nil
+        XCTAssertEqual(engine.layout.letters, .qwerty, "nil: English's own")
+        XCTAssertEqual(engine.layout.key(.character("z"))?.row, 2)
+    }
+
+    /// Spatial autocorrect's language model was trained on QWERTY text, but its touch part
+    /// scores taps against the keys as drawn: a sloppy word on QWERTZ is read as QWERTZ.
+    func testSpatialAutocorrectReadsTapsOnTheQWERTZKeys() throws {
+        engine.width = 402
+        let model = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        engine.letterOdds = model
+        engine.autocorrect.decoder = TypingDecoder(model: model)
+        engine.letterLayout = .qwertz
+        // "yes" and "zoo" with each tap a third of a key off-centre, towards the next key right.
+        for word in ["yes", "zoo"] {
+            for letter in word {
+                let key = try XCTUnwrap(engine.layout.key(.character(String(letter))))
+                tapAt(CGPoint(x: key.frame.midX + key.frame.width / 3, y: key.frame.midY))
+            }
+            tapAt(point(.space))
+        }
+        XCTAssertEqual(target.text, "yes zoo ")
+    }
+
     func testEnablesReturnKeyAutomaticallyBlocksEmptyField() {
         target.enablesReturnKeyAutomatically = true
         tap(.returnKey)
@@ -2041,6 +2120,23 @@ extension FullKeyboardEngineTests {
         let narrower = engine.layout.key(.character("e"))!.frame
         let moved = try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["e"]).x - narrower.midX
         XCTAssertEqual(moved / narrower.width, shift / e.width, accuracy: 0.001, "offsets are in keycaps")
+    }
+
+    /// Another arrangement of the letters is another key plane: what was learned on QWERTY
+    /// never moves QWERTZ's centres, and comes back with QWERTY.
+    func testAdaptiveTouchKeepsEachLetterLayoutApart() throws {
+        let touch = adaptive()
+        try teach(touch, dx: 0.2)
+        XCTAssertTrue(touch.isActive)
+        let qwerty = try XCTUnwrap(AdaptiveTouchGeometry(layout: engine.layout)).key
+        engine.letterLayout = .qwertz
+        XCTAssertNotEqual(try XCTUnwrap(AdaptiveTouchGeometry(layout: engine.layout)).key, qwerty)
+        XCTAssertFalse(touch.isActive, "QWERTZ starts from the stock centres")
+        XCTAssertEqual(engine.autocorrect.decoderKeys, TypingDecoder.Keys(layout: engine.layout))
+        engine.letterLayout = .azerty
+        XCTAssertFalse(touch.isActive)
+        engine.letterLayout = .qwerty
+        XCTAssertTrue(touch.isActive, "QWERTY's profile is still there")
     }
 
     func testAdaptiveTouchFallsBackToStockWhenTheGripChangesAndKeepsBothGrips() throws {

@@ -143,6 +143,7 @@ struct KeyboardLanguagesRow: View {
 struct KeyboardLanguagesPage: View {
     @State private var chosen = LanguageSettings().keyboardLanguages
     @State private var switchDictation = LanguageSettings().dictationFollowsKeyboard
+    @State private var letterLayouts = LanguageSettings().letterLayouts
     private let automatic = automaticKeyboardLanguage()
     private let suggested = KeyboardLanguage.suggested(
         inputModes: UITextInputMode.activeInputModes.compactMap(\.primaryLanguage),
@@ -181,6 +182,20 @@ struct KeyboardLanguagesPage: View {
                             .font(.system(size: 12))
                             .foregroundStyle(HexTheme.textMuted)
                     }
+                }
+            }
+
+            if !arranged.isEmpty {
+                Section {
+                    ForEach(arranged, id: \.self) { language in
+                        layoutRow(language)
+                    }
+                } header: {
+                    LanguageSectionHeader(title: "Layout")
+                } footer: {
+                    Text("Moves the letters. Accents and autocorrect stay the language's.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
                 }
             }
 
@@ -235,7 +250,48 @@ struct KeyboardLanguagesPage: View {
         .onAppear {
             chosen = LanguageSettings().keyboardLanguages
             switchDictation = LanguageSettings().dictationFollowsKeyboard
+            letterLayouts = LanguageSettings().letterLayouts
         }
+    }
+
+    /// The languages whose keys the keyboard shows, with more than one layout to pick: each
+    /// chosen one (Automatic's while none is), but only the first of English and Spanish
+    /// together, whose keys both type on (`KeyboardLanguageList.layout`).
+    private var arranged: [KeyboardLanguage] {
+        let typing = chosen.isEmpty ? [automatic] : chosen
+        var seen = Set<KeyboardLanguage>()
+        return typing
+            .map { KeyboardLanguageList(languages: typing, current: $0).layout }
+            .filter { $0.letterLayouts.count > 1 && seen.insert($0).inserted }
+    }
+
+    private func layoutRow(_ language: KeyboardLanguage) -> some View {
+        let current = language.offered(letterLayouts[language.rawValue].flatMap(KeyboardLetterLayout.init(rawValue:)))
+        return HStack(spacing: 12) {
+            Text(language.displayName)
+                .font(.system(size: 15, weight: .regular))
+                .foregroundStyle(HexTheme.textBase)
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(language.letterLayouts, id: \.self) { letters in
+                    Button {
+                        LanguageSettings().setLetterLayout(letters, for: language)
+                        letterLayouts = LanguageSettings().letterLayouts
+                    } label: {
+                        if letters == current {
+                            Label(language.layoutName(letters), systemImage: "checkmark")
+                        } else {
+                            Text(language.layoutName(letters))
+                        }
+                    }
+                }
+            } label: {
+                LanguageMenuValue(value: language.layoutName(current))
+            }
+        }
+        .frame(minHeight: 34)
+        .listRowBackground(HexTheme.bgBase)
+        .listRowSeparatorTint(HexTheme.borderWeak)
     }
 
     private func languageRow(_ language: KeyboardLanguage) -> some View {
