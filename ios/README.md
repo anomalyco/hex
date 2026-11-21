@@ -1195,6 +1195,17 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Mozilla Public License 1.1](https://www.mozilla.org/en-US/MPL/1.1/)
   (<https://github.com/sbosio/rla-es>).
 
+## Active users
+
+TestFlight and App Store builds are counted on Anomaly's DAU page
+(`https://anoma.ly/release/admin/?app=hex-ios`) the way the desktop app's update
+checks are: `HEXShared/ActiveUserCheck.swift` requests
+`https://anoma.ly/release/hex-ios/ios/<beta|stable>.json` with only
+`User-Agent: hex-ios/<channel>/<short version>-<build>/ios` when the app comes to
+the foreground or the keyboard appears with Full Access, at most once an hour
+across both (the last check is in the App Group). The answer is ignored; a 404
+counts. Debug builds never check. Never add an install ID, text, or settings to it.
+
 ## Build & Test
 
 Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46.0+.

@@ -105,6 +105,8 @@ final class KeyboardViewController: UIInputViewController {
         handOffNumericPadIfNeeded()
         syncFromBridge(animated: false)
         schedulePoll(force: true)
+        // Without Full Access the keyboard has no network.
+        if hasFullAccess { ActiveUserCheck.checkIfDue() }
     }
 
     override func viewDidAppear(_ animated: Bool) {

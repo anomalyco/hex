@@ -56,7 +56,10 @@ struct HEXMobileApp: App {
                     }
                     dictation.handleKeyboardLaunch(request)
                 }
-                .onChange(of: scenePhase) { _, phase in
+                .onChange(of: scenePhase, initial: true) { _, phase in
+                    if phase == .active {
+                        ActiveUserCheck.checkIfDue()
+                    }
                     if phase == .background {
                         openedFromKeyboard = false
                         dictation.appMovedToBackground()
