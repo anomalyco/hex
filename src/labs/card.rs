@@ -90,6 +90,7 @@ impl Feature {
             Self::ModesEditor => "Modes editor",
             Self::DropTranscribe => "Transcribe dropped audio",
             Self::PasteLastPicker => "Paste Last picker",
+            Self::VocabularyFiles => "Vocabulary files",
         }
     }
 
@@ -327,6 +328,9 @@ impl Feature {
             }
             Self::PasteLastPicker => {
                 "Tap Paste Last to paste the newest dictation or annotation; hold it to pick another"
+            }
+            Self::VocabularyFiles => {
+                "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one"
             }
         }
     }

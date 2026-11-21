@@ -44,7 +44,7 @@ hidden while off; a behaviour-only feature is just its toggle. Today: Meetings
 a stable build with the driver keeps its pane for Uninstall alone), Playground
 (Dev), Paste Last picker (Dev, macOS; the mixed dictation-and-annotation
 picker and History, `labs.paste_last_picker`), Live text, Live chapters,
-Vocabulary help, Words on screen
+Vocabulary help, Vocabulary files, Words on screen
 (macOS), Rewrite reads nearby text (macOS), Switch model with keyboard
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Free memory when idle

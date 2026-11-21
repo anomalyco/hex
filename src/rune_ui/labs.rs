@@ -585,6 +585,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         }
     }
     rows.push(row(Feature::VocabularyBiasing, Some(&BOOK)));
+    rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
     // macOS reads the focused window through Accessibility as a capture
     // becomes real.
     if caps.os == super::platform::Os::Macos {
@@ -967,6 +968,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::HoldThroughKeys => "lab-hold-through-keys",
         Feature::ModesEditor => "lab-modes-editor",
         Feature::DropTranscribe => "lab-drop-transcribe",
+        Feature::VocabularyFiles => "lab-vocabulary-files",
     }
 }
 

@@ -27,6 +27,24 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── Add term -> New empty row, focused; the list glides to its end and the row
 │   rises 8 pt as it fades in (SETTLE, bounce 0; Reduce Motion: fade only);
 │   saved once the term has text
+├── Labs › Vocabulary files (off by default, every OS) -> Import… and Export… join
+│   the footer beside Add term; off, the sheet is exactly as before (labs.md)
+│   ├── Import… -> one CSV or TXT regular file (at most 1 MiB, UTF-8), Teams' custom
+│   │   dictionary columns: term, then comma-separated "sounds like" spellings; a "Term"
+│   │   header, blank rows, and further columns are ignored. A folder, device, or FIFO, a
+│   │   larger or non-UTF-8 file, and an unclosed quote are refused with that reason.
+│   │   Existing terms keep their entry and gain new spellings; new terms append in file
+│   │   order; a term this file added never also counts as updated and a term counts as
+│   │   updated once. Skipped counts each refused term once (over 64 characters, or a new
+│   │   term past 500) and each dropped spelling (over 64 characters, or past the 16th).
+│   │   The merged rows save through the sheet's own draft path, then "Added 12 terms",
+│   │   "Added 3 terms, updated 2", "Updated 2 terms, skipped 1", "No new terms in that
+│   │   file" only when nothing changed, "No terms found in that file", or the error; a
+│   │   failed save says so instead of reporting success
+│   └── Export… -> a save dialog named hex-vocabulary.csv; appends .csv only when the
+│       name has no extension and <name>.csv doesn't exist, writes the four-column
+│       header then term, spellings joined by ", ", and two empty cells, quoting what
+│       needs it, atomically; "Exported N terms"
 ├── Edits -> Debounced drafts, like Modes' corrections -> settings.json `vocabulary`
 ├── × -> Removes that row at any click speed or focus; rows keep an identity,
 │   so a late edit, focus change, or second × for a removed row touches nothing
@@ -216,13 +234,24 @@ Boost strengths (nats per term piece)    // dictation/vocabulary.rs: VocabularyB
 ```
 
 Sources: [dictation/vocabulary.rs](../../src/dictation/vocabulary.rs),
+[dictation/vocabulary/csv.rs](../../src/dictation/vocabulary/csv.rs),
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs),
 [meeting/query.rs](../../src/meeting/query.rs) (`vocabulary_aliases`,
 `sounds_alike`), [dictation/processor.rs](../../src/dictation/processor.rs)
 (`vocabulary_lines`), and [control.rs](../../src/control.rs)
 (`edit_vocabulary`).
 
-Checks: `dictation::vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
+Checks: `dictation::vocabulary::csv::tests` (header skip, quotes and embedded
+newlines, an unclosed quote, BOM, CRLF, blank rows, merge with existing terms
+and spellings, duplicate terms, dropped spellings, the caps, a folder, and an
+export→import round trip), `merge_status` and the sheet's import
+and export through its draft path in [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs),
+`the_vocabulary_sheet_offers_files_only_with_its_lab_on` in
+[rune_ui/tests.rs](../../src/rune_ui/tests.rs), and
+`vocabulary_files_is_its_own_switch_and_everywhere` in
+[labs.rs](../../src/labs.rs). The native open and save dialogs were not opened
+in a desktop session.
+`dictation::vocabulary::tests` (dedupe and merge, clamping, case-insensitive removal,
 comma splitting, reading the saved list without settings, the
 first 64 terms and their spellings reaching transcription, the prompt bounded
 by characters alone (`the_prompt_keeps_the_first_terms_that_fit`), the

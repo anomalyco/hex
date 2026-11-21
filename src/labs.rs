@@ -199,6 +199,7 @@ impl Feature {
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio,
             Self::ModesEditor => settings.labs.modes_editor,
             Self::PasteLastPicker => settings.labs.paste_last_picker,
+            Self::VocabularyFiles => settings.labs.vocabulary_files,
         }
     }
 
@@ -289,6 +290,7 @@ impl Feature {
             &mut labs.copy_dictation_audio,
             &mut labs.modes_editor,
             &mut labs.paste_last_picker,
+            &mut labs.vocabulary_files,
         ]
     }
 
@@ -385,6 +387,7 @@ impl Feature {
             Self::CopyDictationAudio => settings.labs.copy_dictation_audio = on,
             Self::ModesEditor => settings.labs.modes_editor = on,
             Self::PasteLastPicker => settings.labs.paste_last_picker = on,
+            Self::VocabularyFiles => settings.labs.vocabulary_files = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -434,7 +437,10 @@ const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 /// Labs › Faster live text: a shorter stream lookahead, on the bit the
 /// graduated meeting labs left free.
 const FASTER_LIVE_TEXT: u64 = 1 << 23;
-// 1 << 24 is free (More call apps graduated).
+/// Importing and exporting the vocabulary as a CSV file, on the bit More
+/// call apps left free.
+// Kept only for the state-word encoding; no gate reads it.
+const VOCABULARY_FILES: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 // 1 << 26 is free (Vocabulary in meeting notes graduated).
 const NOTCH_INDICATOR: u64 = 1 << 27;
@@ -948,6 +954,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             Feature::HideMenuBarIcon,
             settings.hide_menu_bar_icon,
             HIDE_MENU_BAR_ICON,
+        ),
+        (
+            Feature::VocabularyFiles,
+            settings.vocabulary_files,
+            VOCABULARY_FILES,
         ),
         (
             Feature::GnomeClipboardRestore,
@@ -2129,6 +2140,33 @@ mod tests {
         assert_eq!(
             Feature::TerminalPasteShortcut.on_this_os(),
             cfg!(any(target_os = "windows", target_os = "linux"))
+        );
+    }
+
+    #[test]
+    fn vocabulary_files_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!Feature::VocabularyFiles.on(&AppSettings::default()));
+        assert_eq!(encode(&labs) & VOCABULARY_FILES, 0);
+        labs.vocabulary_files = true;
+        let settings = AppSettings {
+            labs,
+            ..AppSettings::default()
+        };
+        assert!(Feature::VocabularyFiles.on(&settings));
+        assert_ne!(encode(&settings.labs) & VOCABULARY_FILES, 0);
+        assert!(Feature::VocabularyFiles.on_this_os());
+        assert_eq!(Feature::VocabularyFiles.added(), 20261120);
+        assert_eq!(Feature::VocabularyFiles.audience(), Audience::Everyone);
+        assert_eq!(Feature::VocabularyFiles.group(), Group::Dictation);
+        assert_eq!(
+            Feature::VocabularyFiles.settings_key(),
+            "labs.vocabulary_files"
+        );
+        assert_eq!(Feature::VocabularyFiles.name(), "vocabulary-files");
+        assert_eq!(
+            Feature::VocabularyFiles.oses(),
+            &[Os::Macos, Os::Windows, Os::Linux]
         );
     }
 
