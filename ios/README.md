@@ -266,7 +266,8 @@ never at a launch by itself.
     through the Hex key's own path (`HexKeyGesture`, `hexKeyHeld`), but not
     while the bar shows the Full Access hint or a notice. A tap there does nothing,
     a slide cancels it, and a word's slot keeps its tap and its hold (Add to
-    vocabulary).
+    vocabulary). The bar's Paste is plain text on the words' line, and Paste and
+    Next keyboard centre on the keyboard's middle, not the strip's.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly

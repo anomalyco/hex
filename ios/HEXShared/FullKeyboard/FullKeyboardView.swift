@@ -664,6 +664,7 @@ final class FullKeyboardView: UIView {
         stripView.textCenterY = layout.metrics.stripTextCenter
         stripView.chipHeight = layout.metrics.stripChipHeight
         stripView.hexOnLeading = layout.hexOnLeading
+        stripView.barMidX = layout.stripBarFrame.midX - layout.stripFrame.minX
 
         hexKey.cornerRadius = layout.metrics.cornerRadius
         if let hex = layout.key(.hex) {
