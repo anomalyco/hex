@@ -85,9 +85,9 @@ final class FullKeyboardEngine {
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
     private var lastSpaceAt: TimeInterval?
-    /// The text before the cursor just after a suggestion typed its word and a space. A space
-    /// typed next, while the text is still that, is swallowed, as on Apple's keyboard.
-    private(set) var suggestionSpaceBefore: String?
+    /// The text before the cursor just after a suggestion typed its word and a space (or held
+    /// it, `spacePending`). A space typed next, while the text is still that, is swallowed.
+    var suggestionSpaceBefore: String?
     /// When a key last went down or came up, for `takesStripTouch(at:)`.
     private var lastKeyTouchAt: TimeInterval?
 
@@ -437,8 +437,7 @@ final class FullKeyboardEngine {
                 autocorrect.suppressAndKeep(token)
             }
         }
-        insert(suggestion.replacement + " ", source: nil)
-        suggestionSpaceBefore = textBefore
+        insertPicked(suggestion.replacement)
         typingLog?.context("suggestion")
     }
 
@@ -922,6 +921,7 @@ final class FullKeyboardEngine {
     /// keyboard does (black box, iOS 27.2), and the strip then offers what you typed
     /// (`offeringRevert`); Adaptive touch keeps the word's taps for that revert.
     func deleteBackward(takesSwipeBack: Bool = true, source: String = "key") {
+        if takesSwipeBack, dropsHeldSpace() { return }
         // Right after a swipe, delete takes back its whole word (and the space it added).
         let swiped = swipedWord
         swipedWord = nil
@@ -984,7 +984,7 @@ final class FullKeyboardEngine {
     /// `down`: where a tap's finger went down, for Adaptive touch (nil for a slide from shift).
     private func commitCharacter(_ key: KeyboardKey, at point: CGPoint, down: CGPoint? = nil) {
         guard let character = key.character else { return }
-        spaceAfterSwipedWord(before: character)
+        spaceBeforeNextWord(character)
         var text = layerState.layer == .letters && shift.isUppercase ? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
@@ -1193,7 +1193,7 @@ final class FullKeyboardEngine {
     }
 
     private func commitAccentSelection(_ chosen: String) {
-        spaceAfterSwipedWord(before: chosen)
+        spaceBeforeNextWord(chosen)
         if layerState.layer == .letters {
             shift.didType()
         }
@@ -1209,10 +1209,9 @@ final class FullKeyboardEngine {
         swipedWord = nil
         let now = clock()
         if let before = suggestionSpaceBefore {
-            suggestionSpaceBefore = nil
-            if before.last == " ", before == textBefore {
-                // The suggestion typed this space already. It still counts as one, so a quick
-                // second press types ". ".
+            suggestionSpaceBefore = spacePending ? before : nil
+            if before == textBefore, before.last == " " || suggestionSpaceBefore != nil {
+                // Typed or held (`spacePending`) already; it counts, so a quick second press types ". ".
                 typingLog?.edit("space_swallowed", [TypingLogField("after", .string("suggestion"))])
                 lastSpaceAt = now
                 tokenTaps.removeAll()
@@ -1238,17 +1237,19 @@ final class FullKeyboardEngine {
             typingLog?.context("space")
             return
         }
+        let ending = holdsTypedSpace ? "" : " "
+        defer { if ending.isEmpty { holdSpaceAfterWord() } }
         let token = AutocorrectEngine.currentToken(in: textBefore)
         let taps = currentTokenTaps
         learning?.didFinish(word: token, language: autocorrect.language.rawValue)
         syncLearning()
         autocorrect.decoderTaps = taps
-        if !afterSwipe, applyTextReplacement(ending: " ") {
+        if !afterSwipe, applyTextReplacement(ending: ending) {
             lastSpaceAt = now
             typingLog?.context("space")
             return
         }
-        if !afterSwipe, finishWord(ending: " ") {
+        if !afterSwipe, finishWord(ending: ending) {
             rememberFinishedWord(typed: token, taps: taps, space: point)
             lastSpaceAt = now
             layerState.didInsert(" ")
@@ -1257,7 +1258,7 @@ final class FullKeyboardEngine {
             typingLog?.context("space")
             return
         }
-        insert(" ", source: "key")
+        insert(ending, source: "key")
         if !afterSwipe, let token { rememberFinishedWord(typed: token, taps: taps, space: point) }
         lastSpaceAt = now
         typingLog?.context("space")
@@ -1280,7 +1281,7 @@ final class FullKeyboardEngine {
     }
 
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
-    private func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
+    func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
         swipedWord = nil
         // Anything but the next word's letters ends the chance to revise the word before.
         if !(text.count == 1 && (text.first?.isLetter == true || text == "'")) {
@@ -1436,7 +1437,7 @@ final class FullKeyboardEngine {
     /// types "hello w", "(" types "hello ("); punctuation in `swipeJoiners` goes against the
     /// word ("hello,"). Shift as you set it stays; with it off, the space may bring a capital
     /// (a field that capitalises every word).
-    private func spaceAfterSwipedWord(before text: String) {
+    func spaceAfterSwipedWord(before text: String) {
         guard let swiped = swipedWord, let first = text.first, !Self.swipeJoiners.contains(first),
               let before = textBefore, before.hasSuffix(swiped.word) else { return }
         swipedWord = nil
