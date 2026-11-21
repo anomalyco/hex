@@ -680,6 +680,16 @@
         }
       }
     },
+    "Auto" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动"
+          }
+        }
+      }
+    },
     "Auto-capitalization" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1633,12 +1643,42 @@
         }
       }
     },
+    "More languages…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多语言…"
+          }
+        }
+      }
+    },
     "Off drops the final period, keeps ? and !" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭后去掉末尾的句号，保留问号和感叹号"
+          }
+        }
+      }
+    },
+    "Remove" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除"
+          }
+        }
+      }
+    },
+    "Remove from keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从键盘中移除"
           }
         }
       }

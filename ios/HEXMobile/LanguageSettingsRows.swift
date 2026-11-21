@@ -4,10 +4,13 @@ import UIKit
 /// Settings › Dictation language: Automatic, the first iPhone language Apple Speech
 /// transcribes, or any language `SpeechTranscriber` or `DictationTranscriber` has. Shown
 /// on iOS 26, where Hex dictates with Apple Speech; before it, Parakeet is English only.
+/// Remove from keyboard takes a language off the keyboard's quick switch.
 struct DictationLanguageRow: View {
     @Bindable var dictation: DictationController
     @State private var options: [SpeechLanguageOption] = []
     @State private var automaticName: String?
+    /// The keyboard's quick switch (`LanguageSettings.keyboardLanguageChoices`).
+    @State private var keyboardChoices: [String] = []
 
     var body: some View {
         if #available(iOS 26.0, *) {
@@ -36,6 +39,23 @@ struct DictationLanguageRow: View {
                                 Text("Automatic")
                             }
                         }
+                        if !keyboardChoices.isEmpty {
+                            // The keyboard's quick switch: take a language off it here too.
+                            Menu("Remove from keyboard") {
+                                ForEach(keyboardChoices, id: \.self) { id in
+                                    Button(role: .destructive) {
+                                        let settings = LanguageSettings()
+                                        settings.removeDictationLanguage(id)
+                                        if dictation.dictationLanguage != nil, settings.dictationLanguage == nil {
+                                            dictation.setDictationLanguage(nil)
+                                        }
+                                        keyboardChoices = settings.keyboardLanguageChoices()
+                                    } label: {
+                                        Text(name(for: id))
+                                    }
+                                }
+                            }
+                        }
                         Divider()
                         ForEach(options) { option in
                             Button {
@@ -55,10 +75,14 @@ struct DictationLanguageRow: View {
                 .padding(.horizontal, 16)
                 .frame(minHeight: 48)
             }
+            .onChange(of: dictation.dictationLanguage) { _, _ in
+                keyboardChoices = LanguageSettings().keyboardLanguageChoices()
+            }
             .task {
                 // The keyboard may have switched the language while Hex was away.
                 dictation.followDictationLanguageSetting()
                 options = await AppleSpeechLanguages.options()
+                keyboardChoices = LanguageSettings().keyboardLanguageChoices()
                 automaticName = await AppleSpeechLanguages.automatic().map {
                     HinglishSettings().name(for: $0.identifier) ?? SpeechLanguagePicker.displayName(for: $0.identifier)
                 }
@@ -68,6 +92,10 @@ struct DictationLanguageRow: View {
 
     private var selectedName: String {
         guard let id = dictation.dictationLanguage else { return String(localized: "Automatic") }
+        return name(for: id)
+    }
+
+    private func name(for id: String) -> String {
         if let hinglish = HinglishSettings().name(for: id) { return hinglish }
         return SpeechLanguagePicker.shortNames(for: options.map(\.id))[id]
             ?? SpeechLanguagePicker.displayName(for: id)

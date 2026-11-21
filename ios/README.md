@@ -579,7 +579,15 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   the keyboard lists Apple's languages once per process and caches them in
   `settings.dictationLanguage.supported`). Names are each language's own
   ("Español", "Deutsch", "עברית"), with a region code only where two share a
-  language. A pick writes the same App Group setting as Hex's menu, so
+  language. A long press on a language (a chip, or a row on the Hex key menu's Language
+  page) shows **Remove**, which takes it off (`settings.dictationLanguage.removed`, so one
+  of the iPhone's own languages stays off too) and puts the one set back on Automatic;
+  Settings › Dictation language's **Remove from keyboard** does the same (TestFlight build
+  56: a language couldn't be removed, and one could only be added in Hex). **More
+  languages…** lists every other language Apple Speech has, the iPhone's own first, and
+  picking one there adds it (in the dictation bar the list takes the keys' place). Removing
+  or adding one never changes Automatic, which still follows the keyboard's language.
+  A pick writes the same App Group setting as Hex's menu, so
   in-keyboard dictation uses it at once; a warm Hex session follows it within
   100 ms and prepares the language between dictations, and a handoff or the
   Action Button picks it up before recording.
@@ -805,7 +813,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   keyboard; it still counts towards double-space for a period. Holding the space bar
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
-  the keyboard switches between two or more languages (Keyboard languages, above).
+  the keyboard switches between two or more languages (Keyboard languages, above). The
+  dictation bar's space bar is the same trackpad (the same still hold or a 10 pt slide, a
+  character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
+  build 56 asked for it), and a tap still types a space.
 - **Slides from 123, #+= and shift (full keyboard):** As on Apple's keyboard, holding 123
   (or ABC, or #+=) shows its page, and sliding shows the pop-up of the key under the
   finger (or darkens it with Key pop-ups off); letting go types that key and goes back to

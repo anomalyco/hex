@@ -148,7 +148,7 @@ struct KeyboardSnapshotStage: View {
                 style: .polished
             )
 
-        case "keyboard-language":
+        case "keyboard-language", "keyboard-language-remove", "keyboard-more-languages":
             viewModel.configureFixture(
                 snapshot: KeyboardSnapshot(
                     state: .ready,
@@ -157,8 +157,11 @@ struct KeyboardSnapshotStage: View {
                 ),
                 now: now,
                 style: .polished,
-                activeTray: .language
+                activeTray: scene == "keyboard-more-languages" ? .moreLanguages : .language
             )
+            if scene == "keyboard-language-remove" {
+                viewModel.removingLanguage = viewModel.languageChoices[0]
+            }
 
         default:
             break
@@ -173,6 +176,12 @@ struct KeyboardSnapshotStage: View {
 /// a Chinese dictation went in as spoken, with English's language pack missing.
 enum DictationLanguageFixture {
     static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
+    /// Some of what Apple Speech lists, for More languages….
+    static let supported = choices + [
+        "en-GB", "en-AU", "en-IN", "fr-FR", "fr-CA", "it-IT", "pt-BR", "pt-PT", "ja-JP", "ko-KR",
+        "zh-CN", "zh-TW", "zh-HK", "yue-CN", "ru-RU", "uk-UA", "pl-PL", "nl-NL", "sv-SE", "da-DK",
+        "fi-FI", "tr-TR", "ar-SA", "hi-IN", "th-TH", "vi-VN", "id-ID", "ms-MY", "cs-CZ", "el-GR",
+    ]
 
     static var explicit: String? {
         argument(after: "--dictation-language")
@@ -197,6 +206,11 @@ enum DictationLanguageFixture {
         }
         model.dictationLanguage = explicit
         model.automaticLanguage = "en-US"
+        model.moreLanguages = DictationLanguageSwitch.more(
+            choices: model.languageChoices,
+            preferred: Locale.preferredLanguages,
+            supported: supported
+        )
         model.translationTarget = translationTarget
         if ProcessInfo.processInfo.arguments.contains("--translation-failed") {
             model.translationNote = TranslationFailure(

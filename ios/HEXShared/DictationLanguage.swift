@@ -8,6 +8,7 @@ nonisolated struct LanguageSettings {
         static let resolvedDictation = "settings.dictationLanguage.resolved"
         static let automaticDictation = "settings.dictationLanguage.automatic"
         static let recent = "settings.dictationLanguage.recent"
+        static let removed = "settings.dictationLanguage.removed"
         static let supported = "settings.dictationLanguage.supported"
         /// One layout, or none for Automatic: the setting before Languages, still written
         /// with the first language for an older build.
@@ -55,6 +56,45 @@ nonisolated struct LanguageSettings {
     var recentDictationLanguages: [String] {
         get { defaults?.stringArray(forKey: Key.recent) ?? [] }
         nonmutating set { defaults?.set(Array(newValue.prefix(Self.maxRecent)), forKey: Key.recent) }
+    }
+
+    /// Languages taken off the keyboard's quick switch (as it listed them), so the iPhone's own
+    /// languages stay off it too, until picked again.
+    var removedDictationLanguages: [String] {
+        get { defaults?.stringArray(forKey: Key.removed) ?? [] }
+        nonmutating set { defaults?.set(newValue, forKey: Key.removed) }
+    }
+
+    /// The keyboard's quick switch (`DictationLanguageSwitch.choices`), for the keyboard and
+    /// Settings › Dictation alike.
+    func keyboardLanguageChoices(
+        preferred: [String] = Locale.preferredLanguages,
+        hinglish: Bool = HinglishSettings().isEnabled
+    ) -> [String] {
+        DictationLanguageSwitch.choices(
+            current: dictationLanguage,
+            recent: recentDictationLanguages,
+            preferred: preferred,
+            supported: supportedDictationLanguages,
+            hinglish: hinglish,
+            removed: removedDictationLanguages
+        )
+    }
+
+    /// Takes a language off the keyboard's quick switch: out of the recents, and kept off
+    /// while it is one of the iPhone's languages. The one set goes back to Automatic.
+    func removeDictationLanguage(_ identifier: String) {
+        let supported = supportedDictationLanguages
+        func same(_ other: String) -> Bool {
+            other == identifier || DictationLanguageSwitch.supportedMatch(for: other, in: supported) == identifier
+        }
+        recentDictationLanguages = recentDictationLanguages.filter { !same($0) }
+        if !removedDictationLanguages.contains(identifier) {
+            removedDictationLanguages.append(identifier)
+        }
+        if let current = dictationLanguage, same(current) {
+            dictationLanguage = nil
+        }
     }
 
     /// Every language Apple Speech transcribes here (BCP 47), as last listed, so the
@@ -210,6 +250,11 @@ nonisolated struct LanguageSettings {
         clearKeyboardNeedsHex()
         if let identifier {
             recentDictationLanguages = [identifier] + recentDictationLanguages.filter { $0 != identifier }
+            let match = DictationLanguageSwitch.supportedMatch(for: identifier, in: supportedDictationLanguages)
+            let removed = removedDictationLanguages
+            if removed.contains(where: { $0 == identifier || $0 == match }) {
+                removedDictationLanguages = removed.filter { $0 != identifier && $0 != match }
+            }
         }
     }
 }

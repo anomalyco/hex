@@ -8,23 +8,58 @@ nonisolated enum DictationLanguageSwitch {
     /// Up to five languages, best first: the one set now, the ones picked recently, Hindi while
     /// Experiments › Hinglish is on (shown as Hinglish), then the iPhone's preferred languages.
     /// Each is matched to a language Apple Speech has (`supported`, BCP 47) when that list is
-    /// known, and dropped when it has none.
+    /// known, and dropped when it has none. Languages taken off the switch (`removed`, as it
+    /// listed them) stay off, except the one set now.
     static func choices(
         current: String?,
         recent: [String],
         preferred: [String],
         supported: [String],
-        hinglish: Bool = false
+        hinglish: Bool = false,
+        removed: [String] = []
     ) -> [String] {
         var result: [String] = []
-        let offered = hinglish ? [HinglishSettings.language] : []
-        for identifier in [current].compactMap({ $0 }) + recent + offered + preferred {
-            guard let match = supportedMatch(for: identifier, in: supported),
-                  !result.contains(match) else { continue }
+        if let current, let match = supportedMatch(for: current, in: supported) {
             result.append(match)
-            if result.count == maxChoices { break }
+        }
+        let offered = hinglish ? [HinglishSettings.language] : []
+        for identifier in recent + offered + preferred {
+            guard result.count < maxChoices else { break }
+            guard let match = supportedMatch(for: identifier, in: supported),
+                  !result.contains(match), !removed.contains(match) else { continue }
+            result.append(match)
         }
         return result
+    }
+
+    /// The keyboard's More languages: every other language Apple Speech has, the iPhone's
+    /// preferred ones first (with their other regions), then the rest by name.
+    static func more(
+        choices: [String],
+        preferred: [String],
+        supported: [String],
+        hinglish: HinglishSettings = HinglishSettings()
+    ) -> [String] {
+        guard !supported.isEmpty else { return [] }
+        var first: [String] = []
+        for identifier in preferred {
+            guard let match = supportedMatch(for: identifier, in: supported),
+                  !choices.contains(match), !first.contains(match) else { continue }
+            first.append(match)
+        }
+        let codes = preferred.compactMap { Locale(identifier: $0).language.languageCode?.identifier }
+        let rest = supported.filter { !choices.contains($0) && !first.contains($0) }
+        let names = nativeNames(for: supported, hinglish: hinglish)
+        func byName(_ a: String, _ b: String) -> Bool {
+            (names[a] ?? a).localizedStandardCompare(names[b] ?? b) == .orderedAscending
+        }
+        func rank(_ id: String) -> Int? {
+            Locale(identifier: id).language.languageCode.flatMap { codes.firstIndex(of: $0.identifier) }
+        }
+        let regions = rest.filter { rank($0) != nil }.sorted { a, b in
+            rank(a) == rank(b) ? byName(a, b) : rank(a)! < rank(b)!
+        }
+        return first + regions + rest.filter { rank($0) == nil }.sorted(by: byName)
     }
 
     /// The supported locale for an identifier: the same region, else the language's usual
