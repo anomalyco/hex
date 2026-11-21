@@ -158,6 +158,9 @@ nonisolated struct TranslationFailure: Codable, Equatable, Sendable {
         case unsupported
         /// The translation failed twice, each time in a new session.
         case failed
+        /// Before iOS 26 Apple's translation runs in Hex's own window, which iOS didn't run in
+        /// time (`TranslationSessionHost`): Hex was in the background.
+        case needsHexOpen
     }
 
     let reason: Reason
@@ -190,6 +193,7 @@ nonisolated struct TranslationFailure: Codable, Equatable, Sendable {
         case .notDownloaded: String(localized: "Download \(name) in Settings")
         case .unsupported: String(localized: "Pick another language in Settings")
         case .failed: String(localized: "Download \(name) again in Settings")
+        case .needsHexOpen: String(localized: "iOS 18 translates only with Hex open")
         }
     }
 }
@@ -217,6 +221,13 @@ nonisolated struct TranslationEngine: Sendable {
     var status: @MainActor @Sendable (Locale.Language, Locale.Language) async -> LanguageAvailability.Status
     var translate: @MainActor @Sendable (String, Locale.Language, Locale.Language) async throws -> String
 
+    /// Before iOS 26, the session Hex's window hosts (`TranslationSessionHost`), while it does;
+    /// nil in the keyboard, which doesn't translate before iOS 26.
+    @MainActor static var hosted: TranslationEngine?
+
+    /// Thrown by `hosted` when no session came in time.
+    struct NoSession: Error {}
+
     @available(iOS 26.0, *)
     static var apple: TranslationEngine {
         TranslationEngine(
@@ -233,7 +244,8 @@ nonisolated struct TranslationEngine: Sendable {
 
 enum DictationTranslator {
     /// The translation, or why it went in as spoken. Skipped when the experiment is off, the
-    /// text is empty or already in the target language, or before iOS 26. `source` is the
+    /// text is empty or already in the target language, or before iOS 26 without Hex's window
+    /// (`TranslationEngine.hosted`: the keyboard, a test). `source` is the
     /// dictation language; without one the text's language is guessed. A failed translation
     /// is tried once more in a new session; a missing language pack isn't retried. The last
     /// failure is kept for Settings until a translation works.
@@ -245,7 +257,7 @@ enum DictationTranslator {
         engine: TranslationEngine? = nil
     ) async -> TranslationOutcome {
         guard settings.isEnabled else { return .skipped }
-        let engine: TranslationEngine? = if #available(iOS 26.0, *) { engine ?? .apple } else { engine }
+        let engine: TranslationEngine? = if #available(iOS 26.0, *) { engine ?? .apple } else { engine ?? .hosted }
         guard let engine else { return .skipped }
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let source = source ?? detectedLanguage(of: trimmed) else { return .skipped }
@@ -288,6 +300,7 @@ enum DictationTranslator {
     }
 
     static func reason(for error: any Error) -> TranslationFailure.Reason {
+        if error is TranslationEngine.NoSession { return .needsHexOpen }
         if #available(iOS 26.0, *), TranslationError.notInstalled ~= error { return .notDownloaded }
         if TranslationError.unsupportedSourceLanguage ~= error
             || TranslationError.unsupportedTargetLanguage ~= error

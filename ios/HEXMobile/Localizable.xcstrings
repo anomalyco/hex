@@ -54,6 +54,16 @@
         }
       }
     },
+    "iOS 18 couldn't translate the last dictation while Hex was in the background. Dictations you finish in Hex translate." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 在后台时，iOS 18 未能翻译上一次听写。在 Hex 中完成的听写会被翻译。"
+          }
+        }
+      }
+    },
     "Couldn't translate, pasted as spoken" : {
       "localizations" : {
         "zh-Hans" : {
@@ -90,6 +100,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在设置中重新下载%@"
+          }
+        }
+      }
+    },
+    "iOS 18 translates only with Hex open" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iOS 18 仅在 Hex 打开时翻译"
           }
         }
       }

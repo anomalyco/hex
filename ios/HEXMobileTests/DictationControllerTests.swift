@@ -1910,6 +1910,28 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
+    func testBeforeIOS26ATranslationWithoutHexsWindowSaysSo() async {
+        XCTAssertEqual(DictationTranslator.reason(for: TranslationEngine.NoSession()), .needsHexOpen)
+        let failure = TranslationFailure(.needsHexOpen, source: Locale.Language(identifier: "zh"), target: Locale.Language(identifier: "en"))
+        XCTAssertEqual(failure.fix, "iOS 18 translates only with Hex open")
+        XCTAssertLessThanOrEqual(failure.fix.count, 40, "fits the keyboard's second line")
+
+        let settings = DictationTranslationSettings(defaults: defaults)
+        settings.isEnabled = true
+        settings.targetLanguage = "en"
+        let stub = StubTranslator()
+        stub.replies = [.failure(TranslationEngine.NoSession()), .failure(TranslationEngine.NoSession())]
+        let outcome = await DictationTranslator.translate(
+            "我们明天见。",
+            source: Locale.Language(identifier: "zh-CN"),
+            settings: settings,
+            engine: stub.engine
+        )
+        XCTAssertEqual(outcome.failure?.reason, .needsHexOpen)
+        XCTAssertEqual(stub.inputs.count, 1, "not tried again: another wait wouldn't bring a session")
+        XCTAssertEqual(settings.lastFailure?.reason, .needsHexOpen, "Settings says why")
+    }
+
     /// `twice` lets the warm session loop (every 100 ms) look at least twice.
     private func settle(twice: Bool = false) async throws {
         for _ in 0..<(twice ? 16 : 8) {
