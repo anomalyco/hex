@@ -1126,6 +1126,25 @@ final class AutocorrectEngineTests: XCTestCase {
         typeWord("addr ")
         XCTAssertEqual(target.text, "addr ", "a field without autocorrection gets none, as with Apple's")
     }
+
+    /// Chat shorthand Hex leaves alone ("brb", "idk") still takes your own text replacement,
+    /// as Apple's keyboard applies every text replacement, with Autocorrect on or off.
+    func testYourTextReplacementWinsOverShorthand() {
+        engine.autocorrect.loadLexiconEntries([("brb", "be right back"), ("omg", "oh my god")])
+        typeWord("brb")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "be right back")
+        XCTAssertTrue(engine.suggestions.dropFirst().first?.willAutoReplace == true)
+        typeWord(" idk ")
+        XCTAssertEqual(target.text, "be right back idk ", "shorthand without a replacement stays")
+
+        engine.autocorrect.isEnabled = false
+        typeWord("omg")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "oh my god")
+        tap(.space)
+        XCTAssertEqual(target.text, "be right back idk oh my god ")
+        tap(.delete)
+        XCTAssertEqual(target.text, "be right back idk omg", "one backspace puts back the shortcut")
+    }
 }
 
 

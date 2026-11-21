@@ -577,10 +577,11 @@ final class AutocorrectEngine {
         self.beforeInput = beforeInput
 
         let lower = token.lowercased()
+        // Chat shorthand ("brb") is left alone, unless it is your own text replacement's shortcut.
         let allowAuto = !suppressedInSession.contains(lower)
             && !learning.rejected.contains(lower)
             && !learnedWords.contains(lower)
-            && !Self.shorthandAllowlist.contains(lower)
+            && (!Self.shorthandAllowlist.contains(lower) || lexiconShortcuts[lower] != nil)
 
         partner?.beforeInput = beforeInput
         // Autocorrect off: your text replacements only.
@@ -727,11 +728,11 @@ final class AutocorrectEngine {
         let lower = token.lowercased()
         guard !suppressedInSession.contains(lower),
               !learning.rejected.contains(lower),
-              !learnedWords.contains(lower),
-              !Self.shorthandAllowlist.contains(lower) else { return nil }
-        guard isEnabled, hasDictionary else {
-            return lexiconShortcuts[lower].map { (token, $0) }
-        }
+              !learnedWords.contains(lower) else { return nil }
+        // Your own text replacement comes first, as on Apple's keyboard: before the chat
+        // shorthand Hex leaves alone ("brb"), and with Autocorrect off or no dictionary.
+        if let shortcut = lexiconShortcuts[lower] { return (token, shortcut) }
+        guard isEnabled, hasDictionary, !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
         return (token, fix)
     }
