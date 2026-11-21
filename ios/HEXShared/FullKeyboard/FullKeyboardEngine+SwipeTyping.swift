@@ -33,7 +33,7 @@ extension FullKeyboardEngine {
     /// The word before a swipe's, lowercased, when only spaces (or the one the swipe will
     /// add) come between them.
     var swipePreviousWord: String? {
-        let before = target.documentContextBeforeInput ?? ""
+        let before = textBefore ?? ""
         return AutocorrectEngine.previousWord(SwipeTyping.needsSpace(before: before) ? before + " " : before, token: "")
     }
 
@@ -61,7 +61,7 @@ extension FullKeyboardEngine {
     var swipeCapital: Bool {
         if shift.isUppercase { return true }
         guard shift.state == .off, !shift.isHeld else { return false }
-        let before = target.documentContextBeforeInput
+        let before = textBefore
         guard SwipeTyping.needsSpace(before: before) else { return false }
         return AutoCapitalization.shouldCapitalize(
             mode: autoCapitalizationMode,

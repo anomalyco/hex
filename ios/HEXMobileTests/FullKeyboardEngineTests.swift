@@ -1479,6 +1479,114 @@ final class FullKeyboardEngineTests: XCTestCase {
         now += 0.5
     }
 
+    /// Types `text` key by key: letters on the letters page, digits and marks from the 123 page.
+    private func keys(_ text: String) {
+        for ch in text {
+            if ch == " " {
+                tap(.space)
+            } else if ch.isLetter {
+                if engine.layout.layer != .letters { tap(.layerSwitch(.letters)) }
+                tap(.character(String(ch)))
+            } else {
+                if engine.layout.layer == .letters { tap(.layerSwitch(.numbers)) }
+                tap(.character(String(ch)))
+            }
+            now += 0.5
+        }
+    }
+
+    private func smartField(quotes: UITextSmartQuotesType? = .default, dashes: UITextSmartDashesType? = .default, language: KeyboardLanguage = .english) {
+        target = FixtureTextTarget()
+        target.autocapitalizationType = UITextAutocapitalizationType.none
+        target.smartQuotesType = quotes
+        target.smartDashesType = dashes
+        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        engine.width = 393
+        engine.clock = { [unowned self] in self.now }
+        engine.language = language
+        engine.configureForField()
+    }
+
+    /// X (Brandon): "no smart quotes/etc." Apple's keyboard (black box, iOS 27.2, a UITextView
+    /// and a text field) curls ' and " by what comes before them, makes a second hyphen an em
+    /// dash, and writes autocorrect's apostrophes as ’; a field whose smartQuotesType or
+    /// smartDashesType is .no gets straight ones, as there.
+    func testSmartQuotesAndDashesFollowTheFieldAsOnApplesKeyboard() {
+        smartField()
+        keys("'hi' it's \"yes\" (\"ok\") 5'9\" ('a') so '\"ok\"' well--known this -- that one---two yes - no")
+        XCTAssertEqual(target.text, "‘hi’ it’s “yes” (“ok”) 5’9” (‘a’) so ‘“ok”’ well—known this — that one—-two yes - no")
+        smartField()
+        keys("a--")
+        tap(.delete)
+        XCTAssertEqual(target.text, "a", "delete takes the dash whole")
+
+        smartField()
+        type("dont ")
+        XCTAssertEqual(target.text, "don’t ", "autocorrect's apostrophe")
+        type("im")
+        XCTAssertTrue(engine.suggestions.contains { $0.displayText == "I’m" && $0.replacement == "I'm" }, "the strip shows it too")
+        type(" ")
+        XCTAssertEqual(target.text, "don’t I’m ")
+        type("ill")
+        tap(.delete)
+        keys("'l")
+        XCTAssertEqual(target.text, "don’t I’m il’l")
+        XCTAssertEqual(AutocorrectEngine.currentToken(in: engine.textBefore), "il'l", "the keys read ’ as an apostrophe")
+
+        smartField(quotes: .no, dashes: .no)
+        keys("'hi' it's \"yes\" well--known ")
+        type("dont ")
+        XCTAssertEqual(target.text, "'hi' it's \"yes\" well--known don't ")
+
+        smartField(quotes: .yes, dashes: .no)
+        keys("\"well--known\"")
+        XCTAssertEqual(target.text, "“well--known”")
+    }
+
+    /// Each of Apple's keyboards types its language's quotes (black box, iOS 27.2): „Hallo“ ‚tag‘
+    /// in German, where the apostrophe key types ‘ in a word too; « Bonjour » with no-break
+    /// spaces inside and ‘salut’ in French; „tak” ‚nie’ in Polish; «да» in Russian.
+    func testSmartQuotesFollowTheKeysLanguage() {
+        smartField(language: .german)
+        keys("\"hallo\" 'tag' geht's")
+        XCTAssertEqual(target.text, "„hallo“ ‚tag‘ geht‘s")
+        smartField(language: .french)
+        keys("\"bonjour\" 'salut' l'ami")
+        XCTAssertEqual(target.text, "«\u{00A0}bonjour\u{00A0}» ‘salut’ l’ami")
+        smartField(language: .frenchCanadian)
+        keys("\"oui\"")
+        XCTAssertEqual(target.text, "«\u{00A0}oui\u{00A0}»")
+        smartField(language: .polish)
+        keys("\"tak\" 'nie'")
+        XCTAssertEqual(target.text, "„tak” ‚nie’")
+        smartField(language: .russian)
+        keys("\"1\" '2'")
+        XCTAssertEqual(target.text, "«1» ‘2’")
+    }
+
+    /// Apple's keyboard (black box, iOS 27.2) puts , . ! ? ; : and ) against a picked
+    /// suggestion's word, taking the space the suggestion typed; a quote, a bracket or @ keeps
+    /// it, and so does a space you typed yourself. A field's smartInsertDeleteType changed
+    /// nothing there.
+    func testMarksGoAgainstAPickedSuggestion() {
+        for (mark, expected) in [(",", "hello,"), (".", "hello."), (")", "hello)"), ("(", "hello ("), ("@", "hello @")] {
+            smartField(quotes: .no)
+            type("hel")
+            engine.acceptSuggestion(KeyboardSuggestion(displayText: "hello", replacement: "hello", kind: .secondary))
+            keys(mark)
+            XCTAssertEqual(target.text, expected, mark)
+        }
+        smartField()
+        type("hel")
+        engine.acceptSuggestion(KeyboardSuggestion(displayText: "hello", replacement: "hello", kind: .secondary))
+        keys("\"")
+        XCTAssertEqual(target.text, "hello “")
+        smartField()
+        type("hello ")
+        keys(".")
+        XCTAssertEqual(target.text, "hello .", "a space you typed stays")
+    }
+
     /// X (Erick): "If I add punctuation after a typo autocorrect does not fix the typo." A
     /// mark that closes a word fixes it as space does and goes in after the fix, as on Apple's
     /// keyboard; delete right after takes the mark, and the strip offers the typo back.

@@ -551,7 +551,7 @@ final class AutocorrectEngine {
     }
 
     /// Marks after which a sentence goes on.
-    static let midSentenceMarks: Set<Character> = [",", ";", ":", ")", "\"", "\u{201D}", "\u{2019}", "\u{2014}"]
+    static let midSentenceMarks: Set<Character> = [",", ";", ":", ")", "\"", "'", "\u{201D}", "\u{2019}", "\u{2014}"]
 
     /// Common first words of a clause, after a comma (Hex's own short lists).
     static func clauseStarters(_ language: KeyboardLanguage) -> [String] {

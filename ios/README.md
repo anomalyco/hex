@@ -907,6 +907,17 @@ never at a launch by itself.
   dictation bar's space bar is the same trackpad (the same still hold or a 10 pt slide, a
   character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
   build 56 asked for it), and a tap still types a space.
+- **Smart punctuation (full keyboard):** As on Apple's keyboard (black box, iOS 27.2), the
+  ' and " keys type opening quotes at the start, after a space, a bracket or an opening
+  quote, and closing ones elsewhere (‘Hi’ it’s “yes” 5’9”); a second hyphen makes an em dash
+  (a--b is a—b); autocorrect's and the strip's apostrophes are ’ (don’t, I’m). Each language
+  types its own quotes (`SmartQuotes`): „ “ ‚ ‘ in German, « » with no-break spaces in French,
+  „ ” ‚ ’ in Polish, « » in Norwegian, Russian and Ukrainian, “ ” ‘ ’ elsewhere. A field's
+  `smartQuotesType` or `smartDashesType` of `.no` turns each off (Messages' composer has
+  both off: Apple's keyboard types straight quotes and -- there). The keys reason about the
+  text with straight quotes (`SmartPunctuation.plain`). A mark that ends a clause (, . ! ? ;
+  : )) right after a picked suggestion takes the space the suggestion typed ("Hello,"), as
+  Apple's does with `smartInsertDeleteType` on or off.
 - **Delete after an autocorrection (full keyboard):** As on Apple's keyboard (black box,
   iOS 27.2), delete takes only the space or mark after the corrected words, and the strip's
   left slot offers what you typed, highlighted with an undo arrow (Apple's text view shows

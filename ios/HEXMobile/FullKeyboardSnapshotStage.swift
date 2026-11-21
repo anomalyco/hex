@@ -574,6 +574,8 @@ final class FixtureTextTarget: KeyboardTextTarget {
     var keyboardType: UIKeyboardType? = .default
     var returnKeyType: UIReturnKeyType? = .default
     var enablesReturnKeyAutomatically: Bool? = false
+    var smartQuotesType: UITextSmartQuotesType?
+    var smartDashesType: UITextSmartDashesType?
 
     init(text: String = "", appearance: UIKeyboardAppearance? = nil) {
         self.text = text
