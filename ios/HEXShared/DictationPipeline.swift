@@ -88,8 +88,9 @@ nonisolated struct HinglishSettings {
 /// (`CleanupTagger.cleanIfEnabled`, which guards its own memory in the keyboard), `refine`
 /// (Clean up with Apple Intelligence, only in the app), translation, the style
 /// (`TranscriptFormatter`, with Format lists' `SpokenLists` inside it), the spellings again,
-/// then Lowercase. The style and Lowercase are
-/// string rules with no model, so in-keyboard dictation needs no more memory to run them.
+/// Lowercase, then French spacing (`FrenchSpacing`, in every style but Verbatim). The style,
+/// Lowercase and French spacing are string rules with no model, so in-keyboard dictation needs
+/// no more memory to run them.
 nonisolated struct DictationPipeline: Sendable {
     var style: DictationStyle
     /// The dictation language (BCP 47).
@@ -177,12 +178,15 @@ nonisolated struct DictationPipeline: Sendable {
     /// `text` in the style, then the vocabulary's and learned fixes' spellings again (a style
     /// can lowercase a term or capitalize a sentence start: "iPhone" -> "IPhone"), then
     /// Lowercase, with Unicode's context-aware mapping, so a word-final Σ becomes ς ("ΟΔΟΣ" ->
-    /// "οδος"), where Swift's `lowercased()` always gives σ.
+    /// "οδος"), where Swift's `lowercased()` always gives σ, then, in French, the spaces before
+    /// `? ! ; :` and inside `« »` that the styles take out (`FrenchSpacing`; Verbatim keeps the
+    /// model's).
     func format(_ text: String, language: String?) -> String {
         let styled = TranscriptFormatter.format(
             text, style: style, language: language, lists: formatLists, endsWithPeriod: endsWithPeriod
         )
         let spelled = VocabularySpelling.apply(vocabulary + DictationCorrections.spellings(corrections), to: styled)
-        return lowercase ? spelled.lowercased(with: nil) : spelled
+        let cased = lowercase ? spelled.lowercased(with: nil) : spelled
+        return style == .verbatim ? cased : FrenchSpacing.apply(cased, language: language)
     }
 }

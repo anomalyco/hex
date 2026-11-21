@@ -973,3 +973,71 @@ final class InformalContractionTests: XCTestCase {
         )
     }
 }
+
+/// X (Philippe): "When dictating, in some languages punctuation has a space before, like
+/// question and exclamation marks in French. Right now they're not inserted." French puts a
+/// narrow no-break space before ? ! ; and a no-break space before : and inside « » (Canada none
+/// before ? ! ;, Switzerland narrow ones inside « »). The texts are Apple Speech's (macOS 27.2.1,
+/// say -v Thomas and Amélie): fr-FR and fr-CH write "ça va ?" with a plain space, fr-CA's
+/// DictationTranscriber "ça va?", and the styles took the space out.
+final class FrenchSpacingTests: XCTestCase {
+    private let thin = "\u{202F}"
+    private let nbsp = "\u{00A0}"
+
+    func testFrenchGetsItsSpacesAfterTheStyle() {
+        let heard = "Bonjour, comment ça va ? Tu viens ce soir ?"
+        let pipeline = DictationPipeline(style: .polished, language: "fr-FR")
+        XCTAssertEqual(pipeline.format(heard, language: "fr-FR"), "Bonjour, comment ça va\(thin)? Tu viens ce soir\(thin)?")
+        XCTAssertEqual(
+            pipeline.format("il y a trois choses: le pain; le lait et «les œufs» ! c'est tout", language: "fr-FR"),
+            "Il y a trois choses\(nbsp): le pain\(thin); le lait et «\(nbsp)les œufs\(nbsp)»\(thin)! C'est tout."
+        )
+        var casual = DictationPipeline(style: .casual, language: "fr-FR")
+        XCTAssertEqual(casual.format("Tu viens ce soir ? Génial !", language: "fr-FR"), "tu viens ce soir\(thin)? génial\(thin)!")
+        casual.lowercase = true
+        XCTAssertEqual(casual.format("Tu viens ?", language: "fr-FR"), "tu viens\(thin)?")
+        XCTAssertEqual(DictationPipeline(style: .notes, language: "fr-FR").format("Tu viens ?", language: "fr-FR"), "Tu viens\(thin)?")
+        XCTAssertEqual(
+            DictationPipeline(style: .verbatim, language: "fr-FR").format(heard, language: "fr-FR"), heard,
+            "Verbatim keeps the model's spaces"
+        )
+        XCTAssertEqual(DictationPipeline(style: .polished, language: "en-US").format("Really ? Yes", language: "en-US"), "Really? Yes.")
+        XCTAssertEqual(
+            DictationPipeline(style: .polished, language: "en-US").format("Tu viens ?", language: "fr-FR"),
+            "Tu viens\(thin)?",
+            "a translation into French is spaced as French"
+        )
+    }
+
+    func testCanadaAndSwitzerlandFollowTheirOwn() {
+        let canada = DictationPipeline(style: .polished, language: "fr-CA")
+        XCTAssertEqual(canada.format("Bonjour, comment ça va? Tu viens ce soir?", language: "fr-CA"), "Bonjour, comment ça va? Tu viens ce soir?")
+        XCTAssertEqual(FrenchSpacing.apply("ça va ? Oui ! Voici : «tout»", language: "fr-CA"), "ça va? Oui! Voici\(nbsp): «\(nbsp)tout\(nbsp)»")
+        XCTAssertEqual(
+            FrenchSpacing.apply("ça va ? Voici : « tout »", language: "fr-CH"),
+            "ça va\(thin)? Voici\(nbsp): «\(thin)tout\(thin)»"
+        )
+        XCTAssertEqual(FrenchSpacing.convention(for: "fr-BE"), .france)
+        XCTAssertEqual(FrenchSpacing.convention(for: "fr"), .france)
+        XCTAssertNil(FrenchSpacing.convention(for: "en-CA"))
+        XCTAssertNil(FrenchSpacing.convention(for: nil))
+    }
+
+    func testNoDoubledSpacesAndNothingOutsideWords() {
+        let once = FrenchSpacing.apply("ça va  ?\nOui\(nbsp)! Quoi ?!", language: "fr-FR")
+        XCTAssertEqual(once, "ça va\(thin)?\nOui\(thin)! Quoi\(thin)?!")
+        XCTAssertEqual(FrenchSpacing.apply(once, language: "fr-FR"), once, "running twice changes nothing")
+        let untouched = [
+            "Rendez-vous à 10:30 ou 18:45",
+            "Super :) et ;-) puis :D et :(",
+            "Va sur https://exemple.fr/page?q=1",
+            "Écris moi@exemple.fr! ou www.exemple.fr?",
+            "Tape `a ? b : c` puis `x::y`",
+            "? au début\n: en début de ligne",
+        ]
+        for text in untouched {
+            XCTAssertEqual(FrenchSpacing.apply(text, language: "fr-FR"), text, text)
+        }
+        XCTAssertEqual(FrenchSpacing.apply("Il m'a dit «Tu viens?»", language: "fr-FR"), "Il m'a dit «\(nbsp)Tu viens\(thin)?\(nbsp)»")
+    }
+}
