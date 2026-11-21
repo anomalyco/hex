@@ -304,6 +304,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         didSet { syncLanguage() }
     }
 
+    /// Fixtures pin how the letters are arranged; otherwise Settings › Keyboard › Languages ›
+    /// Layout for the keys' language. Without the App Group (an iPhone that keeps it from a
+    /// keyboard without Full Access) every language types on its own layout, as before.
+    var letterLayoutOverride: KeyboardLetterLayout? {
+        didSet { syncLanguage() }
+    }
+
     /// Where Languages and the language last switched to are kept; tests give their own.
     var languageSettings = LanguageSettings() {
         didSet { syncLanguage() }
@@ -341,10 +348,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
                 )
             )
         }
-        guard list != languages || engine.language != list.current else { return }
+        // The keys' language's layout: with English and Spanish on one keyboard, the first one's.
+        let letters = letterLayoutOverride.map(list.layout.offered) ?? settings.letterLayout(for: list.layout)
+        guard list != languages || engine.language != list.current || engine.letterLayout != letters else { return }
         languages = list
         engine.switchesLanguage = list.switches
         engine.layoutLanguage = list.layout == list.current ? nil : list.layout
+        engine.letterLayout = letters
         engine.language = list.current
         engine.partnerLanguage = list.partner(available: Self.spellCheckLanguages)
         syncSpatialAutocorrect()

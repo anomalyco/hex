@@ -259,7 +259,7 @@ enum SettingsSnapshotFixture {
     }
 
     /// `settings-keyboard-languages[-on]`: Keyboard › Languages, open (Automatic, or with
-    /// `-on` English, Français and Русский with Switch dictation too).
+    /// `-on` English on QWERTZ, Français and Русский with Switch dictation too).
     static var opensKeyboardLanguages: Bool {
         scene?.hasPrefix("settings-keyboard-languages") == true
     }
@@ -290,6 +290,8 @@ enum SettingsSnapshotFixture {
             emojiUsage.record("🎉")
         }
         LanguageSettings().keyboardLanguages = on ? [.english, .french, .russian] : []
+        LanguageSettings().setLetterLayout(on ? .qwertz : .qwerty, for: .english)
+        LanguageSettings().setLetterLayout(.azerty, for: .french)
         LanguageSettings().currentKeyboardLanguage = nil
         LanguageSettings().dictationFollowsKeyboard = on
         CleanupTaggerSettings().isEnabled = on

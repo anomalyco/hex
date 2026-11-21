@@ -14,6 +14,7 @@ nonisolated struct LanguageSettings {
         static let keyboardLayout = "settings.keyboardLayout"
         static let keyboardLanguages = "settings.keyboardLanguages"
         static let currentKeyboardLanguage = "settings.keyboardLanguages.current"
+        static let letterLayouts = "settings.keyboardLanguages.layouts"
         static let dictationFollowsKeyboard = "settings.keyboardLanguages.switchDictation"
         static let speechModuleFailed = "settings.dictationLanguage.speechModuleFailed"
         static let unavailable = "settings.dictationLanguage.unavailable"
@@ -80,6 +81,25 @@ nonisolated struct LanguageSettings {
             defaults?.set(languages.map(\.rawValue), forKey: Key.keyboardLanguages)
             defaults?.set(languages.first?.rawValue, forKey: Key.keyboardLayout)
         }
+    }
+
+    /// Settings › Keyboard › Languages › Layout: how each language arranges its letters
+    /// (`KeyboardLetterLayout`), by language code. A language never set, or set to one it no
+    /// longer offers, types on its own layout, as it always did.
+    func letterLayout(for language: KeyboardLanguage) -> KeyboardLetterLayout {
+        let stored = letterLayouts[language.rawValue].flatMap(KeyboardLetterLayout.init(rawValue:))
+        return language.offered(stored)
+    }
+
+    func setLetterLayout(_ letters: KeyboardLetterLayout, for language: KeyboardLanguage) {
+        var all = letterLayouts
+        all[language.rawValue] = language.offered(letters).rawValue
+        defaults?.set(all, forKey: Key.letterLayouts)
+    }
+
+    /// Every language's chosen layout as stored (code to `KeyboardLetterLayout` raw value).
+    var letterLayouts: [String: String] {
+        defaults?.dictionary(forKey: Key.letterLayouts) as? [String: String] ?? [:]
     }
 
     /// The language the space bar last switched to, so the keyboard comes back in it.

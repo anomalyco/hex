@@ -109,10 +109,75 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         return supported.first { Self.matching($0)?.baseLanguage == baseLanguage }
     }
 
-    /// The three letter rows, lowercase. Rows 1 and 2 may hold 11 keys (Apple's Nordic,
-    /// German and Russian layouts) or 12 (Ukrainian); row 3 sits between shift and delete.
-    var letterRows: [[String]] {
-        let rows = switch self {
+    /// The three letter rows of the language's own layout (its `defaultLetterLayout`), lowercase.
+    var letterRows: [[String]] { letterRows(defaultLetterLayout) }
+
+    /// The three letter rows on `letters` (Settings › Keyboard › Languages › Layout), lowercase,
+    /// or on the language's own layout where it doesn't offer `letters`. Rows 1 and 2 may hold
+    /// 11 keys (Apple's Nordic, German and Russian layouts) or 12 (Ukrainian); row 3 sits
+    /// between shift and delete, except on Dvorak, whose delete ends row 1.
+    func letterRows(_ letters: KeyboardLetterLayout) -> [[String]] {
+        let rows: [String] = switch offered(letters) {
+        case .own: ownLetterRows
+        case .qwerty: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        case .qwertz: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
+        case .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
+        case .dvorak: ["pyfgcrl", "aoeuidhtns", "qjkxbmwvz"]
+        }
+        return rows.map { $0.map(String.init) }
+    }
+
+    /// The layouts Settings › Keyboard › Languages › Layout offers for this language, its own
+    /// (today's, `defaultLetterLayout`) first, then the rest in the order Apple's Keyboard
+    /// Layout list shows them (iOS 27.0 simulator, Settings › General › Keyboard › Keyboards ›
+    /// Add New Keyboard, black box). Apple's French keyboards also list "AZERTY – French",
+    /// "QWERTY – French" and "QWERTZ – French", which differ from the plain ones only by the ´
+    /// dead key Hex leaves out, so French offers the three plain ones. One layout: no choice.
+    var letterLayouts: [KeyboardLetterLayout] {
+        switch self {
+        case .english: [.qwerty, .azerty, .qwertz, .dvorak]
+        case .german: [.own, .qwertz, .qwerty, .azerty]
+        case .spanish: [.own, .qwerty, .azerty, .qwertz]
+        case .french: [.azerty, .qwerty, .qwertz]
+        case .frenchCanadian: [.qwerty, .azerty, .qwertz]
+        case .frenchSwiss: [.qwertz, .azerty, .qwerty]
+        case .italian, .portuguese: [.qwerty, .azerty, .qwertz]
+        case .polish, .romanian: [.qwerty, .qwertz, .azerty]
+        // Apple lists QWERTY first for Serbian (Latin) and adds it as QWERTY; Hex keeps the
+        // QWERTZ it always typed on as the default.
+        case .serbianLatin: [.qwertz, .qwerty, .azerty]
+        case .norwegian, .russian, .ukrainian: [.own]
+        }
+    }
+
+    /// The layout the language types on until another is chosen: the one Hex always had.
+    var defaultLetterLayout: KeyboardLetterLayout { letterLayouts[0] }
+
+    /// `letters` where this language offers it, else its own layout.
+    func offered(_ letters: KeyboardLetterLayout?) -> KeyboardLetterLayout {
+        guard let letters, letterLayouts.contains(letters) else { return defaultLetterLayout }
+        return letters
+    }
+
+    /// What Settings names `letters` for this language: Apple's names, and for a language's
+    /// own layout with letters of its own, its arrangement and the language ("QWERTZ – Deutsch").
+    func layoutName(_ letters: KeyboardLetterLayout) -> String {
+        switch letters {
+        case .qwerty: "QWERTY"
+        case .qwertz: "QWERTZ"
+        case .azerty: "AZERTY"
+        case .dvorak: "Dvorak"
+        case .own:
+            switch self {
+            case .german: "QWERTZ – \(displayName)"
+            case .spanish, .norwegian: "QWERTY – \(displayName)"
+            default: displayName
+            }
+        }
+    }
+
+    private var ownLetterRows: [String] {
+        switch self {
         case .english, .italian, .frenchCanadian, .portuguese, .polish, .romanian:
             ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         // Apple's French keyboards also hold a ´ dead key (AZERTY's row 3, the end of the
@@ -131,7 +196,6 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"]
         case .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
         }
-        return rows.map { $0.map(String.init) }
     }
 
     /// Letter keys held for more letters, as the system keyboard's long-press options for this
@@ -305,6 +369,24 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// `letterHolds` on `letters`. A plain layout leaves out the keys the language's own has
+    /// for its letters (German's ä ö ü, Spanish's ñ), and Apple's keyboard then holds each right
+    /// after its base letter (iOS 27.0 simulator, German QWERTZ and QWERTY: A Ä À Á…, O Ö Ô…,
+    /// U Ü Û…; Spanish QWERTY: N Ñ Ń), so Hex's does too. Every other hold stays the language's.
+    func letterHolds(on letters: KeyboardLetterLayout) -> [String: [String]] {
+        var holds = letterHolds
+        let shown = Set(letterRows(letters).joined())
+        for letter in ownLetterRows.joined().map(String.init) where !shown.contains(letter) {
+            let base = String(letter.decomposedStringWithCanonicalMapping.unicodeScalars.prefix(1).map(Character.init))
+            guard base != letter, shown.contains(base) else { continue }
+            var list = holds[base] ?? [base]
+            list.removeAll { $0 == letter }
+            list.insert(letter, at: 1)
+            holds[base] = list
+        }
+        return holds
+    }
+
     /// The 123 and #+= keys whose held options on this language's system keyboard differ from
     /// English's (`AccentCatalog`), observed the same way. The pages themselves are English's in
     /// every language, so Ukrainian's ₴, second on the system keyboard's held $, is held there.
@@ -440,18 +522,22 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
-    /// Each letter's (row, column) for autocorrect's neighbouring-key cost, with rows 2
-    /// and 3 shifted as the keys are.
-    var keyCoordinates: [Character: (Double, Double)] {
+    /// Each letter's (row, column) for autocorrect's neighbouring-key cost on `letters`, with
+    /// rows shifted as the keys are.
+    func keyCoordinates(_ letters: KeyboardLetterLayout? = nil) -> [Character: (Double, Double)] {
         var map: [Character: (Double, Double)] = [:]
+        let letters = offered(letters)
         // AZERTY's row 2 runs edge to edge, and its row 3 starts under e (W under E).
         // Ukrainian's rows 1 and 2 are both twelve keys, and its row 3 starts under ц.
-        let offsets = switch self {
-        case .french: [0.0, 0.0, 2.0]
-        case .ukrainian: [0.0, 0.0, 1.0]
+        // Dvorak's row 2 runs from the edge, its row 1 ends at delete (P over U's left half) and
+        // its row 3 starts after shift (Q under O's right half).
+        let offsets = switch letters {
+        case .azerty: [0.0, 0.0, 2.0]
+        case .dvorak: [1.85, 0.0, 1.33]
+        case .own where self == .ukrainian: [0.0, 0.0, 1.0]
         default: [0.0, 0.5, 1.5]
         }
-        for (row, letters) in letterRows.enumerated() {
+        for (row, letters) in letterRows(letters).enumerated() {
             for (column, letter) in letters.enumerated() {
                 guard let character = letter.first else { continue }
                 map[character] = (Double(row), Double(column) + offsets[row])
@@ -515,6 +601,22 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
         return .english
     }
+}
+
+/// How a language's letters are arranged (Settings › Keyboard › Languages › Layout), as
+/// Apple's Keyboard Layout list offers them for it. The plain ones hold only the 26 letters, in
+/// every language (iOS 27.0 simulator: the same rows, bottom row and 123 pages as the language's
+/// own layout, which is English's QWERTY, French's AZERTY, Swiss French's and Serbian's QWERTZ);
+/// a language's other letters are then held on their base letter (`letterHolds(on:)`).
+nonisolated enum KeyboardLetterLayout: String, CaseIterable, Sendable {
+    /// The language's own keys, with letters of their own (German's ü ö ä, Spanish's ñ).
+    case own
+    case qwerty
+    case qwertz
+    case azerty
+    /// Apple's iPhone Dvorak (English): P Y F G C R L and delete, A O E U I D H T N S edge to
+    /// edge, shift and Q J K X B M W V Z, on keys a little narrower so that row fits.
+    case dvorak
 }
 
 /// Settings › Keyboard › Languages as the keys use it: the languages the space bar switches
