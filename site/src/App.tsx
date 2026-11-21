@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react"
-import Download, { PLATFORM_NAMES, SHORTCUTS } from "./Download"
+import Download, { OS_NAMES, OS_SHORTCUTS, PLATFORM_NAMES, SHORTCUTS, osOf, type Os } from "./Download"
 import { guessPlatform, refinePlatform, type Platform } from "./platform"
 import { OptionKey, SoundToggle, useShout } from "./Shout"
 import signature from "./footer-signature.svg"
@@ -38,6 +38,13 @@ export default function App() {
     }
   }, [])
 
+  // The install tabs and the hero's key are one choice: clicking a tab takes
+  // the hero to that OS, until then it follows the detected platform.
+  const [chosenOs, setChosenOs] = useState<Os>()
+  const os = chosenOs ?? osOf(platform)
+  const shortcut = chosenOs ? OS_SHORTCUTS[chosenOs] : SHORTCUTS[platform]
+  const osName = chosenOs ? OS_NAMES[chosenOs] : PLATFORM_NAMES[platform]
+
   const root = useRef<HTMLElement>(null)
   const canvas = useRef<HTMLCanvasElement>(null)
   const head = useRef<HTMLDivElement>(null)
@@ -65,7 +72,13 @@ export default function App() {
           <div className="show__head" ref={head}>
             <img src={`${import.meta.env.BASE_URL}shout-idle.webp`} alt="" width="640" height="640" decoding="async" fetchPriority="high" />
           </div>
-          <OptionKey phase={shout.phase} onStart={shout.start} onIntent={shout.intent} onPress={shout.pressKey} />
+          <OptionKey
+            os={os}
+            phase={shout.phase}
+            onStart={shout.start}
+            onIntent={shout.intent}
+            onPress={shout.pressKey}
+          />
         </div>
 
         <section className="hero">
@@ -82,12 +95,12 @@ export default function App() {
               </span>
             </h1>
             <p>
-              Local voice dictation for {PLATFORM_NAMES[platform]}. Hold {SHORTCUTS[platform]}, say what you mean, and
+              Local voice dictation for {osName}. Hold {shortcut}, say what you mean, and
               Hex pastes it where you are.
             </p>
           </div>
 
-          <Download platform={platform} />
+          <Download platform={platform} os={os} onChooseOs={setChosenOs} />
         </section>
       </main>
       <footer className="site-footer">
