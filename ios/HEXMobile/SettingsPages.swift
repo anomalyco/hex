@@ -555,6 +555,7 @@ struct ExperimentsSettingsPage: View {
     @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
     @State private var confirmingTouchReset = false
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+    @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
@@ -627,6 +628,15 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsDivider()
 
+                // Off by default: the emoji panel's ABC stays where it always was.
+                SettingsToggleRow(
+                    title: String(localized: "ABC under the emoji key"),
+                    detail: String(localized: "In the emoji panel, ABC sits where the emoji key was, so you can switch back without moving your thumb."),
+                    isOn: $emojiLettersUnderEmojiKey
+                )
+
+                SettingsDivider()
+
                 // Off by default: one shared list of learned words and fixes, as before.
                 SettingsToggleRow(
                     title: String(localized: "Learn each language separately"),
@@ -662,6 +672,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: germanSpatialAutocorrect) { _, enabled in
             FullKeyboardSettings().germanSpatialAutocorrect = enabled
         }
+        .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
+            FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
+        }
         .onChange(of: learnPerLanguage) { _, enabled in
             TypingJournalSettings().learnsPerLanguage = enabled
         }
@@ -683,6 +696,7 @@ struct ExperimentsSettingsPage: View {
             adaptiveTouch = AdaptiveTouchSettings().isEnabled
             refreshAdaptiveTouchStatus()
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+            emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
             learnPerLanguage = TypingJournalSettings().learnsPerLanguage
             multilingualParakeet = MultilingualParakeetSettings().isEnabled
         }

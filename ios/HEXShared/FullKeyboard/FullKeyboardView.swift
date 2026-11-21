@@ -106,6 +106,8 @@ final class FullKeyboardView: UIView {
     let routedTarget: EmojiRoutedTarget
     /// Fixtures turn the emoji experiment on or off; otherwise the App Group's switch.
     var emojiOverride: Bool? { didSet { refreshEmojiKey() } }
+    /// Fixtures and tests turn the ABC experiment on or off; otherwise the App Group's switch.
+    var emojiLettersUnderEmojiKeyOverride: Bool? { didSet { setNeedsLayout() } }
     /// Where emoji use is kept; fixtures give a seeded store.
     var makeEmojiUsage: () -> EmojiUsageStore = { EmojiUsageStore() }
     var emojiLibrary: EmojiLibrary?

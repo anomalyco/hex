@@ -17,6 +17,7 @@ nonisolated enum KeyHapticStrength: String, CaseIterable, Sendable {
 struct FullKeyboardSettings {
     static let launchArgument = "--experiment-full-keyboard"
     static let emojiLaunchArgument = "--experiment-emoji"
+    static let emojiLettersLaunchArgument = "--experiment-emoji-letters"
     static let swipeLaunchArgument = "--experiment-swipe"
     /// Simulator scenes pass `--hex-key left` (or `right`) for Settings › Keyboard › Hex key.
     static let hexKeyLaunchArgument = "--hex-key"
@@ -34,6 +35,7 @@ struct FullKeyboardSettings {
         static let hapticStrength = "settings.keyboardHapticStrength"
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
+        static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
         static let swipeTyping = "experiments.swipeTyping"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
     }
@@ -138,6 +140,16 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.emoji) }
     }
 
+    /// Settings › Experiments › ABC under the emoji key: the emoji panel's ABC sits where the
+    /// emoji key that opened it was, so switching back to the letters needs no thumb move.
+    /// Off by default; a panel with no emoji key behind it (the dictation bar's, a standalone
+    /// panel) keeps ABC at the bar's leading end. Stored as
+    /// `experiments.emojiLettersUnderEmojiKey`.
+    var emojiLettersUnderEmojiKey: Bool {
+        get { defaults?.object(forKey: Key.emojiLettersUnderEmojiKey) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.emojiLettersUnderEmojiKey) }
+    }
+
     /// Settings › Keyboard › Swipe typing: slide through a word's letters to type it, on the
     /// English and Spanish layouts (`SwipeTyping`). On by default. Stored as
     /// `experiments.swipeTyping`, from when it was an experiment (off by default): unset or
@@ -162,7 +174,8 @@ struct FullKeyboardSettings {
 
     /// Simulator scenes pass `--experiment-full-keyboard` or `--keyboard full|dictation-bar`
     /// to pick the keyboard, `--experiment-emoji` to turn Emoji on, `--experiment-swipe` for
-    /// Swipe typing (both on by default; the arguments override a stored off), and
+    /// Swipe typing (both on by default; the arguments override a stored off),
+    /// `--experiment-emoji-letters` for ABC under the emoji key, and
     /// `--hex-key left|right` for the Hex key's side.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
@@ -177,6 +190,9 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.emojiLaunchArgument) {
             emoji = true
+        }
+        if arguments.contains(Self.emojiLettersLaunchArgument) {
+            emojiLettersUnderEmojiKey = true
         }
         if arguments.contains(Self.swipeLaunchArgument) {
             swipeTyping = true

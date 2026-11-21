@@ -21,6 +21,16 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     var showsKeyPopups = true
     var metrics = KeyboardMetrics.portrait { didSet { if metrics != oldValue { setNeedsLayout() } } }
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { setNeedsLayout() } } }
+    /// The full keyboard's current emoji key, in the panel's coordinates, when it has one: only
+    /// its x and width are used. ABC takes both, under the thumb that just lifted off the key
+    /// (Settings › Experiments › ABC under the emoji key); nil keeps ABC at the bar's leading
+    /// end, as on the dictation bar and in a panel a fixture shows alone.
+    var emojiKeyFrame: CGRect? {
+        didSet {
+            guard emojiKeyFrame != oldValue else { return }
+            setNeedsLayout()
+        }
+    }
     /// An emoji went in: the text to insert, its entry, and where it came from
     /// ("suggestion", "grid", "tone").
     var onInsert: ((String, Int, String) -> Void)?
@@ -250,11 +260,14 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         // ABC and delete are drawn without keys, so they take only their label's room and the
         // categories get the rest.
         let keyWidth = min(44, KeyboardLayout.letterWidth(innerWidth: bounds.width - 2 * horizontalInset, metrics: metrics) * KeyboardLayout.bottomSwitchWidthRatio)
-        lettersKey.frame = CGRect(x: horizontalInset + side, y: barY, width: keyWidth, height: barKeyHeight)
+        let lettersFrame = emojiKeyFrame.map {
+            CGRect(x: $0.minX, y: barY, width: $0.width, height: barKeyHeight)
+        } ?? CGRect(x: horizontalInset + side, y: barY, width: keyWidth, height: barKeyHeight)
+        lettersKey.frame = lettersFrame
         deleteKey.frame = CGRect(x: bounds.width - horizontalInset - side - keyWidth, y: barY, width: keyWidth, height: barKeyHeight)
         lettersKey.cornerRadius = metrics.cornerRadius
         deleteKey.cornerRadius = metrics.cornerRadius
-        categoryBar.frame = CGRect(x: lettersKey.frame.maxX + 4, y: barY, width: deleteKey.frame.minX - lettersKey.frame.maxX - 8, height: barKeyHeight)
+        categoryBar.frame = CGRect(x: lettersKey.frame.maxX + 4, y: barY, width: max(0, deleteKey.frame.minX - lettersKey.frame.maxX - 8), height: barKeyHeight)
 
         let gridTop = row.maxY
         let gridFrame = CGRect(x: horizontalInset, y: gridTop, width: bounds.width - 2 * horizontalInset, height: barY - 4 - gridTop)

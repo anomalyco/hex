@@ -3413,6 +3413,26 @@
         }
       }
     },
+    "ABC under the emoji key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表情符号键下方的 ABC"
+          }
+        }
+      }
+    },
+    "In the emoji panel, ABC sits where the emoji key was, so you can switch back without moving your thumb." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在表情符号面板里，ABC 就在表情符号键原来的位置，不用移动拇指就能切回字母键盘。"
+          }
+        }
+      }
+    },
     "Layout" : {
       "localizations" : {
         "zh-Hans" : {
