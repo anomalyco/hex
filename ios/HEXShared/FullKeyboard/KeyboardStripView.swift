@@ -4,8 +4,8 @@ import UIKit
 /// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
 /// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
 /// capsule with the divider beside it hidden. iOS's band above the keyboard takes the top of
-/// Apple's bar, so the words and dividers sit on Apple's line high in the 27 pt below it
-/// (`KeyboardMetrics.stripTextCenter`) and the pills fill it. The centred
+/// Apple's bar, so the pills fill the 27 pt below it and the words and dividers centre in it
+/// (`KeyboardMetrics.stripTextCenter`). The centred
 /// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {

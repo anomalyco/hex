@@ -183,14 +183,12 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// Elsewhere it's the strip less half a point above and below, at most 36 pt.
     var stripPillHeight: CGFloat { stripHeight == Self.stripBarHeight ? stripHeight : min(stripHeight - 1, 36) }
 
-    /// Apple's bar centres its words and dividers 27 pt above row 1's keycaps (iOS 27.2,
-    /// iPhone 17 Pro: 25.3 pt below the panel's edge, keycaps at 52 pt). In the phone's portrait
-    /// strip that's 8 pt down, high in the 27 pt the band leaves; Hex centred them in the strip,
-    /// 5.7 pt below Apple's. Elsewhere the strip is Apple's bar and they centre in it.
-    static let barTextAboveKeys: CGFloat = 27
-    var stripTextCenter: CGFloat {
-        stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
-    }
+    /// Where the strip's words, dividers and Hex mark centre: on its middle, so a word sits in
+    /// the middle of its pill as Apple's does. Apple's words are 27 pt above row 1's keycaps
+    /// (25.3 pt below the panel's edge on the iPhone 17 Pro, iOS 27.2), but its pill reaches
+    /// 11 pt up into the band iOS draws over a third-party keyboard; putting Hex's words on
+    /// Apple's line left them high in a pill that can't (#2201), so they sit 5.5 pt lower.
+    var stripTextCenter: CGFloat { stripHeight / 2 }
 
     /// Apple's keycap corners (iOS 27.2: the same on every iPhone, measured from screenshots
     /// against keys Hex drew at known radii).
