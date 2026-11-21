@@ -174,12 +174,23 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     static let coverStripHeight: CGFloat = 32
 
     /// How far the strip's pills (an autocorrection, a pressed suggestion, the Hex key, the
-    /// recording bar) sit in from its top and bottom: Apple's pill fills its bar but the
-    /// edge band iOS draws, so in the 27 pt strip half a point, in the Duo's 44 pt bar 4 pt.
+    /// recording bar) sit in from its top and bottom: none in the phone's portrait strip, in
+    /// the Duo's 44 pt bar 4 pt.
     var stripInset: CGFloat { (stripHeight - stripPillHeight) / 2 }
-    /// The pills' height: the strip less half a point above and below, at most 36 pt (26 pt in
-    /// the phone's portrait strip, 36 pt in landscape and in the Duo's 44 pt bar).
-    var stripPillHeight: CGFloat { min(stripHeight - 1, 36) }
+    /// The pills' height. Apple's pressed suggestion is a 38 pt capsule from 6 pt below the
+    /// panel's edge to 44 pt (iOS 27.2, iPhone 17 Pro); the band iOS draws takes its top 11 pt,
+    /// so in the phone's portrait strip the pill fills all 27 pt and ends where Apple's does.
+    /// Elsewhere it's the strip less half a point above and below, at most 36 pt.
+    var stripPillHeight: CGFloat { stripHeight == Self.stripBarHeight ? stripHeight : min(stripHeight - 1, 36) }
+
+    /// Apple's bar centres its words and dividers 27 pt above row 1's keycaps (iOS 27.2,
+    /// iPhone 17 Pro: 25.3 pt below the panel's edge, keycaps at 52 pt). In the phone's portrait
+    /// strip that's 8 pt down, high in the 27 pt the band leaves; Hex centred them in the strip,
+    /// 5.7 pt below Apple's. Elsewhere the strip is Apple's bar and they centre in it.
+    static let barTextAboveKeys: CGFloat = 27
+    var stripTextCenter: CGFloat {
+        stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
+    }
 
     /// Apple's keycap corners (iOS 27.2: the same on every iPhone, measured from screenshots
     /// against keys Hex drew at known radii).
