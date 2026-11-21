@@ -38,6 +38,39 @@ protocol AudioManaging: AnyObject {
     func beginCapture(at url: URL, maxDuration: TimeInterval, allowBluetooth: Bool) throws -> any ActiveAudioCapture
 }
 
+/// Keeps AVAudioRecorders that stopped or failed to start alive until their audio queue is
+/// done calling back.
+///
+/// A recorder's AudioQueue input callback reads the recorder (a weak reference inside it) on
+/// the queue's own thread. When the queue fails or stops from inside that callback (no
+/// microphone, a lost route), it is disposed asynchronously and callbacks it already fetched
+/// are still delivered. Freeing the recorder in that window crashed Hex in `objc_loadWeak`
+/// (`AudioRecorderAQInputCallback`) when the microphone failed during the keyboard's switch to
+/// Hex. Nothing reports when the last callback has run, so a retired recorder is held for
+/// `holdTime`: the queue takes about a millisecond to wind down, and a stopped recorder costs
+/// next to nothing to keep.
+@MainActor
+final class RetiredRecorders {
+    static let shared = RetiredRecorders()
+    static let holdTime: Duration = .seconds(5)
+
+    private var held: [UInt64: AnyObject] = [:]
+    private var nextToken: UInt64 = 0
+
+    /// Recorders still held.
+    var count: Int { held.count }
+
+    func hold(_ recorder: AnyObject, for duration: Duration = holdTime) {
+        nextToken &+= 1
+        let token = nextToken
+        held[token] = recorder
+        Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            self?.held[token] = nil
+        }
+    }
+}
+
 @MainActor
 private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudioRecorderDelegate {
     let url: URL
@@ -76,9 +109,12 @@ private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudi
     }
 
     func stop() {
+        guard !explicitlyStopped else { return }
         explicitlyStopped = true
         recorder.delegate = nil
         recorder.stop()
+        // The controller drops this capture next; its queue may still be calling back.
+        RetiredRecorders.shared.hold(recorder)
     }
 
     nonisolated func audioRecorderDidFinishRecording(
@@ -148,7 +184,13 @@ final class SystemAudioManager: AudioManaging {
         )
         tapInstalled = true
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            // Leave nothing half-installed: no tap on an engine that never ran.
+            stopKeepalive()
+            throw error
+        }
     }
 
     func stopKeepalive() {
@@ -190,6 +232,11 @@ final class SystemAudioManager: AudioManaging {
         recorder.isMeteringEnabled = true
         recorder.prepareToRecord()
         guard recorder.record(forDuration: maxDuration) else {
+            // The microphone didn't start (none in the simulator, or one another app holds).
+            // The recorder's queue made it this far and is still winding down: freeing the
+            // recorder here crashed Hex on the queue's thread.
+            recorder.stop()
+            RetiredRecorders.shared.hold(recorder)
             throw CocoaError(.fileWriteUnknown)
         }
 
