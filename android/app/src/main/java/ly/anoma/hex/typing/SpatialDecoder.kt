@@ -239,11 +239,120 @@ internal class SpatialDecoder(val model: TypingModel) {
             }
         }
         readings.sortWith(compareBy<Reading> { it.cost }.thenBy { it.text })
-        val best = readings.firstOrNull() ?: return none
-        val margin = if (!knownLiteral || foldAccents(best.text.lowercase()) == foldAccents(typed)) 2.0 else 7.0
-        return Decision(if (cost - best.cost >= margin) best.text else null,
-            readings.asSequence().filter { it.cost < cost && !it.text.equals(typed, ignoreCase = true) }.distinctBy { it.text.lowercase() }.take(3).toList())
+        val best = readings.firstOrNull()
+        val margin = if (best == null || !knownLiteral || foldAccents(best.text.lowercase()) == foldAccents(typed)) 2.0 else 7.0
+        var replace = if (best != null && cost - best.cost >= margin) best.text else null
+        var shown = readings.asSequence().filter { it.cost < cost && !it.text.equals(typed, ignoreCase = true) }
+            .distinctBy { it.text.lowercase() }.toMutableList()
+        // Nothing above read a spelling that is no word at all: a missed space may still explain it,
+        // with a slip in the second word or three or more words run together (iOS #2244). Never a
+        // known spelling or a likelier reading that only missed the margin; not German, whose model
+        // is lowercase and whose nouns take their capital in the one-word path.
+        if (replace == null && !knownLiteral && model.language != "de" && typed.length >= 5) {
+            missedSpaceReading(taps, typed, previous, swears, cost)?.let { fallback ->
+                val likeliest = shown.firstOrNull()
+                if (likeliest == null || fallback.cost <= likeliest.cost || likeliest.text.equals(fallback.text, ignoreCase = true)) {
+                    replace = fallback.text
+                    shown.removeAll { it.text.equals(fallback.text, ignoreCase = true) }
+                    shown.add(0, fallback)
+                }
+            }
+        }
+        if (best == null && replace == null) return none
+        return Decision(replace, shown.take(3))
     }
+
+    // What a missed space can still make of taps nothing else read (iOS missedSpaceReading): the
+    // cheaper of a word and a slipped second word, or three to six words spelled as typed, taken only
+    // when its words, without the spaces' cost, cost no more than the run nobody knows does.
+    private fun missedSpaceReading(taps: List<Tap>, typed: String, previous: Int, swears: Boolean, literalCost: Double): Reading? {
+        val space = taps[0].missedSpaceCost
+        fun affordable(r: Reading?) = r?.takeIf { it.cost - space * (it.text.count { c -> c == ' ' }) <= literalCost }
+        val slipped = affordable(slippedSecondWord(taps, typed, previous, swears))
+        val segmented = affordable(exactSegmentation(taps, typed, previous, swears))
+        return when {
+            slipped != null && segmented != null -> if (segmented.cost < slipped.cost) segmented else slipped
+            else -> slipped ?: segmented
+        }
+    }
+
+    private fun canStandAlone(word: Int) = model.length(word) > 1 || model.frequencyCost(word) < 56
+
+    // The first letters as a word and the rest one slip from a word after it, clearing the margin it
+    // would need typed after that first word ("specialchsracter" -> "special character"). A rest that
+    // is a word already is the ordinary split's; the first word is two letters or more.
+    private fun slippedSecondWord(taps: List<Tap>, typed: String, previous: Int, swears: Boolean): Reading? {
+        val n = typed.length
+        var best: Reading? = null
+        for (k in 2..n - 3) {
+            val left = model.index(typed.substring(0, k))
+            if (left < 0 || !canStandAlone(left) || model.neverSuggest.blocks(left, swears, previous) || model.index(typed.substring(k)) >= 0) continue
+            var leftSpatial = 0.0
+            var rightLiteral = 0.0
+            for (i in 0 until k) leftSpatial += taps[i].cost[model.code(typed[i])]
+            for (i in k until n) rightLiteral += taps[i].cost[model.code(typed[i])]
+            rightLiteral += lmWeight * 22.0
+            val leftCost = leftSpatial + lmWeight * model.languageCost(previous, left)
+            for (f in search(taps, k, n, 1, swears, left).sortedWith(spatialOrder).take(5)) {
+                if (model.neverSuggest.blocksFollowing(f.word, swears, left)) continue
+                val rightCost = f.cost + lmWeight * model.languageCost(left, f.word)
+                if (rightLiteral - rightCost < 2.0) continue
+                val cost = leftCost + rightCost + taps[k].missedSpaceCost
+                if (best == null || cost < best.cost)
+                    best = Reading(model.text(left) + " " + model.text(f.word), cost, model.frequencyCost(left) + model.frequencyCost(f.word))
+            }
+        }
+        return best
+    }
+
+    private class Path(val words: List<Int>, val cost: Double)
+
+    // Three to six words typed with no spaces, each spelled as typed ("seeyoutomorrow" -> "see you
+    // tomorrow"): the cheapest path per end, last word and word count, words found by walking the
+    // model's list one letter at a time from each start.
+    private fun exactSegmentation(taps: List<Tap>, typed: String, previous: Int, swears: Boolean): Reading? {
+        val n = typed.length
+        if (n !in 5..32) return null
+        val spatial = DoubleArray(n + 1)
+        for (i in 0 until n) spatial[i + 1] = spatial[i] + taps[i].cost[model.code(typed[i])]
+        val states = Array(n + 1) { HashMap<Long, Path>() }
+        states[0][key(-1, 0)] = Path(emptyList(), 0.0)
+        var best: Path? = null
+        for (start in 0 until n) {
+            if (states[start].isEmpty()) continue
+            val ends = ArrayList<Pair<Int, Int>>()
+            var lo = 0; var hi = model.size
+            for (end in start + 1..n) {
+                val child = model.child(lo, hi, end - start - 1, model.code(typed[end - 1]))
+                if (child == 0L) break
+                lo = (child ushr 32).toInt(); hi = child.toInt()
+                if (model.length(lo) == end - start && canStandAlone(lo) && !model.neverSuggest.blocks(lo, swears)) ends.add(end to lo)
+            }
+            if (ends.isEmpty()) continue
+            for ((k, path) in states[start]) {
+                val last = (k shr 8).toInt()
+                val before = if (last >= 0) last else previous
+                for ((end, word) in ends) {
+                    if (model.neverSuggest.blocksFollowing(word, swears, before)) continue
+                    val words = path.words + word
+                    val cost = path.cost + (spatial[end] - spatial[start]) + lmWeight * model.languageCost(before, word) +
+                        (if (path.words.isEmpty()) 0.0 else taps[start].missedSpaceCost)
+                    if (end == n) {
+                        if (words.size in 3..6 && (best == null || cost < best.cost)) best = Path(words, cost)
+                        continue
+                    }
+                    if (words.size >= 6) continue
+                    val next = key(word, words.size)
+                    val known = states[end][next]
+                    if (known != null && known.cost <= cost) continue
+                    states[end][next] = Path(words, cost)
+                }
+            }
+        }
+        return best?.let { p -> Reading(p.words.joinToString(" ") { model.text(it) }, p.cost, p.words.sumOf { model.frequencyCost(it) }) }
+    }
+
+    private fun key(last: Int, count: Int) = (last.toLong() shl 8) or count.toLong()
     private companion object {
         val spatialOrder = compareBy<Found> { it.cost }.thenBy { it.word }
         const val EDIT_COST = 7.0
