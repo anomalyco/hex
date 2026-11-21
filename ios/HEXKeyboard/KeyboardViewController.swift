@@ -81,6 +81,7 @@ final class KeyboardViewController: UIInputViewController {
         super.viewWillDisappear(animated)
         if dictationEdits.isTracking { dictationEdits.finish(editContext) }
         TypingJournal.sharedIfEnabled()?.save()
+        AdaptiveTouch.current?.save()
         isShown = false
         localDictation.discard(reason: "keyboard hidden")
         endTypingLogSession(reason: "disappear", settleDictation: editContext)

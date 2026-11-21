@@ -376,6 +376,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         if engine.journal !== journal {
             engine.journal = journal
         }
+        // Adaptive touch keeps its averages on disk only with Full Access; without, in memory.
+        let adaptive = AdaptiveTouch.sharedIfEnabled(persistent: hostController?.hasFullAccess == true)
+        if engine.adaptiveTouch !== adaptive {
+            engine.adaptiveTouch = adaptive
+        }
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         syncHexPlacement()

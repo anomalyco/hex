@@ -841,3 +841,55 @@ nonisolated struct TypingDecoder {
         model.length(i) >= 2 || model.unigramCost(i) < parameters.oneLetterWordCost
     }
 }
+
+extension TypingDecoder {
+    /// Whether `decide` with `keys` would put `reading` (one word) in place of what you typed:
+    /// it beats the literal by the margin. Nil for a two-word reading, which only `decide` can
+    /// tell. Adaptive touch asks with the stock centres, so a correction it applies is one
+    /// they would apply too.
+    func replaces(with reading: String, taps: [CGPoint], typed: String, previous: String?, literalIsValid: Bool, keys: Keys) -> Bool? {
+        guard !reading.contains(" ") else { return nil }
+        guard taps.count == typed.count, !typed.isEmpty, let letters = model.encode(typed),
+              !letters.contains(where: { $0 == model.apostropheCode }),
+              let codes = model.encode(reading.lowercased()) else { return false }
+        let centres = codeCentres(keys)
+        let costs = taps.map { tapCosts($0, centres: centres, keys: keys) }
+        let prev = previous.flatMap { model.index(of: $0) }
+        var literalCost = 0.0
+        for (i, code) in letters.enumerated() {
+            let c = costs[i][Int(code)]
+            guard c.isFinite else { return false }
+            literalCost += c
+        }
+        let literalIndex = model.index(ofCodes: letters)
+        let literalIsYours = userWords.index(of: letters) != nil
+        var literalLM = literalIndex.map { lmCost($0, after: prev) }
+            ?? (literalIsValid ? parameters.unknownValidCost : parameters.unknownCost)
+        if literalIsYours { literalLM = min(literalLM, parameters.userWordCost) }
+        literalCost += parameters.lmWeight * literalLM
+
+        var cost = Double.infinity
+        if let spatial = search(OneWord(codes: codes), costs, range: 0..<costs.count, limit: 1, maxEdits: parameters.maxEdits).first?.1 {
+            if let index = model.index(ofCodes: codes), !neverSuggest.words.contains(index) {
+                cost = spatial + parameters.lmWeight * lmCost(index, after: prev)
+            }
+            if userWords.index(of: codes) != nil {
+                cost = min(cost, spatial + parameters.lmWeight * parameters.userWordCost)
+            }
+        }
+        guard cost < literalCost else { return false }
+        var margin = (literalIndex != nil || literalIsValid || literalIsYours) ? parameters.validMargin : parameters.autoMargin
+        if Self.withoutAccents(reading.lowercased()) == Self.withoutAccents(typed) {
+            margin = min(margin, parameters.accentMargin)
+        }
+        return literalCost - cost >= margin
+    }
+
+    /// One word, searched as a word list.
+    private struct OneWord: TypingDecoderWords {
+        let codes: [UInt8]
+        var wordCount: Int { 1 }
+        func length(_ i: Int) -> Int { codes.count }
+        func byte(_ i: Int, _ depth: Int) -> Int { depth < codes.count ? Int(codes[depth]) : -1 }
+    }
+}

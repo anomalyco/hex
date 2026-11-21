@@ -1098,3 +1098,57 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "dont ")
     }
 }
+
+
+// MARK: - Adaptive touch: personal centres rank readings, never correct on their own
+
+extension AutocorrectEngineTests {
+    func testPersonalCentresNeverRewriteAWordTheStockCentresKeep() throws {
+        try useDecoder()
+        let ac = engine.autocorrect
+        let stock = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout))
+        // A profile far past the experiment's bounds: b's centre sits on m, and c's on b.
+        var personal = stock
+        personal.centres["b"] = stock.centres["m"]
+        personal.centres["c"] = stock.centres["b"]
+        ac.decoderKeys = personal
+        let bat = "bat".map { stock.centres[$0]! }
+        func atSpace(_ taps: [CGPoint], stockKeys: TypingDecoder.Keys?) -> String? {
+            ac.decoderStockKeys = stockKeys
+            ac.decoderTaps = taps
+            return ac.replacementOnSpace(beforeInput: "the bat", field: .text, autocorrectionType: .default)?.replacement
+        }
+        XCTAssertEqual(atSpace(bat, stockKeys: nil), "cat", "alone, the personal centres would rewrite \"bat\"")
+        let nudged = bat.map { CGPoint(x: $0.x + 0.01, y: $0.y) }
+        XCTAssertNil(atSpace(nudged, stockKeys: stock), "the stock centres keep it: no new rewrite")
+        let strip = ac.suggestions(beforeInput: "the bat", field: .text, autocorrectionType: .default)
+        XCTAssertTrue(strip.contains { $0.replacement == "cat" && !$0.willAutoReplace }, "offered, not applied: \(strip)")
+
+        // A fix both make still goes in.
+        ac.decoderKeys = stock
+        let thw = "thw".map { stock.centres[$0]! }
+        ac.decoderStockKeys = stock
+        ac.decoderTaps = thw
+        XCTAssertEqual(ac.replacementOnSpace(beforeInput: "see thw", field: .text, autocorrectionType: .default)?.replacement, "the")
+    }
+
+    func testTheDecodersReplacementCheckAgreesWithItsDecision() throws {
+        try useDecoder()
+        let decoder = try XCTUnwrap(engine.autocorrect.decoder)
+        let keys = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout))
+        for (typed, previous, valid) in [("thw", "see", false), ("teh", nil, false), ("bat", "the", true), ("helo", "say", false), ("ypu", "thank", false)] {
+            let taps = typed.map { keys.centres[$0]! }
+            let decision = try XCTUnwrap(decoder.decide(taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys))
+            if let replacement = decision.replacement, !replacement.contains(" ") {
+                XCTAssertEqual(decoder.replaces(with: replacement, taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys), true, typed)
+            }
+            let margin = valid || decoder.model.index(of: typed) != nil ? decoder.parameters.validMargin : decoder.parameters.autoMargin
+            for reading in decision.readings where !reading.text.contains(" ") {
+                XCTAssertEqual(
+                    decoder.replaces(with: reading.text, taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys),
+                    decision.literalCost - reading.cost >= margin, "\(typed) → \(reading.text)"
+                )
+            }
+        }
+    }
+}
