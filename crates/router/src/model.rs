@@ -51,24 +51,25 @@ pub fn format_length(ms: u64) -> String {
 pub fn parse_clock_ms(input: &str) -> Option<u64> {
     let trimmed = input.trim();
     if let Some((mins, secs)) = trimmed.split_once(':') {
-        let m: u64 = mins.parse().ok()?;
-        let s: f64 = secs.parse().ok()?;
-        if !s.is_finite() || s < 0.0 {
-            return None;
-        }
+        let minutes: u64 = mins.parse().ok()?;
+        let seconds: f64 = secs.parse().ok()?;
         // Minutes are only bounded by the input, so absurd ones read as no
         // time instead of overflowing the millisecond clock.
-        m.checked_mul(60_000)?
-            .checked_add((s * 1_000.0).round() as u64)
+        minutes
+            .checked_mul(60_000)?
+            .checked_add(seconds_ms(seconds)?)
     } else if let Some(ms_str) = trimmed.strip_suffix("ms") {
         ms_str.trim().parse().ok()
     } else {
-        let s: f64 = trimmed.strip_suffix('s').unwrap_or(trimmed).parse().ok()?;
-        if !s.is_finite() || s < 0.0 {
-            return None;
-        }
-        Some((s * 1_000.0).round() as u64)
+        seconds_ms(trimmed.strip_suffix('s').unwrap_or(trimmed).parse().ok()?)
     }
+}
+
+/// A seconds value as milliseconds, refusing what the clock can't hold: NaN,
+/// infinities, negatives, and anything at or past `u64`'s own range.
+fn seconds_ms(seconds: f64) -> Option<u64> {
+    let ms = (seconds * 1_000.0).round();
+    (ms.is_finite() && ms >= 0.0 && ms < u64::MAX as f64).then_some(ms as u64)
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -652,6 +653,13 @@ mod tests {
         assert_eq!(parse_clock_ms("250ms"), Some(250));
         assert_eq!(parse_clock_ms("-1"), None);
         assert_eq!(parse_clock_ms("soon"), None);
+        // NaN, infinities, negatives, and values past the clock's range read
+        // as no time in both branches.
+        assert_eq!(parse_clock_ms("0:1e300"), None);
+        assert_eq!(parse_clock_ms("1e300"), None);
+        assert_eq!(parse_clock_ms("0:NaN"), None);
+        assert_eq!(parse_clock_ms("inf"), None);
+        assert_eq!(parse_clock_ms("0:-1"), None);
         // Minutes that would overflow the millisecond clock read as no time.
         assert_eq!(parse_clock_ms(&format!("{}:00", u64::MAX)), None);
         assert_eq!(parse_clock_ms("184467440737095516:00"), None);

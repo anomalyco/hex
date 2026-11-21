@@ -138,14 +138,16 @@ impl Policy {
     }
 
     /// The lock on a Labs feature: Labs, Meetings for Meetings, Annotate for
-    /// Annotate replay, or OpenCode processing for a voice prompt.
+    /// Annotate's labs, or OpenCode processing for a voice prompt.
     pub fn labs_lock(self, feature: crate::labs::Feature) -> Option<Lock> {
         if feature == crate::labs::Feature::Meetings && self.locks(Lock::Meetings) {
             return Some(Lock::Meetings);
         }
         if matches!(
             feature,
-            crate::labs::Feature::AnnotateReplay | crate::labs::Feature::AnnotatePointerScreen
+            crate::labs::Feature::AnnotateReplay
+                | crate::labs::Feature::AnnotatePointerScreen
+                | crate::labs::Feature::AnnotateAgentTools
         ) && self.locks(Lock::Annotate)
         {
             return Some(Lock::Annotate);
@@ -178,6 +180,7 @@ impl Policy {
                 &mut settings.capture.enabled,
                 &mut settings.labs.annotate_replay,
                 &mut settings.labs.annotate_pointer_screen,
+                &mut settings.labs.annotate_agent_tools,
             ],
             #[cfg(not(hex_capture))]
             Lock::Annotate => Vec::new(),
@@ -318,6 +321,52 @@ mod tests {
         );
         let labs = Policy::default().with(Lock::Labs);
         assert_eq!(labs.labs_lock(feature), Some(Lock::Labs));
+    }
+
+    /// An organization's DisableAnnotate lock reaches the agent tools lab: the
+    /// card reads managed, `hex labs on` and `hex settings set` refuse, the
+    /// gate reads off, and the saved switch is never rewritten.
+    #[test]
+    fn the_annotate_lock_holds_agent_tools_off_and_keeps_its_switch_saved() {
+        use crate::labs::Feature;
+        let feature = Feature::AnnotateAgentTools;
+        assert_eq!(Policy::default().labs_lock(feature), None);
+        let annotate = Policy::default().with(Lock::Annotate);
+        assert_eq!(
+            annotate.labs_lock(feature),
+            Some(Lock::Annotate),
+            "the card shows it managed"
+        );
+        assert_eq!(
+            annotate.setting_lock("labs.annotate_agent_tools"),
+            Some(Lock::Annotate)
+        );
+        assert!(
+            !crate::labs::annotate_agent_tools_under(annotate),
+            "the gate reads off under the lock"
+        );
+        #[cfg(target_os = "linux")]
+        {
+            let _forced = Policy::forced_for_test(annotate);
+            assert_eq!(feature.managed(), Some(Lock::Annotate));
+            assert!(
+                !crate::labs::annotate_agent_tools(),
+                "the process gate reads off under the forced lock"
+            );
+        }
+
+        let mut saved = AppSettings::default();
+        saved.labs.annotate_agent_tools = true;
+        let mut loaded = saved.clone();
+        annotate.enforce(&mut loaded);
+        assert!(
+            !loaded.labs.annotate_agent_tools,
+            "the locked lab reads off"
+        );
+        // The lock never rewrites the saved switch.
+        let mut written = loaded.clone();
+        annotate.keep_saved(&mut written, &saved);
+        assert!(written.labs.annotate_agent_tools);
     }
 
     #[test]

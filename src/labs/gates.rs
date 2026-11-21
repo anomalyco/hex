@@ -470,12 +470,21 @@ pub fn paste_last_picker() -> bool {
 
 /// Labs › Agent tools for captures: `hex annotate inspect`, `zoom`, `frames`,
 /// and `skill` read a capture bundle in the CLI process (read by each of those
-/// commands, in a process that never applied settings).
+/// commands, in a process that never applied settings). An Annotate lock holds
+/// it off even with its saved switch on.
 pub fn annotate_agent_tools() -> bool {
+    annotate_agent_tools_under(crate::policy::Policy::current())
+}
+
+/// [`annotate_agent_tools`] under an explicit policy, so its managed lock is
+/// read where the gate is tested.
+pub(crate) fn annotate_agent_tools_under(policy: crate::policy::Policy) -> bool {
     // The state word is full, so the switch has its own atomic, loaded here
     // first in a process that never applied its settings.
     let _ = state();
-    ANNOTATE_AGENT_TOOLS.load(Ordering::Acquire) && Feature::AnnotateAgentTools.on_this_os()
+    ANNOTATE_AGENT_TOOLS.load(Ordering::Acquire)
+        && Feature::AnnotateAgentTools.on_this_os()
+        && policy.labs_lock(Feature::AnnotateAgentTools).is_none()
 }
 
 /// Labs › Transcribe dropped audio: a file with one of this build's

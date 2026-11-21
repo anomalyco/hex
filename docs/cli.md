@@ -304,7 +304,9 @@ again, one network call. An unknown capture is refused with `not-found`.
 (`labs.annotate_agent_tools`, off by default; `hex labs on
 annotate-agent-tools`). They run in the `hex` process on every OS, with Hex
 closed: they only read the bundle and decode its video, never starting a
-capture, sending one, or writing a setting. While the lab is off they refuse
+capture, sending one, or writing a setting. `frames` extracts with `ffmpeg`
+from PATH when one is installed, as the engine's own `extract_frames_range`
+does. While the lab is off they refuse
 with that switch's name. `inspect [<capture>]` prints `summary.md`; `--marks`
 prints one line per mark (`#2 ✎② 0:09 circled · m2`), or `No marks`; `--json`
 prints `scrawl.json` pretty, or with `--marks` the marks as a JSON array.

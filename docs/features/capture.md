@@ -1100,8 +1100,9 @@ hex capture list|show|send|route         // capture.cli; docs/cli.md
 hex annotate inspect|zoom|frames|skill   // capture.agents; labs.annotate_agent_tools
 ├── Off by default (`Audience::Everyone`, every OS); a CLI read in the `hex`
 │   process, never over the control socket: Hex needn't run, and nothing
-│   records, sends, or writes a setting. Off -> refused naming
-│   `hex labs on annotate-agent-tools`
+│   records, sends, or writes a setting. `frames` extracts with `ffmpeg` from
+│   PATH when one is installed (the engine's own choice), else the engine's
+│   decoder. Off -> refused naming `hex labs on annotate-agent-tools`
 ├── inspect [<capture>=latest] -> `summary.md` (sketch::summary_markdown)
 │   ├── --marks -> one `agent_context::MarkEntry::line()` per mark, time order,
 │   │   or `No marks`; --marks --json -> the entries as a JSON array
