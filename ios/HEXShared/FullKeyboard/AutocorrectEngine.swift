@@ -591,8 +591,8 @@ final class AutocorrectEngine {
         if let partner = workingPartner {
             // Both languages' candidates, those of the language the words before are in
             // first; spelling guesses only for a word neither knows.
-            let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2, model: predictionModel)
-            let theirs = partner.candidates(for: token, autoFix: autoFix, guesses: !knowsAsTyped(token), limit: 2, model: partner.decoder?.model)
+            let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2, model: predictionModel, corrects: isEnabled)
+            let theirs = partner.candidates(for: token, autoFix: autoFix, guesses: !knowsAsTyped(token), limit: 2, model: partner.decoder?.model, corrects: isEnabled)
             let leansPartner = languageLean(partner, token: token) > 0
             let (first, second) = leansPartner ? (theirs, mine) : (mine, theirs)
             for index in 0..<max(first.count, second.count) {
@@ -602,7 +602,7 @@ final class AutocorrectEngine {
                 }
             }
         } else {
-            pool += candidates(for: token, autoFix: autoFix, guesses: true, limit: 2 - pool.count, model: predictionModel)
+            pool += candidates(for: token, autoFix: autoFix, guesses: true, limit: 2 - pool.count, model: predictionModel, corrects: isEnabled)
         }
 
         let literal = KeyboardSuggestion(displayText: "“\(token)”", replacement: token, kind: .keepLiteral)
@@ -625,7 +625,13 @@ final class AutocorrectEngine {
     /// strip), at most `limit`: a learned fix or contraction space won't apply, Spatial
     /// autocorrect's other readings of your taps, spelling guesses for a word the dictionary
     /// doesn't know (only with `guesses`), then completions.
-    private func candidates(for token: String, autoFix: String?, guesses: Bool, limit: Int, model: TypingDecoderModel?) -> [String] {
+    ///
+    /// `corrects` false (Autocorrect off): completions only, as Apple's keyboard with
+    /// Auto-Correction off offers "Imagine" for "im" but not "I'm", and nothing for "teh" or
+    /// "dont" (black box, iOS 27.2).
+    private func candidates(
+        for token: String, autoFix: String?, guesses: Bool, limit: Int, model: TypingDecoderModel?, corrects: Bool = true
+    ) -> [String] {
         let lower = token.lowercased()
         var pool: [String] = autoFix.map { [$0] } ?? []
         let start = pool.count
@@ -634,7 +640,7 @@ final class AutocorrectEngine {
             pool.contains { $0.caseInsensitiveCompare(item) == .orderedSame }
         }
 
-        if autoFix == nil {
+        if corrects, autoFix == nil {
             if let learned = learning.typos[lower], mayOffer(learned, replacing: token) {
                 // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
                 pool.append(Self.matchCase(of: token, onto: learned))
@@ -654,7 +660,7 @@ final class AutocorrectEngine {
         }
 
         // Spatial autocorrect's other readings of your taps.
-        if let decision = decoderDecision(for: token) {
+        if corrects, let decision = decoderDecision(for: token) {
             for reading in decision.readings where pool.count < end && mayOffer(reading.text, replacing: token) {
                 let cased = Self.matchCase(of: token, onto: reading.text)
                 if !has(cased) {
@@ -664,7 +670,7 @@ final class AutocorrectEngine {
         }
 
         // Spelling guesses for a word the dictionary doesn't know.
-        if guesses && pool.count < end && token.count >= 2 {
+        if corrects && guesses && pool.count < end && token.count >= 2 {
             let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower) || checker.isWordValid(token)
             if !valid {
                 for guess in rankedGuesses(for: token) {
