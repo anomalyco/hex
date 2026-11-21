@@ -198,6 +198,8 @@ pub(super) struct ClipExport {
     pub(super) movie: std::path::PathBuf,
     /// The span kept, when it's less than the whole recording.
     pub(super) trim: Option<[u64; 2]>,
+    /// How it's made smaller; none keeps it as recorded.
+    pub(super) shrink: Option<super::clip::Shrink>,
     pub(super) length_ms: u64,
     /// The contact sheet's RGBA and size.
     pub(super) sheet: Option<(u32, u32, Vec<u8>)>,
@@ -205,17 +207,26 @@ pub(super) struct ClipExport {
 }
 
 impl ClipExport {
-    /// Saves the span kept as a movie, or sends its contact sheet with its
-    /// words and the movie written beside it.
+    /// The span kept, as a movie: copied as a file, saved in the
+    /// screenshots folder, or sent as its contact sheet with its words and
+    /// the movie's path. `progress` hears how far a shrink is.
     #[cfg(target_os = "macos")]
-    pub(super) fn deliver(&self, out: &Out) -> anyhow::Result<()> {
+    pub(super) fn deliver(&self, out: &Out, progress: &mut dyn FnMut(f64)) -> anyhow::Result<()> {
         use crate::screenshots::save;
         match out {
-            Out::Copy => anyhow::bail!("a recording isn't copied"),
+            Out::Copy => {
+                let movie = self.written(progress)?;
+                save::copy_saved(&movie, true)
+            }
             Out::Save => {
                 let folder = crate::app_settings::screenshot_settings().folder();
-                let written =
-                    super::clip::write_span(&self.movie, self.trim, &save::recording_path(&folder));
+                let written = super::clip::write_span(
+                    &self.movie,
+                    self.trim,
+                    self.shrink,
+                    &save::recording_path(&folder),
+                    progress,
+                );
                 match &written {
                     Ok(()) => crate::screenshots::clear_save_error(),
                     Err(error) => crate::screenshots::record_save_error(&folder, error),
@@ -223,31 +234,41 @@ impl ClipExport {
                 written
             }
             Out::Send(dest) => {
-                // The whole recording is already saved; only a cut is new.
-                let folder = std::env::temp_dir().join("hex-screenshots");
-                let movie = match self.trim {
-                    Some(_) => {
-                        let movie = save::recording_path(&folder);
-                        super::clip::write_span(&self.movie, self.trim, &movie)?;
-                        movie
-                    }
-                    None => self.movie.clone(),
-                };
+                let movie = self.written(progress)?;
                 let (w, h, rgba) = self
                     .sheet
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("the recording has no frames"))?;
-                let sheet = save::write(&folder, &encode(*w, *h, rgba, 1.0)?)?;
+                let sheet = save::write(&scratch(), &encode(*w, *h, rgba, 1.0)?)?;
                 let text = clip_text(&self.words, &movie, self.length_ms);
                 crate::capture_host::send_image(&dest.session, &text, &sheet)
             }
         }
     }
 
+    /// The movie to copy or send: the recording itself when it's kept
+    /// whole as recorded, which is already saved, else a new one beside
+    /// the editor's other exports.
+    #[cfg(target_os = "macos")]
+    fn written(&self, progress: &mut dyn FnMut(f64)) -> anyhow::Result<std::path::PathBuf> {
+        if self.trim.is_none() && self.shrink.is_none() {
+            return Ok(self.movie.clone());
+        }
+        let movie = crate::screenshots::save::recording_path(&scratch());
+        super::clip::write_span(&self.movie, self.trim, self.shrink, &movie, progress)?;
+        Ok(movie)
+    }
+
     #[cfg(not(target_os = "macos"))]
-    pub(super) fn deliver(&self, _: &Out) -> anyhow::Result<()> {
+    pub(super) fn deliver(&self, _: &Out, _: &mut dyn FnMut(f64)) -> anyhow::Result<()> {
         anyhow::bail!("recordings export on macOS only")
     }
+}
+
+/// Where copied and sent exports are written: they aren't saves.
+#[cfg(target_os = "macos")]
+fn scratch() -> std::path::PathBuf {
+    std::env::temp_dir().join("hex-screenshots")
 }
 
 /// What a sent recording says: its words, then where its movie is.

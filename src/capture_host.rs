@@ -425,11 +425,25 @@ fn scrawl_engine(
         .with_transcriber(transcriber)
 }
 
+/// How a capture's movie is made: a Screenshots recording is for people, so
+/// it's HEVC at the size, frame rate, and quality Labs › Screenshots asks
+/// for; an Annotate capture's stays sized for agents.
+fn movie_for(clip: bool, screenshots: &crate::app_settings::ScreenshotSettings) -> MovieQuality {
+    if clip {
+        MovieQuality::Full(screenshots.movie_size())
+    } else {
+        MovieQuality::Compact
+    }
+}
+
 /// What the capture asks for: `target`, on the clock the dictation timeline
-/// shares, with Hex's audio and Hex's folder. A Screenshots recording is for
-/// people, so its movie keeps every pixel; an Annotate capture's stays sized
-/// for agents.
-fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool) -> Start {
+/// shares, with Hex's audio and Hex's folder, its movie made as `movie` says.
+fn start_request(
+    t0: CaptureInstant,
+    bundle: PathBuf,
+    target: Target,
+    movie: MovieQuality,
+) -> Start {
     // Only a screen goes through the portal's remembered output; a window is
     // picked each time and an iPhone never asks.
     let screen = match &target {
@@ -449,11 +463,7 @@ fn start_request(t0: CaptureInstant, bundle: PathBuf, target: Target, clip: bool
         audio: AudioIn::External,
         window_log: true,
         note: None,
-        movie: if clip {
-            MovieQuality::Full
-        } else {
-            MovieQuality::Compact
-        },
+        movie,
         portal_token,
     }
 }
@@ -2028,9 +2038,10 @@ impl CaptureHost {
             thread::Builder::new()
                 .name("capture-audio".into())
                 .spawn(move || {
+                    let movie = movie_for(clip, &crate::app_settings::screenshot_settings());
                     let start = engine
                         .target(target)
-                        .map(|target| start_request(now, recording.clone(), target, clip));
+                        .map(|target| start_request(now, recording.clone(), target, movie));
                     collect(
                         &*engine, start, &recording, chunks, sealed, &jobs, &outcomes, &input,
                     );
@@ -3958,11 +3969,44 @@ mod tests {
     }
 
     #[test]
-    fn a_screenshots_recording_keeps_every_pixel_and_a_capture_stays_compact() {
+    fn a_screenshots_recording_follows_its_settings_and_a_capture_stays_compact() {
+        use crate::app_settings::{MaxResolution, RecordingQuality, ScreenshotSettings};
+        use scrawl_capture::capture::MovieSize;
+        let defaults = ScreenshotSettings::default();
+        assert_eq!(
+            movie_for(true, &defaults),
+            MovieQuality::Full(MovieSize {
+                one_x: true,
+                long_edge: None,
+                fps: 30,
+                quality: 50,
+            })
+        );
+        let full = ScreenshotSettings {
+            scale_to_1x: false,
+            max_resolution: MaxResolution::P1080,
+            frame_rate: 60,
+            quality: RecordingQuality::Low,
+            ..defaults.clone()
+        };
+        assert_eq!(
+            movie_for(true, &full),
+            MovieQuality::Full(MovieSize {
+                one_x: false,
+                long_edge: Some(1920),
+                fps: 60,
+                quality: 20,
+            })
+        );
+        assert_eq!(movie_for(false, &full), MovieQuality::Compact);
         let t0 = CaptureInstant::now();
-        let movie = |clip| start_request(t0, PathBuf::new(), Target::ActiveDisplay, clip).movie;
-        assert_eq!(movie(true), MovieQuality::Full);
-        assert_eq!(movie(false), MovieQuality::Compact);
+        let start = start_request(
+            t0,
+            PathBuf::new(),
+            Target::ActiveDisplay,
+            MovieQuality::Compact,
+        );
+        assert_eq!(start.movie, MovieQuality::Compact);
     }
 
     #[test]

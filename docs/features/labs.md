@@ -327,7 +327,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        remembered screen for all, as before. See capture.linux
 │                                        // checks: entered (linux/pointer_output.rs), token_file_name and
 │                                        // recorded_output (crates/capture/src/linux/portal.rs); not run on a compositor exporting the protocol
-├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder (macOS)
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder
+│                                        + screenshots.scale_to_1x/max_resolution/frame_rate/quality/export_size (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail;
 │                                        a saved record shortcut and Annotate's capture shortcuts never share a key, on or off
 ├── Annotate last 15 seconds no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
@@ -430,8 +431,9 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   Appearance: Theme (System, Light mode, Dark mode);
 │   Rewrite by voice: Phrase (a text field; an invalid draft says why under it while the saved phrase keeps working);
 │   Screenshots: its shortcut, Record screen, Saves to (Reveal and the folder's own chooser, which a
-│   failed save or chooser answers under the row), and the macOS-takes-this-shortcut note with Open
-│   Keyboard Settings.
+│   failed save or chooser answers under the row), with Annotate on a Recording group (Scale Retina
+│   to 1x, Max resolution pop-up, Frame rate, Quality), and the macOS-takes-this-shortcut note with
+│   Open Keyboard Settings.
 │   The Annotate last 15 seconds shortcut lives in Annotate's pane
 │   // checks: unload_when_idle_shows_its_minutes_on_its_card_while_on,
 │   // keep_microphone_open_shows_its_window_on_its_card_while_on (its control stays inside its card, its last choice reachable),
@@ -3117,12 +3119,22 @@ record shortcut  -> the same picker, "Full screen · Click to record"; area, win
                     moves the nearer end of the span kept (never under 0.5 s) and shows the frame
                     there; the words said inside the span under it, read-only (one whose model
                     gave no word times has its text spread over the movie as estimated, never
-                    "Nothing was said"); no marks, no Copy
-                    ├── Save     -> another "Hex Recording … .mp4" in screenshots.folder,
-                    │               copied whole or cut without re-encoding (`scrawl-helper trim`)
+                    "Nothing was said"); no marks
+                    ├── size     -> "Original · 93 MB" (or "1080p · ~56 MB"), a pop-up of Original,
+                    │               1080p, 720p, each with its estimate for the span kept; the pick
+                    │               is remembered (screenshots.export_size) and saved off the UI thread
+                    ├── Copy (⌘C) -> the movie FILE on the clipboard (pastes as an attachment in
+                    │               Slack, Messages, Finder): the saved movie itself when nothing was
+                    │               cut at Original, else a copy in the temp folder's hex-screenshots
+                    ├── Save     -> another "Hex Recording … .mp4" in screenshots.folder
                     └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
                                     the span's words and "Screen recording (m:ss): <movie>" as text,
-                                    the saved movie itself when nothing was cut
+                                    the saved movie itself when nothing was cut at Original
+                    each at Original is copied whole or cut without re-encoding
+                    (`scrawl-helper trim`, which snaps to keyframes); at 1080p or 720p it is
+                    re-encoded (`scrawl-helper shrink`, HEVC at the recording's quality, utility
+                    priority, off the UI thread) with its percentage on the pressed button; one
+                    export at a time
 ```
 
 The recording's bundle stays Annotate's (`~/Library/Application
@@ -3130,8 +3142,21 @@ Support/scrawl/captures/<id>.scrawl`), and Annotate's retention may trash
 its movie; the saved copy is the one the card, the editor, and a drag use.
 Annotate's own captures are not saved anywhere new.
 
-The movie keeps every pixel (`MovieQuality::Full`): capture-core's
-`Encoder::Hevc` writes hardware HEVC Main at a constant quality of 0.7 with
+The movie is made as Labs › Screenshots' Recording settings say
+(`MovieQuality::Full(MovieSize)`, read at each start): Scale Retina to 1x
+(`screenshots.scale_to_1x`, on: one pixel a point), Max resolution
+(`screenshots.max_resolution`: Original, 1440p, 1080p, 720p by long edge;
+with 1x on, the smaller of the two wins), Frame rate
+(`screenshots.frame_rate`: 30 or 60), and Quality (`screenshots.quality`:
+High, Medium, Low, HEVC constant quality 0.50, 0.30, 0.20). Defaults: 1x on,
+Original, 30 fps, High; Full size is one switch away (1x off). The Recording
+group shows only while Annotate is on, since only then can the lab record.
+Measured on a 46 s 1920×1016 clip with nearly every pixel moving (a worst
+case), VideoToolbox HEVC gave High 92.6 MB (16.0 Mbit/s), Medium 35.2 MB
+(6.1), Low 21.3 MB (3.7), against 330.9 MB (57.3) at the old 0.7; 60 fps
+costs about 1.27× 30 fps; below 0.45 changing digits ghost, and 0.2 smears.
+Then capture-core's
+`Encoder::Hevc` writes hardware HEVC Main at that constant quality with
 VideoToolbox's real-time mode off, Rec. 709 tags, no B-frames, a keyframe at
 least every 5 s, and a frame only when the picture changes, up to 60 fps. An
 area above 8192×4320 pixels (4320×8192 tall), the hardware limit, is scaled
@@ -3142,10 +3167,11 @@ against 18.8 dB for the old 1280 px movie, at 56 MB/min while busy and
 8 MB/min while still; a 5K display busy is about 96 MB/min.
 
 ```ts
-the record shortcut's movie  -> native pixels, HEVC 0.7, Rec. 709, frames only on change
+the record shortcut's movie  -> Recording settings (1x, max size, 30/60 fps, HEVC 0.50/0.30/0.20), Rec. 709, frames only on change
 an Annotate capture's movie  -> 1280 px long edge (2560 for a display), system H.264
-// check: a_screenshots_recording_keeps_every_pixel_and_a_capture_stays_compact (capture_host.rs)
-// check: a_full_quality_movie_keeps_every_pixel_as_hevc (crates/capture/src/capture/macos.rs)
+// check: a_screenshots_recording_follows_its_settings_and_a_capture_stays_compact (capture_host.rs)
+// check: a_full_quality_movie_records_hevc_at_the_size_asked, one_x_and_a_long_edge_take_the_smaller (crates/capture/src/capture/macos.rs)
+// check: an_export_estimate_follows_the_span_kept_and_the_size, a_recording_has_no_marks_and_copies_its_movie (editor/tests.rs)
 // check: hevc_records_native_pixels_up_to_the_hardware_limit (crates/capture-core/src/plan.rs)
 // check: writes_a_tagged_hevc_movie_from_frames (crates/capture-core/src/video_writer.rs)
 ```

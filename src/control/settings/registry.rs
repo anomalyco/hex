@@ -235,6 +235,35 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: folder screenshots are saved to; none uses the Desktop (macOS)",
     ),
     key(
+        "screenshots.scale_to_1x",
+        Kind::Bool,
+        "Labs: record a Retina display at its size in points, a quarter of the pixels; \
+         on by default (macOS)",
+    ),
+    key(
+        "screenshots.max_resolution",
+        Kind::Choice(&["original", "1440p", "1080p", "720p"]),
+        "Labs: the largest a screen recording is, by its long edge (2560, 1920, or 1280 \
+         pixels); original (the default) keeps its size (macOS)",
+    ),
+    key(
+        "screenshots.frame_rate",
+        Kind::NumberChoice(&["30", "60"]),
+        "Labs: a screen recording's frames a second; 30 by default (macOS)",
+    ),
+    key(
+        "screenshots.quality",
+        Kind::Choice(&["high", "medium", "low"]),
+        "Labs: how much detail a screen recording keeps; high (the default) keeps small \
+         text crisp (macOS)",
+    ),
+    key(
+        "screenshots.export_size",
+        Kind::Choice(&["original", "1080p", "720p"]),
+        "Labs: the size the screenshot editor exports a recording at; original (the \
+         default) copies it as recorded (macOS)",
+    ),
+    key(
         "show_dock_icon",
         Kind::Bool,
         "Keep Hex in the Dock when Settings is closed (macOS)",

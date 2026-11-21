@@ -20,6 +20,7 @@ pub(crate) mod numbers;
 mod onboarding;
 mod portuguese;
 mod russian;
+mod screenshots;
 mod text_language;
 mod traditional_chinese;
 
@@ -366,7 +367,7 @@ fn tables() -> &'static [HashMap<&'static str, &'static str>; 6] {
 }
 
 /// Every translated string: the main, Meetings, Labs, failure, first-run,
-/// menu bar, and History rows.
+/// menu bar, History, and Screenshots rows.
 pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str, [&'static str; 6])>
 {
     TRANSLATIONS
@@ -377,6 +378,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(onboarding::TRANSLATIONS)
         .chain(menu::TRANSLATIONS)
         .chain(history::TRANSLATIONS)
+        .chain(screenshots::TRANSLATIONS)
 }
 
 /// Columns: Polish, Chinese (Simplified), Japanese, German, Spanish, Ukrainian.

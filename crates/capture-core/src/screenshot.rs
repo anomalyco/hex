@@ -50,6 +50,7 @@ pub fn screenshot_with(
             source: *source,
             long_edge,
             encoder: Encoder::default(),
+            quality: crate::HEVC_QUALITY,
         },
         exclude,
     )?;

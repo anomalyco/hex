@@ -1,4 +1,5 @@
-//! Labs › Screenshots' settings (macOS): its shortcut and folder.
+//! Labs › Screenshots' settings (macOS): its shortcut and folder, and how
+//! a recording is encoded.
 
 use super::*;
 
@@ -13,6 +14,16 @@ pub struct ScreenshotSettings {
     pub record_hotkey: Option<HotkeyBinding>,
     /// Where screenshots are saved; `None` is the Desktop.
     pub folder: Option<PathBuf>,
+    /// A recording keeps one pixel a point, so a Retina display records at
+    /// its size in points: a quarter of the pixels.
+    pub scale_to_1x: bool,
+    /// The largest a recording is.
+    pub max_resolution: MaxResolution,
+    /// A recording's frames a second: 30 or 60.
+    pub frame_rate: u32,
+    pub quality: RecordingQuality,
+    /// The size the editor last exported a recording at.
+    pub export_size: ExportSize,
 }
 
 impl Default for ScreenshotSettings {
@@ -21,6 +32,153 @@ impl Default for ScreenshotSettings {
             hotkey: HotkeyBinding::screenshot_default(),
             record_hotkey: None,
             folder: None,
+            scale_to_1x: true,
+            max_resolution: MaxResolution::Original,
+            frame_rate: 30,
+            quality: RecordingQuality::High,
+            export_size: ExportSize::Original,
+        }
+    }
+}
+
+/// The largest a Screenshots recording is, by its long edge.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum MaxResolution {
+    #[default]
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "1440p")]
+    P1440,
+    #[serde(rename = "1080p")]
+    P1080,
+    #[serde(rename = "720p")]
+    P720,
+}
+
+impl MaxResolution {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 4] = [Self::Original, Self::P1440, Self::P1080, Self::P720];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Original => "Original",
+            Self::P1440 => "1440p",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The `hex settings` value.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::P1440 => "1440p",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The longest side in pixels, of a 16:9 picture that size; `None`
+    /// keeps the source's.
+    pub const fn long_edge(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::P1440 => Some(2560),
+            Self::P1080 => Some(1920),
+            Self::P720 => Some(1280),
+        }
+    }
+}
+
+/// How much detail a Screenshots recording keeps, as HEVC's constant
+/// quality. Measured on a 46 s recording with nearly every pixel moving
+/// (1920×1016, 30 fps), a worst case: High kept small changing digits
+/// crisp (93 MB, 16 Mbit/s), Medium ghosted them while they changed, as a
+/// 6 Mbit/s H.264 export does (35 MB, 6.1 Mbit/s), and Low smeared them
+/// (21 MB, 3.7 Mbit/s). A mostly still screen takes far less.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordingQuality {
+    #[default]
+    High,
+    Medium,
+    Low,
+}
+
+impl RecordingQuality {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 3] = [Self::High, Self::Medium, Self::Low];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::High => "High",
+            Self::Medium => "Medium",
+            Self::Low => "Low",
+        }
+    }
+
+    /// HEVC's constant quality, in hundredths.
+    pub const fn hundredths(self) -> u8 {
+        match self {
+            Self::High => 50,
+            Self::Medium => 30,
+            Self::Low => 20,
+        }
+    }
+
+    /// Bits a pixel a second at 30 fps, measured on the recording above:
+    /// close to the most a screen recording takes at this quality.
+    pub const fn bits_per_pixel_second(self) -> f64 {
+        match self {
+            Self::High => 8.22,
+            Self::Medium => 3.12,
+            Self::Low => 1.90,
+        }
+    }
+}
+
+/// The size the editor exports a recording at: as recorded, or shrunk.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum ExportSize {
+    #[default]
+    #[serde(rename = "original")]
+    Original,
+    #[serde(rename = "1080p")]
+    P1080,
+    #[serde(rename = "720p")]
+    P720,
+}
+
+impl ExportSize {
+    /// Every choice, in the order the editor shows them.
+    pub const ALL: [Self; 3] = [Self::Original, Self::P1080, Self::P720];
+
+    /// The English label the editor shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Original => "Original",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The `hex settings` value.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Original => "original",
+            Self::P1080 => "1080p",
+            Self::P720 => "720p",
+        }
+    }
+
+    /// The longest side in pixels; `None` copies the recording as it is.
+    pub const fn long_edge(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::P1080 => Some(1920),
+            Self::P720 => Some(1280),
         }
     }
 }
@@ -43,6 +201,23 @@ impl ScreenshotSettings {
         self.folder
             .clone()
             .unwrap_or_else(crate::app_paths::desktop_dir)
+    }
+
+    /// A recording's frames a second: 60 when asked for more than 45,
+    /// else 30.
+    pub fn fps(&self) -> u32 {
+        if self.frame_rate > 45 { 60 } else { 30 }
+    }
+
+    /// How a recording's movie is made.
+    #[cfg(hex_capture)]
+    pub fn movie_size(&self) -> scrawl_capture::capture::MovieSize {
+        scrawl_capture::capture::MovieSize {
+            one_x: self.scale_to_1x,
+            long_edge: self.max_resolution.long_edge(),
+            fps: self.fps(),
+            quality: self.quality.hundredths(),
+        }
     }
 }
 

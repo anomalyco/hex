@@ -50,9 +50,10 @@ impl VideoWriter {
         path: &Path,
         (width, height): (u32, u32),
         fps: u32,
+        quality: f64,
         events: Sender<RecordingEvent>,
     ) -> Result<Arc<Self>, String> {
-        let writer = AvWriter::hevc(path, width, height, fps)?;
+        let writer = AvWriter::hevc(path, width, height, fps, quality)?;
         Ok(Arc::new(Self {
             path: path.to_path_buf(),
             events,
@@ -279,7 +280,7 @@ mod tests {
     fn writes_a_tagged_hevc_movie_from_frames() {
         let dir = crate::test_dir::tempdir().unwrap();
         let path = dir.path().join("recording.mp4");
-        let writer = AvWriter::hevc(&path, 640, 360, 60).unwrap();
+        let writer = AvWriter::hevc(&path, 640, 360, 60, crate::HEVC_QUALITY).unwrap();
         // SAFETY: Exact times.
         writer
             .start(unsafe { objc2_core_media::CMTime::new(0, 60_000) })

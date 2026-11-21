@@ -8,6 +8,7 @@
 use std::path::PathBuf;
 
 use super::Shot;
+use crate::app_settings::{ExportSize, RecordingQuality};
 
 /// Frames along the filmstrip, read when the recording opens.
 pub(super) const FRAMES: usize = 12;
@@ -19,6 +20,9 @@ pub(super) const STRIP_H: f32 = 44.0;
 const MIN_SPAN_MS: u64 = 500;
 /// The most frames on a sent contact sheet.
 const SHEET_FRAMES: usize = 4;
+/// How much more a 60 fps encode takes than a 30 fps one: 1.27× on the
+/// recording [`RecordingQuality`] was measured on.
+const FPS_60_COST: f64 = 1.27;
 
 /// A word said while recording, on the movie's clock.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -48,6 +52,10 @@ pub(crate) struct Clip {
     pub(crate) holding: Option<Handle>,
     /// The frame shown above the filmstrip.
     pub(crate) shown: usize,
+    /// The movie's size on disk, and its picture's in pixels (zero when
+    /// unknown), for the export's estimate.
+    pub(crate) bytes: u64,
+    pub(crate) pixels: [u32; 2],
 }
 
 impl Clip {
@@ -65,12 +73,36 @@ impl Clip {
             trim: [0, duration_ms],
             holding: None,
             shown: 0,
+            bytes: 0,
+            pixels: [0, 0],
         }
     }
 
     /// The frame above the filmstrip.
     pub(crate) fn picture(&self) -> Option<&Shot> {
         self.frames.get(self.shown).map(|(_, shot)| shot)
+    }
+
+    /// About how many bytes the span kept takes exported at `size`,
+    /// re-encoded at `quality` and `fps` when it's shrunk. As recorded,
+    /// it's the movie's share; shrunk, that share scaled by the pixels
+    /// left (an encode's size follows its pixels), and never more than the
+    /// most `quality` was measured to take, since the recording may have
+    /// been made finer.
+    pub(crate) fn estimate(&self, size: ExportSize, quality: RecordingQuality, fps: u32) -> u64 {
+        let [from, to] = self.trim;
+        let kept = self.bytes as f64 * (to - from) as f64 / self.duration_ms.max(1) as f64;
+        let ([w, h], Some(edge)) = (self.pixels, size.long_edge()) else {
+            return kept.round() as u64;
+        };
+        if w == 0 || h == 0 {
+            return kept.round() as u64;
+        }
+        let scale = (edge as f64 / w.max(h) as f64).min(1.0);
+        let pixels = w as f64 * h as f64 * scale * scale;
+        let rate = if fps > 45 { FPS_60_COST } else { 1.0 };
+        let most = quality.bits_per_pixel_second() * pixels * rate * (to - from) as f64 / 8000.0;
+        (kept * scale * scale).min(most).round() as u64
     }
 
     /// Whether the span kept is less than the whole recording.
@@ -149,6 +181,19 @@ pub(crate) fn duration_label(ms: u64) -> String {
     format!("{}:{:02}", seconds / 60, seconds % 60)
 }
 
+/// `bytes` as a person reads a file's size: `820 KB`, `24 MB`, `1.3 GB`.
+pub(crate) fn size_label(bytes: u64) -> String {
+    const MB: f64 = 1_000_000.0;
+    let mb = bytes as f64 / MB;
+    if mb < 1.0 {
+        format!("{} KB", (bytes as f64 / 1000.0).ceil().max(1.0))
+    } else if mb < 1000.0 {
+        format!("{} MB", mb.round())
+    } else {
+        format!("{:.1} GB", mb / 1000.0)
+    }
+}
+
 /// `frames`, all one size, laid out as one, two side by side, or two by
 /// two, as RGBA; none without a frame.
 pub(super) fn sheet(frames: &[&Shot]) -> Option<(u32, u32, Vec<u8>)> {
@@ -203,7 +248,9 @@ pub(crate) fn recorded(bundle: &std::path::Path) -> anyhow::Result<(PathBuf, Vec
 #[cfg(target_os = "macos")]
 pub(super) fn load(movie: PathBuf, words: Vec<Word>) -> anyhow::Result<Clip> {
     use scrawl_capture::helper::{self, FrameTimes};
-    let duration_ms = helper::probe(&movie)?.duration_ms.max(1);
+    let probe = helper::probe(&movie)?;
+    let duration_ms = probe.duration_ms.max(1);
+    let bytes = std::fs::metadata(&movie).map_or(0, |meta| meta.len());
     let last = duration_ms.saturating_sub(100);
     let times: Vec<u64> = (0..FRAMES as u64)
         .map(|i| last * i / (FRAMES as u64 - 1))
@@ -232,7 +279,10 @@ pub(super) fn load(movie: PathBuf, words: Vec<Word>) -> anyhow::Result<Clip> {
         })
         .collect::<anyhow::Result<Vec<_>>>()?;
     anyhow::ensure!(!frames.is_empty(), "the recording has no frames");
-    Ok(Clip::new(movie, duration_ms, frames, words))
+    let mut clip = Clip::new(movie, duration_ms, frames, words);
+    clip.bytes = bytes;
+    clip.pixels = [probe.width, probe.height];
+    Ok(clip)
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -240,19 +290,56 @@ pub(super) fn load(_: PathBuf, _: Vec<Word>) -> anyhow::Result<Clip> {
     anyhow::bail!("recordings open on macOS only")
 }
 
+/// How an export shrinks the span kept: its picture's longest side, and
+/// the quality and frames a second it's encoded at.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Shrink {
+    pub(crate) max_edge: u32,
+    pub(crate) quality: f64,
+    pub(crate) fps: u32,
+}
+
+impl Shrink {
+    /// How `size` shrinks a recording, at Labs › Screenshots' quality and
+    /// frame rate; none when `size` keeps it as recorded.
+    pub(crate) fn of(
+        size: ExportSize,
+        settings: &crate::app_settings::ScreenshotSettings,
+    ) -> Option<Self> {
+        Some(Self {
+            max_edge: size.long_edge()?,
+            quality: f64::from(settings.quality.hundredths()) / 100.0,
+            fps: settings.fps(),
+        })
+    }
+}
+
 /// The span kept of `movie` written to `out`: copied when it's the whole
-/// recording, else cut without re-encoding.
+/// recording, else cut without re-encoding, or re-encoded smaller as
+/// `shrink` says, at utility priority, handing `progress` the share done.
 #[cfg(target_os = "macos")]
 pub(super) fn write_span(
     movie: &std::path::Path,
     trim: Option<[u64; 2]>,
+    shrink: Option<Shrink>,
     out: &std::path::Path,
+    progress: &mut dyn FnMut(f64),
 ) -> anyhow::Result<()> {
+    use scrawl_capture::helper;
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    match trim {
-        Some([from, to]) => scrawl_capture::helper::trim(movie, out, from, to).map(|_| ()),
-        None => std::fs::copy(movie, out).map(|_| ()).map_err(Into::into),
+    match (shrink, trim) {
+        (Some(how), span) => {
+            let how = helper::Reencode {
+                max_edge: how.max_edge,
+                quality: how.quality,
+                fps: how.fps,
+                span,
+            };
+            helper::reencode(movie, out, how, progress).map(|_| ())
+        }
+        (None, Some([from, to])) => helper::trim(movie, out, from, to).map(|_| ()),
+        (None, None) => std::fs::copy(movie, out).map(|_| ()).map_err(Into::into),
     }
 }

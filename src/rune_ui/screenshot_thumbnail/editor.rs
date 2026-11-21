@@ -28,6 +28,7 @@ use rune::{Key, KeyEvent, OverlayHandle, Phase, Tx};
 use self::clip::Clip;
 use self::export::{Export, deliver, load_sessions};
 use self::marks::{Mark, Rect, Tool};
+use crate::app_settings::ExportSize;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::rune_ui::capture_capsule::surface::CHIP_H;
 pub(crate) use narration::Narration;
@@ -91,6 +92,24 @@ enum Out {
     Send(Dest),
 }
 
+/// The toolbar button an export was pressed on, which shows its progress.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum Pressed {
+    Copy,
+    Save,
+    Send,
+}
+
+impl Out {
+    fn pressed(&self) -> Pressed {
+        match self {
+            Self::Copy => Pressed::Copy,
+            Self::Save => Pressed::Save,
+            Self::Send(_) => Pressed::Send,
+        }
+    }
+}
+
 /// A dictation talking over the shot, or none.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum Listen {
@@ -109,6 +128,11 @@ pub(crate) struct Editor {
     file: Option<PathBuf>,
     /// A recording open to trim, in place of a shot.
     clip: Option<Clip>,
+    /// The size a recording exports at, `screenshots.export_size`.
+    export_size: ExportSize,
+    /// A recording's export under way: the button pressed and the share
+    /// done. Another waits until it's over.
+    exporting: Option<(Pressed, f32)>,
     /// The display's size in points.
     screen: [f32; 2],
     /// The panel's top-left, once it's been moved.
@@ -205,6 +229,7 @@ impl Editor {
     fn load_clip(&mut self, clip: Clip, screen: [f32; 2]) {
         *self = Self {
             clip: Some(clip),
+            export_size: crate::app_settings::screenshot_settings().export_size,
             screen,
             on: true,
             now: self.now,
@@ -502,52 +527,112 @@ impl Editor {
 }
 
 impl Editor {
-    /// The recording's span kept, to `out`, on its own thread: saved as a
-    /// movie in the screenshots folder, or sent as a contact sheet with its
-    /// words and the movie's path. It never goes to the clipboard.
+    /// The recording's span kept, to `out`, on its own thread, at the
+    /// export size: the movie file on the clipboard, saved in the
+    /// screenshots folder, or sent as a contact sheet with its words and
+    /// the movie's path. A shrink shows its progress on the button pressed.
     fn deliver_clip(&mut self, out: Out, tx: &mut Tx) {
         let Some(clip) = &self.clip else {
             return;
         };
-        if matches!(out, Out::Copy) {
+        if self.exporting.is_some() {
             return;
         }
+        let settings = crate::app_settings::screenshot_settings();
+        let shrink = clip::Shrink::of(self.export_size, &settings);
         let job = export::ClipExport {
             movie: clip.movie.clone(),
             trim: clip.trimmed().then_some(clip.trim),
+            shrink,
             length_ms: clip.trim[1] - clip.trim[0],
             sheet: clip::sheet(&clip.sheet_frames()),
             words: clip.words_in_trim(),
         };
-        if let Out::Send(dest) = &out {
+        let pressed = out.pressed();
+        if shrink.is_some() {
+            self.exporting = Some((pressed, 0.0));
+            tx.animated();
+        } else if let Out::Send(dest) = &out {
             self.note(tr_fill("Sending to {}…", &dest.name), tx);
         }
         let overlay = self.overlay.clone();
         let spawned = std::thread::Builder::new()
             .name("hex-recording-export".into())
             .spawn(move || {
-                let result = job.deliver(&out);
+                let mut shown = 0u8;
+                let mut progress = |share: f64| {
+                    let percent = (share * 100.0).floor().clamp(0.0, 99.0) as u8;
+                    if percent <= shown {
+                        return;
+                    }
+                    shown = percent;
+                    if let Some(overlay) = &overlay {
+                        overlay.update(move |s, tx| {
+                            if let Some((_, done)) = &mut s.exporting {
+                                *done = f32::from(percent) / 100.0;
+                                tx.animated();
+                            }
+                        });
+                    }
+                };
+                let result = job.deliver(&out, &mut progress);
                 let Some(overlay) = overlay else {
                     return;
                 };
                 match result {
                     Ok(()) => {
                         let note = match &out {
+                            Out::Copy => tr("Movie copied").to_owned(),
+                            Out::Save => tr("Saved").to_owned(),
                             Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
-                            _ => tr("Saved").to_owned(),
                         };
-                        overlay.update(move |s, tx| s.note(note, tx));
+                        overlay.update(move |s, tx| {
+                            s.exporting = None;
+                            s.note(note, tx);
+                        });
                     }
                     Err(error) => {
-                        tracing::warn!(%error, "could not export the recording");
+                        tracing::warn!(error = %format!("{error:#}"), "could not export the recording");
                         let note = export_failure(&error, &out);
-                        overlay.update(move |s, tx| s.failed(note, out, tx));
+                        overlay.update(move |s, tx| {
+                            s.exporting = None;
+                            s.failed(note, out, tx);
+                        });
                     }
                 }
             });
         if let Err(error) = spawned {
             tracing::warn!(%error, "could not start a recording export");
+            self.exporting = None;
         }
+    }
+
+    /// A recording now exports at `size`, remembered as
+    /// `screenshots.export_size`.
+    fn pick_export_size(&mut self, size: ExportSize) {
+        if self.export_size == size {
+            return;
+        }
+        self.export_size = size;
+        #[cfg(all(target_os = "macos", hex_capture))]
+        std::thread::Builder::new()
+            .name("hex-export-size".into())
+            .spawn(move || {
+                if let Err(error) = crate::rune_ui::host::save_settings(|settings| {
+                    settings.screenshots.export_size = size;
+                }) {
+                    tracing::warn!(%error, "could not save the export size");
+                }
+            })
+            .map(drop)
+            .unwrap_or_else(|error| tracing::warn!(%error, "could not save the export size"));
+    }
+
+    /// About how large the recording's span kept is, exported at `size`.
+    fn estimate(&self, size: ExportSize) -> Option<u64> {
+        let clip = self.clip.as_ref()?;
+        let settings = crate::app_settings::screenshot_settings();
+        Some(clip.estimate(size, settings.quality, settings.fps()))
     }
 }
 
@@ -606,7 +691,7 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
         s.undo();
         return true;
     }
-    if key.is_command('c') && s.typing.is_none() && s.clip.is_none() {
+    if key.is_command('c') && s.typing.is_none() {
         s.deliver(Out::Copy, tx);
         return true;
     }

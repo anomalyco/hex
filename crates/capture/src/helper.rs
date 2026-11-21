@@ -309,6 +309,89 @@ pub fn shrink(movie: &Path, out: &Path, max_edge: u32) -> Result<crate::retentio
     )
 }
 
+/// How [`reencode`] writes a movie: a screen recording's own HEVC settings at `quality`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Reencode {
+    /// The longest side in pixels; a smaller movie keeps its own.
+    pub max_edge: u32,
+    /// HEVC's constant quality, from 0 to 1.
+    pub quality: f64,
+    /// At most this many frames a second.
+    pub fps: u32,
+    /// Only this span, in ms; `None` is the whole movie.
+    pub span: Option<[u64; 2]>,
+}
+
+/// Re-encodes `movie` into `out` (an `.mp4`) as [`Reencode`] says, audio copied, handing
+/// `progress` the share done (0 to 1) as it goes. Runs at utility priority.
+pub fn reencode(
+    movie: &Path,
+    out: &Path,
+    how: Reencode,
+    mut progress: impl FnMut(f64),
+) -> Result<crate::retention::Shrunk> {
+    use std::io::BufRead;
+    let numbers = [
+        how.max_edge.to_string(),
+        how.quality.clamp(0.0, 1.0).to_string(),
+        how.fps.max(1).to_string(),
+    ];
+    let span = how
+        .span
+        .map(|[from, to]| [from.to_string(), to.to_string()]);
+    let helper = path()?;
+    let mut args = vec![
+        os("-c"),
+        os("utility"),
+        helper.as_os_str(),
+        os("shrink"),
+        movie.as_os_str(),
+        os("--out"),
+        out.as_os_str(),
+        os("--max-edge"),
+        os(&numbers[0]),
+        os("--quality"),
+        os(&numbers[1]),
+        os("--fps"),
+        os(&numbers[2]),
+        os("--progress"),
+    ];
+    if let Some([from, to]) = &span {
+        args.extend([os("--from"), os(from), os("--to"), os(to)]);
+    }
+    let mut child = Command::new("/usr/sbin/taskpolicy")
+        .args(&args)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .context("Could not start scrawl-helper")?;
+    let stdout = child.stdout.take().context("No helper stdout")?;
+    let mut last = None;
+    for line in std::io::BufReader::new(stdout)
+        .lines()
+        .map_while(Result::ok)
+    {
+        let Ok(value) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
+        match value.get("progress").and_then(serde_json::Value::as_f64) {
+            Some(share) => progress(share.clamp(0.0, 1.0)),
+            None => last = Some(value),
+        }
+    }
+    let status = child.wait()?;
+    if !status.success() {
+        let mut message = String::new();
+        if let Some(mut stderr) = child.stderr.take() {
+            let _ = stderr.read_to_string(&mut message);
+        }
+        bail!("{}", message.trim());
+    }
+    serde_json::from_value(last.context("scrawl-helper wrote no result")?)
+        .context("Invalid scrawl-helper output")
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Trimmed {

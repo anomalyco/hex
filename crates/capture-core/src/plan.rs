@@ -86,7 +86,12 @@ pub struct SourcePlan {
     /// [`Encoder`] takes.
     pub long_edge: Option<u32>,
     pub encoder: Encoder,
+    /// [`Encoder::Hevc`]'s constant quality, from 0 to 1; the system encoder ignores it.
+    pub quality: f64,
 }
+
+/// [`SourcePlan::quality`] unless the host picks another: the knee measured on Retina text.
+pub const HEVC_QUALITY: f64 = 0.7;
 
 impl From<Source> for SourcePlan {
     fn from(source: Source) -> Self {
@@ -94,6 +99,7 @@ impl From<Source> for SourcePlan {
             source,
             long_edge: None,
             encoder: Encoder::default(),
+            quality: HEVC_QUALITY,
         }
     }
 }

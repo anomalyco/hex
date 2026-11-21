@@ -4,15 +4,18 @@
 use std::time::Duration;
 
 use rune::{
-    Anim, Cursor, Cx, Drag, El, Phase, Spring, SpringPair, TextStyle, Transition, Tx, el, row, text,
+    Anim, Cursor, Cx, Drag, El, Phase, PopupMenu, Spring, SpringPair, TextStyle, Transition, Tx,
+    el, row, text,
 };
 use rune_kit::{Button, ButtonVariant, ControlSize, IconButton, IconButtonVariant};
 
-use super::clip::{Clip, duration_label};
+use super::clip::{Clip, duration_label, size_label};
 use super::marks::{self, Mark, Tool};
 use super::{
-    Editor, Layout, Listen, Out, PAD, SendList, Sessions, Shot, Talk, clamp_panel, matching, talk,
+    Editor, Layout, Listen, Out, PAD, Pressed, SendList, Sessions, Shot, Talk, clamp_panel,
+    matching, talk,
 };
+use crate::app_settings::ExportSize;
 use crate::desktop::i18n::tr;
 use crate::rune_ui::capture_capsule::ink::{ink_red, layer};
 use crate::rune_ui::capture_capsule::surface::{self, CHIP_H, CHIP_PX, SHELL_RADIUS, medium};
@@ -241,7 +244,8 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
 
 /// The tools on the left; a note, Copy, Save, Send to…, and ✕ on the
 /// right. Its empty middle moves the panel. A recording has the span kept
-/// in place of the tools, and no Copy: Save is its main action.
+/// and the size it exports at, with that size's estimate, in place of the
+/// tools; while a shrink runs, the button pressed shows how far it is.
 fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
     let k = p.k;
     let mut bar = row().center_y().gap(2.0).size(w, CHIP_H);
@@ -255,6 +259,7 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
                 .single_line()
                 .px(CHIP_PX - 4.0),
         );
+        bar = bar.child(export_size(k, s));
     }
     for tool in Tool::ALL.into_iter().filter(|_| s.clip.is_none()) {
         bar = bar.child(
@@ -299,28 +304,21 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
                 .on_press_tx(|s: &mut Editor, tx| s.retry(tx)),
         ));
     }
-    if s.clip.is_none() {
-        bar = bar.child(push(
-            k,
-            Button::new(tr("Copy"))
-                .variant(ButtonVariant::Contrast)
-                .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Copy, tx)),
-        ));
-    }
-    let save = if s.clip.is_some() {
-        ButtonVariant::Contrast
-    } else {
-        ButtonVariant::Ghost
-    };
     bar.child(push(
         k,
-        Button::new(tr("Save"))
-            .variant(save)
+        Button::new(pressed_label(s, Pressed::Copy, tr("Copy")))
+            .variant(ButtonVariant::Contrast)
+            .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Copy, tx)),
+    ))
+    .child(push(
+        k,
+        Button::new(pressed_label(s, Pressed::Save, tr("Save")))
+            .variant(ButtonVariant::Ghost)
             .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Save, tx)),
     ))
     .child(push(
         k,
-        Button::new(tr("Send to…"))
+        Button::new(pressed_label(s, Pressed::Send, tr("Send to…")))
             .variant(ButtonVariant::Ghost)
             .expanded(s.send.is_some())
             .on_press(|s: &mut Editor| s.open_send()),
@@ -335,6 +333,55 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
             .build(k)
             .key("close"),
     )
+}
+
+/// `label`, or how far the export pressed on it is.
+fn pressed_label(s: &Editor, pressed: Pressed, label: &str) -> String {
+    match s.exporting {
+        Some((on, done)) if on == pressed => format!("{}%", (done * 100.0).floor()),
+        _ => label.to_owned(),
+    }
+}
+
+/// The size a recording exports at and about how large it comes out; a
+/// press picks another, each with its own estimate.
+fn export_size(k: &rune_kit::Kit, s: &Editor) -> El {
+    let size = s.export_size;
+    let label = |size: ExportSize| match s.estimate(size) {
+        Some(bytes) if bytes > 0 => {
+            format!("{} · {}", tr(size.name()), estimate_label(size, bytes))
+        }
+        _ => tr(size.name()).to_owned(),
+    };
+    let title = label(size);
+    let options: Vec<(String, String)> = ExportSize::ALL
+        .into_iter()
+        .map(|size| (size.id().to_owned(), label(size)))
+        .collect();
+    let button = Button::new(title)
+        .variant(ButtonVariant::Ghost)
+        .on_press_tx(move |_: &mut Editor, tx| {
+            let menu = PopupMenu::picker(options.clone(), size.id());
+            tx.popup_menu(menu, "export-size", |s: &mut Editor, picked, tx| {
+                if let Some(size) = ExportSize::ALL
+                    .into_iter()
+                    .find(|size| Some(size.id()) == picked)
+                {
+                    s.pick_export_size(size);
+                    tx.animated();
+                }
+            });
+        });
+    push(k, button).key("export-size")
+}
+
+/// An estimate as the picker shows it: as recorded it's the file's share,
+/// close to exact; shrunk, it's a guess.
+fn estimate_label(size: ExportSize, bytes: u64) -> String {
+    match size {
+        ExportSize::Original => size_label(bytes),
+        _ => format!("~{}", size_label(bytes)),
+    }
 }
 
 /// Under the shot: the microphone, then what was said over the shot, or
