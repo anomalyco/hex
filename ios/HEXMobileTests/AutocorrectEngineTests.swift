@@ -252,12 +252,18 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(own, "you're mother ", "an apostrophe you typed yourself stays")
     }
 
-    /// The next word's space revised the word before: one backspace puts back both as typed,
-    /// and the word you kept stays.
-    func testOneBackspaceTakesARevisionBack() throws {
+    /// The next word's space revised the word before. As on Apple's keyboard (black box, iOS
+    /// 27.2: "well see " became "We’ll see ", and after delete its bubble offered "Well see"),
+    /// delete takes only the space and the strip offers both words as typed; tapping it puts
+    /// them back, and the words you kept stay.
+    func testDeleteAfterARevisionOffersBothWordsBack() throws {
         let text = try typedWithContext("well see ") { keys in
             XCTAssertEqual(keys.target.documentContextBeforeInput, "we'll see ")
             keys.deleteBackward()
+            XCTAssertEqual(keys.target.documentContextBeforeInput, "we'll see")
+            let revert = KeyboardSuggestion(displayText: "well see", replacement: "well see", kind: .revert)
+            XCTAssertEqual(keys.suggestions.first, revert)
+            keys.acceptSuggestion(revert)
             XCTAssertEqual(keys.target.documentContextBeforeInput, "well see")
             let space = keys.layout.key(.space)!.frame
             keys.touchBegan(id: 1, at: CGPoint(x: space.midX, y: space.midY))
@@ -277,11 +283,14 @@ final class AutocorrectEngineTests: XCTestCase {
         tap(.space)
         XCTAssertEqual(target.text, "the ")
 
-        // 2. Single Backspace reverts `the ` -> `teh` and suppresses `"teh"` for this session.
+        // 2. Delete takes only the space; the strip's left slot offers `teh` back.
         tap(.delete)
-        XCTAssertEqual(target.text, "teh")
+        XCTAssertEqual(target.text, "the")
+        XCTAssertEqual(engine.suggestions.first, KeyboardSuggestion(displayText: "teh", replacement: "teh", kind: .revert))
 
-        // 3. Pressing Space again keeps `teh ` untouched!
+        // 3. Tapping it puts back `teh` (no space) and suppresses it for this session: space keeps it.
+        engine.acceptSuggestion(engine.suggestions[0])
+        XCTAssertEqual(target.text, "teh")
         tap(.space)
         XCTAssertEqual(target.text, "teh ")
 
@@ -290,6 +299,61 @@ final class AutocorrectEngineTests: XCTestCase {
         engine.acceptSuggestion(engine.suggestions[0])
         XCTAssertEqual(target.text, "teh teh ")
         XCTAssertTrue(LearnedWordsStore(defaults: defaults).contains("teh"))
+    }
+
+    /// TestFlight (X, Brandon): "clicking backspace after a corrected word reverts that word
+    /// back to its uncorrected version." Apple's keyboard (black box, iOS 27.2, a text view):
+    /// delete after "becuase " takes only the space and shows "Becuase" with an undo arrow;
+    /// space then keeps "Because ", a letter continues the word ("Receives"), a second delete
+    /// takes a letter ("Weir"); a comma is taken like a space ("And," -> "And"); the offer
+    /// comes back when deleting brings the cursor back to the word ("With cat" -> "With").
+    func testDeleteAfterAnAutocorrectionTakesOnlyItsSpaceAsOnApplesKeyboard() {
+        func fresh() {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+        }
+        let revert = { (typed: String) in KeyboardSuggestion(displayText: typed, replacement: typed, kind: .revert) }
+        fresh()
+        typeWord("taht ")
+        XCTAssertEqual(target.text, "that ")
+        XCTAssertFalse(engine.suggestions.contains { $0.kind == .revert }, "not while the space is there")
+        tap(.delete)
+        XCTAssertEqual(target.text, "that")
+        XCTAssertEqual(engine.suggestions.first, revert("taht"))
+        tap(.space)
+        XCTAssertEqual(target.text, "that ", "space keeps the fix")
+
+        fresh()
+        typeWord("recieve ")
+        tap(.delete)
+        typeWord("s")
+        XCTAssertEqual(target.text, "receives")
+        XCTAssertNotEqual(engine.suggestions.first?.kind, .revert)
+        tap(.delete)
+        XCTAssertEqual(engine.suggestions.first, revert("recieve"), "back at the word's end")
+        tap(.delete)
+        XCTAssertEqual(target.text, "receiv")
+        XCTAssertNotEqual(engine.suggestions.first?.kind, .revert)
+
+        fresh()
+        typeWord("adn")
+        tap(.layerSwitch(.numbers))
+        tap(.character(","))
+        XCTAssertEqual(target.text, "and,")
+        tap(.delete)
+        XCTAssertEqual(target.text, "and")
+        engine.acceptSuggestion(revert("adn"))
+        XCTAssertEqual(target.text, "adn", "the revert puts back neither the comma nor a space")
+
+        fresh()
+        typeWord("wiht cat")
+        for _ in 0..<4 { tap(.delete) }
+        XCTAssertEqual(target.text, "with")
+        XCTAssertEqual(engine.suggestions.first, revert("wiht"), "deleting back to it brings the offer back")
     }
 
     func testDeleteWhatHexLearnedForgetsLearnedWords() {
@@ -1081,7 +1145,7 @@ final class AutocorrectEngineTests: XCTestCase {
     /// X (Justin): "Space bar accidental taps or lack of taps don't seem to be factored in." A
     /// space tapped at the space bar's top edge, under a letter the word needed, joins the
     /// words at the next word's space, as the system keyboard does ("deli ate" -> "delicate");
-    /// one tapped well inside the bar never does, and one backspace puts back both words.
+    /// one tapped well inside the bar never does, and the strip's revert puts back both words.
     func testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords() throws {
         try useDecoder()
         engine.letterOdds = engine.autocorrect.decoder?.model
@@ -1098,7 +1162,10 @@ final class AutocorrectEngineTests: XCTestCase {
         typeTaps("ate")
         XCTAssertEqual(target.text, "the delicate ")
         tap(.delete)
-        XCTAssertEqual(target.text, "the deli ate", "one backspace puts back both words")
+        XCTAssertEqual(target.text, "the delicate", "delete takes only the space")
+        XCTAssertEqual(engine.suggestions.first?.kind, .revert)
+        engine.acceptSuggestion(engine.suggestions[0])
+        XCTAssertEqual(target.text, "the deli ate", "the revert puts back both words")
 
         tap(.space)
         typeTaps("so")

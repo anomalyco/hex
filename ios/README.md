@@ -73,7 +73,8 @@ never at a launch by itself.
     and, where a typing model is bundled for the language, Spatial autocorrect's
     model: English and Spanish, and German with its experiment on). Words
     it learns may last only while the keyboard runs, as an iPhone may not let
-    it write the App Group; haptics, Paste and dictation need Full Access. Without Full
+    it write the App Group; haptics, key clicks (Apple's keyboard guide), Paste and
+    dictation need Full Access. Without Full
     Access the keyboard always mounts the full keyboard, whichever keyboard is
     chosen (the dictation bar types only spaces and line breaks). Dictation needs
     Full Access (Hex's App Group and the microphone): tapping the Hex key, or
@@ -271,8 +272,8 @@ never at a launch by itself.
     offsets, and word-level pairs with counts and at most one word of context on
     each side. Only plain text fields that allow autocorrect count
     (`TypingJournal.allows`). Nothing leaves the iPhone.
-    - **Typing:** words you erase and retype, autocorrect fixes you undo with one
-      backspace, suggestions you pick, and autocorrections you turn down by
+    - **Typing:** words you erase and retype, autocorrect fixes you undo from the
+      strip, suggestions you pick, and autocorrections you turn down by
       tapping what you typed. A typo you fixed the same way twice (never a
       completion, never fixed two ways) becomes a fix on space, only a suggestion
       when what you typed is a real word; an autocorrection you turned down twice
@@ -404,7 +405,7 @@ never at a launch by itself.
       letter meant, and only once the next word shows the word stood: a word left as typed
       (letters the key under the finger typed, not ones the next-letter odds claimed), a
       picked suggestion of the same length (at most two letters changed), a word kept over
-      an autocorrection by undoing it or tapping it, and a letter erased and retyped as a
+      an autocorrection by reverting it from the strip or tapping it, and a letter erased and retyped as a
       neighbour (the erased tap is labelled with the letter that replaced it). Never an
       autocorrection left in place (or a word before it revised, or two joined), a swipe, a
       slide, a strip touch, an accent pick, or a password, code, email, URL, secure or
@@ -930,9 +931,45 @@ never at a launch by itself.
   still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`); sliding 10 pt starts it at once, unless
   the keyboard switches between two or more languages (Keyboard languages, above). The
-  dictation bar's space bar is the same trackpad (the same still hold or a 10 pt slide, a
+  full keyboard's trackpad moves up and down lines too, as Apple's does (black box, iOS 27.2:
+  a line every 15 to 16 pt, the first after about 8, staying on the first or last line past
+  them): a keyboard can only move the cursor by characters, so `TrackpadCursor` finds the
+  line before or after in the text the field shares around the cursor (a few lines; a wrapped
+  line counts about 8.2 pt a character across the screen) and keeps the column. Lines the
+  field doesn't share are out of reach. Along a line it moves by characters as before.
+  Apple's second-finger tap to select text has no counterpart: `UITextDocumentProxy` (iOS
+  27.2 SDK) can read the selection but not make one, so Hex doesn't try. The dictation bar's
+  space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
   character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
   build 56 asked for it), and a tap still types a space.
+- **Smart punctuation (full keyboard):** As on Apple's keyboard (black box, iOS 27.2), the
+  ' and " keys type opening quotes at the start, after a space, a bracket or an opening
+  quote, and closing ones elsewhere (‘Hi’ it’s “yes” 5’9”); a second hyphen makes an em dash
+  (a--b is a—b); autocorrect's and the strip's apostrophes are ’ (don’t, I’m). Each language
+  types its own quotes (`SmartQuotes`): „ “ ‚ ‘ in German, « » with no-break spaces in French,
+  „ ” ‚ ’ in Polish, « » in Norwegian, Russian and Ukrainian, “ ” ‘ ’ elsewhere. A field's
+  `smartQuotesType` or `smartDashesType` of `.no` turns each off (Messages' composer has
+  both off: Apple's keyboard types straight quotes and -- there). The keys reason about the
+  text with straight quotes (`SmartPunctuation.plain`). A mark that ends a clause (, . ! ? ;
+  : )) right after a picked suggestion takes the space the suggestion typed ("Hello,"), as
+  Apple's does with `smartInsertDeleteType` on or off.
+- **Delete after an autocorrection (full keyboard):** As on Apple's keyboard (black box,
+  iOS 27.2), delete takes only the space or mark after the corrected words, and the strip's
+  left slot offers what you typed, highlighted with an undo arrow (Apple's text view shows
+  it in a bubble under the word, which a keyboard can't draw); tapping it puts that back,
+  without the space, and turns the fix down for the session. Space keeps the fix. The offer
+  comes back whenever the cursor is at the end of the latest autocorrection again, revisions
+  ("well see" to "we'll see") and joins included. Text replacements offer none, as on Apple's.
+- **Key clicks:** Every key of the full keyboard (delete, shift, 123 and return included, and
+  each delete repeat), its strip, and the dictation bar's keys ask for the system click on
+  touch-down (`UIDevice.playInputClick`), which plays only because the keyboard's root view
+  (`KeyboardInputView`) adopts `UIInputViewAudioFeedback`: the full keyboard view adopted it
+  before, as a subview, and never clicked. It follows Settings › Sounds & Haptics › Keyboard
+  Feedback › Sound, with no setting of Hex's. Apple's keyboard has other sounds for delete and
+  the modifier keys, but the click is the only keyboard sound a keyboard may play, so every key
+  gets it. In the iOS 27.2 simulator each press reaches the system click (system sound 1104,
+  in the keyboard's log) with Full Access or without, and none with the Sound switch off; on
+  an iPhone, Apple's guide says it needs Allow Full Access.
 - **Slides from 123, #+= and shift (full keyboard):** As on Apple's keyboard, holding 123
   (or ABC, or #+=) shows its page, and sliding shows the pop-up of the key under the
   finger (or darkens it with Key pop-ups off); letting go types that key and goes back to

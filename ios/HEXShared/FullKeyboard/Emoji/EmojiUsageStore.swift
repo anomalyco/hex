@@ -93,6 +93,7 @@ final class EmojiRoutedTarget: KeyboardTextTarget {
     var isSearching: Bool { query != nil }
 
     var documentContextBeforeInput: String? { query ?? document.documentContextBeforeInput }
+    var documentContextAfterInput: String? { isSearching ? nil : document.documentContextAfterInput }
     var hasText: Bool { query.map { !$0.isEmpty } ?? document.hasText }
     var autocapitalizationType: UITextAutocapitalizationType? { isSearching ? UITextAutocapitalizationType.none : document.autocapitalizationType }
     var autocorrectionType: UITextAutocorrectionType? { isSearching ? .no : document.autocorrectionType }
@@ -101,6 +102,8 @@ final class EmojiRoutedTarget: KeyboardTextTarget {
     var enablesReturnKeyAutomatically: Bool? { isSearching ? false : document.enablesReturnKeyAutomatically }
     var keyboardAppearance: UIKeyboardAppearance? { document.keyboardAppearance }
     var textContentType: UITextContentType? { isSearching ? nil : document.textContentType }
+    var smartQuotesType: UITextSmartQuotesType? { isSearching ? .no : document.smartQuotesType }
+    var smartDashesType: UITextSmartDashesType? { isSearching ? .no : document.smartDashesType }
 
     func insertText(_ text: String) {
         guard let current = query else {

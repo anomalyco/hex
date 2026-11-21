@@ -178,7 +178,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 | `delete` | `deleted` (the character), `src`: `key` (on press), `repeat` (held, 75 ms), `repeat_fast` (after 0.85 s, two at a time), `bar` |
 | `delete_word` | `deleted`, `src`: `repeat_word` (held past 1.4 s) |
 | `autocorrect` | `from`, `to`, `deleted` (= `from`), `inserted` (`to` + space). Applied on space. |
-| `autocorrect_undo` | `deleted` (the correction and its space), `inserted` (what was typed): one backspace right after a correction undid it. |
+| `autocorrect_undo` | `deleted` (the correction, without its space or mark), `inserted` (what was typed), `src`: `strip`. The strip's revert, offered once delete took the correction's space or mark (or the cursor came back to its end), put back what was typed. |
 | `suggestion` | `slot` (0 left, 1 centre, 2 right), `text` (as shown), `deleted` (the word being typed), `inserted` (the replacement + space), `candidates` (as in `candidates`) |
 | `double_space_period` | `deleted`: `" "`, `inserted`: `". "` |
 | `space_swallowed` | `after`: `suggestion`. A space right after a suggestion typed its own changed nothing. |
@@ -200,7 +200,7 @@ dictation, a status, or the clipboard chips.
 
 The host's text around the cursor, as `documentContextBeforeInput` /
 `AfterInput` give it. `why`: `session_start`, `space`, `return`,
-`suggestion`, `delete_word`, `autocorrect_undo`, `paste`, `trackpad`,
+`suggestion`, `delete_word`, `autocorrect_undo`, `revert`, `paste`, `trackpad`,
 `undo_dictation`, `dictation`, `session_end`, or `text_did_change` (the host
 changed the text or moved the cursor: written once things settle for 0.3 s, at
 once when the field emptied). `before` (the last 200 characters), `after` (the

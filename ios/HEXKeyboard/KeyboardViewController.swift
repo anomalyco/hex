@@ -71,6 +71,18 @@ final class KeyboardViewController: UIInputViewController {
     /// so a key press doesn't open the App Group's settings to ask.
     private var hapticsSetting = true
 
+    /// UIKit's own input view, as a `KeyboardInputView` so the keys can click.
+    override func loadView() {
+        super.loadView()
+        let system = inputView
+        let input = KeyboardInputView(frame: system?.frame ?? .zero, inputViewStyle: system?.inputViewStyle ?? .keyboard)
+        input.allowsSelfSizing = system?.allowsSelfSizing ?? false
+        input.autoresizingMask = system?.autoresizingMask ?? []
+        input.translatesAutoresizingMaskIntoConstraints = system?.translatesAutoresizingMaskIntoConstraints ?? true
+        inputView = input
+        if viewIfLoaded !== input { view = input }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         reportFullAccess(force: true)
@@ -459,6 +471,7 @@ final class KeyboardViewController: UIInputViewController {
         viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressed(at: at) }
         viewModel.onHexKeyAbandon = { [weak self] in self?.localDictation.discard() }
         viewModel.onKeyFeedback = { [weak self] in
+            UIDevice.current.playInputClick()
             guard let self, self.allowsKeyHaptics else { return }
             self.barHaptics.impactOccurred(intensity: FullKeyboardView.keyTickIntensity(self.hapticStrength))
             self.barHaptics.prepare()

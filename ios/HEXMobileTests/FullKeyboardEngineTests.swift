@@ -310,6 +310,50 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "hello")
     }
 
+    /// X (Brandon): "holding down on the space bar only allows scrubbing horizontally, whereas
+    /// Apple's keyboard treats it like a cursor on both x/y axes". Apple's (black box, iOS 27.2)
+    /// moves a line every 15 to 16 pt, the first after about 8, keeping the column, and keeps
+    /// the cursor on the first or last line past them; a keyboard can only move by characters,
+    /// so the line before or after is found in the text around the cursor.
+    func testTheSpaceBarTrackpadMovesUpAndDownLines() {
+        target = FixtureTextTarget(text: "one two three\nfour five\nsix seven eight nine")
+        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        engine.width = 393
+        engine.clock = { [unowned self] in self.now }
+        engine.configureForField()
+        target.adjustTextPosition(byCharacterOffset: 24 + 12 - target.cursorIndex)
+        engine.textDidChange()
+        let space = point(.space)
+        engine.touchBegan(id: 1, at: space)
+        engine.holdSpace(forTouch: 1)
+        func slide(_ dx: CGFloat, _ dy: CGFloat) -> Int {
+            engine.touchMoved(id: 1, to: CGPoint(x: space.x + dx, y: space.y + dy))
+            return target.cursorIndex
+        }
+        XCTAssertEqual(slide(0, -5), 36, "not yet")
+        XCTAssertEqual(slide(0, -8), 14 + 9, "up a line, at its end: \"four five\" is shorter")
+        XCTAssertEqual(slide(0, -24), 12, "and up again, back at the column it started at")
+        XCTAssertEqual(slide(0, -60), 12, "the first line keeps it")
+        XCTAssertEqual(slide(0, -52), 14 + 9, "coming back moves it at once")
+        XCTAssertEqual(slide(-8, -52), 14 + 8, "along the line as before")
+        XCTAssertEqual(slide(-8, -21), 24 + 8, "down a line, at the new column")
+        XCTAssertEqual(slide(-8, 30), 24 + 8, "the last line keeps it")
+        engine.touchEnded(id: 1, at: CGPoint(x: space.x - 8, y: space.y + 30))
+        XCTAssertEqual(target.text, "one two three\nfour five\nsix seven eight nine", "nothing typed")
+
+        // A line the field wraps: up by one wrapped line's worth of characters.
+        let long = String(repeating: "word ", count: 30)
+        target = FixtureTextTarget(text: long)
+        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        engine.width = 393
+        engine.configureForField()
+        engine.touchBegan(id: 2, at: space)
+        engine.holdSpace(forTouch: 2)
+        engine.touchMoved(id: 2, to: CGPoint(x: space.x, y: space.y - 10))
+        XCTAssertEqual(target.cursorIndex, long.count - TrackpadCursor.lineLength(forWidth: 393))
+        engine.touchEnded(id: 2, at: CGPoint(x: space.x, y: space.y - 10))
+    }
+
     /// With two or more languages a quick swipe along the space bar switches language (to the
     /// left the next, to the right the one before) and types nothing; a slip shorter than a
     /// swipe is still a space; a hold, then a slide, moves the cursor. With one language any
@@ -1442,6 +1486,26 @@ final class FullKeyboardEngineTests: XCTestCase {
         }
     }
 
+    /// TestFlight: "Cannot hear the iOS typing sound when using your keyboard." Every key asks
+    /// for the system click as it goes down, delete, shift, 123 and return too, once a press,
+    /// whatever Haptics is set to.
+    func testEveryKeyClicksOnTouchDown() {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 262)
+        view.layoutIfNeeded()
+        var clicks = 0
+        view.playInputClick = { clicks += 1 }
+        let kinds: [KeyKind] = [.character("a"), .shift, .space, .delete, .returnKey, .layerSwitch(.numbers)]
+        for (index, kind) in kinds.enumerated() {
+            let key = view.engine.layout.key(kind)!
+            let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
+            view.plane.began(id: index + 10, sample: sample)
+            XCTAssertEqual(clicks, index + 1, "\(kind) clicks going down")
+            view.plane.ended(id: index + 10, sample: sample)
+            XCTAssertEqual(clicks, index + 1, "\(kind) doesn't click again coming up")
+        }
+    }
+
     // MARK: - Delete swipe
 
     private func swipeEngine(_ text: String) -> (FixtureTextTarget, FullKeyboardEngine) {
@@ -1515,9 +1579,117 @@ final class FullKeyboardEngineTests: XCTestCase {
         now += 0.5
     }
 
+    /// Types `text` key by key: letters on the letters page, digits and marks from the 123 page.
+    private func keys(_ text: String) {
+        for ch in text {
+            if ch == " " {
+                tap(.space)
+            } else if ch.isLetter {
+                if engine.layout.layer != .letters { tap(.layerSwitch(.letters)) }
+                tap(.character(String(ch)))
+            } else {
+                if engine.layout.layer == .letters { tap(.layerSwitch(.numbers)) }
+                tap(.character(String(ch)))
+            }
+            now += 0.5
+        }
+    }
+
+    private func smartField(quotes: UITextSmartQuotesType? = .default, dashes: UITextSmartDashesType? = .default, language: KeyboardLanguage = .english) {
+        target = FixtureTextTarget()
+        target.autocapitalizationType = UITextAutocapitalizationType.none
+        target.smartQuotesType = quotes
+        target.smartDashesType = dashes
+        engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+        engine.width = 393
+        engine.clock = { [unowned self] in self.now }
+        engine.language = language
+        engine.configureForField()
+    }
+
+    /// X (Brandon): "no smart quotes/etc." Apple's keyboard (black box, iOS 27.2, a UITextView
+    /// and a text field) curls ' and " by what comes before them, makes a second hyphen an em
+    /// dash, and writes autocorrect's apostrophes as ’; a field whose smartQuotesType or
+    /// smartDashesType is .no gets straight ones, as there.
+    func testSmartQuotesAndDashesFollowTheFieldAsOnApplesKeyboard() {
+        smartField()
+        keys("'hi' it's \"yes\" (\"ok\") 5'9\" ('a') so '\"ok\"' well--known this -- that one---two yes - no")
+        XCTAssertEqual(target.text, "‘hi’ it’s “yes” (“ok”) 5’9” (‘a’) so ‘“ok”’ well—known this — that one—-two yes - no")
+        smartField()
+        keys("a--")
+        tap(.delete)
+        XCTAssertEqual(target.text, "a", "delete takes the dash whole")
+
+        smartField()
+        type("dont ")
+        XCTAssertEqual(target.text, "don’t ", "autocorrect's apostrophe")
+        type("im")
+        XCTAssertTrue(engine.suggestions.contains { $0.displayText == "I’m" && $0.replacement == "I'm" }, "the strip shows it too")
+        type(" ")
+        XCTAssertEqual(target.text, "don’t I’m ")
+        type("ill")
+        tap(.delete)
+        keys("'l")
+        XCTAssertEqual(target.text, "don’t I’m il’l")
+        XCTAssertEqual(AutocorrectEngine.currentToken(in: engine.textBefore), "il'l", "the keys read ’ as an apostrophe")
+
+        smartField(quotes: .no, dashes: .no)
+        keys("'hi' it's \"yes\" well--known ")
+        type("dont ")
+        XCTAssertEqual(target.text, "'hi' it's \"yes\" well--known don't ")
+
+        smartField(quotes: .yes, dashes: .no)
+        keys("\"well--known\"")
+        XCTAssertEqual(target.text, "“well--known”")
+    }
+
+    /// Each of Apple's keyboards types its language's quotes (black box, iOS 27.2): „Hallo“ ‚tag‘
+    /// in German, where the apostrophe key types ‘ in a word too; « Bonjour » with no-break
+    /// spaces inside and ‘salut’ in French; „tak” ‚nie’ in Polish; «да» in Russian.
+    func testSmartQuotesFollowTheKeysLanguage() {
+        smartField(language: .german)
+        keys("\"hallo\" 'tag' geht's")
+        XCTAssertEqual(target.text, "„hallo“ ‚tag‘ geht‘s")
+        smartField(language: .french)
+        keys("\"bonjour\" 'salut' l'ami")
+        XCTAssertEqual(target.text, "«\u{00A0}bonjour\u{00A0}» ‘salut’ l’ami")
+        smartField(language: .frenchCanadian)
+        keys("\"oui\"")
+        XCTAssertEqual(target.text, "«\u{00A0}oui\u{00A0}»")
+        smartField(language: .polish)
+        keys("\"tak\" 'nie'")
+        XCTAssertEqual(target.text, "„tak” ‚nie’")
+        smartField(language: .russian)
+        keys("\"1\" '2'")
+        XCTAssertEqual(target.text, "«1» ‘2’")
+    }
+
+    /// Apple's keyboard (black box, iOS 27.2) puts , . ! ? ; : and ) against a picked
+    /// suggestion's word, taking the space the suggestion typed; a quote, a bracket or @ keeps
+    /// it, and so does a space you typed yourself. A field's smartInsertDeleteType changed
+    /// nothing there.
+    func testMarksGoAgainstAPickedSuggestion() {
+        for (mark, expected) in [(",", "hello,"), (".", "hello."), (")", "hello)"), ("(", "hello ("), ("@", "hello @")] {
+            smartField(quotes: .no)
+            type("hel")
+            engine.acceptSuggestion(KeyboardSuggestion(displayText: "hello", replacement: "hello", kind: .secondary))
+            keys(mark)
+            XCTAssertEqual(target.text, expected, mark)
+        }
+        smartField()
+        type("hel")
+        engine.acceptSuggestion(KeyboardSuggestion(displayText: "hello", replacement: "hello", kind: .secondary))
+        keys("\"")
+        XCTAssertEqual(target.text, "hello “")
+        smartField()
+        type("hello ")
+        keys(".")
+        XCTAssertEqual(target.text, "hello .", "a space you typed stays")
+    }
+
     /// X (Erick): "If I add punctuation after a typo autocorrect does not fix the typo." A
     /// mark that closes a word fixes it as space does and goes in after the fix, as on Apple's
-    /// keyboard; backspace right after takes both back, as after a space.
+    /// keyboard; delete right after takes the mark, and the strip offers the typo back.
     func testPunctuationAfterATypoFixesItFirst() {
         for mark in [",", ".", "!", "?", ";", ":", ")", "\""] {
             target = FixtureTextTarget()
@@ -1537,7 +1709,10 @@ final class FullKeyboardEngineTests: XCTestCase {
         punctuate(".")
         XCTAssertTrue(target.text.hasSuffix(" receive."))
         tap(.delete)
-        XCTAssertTrue(target.text.hasSuffix(" recieve"), "one backspace takes back the mark and the fix")
+        XCTAssertTrue(target.text.hasSuffix(" receive"), "delete takes the mark")
+        XCTAssertEqual(engine.suggestions.first?.kind, .revert)
+        engine.acceptSuggestion(engine.suggestions[0])
+        XCTAssertTrue(target.text.hasSuffix(" recieve"), "the strip puts back what was typed")
         punctuate(".")
         XCTAssertTrue(target.text.hasSuffix(" recieve."), "the word you kept stays")
 
@@ -2293,6 +2468,8 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(learned(touch).weak, 0, "an autocorrection left in place can't confirm itself")
         type("teh ")
         engine.deleteBackward()
+        XCTAssertEqual(engine.suggestions.first?.kind, .revert)
+        engine.acceptSuggestion(engine.suggestions[0])
         type(" dog it ")
         XCTAssertEqual(target.text, "the cat teh dog it ")
         XCTAssertEqual(learned(touch).weak, 3 + 3, "cat and dog, as typed")

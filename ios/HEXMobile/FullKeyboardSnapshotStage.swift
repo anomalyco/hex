@@ -574,6 +574,8 @@ final class FixtureTextTarget: KeyboardTextTarget {
     var keyboardType: UIKeyboardType? = .default
     var returnKeyType: UIReturnKeyType? = .default
     var enablesReturnKeyAutomatically: Bool? = false
+    var smartQuotesType: UITextSmartQuotesType?
+    var smartDashesType: UITextSmartDashesType?
 
     init(text: String = "", appearance: UIKeyboardAppearance? = nil) {
         self.text = text
@@ -585,6 +587,10 @@ final class FixtureTextTarget: KeyboardTextTarget {
         let clamped = max(0, min(text.count, cursorIndex))
         let idx = text.index(text.startIndex, offsetBy: clamped)
         return String(text[..<idx])
+    }
+
+    var documentContextAfterInput: String? {
+        String(text.dropFirst(max(0, min(text.count, cursorIndex))))
     }
 
     var hasText: Bool { !text.isEmpty }
