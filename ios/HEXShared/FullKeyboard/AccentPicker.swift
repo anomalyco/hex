@@ -79,9 +79,26 @@ nonisolated enum AccentCatalog {
         "=": "≈ ≠ =",
     ]
 
+    /// The Spanish keyboard's (letters missing hold nothing there), and English's symbols.
+    private static let spanishOrder: [String: String] = englishOrder.filter { $0.key.first?.isLetter != true }.merging([
+        "a": "a á à ä â ã å ą æ ā ª",
+        "e": "e é è ë ê ę ė ē",
+        "i": "ī į î ì ï í i",
+        "o": "º ō œ ø õ ô ò ó o ö",
+        "u": "ū û ù ü ú u",
+        "s": "s š",
+        "d": "d đ",
+        "l": "l·l l",
+        "c": "c ç ć č",
+        "n": "ń n",
+        "1": "1 1º 1ª", "2": "2 2º 2ª", "3": "3 3º 3ª", "4": "4 4º 4ª", "5": "5 5º 5ª",
+        "6": "6 6º 6ª", "7": "7 7º 7ª", "8": "8 8º 8ª", "9": "9ª 9 9º", "0": "0 0ª ° 0º",
+    ]) { _, spanish in spanish }
+
     private static func displayOrder(for language: KeyboardLanguage) -> [String: String] {
         switch language {
         case .english: englishOrder
+        case .spanish: spanishOrder
         default: [:]
         }
     }

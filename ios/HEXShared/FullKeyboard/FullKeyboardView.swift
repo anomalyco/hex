@@ -585,11 +585,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// Fixtures: show a key's accent callout with `option` selected.
     func debugHoldAccent(_ character: String, selecting option: String) {
         debugHoldAccent(character)
-        guard let menu = engine.activeAccentMenu,
-              let index = menu.options.firstIndex(of: option),
-              let key = engine.layout.key(.character(character)) else { return }
-        let cell = menu.cellFrames[index]
-        engine.touchMoved(id: -2, to: CGPoint(x: cell.midX, y: key.frame.midY))
+        guard let index = engine.activeAccentMenu?.options.firstIndex(of: option) else { return }
+        engine.debugSelectAccent(index)
     }
 
     /// Fixtures: show a key's long-press accent callout.
@@ -598,12 +595,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let center = CGPoint(x: key.frame.midX, y: key.frame.midY)
         engine.touchBegan(id: -2, at: center)
         _ = engine.openAccentMenuIfEligible(forTouch: -2)
-        if let selectIndex,
-           let menu = engine.activeAccentMenu,
-           selectIndex >= 0, selectIndex < menu.cellFrames.count {
-            let cell = menu.cellFrames[selectIndex]
-            engine.touchMoved(id: -2, to: CGPoint(x: cell.midX, y: center.y))
-        }
+        if let selectIndex { engine.debugSelectAccent(selectIndex) }
     }
 
     // MARK: - Layout

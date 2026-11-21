@@ -148,6 +148,11 @@ final class FullKeyboardEngine {
 
     private(set) var activeAccentMenu: AccentMenu?
     private var activeAccentTouchID: Int?
+    /// The callout cell under the finger when it opened. Apple's callout keeps the key's own
+    /// character selected until the finger moves into another cell (iOS 27.2: held and let go
+    /// at the screen's edge, where the callout shifts so another cell is under the finger, it
+    /// types the key's own); then the cell under the finger is the one.
+    private var accentOpenCell: Int?
     private(set) var suggestions: [KeyboardSuggestion] = []
 
     let target: KeyboardTextTarget
@@ -646,6 +651,7 @@ final class FullKeyboardEngine {
             )
         }
         activeAccentTouchID = id
+        accentOpenCell = activeAccentMenu?.index(for: touch.point)
         typingLog?.ui("accent_open", [
             TypingLogField("id", .int(id)),
             TypingLogField("key", .string(TypingLogger.keyID(touch.key.kind))),
@@ -655,13 +661,32 @@ final class FullKeyboardEngine {
         return true
     }
 
+    /// Fixtures: select a callout option as sliding to it does.
+    func debugSelectAccent(_ index: Int) {
+        guard var menu = activeAccentMenu, menu.cellFrames.indices.contains(index), index != menu.selectedIndex else { return }
+        menu.selectedIndex = index
+        activeAccentMenu = menu
+        accentOpenCell = nil
+        onSelectionStep?()
+        onChange?()
+    }
+
+    /// The callout's selection for a finger at `point` (`accentOpenCell`).
+    private func accentIndex(in menu: AccentMenu, at point: CGPoint) -> Int {
+        let under = menu.index(for: point)
+        guard let open = accentOpenCell else { return under }
+        if under == open { return menu.selectedIndex }
+        accentOpenCell = nil
+        return under
+    }
+
     func touchMoved(id: Int, to point: CGPoint) {
         guard var touch = touches[id] else { return }
         touch.point = point
 
         // 1. Active long-press accent picker: horizontal drag selects the alternate character.
         if activeAccentTouchID == id, var menu = activeAccentMenu {
-            let nextIndex = menu.index(for: point)
+            let nextIndex = accentIndex(in: menu, at: point)
             touches[id] = touch
             if nextIndex != menu.selectedIndex {
                 menu.selectedIndex = nextIndex
@@ -772,7 +797,8 @@ final class FullKeyboardEngine {
         touch.point = point
 
         if activeAccentTouchID == id, let menu = activeAccentMenu {
-            let index = menu.index(for: point)
+            let index = accentIndex(in: menu, at: point)
+            accentOpenCell = nil
             let chosen = menu.options[index]
             activeAccentMenu = nil
             activeAccentTouchID = nil
