@@ -807,6 +807,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   Ukrainian is `DictationTranscriber`'s only (macOS 27.2 lists `uk-UA` there and
   not for `SpeechTranscriber`): a `say -v Lesya` clip came back word for word in
   Cyrillic, without punctuation, after an 18 s model download.
+  Polish is too (macOS 27.2.1 lists `pl-PL` for `DictationTranscriber` only):
+  `say -v Zosia` clips came back with every diacritic (ą ć ę ł ń ó ś ź ż), numbers as
+  digits ("10 min", "19:30"), and no punctuation.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes

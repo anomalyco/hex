@@ -463,6 +463,27 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(pipeline.format("Єнот, Ґанок і Їжак", language: "uk-UA"), "єнот, ґанок і їжак.")
     }
 
+    /// Polish as `DictationTranscriber` writes it (macOS 27.2, Zosia voice: diacritics kept, no
+    /// punctuation, numbers as digits): Polished capitalizes and ends it, Casual starts each
+    /// sentence lowercase, Lowercase lowers Ą Ć Ę Ł Ń Ó Ś Ź Ż, and English's "i" rules never
+    /// touch Polish "i" ("and").
+    func testPolishStylesAndLowercase() {
+        let heard = "dzień dobry spóźnię się 10 min będę w domu o 19:30 zacznijcie beze mnie"
+        XCTAssertEqual(
+            TranscriptFormatter.format(heard, style: .polished, language: "pl-PL"),
+            "Dzień dobry spóźnię się 10 min będę w domu o 19:30 zacznijcie beze mnie."
+        )
+        XCTAssertEqual(TranscriptFormatter.format("żółw i jeż. i gęś", style: .polished, language: "pl-PL"), "Żółw i jeż. I gęś.")
+        XCTAssertEqual(TranscriptFormatter.format("Łabędź i jeż. Ósma.", style: .casual, language: "pl-PL"), "łabędź i jeż. ósma")
+        XCTAssertEqual(TranscriptFormatter.format("Żółw i jeż.", style: .verbatim, language: "pl-PL"), "Żółw i jeż.")
+        var pipeline = DictationPipeline(style: .polished, language: "pl-PL", vocabulary: [])
+        pipeline.lowercase = true
+        XCTAssertEqual(
+            pipeline.format("WĄŻ, ĆMA, GĘŚ, ŁÓDŹ, KOŃ, ÓSMY ŚLAD, ŹLE, ŻÓŁW", language: "pl-PL"),
+            "wąż, ćma, gęś, łódź, koń, ósmy ślad, źle, żółw."
+        )
+    }
+
     /// Lowercase comes after the style and the vocabulary's spellings, as desktop's Lowercase
     /// step lowercases the final text, custom vocabulary included.
     func testLowercaseRunsAfterTheStyleAndVocabulary() {
