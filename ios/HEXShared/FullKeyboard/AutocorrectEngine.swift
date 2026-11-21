@@ -724,6 +724,11 @@ final class AutocorrectEngine {
                 pool.append(cased(learned, typed: token))
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
                 pool.append(Self.matchCase(of: token, onto: suggested))
+            } else if !suppressedInSession.contains(lower), !learning.rejected.contains(lower),
+                      !learnedWords.contains(lower), let accented = language.accentSuggestions[lower] {
+                // Offered, never put in by space: the plain spelling is a word of its own
+                // ("e" is "and", "ce" is "to us"), as the contractions above are.
+                pool.append(cased(accented, typed: token))
             }
         }
 
@@ -833,13 +838,20 @@ final class AutocorrectEngine {
     /// keys, else the keyboard's own language's. Held-out English benchmark, French beside it:
     /// 7.56% WER before, 5.79% now, against 5.75% alone.
     private func cautiousReplacement(for token: String) -> String? {
-        guard let partner = workingPartner else {
-            lastFixLanguage = language
-            return ownReplacement(for: token)
-        }
         if let shortcut = shortcut(for: token) {
             lastFixLanguage = nil
             return shortcut
+        }
+        // This language's own accented spelling decides before any partner logic: the table
+        // only holds plain spellings that are no word of this language ("perche" -> "perché"),
+        // so an English lean must not hand it to the other dictionary's guess.
+        if let accented = accentRestoration(for: token) {
+            lastFixLanguage = language
+            return accented
+        }
+        guard let partner = workingPartner else {
+            lastFixLanguage = language
+            return ownReplacement(for: token)
         }
         let lean = languageLean(partner, token: token)
         // One-letter words are left to the keyboard's own language: `UITextChecker` takes
@@ -1065,7 +1077,15 @@ final class AutocorrectEngine {
             return Self.matchCase(of: token, onto: fix)
         }
 
-        // 4. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
+        // 4. A word typed without its accent where the plain spelling is no word of the
+        // language ("perche" -> "perché", "citta" -> "città"): the dictionary path below
+        // needs three letters and never rewrites a word it knows, and a language's own list
+        // is deterministic. Ambiguous pairs ("e"/"è", "ce"/"c'è") are suggestion-only.
+        if let accented = accentRestoration(for: token) {
+            return accented
+        }
+
+        // 5. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
         guard token.count >= 3, !token.contains("'") else { return nil }
         guard !checker.isWordValid(token) else { return nil }
 
@@ -1084,6 +1104,20 @@ final class AutocorrectEngine {
         }
         guard let bestGuess, bestScore <= 1.35 else { return nil }
         return withoutAddedCapitals(cased(bestGuess, typed: token), typed: token)
+    }
+
+    /// The language's own accented spelling of `token`, where the plain spelling is no word
+    /// of it ("perche" -> "perché"), or nil. All-caps and mixed-case words are left alone,
+    /// as the dictionary path leaves them, and the table only holds non-words of this
+    /// language, so it may decide before a bilingual partner's dictionary does.
+    private func accentRestoration(for token: String) -> String? {
+        let isAllCaps = token.count >= 2 && token == token.uppercased() && token != token.lowercased()
+        guard !isAllCaps, !token.dropFirst().contains(where: \.isUppercase) else { return nil }
+        let lower = token.lowercased()
+        guard let accented = language.accentRestorations[lower], mayOffer(accented, replacing: token) else {
+            return nil
+        }
+        return withoutAddedCapitals(cased(accented, typed: token), typed: token)
     }
 
     /// `candidate` cased as `token` was typed (`matchCase`), less a capital it only has

@@ -2228,6 +2228,26 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.swipe?.model.language, "es")
     }
 
+    /// The input mode's language (`UIInputViewController.primaryLanguage`), which Apple
+    /// documents as superseding the Info.plist's en-US: the keyboard reports the language
+    /// resolved before the controller attaches, and each space-bar switch.
+    func testTheInputModeLanguageFollowsTheSpaceBar() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.italian, .english]
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.languageSettings = settings
+        XCTAssertEqual(view.reportedInputModeLanguage, "it-IT")
+
+        let controller = RecordingInputController()
+        view.hostController = controller
+        XCTAssertEqual(controller.primaryLanguage, "it-IT", "reported when the controller attaches")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(controller.primaryLanguage, "en-US")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(controller.primaryLanguage, "it-IT")
+        XCTAssertEqual(controller.reportedLanguages, ["it-IT", "en-US", "it-IT"], "each change sent once")
+    }
+
     func testOnlyTheEnglishAndSpanishLayoutsSwipe() {
         let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
         view.swipeOverride = true
@@ -2756,5 +2776,21 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(AdaptiveTouchStatus.current(settings: settings, fullAccessConfirmed: true), .learning(taps: 240))
         settings.summary = (900, false)
         XCTAssertEqual(AdaptiveTouchStatus.current(settings: settings, fullAccessConfirmed: true), .learning(taps: 400))
+    }
+}
+
+/// Records each language the keyboard reports as its input mode's (`primaryLanguage`), so the
+/// test sees both the value and how often it was sent.
+@MainActor
+private final class RecordingInputController: UIInputViewController {
+    private(set) var reportedLanguages: [String] = []
+
+    override var primaryLanguage: String? {
+        get { reportedLanguages.last }
+        set {
+            if let newValue {
+                reportedLanguages.append(newValue)
+            }
+        }
     }
 }

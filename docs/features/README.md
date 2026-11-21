@@ -2866,6 +2866,15 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Adaptive touch, German spatial autocorrect, Learn each language separately
+├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
+│   more layouts, the space bar names the current one and a slide switches letters, accents
+│   and autocorrect, and the input mode reports the language typing
+│   (`UIInputViewController.primaryLanguage`, which Apple documents as superseding the
+│   Info.plist's en-US; unit-tested, whether the host's spelling follows it is unverified on
+│   a device); Italian restores unambiguous unaccented spellings on space ("perche" →
+│   "perché", "citta" → "città", `KeyboardLanguage.accentRestorations`) and offers "è" and
+│   "c'è" in the strip for "e" and "ce", which are words of their own and are never changed
+│   by space
 ├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
 │   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
 │   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file

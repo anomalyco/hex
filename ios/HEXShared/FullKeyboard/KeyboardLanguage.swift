@@ -69,6 +69,30 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         String(rawValue.prefix { $0 != "-" })
     }
 
+    /// The BCP 47 identifier the keyboard reports as its input mode's language
+    /// (`UIInputViewController.primaryLanguage`, which supersedes the Info.plist's
+    /// `PrimaryLanguage`), so the host's spelling and autocorrection follow the language
+    /// typing: the language's usual region, as `dictationLanguage` falls back to.
+    var inputModeLanguage: String {
+        switch self {
+        case .english: "en-US"
+        case .norwegian: "nb-NO"
+        case .spanish: "es-ES"
+        case .german: "de-DE"
+        case .italian: "it-IT"
+        case .french: "fr-FR"
+        case .frenchCanadian: "fr-CA"
+        case .frenchSwiss: "fr-CH"
+        case .portuguese: "pt-BR"
+        case .polish: "pl-PL"
+        case .romanian: "ro-RO"
+        case .russian: "ru-RU"
+        case .ukrainian: "uk-UA"
+        case .greek: "el-GR"
+        case .serbianLatin: "sr-Latn-RS"
+        }
+    }
+
     /// Latin letters, so another Latin-script language can be autocorrected on its keys
     /// (bilingual autocorrect). Russian's and Ukrainian's are Cyrillic, Greek's Greek.
     var isLatin: Bool { self != .russian && self != .ukrainian && self != .greek }
@@ -90,23 +114,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         func key(_ identifier: String) -> String {
             identifier.replacingOccurrences(of: "_", with: "-").lowercased()
         }
-        let usual = switch self {
-        case .english: "en-US"
-        case .norwegian: "nb-NO"
-        case .spanish: "es-ES"
-        case .german: "de-DE"
-        case .italian: "it-IT"
-        case .french: "fr-FR"
-        case .frenchCanadian: "fr-CA"
-        case .frenchSwiss: "fr-CH"
-        case .portuguese: "pt-BR"
-        case .polish: "pl-PL"
-        case .romanian: "ro-RO"
-        case .russian: "ru-RU"
-        case .ukrainian: "uk-UA"
-        case .greek: "el-GR"
-        case .serbianLatin: "sr-Latn-RS"
-        }
+        let usual = inputModeLanguage
         // Spanish's regions are Apple's three variants, not the iPhone's own identifier.
         if self == .spanish {
             let named = preferred.first {
@@ -575,6 +583,47 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// Unaccented spellings space puts the accent back on, where the plain spelling is no
+    /// word of the language at all. The dictionary path needs three letters and never
+    /// rewrites a word it knows, so these cannot come from it ("perche" is also the plural of
+    /// a fish, but that is not a common word; "cosi" is the plural of "coso" and stays out).
+    /// A pair whose plain spelling is a common word of its own is never here: "e" is "and",
+    /// "ce" is "to us", "si" is "oneself", "ne" is "of it", "da" is "from", "la" is "the" and
+    /// "li" is "them"; `accentSuggestions` offers those in the strip instead, as Spanish's
+    /// "si"/"sí" and "tu"/"tú" are left alone, and English's `suggestOnlyContractions`.
+    var accentRestorations: [String: String] {
+        switch self {
+        case .italian:
+            [
+                "perche": "perché", "poiche": "poiché", "affinche": "affinché",
+                "benche": "benché", "finche": "finché",
+                "piu": "più", "gia": "già", "puo": "può", "cioe": "cioè", "percio": "perciò",
+                "citta": "città", "societa": "società", "universita": "università",
+                "qualita": "qualità", "liberta": "libertà", "verita": "verità",
+                "realta": "realtà", "attivita": "attività", "possibilita": "possibilità",
+                "difficolta": "difficoltà", "opportunita": "opportunità",
+                "caffe": "caffè", "giu": "giù",
+                "lunedi": "lunedì", "martedi": "martedì", "mercoledi": "mercoledì",
+                "giovedi": "giovedì", "venerdi": "venerdì",
+            ]
+        case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
+             .portuguese, .polish, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+            [:]
+        }
+    }
+
+    /// Accented forms whose plain spelling is a common word of its own, offered in the
+    /// suggestion strip and never put in by space ("e" is "and", "ce" is "to us"; "c'è"
+    /// uses the same straight apostrophe as the English contractions).
+    var accentSuggestions: [String: String] {
+        switch self {
+        case .italian: ["e": "è", "ce": "c'è"]
+        case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
+             .portuguese, .polish, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+            [:]
+        }
+    }
+
     /// Each letter's (row, column) for autocorrect's neighbouring-key cost on `letters`, with
     /// rows shifted as the keys are.
     func keyCoordinates(_ letters: KeyboardLetterLayout? = nil) -> [Character: (Double, Double)] {
@@ -640,7 +689,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// Automatic follows the dictation language: its layout, or English for a language
     /// without one (Hebrew). Before any dictation language is known, the first
     /// iPhone keyboard, then preferred language, that has a layout. Hex's own input mode
-    /// says nothing here: its `primaryLanguage` is the Info.plist's en-US, whatever you type.
+    /// says nothing here: the keyboard reports the language typing there
+    /// (`FullKeyboardView.syncLanguage`), so following it would only repeat the choice
+    /// already made.
     static func automatic(
         dictationLanguage: String?,
         inputModes: [String],

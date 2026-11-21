@@ -413,6 +413,54 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Domani andiamo al mare con i bambini perché Sono molto stai ")
     }
 
+    /// Italian's unaccented spellings only come from its own table, and only where the plain
+    /// spelling is no word: "e" is "and" and "ce" is "to us", so they stay as typed and the
+    /// strip offers "è" and "c'è", which space never applies.
+    func testItalianRestoresUnambiguousAccentsAndSuggestsTheAmbiguousOnes() {
+        let italian = stubbed {
+            $0.valid = ["e", "ce", "perche", "citta"]
+        }
+        italian.setLanguage(.italian, available: ["it"])
+        XCTAssertEqual(fix(italian, "perche"), "perché", "even a checker that calls it valid")
+        XCTAssertEqual(fix(italian, "citta"), "città")
+        XCTAssertEqual(fix(italian, "piu"), "più")
+        XCTAssertEqual(fix(italian, "Citta"), "Città")
+        XCTAssertNil(fix(italian, "e"), "\"e\" is and")
+        XCTAssertNil(fix(italian, "ce"), "\"ce\" is to us")
+        let e = italian.suggestions(beforeInput: "e", field: .text, autocorrectionType: .default)
+        XCTAssertEqual(e.dropFirst().first?.replacement, "è")
+        XCTAssertFalse(e.dropFirst().first?.willAutoReplace ?? true, "space never applies it")
+        let ce = italian.suggestions(beforeInput: "ce", field: .text, autocorrectionType: .default)
+        XCTAssertEqual(ce.dropFirst().first?.replacement, "c'è")
+        XCTAssertFalse(ce.dropFirst().first?.willAutoReplace ?? true, "space never applies it")
+
+        // Bilingual autocorrect: the table is this language's own spelling even when the
+        // partner's dictionary takes the plain form for a word (English beside Italian).
+        let english = StubChecker()
+        english.valid = ["perche", "the"]
+        italian.setPartner(.english, available: ["it", "en_US"], checker: english)
+        XCTAssertEqual(italian.partner?.language, .english)
+        XCTAssertEqual(fix(italian, "perche"), "perché", "the table wins beside English")
+        XCTAssertNil(fix(italian, "the"), "an English word stays")
+
+        // It decides before the bilingual lean too, not only when the partner knows the plain
+        // spelling: English words before "piu" would otherwise hand it to the partner's guess.
+        english.valid.insert("pi")
+        english.guessTable["piu"] = ["pi"]
+        XCTAssertEqual(fix(italian, before: "the meeting piu"), "più")
+    }
+
+    /// Every restoration only adds accents: it never changes a letter ("perche" -> "perché").
+    func testItalianAccentRestorationsOnlyAddAccents() {
+        for (plain, accented) in KeyboardLanguage.italian.accentRestorations {
+            XCTAssertEqual(
+                accented.folding(options: .diacriticInsensitive, locale: nil),
+                plain,
+                plain
+            )
+        }
+    }
+
     /// Russian types in Russian: its words stay and its typos get Russian fixes, never English.
     func testRussianCorrectsInRussianNeverEnglish() {
         engine.language = .russian

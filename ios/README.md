@@ -788,11 +788,19 @@ never at a launch by itself.
   The globe key is unchanged. The keyboard comes back in the language it was left in, in
   every app and field, as Apple's keyboards do (black box: a switch in Messages held in
   Safari and back; `settings.keyboardLanguages.current`; without Full Access an iPhone may
-  keep it only while the keyboard runs). A field gives a third-party keyboard nothing to go
-  on: `documentInputMode` is nil in Messages and Hex's own en-US in a field that asks for
-  English. **Dictation follows the keyboard:** with two or more languages and Dictation
-  language on Automatic, dictation is in the language the space bar shows, in the iPhone's
-  region where Apple Speech has it (`LanguageSettings.keyboardDictationLanguage`,
+  keep it only while the keyboard runs). The input mode says what it types: Hex sets
+  `UIInputViewController.primaryLanguage` to the language's BCP 47 identifier
+  (`KeyboardLanguage.inputModeLanguage`) as the language changes (unit-tested), meant to
+  make the host spell and autocorrect in the language typing; Apple documents it as
+  superseding the extension's Info.plist en-US, but whether the host follows it (Notes's red
+  underlines, for one) is not verified on a device. Switching from the full keyboard to the
+  dictation bar leaves the last reported language in place. A field gives a third-party
+  keyboard nothing else to go on: before this change `documentInputMode` was observed as nil
+  in Messages and the plist's en-US in a field that asks for English; what it reports with
+  the runtime language is unverified. **Dictation follows the keyboard:** with
+  two or more languages and Dictation language on Automatic, dictation is in the language
+  the space bar shows, in the iPhone's region where Apple Speech has it
+  (`LanguageSettings.keyboardDictationLanguage`,
   `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
   which prepares the new language between dictations (TestFlight build 56: with the
   keyboard on Español, dictation stayed English and Spanish came out "incomprehensible").
@@ -917,8 +925,8 @@ never at a launch by itself.
   Automatic follows the dictation language (Hebrew, Cyrillic Serbian and other
   languages without a layout get English; Serbian only in Latin script, `sr-Latn`);
   before any dictation language is known, the first iPhone
-  keyboard, then preferred language, that has a layout. It never follows Hex's own
-  input mode, whose `primaryLanguage` is always the Info.plist's en-US. Rows of 11 keys narrow
+  keyboard, then preferred language, that has a layout. It doesn't read back the input mode
+  Hex reports (`primaryLanguage`), which is derived from this choice. Rows of 11 keys narrow
   only the letters: shift, delete and the bottom row keep their English sizes,
   and row 3's letters sit centred between shift and delete. Russian's nine-letter row 3
   wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's;
@@ -939,8 +947,14 @@ never at a launch by itself.
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
   the layout (on QWERTZ, Z sits beside T), and an accent or tilde you left out
   is the cheapest fix of all ("aqui" → "aquí", "manana" → "mañana"; a word the
-  dictionary knows, such as "esta", is never changed); in Polish every missing
-  diacritic in a word counts as one such fix ("zolw" → "żółw", "maly" → "mały"). The
+  dictionary knows, such as "esta", is never changed). Italian also restores common
+  accented spellings independently of the checker's guesses and a bilingual partner's
+  dictionary, where the plain spelling is no word of its own ("perche" → "perché", "citta" →
+  "città", the days, the -ità words; `KeyboardLanguage.accentRestorations`); "e"/"è" and
+  "ce"/"c'è" stay as typed, because "e" is "and" and "ce" is "to us": the strip offers "è"
+  and "c'è", and space never applies them (`KeyboardLanguage.accentSuggestions`). In Polish
+  every missing diacritic in a word counts as one such fix
+  ("zolw" → "żółw", "maly" → "mały"). The
   iOS 27.2 simulator lists `pl_PL` but its checker flags no word, so Polish fixes are
   checked against a stub dictionary there. Greek likewise: every tonos or diaeresis left out
   counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
