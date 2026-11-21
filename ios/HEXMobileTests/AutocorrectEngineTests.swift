@@ -904,6 +904,12 @@ final class AutocorrectEngineTests: XCTestCase {
         tap(.space)
         typeTaps("ate")
         XCTAssertTrue(target.text.hasSuffix(" deli ate "), "a space inside the bar: \(target.text)")
+
+        // Two words space would fix on their own stay two ("i dkdnt" is "I didn't", never one word).
+        tapCentre("i")
+        edgeSpace(under: "b")
+        typeTaps("didnt")
+        XCTAssertTrue(target.text.hasSuffix(" I didn't "), target.text)
     }
 
     func testSpatialAutocorrectReadsAnETappedHighOnTheStripAsThe() throws {

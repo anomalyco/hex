@@ -805,15 +805,25 @@ nonisolated struct TypingDecoder {
         let centres = codeCentres(keys)
         let costs = taps.map { tapCosts($0, centres: centres, keys: keys) }
         let prev = previous.flatMap { model.index(of: $0) }
-        let firstIndex = model.index(ofCodes: firstCodes)
-        let secondIndex = model.index(ofCodes: secondCodes)
-        var split = 0.0
-        for (i, code) in firstCodes.enumerated() { split += costs[i][Int(code)] }
-        for (i, code) in secondCodes.enumerated() { split += costs[firstCodes.count + 1 + i][Int(code)] }
+        // The two words as space would leave them: each as typed or its likeliest reading
+        // ("i dkdnt" is "I didn't", never "obedient").
+        func reading(_ codes: [UInt8], at range: Range<Int>, after before: Int?, valid: Bool) -> (cost: Double, word: Int?) {
+            let typed = model.index(ofCodes: codes)
+            var spatial = 0.0
+            for (i, code) in codes.enumerated() { spatial += costs[range.lowerBound + i][Int(code)] }
+            var best = (cost: spatial + parameters.lmWeight * (typed.map { lmCost($0, after: before) }
+                ?? (valid ? parameters.unknownValidCost : parameters.unknownCost)), word: typed)
+            for (word, s) in search(model, costs, range: range, limit: 3, maxEdits: parameters.maxEdits, skipping: neverSuggest.words) {
+                let cost = s + parameters.lmWeight * lmCost(word, after: before)
+                if cost < best.cost { best = (cost, word) }
+            }
+            return best
+        }
+        let firstRange = 0..<firstCodes.count
+        let firstReading = reading(firstCodes, at: firstRange, after: prev, valid: firstIsValid)
+        let secondReading = reading(secondCodes, at: (firstCodes.count + 1)..<taps.count, after: firstReading.word, valid: secondIsValid)
+        let split = firstReading.cost + secondReading.cost
         guard split.isFinite else { return nil }
-        let firstLM = firstIndex.map { lmCost($0, after: prev) } ?? (firstIsValid ? parameters.unknownValidCost : parameters.unknownCost)
-        let secondLM = secondIndex.map { lmCost($0, after: firstIndex) } ?? (secondIsValid ? parameters.unknownValidCost : parameters.unknownCost)
-        split += parameters.lmWeight * (firstLM + secondLM)
         var best: (word: Int, cost: Double)?
         for (word, spatial) in search(model, costs, range: 0..<costs.count, limit: 3, maxEdits: parameters.maxEdits, skipping: neverSuggest.words)
         where model.length(word) > max(first.count, second.count) && !neverSuggest.follows(word, after: prev) {
