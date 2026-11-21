@@ -936,8 +936,9 @@ What a send carries                      // capture.send (router opencode::send_
 │   server on another machine reads it; the text only names where it was recorded
 ├── Every request goes to the running local service over HTTP
 │   (service.json); a service that isn't up is never started. On Windows with
-│   Labs › OpenCode in WSL on, a service in the default WSL distribution
-│   answers instead (capture.route). The prompt's "Recorded at" line names the
+│   Labs › OpenCode in WSL on, a WSL service that answers is used ahead of a
+│   Windows one; the Windows service is used when WSL answers nothing
+│   (capture.route). The prompt's "Recorded at" line names the
 │   capture folder as its Linux `/mnt/…` path; the summary header keeps the
 │   Windows path
 ├── With an agent host (routing's agentHost), the request body travels on SSH

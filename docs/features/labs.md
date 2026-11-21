@@ -353,7 +353,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                         // check: terminal_paste_sends_plain_control_v_to_java_games (windows/paste.rs)
 ├── OpenCode in WSL no    labs.opencode_in_wsl          (Windows) Modes rewriting, the Modes model picker, and Annotate's capture sends
                                          use an OpenCode service running in the default WSL distribution
-                                         when no Windows registration answers; looking for it can start WSL
+                                         ahead of a Windows one when it answers; every lookup also looks in WSL
+                                         even when a Windows service is healthy, waiting up to 3 s, and that can
+                                         start WSL; the Windows service is used when WSL answers nothing
                                          // checks: the_passwd_line_for_the_uid_names_its_home, both_wsl_prefixes_name_the_distribution,
                                          // a_distribution_or_home_windows_cant_reach_is_refused, a_zero_budget_or_cancellation_skips_the_lookup,
                                          // the_cache_follows_the_default_distribution_and_uid, one_lookup_serves_every_caller_and_a_short_wait_stops,
@@ -364,7 +366,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
                                          // a_capture_folder_follows_the_automount_read_with_the_home,
                                          // a_wsl_service_gets_the_workspace_its_linux_server_can_use,
                                          // a_wsl_service_maps_a_capture_folder_into_its_distribution,
-                                         // a_wsl_service_is_a_fallback_only_without_a_windows_one,
+                                         // a_wsl_service_wins_with_the_lab_on_and_the_windows_one_is_the_fallback,
+                                         // a_wsl_lookup_is_capped_only_when_windows_already_answered,
                                          // a_failed_wsl_request_forgets_the_workspace, a_not_found_wsl_request_forgets_the_workspace,
                                          // a_wsl_request_failure_reads_as_the_capsule_expects,
                                          // opencode_in_wsl_is_its_own_bit_and_windows_only; not run on a real Windows PC with WSL
@@ -3686,15 +3689,19 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   is `labs.terminal_paste_shortcut`, and General shows its recorder while on.
 - OpenCode in WSL (Windows): Modes rewriting, the Modes model picker, and
   Annotate's capture sends use an OpenCode service running inside the default
-  WSL distribution. WSL2 forwards
-  loopback, so Hex dials the registered URL as usual; what it cannot see
-  without this lab is the registration, which lives in the distribution's
+  WSL distribution. With the lab on, a WSL service that answers is used ahead
+  of a Windows one; the Windows service is used when WSL answers nothing. WSL2
+  forwards loopback, so Hex dials the registered URL as usual; what it cannot
+  see without this lab is the registration, which lives in the distribution's
   home.
 
 ```ts
 Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
-├── a Windows registration answers /api/info -> it wins, exactly as before
-├── none answers -> read HKCU\…\Lxss\DefaultDistribution, DistributionName and DefaultUid on every lookup
+├── a WSL registration answers /api/info -> it wins over a Windows one; the Windows service
+│   is used when the WSL wait answers nothing, so Windows comes back only after that wait
+├── Windows already confirmed a service -> the WSL lookup waits at most min(the caller's
+│   remaining budget, WSL_LOOKUP_CAP 3 s), so a cold WSL can't hold a rewrite or Annotate's send
+├── each search -> read HKCU\…\Lxss\DefaultDistribution, DistributionName and DefaultUid on every lookup
 │   ├── a cached home is reused only when DistributionName and DefaultUid still match; otherwise
 │   │   rebuild it from passwd: \\wsl.localhost\<distribution>\etc\passwd, else \\wsl$\<distribution>\etc\passwd
 │   │   on older Windows 10 (at most 1 MiB) -> the line whose uid is DefaultUid -> its (one trailing / trimmed) home
@@ -3710,10 +3717,12 @@ Settings › Labs › OpenCode in WSL on            // labs.opencode_in_wsl
 │   Each wait checks Escape in WAIT_SLICE slices; a timeout or cancel never aborts the others
 ├── a lookup that ran into its cap without a service pauses new lookups for 10 s, so a hung WSL
 │   doesn't make every rewrite wait out its deadline; a later try finds it once it starts
-├── no registration or no home -> OpenCode isn't running, or the update notice when one answered /api/info with 404
+├── no WSL registration, no home, or a wait that ran into its cap -> the Windows service when one
+│   already answered; with neither, OpenCode isn't running, or the update notice when one answered
+│   /api/info with 404
 ├── Annotate's capture send asks the same lookup first (src/capture_host/routing/opencode.rs)
-│   ├── a WSL service answers the router's local requests; a native Windows one leaves the router's own
-│   │   registration path unchanged
+│   ├── a WSL service answers the router's local requests; when WSL answers nothing, a native Windows
+│   │   one leaves the router's own registration path unchanged
 │   └── the prompt's "Recorded at" line names the capture folder as the WSL server sees it:
 │       X:\a\b -> /mnt/x/a/b, following [automount] root = (one trailing /, else /mnt/);
 │       enabled = false, a UNC share, or a relative path leaves the Windows text. The
@@ -3752,7 +3761,8 @@ Checks: `the_passwd_line_for_the_uid_names_its_home`,
 [wsl.rs](../../src/desktop/opencode_service/wsl.rs);
 `a_wsl_service_gets_the_workspace_its_linux_server_can_use`,
 `a_wsl_service_maps_a_capture_folder_into_its_distribution`,
-`a_wsl_service_is_a_fallback_only_without_a_windows_one`,
+`a_wsl_service_wins_with_the_lab_on_and_the_windows_one_is_the_fallback`,
+`a_wsl_lookup_is_capped_only_when_windows_already_answered`,
 `a_failed_wsl_request_forgets_the_workspace`, and
 `a_not_found_wsl_request_forgets_the_workspace` in
 [opencode_service.rs](../../src/desktop/opencode_service.rs);

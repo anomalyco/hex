@@ -465,7 +465,8 @@ const TYPED_TEXT: u64 = GNOME_ANNOTATE << 1;
 /// light blinks slowly instead of staying solid.
 const CAPS_LOCK_SLOW_BLINK: u64 = TYPED_TEXT << 1;
 /// The next bit above Caps Lock's slow blink: an OpenCode service in WSL is
-/// found when no Windows one answers (Windows).
+/// used ahead of a Windows one when it answers, with Windows as the fallback
+/// (Windows).
 const OPENCODE_IN_WSL: u64 = CAPS_LOCK_SLOW_BLINK << 1;
 /// The next bit above OpenCode in WSL: the local API's `process=global`
 /// returns a transcript after Global mode's output processing.

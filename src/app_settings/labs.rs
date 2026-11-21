@@ -202,8 +202,8 @@ pub struct LabsSettings {
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
     /// An OpenCode service running in the default WSL distribution is used
-    /// for Modes rewriting and the Modes model picker when no Windows
-    /// service answers (Windows).
+    /// for Modes rewriting and the Modes model picker ahead of a Windows one
+    /// when it answers; Windows answers when WSL answers nothing (Windows).
     pub opencode_in_wsl: bool,
     /// `hex completions <shell>` prints a completion script for bash, zsh,
     /// fish, elvish, or PowerShell, generated from Hex's own commands.
