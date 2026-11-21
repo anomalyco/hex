@@ -39,7 +39,7 @@ struct KeyboardSnapshotStage: View {
                 .overlay(HexTheme.borderWeak)
 
             KeyboardSurfaceView(model: viewModel)
-                .frame(height: 140)
+                .frame(height: 146)
         }
         .background(Color(red: 0x07 / 255.0, green: 0x08 / 255.0, blue: 0x09 / 255.0).ignoresSafeArea())
         .preferredColorScheme(.dark)

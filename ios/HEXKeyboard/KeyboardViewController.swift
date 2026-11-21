@@ -184,8 +184,10 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    /// The dictation bar's own height, under `barTopInset`.
-    private static let barHeight: CGFloat = 140
+    /// The dictation bar's own height, under `barTopInset`: 4 pt top padding, the 40 pt
+    /// top row (44 pt tap areas around 26 pt pills), a 2 pt gap, the 44 pt stage well, an
+    /// 8 pt gap, the 42 pt keys, and 6 pt bottom padding.
+    private static let barHeight: CGFloat = 146
 
     /// On an iPad, iPadOS adds its shortcut bar (undo, redo, paste, and the app's own buttons)
     /// to a custom keyboard. Mostly it sits above the keyboard, but some apps draw it over the
@@ -918,7 +920,7 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: - The dictation bar's emoji panel
 
     /// The full keyboard's emoji panel in place of the dictation bar, at the full keyboard's
-    /// height (the bar's 140 pt can't hold its grid); its ABC key goes back to the bar. No
+    /// height (the bar's 146 pt can't hold its grid); its ABC key goes back to the bar. No
     /// search: its query is typed on letter keys the bar doesn't have.
     private func openBarEmojiPanel() {
         guard barEmojiPanel == nil, fullKeyboard == nil, let surface else { return }
