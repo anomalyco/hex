@@ -260,7 +260,14 @@ never at a launch by itself.
     the Hex key, sliding more than 10 pt before the hold fires opens the menu
     instead, and once dictation has started, moving the finger changes
     nothing. Push to talk needs dictation in the keyboard (a warm session or
-    in-keyboard dictation); a hold that opens Hex is only a tap.
+    in-keyboard dictation); a hold that opens Hex is only a tap. The full
+    keyboard's bar takes the same hold (0.4 s, Apple's long press) anywhere no
+    word is: an empty slot, beside the Hex key, or a bar with nothing in it,
+    through the Hex key's own path (`HexKeyGesture`, `hexKeyHeld`), but not
+    while the bar shows the Full Access hint or a notice. A tap there does nothing,
+    a slide cancels it, and a word's slot keeps its tap and its hold (Add to
+    vocabulary). The bar's Paste is plain text on the words' line, and Paste and
+    Next keyboard centre on the keyboard's middle, not the strip's.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly
@@ -347,12 +354,14 @@ never at a launch by itself.
     "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
     the list is also sent as a best-effort recognition hint; Parakeet's batch
     path gets no hint.
-  - **Learn how I type (Settings › Privacy › Learn how I type):** Off by default, and
-    shown whether or not the full keyboard is on. A private journal in the App
-    Group (`typing-journal.json`) that never stores what you write: per-key tap
-    offsets, and word-level pairs with counts and at most one word of context on
-    each side. Only plain text fields that allow autocorrect count
-    (`TypingJournal.allows`). Nothing leaves the iPhone.
+  - **Learn how I type (Settings › Privacy › Learn how I type):** On by default (an
+    unset switch reads on; turning it off is saved and stays off), and
+    shown whether or not the full keyboard is on. It learns only from typing and
+    dictating with Hex, on this iPhone, never from what you write elsewhere. A
+    private journal in the App Group (`typing-journal.json`) that never stores
+    what you write: per-key tap offsets, and word-level pairs with counts and at
+    most one word of context on each side. Only plain text fields that allow
+    autocorrect count (`TypingJournal.allows`). Nothing leaves the iPhone.
     - **Typing:** words you erase and retype, autocorrect fixes you undo from the
       strip, suggestions you pick, and autocorrections you turn down by
       tapping what you typed. A typo you fixed the same way twice (never a
@@ -587,7 +596,10 @@ never at a launch by itself.
     touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
     real fingers.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
-    and apart from Learn how I type. Its description says what it records, and
+    and apart from Learn how I type. A one-time migration (`migrations.typingLogsOff.v1` in the
+    App Group, `TypingLogSettings.turnOffOnce`, run by the app and the keyboard at launch)
+    turned it off for everyone who had it on, keeping the logs already recorded.
+    Its description says what it records, and
     turning it on asks first in a dialog (App Review 2.5.14): each tap and the
     text you type or dictate with Hex, including the text around the cursor,
     for 14 days, on this iPhone, to export or delete, never password, code or

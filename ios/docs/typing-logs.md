@@ -9,6 +9,10 @@ testing and training keyboard prediction and per-user touch models on a Mac.
 Nothing is sent anywhere; Privacy › Advanced › Typing logs shares a day's file (or
 all of them) through the share sheet, for example by AirDrop.
 
+Once per App Group, the app and the keyboard turn it off at launch for anyone who
+had it on (`migrations.typingLogsOff.v1`, `TypingLogSettings.turnOffOnce`). The
+logs already recorded stay, and turning it back on afterwards keeps it on.
+
 It is separate from Learn how I type, which keeps only word pairs and per-key
 averages and is unchanged.
 

@@ -1671,12 +1671,12 @@
         }
       }
     },
-    "Learns from taps and the words you fix" : {
+    "Learns on this iPhone from your taps and the words you fix with Hex, never from what you write elsewhere" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从你的轻点和修正的词中学习"
+            "value" : "在这台 iPhone 上从你的轻点和你用 Hex 修正的词中学习，绝不从你在别处写的内容中学习"
           }
         }
       }

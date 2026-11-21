@@ -86,6 +86,8 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         reportFullAccess(force: true)
+        // Before any typing log starts: the keyboard may update before Hex is opened.
+        TypingLogSettings().turnOffOnce()
         KeyboardLocalDictation.allowHapticsWhileRecording()
         configureView()
         syncFromBridge(animated: false)

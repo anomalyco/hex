@@ -97,9 +97,13 @@ final class KeyboardStripView: UIView {
         }
     }
     private var loggingMark: TypingLogMarkView?
-    /// A plain chip: `UIPasteControl` renders as an empty blue box inside a keyboard
-    /// extension (TestFlight build 4), so this reads the clipboard on tap instead, once, which
-    /// iOS asks about until Paste from Other Apps is Allow (`KeyboardClipboardTracker`).
+    /// Where the bar's middle slot centres, from this view's leading edge: the keyboard's middle,
+    /// not this view's, which leaves out the Hex key. Paste and Next keyboard centre on it.
+    var barMidX: CGFloat? { didSet { if barMidX != oldValue { setNeedsLayout() } } }
+    /// Plain text on the words' line, as a suggestion is: `UIPasteControl` renders as an empty
+    /// blue box inside a keyboard extension (TestFlight build 4), so this reads the clipboard on
+    /// tap instead, once, which iOS asks about until Paste from Other Apps is Allow
+    /// (`KeyboardClipboardTracker`).
     private let pasteControl = UIButton(type: .custom)
     private let nextKeyboardChip = UIButton(type: .custom)
 
@@ -128,15 +132,21 @@ final class KeyboardStripView: UIView {
         undoChip.configuration = chip
         undoChip.isHidden = true
         undoChip.addTarget(self, action: #selector(handleUndo), for: .touchUpInside)
+        // Apple's bar words: SF 17 pt regular in the bar's ink, no chip.
         var paste = UIButton.Configuration.plain()
         paste.image = UIImage(
             systemName: "doc.on.clipboard",
-            withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.5, weight: .medium)
+            withConfiguration: UIImage.SymbolConfiguration(font: Self.pasteFont, scale: .small)
         )
-        paste.imagePadding = 6
+        paste.imagePadding = 5
         paste.title = "Paste"
-        paste.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
-        paste.background.cornerRadius = 15
+        paste.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
+            var attributes = attributes
+            attributes.font = Self.pasteFont
+            return attributes
+        }
+        paste.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 8, bottom: 0, trailing: 8)
+        paste.background.backgroundColor = .clear
         pasteControl.configuration = paste
         pasteControl.isHidden = true
         pasteControl.addTarget(self, action: #selector(handlePaste), for: .touchUpInside)
@@ -169,6 +179,8 @@ final class KeyboardStripView: UIView {
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { fatalError() }
+
+    private static let pasteFont = UIFont.systemFont(ofSize: 17, weight: .regular)
 
     /// `fullAccessHint`, while true, replaces everything else in the strip with what
     /// dictation needs (`FullAccessHintView`); `notice` does the same after it.
@@ -310,8 +322,7 @@ final class KeyboardStripView: UIView {
     private func applyPalette() {
         statusLabel.textColor = palette.textMuted
         var paste = pasteControl.configuration
-        paste?.baseForegroundColor = palette.textBase
-        paste?.background.backgroundColor = palette.chipFill
+        paste?.baseForegroundColor = palette.stripText
         pasteControl.configuration = paste
         var next = nextKeyboardChip.configuration
         next?.baseForegroundColor = palette.textMuted
@@ -354,7 +365,9 @@ final class KeyboardStripView: UIView {
         let pair = pasteShown && nextShown
         let gap: CGFloat = 8
         let total = pair ? pasteW + gap + nextSize.width : (pasteShown ? pasteW : nextSize.width)
-        let startX = (bounds.width - total) / 2
+        // On the keyboard's middle, as the middle slot's word, kept inside the strip.
+        let midX = barMidX ?? bounds.width / 2
+        let startX = max(0, min(bounds.width - total, midX - total / 2))
         let chipY = max(0, midY - chipH / 2)
         pasteControl.frame = CGRect(x: startX, y: chipY, width: pasteW, height: chipH)
         nextKeyboardChip.frame = CGRect(

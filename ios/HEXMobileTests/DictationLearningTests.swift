@@ -388,6 +388,20 @@ final class TypingJournalLearningTests: XCTestCase {
         )
     }
 
+    func testLearnHowITypeIsOnUntilTurnedOff() {
+        let name = "TypingJournalDefault-\(UUID().uuidString)"
+        let fresh = UserDefaults(suiteName: name)!
+        defer { fresh.removePersistentDomain(forName: name) }
+        let untouched = TypingJournalSettings(defaults: fresh)
+        XCTAssertTrue(untouched.isEnabled, "an iPhone that never touched the switch learns")
+        XCTAssertNotNil(TypingJournal.sharedIfEnabled(settings: untouched))
+        untouched.isEnabled = false
+        XCTAssertFalse(TypingJournalSettings(defaults: fresh).isEnabled, "a switch turned off stays off")
+        XCTAssertNil(TypingJournal.sharedIfEnabled(settings: untouched))
+        XCTAssertTrue(TypingJournal.storedDictationCorrections(settings: untouched, directory: directory).isEmpty)
+        XCTAssertFalse(TypingJournalSettings(defaults: nil).isEnabled, "nowhere to learn without the App Group")
+    }
+
     func testLearnedFixesReachTheAppAndCanBeSwitchedOffOrDeleted() {
         let journal = TypingJournal(directory: directory, settings: settings)
         journal.recordDictation(fixResult())

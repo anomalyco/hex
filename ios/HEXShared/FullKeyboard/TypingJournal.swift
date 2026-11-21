@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 import UIKit
 
-/// Experiment (Learn how I type): a private, on-device record of how you type and dictate,
+/// Learn how I type (on by default): a private, on-device record of how you type and dictate,
 /// kept in the App Group so the app can show it and the keyboard can personalize itself.
 ///
 /// It is deliberately not a keystroke log or a copy of what you write. Taps are folded into
@@ -24,8 +24,10 @@ struct TypingJournalSettings {
         self.defaults = defaults
     }
 
+    /// Learn how I type: on until you turn it off. Only a switch you turned off is saved as
+    /// off, so an iPhone that never touched it learns.
     var isEnabled: Bool {
-        get { defaults?.bool(forKey: Key.enabled) ?? false }
+        get { defaults.map { $0.object(forKey: Key.enabled) as? Bool ?? true } ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.enabled) }
     }
 

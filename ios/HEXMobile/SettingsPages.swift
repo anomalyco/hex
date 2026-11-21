@@ -471,10 +471,10 @@ struct PrivacySettingsPage: View {
 
             SettingsCard {
                 // Not only for the full keyboard: it also learns from dictations the
-                // dictation bar inserts.
+                // dictation bar inserts. On until turned off (`TypingJournalSettings`).
                 SettingsToggleRow(
                     title: String(localized: "Learn how I type"),
-                    detail: String(localized: "Learns from taps and the words you fix"),
+                    detail: String(localized: "Learns on this iPhone from your taps and the words you fix with Hex, never from what you write elsewhere"),
                     isOn: $learnTyping
                 )
 
