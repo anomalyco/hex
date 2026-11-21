@@ -1019,6 +1019,11 @@ from desktop releases. The marketing version stays fixed across beta builds.
 it matches the Xcode Cloud start condition, and `ci_scripts/ci_post_clone.sh` stamps that
 version into `project.yml` before generating the project. Once Apple approves a
 version, later uploads must be higher than it. Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
+An iPad still installs it (as an iPhone app) and runs its keyboard, which there is always the
+dictation bar (the full keyboard is iPhone only). Docked, the bar keeps its top 44 pt clear:
+iPadOS adds its shortcut bar (undo, redo, paste) to a custom keyboard, usually above it but
+in some apps over its top (Notes, iPadOS 26.6), where it covered the bar's top row. A
+floating keyboard (iPhone-wide) has no shortcut bar and no strip.
 
 The Xcode Cloud workflow needs a tag start condition with prefix `ios-beta-`,
 container `ios/HEXMobile.xcodeproj`, shared scheme `HEXMobile`, an iOS Archive

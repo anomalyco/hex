@@ -20,6 +20,8 @@ final class KeyboardViewController: UIInputViewController {
     private var barEmojiPanel: EmojiPanelView?
     private var barEmojiLibrary: EmojiLibrary?
     private var heightConstraint: NSLayoutConstraint?
+    /// The dictation bar's top edge, `barTopInset` below the keyboard's.
+    private var barTopConstraint: NSLayoutConstraint?
     /// Opaque, under the surface: nothing iOS leaves behind the keyboard shows through it.
     private let backdrop = KeyboardBackdropView()
     private var pollInterval: TimeInterval = 0
@@ -108,7 +110,35 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        if let fullKeyboard { applyHeight(fullKeyboard.preferredHeight) }
+        if let fullKeyboard {
+            applyHeight(fullKeyboard.preferredHeight)
+        } else {
+            applyBarInset()
+        }
+    }
+
+    /// The dictation bar's own height, under `barTopInset`.
+    private static let barHeight: CGFloat = 140
+
+    /// On an iPad, iPadOS adds its shortcut bar (undo, redo, paste, and the app's own buttons)
+    /// to a custom keyboard. Mostly it sits above the keyboard, but some apps draw it over the
+    /// keyboard's top instead: in Notes on an iPad mini (iPadOS 26.6, TestFlight) its buttons
+    /// reached about 40 pt down and covered the bar's top row and its language and style trays.
+    /// The keyboard can't tell which an app does, so on an iPad the bar keeps that strip clear.
+    /// A floating keyboard is iPhone-wide and has no shortcut bar; before the first layout
+    /// (no width yet) the keyboard is taken to be docked, as it mostly is.
+    private var barTopInset: CGFloat {
+        let width = view.bounds.width
+        return UIDevice.current.userInterfaceIdiom == .pad && (width == 0 || width >= 500) ? 44 : 0
+    }
+
+    /// Keeps the dictation bar's top inset, and with it the keyboard's height, right for the
+    /// keyboard's width (it changes as an iPad keyboard floats or docks).
+    private func applyBarInset() {
+        guard fullKeyboard == nil, barEmojiPanel == nil, let barTopConstraint else { return }
+        let inset = barTopInset
+        if barTopConstraint.constant != inset { barTopConstraint.constant = inset }
+        applyHeight(Self.barHeight + inset)
     }
 
     /// The keyboard's height. Set once before the first layout (the surface's own height), then
@@ -495,9 +525,11 @@ final class KeyboardViewController: UIInputViewController {
         surface?.removeFromSuperview()
         view.subviews.filter { $0 is FullKeyboardView }.forEach { $0.removeFromSuperview() }
         fullKeyboard = nil
+        barTopConstraint = nil
         didWarmLexicon = false
 
         let mounted: UIView
+        var topInset: CGFloat = 0
         if wantsFull {
             let keyboard = FullKeyboardView(
                 model: viewModel,
@@ -528,16 +560,19 @@ final class KeyboardViewController: UIInputViewController {
             addChild(hosting)
             hosting.didMove(toParent: self)
             mounted = hosting.view
-            applyHeight(140)
+            topInset = barTopInset
+            applyHeight(Self.barHeight + topInset)
         }
         mounted.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(mounted, aboveSubview: backdrop)
+        let top = mounted.topAnchor.constraint(equalTo: view.topAnchor, constant: topInset)
         NSLayoutConstraint.activate([
             mounted.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             mounted.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            mounted.topAnchor.constraint(equalTo: view.topAnchor),
+            top,
             mounted.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
+        if !wantsFull { barTopConstraint = top }
         surface = mounted
         attachTypingLog()
         schedulePoll(force: false)
@@ -733,7 +768,7 @@ final class KeyboardViewController: UIInputViewController {
         panel.removeFromSuperview()
         barEmojiPanel = nil
         surface?.isHidden = false
-        if fullKeyboard == nil { applyHeight(140) }
+        applyBarInset()
     }
 
     // MARK: - In-keyboard dictation
