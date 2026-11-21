@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.SpokenCleanup
+import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
@@ -272,5 +273,52 @@ class InsertionTest {
         assertEquals("testing 1, 2, 3", pipeline("Testing one two three.", Style.Casual))
         assertEquals("john at the rate gmail dot com", pipeline("john at the rate gmail dot com", Style.Verbatim))
         assertEquals("Test 1, 2, 3.", SpokenText.format("Test one, two, three.", SpeechOptions(Style.Polished, Spoken.English, true, false)))
+    }
+
+    // iOS TranscriptCleanupTests: Format lists and Spoken punctuation inside the styles.
+    private fun spoken(text: String, style: Style, lists: Boolean = true, punctuation: Boolean = true, period: Boolean = true,
+                       lowercase: Boolean = false, spoken: Spoken = Spoken.English) =
+        SpokenText.format(text, SpeechOptions(style, spoken, false, false, lowercase, period, lists, punctuation))
+
+    @Test fun listsInsideTheStyles() {
+        val plan = "Um, so the plan is, first, um, call the bank, second, pay rent. Thanks!"
+        assertEquals("So the plan is:\n1. Call the bank.\n2. Pay rent.\nThanks!", spoken(plan, Style.Polished))
+        assertEquals("so the plan is:\n1. Call the bank\n2. Pay rent\nthanks!", spoken(plan, Style.Casual))
+        assertEquals("So the plan is:\n1. Call the bank\n2. Pay rent\nThanks!", spoken(plan, Style.Notes))
+        assertEquals(plan, spoken(plan, Style.Verbatim))
+        assertEquals("So the plan is, first, call the bank, second, pay rent. Thanks!", spoken(plan, Style.Polished, lists = false))
+        assertEquals("So the plan is:\n1. Call the bank\n2. Pay rent\nThanks!", spoken(plan, Style.Polished, period = false))
+        assertEquals("Groceries:\n- Eggs.\n- Milk.", spoken("Groceries, bullet, eggs, bullet, milk.", Style.Polished))
+        assertEquals("Groceries:\n- Eggs\n- Milk", spoken("Groceries, bullet, eggs, bullet, milk.", Style.Polished, period = false))
+        assertEquals("首先，买牛奶。其次，给妈妈打电话", SpokenText.style("首先，买牛奶。其次，给妈妈打电话。", Style.Polished, "zh-CN", false, true))
+        for ((style, written) in listOf(Style.Polished to "Test 1, 2, 3.", Style.Casual to "test 1, 2, 3",
+            Style.Notes to "Test 1, 2, 3", Style.Verbatim to "Test 1, 2, 3")) assertEquals(written, spoken("Test 1, 2, 3", style))
+        assertEquals("- Eggs\n- Milk", spoken("First, eggs. Second, milk.", Style.Notes, lists = false))
+        assertEquals("1. Eggs\n2. Milk", spoken("First, eggs. Second, milk.", Style.Notes))
+        assertEquals("1. eggs\n2. milk", spoken("First, eggs. Second, milk.", Style.Notes, lowercase = true))
+        assertEquals("1. Going to call Sam.\n2. Want to book the hotel.",
+            spoken("First, gonna call Sam. Second, wanna book the hotel.", Style.Polished))
+        assertEquals("Todo:\n- Got to pack.\n- Let me check the car.", spoken("Todo bullet gotta pack bullet lemme check the car", Style.Polished))
+        assertEquals("Mi lista de compras.\n1. Huevos.\n2. Leche.\n3. Pan.",
+            spoken("Mi lista de compras. Primero, huevos, segundo, leche, tercero, pan.", Style.Polished, spoken = Spoken.Spanish))
+        assertEquals("The first time I saw it, I loved it.", spoken("The first time I saw it, I loved it.", Style.Polished))
+    }
+    @Test fun spokenPunctuationInsideTheStyles() {
+        val plan = "Okay comma so here is the plan colon we leave at noon period see you there exclamation point"
+        assertEquals("Okay, so here is the plan: we leave at noon. See you there!", spoken(plan, Style.Polished))
+        assertEquals("okay so here is the plan: we leave at noon. see you there!", spoken(plan, Style.Casual))
+        assertEquals("- So here is the plan: we leave at noon\n- See you there!", spoken(plan, Style.Notes))
+        assertEquals(plan, spoken(plan, Style.Verbatim))
+        assertEquals("Love you :-)", spoken("love you smiley face", Style.Polished))
+        assertEquals("Wow exclamation point.", spoken("Wow exclamation point", Style.Polished, punctuation = false))
+        assertEquals("Wow!", spoken("Wow exclamation point", Style.Polished))
+        assertEquals("Hi Sarah,\nThanks for the update.", spoken("Hi Sarah comma new line thanks for the update period", Style.Polished))
+        assertEquals("Groceries:\n- Eggs.\n- Milk.", spoken("Groceries, dash, eggs, dash, milk.", Style.Polished))
+        assertEquals("wow!", spoken("Wow exclamation point", Style.Polished, lowercase = true))
+        assertEquals("Llego mañana. Nos vemos.", spoken("Llego mañana, punto nos vemos", Style.Polished, spoken = Spoken.Spanish))
+        assertEquals("Hi Sarah, how are you?", SpokenPunctuation.format("Hi Sarah comma how are you question mark", "en"))
+        assertEquals("Wir sehen uns morgen, okay?", spoken("Wir sehen uns morgen Komma okay Fragezeichen", Style.Polished, spoken = Spoken.German))
+        for (prose in listOf("A period of time passed.", "The comma is wrong.", "Use the Oxford comma.", "He has a question mark tattoo.",
+            "Two comma five.", "Colon cancer is treatable.")) assertEquals(prose, SpokenPunctuation.format(prose, "en"))
     }
 }
