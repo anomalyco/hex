@@ -1763,6 +1763,26 @@
         }
       }
     },
+    "Spoken punctuation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "口述标点"
+          }
+        }
+      }
+    },
+    "Say “comma” or “question mark” for the mark" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说“comma”或“question mark”即可输入标点"
+          }
+        }
+      }
+    },
     "Messages" : {
       "shouldTranslate" : false
     },

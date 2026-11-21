@@ -87,7 +87,8 @@ nonisolated struct HinglishSettings {
 /// custom vocabulary, Clean up what I say
 /// (`CleanupTagger.cleanIfEnabled`, which guards its own memory in the keyboard), `refine`
 /// (Clean up with Apple Intelligence, only in the app), translation, the style
-/// (`TranscriptFormatter`, with Format lists' `SpokenLists` inside it), the spellings again,
+/// (`TranscriptFormatter`, with Format lists' `SpokenLists` and Spoken punctuation's
+/// `SpokenPunctuation` inside it), the spellings again,
 /// Lowercase, then French spacing (`FrenchSpacing`, in every style but Verbatim). The style,
 /// Lowercase and French spacing are string rules with no model, so in-keyboard dictation needs
 /// no more memory to run them.
@@ -102,6 +103,8 @@ nonisolated struct DictationPipeline: Sendable {
     var lowercase = false
     /// Settings › Dictation › Format lists (`SpokenLists`), inside the style.
     var formatLists = false
+    /// Settings › Dictation › Spoken punctuation (`SpokenPunctuation`), inside the style.
+    var spokenPunctuation = false
     /// Experiments › Hinglish: Hindi is written in Latin letters before every other step, so
     /// learned fixes, vocabulary and the style see the Latin words.
     var hinglish = false
@@ -183,7 +186,12 @@ nonisolated struct DictationPipeline: Sendable {
     /// model's).
     func format(_ text: String, language: String?) -> String {
         let styled = TranscriptFormatter.format(
-            text, style: style, language: language, lists: formatLists, endsWithPeriod: endsWithPeriod
+            text,
+            style: style,
+            language: language,
+            lists: formatLists,
+            punctuation: spokenPunctuation,
+            endsWithPeriod: endsWithPeriod
         )
         let spelled = VocabularySpelling.apply(vocabulary + DictationCorrections.spellings(corrections), to: styled)
         let cased = lowercase ? spelled.lowercased(with: nil) : spelled
