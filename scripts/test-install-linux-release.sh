@@ -77,14 +77,18 @@ jq -n --arg version "$version" --arg target "$target" --arg url "/release/hex/fi
       distributions: [{kind: "direct"}]}}' > "$server/release/hex/desktop/stable.json"
 cp "$server/release/hex/desktop/stable.json" "$temporary/manifest.json"
 
-port=$((38000 + ($$ % 1000)))
-python3 -m http.server "$port" --bind 127.0.0.1 --directory "$server" \
+# The OS picks a free port; the unbuffered server prints it once it listens.
+port=
+python3 -u -m http.server 0 --bind 127.0.0.1 --directory "$server" \
   > "$temporary/server.log" 2>&1 &
 server_pid=$!
 attempt=0
-until curl --fail --silent "http://127.0.0.1:$port/release/hex/desktop/stable.json" >/dev/null; do
+until port=$(sed -n 's/^Serving HTTP on .* port \([0-9][0-9]*\).*/\1/p' "$temporary/server.log" | head -n 1) &&
+  [ -n "$port" ] &&
+  curl --fail --silent --max-time 2 "http://127.0.0.1:$port/release/hex/desktop/stable.json" >/dev/null; do
   attempt=$((attempt + 1))
-  if [ "$attempt" -ge 20 ]; then
+  if [ "$attempt" -ge 100 ] || ! kill -0 "$server_pid" 2>/dev/null; then
+    cat "$temporary/server.log" >&2 || true
     echo "Fixture server did not start." >&2
     exit 1
   fi
