@@ -186,6 +186,8 @@ final class FullKeyboardEngine {
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
     /// An iPhone, or the iPhone Duo folded or unfolded (`KeyboardPosture`).
     var posture: KeyboardPosture = .phone { didSet { if posture != oldValue { rebuildLayout() } } }
+    /// Which iPhone key plane to draw (`KeyboardPhoneSize`), from the screen's size.
+    var phoneSize: KeyboardPhoneSize = .regular { didSet { if phoneSize != oldValue { rebuildLayout() } } }
     /// How far iOS set the keyboard in from each side of the screen (the Duo).
     var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
     /// Settings › Keyboard › Hex key: the strip's trailing (Right) or leading (Left) end.
@@ -1462,7 +1464,8 @@ final class FullKeyboardEngine {
             letters: letterLayout,
             posture: posture,
             windowInset: windowInset,
-            hexPlacement: hexPlacement
+            hexPlacement: hexPlacement,
+            phoneSize: phoneSize
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)
         syncDecoderKeys()

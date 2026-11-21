@@ -286,7 +286,8 @@ final class EmojiSuggesterTests: XCTestCase {
         let grid = try XCTUnwrap(panel.subviews.compactMap { $0 as? UICollectionView }.first { !($0.superview is EmojiRowView) })
         for button in buttons {
             let frame = button.convert(button.bounds, to: panel)
-            for y in [grid.frame.maxY + 1, frame.minY - 1, frame.maxY + 1, panel.bounds.maxY - 1] {
+            // The bar reaches the panel's bottom edge, as row 4 does, so nothing is under it there.
+            for y in [grid.frame.maxY + 1, frame.minY - 1, frame.maxY + 1, panel.bounds.maxY - 1] where y < panel.bounds.maxY {
                 let hit = panel.hitTest(CGPoint(x: frame.midX, y: y), with: nil)
                 XCTAssertTrue(hit === button, "\(button.accessibilityLabel ?? "") at y \(y): \(String(describing: hit))")
             }

@@ -241,7 +241,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation, posture: engine.posture) + lift
+        KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize) + lift
     }
 
     /// Room above the strip for the emoji search results. The strip itself keeps its height in
@@ -253,7 +253,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
     private var appliedLift: CGFloat {
-        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture)))
+        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize)))
     }
 
     /// Reads which device and posture the keyboard is on, and how far iOS set it in from the
@@ -264,8 +264,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         let size = screen.bounds.size
         let posture = KeyboardPosture.current(screenSize: size, isFoldable: Self.isFoldable)
         let inset = posture == .phone ? 0 : max(0, (size.width - bounds.width) / 2)
-        let heightChanges = posture != engine.posture
+        let phoneSize = KeyboardPhoneSize.current(screenSize: size)
+        let heightChanges = posture != engine.posture || phoneSize != engine.phoneSize
         engine.posture = posture
+        engine.phoneSize = phoneSize
         engine.windowInset = inset
         if heightChanges { onPreferredHeightChange?() }
     }
@@ -624,7 +626,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             panel.frame = recordingPanelFrame
             panel.horizontalInset = layout.horizontalInset
             panel.metrics = layout.metrics
-            panel.sideKeyWidth = layout.letterWidth * KeyboardLayout.modifierWidthRatio
+            panel.sideKeyWidth = layout.modifierWidth
             panel.hexOnLeading = layout.hexOnLeading
         }
         if let menu = styleMenu, let hex = layout.key(.hex) {
