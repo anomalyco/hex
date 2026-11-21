@@ -1243,6 +1243,56 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hi ther")
     }
 
+    /// Types a mark from the 123 page; the next space goes back to the letters.
+    private func punctuate(_ mark: String) {
+        if engine.layout.layer == .letters { tap(.layerSwitch(.numbers)) }
+        tap(.character(mark))
+        now += 0.5
+    }
+
+    /// X (Erick): "If I add punctuation after a typo autocorrect does not fix the typo." A
+    /// mark that closes a word fixes it as space does and goes in after the fix, as on Apple's
+    /// keyboard; backspace right after takes both back, as after a space.
+    func testPunctuationAfterATypoFixesItFirst() {
+        for mark in [",", ".", "!", "?", ";", ":", ")", "\""] {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+            type("see teh")
+            punctuate(mark)
+            XCTAssertEqual(target.text, "see the" + mark, mark)
+            type(" ok")
+            XCTAssertEqual(target.text, "see the\(mark) ok", mark)
+        }
+
+        type(" recieve")
+        punctuate(".")
+        XCTAssertTrue(target.text.hasSuffix(" receive."))
+        tap(.delete)
+        XCTAssertTrue(target.text.hasSuffix(" recieve"), "one backspace takes back the mark and the fix")
+        punctuate(".")
+        XCTAssertTrue(target.text.hasSuffix(" recieve."), "the word you kept stays")
+
+        type(" approx")
+        punctuate(".")
+        XCTAssertTrue(target.text.hasSuffix(" approx."), "an abbreviation's period")
+        type(" a")
+        punctuate(",")
+        XCTAssertTrue(target.text.hasSuffix(" a,"))
+    }
+
+    func testPunctuationNeverChangesASwipedWord() throws {
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.autocorrect.loadLexiconEntries([("hello", "Hello, friend")])
+        swipe("hello", on: plane)
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character(","), on: plane)
+        XCTAssertEqual(field.text, "hello,", "a swiped word is a reading, not a typo")
+    }
+
     func testDeleteSwipeWordsMatchOptionDelete() {
         XCTAssertNil(DeleteWordSwipe.wordLength(before: ""))
         XCTAssertEqual(DeleteWordSwipe.wordLength(before: "Hello, world. "), 7)
@@ -1349,6 +1399,42 @@ final class FullKeyboardEngineTests: XCTestCase {
         tap(.shift, on: keys)
         swipe("hello", on: keys)
         XCTAssertEqual(sentence.text, "Great. thanks Hello", "shift still capitalises")
+    }
+
+    /// X (Eric Jung): "the swipe keyboard has random auto capitalization of words." Shift and
+    /// auto-capitalization around swipes were right (after a period, a return, a comma, a
+    /// delete, a pick); the capitals came from readings: the word list's names and
+    /// abbreviations, which the dictionary knows only capitalised ("kent", "gs"), and "I'm"
+    /// read after a word "I" never follows. A name now needs more evidence than a common word,
+    /// your own words don't, and a contraction follows the word before.
+    func testASwipeMidSentenceGetsNoStrayCapital() throws {
+        let (field, plane) = try swipeKeyboard("Great.")
+        field.autocapitalizationType = .sentences
+        plane.engine.refreshAutoCapitalization()
+        let swipe = try XCTUnwrap(plane.swipe)
+        XCTAssertTrue(plane.engine.swipeReadsAsName("kent"))
+        XCTAssertTrue(plane.engine.swipeReadsAsName("york"))
+        XCTAssertFalse(plane.engine.swipeReadsAsName("many"))
+        XCTAssertFalse(plane.engine.swipeReadsAsName("Kent"), "your own spelling")
+        let close = [SwipeDecoder.Candidate(text: "kent", cost: 10), SwipeDecoder.Candidate(text: "many", cost: 12)]
+        XCTAssertEqual(swipe.ranked(close), ["many", "kent"])
+        let clear = [SwipeDecoder.Candidate(text: "kent", cost: 10), SwipeDecoder.Candidate(text: "many", cost: 20)]
+        XCTAssertEqual(swipe.ranked(clear), ["kent", "many"])
+
+        for word in ["thanks", "for", "the", "help"] { self.swipe(word, on: plane) }
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character(","), on: plane)
+        tap(.space, on: plane)
+        for word in ["see", "you", "in", "york"] { self.swipe(word, on: plane) }
+        XCTAssertEqual(field.text, "Great. Thanks for the help, see you in York", "a common name keeps its capital")
+
+        let decoder = swipe.decoder
+        let path = SwipePath.through("im", keys: plane.engine.swipeKeys)
+        let cost = { (previous: String) in
+            decoder.decode(path, keys: plane.engine.swipeKeys, previous: previous, limit: 8).first { $0.text == "I'm" }?.cost
+        }
+        let afterThink = try XCTUnwrap(cost("think")), afterUs = try XCTUnwrap(cost("us"))
+        XCTAssertGreaterThan(afterUs - afterThink, 3, "\"I'm\" after \"think\", hardly after \"us\"")
     }
 
     func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {

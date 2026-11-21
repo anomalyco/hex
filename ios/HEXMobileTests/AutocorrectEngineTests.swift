@@ -171,6 +171,101 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(slots.dropFirst().first?.willAutoReplace, false)
     }
 
+    /// Types `text` at the keys' centres into a new field, with the typing model's word pairs,
+    /// and returns the field's text.
+    private func typedWithContext(_ text: String, then: ((FullKeyboardEngine) -> Void)? = nil) throws -> String {
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let keys = FullKeyboardEngine(
+            target: field,
+            autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults))
+        )
+        keys.width = 393
+        keys.clock = { [unowned self] in self.now }
+        keys.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        keys.configureForField()
+        let saved = engine
+        engine = keys
+        defer { engine = saved }
+        typeWord(text)
+        then?(keys)
+        return field.text
+    }
+
+    /// X (Erick): "the id in this didn't autocorrect to I'd". A word the same letters spell
+    /// with an apostrophe follows the words around it, as on Apple's keyboard: the word
+    /// before decides when it is clear ("yes id" -> "yes I'd", "the id" stays), else the next
+    /// word ("well see" -> "we'll see", "well done" stays).
+    func testContractionsWithoutTheApostropheFollowTheWordsAroundThem() throws {
+        let cases: [(String, String)] = [
+            ("id like to go ", "I'd like to go "),
+            ("yes id love to ", "yes I'd love to "),
+            ("i think id help ", "I think I'd help "),
+            ("the id in this ", "the id in this "),
+            ("my id is here ", "my id is here "),
+            ("ill be there ", "I'll be there "),
+            ("shell be here ", "she'll be here "),
+            ("the shell is ", "the shell is "),
+            ("wed love to ", "we'd love to "),
+            ("lets go ", "let's go "),
+            ("well see ", "we'll see "),
+            ("well done ", "well done "),
+            ("as well as ", "as well as "),
+            ("till hell freezes over ", "till hell freezes over "),
+            ("hell be here ", "he'll be here "),
+            ("were going home ", "were going home "),
+        ]
+        for (typed, expected) in cases {
+            XCTAssertEqual(try typedWithContext(typed), expected, typed)
+        }
+        // Without the typing model nothing changes ("ill" stays a word).
+        typeWord("ill be there ")
+        XCTAssertEqual(target.text, "ill be there ")
+    }
+
+    /// X (Justin): "It doesn't seem to understand grammar. Its vs it's for instance." The words
+    /// around its/it's, your/you're, there/their/they're and then/than choose between them when
+    /// they're clear, at the word's own space or the next word's.
+    func testSoundAlikeWordsFollowTheWordsAroundThem() throws {
+        let cases: [(String, String)] = [
+            ("its a nice day ", "it's a nice day "),
+            ("i think its broken ", "I think it's broken "),
+            ("the dog wagged its tail ", "the dog wagged its tail "),
+            ("winter is on its way ", "winter is on its way "),
+            ("your welcome ", "you're welcome "),
+            ("i like your car ", "I like your car "),
+            ("there going home ", "they're going home "),
+            ("their is a dog ", "there is a dog "),
+            ("they lost there keys ", "they lost their keys "),
+            ("more then that ", "more than that "),
+            ("and than we left ", "and then we left "),
+            ("youre mother loves you ", "your mother loves you "),
+        ]
+        for (typed, expected) in cases {
+            XCTAssertEqual(try typedWithContext(typed), expected, typed)
+        }
+        let own = try typedWithContext("you") { _ in
+            self.tap(.layerSwitch(.numbers))
+            self.tap(.character("'"))
+            self.typeWord("re mother ")
+        }
+        XCTAssertEqual(own, "you're mother ", "an apostrophe you typed yourself stays")
+    }
+
+    /// The next word's space revised the word before: one backspace puts back both as typed,
+    /// and the word you kept stays.
+    func testOneBackspaceTakesARevisionBack() throws {
+        let text = try typedWithContext("well see ") { keys in
+            XCTAssertEqual(keys.target.documentContextBeforeInput, "we'll see ")
+            keys.deleteBackward()
+            XCTAssertEqual(keys.target.documentContextBeforeInput, "well see")
+            let space = keys.layout.key(.space)!.frame
+            keys.touchBegan(id: 1, at: CGPoint(x: space.midX, y: space.midY))
+            keys.touchEnded(id: 1, at: CGPoint(x: space.midX, y: space.midY))
+        }
+        XCTAssertEqual(text, "well see ")
+    }
+
     func testSpaceDeleteSpaceKeepLoopAndLearnedWordsPersistence() {
         typeWord("teh")
         XCTAssertEqual(engine.suggestions.count >= 2, true)
@@ -744,6 +839,86 @@ final class AutocorrectEngineTests: XCTestCase {
     /// left slot. Record typing logs showed that picked what was typed and a space ("th  "),
     /// and kept "th" from being corrected for the rest of the session. The keys take the
     /// tap now, on row 1's top edge, and Spatial autocorrect keeps the "the" it spells.
+    private func tapCentre(_ letter: Character) {
+        let key = engine.layout.key(.character(String(letter)))!.frame
+        tap(at: CGPoint(x: key.midX, y: key.midY))
+    }
+
+    /// X (Erick, Justin): "Auto correct does not separate two words like apple does." A space
+    /// tapped as the b, n, v or c above the space bar is read as one wherever on the key it
+    /// lands (the system keyboard turns "ofbthe" into "of the" at the key's centre too), and
+    /// a missed space splits the words, with English "i" a capital.
+    func testASpaceTappedAsALetterAboveTheSpaceBarOrMissedSplitsTheWords() throws {
+        try useDecoder()
+        typeTaps("is")
+        typeTaps("this")
+        for letter in ["b", "n", "v", "c"] {
+            for dy: CGFloat in [0, -8, 10] {
+                for ch in "of" { tapCentre(ch) }
+                let key = engine.layout.key(.character(letter))!.frame
+                let point = CGPoint(x: key.midX, y: key.midY + dy)
+                XCTAssertEqual(engine.layout.hitTest(point)?.kind, .character(letter))
+                tap(at: point)
+                typeTaps("the")
+                XCTAssertTrue(target.text.hasSuffix(" of the "), "\(letter) \(dy): \(target.text)")
+            }
+        }
+        typeTaps("iwant")
+        XCTAssertTrue(target.text.hasSuffix(" I want "), target.text)
+        typeTaps("lookat")
+        XCTAssertTrue(target.text.hasSuffix(" look at "), target.text)
+        // A closing mark from the 123 page reads the word's taps as space does.
+        for ch in "ofthe" { tapCentre(ch) }
+        tap(.layerSwitch(.numbers))
+        tap(.character("."))
+        XCTAssertTrue(target.text.hasSuffix(" of the."), target.text)
+        tap(.space)
+        // A word with a bottom-row letter stays one word.
+        for word in ["number", "cabin", "seven", "become"] { typeTaps(word) }
+        XCTAssertTrue(target.text.hasSuffix(" number cabin seven become "), target.text)
+    }
+
+    /// X (Justin): "Space bar accidental taps or lack of taps don't seem to be factored in." A
+    /// space tapped at the space bar's top edge, under a letter the word needed, joins the
+    /// words at the next word's space, as the system keyboard does ("deli ate" -> "delicate");
+    /// one tapped well inside the bar never does, and one backspace puts back both words.
+    func testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords() throws {
+        try useDecoder()
+        engine.letterOdds = engine.autocorrect.decoder?.model
+        let space = engine.layout.key(.space)!
+        func edgeSpace(under letter: Character) {
+            let key = engine.layout.key(.character(String(letter)))!.frame
+            let point = CGPoint(x: key.midX, y: space.hitFrame.minY + 1)
+            XCTAssertEqual(engine.layout.hitTest(point)?.kind, .space)
+            tap(at: point)
+        }
+        typeTaps("the")
+        for ch in "deli" { tapCentre(ch) }
+        edgeSpace(under: "c")
+        typeTaps("ate")
+        XCTAssertEqual(target.text, "the delicate ")
+        tap(.delete)
+        XCTAssertEqual(target.text, "the deli ate", "one backspace puts back both words")
+
+        tap(.space)
+        typeTaps("so")
+        for ch in "ha" { tapCentre(ch) }
+        edgeSpace(under: "n")
+        typeTaps("ded")
+        XCTAssertTrue(target.text.hasSuffix(" so handed "), target.text)
+
+        for ch in "deli" { tapCentre(ch) }
+        tap(.space)
+        typeTaps("ate")
+        XCTAssertTrue(target.text.hasSuffix(" deli ate "), "a space inside the bar: \(target.text)")
+
+        // Two words space would fix on their own stay two ("i dkdnt" is "I didn't", never one word).
+        tapCentre("i")
+        edgeSpace(under: "b")
+        typeTaps("didnt")
+        XCTAssertTrue(target.text.hasSuffix(" I didn't "), target.text)
+    }
+
     func testSpatialAutocorrectReadsAnETappedHighOnTheStripAsThe() throws {
         try useDecoder()
         typeTaps("on")

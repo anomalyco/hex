@@ -124,6 +124,7 @@ final class FullKeyboardEngine {
             if letterOdds !== oldValue {
                 continuationCache = nil
                 wordStartMass = nil
+                autocorrect.contextModel = letterOdds
             }
         }
     }
@@ -280,6 +281,7 @@ final class FullKeyboardEngine {
         suggestionSpaceBefore = nil
         tokenTaps.removeAll()
         swipedWord = nil
+        finishedWord = nil
         autocorrect.clearPendingUndo()
         cancelAllTouches()
         rebuildLayout(cause: "field")
@@ -296,6 +298,7 @@ final class FullKeyboardEngine {
         }
         tokenTaps.removeAll()
         swipedWord = nil
+        finishedWord = nil
         autocorrect.clearPendingUndo()
         refreshAutoCapitalization()
         refreshSuggestions()
@@ -613,6 +616,7 @@ final class FullKeyboardEngine {
                     touches[id] = touch
                     typingLog?.edit("cursor", [TypingLogField("offset", .int(rawSteps))])
                     tokenTaps.removeAll()
+                    finishedWord = nil
                     suggestionSpaceBefore = nil
                     target.adjustTextPosition(byCharacterOffset: rawSteps)
                     onSelectionStep?()
@@ -727,7 +731,7 @@ final class FullKeyboardEngine {
                 ])
                 onLanguageSwipe?(step)
             } else {
-                typeSpace()
+                typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
             }
         case .returnKey:
             if target.enablesReturnKeyAutomatically == true && !target.hasText {
@@ -752,8 +756,10 @@ final class FullKeyboardEngine {
             // a slide: nothing, and back too. Off the keys: nothing, and the page stays.
             if let returnLayer = touch.returnLayer {
                 if let under = slideTarget(for: touch, at: point), let character = under.character {
-                    autocorrect.clearPendingUndo()
-                    insert(character, source: "slide")
+                    if !correctWord(endingWith: character) {
+                        autocorrect.clearPendingUndo()
+                        insert(character, source: "slide")
+                    }
                     layerState.switchTo(returnLayer)
                     rebuildLayout(cause: "layer_slide")
                     refreshAutoCapitalization()
@@ -856,13 +862,12 @@ final class FullKeyboardEngine {
                 target.deleteBackward()
             }
             tokenTaps.removeAll()
+            finishedWord = nil
             target.insertText(undo.original)
-            autocorrect.suppressAndKeep(undo.original)
-            learning?.record(
-                .undone,
-                typed: undo.insertedText.trimmingCharacters(in: .whitespaces),
-                final: undo.original
-            )
+            for change in undo.changes {
+                autocorrect.suppressAndKeep(change.from)
+                learning?.record(.undone, typed: change.to, final: change.from)
+            }
             lastSpaceAt = nil
             didEdit()
             return
@@ -925,9 +930,127 @@ final class FullKeyboardEngine {
         if layerState.layer == .letters {
             shift.didType()
         }
-        autocorrect.clearPendingUndo()
-        insert(text, source: "key", at: point)
+        if !correctWord(endingWith: text) {
+            autocorrect.clearPendingUndo()
+            insert(text, source: "key", at: point)
+        }
         logState("typed")
+    }
+
+    /// Punctuation that closes a word, as Apple's keyboard treats it: , . ! ? ; : ) and ".
+    static let wordEnders: Set<Character> = [",", ".", "!", "?", ";", ":", ")", "\""]
+
+    /// Punctuation right after a word corrects it as space does ("teh," becomes "the,"), and
+    /// goes in after the fix. Backspace right after takes back both, as after a space ("teh").
+    /// False when there is nothing to fix: the caller types the mark as usual.
+    private func correctWord(endingWith text: String) -> Bool {
+        guard text.count == 1, let mark = text.first, Self.wordEnders.contains(mark), swipedWord == nil else { return false }
+        let before = target.documentContextBeforeInput
+        guard let last = before?.last, last.isLetter, let token = AutocorrectEngine.currentToken(in: before) else { return false }
+        // "approx." and "etc." are abbreviations, not typos.
+        if mark == ".", AutocorrectEngine.abbreviations.contains(token.lowercased()) { return false }
+        learning?.didFinish(word: token)
+        syncLearning()
+        autocorrect.decoderTaps = currentTokenTaps
+        guard finishWord(ending: text) else { return false }
+        finishedWord = nil
+        lastSpaceAt = nil
+        layerState.didInsert(text)
+        rebuildLayoutIfNeeded()
+        didEdit()
+        return true
+    }
+
+    /// The word a space finished, while the next one is typed: that word's space or mark may
+    /// still revise it ("well see" becomes "we'll see"), as Apple's keyboard decides some
+    /// words at the next one.
+    private struct FinishedWord {
+        /// The word as it reads now.
+        var text: String
+        /// As you typed it: one you gave an apostrophe yourself is never revised.
+        var typed: String
+        /// The text before the cursor right after its space.
+        var before: String
+        /// Where its letters were tapped, and its space: a space near the letter row's edge
+        /// may have been a letter, and the next word joins it (`AutocorrectEngine.merge`).
+        var taps: [CGPoint]?
+        var space: CGPoint?
+    }
+
+    private var finishedWord: FinishedWord?
+
+    /// Corrects the word before the cursor as `ending` (a space or a closing mark) finishes
+    /// it, and revises the word before it now that this one follows (`AutocorrectEngine.
+    /// revision`); then types `ending`. One backspace right after puts back what was typed.
+    /// False, typing nothing, when neither changes.
+    private func finishWord(ending: String) -> Bool {
+        let before = target.documentContextBeforeInput ?? ""
+        guard let token = AutocorrectEngine.currentToken(in: before) else { return false }
+        if let finished = finishedWord, before == finished.before + token,
+           let taps = finished.taps, let space = finished.space, field == .text, target.autocorrectionType != .no,
+           let merged = autocorrect.merge(
+               first: finished.typed, firstTaps: taps, space: space, second: token,
+               before: String(finished.before.dropLast())
+           ) {
+            let original = finished.text + " " + token
+            for _ in 0..<original.count {
+                target.deleteBackward()
+            }
+            tokenTaps.removeAll()
+            typingLog?.edit("autocorrect", [
+                TypingLogField("from", .string(original)),
+                TypingLogField("to", .string(merged)),
+                TypingLogField("deleted", .string(original)),
+                TypingLogField("inserted", .string(merged + ending)),
+                TypingLogField("merged", .bool(true)),
+            ])
+            target.insertText(merged + ending)
+            learning?.record(.autocorrected, typed: token, final: merged)
+            autocorrect.recordAppliedCorrection(
+                original: original, insertedText: merged + ending, changes: [.init(from: token, to: merged)]
+            )
+            swipedWord = nil
+            return true
+        }
+        let fix = autocorrect.replacementOnSpace(beforeInput: before, field: field, autocorrectionType: target.autocorrectionType)
+        let word = fix?.replacement ?? token
+        var revised: (from: String, to: String)?
+        if let finished = finishedWord, before == finished.before + token, !finished.typed.contains("'"),
+           let to = autocorrect.revision(
+               of: finished.text, before: String(finished.before.dropLast()), next: word,
+               field: field, autocorrectionType: target.autocorrectionType
+           ) {
+            revised = (finished.text, to)
+        }
+        guard fix != nil || revised != nil else { return false }
+        let original = (revised.map { $0.from + " " } ?? "") + token
+        let inserted = (revised.map { $0.to + " " } ?? "") + word + ending
+        for _ in 0..<original.count {
+            target.deleteBackward()
+        }
+        tokenTaps.removeAll()
+        var fields = [
+            TypingLogField("from", .string(token)),
+            TypingLogField("to", .string(word)),
+            TypingLogField("deleted", .string(original)),
+            TypingLogField("inserted", .string(inserted)),
+        ]
+        if ending != " " { fields.append(TypingLogField("ending", .string(ending))) }
+        if let revised { fields.append(TypingLogField("revised", .strings([revised.from, revised.to]))) }
+        typingLog?.edit("autocorrect", fields)
+        target.insertText(inserted)
+        var changes: [AutocorrectEngine.AppliedCorrection.Change] = []
+        if let revised {
+            changes.append(.init(from: revised.from, to: revised.to))
+            learning?.record(.autocorrected, typed: revised.from, final: revised.to)
+        }
+        if fix != nil {
+            changes.append(.init(from: token, to: word))
+            learning?.record(.autocorrected, typed: token, final: word)
+        }
+        autocorrect.recordAppliedCorrection(original: original, insertedText: inserted, changes: changes)
+        swipedWord = nil
+        return true
     }
 
     /// The taps of the word being typed when every letter came from a key, else nil.
@@ -945,7 +1068,8 @@ final class FullKeyboardEngine {
         logState("typed")
     }
 
-    private func typeSpace() {
+    /// `point` is where the space bar was tapped, as on the unsplit keyboard.
+    private func typeSpace(at point: CGPoint? = nil) {
         // Space never autocorrects a swiped word: it is a reading, not a typo.
         let afterSwipe = swipedWord != nil
         swipedWord = nil
@@ -973,6 +1097,7 @@ final class FullKeyboardEngine {
             target.deleteBackward()
             target.insertText(". ")
             tokenTaps.removeAll()
+            finishedWord = nil
             lastSpaceAt = nil
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
@@ -980,28 +1105,13 @@ final class FullKeyboardEngine {
             typingLog?.context("space")
             return
         }
-        learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
+        let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput)
+        let taps = currentTokenTaps
+        learning?.didFinish(word: token)
         syncLearning()
-        autocorrect.decoderTaps = currentTokenTaps
-        if !afterSwipe, let (original, replacement) = autocorrect.replacementOnSpace(
-            beforeInput: target.documentContextBeforeInput,
-            field: field,
-            autocorrectionType: target.autocorrectionType
-        ) {
-            for _ in 0..<original.count {
-                target.deleteBackward()
-            }
-            let inserted = replacement + " "
-            tokenTaps.removeAll()
-            typingLog?.edit("autocorrect", [
-                TypingLogField("from", .string(original)),
-                TypingLogField("to", .string(replacement)),
-                TypingLogField("deleted", .string(original)),
-                TypingLogField("inserted", .string(inserted)),
-            ])
-            target.insertText(inserted)
-            autocorrect.recordAppliedCorrection(original: original, insertedText: inserted)
-            learning?.record(.autocorrected, typed: original, final: replacement)
+        autocorrect.decoderTaps = taps
+        if !afterSwipe, finishWord(ending: " ") {
+            rememberFinishedWord(typed: token, taps: taps, space: point)
             lastSpaceAt = now
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
@@ -1011,13 +1121,34 @@ final class FullKeyboardEngine {
         }
         autocorrect.clearPendingUndo()
         insert(" ", source: "key")
+        if !afterSwipe, let token { rememberFinishedWord(typed: token, taps: taps, space: point) }
         lastSpaceAt = now
         typingLog?.context("space")
+    }
+
+    /// The word right before the space just typed, for the next word's revision.
+    private func rememberFinishedWord(typed: String?, taps: [CGPoint]?, space: CGPoint?) {
+        guard let typed, let before = target.documentContextBeforeInput, before.last == " ",
+              let word = AutocorrectEngine.currentToken(in: String(before.dropLast())) else {
+            finishedWord = nil
+            return
+        }
+        // After a split or a merge the word reads other letters than you typed ("of the" for
+        // "ofthe"): it is remembered as it reads, without taps.
+        guard word.filter({ $0 != "'" }).count == typed.count else {
+            finishedWord = FinishedWord(text: word, typed: word, before: before, taps: nil, space: nil)
+            return
+        }
+        finishedWord = FinishedWord(text: word, typed: typed, before: before, taps: taps, space: space)
     }
 
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
     private func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
         swipedWord = nil
+        // Anything but the next word's letters ends the chance to revise the word before.
+        if !(text.count == 1 && (text.first?.isLetter == true || text == "'")) {
+            finishedWord = nil
+        }
         if text.count == 1, text.first?.isLetter == true {
             // Spatial autocorrect reads taps as on the unsplit keyboard (`KeyboardLayout.unsplitX`).
             tokenTaps.append(point.map { CGPoint(x: layout.unsplitX($0.x), y: $0.y) })
@@ -1144,6 +1275,7 @@ final class FullKeyboardEngine {
             TypingLogField("src", .string("swipe")),
         ])
         target.insertText(inserted)
+        finishedWord = nil
         lastSpaceAt = nil
         layerState.didInsert(inserted)
         if layerState.layer == .letters { shift.didType() }
@@ -1201,9 +1333,14 @@ final class FullKeyboardEngine {
         if !autoCapitalizes {
             return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
         }
-        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2 else { return word }
-        let capitalised = first.uppercased() + word.dropFirst()
-        return autocorrect.checker.isWordValid(capitalised) && !autocorrect.checker.isWordValid(word) ? capitalised : word
+        return swipeReadsAsName(word) ? first.uppercased() + word.dropFirst() : word
+    }
+
+    /// Whether a swipe's reading, as the model spells it (lowercase), is a word the dictionary
+    /// knows only with a capital: a name, day or place ("monday"), or an abbreviation.
+    func swipeReadsAsName(_ word: String) -> Bool {
+        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2, let first = word.first else { return false }
+        return autocorrect.checker.isWordValid(first.uppercased() + word.dropFirst()) && !autocorrect.checker.isWordValid(word)
     }
 
     /// Puts another of the swipe's readings in its word's place; the word joins the others.
@@ -1277,9 +1414,11 @@ final class FullKeyboardEngine {
     }
 
     /// The letter keys Spatial autocorrect scores taps against: this layout's, moved by
-    /// `tapOffsets`. None off the letters page.
+    /// `tapOffsets`. Off the letters page the last letters page's stay: a closing mark from
+    /// the 123 page still reads the word's taps ("ofthe." -> "of the.").
     private func syncDecoderKeys() {
-        autocorrect.decoderKeys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets)
+        guard let keys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets) else { return }
+        autocorrect.decoderKeys = keys
     }
 
     /// Hands the layout and shift to typing logs, which writes a line when either changed.

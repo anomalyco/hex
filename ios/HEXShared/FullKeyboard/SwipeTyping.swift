@@ -36,6 +36,13 @@ final class SwipeTyping {
 
     /// How long the last swipe's decode took, for Record typing logs and probes.
     private(set) var lastDecodeTime: TimeInterval?
+    /// Nats more a rare reading the dictionary knows only with a capital costs, unless it is
+    /// one of your own words: the model's lowercase list holds names and abbreviations ("gs",
+    /// "ut", "kent") that a loose swipe of a common word could read as, and they would go in
+    /// capitalised mid-sentence. Common ones ("john", "york", "english") cost nothing more.
+    var nameCost = 4.0
+    /// The model's cost (-ln p) past which such a word counts as rare: about its 2,500th word.
+    static let commonNameCost = 10.0
 
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
 
@@ -65,7 +72,7 @@ final class SwipeTyping {
         )
         var extra = SwipeDecoder.ExtraWords()
         if model.language == KeyboardLanguage.english.rawValue {
-            extra.add(AutocorrectEngine.englishContractions, cost: { SwipeDecoder.costOfContraction($0) }, model: model)
+            extra.add(AutocorrectEngine.englishContractions, cost: { SwipeDecoder.costOfContraction($0) }, model: model, contractions: true)
         }
         extra.add(autocorrect.ownWords, cost: SwipeDecoder.ownWordCost, model: model)
         decoder.extraWords = extra
@@ -155,9 +162,24 @@ final class SwipeTyping {
         let candidates = decoder.decode(
             points.map(layout.joinedForSwipe), keys: engine.swipeKeys, previous: engine.swipePreviousWord, limit: 8
         )
+        let words = ranked(candidates)
         let elapsed = clock() - started
         lastDecodeTime = elapsed
-        engine.endSwipe(typing: candidates.map(\.text), points: points.count, decodeTime: elapsed)
+        engine.endSwipe(typing: words, points: points.count, decodeTime: elapsed)
+    }
+
+    /// The readings best first once a rare name or abbreviation costs `nameCost` more.
+    func ranked(_ candidates: [SwipeDecoder.Candidate]) -> [String] {
+        let model = decoder.model
+        func rareName(_ text: String) -> Bool {
+            guard engine.swipeReadsAsName(text) else { return false }
+            return model.index(of: text).map { model.unigramCost($0) > Self.commonNameCost } ?? true
+        }
+        return candidates
+            .map { ($0.text, $0.cost + (rareName($0.text) ? nameCost : 0)) }
+            .enumerated()
+            .sorted { $0.element.1 != $1.element.1 ? $0.element.1 < $1.element.1 : $0.offset < $1.offset }
+            .map(\.element.0)
     }
 
     // MARK: - The word so far
@@ -173,13 +195,13 @@ final class SwipeTyping {
         let decoder = decoder, keys = engine.swipeKeys, previous = engine.swipePreviousWord
         let points = swipe.points.map(engine.layout.joinedForSwipe), generation = generation
         Self.previewQueue.async { [weak self] in
-            let words = decoder.decode(points, keys: keys, previous: previous, limit: 3).map(\.text)
+            let candidates = decoder.decode(points, keys: keys, previous: previous, limit: 3)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
                     self.previewInFlight = false
                     guard self.generation == generation, self.active != nil else { return }
-                    self.engine.showSwipePreview(words)
+                    self.engine.showSwipePreview(self.ranked(candidates))
                 }
             }
         }

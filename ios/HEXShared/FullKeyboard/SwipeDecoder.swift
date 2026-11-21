@@ -62,6 +62,10 @@ nonisolated struct SwipeDecoder: Sendable {
         var band = 0.1
         /// The shortest path read as a swipe (pitches).
         var minimumLength = 0.6
+        /// A contraction ("I'm") whose first word ("I") never follows the word before in the
+        /// model's pairs costs this much more: those first words follow thousands of words, so
+        /// a missing pair is evidence against it ("with us in", not "with us I'm").
+        var contractionMissingPair = 3.0
 
         /// -ln of a point landing `squared` (pitches²) from a key's centre, under the mixture
         /// of a tight spread and a stray one; 0 at the centre.
@@ -120,6 +124,9 @@ nonisolated struct SwipeDecoder: Sendable {
         private(set) var costs: [Double] = []
         /// The model's index of the same word, for its pairs; nil when it lacks it.
         private(set) var modelIndex: [Int?] = []
+        /// A contraction's first word in the model ("i" for "I'm", "do" for "don't"), whose
+        /// pairs weigh it after the word before; nil for other words.
+        private(set) var heads: [Int?] = []
 
         init() {}
 
@@ -140,7 +147,7 @@ nonisolated struct SwipeDecoder: Sendable {
             add(words, cost: { _ in cost }, model: model)
         }
 
-        mutating func add(_ words: [String], cost: (String) -> Double, model: TypingDecoderModel) {
+        mutating func add(_ words: [String], cost: (String) -> Double, model: TypingDecoderModel, contractions: Bool = false) {
             var seen = Set(codes)
             for word in words {
                 guard word.count >= 2, let encoded = model.encode(word.lowercased()), seen.insert(encoded).inserted else { continue }
@@ -148,7 +155,15 @@ nonisolated struct SwipeDecoder: Sendable {
                 texts.append(word)
                 costs.append(cost(word))
                 modelIndex.append(model.index(ofCodes: encoded))
+                heads.append(contractions ? Self.head(of: word.lowercased()).flatMap { model.index(of: $0) } : nil)
             }
+        }
+
+        /// A contraction's first word: "do" for "don't", "i" for "I'm".
+        static func head(of contraction: String) -> String? {
+            if contraction.hasSuffix("n't") { return String(contraction.dropLast(3)) }
+            guard let apostrophe = contraction.firstIndex(of: "'") else { return nil }
+            return String(contraction[..<apostrophe])
         }
     }
 
@@ -308,7 +323,12 @@ nonisolated struct SwipeDecoder: Sendable {
             return min(bigram, backoff)
         }
         guard id < 0 else { return model(id) }
-        let own = 0.92 + extraWords.costs[-1 - id]
+        var own = 0.92 + extraWords.costs[-1 - id]
+        // A contraction is as much likelier after the word before as its first word is.
+        if let head = extraWords.heads[-1 - id], let previous {
+            let alone = 0.92 + self.model.unigramCost(head)
+            own += (self.model.bigramCost(previous, head) ?? alone + parameters.contractionMissingPair) - alone
+        }
         return extraWords.modelIndex[-1 - id].map { min(own, model($0)) } ?? own
     }
 
