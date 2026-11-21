@@ -481,19 +481,23 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
 - **Translate what I say (Settings › Dictation, iOS 26+):** Off by default. Translates
   each dictation on the iPhone with Apple's Translation framework into the
   language picked under Insert in, once its pack is downloaded; without the
-  pack the transcript goes in as spoken. Where you dictate, a switch picks
-  translated or as spoken for the next dictations and keeps the last choice
-  (`experiments.translateDictation.pastesTranslation`, translated by
-  default; turning the experiment on resets it to translated): two rows in
-  the full keyboard's Hex key menu ("Paste in English", "Paste in Spanish",
-  named in English, "Paste as spoken" when the dictation language is
-  unknown), a "Paste in English" chip in the dictation bar's language tray,
-  and a "Paste in English" toggle under Insert in. It shows only while the
-  experiment is on and you dictate in another language than the target.
-  While dictations paste translated, the space bar and the dictation bar's
-  language label read "Español → English". The App Group carries the
-  switch, so in-keyboard dictation, a warm session, and the Action Button
-  all follow it.
+  pack the transcript goes in as spoken. Where you dictate, a "Translate to
+  English" switch turns it on or off without opening Hex (testers asked for
+  a button, not a setting): a row in the full keyboard's Hex key menu, lit
+  with a checkmark while on, and a chip in the dictation bar's language tray.
+  It writes Settings' own switch (`experiments.translateDictation`; on also
+  sets `experiments.translateDictation.pastesTranslation` to translated), and
+  Settings re-reads both when it shows. Below it, Translation language lists
+  up to six targets (the current one, English, the dictation and preferred
+  languages, then common ones, only those Apple translates into); picking one
+  sets `experiments.translateDictation.target` and turns translation on.
+  Settings keeps the full language list, the pack download and its "Paste in
+  English" toggle under Insert in. While dictations paste translated, the Hex
+  key wears the target's code ("EN") in its corner, the dictation bar shows
+  "→ EN" beside the Hex mark, and the space bar reads "Español → English".
+  The App Group carries the switch, so in-keyboard dictation, a warm
+  session, and the Action Button all follow it. The keyboard shares the
+  app's String Catalog, so the Hex key menu is in Chinese on a Chinese iPhone.
 - **Keyboard languages (Settings › Keyboard › Languages, with Full chosen):** Automatic (the
   default, as before: the dictation language's layout, below), or one or more layouts ticked
   and dragged into order (`KeyboardLanguagesPage`, App Group `settings.keyboardLanguages`,

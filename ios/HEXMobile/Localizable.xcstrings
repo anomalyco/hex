@@ -1689,12 +1689,72 @@
         }
       }
     },
+    "Settings › Apps › Hex › Paste from Other Apps › Allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置 › App › Hex › 从其他App粘贴 › 允许"
+          }
+        }
+      }
+    },
+    "To paste without being asked, go to Settings, Apps, Hex, Paste from Other Apps, and choose Allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "若要粘贴时不再询问，请前往“设置”>“App”>“Hex”>“从其他App粘贴”，然后选择“允许”。"
+          }
+        }
+      }
+    },
     "Paste in %@" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "以%@粘贴"
+          }
+        }
+      }
+    },
+    "Language" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语言"
+          }
+        }
+      }
+    },
+    "Translate to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻译成%@"
+          }
+        }
+      }
+    },
+    "Translating to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在翻译成%@"
+          }
+        }
+      }
+    },
+    "Translation language" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "翻译语言"
           }
         }
       }

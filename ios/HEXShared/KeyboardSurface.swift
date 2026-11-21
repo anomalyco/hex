@@ -66,6 +66,11 @@ final class KeyboardViewModel: ObservableObject {
     /// picks translated or as spoken for the next dictations.
     @Published var translationTarget: String?
     @Published var pastesTranslation = true
+    /// Translate what I say's target whether it is on or off, for the keyboards' Translate to
+    /// <language> switch; nil hides the switch (no Apple translation before iOS 26).
+    @Published var translationLanguage: String?
+    /// The targets the full keyboard's Hex key menu offers (`DictationTranslationSettings.targetChoices`).
+    @Published var translationTargetChoices: [String] = []
     /// Record typing logs is recording this field: both keyboards show a small mark the
     /// whole time, so logging is never hidden.
     @Published var isLoggingTyping = false
@@ -90,8 +95,10 @@ final class KeyboardViewModel: ObservableObject {
     var onStyleSelected: ((DictationStyle) -> Void)?
     /// A language picked in the keyboard's switch; nil is Automatic.
     var onLanguageSelected: ((String?) -> Void)?
-    /// Paste translated (true) or as spoken (false), picked where you dictate.
-    var onPasteTranslationSelected: ((Bool) -> Void)?
+    /// Translate to <language> switched on (true) or off where you dictate.
+    var onTranslationToggled: ((Bool) -> Void)?
+    /// A target picked in the Hex key menu; it also turns translation on.
+    var onTranslationTargetSelected: ((String) -> Void)?
     var onSpace: (() -> Void)?
     var onDelete: (() -> Void)?
     var onReturn: (() -> Void)?
@@ -120,6 +127,22 @@ final class KeyboardViewModel: ObservableObject {
     var pasteChoice: TranslationPasteChoice? {
         guard hasFullAccess, let translationTarget else { return nil }
         return TranslationPasteChoice(target: translationTarget, source: effectiveLanguage)
+    }
+
+    /// The keyboards' Translate to <language> switch can show: Full Access and a target.
+    var showsTranslationSwitch: Bool {
+        hasFullAccess && translationLanguage != nil
+    }
+
+    /// Dictations paste translated: Translate what I say is on and its paste switch says
+    /// translated. The Hex key wears the target's badge ("EN") the whole time.
+    var isTranslating: Bool {
+        hasFullAccess && translationTarget != nil && pastesTranslation
+    }
+
+    /// The target while `isTranslating`, for the badge beside the Hex key ("EN").
+    var translatingTo: String? {
+        isTranslating ? translationTarget : nil
     }
 
     /// The language label with where dictations go while they paste translated:
@@ -519,6 +542,28 @@ struct TypingLogMark: View {
     }
 }
 
+/// Beside the dictation bar's Hex mark while dictations paste translated: the target's code
+/// ("EN"), so a dictation never comes out in another language by surprise.
+private struct TranslationBadge: View {
+    let target: String
+    let palette: KeyboardChromePalette
+
+    var body: some View {
+        HStack(spacing: 2) {
+            Image(systemName: "arrow.right")
+                .font(.system(size: 8, weight: .bold))
+            Text(TranslationPasteChoice.badge(target: target))
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundStyle(palette.textBase)
+        .padding(.horizontal, 5)
+        .frame(height: 16)
+        .background(palette.chipActiveFill, in: Capsule())
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(TranslationPasteChoice.translatingLabel(target: target))
+    }
+}
+
 enum KeyboardSetupCopy {
     static let fullAccessPath = "Allow Full Access: Settings › Apps › Hex › Keyboards"
 }
@@ -684,6 +729,10 @@ struct KeyboardSurfaceView: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Open Hex")
 
+            if let target = model.translatingTo {
+                TranslationBadge(target: target, palette: p)
+            }
+
             if model.isLoggingTyping {
                 TypingLogMark(textColor: p.textMuted)
             }
@@ -692,7 +741,7 @@ struct KeyboardSurfaceView: View {
 
             Spacer(minLength: 4)
 
-            if model.showsLanguageSwitch {
+            if model.showsLanguageSwitch || model.showsTranslationSwitch {
                 languageTrigger(palette: p)
             }
 
@@ -800,7 +849,9 @@ struct KeyboardSurfaceView: View {
     }
 
     private func languageTrigger(palette p: KeyboardChromePalette) -> some View {
-        let label = model.languageSummary ?? "Automatic"
+        // While translating, the badge beside the Hex mark says where dictations go ("→ EN").
+        let summary = model.translatingTo == nil ? model.languageSummary : model.languageLabel
+        let label = summary ?? "Automatic"
         return Button {
             model.onKeyFeedback?()
             model.setActiveTray(.language, reduceMotion: reduceMotion)
@@ -830,9 +881,11 @@ struct KeyboardSurfaceView: View {
         return HStack(spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
-                    languageChip(id: nil, label: "Auto", palette: p)
-                    ForEach(model.languageChoices, id: \.self) { id in
-                        languageChip(id: id, label: names[id] ?? id, palette: p)
+                    if model.showsLanguageSwitch {
+                        languageChip(id: nil, label: "Auto", palette: p)
+                        ForEach(model.languageChoices, id: \.self) { id in
+                            languageChip(id: id, label: names[id] ?? id, palette: p)
+                        }
                     }
                 }
                 .padding(.leading, 2)
@@ -841,23 +894,25 @@ struct KeyboardSurfaceView: View {
             .hexScrollEdgeEffectHidden()
             .hexHorizontalEdgeFade(leading: 4, trailing: 14)
 
-            if let choice = model.pasteChoice {
-                pasteTranslationChip(choice, palette: p)
+            if model.showsTranslationSwitch, let target = model.translationLanguage {
+                translationChip(target: target, palette: p)
             }
             closeTrayButton(palette: p)
         }
         .frame(height: 26)
     }
 
-    /// Lit while dictations paste translated; a tap switches to as spoken and back.
-    private func pasteTranslationChip(_ choice: TranslationPasteChoice, palette p: KeyboardChromePalette) -> some View {
-        let active = model.pastesTranslation
+    /// Translate to <language>: lit while dictations paste translated; a tap turns
+    /// Translate what I say on or off, the same App Group setting as Settings' switch.
+    private func translationChip(target: String, palette p: KeyboardChromePalette) -> some View {
+        let active = model.isTranslating
+        let title = TranslationPasteChoice.toggleTitle(target: target)
         return Button {
             model.onKeyFeedback?()
-            model.onPasteTranslationSelected?(!active)
+            model.onTranslationToggled?(!active)
             model.setActiveTray(.none, reduceMotion: reduceMotion)
         } label: {
-            Text(choice.translatedTitle)
+            Text(title)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(active ? p.textBase : p.textMuted)
                 .lineLimit(1)
@@ -866,8 +921,8 @@ struct KeyboardSurfaceView: View {
                 .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel(choice.translatedTitle)
-        .accessibilityValue(active ? "On" : "Off. \(choice.spokenTitle)")
+        .accessibilityLabel(title)
+        .accessibilityValue(active ? "On" : "Off")
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 

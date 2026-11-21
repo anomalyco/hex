@@ -82,8 +82,8 @@ final class HexKeyGestureTests: XCTestCase {
     }
 }
 
-/// Translate what I say's switch where you dictate: "Paste in English" or as spoken, in the
-/// full keyboard's Hex key menu and the dictation bar, remembered for the next dictations.
+/// Translate what I say where you dictate: the Translate to <language> switch and its targets
+/// in the full keyboard's Hex key menu and the dictation bar, and the paste switch Settings keeps.
 @MainActor
 final class TranslationPasteSwitchTests: XCTestCase {
     private var suiteName = ""
@@ -144,21 +144,97 @@ final class TranslationPasteSwitchTests: XCTestCase {
         XCTAssertNil(model.pasteChoice, "no Full Access, no translation")
     }
 
-    func testTheHexKeyMenuOffersBothAndReportsThePick() {
+    func testTheHexKeyMenuSwitchesTranslationAndPicksItsTarget() {
         let menu = HexStyleMenuView(frame: CGRect(x: 0, y: 0, width: 400, height: 300))
         menu.languageChoices = ["es-ES", "en-US"]
         menu.dictationLanguage = "es-ES"
-        XCTAssertFalse(labels(in: menu).contains { $0.hasPrefix("Paste") }, "no rows while translation is off")
+        XCTAssertFalse(labels(in: menu).contains { $0.hasPrefix("Translat") }, "no rows without a target (before iOS 26)")
 
-        menu.pasteChoice = TranslationPasteChoice(target: "en", source: "es-ES")
-        menu.pastesTranslation = false
-        var picked: Bool?
-        menu.onPasteTranslation = { picked = $0 }
-        let rows = controls(in: menu).filter { $0.accessibilityLabel?.hasPrefix("Paste") == true }
-        XCTAssertEqual(rows.map(\.accessibilityLabel), ["Paste in English", "Paste in Spanish"])
-        XCTAssertEqual(rows.map { $0.accessibilityTraits.contains(.selected) }, [false, true])
-        rows[0].sendActions(for: .touchUpInside)
-        XCTAssertEqual(picked, true)
+        // Off: the switch names the target, and the second row opens the targets.
+        menu.translationTarget = "en"
+        menu.translationTargets = ["en", "ja", "es"]
+        var toggled: Bool?
+        var target: String?
+        menu.onTranslationToggle = { toggled = $0 }
+        menu.onTranslationTarget = { target = $0 }
+        let toggle = controls(in: menu).first { $0.accessibilityLabel == "Translate to English" }
+        XCTAssertEqual(toggle?.accessibilityValue, "Off")
+        XCTAssertEqual(toggle?.accessibilityTraits.contains(.selected), false)
+        toggle?.sendActions(for: .touchUpInside)
+        XCTAssertEqual(toggled, true, "a tap turns it on")
+        XCTAssertTrue(labels(in: menu).contains("Translation language"))
+
+        menu.isTranslating = true
+        let on = controls(in: menu).first { $0.accessibilityLabel == "Translate to English" }
+        XCTAssertEqual(on?.accessibilityValue, "On")
+        on?.sendActions(for: .touchUpInside)
+        XCTAssertEqual(toggled, false, "and off again")
+
+        menu.show(page: .translation)
+        XCTAssertEqual(labels(in: menu), ["English", "Japanese", "Spanish"])
+        controls(in: menu)[1].sendActions(for: .touchUpInside)
+        XCTAssertEqual(target, "ja")
+
+        // One target: nothing to pick, so only the switch.
+        menu.show(page: .styles)
+        menu.translationTargets = ["en"]
+        XCTAssertFalse(labels(in: menu).contains("Translation language"))
+    }
+
+    func testTheSwitchIsSettingsSwitchAndTurningItOnTranslates() {
+        let settings = DictationTranslationSettings(defaults: defaults)
+        XCTAssertFalse(settings.isTranslating)
+        settings.pastesTranslation = false
+        settings.isTranslating = true
+        XCTAssertTrue(settings.isEnabled, "the same App Group key as Settings' switch")
+        XCTAssertTrue(settings.pastesTranslation, "on means translated, whatever the paste switch said")
+        settings.pastesTranslation = false
+        XCTAssertFalse(settings.isTranslating, "Settings' Paste in English off: not translating")
+        settings.isTranslating = true
+        settings.isTranslating = false
+        XCTAssertFalse(settings.isEnabled)
+    }
+
+    func testTheMenuOffersTargetsAppleTranslatesInto() {
+        let choices = DictationTranslationSettings.targetChoices(
+            current: "ja",
+            dictation: ["zh-CN", "en-US", "nb-NO"],
+            preferred: ["zh-Hans-CN", "de-DE", "fr-FR", "it-IT", "ko-KR", "pt-BR"],
+            supported: ["en", "ja", "zh", "de", "fr", "it", "ko", "pt"]
+        )
+        XCTAssertEqual(choices, ["ja", "en", "zh", "de", "fr", "it"], "one per language, no Norwegian, six at most")
+        XCTAssertEqual(
+            DictationTranslationSettings.targetChoices(current: "nb", dictation: [], preferred: [], supported: ["en", "ja"]),
+            ["nb", "en", "ja"],
+            "the current target stays even when Apple can't translate into it"
+        )
+        XCTAssertEqual(
+            DictationTranslationSettings.targetChoices(current: "en", dictation: ["en-US"], preferred: ["en-US"], supported: nil),
+            ["en", "es", "zh", "fr", "de", "ja"],
+            "an English-only iPhone still gets languages to pick, before Apple's list arrives too"
+        )
+    }
+
+    func testTheHexKeyWearsTheTargetWhileTranslating() {
+        let model = KeyboardViewModel()
+        model.translationLanguage = "en"
+        XCTAssertTrue(model.showsTranslationSwitch)
+        XCTAssertNil(model.translatingTo, "off: no badge")
+        model.translationTarget = "en"
+        XCTAssertEqual(model.translatingTo, "en")
+        XCTAssertEqual(TranslationPasteChoice.badge(target: "en"), "EN")
+        XCTAssertEqual(TranslationPasteChoice.badge(target: "zh-TW"), "ZH")
+        model.pastesTranslation = false
+        XCTAssertNil(model.translatingTo, "pasting as spoken: no badge")
+        model.pastesTranslation = true
+        model.hasFullAccess = false
+        XCTAssertNil(model.translatingTo)
+        XCTAssertFalse(model.showsTranslationSwitch)
+
+        let key = HexKeyControl()
+        key.isWarm = true
+        key.translatingTo = "en"
+        XCTAssertEqual(key.accessibilityLabel, "Dictate with Hex, Translating to English")
     }
 
     private func controls(in view: UIView) -> [UIControl] {

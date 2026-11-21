@@ -369,8 +369,15 @@ final class KeyboardViewController: UIInputViewController {
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
-        viewModel.onPasteTranslationSelected = { [weak self] translated in
-            DictationTranslationSettings().pastesTranslation = translated
+        viewModel.onTranslationToggled = { [weak self] on in
+            DictationTranslationSettings().isTranslating = on
+            self?.languageSignature = nil
+            self?.syncLanguageState()
+        }
+        viewModel.onTranslationTargetSelected = { [weak self] target in
+            let settings = DictationTranslationSettings()
+            settings.targetLanguage = target
+            settings.isTranslating = true
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
@@ -696,10 +703,14 @@ final class KeyboardViewController: UIInputViewController {
         let translation = DictationTranslationSettings()
         let target = translation.isEnabled ? translation.targetLanguage : nil
         let pastesTranslation = translation.pastesTranslation
+        // Apple's translation (iOS 26+) backs the keyboards' Translate to <language> switch.
+        let translationLanguage: String? = if #available(iOS 26.0, *) { translation.targetLanguage } else { nil }
+        let translationLanguages = Self.translationLanguages
         let hinglish = HinglishSettings().isEnabled
         let signature = [
             explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)",
             target ?? "", "\(pastesTranslation)", "\(hinglish)",
+            translationLanguage ?? "", "\(translationLanguages?.count ?? -1)",
         ].joined(separator: "|")
         guard signature != languageSignature else { return }
         languageSignature = signature
@@ -715,6 +726,32 @@ final class KeyboardViewController: UIInputViewController {
         if viewModel.languageChoices != choices { viewModel.languageChoices = choices }
         if viewModel.translationTarget != target { viewModel.translationTarget = target }
         if viewModel.pastesTranslation != pastesTranslation { viewModel.pastesTranslation = pastesTranslation }
+        if viewModel.translationLanguage != translationLanguage { viewModel.translationLanguage = translationLanguage }
+        let targets = translationLanguage.map {
+            DictationTranslationSettings.targetChoices(
+                current: $0,
+                dictation: choices,
+                preferred: Locale.preferredLanguages,
+                supported: translationLanguages
+            )
+        } ?? []
+        if viewModel.translationTargetChoices != targets { viewModel.translationTargetChoices = targets }
+        listTranslationLanguagesIfNeeded()
+    }
+
+    /// Apple's translation languages (minimal identifiers), listed once per keyboard process
+    /// so the Hex key menu offers only targets Apple can translate into.
+    private static var translationLanguages: [String]?
+    private static var didListTranslationLanguages = false
+
+    private func listTranslationLanguagesIfNeeded() {
+        guard #available(iOS 26.0, *), hasFullAccess, !Self.didListTranslationLanguages else { return }
+        Self.didListTranslationLanguages = true
+        Task { [weak self] in
+            Self.translationLanguages = await DictationTranslator.supportedTargets()
+            self?.languageSignature = nil
+            self?.syncLanguageState()
+        }
     }
 
     /// Asks Apple Speech which languages it has and what Automatic picks, so the switch can

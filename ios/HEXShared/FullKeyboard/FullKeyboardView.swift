@@ -53,6 +53,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
+    /// A paste iOS asked about or refused: the strip points to the setting that stops it.
+    private var showsAllowPasteHint = false
+    private var allowPasteHintHideWork: DispatchWorkItem?
+    static let allowPasteHintDuration: TimeInterval = 8
 
     // MARK: Emoji (Settings › Keyboard › Emoji; FullKeyboardView+Emoji.swift)
 
@@ -145,6 +149,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             }
             self.hideUndo()
             self.hideFullAccessHint()
+            self.hideAllowPasteHint()
             self.refreshReturnKey()
             self.refreshStrip()
             self.onTextEdit?()
@@ -647,6 +652,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     private func refreshFromModel() {
         hexKey.isWarm = model.hasFullAccess && model.isWarmAvailable
+        hexKey.translatingTo = model.translatingTo
         if engine.showsGlobe != model.needsGlobeKey {
             engine.showsGlobe = model.needsGlobeKey
             setNeedsLayout()
@@ -672,8 +678,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.dictationLanguage = model.dictationLanguage
         menu.automaticLanguage = model.automaticLanguage
         menu.languageChoices = model.showsLanguageSwitch ? model.languageChoices : []
-        menu.pasteChoice = model.pasteChoice
-        menu.pastesTranslation = model.pastesTranslation
+        menu.translationTarget = model.showsTranslationSwitch ? model.translationLanguage : nil
+        menu.isTranslating = model.isTranslating
+        menu.translationTargets = model.translationTargetChoices
     }
 
     func refreshStrip() {
@@ -681,6 +688,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         // dictation needs shows only once the Hex key is tapped (`showFullAccessHint`).
         let status: String? = if model.hasFullAccess, model.stagePhase == .failed {
             model.statusMessage
+        } else if showsAllowPasteHint {
+            KeyboardClipboardTracker.allowPasteHint
         } else {
             nil
         }
@@ -689,7 +698,10 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             hasFullAccess: model.hasFullAccess
         )
         var suggestions = engine.suggestions
-        if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
+        if showsAllowPasteHint, status != nil {
+            // The pasted text's last word would otherwise hide where to stop Allow Paste.
+            suggestions = []
+        } else if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
             if lastDictation != nil || status != nil || clipboardOffer != nil {
                 suggestions = []
             } else {
@@ -741,15 +753,47 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     private func pasteFromClipboard() {
         let pasteboard = UIPasteboard.general
-        guard let text = pasteboard.string ?? pasteboard.url?.absoluteString, !text.isEmpty else { return }
+        // The read blocks while iOS asks Allow Paste, so its length tells whether it asked.
+        let start = ProcessInfo.processInfo.systemUptime
+        let read = KeyboardClipboardTracker.read(pasteboard)
+        let readDuration = ProcessInfo.processInfo.systemUptime - start
+        let text = read.flatMap { $0.isEmpty ? nil : $0 }
+        let refused = text == nil && (pasteboard.hasStrings || pasteboard.hasURLs)
+        let pointsToSetting = clipboard.shouldPointToAllowPaste(readDuration: readDuration, refused: refused)
+        guard let text else {
+            if pointsToSetting { showAllowPasteHint() }
+            return
+        }
         keyFeedback()
         clipboard.markPasted()
         typingLog?.edit("paste", [TypingLogField("inserted", .string(text))])
         engine.target.insertText(text)
         engine.textDidChange()
         typingLog?.context("paste")
+        if pointsToSetting { showAllowPasteHint() }
         refreshStrip()
         onTextEdit?()
+    }
+
+    /// For a few seconds after a paste iOS asked about (or refused), the strip says where
+    /// to stop it asking: Settings › Apps › Hex › Paste from Other Apps › Allow.
+    private func showAllowPasteHint() {
+        showsAllowPasteHint = true
+        refreshStrip()
+        UIAccessibility.post(notification: .announcement, argument: KeyboardClipboardTracker.allowPasteHintAnnouncement)
+        allowPasteHintHideWork?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.hideAllowPasteHint() }
+        allowPasteHintHideWork = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.allowPasteHintDuration, execute: work)
+    }
+
+    /// Typing takes the strip back before the hint's time is up.
+    private func hideAllowPasteHint() {
+        allowPasteHintHideWork?.cancel()
+        allowPasteHintHideWork = nil
+        guard showsAllowPasteHint else { return }
+        showsAllowPasteHint = false
+        refreshStrip()
     }
 
     private func refreshRecordingPanel() {
@@ -1019,9 +1063,14 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self?.model.onLanguageSelected?(language)
             self?.dismissStyleMenu()
         }
-        menu.onPasteTranslation = { [weak self] translated in
-            self?.typingLog?.ui("paste_translation", [TypingLogField("translated", .bool(translated))])
-            self?.model.onPasteTranslationSelected?(translated)
+        menu.onTranslationToggle = { [weak self] on in
+            self?.typingLog?.ui("translate", [TypingLogField("on", .bool(on))])
+            self?.model.onTranslationToggled?(on)
+            self?.dismissStyleMenu()
+        }
+        menu.onTranslationTarget = { [weak self] target in
+            self?.typingLog?.ui("translate", [TypingLogField("target", .string(target))])
+            self?.model.onTranslationTargetSelected?(target)
             self?.dismissStyleMenu()
         }
         menu.onStyle = { [weak self] style in
