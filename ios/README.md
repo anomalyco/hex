@@ -447,8 +447,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
-    the dictation bar, so testers who turned that experiment off keep the bar),
-    then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
+    the dictation bar, so testers who turned that experiment off keep the bar;
+    on an iPad, where the keyboard always shows the dictation bar, the row says so:
+    "On iPad, Hex shows the dictation bar"), then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
     full keyboard while the dictation bar is chosen, and a field to try the keyboard in.

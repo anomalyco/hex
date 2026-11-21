@@ -1619,6 +1619,16 @@
         }
       }
     },
+    "On iPad, Hex shows the dictation bar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 iPad 上显示听写栏"
+          }
+        }
+      }
+    },
     "One file per day, kept 14 days, one event per line. Password, code and card fields are never logged." : {
       "localizations" : {
         "zh-Hans" : {

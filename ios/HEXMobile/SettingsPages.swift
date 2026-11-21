@@ -199,11 +199,29 @@ struct KeyboardSettingsPage: View {
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
     @State private var practiceText = ""
 
+    /// The full keyboard is iPhone only: on an iPad the keyboard shows the dictation bar, whichever
+    /// is chosen. Hex runs there as an iPhone app, whose interface idiom says phone, so this reads
+    /// the hardware model (the simulated one in the simulator).
+    private static let runsOnPad: Bool = {
+        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            return simulated.hasPrefix("iPad")
+        }
+        var system = utsname()
+        uname(&system)
+        let model = withUnsafeBytes(of: &system.machine) { raw in
+            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
+        }
+        return model.hasPrefix("iPad")
+    }()
+
     var body: some View {
         SettingsPageScaffold(title: "Keyboard") {
             SettingsCard {
                 HStack(spacing: 12) {
-                    SettingsRowLabel(title: String(localized: "Keyboard"))
+                    SettingsRowLabel(
+                        title: String(localized: "Keyboard"),
+                        detail: Self.runsOnPad ? String(localized: "On iPad, Hex shows the dictation bar") : nil
+                    )
                     Spacer(minLength: 8)
                     SettingsSegments(
                         items: KeyboardChoice.allCases,
@@ -215,6 +233,7 @@ struct KeyboardSettingsPage: View {
                     )
                 }
                 .padding(.horizontal, 16)
+                .padding(.vertical, 10)
                 .frame(minHeight: 50)
 
                 if fullKeyboard {
