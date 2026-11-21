@@ -436,6 +436,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .frenchCanadian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
             .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
+            .polish: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"],
             .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"],
             .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
@@ -710,6 +711,21 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(AccentCatalog.options(for: "1", uppercase: false))
         XCTAssertEqual(AccentCatalog.options(for: "\"", uppercase: false, language: .german)?.dropFirst().first, "„")
         XCTAssertEqual(AccentCatalog.options(for: ".", uppercase: false, language: .french), [".", "…", "·"])
+        // Polish: its own letter right after the base, nothing on U, I or Y; its currency key
+        // is € (no zł), held on Hex's #+= €, while Hex's 123 page keeps English's $.
+        let polish = ["a": "ą", "c": "ć", "e": "ę", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
+        for (letter, own) in polish {
+            XCTAssertEqual(AccentCatalog.options(for: letter, uppercase: false, language: .polish)?.prefix(2), [letter, own][...], letter)
+        }
+        XCTAssertEqual(AccentCatalog.options(for: "z", uppercase: true, language: .polish), ["Z", "Ż", "Ź", "Ž"])
+        XCTAssertEqual(AccentCatalog.options(for: "l", uppercase: true, language: .polish), ["L", "Ł"])
+        XCTAssertEqual(shownHolds("o", .polish), ["ō", "ø", "œ", "õ", "ò", "ö", "ô", "ó"])
+        for letter in KeyboardLanguage.polish.letterRows.joined() where polish[letter] == nil {
+            XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .polish), letter)
+        }
+        XCTAssertEqual(AccentCatalog.options(for: "€", uppercase: false, language: .polish), ["€", "$", "£", "¥", "₩", "₽"])
+        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .polish), AccentCatalog.options(for: "$", uppercase: false))
+        XCTAssertEqual(AccentCatalog.options(for: "\"", uppercase: false, language: .polish), AccentCatalog.options(for: "\"", uppercase: false))
     }
 
     func testAccentMenusOnTheNewKeysStayInside() {
@@ -720,6 +736,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .russian: ["й", "е", "х", "ж", "э", "ь", "ю", "я"],
             .ukrainian: ["й", "ї", "є", "ʼ", "ґ"],
             .serbianLatin: ["c", "d", "s", "z"],
+            .polish: ["a", "c", "e", "l", "n", "o", "s", "z"],
         ]
         for width in portraitWidths {
             for (language, characters) in keys {
@@ -771,6 +788,10 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic("uk_UA"), .ukrainian)
         XCTAssertEqual(automatic(nil, modes: ["emoji", "uk-UA", "en-US"], preferred: ["ru-RU"]), .ukrainian)
         XCTAssertEqual(automatic(nil, preferred: ["uk-UA", "en-US"]), .ukrainian)
+        XCTAssertEqual(automatic("pl-PL", modes: ["en-US"]), .polish)
+        XCTAssertEqual(automatic("pl_PL"), .polish)
+        XCTAssertEqual(automatic(nil, modes: ["emoji", "pl_PL", "en-US"]), .polish)
+        XCTAssertEqual(automatic(nil, preferred: ["pl-PL", "en-US"]), .polish)
         // Before Hex knows the dictation language: the first keyboard, then language, with a layout.
         XCTAssertEqual(automatic(nil, modes: ["emoji", "nb-NO", "en-US"]), .norwegian)
         XCTAssertEqual(automatic(nil, preferred: ["nn-NO"]), .norwegian)
@@ -814,8 +835,8 @@ final class KeyboardLayoutTests: XCTestCase {
     /// between two French layouts (one dictionary).
     func testBilingualAutocorrectPairsTwoLatinLanguagesWithDictionaries() {
         let available = ["en_US", "fr_FR", "fr_CA", "ru_RU", "de_DE"]
-        func partner(_ chosen: [KeyboardLanguage], _ current: KeyboardLanguage) -> KeyboardLanguage? {
-            KeyboardLanguageList.resolve(chosen: chosen, stored: current, automatic: .english).partner(available: available)
+        func partner(_ chosen: [KeyboardLanguage], _ current: KeyboardLanguage, _ dictionaries: [String]? = nil) -> KeyboardLanguage? {
+            KeyboardLanguageList.resolve(chosen: chosen, stored: current, automatic: .english).partner(available: dictionaries ?? available)
         }
         XCTAssertEqual(partner([.english, .french, .russian], .french), .english)
         XCTAssertEqual(partner([.english, .french, .russian], .english), .french)
@@ -826,6 +847,9 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(partner([.english, .serbianLatin], .english))
         XCTAssertNil(partner([.ukrainian, .english], .ukrainian), "Cyrillic has no bilingual partner")
         XCTAssertNil(partner([.english, .ukrainian], .english))
+        XCTAssertEqual(partner([.polish, .english], .polish, ["en_US", "pl"]), .english, "Polish has Latin letters")
+        XCTAssertEqual(partner([.english, .polish], .english, ["en_US", "pl"]), .polish)
+        XCTAssertNil(partner([.polish, .english], .polish), "no Polish dictionary on this iPhone")
         XCTAssertNil(partner([.english], .english))
     }
 
@@ -853,6 +877,13 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.ukrainian.dictationLanguage(supported: supported + ["uk-UA"], preferred: ["uk-UA"]), "uk-UA")
         XCTAssertNil(KeyboardLanguage.ukrainian.dictationLanguage(supported: supported, preferred: []), "not Russian instead")
         XCTAssertEqual(KeyboardLanguage.ukrainian.dictationLanguage(supported: [], preferred: []), "uk-UA", "not listed yet")
+        XCTAssertEqual(
+            KeyboardLanguage.suggested(inputModes: ["pl_PL", "emoji"], preferred: ["pl-PL", "en-US"]),
+            [.polish, .english]
+        )
+        XCTAssertEqual(KeyboardLanguage.polish.dictationLanguage(supported: supported + ["pl-PL"], preferred: ["pl-PL"]), "pl-PL")
+        XCTAssertEqual(KeyboardLanguage.polish.dictationLanguage(supported: [], preferred: []), "pl-PL", "not listed yet")
+        XCTAssertEqual(KeyboardLanguage.polish.displayName, "Polski")
     }
 
     /// The languages read the one layout chosen before them, and write their first for an
@@ -888,6 +919,9 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLanguage.russian.spellCheckLanguage(available: ["en_US", "ru_RU"]), "ru_RU")
         XCTAssertNil(KeyboardLanguage.russian.spellCheckLanguage(available: ["en_US", "uk_UA"]), "never English")
         XCTAssertEqual(KeyboardLanguage.ukrainian.spellCheckLanguage(available: ["en_US", "ru_RU", "uk_UA"]), "uk_UA")
+        XCTAssertEqual(KeyboardLanguage.polish.spellCheckLanguage(available: ["en_US", "pl"]), "pl")
+        XCTAssertNil(KeyboardLanguage.polish.spellCheckLanguage(available: ["en_US", "cs"]), "never English or Czech")
+        XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "pl-PL", available: ["en_US", "pl"]), "pl")
         XCTAssertNil(KeyboardLanguage.ukrainian.spellCheckLanguage(available: ["en_US", "ru_RU"]), "never Russian or English")
         XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "uk-UA", available: ["en_US", "uk_UA"]), "uk_UA")
         XCTAssertEqual(KeyboardLanguage.serbianLatin.spellCheckLanguage(available: ["en_US", "sr_Latn"]), "sr_Latn")
