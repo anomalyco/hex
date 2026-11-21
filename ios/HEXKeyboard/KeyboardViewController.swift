@@ -148,7 +148,7 @@ final class KeyboardViewController: UIInputViewController {
         log.contextSource = { [weak self] in
             self?.typingLogContext ?? TypingLogContext(before: nil, after: nil, hasText: false)
         }
-        let traits = TypingLogTraits(textDocumentProxy, document: textDocumentProxy.documentIdentifier)
+        let traits = TypingLogTraits(textDocumentProxy, document: TypingLogTraits.documentIdentifier(of: textDocumentProxy))
         typingLogTraits = traits
         log.beginSession(typingLogSessionInfo(trigger: trigger, traits: traits))
         attachTypingLog()
@@ -199,8 +199,12 @@ final class KeyboardViewController: UIInputViewController {
     /// Another field, or the same field with new traits: a new session (which may be skipped).
     private func followTypingLogField() {
         guard typingLog != nil, isShown else { return }
-        let traits = TypingLogTraits(textDocumentProxy, document: textDocumentProxy.documentIdentifier)
-        guard traits.signature != typingLogTraits?.signature else { return }
+        let traits = TypingLogTraits(textDocumentProxy, document: TypingLogTraits.documentIdentifier(of: textDocumentProxy))
+        if let current = typingLogTraits, !current.isOtherField(than: traits) {
+            // The same field: keep its document once UIKit names it.
+            if current.document == nil { typingLogTraits?.document = traits.document }
+            return
+        }
         endTypingLogSession(reason: "field_changed", settleDictation: nil)
         beginTypingLogSession(trigger: "field")
     }
