@@ -220,7 +220,9 @@ extension FullKeyboardView {
                 : nil
         }
         let inset = layout.horizontalInset
-        emojiSearchField?.frame = CGRect(x: inset, y: m.stripTop + lift, width: bounds.width - 2 * inset, height: m.stripHeight)
+        // Centred on the strip's words' line, as the emoji panel's top row.
+        let band = m.stripLineBand
+        emojiSearchField?.frame = CGRect(x: inset, y: m.stripTop + lift + band.top, width: bounds.width - 2 * inset, height: band.height)
         emojiResults?.frame = CGRect(x: inset + m.side, y: 0, width: bounds.width - 2 * (inset + m.side), height: lift)
     }
 

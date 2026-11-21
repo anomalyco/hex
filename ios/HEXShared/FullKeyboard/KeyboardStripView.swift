@@ -3,9 +3,10 @@ import UIKit
 /// The 3-slot top bar above the keys, drawn as Apple's iOS 26 predictive bar is (measured in
 /// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
 /// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
-/// capsule with the divider beside it hidden. iOS's band above the keyboard takes the top of
-/// Apple's bar, so the pills fill the 27 pt below it and the words and dividers centre in it
-/// (`KeyboardMetrics.stripTextCenter`). The centred
+/// capsule with the divider beside it hidden. On an iPhone held upright the strip is Apple's
+/// bar from its pill's top down (38 pt), with the words and dividers on Apple's line, 20 pt
+/// below the keyboard's top edge (`KeyboardMetrics.stripTextCenter`), and a small chip around
+/// a word instead of the capsule. The centred
 /// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {
@@ -376,7 +377,10 @@ final class KeyboardStripView: UIView {
             width: nextSize.width,
             height: chipH
         )
-        var hintFrame = bounds.insetBy(dx: 12, dy: 0)
+        // The hint's two lines and chip centre on the words' line, as everything in the strip.
+        let hintHalf = min(midY, bounds.height - midY)
+        let hintY = midY - hintHalf
+        var hintFrame = CGRect(x: 12, y: hintY, width: max(0, bounds.width - 24), height: 2 * hintHalf)
         var markRoom: CGFloat = 0
         if let loggingMark, showsLoggingMark {
             // On the text line at the outer slot's end, in from the keyboard's rounded corner;
@@ -387,8 +391,8 @@ final class KeyboardStripView: UIView {
             markRoom = 12 + size.width + 4
             bringSubviewToFront(loggingMark)
             hintFrame = hexOnLeading
-                ? CGRect(x: 12, y: 0, width: max(0, loggingMark.frame.minX - 8 - 12), height: bounds.height)
-                : CGRect(x: loggingMark.frame.maxX + 8, y: 0, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: bounds.height)
+                ? CGRect(x: 12, y: hintY, width: max(0, loggingMark.frame.minX - 8 - 12), height: 2 * hintHalf)
+                : CGRect(x: loggingMark.frame.maxX + 8, y: hintY, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: 2 * hintHalf)
         }
         fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
@@ -756,7 +760,7 @@ final class FullAccessHintView: UIView {
         )
         let textX = chipLeads ? openButton.frame.maxX + 10 : 0
         let textWidth = chipLeads ? max(0, bounds.width - textX) : max(0, openButton.frame.minX - 10)
-        // Two lines in the strip's 27 pt.
+        // Two lines, even above and below the strip's words' line.
         let lineHeight: CGFloat = min(16, (bounds.height + 1) / 2)
         let top = (bounds.height - 2 * lineHeight) / 2
         titleLabel.frame = CGRect(x: textX, y: top, width: textWidth, height: lineHeight)
