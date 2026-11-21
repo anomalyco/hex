@@ -183,12 +183,22 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// Elsewhere it's the strip less half a point above and below, at most 36 pt.
     var stripPillHeight: CGFloat { stripHeight == Self.stripBarHeight ? stripHeight : min(stripHeight - 1, 36) }
 
-    /// Where the strip's words, dividers and Hex mark centre: on its middle, so a word sits in
-    /// the middle of its pill as Apple's does. Apple's words are 27 pt above row 1's keycaps
-    /// (25.3 pt below the panel's edge on the iPhone 17 Pro, iOS 27.2), but its pill reaches
-    /// 11 pt up into the band iOS draws over a third-party keyboard; putting Hex's words on
-    /// Apple's line left them high in a pill that can't (#2201), so they sit 5.5 pt lower.
-    var stripTextCenter: CGFloat { stripHeight / 2 }
+    /// Where the strip's words, dividers, chips and Hex mark centre. Apple's words sit midway
+    /// between the panel's edge and row 1's keycaps (25.3 pt down, keycaps at 52 pt, iPhone 17
+    /// Pro, iOS 27.2), so in the phone's portrait strip they're 26 pt above row 1, 9 pt below
+    /// iOS's band. Centred in the strip (#2204) they were 5.5 pt low, with more room above than
+    /// below. Elsewhere the strip is Apple's bar and they centre in it.
+    static let barTextAboveKeys: CGFloat = 26
+    var stripTextCenter: CGFloat {
+        stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
+    }
+    /// A suggestion's chip (an autocorrection, a pressed word, a revert) and the dividers: even
+    /// above and below the words' line, so in the phone's portrait strip as tall as the 9 pt
+    /// between the line and iOS's band allows twice over (18 pt); Apple's 38 pt pill reaches
+    /// up into that band. Elsewhere the pill height.
+    var stripChipHeight: CGFloat {
+        stripHeight == Self.stripBarHeight ? 2 * stripTextCenter : stripPillHeight
+    }
 
     /// Apple's keycap corners (iOS 27.2: the same on every iPhone, measured from screenshots
     /// against keys Hex drew at known radii).
