@@ -549,10 +549,14 @@ final class FullKeyboardEngine {
         let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
         lastKeyTouchAt = clock()
-        // Rollover: a new key going down commits any character or accent picker still held.
+        // Rollover: a new key going down commits any character, space or accent picker still held.
         for other in touchOrder {
-            guard var touch = touches[other], touch.key.character != nil, !touch.committed else { continue }
-            if activeAccentTouchID == other, let menu = activeAccentMenu {
+            guard var touch = touches[other], !touch.committed else { continue }
+            if touch.key.kind == .space, !touch.isLanguageSwipe {
+                typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
+            } else if touch.key.character == nil {
+                continue
+            } else if activeAccentTouchID == other, let menu = activeAccentMenu {
                 typingLog?.ui("accent_pick", [
                     TypingLogField("id", .int(other)),
                     TypingLogField("index", .int(menu.selectedIndex)),
@@ -791,7 +795,7 @@ final class FullKeyboardEngine {
                     TypingLogField("step", .int(step)),
                 ])
                 onLanguageSwipe?(step)
-            } else {
+            } else if !touch.committed {
                 typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
             }
         case .returnKey:

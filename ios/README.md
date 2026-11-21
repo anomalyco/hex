@@ -1079,7 +1079,8 @@ never at a launch by itself.
   sliding 8 to 24 pt, and slides of 40 pt in 150 ms, all typed one); a slide of 10 pt used
   to start the trackpad at once and type nothing (TestFlight build 56: "missing the space
   key"). With two or more languages such a slide is a language swipe (Keyboard languages,
-  above). The
+  above). In a rollover space keeps its place: a key going down while the space bar is
+  still held types the space first, as a held letter's does. The
   full keyboard's trackpad moves as Apple's does (black box, iOS 27.2): the finger drags a
   point through the text at the text's own scale, in two dimensions, and the cursor goes to
   the character nearest it. Slowly a point of finger is a point of text, and faster it goes

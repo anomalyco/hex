@@ -8,7 +8,7 @@ extension FullKeyboardEngine {
     /// finger is, as Apple's does, so letting go types no space (a press held to move the
     /// cursor used to type one beside the space already there).
     func holdSpace(forTouch id: Int) {
-        guard var touch = touches[id], touch.key.kind == .space, !touch.isTrackpad, !touch.isLanguageSwipe else { return }
+        guard var touch = touches[id], touch.key.kind == .space, !touch.committed, !touch.isTrackpad, !touch.isLanguageSwipe else { return }
         startTrackpad(&touch, id: id, hold: true, time: nil)
     }
 
@@ -19,7 +19,7 @@ extension FullKeyboardEngine {
     /// types one (iOS 27.2: taps of 60 to 150 ms sliding 8 to 24 pt, slides of 40 pt in 150 ms).
     func moveSpaceBar(_ touch: inout ActiveTouch, id: Int, to point: CGPoint, time: TimeInterval?) -> Bool {
         if touch.isLanguageSwipe { return true }
-        if !touch.isTrackpad, switchesLanguage, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
+        if !touch.isTrackpad, !touch.committed, switchesLanguage, abs(point.x - touch.startPoint.x) >= Self.trackpadActivationDistance {
             touch.isLanguageSwipe = true
             return true
         }

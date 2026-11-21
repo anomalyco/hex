@@ -11,7 +11,7 @@ extension FullKeyboardEngine {
         var key: KeyboardKey
         var startPoint: CGPoint
         var point: CGPoint
-        /// A character that already went in because another key went down after it.
+        /// A character (or space) that already went in because another key went down after it.
         var committed: Bool
         /// The page a 123/ABC press came from; releasing over a character returns there.
         var returnLayer: KeyboardLayer?

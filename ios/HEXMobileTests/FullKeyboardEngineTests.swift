@@ -63,6 +63,27 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "th")
     }
 
+    /// Space in a rollover keeps its place: a letter held as space goes down goes in first, and
+    /// space goes in when the next letter goes down, even if that letter lifts first. It used
+    /// to wait for its own lift, so "a b" typed fast came out "ab ".
+    func testRolloverWithTheSpaceBarKeepsOrder() {
+        down(1, .character("a"))
+        down(2, .space)
+        up(1, .character("a"))
+        down(3, .character("b"))
+        up(3, .character("b"))
+        up(2, .space)
+        XCTAssertEqual(target.text, "a b")
+
+        down(4, .space)
+        down(5, .character("c"))
+        engine.holdSpace(forTouch: 4)
+        XCTAssertFalse(engine.isTrackpadActive, "a space already typed doesn't become the trackpad")
+        up(4, .space)
+        up(5, .character("c"))
+        XCTAssertEqual(target.text, "a b c")
+    }
+
     func testSlidingToAnotherKeyTypesWhereTheFingerLifts() {
         down(1, .character("f"))
         engine.touchMoved(id: 1, to: point(.character("g")))
