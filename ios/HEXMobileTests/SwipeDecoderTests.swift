@@ -84,6 +84,46 @@ final class SwipeDecoderTests: XCTestCase {
         XCTAssertEqual(read("fuck", swearing, keys).first, "fuck", "with Suggest swear words on")
     }
 
+    /// A straight stroke runs over the letters between its ends: "tired" and "tied" draw one
+    /// line from i to e, "wire" and "write" one from w to i and back to e. Only where the
+    /// finger slowed tells them apart (X tester: guesses didn't account for the letters under
+    /// the swipe), so a pause on a letter the stroke crosses reads it, and the same stroke
+    /// without one doesn't.
+    func testAPauseOnALetterTheStrokeCrossesReadsIt() throws {
+        let (en, keys) = try decoder(.english)
+        func read(_ word: String, pausingOn pauses: Set<Int>) -> String? {
+            let (points, times) = SwipePath.timed(word, keys: keys, pausingOn: pauses)
+            return en.decode(points, times: times, keys: keys).first?.text
+        }
+        // The pauses are on the letters' keys in order (t i r e d: r is 2).
+        XCTAssertEqual(read("tired", pausingOn: [2]), "tired")
+        XCTAssertEqual(read("tired", pausingOn: []), "tied", "the same path, no pause on r")
+        XCTAssertEqual(read("tire", pausingOn: [2]), "tire")
+        XCTAssertEqual(read("tie", pausingOn: []), "tie")
+        XCTAssertEqual(read("wire", pausingOn: [2]), "wire")
+        XCTAssertEqual(read("write", pausingOn: [1, 3]), "write")
+        XCTAssertEqual(read("greet", pausingOn: [1]), "greet")
+        XCTAssertEqual(read("get", pausingOn: []), "get")
+    }
+
+    /// A pause off the word's keys counts against it: p to t along the top row is "put" when
+    /// the finger slows on u and "pit" on i; slowing on o and u offers the much rarer "pout".
+    func testAPauseOffTheWordsKeysCountsAgainstIt() throws {
+        let (en, keys) = try decoder(.english)
+        func read(_ word: String, pausingOn pauses: Set<Int>) -> [String] {
+            let (points, times) = SwipePath.timed(word, keys: keys, pausingOn: pauses)
+            return en.decode(points, times: times, keys: keys).map(\.text)
+        }
+        XCTAssertEqual(read("put", pausingOn: [1]).first, "put")
+        XCTAssertEqual(read("pit", pausingOn: [1]).first, "pit")
+        XCTAssertTrue(read("pout", pausingOn: [1, 2]).prefix(3).contains("pout"))
+        XCTAssertFalse(read("put", pausingOn: [1]).prefix(3).contains("pout"), "no pause on o, no pout")
+        // Touches that all arrive at once (a test's, or no clock) read as before.
+        let (points, _) = SwipePath.timed("pout", keys: keys, pausingOn: [1, 2])
+        let still = [TimeInterval](repeating: 0, count: points.count)
+        XCTAssertEqual(en.decode(points, times: still, keys: keys).map(\.text), en.decode(points, keys: keys).map(\.text))
+    }
+
     func testAPathTooShortReadsAsNothing() throws {
         let (en, keys) = try decoder(.english)
         let h = try XCTUnwrap(keys.centres["h"])
@@ -113,5 +153,32 @@ enum SwipePath {
             }
         }
         return points.map { CGPoint(x: $0.x + offset.dx, y: $0.y + offset.dy) }
+    }
+
+    /// Through `word`'s keys as `through` does, at an even 750 points a second, with the
+    /// touches' times: the finger stays `pause` seconds on the keys at `pausingOn` (indexes
+    /// into the word's keys, repeats run together), sending nothing meanwhile, as a still
+    /// finger does.
+    static func timed(_ word: String, keys: TypingDecoder.Keys, pausingOn pauses: Set<Int>, pause: TimeInterval = 0.15) -> (points: [CGPoint], times: [TimeInterval]) {
+        var centres: [CGPoint] = []
+        for letter in word.lowercased() where letter != "'" {
+            let base = String(letter).decomposedStringWithCanonicalMapping.unicodeScalars.first.map(Character.init)
+            guard let centre = keys.centres[letter] ?? base.flatMap({ keys.centres[$0] }) else { continue }
+            if centres.last != centre { centres.append(centre) }
+        }
+        guard let first = centres.first else { return ([], []) }
+        var points = [first]
+        var times: [TimeInterval] = [0]
+        let step: CGFloat = 6, perStep: TimeInterval = 0.008
+        for (index, (a, b)) in zip(centres, centres.dropFirst()).enumerated() {
+            let count = max(1, Int((hypot(b.x - a.x, b.y - a.y) / step).rounded(.up)))
+            for i in 1...count {
+                let t = CGFloat(i) / CGFloat(count)
+                points.append(CGPoint(x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t))
+                // The first point after a paused key comes only once the finger moves on.
+                times.append(times[times.count - 1] + perStep + (i == 1 && pauses.contains(index) ? pause : 0))
+            }
+        }
+        return (points, times)
     }
 }

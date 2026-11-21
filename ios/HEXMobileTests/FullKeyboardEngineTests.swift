@@ -1634,6 +1634,22 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hello world keyboard", "no second space after one typed")
     }
 
+    /// The plane hands the decoder each touch's time, so a pause on a letter the stroke runs
+    /// over counts: "tired" with the finger slowing on r, "tied" on the same path without.
+    func testASwipeReadsWhereTheFingerPaused() throws {
+        for (pauses, word) in [(Set([2]), "tired"), (Set<Int>(), "tied")] {
+            let (field, plane) = try swipeKeyboard()
+            let (points, times) = SwipePath.timed("tired", keys: plane.engine.swipeKeys, pausingOn: pauses)
+            let start: TimeInterval = 100
+            plane.began(id: 50, sample: TypingLogTouchSample(point: points[0], timestamp: start + times[0]))
+            for (point, time) in zip(points, times).dropFirst() {
+                plane.moved(id: 50, sample: TypingLogTouchSample(point: point, timestamp: start + time))
+            }
+            plane.ended(id: 50, sample: TypingLogTouchSample(point: points[points.count - 1], timestamp: start + times[times.count - 1]))
+            XCTAssertEqual(field.text, word, "pauses \(pauses)")
+        }
+    }
+
     /// TestFlight (build 56): "Manual typing right after swipe typing a word should add a space
     /// after for the next word." Apple's keyboard (iOS 27.2, watched in Messages) keeps a space
     /// pending after a swiped word: a letter, digit, opening mark or symbol goes in after it,

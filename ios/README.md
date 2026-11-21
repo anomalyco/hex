@@ -456,13 +456,24 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     swipes), kept when every key lies near the path and their ideal path (the polyline
     through their keys' centres) is about as long; each is scored on location (point by
     point, then dynamic time warping for the best 80), shape, and how near its first and
-    last keys the finger went down and lifted, and weighed with the model's word-pair
-    frequency after the word before. English contractions, which the Google Books model
-    barely counts, and your own words (Contacts names and other `UILexicon` terms, one-word
+    last keys the finger went down and lifted, the best 80 also on how their keys account
+    for where the finger turned and, from the touches' times, where it slowed (an edit
+    distance: a turn or pause no key of the word explains costs, and so does a key the word
+    goes straight through without a pause on it), and weighed with the model's word-pair
+    frequency after the word before. A straight stroke runs over the letters between its
+    ends, so the path alone can't tell "tired" from "tied" or "wire" from "write" (X
+    tester: guesses didn't account for the letters under the swipe); a pause on r can.
+    English contractions, which the Google Books model barely counts, and your own words
+    (Contacts names and other `UILexicon` terms, one-word
     text replacements, words you kept) are read beside it. It never reads a slur, and reads
     swear words only with Suggest swear words on (`TypingDecoder.NeverSuggest` and
     `mayOffer`, as the strip). Its weights are tuned on synthetic swipes of the
-    autocorrect benchmark's held-out dev sentences; Record typing logs keeps a swipe's
+    autocorrect benchmark's held-out dev sentences and on mined sets of common words that
+    share a path; on the held-out test sentences (typical fingers, 390 pt) top-1 is 97.1%
+    in English and 94.2% in Spanish (94.9 and 90.9 without the turns and pauses), and on
+    held-out words that share a path 96.0% and 94.5% (85.1 and 81.2); a decode takes
+    0.91 ms at the median and 2.85 ms at p99 on an M5 Max (experiment folder
+    2026-11-20-hex-swipe-typing, results/2026-11-21). Record typing logs keeps a swipe's
     touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
     real fingers.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,

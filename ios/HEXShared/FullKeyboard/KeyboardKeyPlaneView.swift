@@ -501,12 +501,12 @@ final class KeyboardKeyPlaneView: UIView {
             if case .character = kind { armAccentTimer(for: id) }
             if kind == .space { armTrackpadHold(for: id) }
         }
-        swipe?.began(id: id, at: sample.point)
+        swipe?.began(id: id, at: sample.point, time: sample.timestamp)
     }
 
     func moved(id: Int, sample: TypingLogTouchSample) {
         // A letter touch that went a key's pitch is a swipe: it moves the trail, not the keys.
-        if let swipe, swipe.moved(id: id, to: sample.point) {
+        if let swipe, swipe.moved(id: id, to: sample.point, time: sample.timestamp) {
             cancelAccentTimer(for: id)
             typingLog?.touch(.moved, id: id, sample: sample, key: nil, under: engine.layout.hitTest(sample.point))
             return
@@ -530,7 +530,7 @@ final class KeyboardKeyPlaneView: UIView {
         cancelAccentTimer(for: id)
         if let swipe, swipe.owns(id) {
             typingLog?.touch(.ended, id: id, sample: sample, key: nil, under: engine.layout.hitTest(sample.point))
-            swipe.ended(id: id, at: sample.point)
+            swipe.ended(id: id, at: sample.point, time: sample.timestamp)
             return
         }
         swipe?.forget(id)

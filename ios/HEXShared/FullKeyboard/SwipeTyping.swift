@@ -20,10 +20,22 @@ final class SwipeTyping {
     /// The light trail behind the finger; the key plane holds it above its keys.
     let trail = SwipeTrailView()
 
-    /// Letter touches that may still become swipes: their points so far.
-    private var pending: [Int: [CGPoint]] = [:]
+    /// A touch's points so far and when each came (`UITouch.timestamp`): the decoder reads
+    /// where the finger paused from the times.
+    struct Stroke {
+        var points: [CGPoint] = []
+        var times: [TimeInterval] = []
+
+        mutating func add(_ point: CGPoint, at time: TimeInterval) {
+            points.append(point)
+            times.append(time)
+        }
+    }
+
+    /// Letter touches that may still become swipes: their strokes so far.
+    private var pending: [Int: Stroke] = [:]
     /// The swipe under way.
-    private var active: (id: Int, points: [CGPoint])?
+    private var active: (id: Int, stroke: Stroke)?
     /// Bumped by every swipe's start and end, so a reading of an older one is dropped.
     private var generation = 0
     private var previewInFlight = false
@@ -83,38 +95,41 @@ final class SwipeTyping {
     /// Before a touch goes down: a swipe still under way ends first, so its word goes in
     /// before the new key's letter.
     func touchWillBegin() {
-        if let swipe = active { finish(swipe.id, points: swipe.points) }
+        if let swipe = active { finish(swipe.id, stroke: swipe.stroke) }
     }
 
-    /// After the engine took a touch: a letter key's may become a swipe.
-    func began(id: Int, at point: CGPoint) {
+    /// After the engine took a touch: a letter key's may become a swipe. `time` is the
+    /// touch's timestamp (now when nil).
+    func began(id: Int, at point: CGPoint, time: TimeInterval? = nil) {
         guard engine.allowsSwipes, let touch = engine.touches[id], !touch.committed,
               touch.key.character?.first?.isLetter == true else { return }
-        pending[id] = [point]
+        var stroke = Stroke()
+        stroke.add(point, at: time ?? clock())
+        pending[id] = stroke
     }
 
     /// True when the touch is a swipe (now or already): the plane leaves it to this.
-    func moved(id: Int, to point: CGPoint) -> Bool {
+    func moved(id: Int, to point: CGPoint, time: TimeInterval? = nil) -> Bool {
         if var swipe = active, swipe.id == id {
-            swipe.points.append(point)
+            swipe.stroke.add(point, at: time ?? clock())
             active = swipe
             trail.add(point)
             schedulePreview()
             return true
         }
-        guard var points = pending[id] else { return false }
-        points.append(point)
-        pending[id] = points
-        guard let first = points.first, hypot(point.x - first.x, point.y - first.y) > threshold,
+        guard var stroke = pending[id] else { return false }
+        stroke.add(point, at: time ?? clock())
+        pending[id] = stroke
+        guard let first = stroke.points.first, hypot(point.x - first.x, point.y - first.y) > threshold,
               let touch = engine.touches[id], !touch.committed, engine.activeAccentMenu == nil,
               engine.allowsSwipes else { return false }
         pending[id] = nil
         syncWords()
         engine.beginSwipe(touchID: id)
-        active = (id, points)
+        active = (id, stroke)
         generation += 1
         lastPreviewAt = 0
-        trail.begin(points)
+        trail.begin(stroke.points)
         schedulePreview()
         return true
     }
@@ -128,9 +143,10 @@ final class SwipeTyping {
     }
 
     /// The swipe's finger lifted: its word goes in.
-    func ended(id: Int, at point: CGPoint) {
-        guard let swipe = active, swipe.id == id else { return }
-        finish(id, points: swipe.points + [point])
+    func ended(id: Int, at point: CGPoint, time: TimeInterval? = nil) {
+        guard var swipe = active, swipe.id == id else { return }
+        swipe.stroke.add(point, at: time ?? clock())
+        finish(id, stroke: swipe.stroke)
     }
 
     /// The system cancelled the swipe's touch: nothing goes in.
@@ -140,7 +156,7 @@ final class SwipeTyping {
         active = nil
         generation += 1
         trail.fade()
-        engine.endSwipe(typing: [], points: swipe.points.count, decodeTime: nil)
+        engine.endSwipe(typing: [], points: swipe.stroke.points.count, decodeTime: nil)
     }
 
     func cancelAll() {
@@ -152,7 +168,7 @@ final class SwipeTyping {
         engine.endSwipe(typing: [], points: 0, decodeTime: nil)
     }
 
-    private func finish(_ id: Int, points: [CGPoint]) {
+    private func finish(_ id: Int, stroke: Stroke) {
         active = nil
         pending[id] = nil
         generation += 1
@@ -160,12 +176,13 @@ final class SwipeTyping {
         let started = clock()
         let layout = engine.layout
         let candidates = decoder.decode(
-            points.map(layout.joinedForSwipe), keys: engine.swipeKeys, previous: engine.swipePreviousWord, limit: 8
+            stroke.points.map(layout.joinedForSwipe), times: stroke.times, keys: engine.swipeKeys,
+            previous: engine.swipePreviousWord, limit: 8
         )
         let words = ranked(candidates)
         let elapsed = clock() - started
         lastDecodeTime = elapsed
-        engine.endSwipe(typing: words, points: points.count, decodeTime: elapsed)
+        engine.endSwipe(typing: words, points: stroke.points.count, decodeTime: elapsed)
     }
 
     /// The readings best first once a rare name or abbreviation costs `nameCost` more.
@@ -187,15 +204,15 @@ final class SwipeTyping {
     /// Reads the path so far off the main thread, at most every `previewInterval`, and shows
     /// its best word in the strip while the swipe is still the same one.
     private func schedulePreview() {
-        guard let swipe = active, !previewInFlight, swipe.points.count >= 3 else { return }
+        guard let swipe = active, !previewInFlight, swipe.stroke.points.count >= 3 else { return }
         let now = clock()
         guard now - lastPreviewAt >= Self.previewInterval else { return }
         previewInFlight = true
         lastPreviewAt = now
         let decoder = decoder, keys = engine.swipeKeys, previous = engine.swipePreviousWord
-        let points = swipe.points.map(engine.layout.joinedForSwipe), generation = generation
+        let points = swipe.stroke.points.map(engine.layout.joinedForSwipe), times = swipe.stroke.times, generation = generation
         Self.previewQueue.async { [weak self] in
-            let candidates = decoder.decode(points, keys: keys, previous: previous, limit: 3)
+            let candidates = decoder.decode(points, times: times, keys: keys, previous: previous, limit: 3)
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
                     guard let self else { return }
