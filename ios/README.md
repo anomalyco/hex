@@ -180,6 +180,41 @@ never at a launch by itself.
     words like "the first time", "second guess", "a new line of", "bullet
     points" stay as said. `TranscriptCleanupTests` holds the list cases and
     62 prose sentences that must not change.
+  - **Spoken punctuation (Settings › Dictation › Spoken punctuation):** On by
+    default (`DictationPunctuationSettings`, App Group key
+    `settings.dictationSpokenPunctuation`), in English, Spanish, French, German,
+    Italian and Portuguese, every style but Verbatim (`SpokenPunctuation`, inside
+    the style after Format lists, so "dash … dash …" stays a list). Punctuation
+    said by name becomes the mark: "comma", "period"/"full stop", "question
+    mark", "exclamation point", "colon", "semicolon", "ellipsis", "dash",
+    "hyphen", "apostrophe", "hashtag", "dollar sign", "open quote … close
+    quote" (or "quote … end quote"/"unquote"), "open paren … close paren" and
+    "smiley" (":-)"), and each language's own words ("coma", "punto", "signo de
+    interrogación", "abrir comillas", "punto y aparte"; "virgule", "point
+    d'interrogation", "ouvrez les guillemets"; "Komma", "Fragezeichen",
+    "Anführungszeichen unten … oben", "Klammer auf … zu"; "virgola", "punto
+    interrogativo", "apri virgolette"; "vírgula", "ponto final", "abre aspas").
+    Quotes are “ ” (« » in French, „ “ in German), French spacing follows
+    (`FrenchSpacing`), and a word after "." "?" "!" gets a capital. Black box
+    (macOS 27.2.1, `say` voices): `DictationTranscriber` already writes every
+    mark, so its text has no names left; `SpeechTranscriber` writes "comma",
+    "question mark" and some French, German and Italian names, leaving the
+    rest as words, often between commas; Parakeet writes every name as words
+    ("noon, comma, see you soon, period", "tonight question mark?"). A mark the
+    model already put beside a name is replaced, never doubled. Guards keep
+    prose: never after an article, possessive, preposition or a word that
+    makes the name a noun ("a period of time", "the comma is", "Oxford comma",
+    "trial period", "ein wichtiger Punkt"), before one that continues it
+    ("question mark tattoo", "colon cancer", "punto de vista"), in a compound
+    ("comma-separated"), or between numbers ("two comma five"); the names that
+    are everyday nouns ("period", "point"/"Punkt"/"punto"/"ponto", "question
+    mark", "dash", "smiley") also need the line's end, a mark after them or a
+    clause start after them; a colon needs words after it; a closing quote or
+    bracket closes only an open one. `TranscriptCleanupTests` holds the
+    models' transcripts and 141 prose sentences (84 English) that must not
+    change. Polished no longer ends a line that ends in "," or ";" ("Hi
+    Sarah," before a line break) with a period, and keeps the space before an
+    emoticon (":-)").
   - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
     name for @) and "at sign" become "@", and an address said around it joins
     up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning
@@ -557,8 +592,9 @@ never at a launch by itself.
   5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
   `https://dev.anoma.ly/hex` until the production site serves
   `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
-  - **Dictation:** Style, Lowercase, Format lists, Dictation language, Translate what I say, Clean up
-    what I say, Custom vocabulary (its list below the switch), Keep mic warm,
+  - **Dictation:** Style, Lowercase, Format lists, Spoken punctuation, End with a
+    period, Dictation language, Translate what I say, Clean up what I say,
+    Custom vocabulary (its list below the switch), Keep mic warm,
     and Microphone.
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`

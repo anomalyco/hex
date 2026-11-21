@@ -8,6 +8,7 @@ struct DictationSettingsPage: View {
     @State private var customVocabulary = CustomVocabularySettings().isEnabled
     @State private var lowercase = DictationLowercaseSettings().isEnabled
     @State private var formatLists = DictationListSettings().isEnabled
+    @State private var spokenPunctuation = DictationPunctuationSettings().isEnabled
     @State private var endsWithPeriod = DictationPeriodSettings().isEnabled
 
     var body: some View {
@@ -51,6 +52,15 @@ struct DictationSettingsPage: View {
                     title: String(localized: "Format lists"),
                     detail: String(localized: "Say “first, second” or “bullet” for a list"),
                     isOn: $formatLists
+                )
+
+                SettingsDivider()
+
+                // Inside the style, on every path but Verbatim (`SpokenPunctuation`).
+                SettingsToggleRow(
+                    title: String(localized: "Spoken punctuation"),
+                    detail: String(localized: "Say “comma” or “question mark” for the mark"),
+                    isOn: $spokenPunctuation
                 )
 
                 SettingsDivider()
@@ -156,6 +166,9 @@ struct DictationSettingsPage: View {
         .onChange(of: formatLists) { _, enabled in
             DictationListSettings().isEnabled = enabled
         }
+        .onChange(of: spokenPunctuation) { _, enabled in
+            DictationPunctuationSettings().isEnabled = enabled
+        }
         .onChange(of: endsWithPeriod) { _, enabled in
             DictationPeriodSettings().isEnabled = enabled
         }
@@ -164,6 +177,7 @@ struct DictationSettingsPage: View {
             customVocabulary = CustomVocabularySettings().isEnabled
             lowercase = DictationLowercaseSettings().isEnabled
             formatLists = DictationListSettings().isEnabled
+            spokenPunctuation = DictationPunctuationSettings().isEnabled
             endsWithPeriod = DictationPeriodSettings().isEnabled
         }
     }

@@ -542,7 +542,7 @@ final class KeyboardLocalDictation {
                 let style = KeyboardBridge().style
                 let vocabulary = CustomVocabularySettings().activeTerms
                 // The app's steps (but Apple Intelligence's cleanup), its style, Format lists,
-                // End with a period and Lowercase included.
+                // Spoken punctuation, End with a period and Lowercase included.
                 let pipeline = DictationPipeline(
                     style: style,
                     language: locale,
@@ -550,6 +550,7 @@ final class KeyboardLocalDictation {
                     corrections: fixes,
                     lowercase: DictationLowercaseSettings().isEnabled,
                     formatLists: DictationListSettings().isEnabled,
+                    spokenPunctuation: DictationPunctuationSettings().isEnabled,
                     hinglish: HinglishSettings().isEnabled,
                     endsWithPeriod: DictationPeriodSettings().isEnabled
                 )

@@ -52,6 +52,8 @@ final class DictationController {
         let lowercase: Bool
         /// Settings › Dictation › Format lists, read at start.
         let formatLists: Bool
+        /// Settings › Dictation › Spoken punctuation, read at start.
+        let spokenPunctuation: Bool
         /// Settings › Dictation › End with a period, read at start.
         let endsWithPeriod: Bool
         /// Experiments › Hinglish, read at start.
@@ -81,6 +83,7 @@ final class DictationController {
     private let customVocabularySettings: CustomVocabularySettings
     private let lowercaseSettings: DictationLowercaseSettings
     private let listSettings: DictationListSettings
+    private let punctuationSettings: DictationPunctuationSettings
     private let periodSettings: DictationPeriodSettings
     private let hinglishSettings: HinglishSettings
     private let typingJournalSettings: TypingJournalSettings
@@ -209,6 +212,7 @@ final class DictationController {
         customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
         lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
         listSettings: DictationListSettings = DictationListSettings(),
+        punctuationSettings: DictationPunctuationSettings = DictationPunctuationSettings(),
         periodSettings: DictationPeriodSettings = DictationPeriodSettings(),
         hinglishSettings: HinglishSettings = HinglishSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
@@ -228,6 +232,7 @@ final class DictationController {
         self.customVocabularySettings = customVocabularySettings
         self.lowercaseSettings = lowercaseSettings
         self.listSettings = listSettings
+        self.punctuationSettings = punctuationSettings
         self.periodSettings = periodSettings
         self.hinglishSettings = hinglishSettings
         self.typingJournalSettings = typingJournalSettings
@@ -789,6 +794,7 @@ final class DictationController {
         let usesCleanup = cleanupSettings.isEnabled
         let lowercase = lowercaseSettings.isEnabled
         let formatLists = listSettings.isEnabled
+        let spokenPunctuation = punctuationSettings.isEnabled
         let endsWithPeriod = periodSettings.isEnabled
         let hinglish = hinglishSettings.isEnabled
         let language = transcriptionLanguageID
@@ -842,6 +848,7 @@ final class DictationController {
                     usesCleanup: usesCleanup,
                     lowercase: lowercase,
                     formatLists: formatLists,
+                    spokenPunctuation: spokenPunctuation,
                     endsWithPeriod: endsWithPeriod,
                     hinglish: hinglish,
                     vocabularyTerms: vocabularyTerms,
@@ -937,6 +944,7 @@ final class DictationController {
                     corrections: session.personalCorrections,
                     lowercase: session.lowercase,
                     formatLists: session.formatLists,
+                    spokenPunctuation: session.spokenPunctuation,
                     hinglish: session.hinglish,
                     endsWithPeriod: session.endsWithPeriod
                 )
