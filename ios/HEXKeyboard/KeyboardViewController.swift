@@ -10,7 +10,9 @@ final class KeyboardViewController: UIInputViewController {
     private var pollTimer: Timer?
     private var coldStartJobID = UUID().uuidString
     private var lastURLRefreshBucket: Int = 0
-    private var lastFullAccessNote: TimeInterval = 0
+    private var lastFullAccessReport: KeyboardFullAccessReport?
+    /// When this keyboard process started (its first load): its Full Access reports' generation.
+    private static let processLaunchedAt = Date().timeIntervalSince1970
     private var surface: UIView?
     private var fullKeyboard: FullKeyboardView?
     /// The dictation bar's emoji panel, at the full keyboard's height while it's open, and
@@ -47,6 +49,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        reportFullAccess(force: true)
         // Keyboard dictation sets this process's audio session to record (WebKit captures for
         // it), and iOS mutes a recording session's haptics by default: keep key haptics on.
         try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
@@ -56,6 +59,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        reportFullAccess(force: true)
         coldStartJobID = UUID().uuidString
         didHandOffCurrentField = false
         // The keyboard may come back for another field: settle on where the dictation was last seen.
@@ -564,8 +568,21 @@ final class KeyboardViewController: UIInputViewController {
         #endif
     }
 
+    /// Tells Hex what this keyboard sees of Full Access, which only a keyboard can see: as it
+    /// loads and each time it appears, before anything else runs, then every 5 s while it's
+    /// shown. One small App Group write; it reads nothing from the field.
+    private func reportFullAccess(force: Bool) {
+        let now = Date().timeIntervalSince1970
+        let isOn = hasFullAccess
+        if let last = lastFullAccessReport, last.isOn == isOn, now - last.at < (force ? 1 : 5) { return }
+        let report = KeyboardFullAccessReport(isOn: isOn, at: now, launchedAt: Self.processLaunchedAt)
+        lastFullAccessReport = report
+        bridge.recordFullAccess(report)
+    }
+
     private func syncFromBridge(animated: Bool) {
         let now = Date().timeIntervalSince1970
+        reportFullAccess(force: false)
         updateKeyboardTraits()
         fullKeyboard?.syncSettings()
         syncTypingLogEnabled()
@@ -584,11 +601,6 @@ final class KeyboardViewController: UIInputViewController {
                 animated: animated
             )
             return
-        }
-
-        if now - lastFullAccessNote >= 5 {
-            lastFullAccessNote = now
-            bridge.fullAccessSeenAt = now
         }
 
         if dictationEdits.isTracking {

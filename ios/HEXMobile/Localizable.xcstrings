@@ -2924,6 +2924,36 @@
           }
         }
       }
+    },
+    "Switch to Hex below to confirm." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在下方切换到 Hex 即可确认。"
+          }
+        }
+      }
+    },
+    "Turn on Allow Full Access in Settings." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“设置”中打开“允许完全访问”。"
+          }
+        }
+      }
+    },
+    "Switch to Hex with %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用 %@ 切换到 Hex"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
