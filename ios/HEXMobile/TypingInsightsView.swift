@@ -64,6 +64,7 @@ struct TypingInsightsView: View {
             .confirmationDialog("Delete what Hex learned about your typing and dictation?", isPresented: $confirmingDelete) {
                 Button("Delete", role: .destructive) {
                     TypingJournal.delete()
+                    AdaptiveTouchSettings().requestReset()
                     reload()
                 }
             }

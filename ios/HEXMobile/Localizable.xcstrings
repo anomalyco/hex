@@ -2824,6 +2824,76 @@
           }
         }
       }
+    },
+    "Adaptive touch" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自适应触控"
+          }
+        }
+      }
+    },
+    "Learns where you land on the keys on this device. Stores averages, not what you type." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "学习你在这台设备上轻点按键的落点。只存平均值，不存你输入的内容。"
+          }
+        }
+      }
+    },
+    "Session only: without Full Access, it forgets when the keyboard closes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅限本次：未开启完全访问时，键盘关闭后就会忘记"
+          }
+        }
+      }
+    },
+    "Learning: %lld of %lld taps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在学习：已有 %1$lld/%2$lld 次轻点"
+          }
+        }
+      }
+    },
+    "Active: your taps are read with your own key centres" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已生效：按你自己的按键中心识别轻点"
+          }
+        }
+      }
+    },
+    "Reset touch learning" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重置触控学习"
+          }
+        }
+      }
+    },
+    "Forget where you land on the keys?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要忘记你轻点按键的落点吗？"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

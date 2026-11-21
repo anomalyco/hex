@@ -251,6 +251,13 @@ enum SettingsSnapshotFixture {
         scene?.hasSuffix("-end") == true
     }
 
+    /// `settings-experiments-on`: Adaptive touch partway through learning, as a keyboard with
+    /// Full Access reports it.
+    static var adaptiveTouchStatus: AdaptiveTouchStatus? {
+        guard let scene, scene.hasPrefix("settings-experiments") else { return nil }
+        return scene.contains("-on") ? .learning(taps: 240) : nil
+    }
+
     /// `settings-keyboard-languages[-on]`: Keyboard › Languages, open (Automatic, or with
     /// `-on` English, Français and Русский with Switch dictation too).
     static var opensKeyboardLanguages: Bool {
@@ -293,5 +300,6 @@ enum SettingsSnapshotFixture {
         TypingJournalSettings().isEnabled = on
         TypingLogSettings().isEnabled = on
         HinglishSettings().isEnabled = on
+        AdaptiveTouchSettings().isEnabled = on
     }
 }
