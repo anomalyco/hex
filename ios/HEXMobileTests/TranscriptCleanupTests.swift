@@ -221,6 +221,80 @@ final class TranscriptCleanupGuardTests: XCTestCase {
         )
     }
 
+    /// A cleanup that keeps less than half the transcript is a spoken self-correction
+    /// only when it keeps the tail after a marker.
+    func testAcceptsSelfCorrectionMarkerTails() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i'll send it tomorrow, i mean, i'll send it today",
+                cleaned: "I'll send it today."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "i want, i mean, i need the report",
+                cleaned: "I need the report."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "send it on tuesday actually wednesday",
+                cleaned: "Send it on Wednesday."
+            )
+        )
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "the the the build is broken",
+                cleaned: "The build is broken."
+            )
+        )
+    }
+
+    /// Dropping most of the transcript without a self-correction is a silent truncation,
+    /// even when nothing was added.
+    func testRejectsTruncationWithoutASelfCorrection() {
+        let cases = [
+            (
+                "first send the quarterly report to the sales team and then ask them to review the numbers before friday because the board meeting moved up and we need everything signed off by thursday afternoon at the latest",
+                "First send the quarterly report to the sales team."
+            ),
+            (
+                "remind me to buy milk and eggs and bread on the way home from work",
+                "Remind me to buy milk."
+            ),
+            (
+                "can you find that article about the quarterly report and send it to me",
+                "Send it to me."
+            ),
+            (
+                "i think we should ship the new version on friday and then we can tell the customers about it",
+                "I think we should ship."
+            ),
+            (
+                "scratch that send the invoice to sarah instead of the whole finance team today",
+                "Send the invoice to Sarah."
+            ),
+        ]
+        for (original, cleaned) in cases {
+            XCTAssertEqual(
+                TranscriptCleanupGuard.rejection(original: original, cleaned: cleaned),
+                "the cleaned text dropped most of the transcript",
+                "\(original) -> \(cleaned)"
+            )
+        }
+    }
+
+    /// Replaced words count with multiplicity on both sides: two "cloud" occurrences may
+    /// become two "Claude" occurrences.
+    func testReplacedWordsCountWithMultiplicity() {
+        XCTAssertTrue(
+            TranscriptCleanupGuard.isAcceptable(
+                original: "ask cloud to review it and then ask cloud to merge it",
+                cleaned: "Ask Claude to review it and then ask Claude to merge it."
+            )
+        )
+    }
+
     /// Pronoun contractions compare as their expansions, so "I'm" and "I am" are the
     /// same words on both sides.
     func testPronounContractionsCompareAsTheirExpansions() {

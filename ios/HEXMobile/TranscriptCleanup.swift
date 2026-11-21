@@ -164,12 +164,13 @@ nonisolated enum TranscriptCleanupGuard {
             return "the cleaned text is about something else"
         }
         // A short transcript may be entirely a spoken self-correction; a long one may lose
-        // at most half of its words, unless it only drops words, as a self-correction
-        // does.
-        if !(originalWords.count <= 6 && cleanedWords.count <= 3), addedWords > 0 {
-            guard Double(shared) / Double(originalWords.count) >= 0.5 else {
-                return "the cleaned text dropped most of the transcript"
-            }
+        // at most half of its words. A cleanup that only drops words may keep less only
+        // when it keeps the tail after the speaker's last spoken self-correction marker;
+        // otherwise it is a silent truncation.
+        if !(originalWords.count <= 6 && cleanedWords.count <= 3),
+           Double(shared) / Double(originalWords.count) < 0.5,
+           !(addedWords == 0 && keepsSelfCorrectionTail(originalWords, cleanedWords)) {
+            return "the cleaned text dropped most of the transcript"
         }
         return nil
     }
@@ -223,9 +224,43 @@ nonisolated enum TranscriptCleanupGuard {
         return cleaned.filter { !originalSet.contains($0) }.count
     }
 
-    /// The distinct original words the cleanup dropped, one for each word it may add.
+    /// The transcript word occurrences the cleanup dropped, counted with multiplicity
+    /// like the words it added: each occurrence whose word never appears in the cleaned
+    /// text is one word the cleanup may have replaced.
     private static func droppedWordCount(_ original: [String], _ cleaned: [String]) -> Int {
-        Set(original).subtracting(Set(cleaned)).count
+        let cleanedSet = Set(cleaned)
+        return original.filter { !cleanedSet.contains($0) }.count
+    }
+
+    /// The spoken self-correction markers that may explain a cleanup keeping only the
+    /// words after them.
+    private static let selfCorrections: [[String]] = [
+        ["no", "wait"],
+        ["wait"],
+        ["i", "mean"],
+        ["actually"],
+        ["scratch", "that"],
+        ["sorry"],
+        ["rather"],
+    ]
+
+    /// Whether the cleaned words are the tail after the transcript's last spoken
+    /// self-correction marker, and that tail is not empty. A cleanup that keeps less than
+    /// half the transcript may do so only in this shape; otherwise it silently truncated
+    /// the speaker.
+    private static func keepsSelfCorrectionTail(_ original: [String], _ cleaned: [String]) -> Bool {
+        var lastEnd: Int?
+        for start in original.indices {
+            for marker in selfCorrections where start + marker.count <= original.count {
+                if original[start..<(start + marker.count)].elementsEqual(marker) {
+                    lastEnd = max(lastEnd ?? 0, start + marker.count)
+                }
+            }
+        }
+        guard let end = lastEnd else { return false }
+        let tail = Array(original[end...])
+        guard !tail.isEmpty else { return false }
+        return cleaned.suffix(tail.count).elementsEqual(tail)
     }
 
     /// Every first- and second-person pronoun in the words, with its count.

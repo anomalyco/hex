@@ -1219,8 +1219,9 @@ holds the decision (`plan`), the one bridge call, and the guard. The guard
 applies the iOS cleaner's rules and adds the checks the reported answers
 needed: length, digits, word counts, negation counts with "no wait" read as a
 self-correction, and word overlap as before; each cleaned word the transcript
-never used must replace a distinct dropped word, and no more may be added than
-a quarter of the transcript (or two words, for a short one), so "cloud code"
+never used must replace a dropped transcript word (the count keeps repeats),
+and no more may be added than a quarter of the transcript (or two words, for a
+short one), so "cloud code"
 becomes "Claude Code" and "get hub" becomes "GitHub"; no first- or
 second-person pronoun may appear more often than in the transcript, so a
 stutter or a repeated-pronoun self-correction may drop repeats but a new
@@ -1233,17 +1234,24 @@ fillers, and a "hear" that becomes "here" is allowed when every other word is
 unchanged; and no preamble, meaning no colon outside a time like 3:30 in the
 first sentence or clause when the transcript has no such colon, and no
 "here's the", "here is the", "cleaned transcript", or "cleaned text" the
-transcript did not say. A cleanup that only drops words is treated as a spoken
-self-correction and may keep less than half the transcript; one that rewrites
-must still keep half. One counting difference remains:
-a length is counted in scalars here and in grapheme clusters on iOS, and the
-CJK numerals `Character.isNumber` sees but Rust's `is_numeric` does not are
-read as digits here. The guard returns the reason (empty text, much longer or
-many more words than the transcript, a changed number, an added or dropped
-negation, added words the speaker did not say, a changed speaker, a reply
-opener, a preamble, text about something else, or most of the transcript
-dropped) and that exact reason is what History and the live log record. The
-bridge
+transcript did not say. A cleanup that only drops words may keep less than
+half the transcript only when the transcript says a self-correction marker
+("no wait", "wait", "i mean", "actually", "scratch that", "sorry", or
+"rather") and the cleaned text ends with every word after the last one;
+otherwise it is a silent truncation and falls back. One that rewrites must
+still keep half. Counting differences remain: a length is counted in scalars
+here and in grapheme clusters on iOS; the CJK numerals
+`Character.isNumber` sees but Rust's `is_numeric` does not are read as
+digits here; and the colon exception ignores a colon between two digits as
+each platform reads them, so a CJK numeral around a colon (`三:四`) counts
+on iOS but not here. The first clause ends at `.`, `!`, `?`, `;` or a
+line feed on both sides, so a `\r` before that line feed stays in the clause
+and does not change the colon check. The guard returns the reason (empty
+text, much longer or many more words than the transcript, a changed number, an
+added or dropped negation, added words the speaker did not say, a changed
+speaker, a reply opener, a preamble, text about something else, or most of the
+transcript dropped) and that exact reason is what History and the live log
+record. The bridge
 (`apple_intelligence::generate_text` → `hex_apple_intelligence_text`) runs
 the plain-text responder at utility priority with a 2 s budget, temperature 0.2,
 and 1024 response tokens; the answer is trimmed, loses one pair of wrapping
@@ -1283,6 +1291,9 @@ Checks: `misheard_words_and_spoken_self_corrections_are_accepted`,
 `a_pure_insertion_is_rejected`,
 `misheard_and_replaced_words_pass_the_added_word_rule`,
 `stutters_and_repeated_pronoun_self_corrections_are_accepted`,
+`a_self_correction_marker_explains_a_short_cleanup`,
+`a_truncation_without_a_self_correction_is_rejected`,
+`replaced_words_count_with_multiplicity`,
 `pronoun_contractions_compare_as_their_expansions`,
 `a_had_contraction_still_passes_as_its_expansion`,
 `a_changed_person_is_rejected`,

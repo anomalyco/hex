@@ -375,11 +375,12 @@ pub(crate) fn rejection(original: &str, cleaned: &str) -> Option<&'static str> {
         return Some("the cleaned text is about something else");
     }
     // A short transcript may be entirely a spoken self-correction; a long one
-    // may lose at most half of its words, unless it only drops words, as a
-    // self-correction does.
+    // may lose at most half of its words. A cleanup that only drops words may
+    // keep less only when it keeps the tail after the speaker's last spoken
+    // self-correction marker; otherwise it is a silent truncation.
     if !(original_words.len() <= 6 && cleaned_words.len() <= 3)
-        && added > 0
         && ratio(shared, original_words.len()) < 0.5
+        && !(added == 0 && keeps_self_correction_tail(&original_words, &cleaned_words))
     {
         return Some("the cleaned text dropped most of the transcript");
     }
@@ -446,12 +447,56 @@ fn added_words(original: &[String], cleaned: &[String]) -> usize {
         .count()
 }
 
-/// The distinct original words the cleanup dropped, one for each word it may
-/// add.
+/// The transcript word occurrences the cleanup dropped, counted with
+/// multiplicity like the words it added: each occurrence whose word never
+/// appears in the cleaned text is one word the cleanup may have replaced.
 fn dropped_words(original: &[String], cleaned: &[String]) -> usize {
-    let original: BTreeSet<&str> = original.iter().map(String::as_str).collect();
     let cleaned: BTreeSet<&str> = cleaned.iter().map(String::as_str).collect();
-    original.difference(&cleaned).count()
+    original
+        .iter()
+        .filter(|word| !cleaned.contains(word.as_str()))
+        .count()
+}
+
+/// The spoken self-correction markers that may explain a cleanup keeping only
+/// the words after them.
+const SELF_CORRECTIONS: &[&[&str]] = &[
+    &["no", "wait"],
+    &["wait"],
+    &["i", "mean"],
+    &["actually"],
+    &["scratch", "that"],
+    &["sorry"],
+    &["rather"],
+];
+
+/// Whether the cleaned words are the tail after the transcript's last spoken
+/// self-correction marker, and that tail is not empty. A cleanup that keeps
+/// less than half the transcript may do so only in this shape; otherwise it
+/// silently truncated the speaker.
+fn keeps_self_correction_tail(original: &[String], cleaned: &[String]) -> bool {
+    let mut last_end = None;
+    for start in 0..original.len() {
+        for marker in SELF_CORRECTIONS {
+            if marker_at(original, start, marker) {
+                last_end = last_end.max(Some(start + marker.len()));
+            }
+        }
+    }
+    let Some(end) = last_end else {
+        return false;
+    };
+    let tail = &original[end..];
+    !tail.is_empty() && cleaned.ends_with(tail)
+}
+
+/// Whether `marker` appears in `words` at `start`.
+fn marker_at(words: &[String], start: usize, marker: &[&str]) -> bool {
+    words.len() >= start + marker.len()
+        && marker
+            .iter()
+            .enumerate()
+            .all(|(offset, word)| words[start + offset] == *word)
 }
 
 /// The first- and second-person pronouns that tell who is speaking. The
@@ -854,6 +899,76 @@ mod tests {
         assert!(is_acceptable(
             "i want, i mean, i need the report",
             "I need the report."
+        ));
+    }
+
+    /// A cleanup that keeps less than half the transcript is a spoken
+    /// self-correction only when it keeps the tail after a marker.
+    #[test]
+    fn a_self_correction_marker_explains_a_short_cleanup() {
+        assert!(is_acceptable(
+            "i'll send it tomorrow, i mean, i'll send it today",
+            "I'll send it today."
+        ));
+        assert!(is_acceptable(
+            "i want, i mean, i need the report",
+            "I need the report."
+        ));
+        assert!(is_acceptable(
+            "send it on tuesday actually wednesday",
+            "Send it on Wednesday."
+        ));
+        assert!(is_acceptable(
+            "the the the build is broken",
+            "The build is broken."
+        ));
+    }
+
+    /// Dropping most of the transcript without a self-correction is a silent
+    /// truncation, even when nothing was added.
+    #[test]
+    fn a_truncation_without_a_self_correction_is_rejected() {
+        let cases = [
+            (
+                "first send the quarterly report to the sales team and then ask them to review \
+                 the numbers before friday because the board meeting moved up and we need \
+                 everything signed off by thursday afternoon at the latest",
+                "First send the quarterly report to the sales team.",
+            ),
+            (
+                "remind me to buy milk and eggs and bread on the way home from work",
+                "Remind me to buy milk.",
+            ),
+            (
+                "can you find that article about the quarterly report and send it to me",
+                "Send it to me.",
+            ),
+            (
+                "i think we should ship the new version on friday and then we can tell the \
+                 customers about it",
+                "I think we should ship.",
+            ),
+            (
+                "scratch that send the invoice to sarah instead of the whole finance team today",
+                "Send the invoice to Sarah.",
+            ),
+        ];
+        for (original, cleaned) in cases {
+            assert_eq!(
+                rejection(original, cleaned),
+                Some("the cleaned text dropped most of the transcript"),
+                "{original} -> {cleaned}"
+            );
+        }
+    }
+
+    /// Replaced words count with multiplicity on both sides: two "cloud"
+    /// occurrences may become two "Claude" occurrences.
+    #[test]
+    fn replaced_words_count_with_multiplicity() {
+        assert!(is_acceptable(
+            "ask cloud to review it and then ask cloud to merge it",
+            "Ask Claude to review it and then ask Claude to merge it."
         ));
     }
 
