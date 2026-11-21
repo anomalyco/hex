@@ -19,6 +19,9 @@ Changes: lowercased and summed word and word-pair counts for 1980–2019, filter
 spellings, selected informative pairs, and quantized probabilities into HXTM v3.
 The English, Spanish, German, French and Italian capitalization lists (.capitals) come from the same corpus's
 word counts for 1980–2019: the share of each word written with a capital first letter.
+The Spanish, German, French and Italian validity lists (.valid) come from the same word counts:
+spellings outside each model used at least 3,000 times (German: 10,000), with each word's count
+quantized to a cost.
 
 German, French and Italian use their corpus's alphabetic spellings; no external dictionary. French and
 Italian keep the books' elided forms ("c'est", "dell'anno") and leave out the same letters run together.
@@ -41,3 +44,5 @@ Nasjonalbiblioteket. CC BY 4.0: https://creativecommons.org/licenses/by/4.0/
 https://data.norge.no/en/datasets/f0db926d-a154-3a12-82b8-6573b57f6dbb/norsk-ordbank-norwegian-bokmal-2005
 Changes: normalized and lowercased word forms, filtered the book counts to attested
 Bokmål spellings, selected informative pairs and quantized probabilities into HXTM v3.
+The Bokmål validity list (nb.valid) is the Norsk ordbank standard full forms outside the model
+that the same book counts use at least 1,000 times, with each word's count quantized to a cost.

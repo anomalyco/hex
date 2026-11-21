@@ -114,6 +114,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         }
         fix?.let { pool.add(it) }
         if (autocorrect && fix == null && model.language == "en") suggestOnly[lower]?.let { add(matchCase(token, it)) }
+        // Your own word, completed once two letters match, before the dictionary's: a word you added is
+        // likelier what you mean than a reading's runner-up ("zor" offers "Zorbex" beside the fix "or").
+        if (token.length >= 2) decoder.personal?.completions(token)?.firstOrNull()?.let { add(yours(it)) }
         val short = if (token.length <= 3) model.completionsAfter(lower, previous, suggestSwearWords).map { shown(model.text(it)) } else emptyList()
         if (fix == null) short.firstOrNull { s -> pool.none { it.equals(s, ignoreCase = true) } }?.let(::add)
         val readings = autocorrect && spatial && token.length >= 2 && !protected()

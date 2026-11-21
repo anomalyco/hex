@@ -188,8 +188,11 @@ internal class SpatialDecoder(val model: TypingModel) {
         val personal = personal?.takeIf { it.size > 0 }
         val yours = personal?.index(typed) ?: -1
         val knownLiteral = literal >= 0 || model.known(typed) || yours >= 0
+        // A rare word the books use, outside the model: what it costs by its count, not a known word's.
+        val listed = if (literal < 0 && yours < 0) model.validCost(typed) else null
         var lm = when {
             literal >= 0 -> model.languageCost(previous, literal)
+            listed != null -> listed
             knownLiteral -> 15.0
             else -> 22.0
         }
@@ -240,7 +243,10 @@ internal class SpatialDecoder(val model: TypingModel) {
         }
         readings.sortWith(compareBy<Reading> { it.cost }.thenBy { it.text })
         val best = readings.firstOrNull()
-        val margin = if (best == null || !knownLiteral || foldAccents(best.text.lowercase()) == foldAccents(typed)) 2.0 else 7.0
+        // A listed rare word takes a one-word fix as a spelling nobody knows does, but is split into
+        // words only as a known word is.
+        val margin = if (best == null || !knownLiteral || foldAccents(best.text.lowercase()) == foldAccents(typed) ||
+            (listed != null && ' ' !in best.text)) 2.0 else 7.0
         var replace = if (best != null && cost - best.cost >= margin) best.text else null
         var shown = readings.asSequence().filter { it.cost < cost && !it.text.equals(typed, ignoreCase = true) }
             .distinctBy { it.text.lowercase() }.toMutableList()

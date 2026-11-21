@@ -198,29 +198,44 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         }
         return (a.toLong() shl 32) or b.toLong()
     }
-    // Public, newline-delimited ASCII spellings outside the word-pair model. Find a
+    // Public, newline-delimited lowercase spellings outside the word-pair model, sorted by their UTF-8
+    // bytes (`<lang>.valid`), each alone (English) or with a tab and its cost in eighths of a nat. Find a
     // literal in the mapped bytes without allocating a heap dictionary or calling an IME service.
-    fun validLiteral(word: String): Boolean {
-        val data = validWords ?: return false
+    // -1 when it isn't listed, its cost, or [UNCOUNTED].
+    private fun validEntry(word: String): Int {
+        val data = validWords ?: return -1
+        val bytes = word.encodeToByteArray()
         var lo = 0; var hi = data.limit()
         while (lo < hi) {
             var at = (lo + hi) ushr 1
             while (at > lo && data.get(at - 1) != 10.toByte()) at--
             var end = at
             while (data.get(end) != 10.toByte()) end++
+            var key = at
+            while (key < end && data.get(key) != 9.toByte()) key++
             var cmp = 0
-            for (i in 0 until minOf(word.length, end - at)) {
-                cmp = data.get(at + i).toInt() - word[i].code
+            for (i in 0 until minOf(bytes.size, key - at)) {
+                cmp = (data.get(at + i).toInt() and 0xff) - (bytes[i].toInt() and 0xff)
                 if (cmp != 0) break
             }
-            if (cmp == 0) cmp = (end - at) - word.length
-            if (cmp == 0) return true
+            if (cmp == 0) cmp = (key - at) - bytes.size
+            if (cmp == 0) {
+                if (key == end) return UNCOUNTED
+                var cost = 0
+                for (i in key + 1 until end) cost = cost * 10 + (data.get(i) - 48)
+                return cost
+            }
             if (cmp < 0) lo = end + 1 else hi = at
         }
-        return false
+        return -1
     }
-    /** Whether a spelling outside the model is a real word: an English literal from SCOWL, or a
-     * name the capitals list has. */
+    fun validLiteral(word: String) = validEntry(word) >= 0
+    /** What a listed spelling outside the model costs as a word, -ln P with the model's backoff, from
+     * how often the books use it; null when it isn't listed or its list has no counts (English). */
+    fun validCost(word: String): Double? = validEntry(word).takeIf { it in 0..255 }?.let { 0.92 + it * 0.125 }
+    /** Whether a spelling outside the model is a real word: one the language's validity list has
+     * (SCOWL for English, the books' attested spellings for the others), or a name the capitals
+     * list has. */
     fun known(word: String) = validLiteral(word) || (capitals?.percent(word) ?: -1) >= 0
     fun index(word: String): Int {
         val r = range(word); val a = (r ushr 32).toInt()
@@ -252,6 +267,7 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         return if (count < 0) best else best.copyOf(count)
     }
     companion object {
+        private const val UNCOUNTED = 256
         private fun mapped(channel: FileChannel, offset: Long, size: Long): ByteBuffer {
             require(size in 1L..32_000_000L)
             return channel.map(FileChannel.MapMode.READ_ONLY, offset, size).order(ByteOrder.LITTLE_ENDIAN)
@@ -266,17 +282,19 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
             fun read(name: String) = assets.openFd("typing/" + name).use { fd ->
                 FileInputStream(fd.fileDescriptor).use { mapped(it.channel, fd.startOffset, fd.declaredLength) }
             }
-            val capitals = if (language + ".capitals" in assets.list("typing").orEmpty()) read(language + ".capitals") else null
+            val names = assets.list("typing").orEmpty()
+            val capitals = if (language + ".capitals" in names) read(language + ".capitals") else null
+            val valid = if (language + ".valid" in names) read(language + ".valid") else null
             return assets.open("typing/never-suggest.tsv").bufferedReader().use { list ->
-                open(read(language + ".hextm"), language, if (language == "en") read("en.valid") else null, list, capitals)
+                open(read(language + ".hextm"), language, valid, list, capitals)
             }
         }
         fun file(file: File, language: String): TypingModel {
             fun read(f: File) = FileInputStream(f).use { mapped(it.channel, 0, f.length()) }
-            val valid = File(file.parentFile, "en.valid")
+            val valid = File(file.parentFile, language + ".valid").takeIf { it.isFile }?.let(::read)
             val capitals = File(file.parentFile, language + ".capitals").takeIf { it.isFile }?.let(::read)
             return File(file.parentFile, "never-suggest.tsv").bufferedReader().use { list ->
-                open(read(file), language, if (language == "en") read(valid) else null, list, capitals)
+                open(read(file), language, valid, list, capitals)
             }
         }
     }

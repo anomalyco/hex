@@ -16,6 +16,7 @@ The same 2,000 held-out English and Spanish sentences, typed by today's iOS engi
 | The likelier next letter claims up to 5 dp of its neighbour's touch area | 721 (5.20%) | 1,090 (8.19%) | 729 (5.38%) | 647 (5.18%) |
 | A missed space with a slip after it, or three or more words run together (iOS #2244; not German) | 707 (5.10%) | 1,058 (7.95%) | 729 (5.38%) | 631 (5.05%) |
 | iOS at fc867484, with #2244 | 768 (5.54%) | 1,146 (8.62%) | — | — |
+| Real words the books use outside the models (validity lists; English's SCOWL list unchanged) | 707 (5.10%) | 1,033 (7.77%) | 714 (5.27%) | 627 (5.02%) |
 
 French and Italian have their own 2,000-sentence sets the same way (French on AZERTY, Italian on QWERTY; accented letters typed as their base key, elisions with their apostrophe). iOS types both with Apple's spelling dictionary and no typing model, and its harness maps only English and Spanish layouts, so there is no iOS column.
 
@@ -25,6 +26,7 @@ French and Italian have their own 2,000-sentence sets the same way (French on AZ
 | Models from Google Books, words read after an elision | 1,177 (8.62%) | 895 (7.44%) |
 | Accents the words around decide ("a"/"à", "e"/"è") | 947 (6.93%) | 789 (6.56%) |
 | A missed space with a slip after it, or words run together | 939 (6.87%) | 763 (6.35%) |
+| Real words the books use outside the models | 935 (6.84%) | 753 (6.26%) |
 
 French has 13,661 reference words, Italian 12,025.
 
@@ -37,9 +39,10 @@ The replay also counts what the suggestion strip offers, as iOS's harness does: 
 | Android with `strip()` and the new predictions | 13,180 / 2,349 / 4,390 | 12,407 / 2,110 / 3,236 | 12,918 / 1,680 / 5,624 | 11,988 / 2,159 / 4,875 |
 | … and the likelier next letter's touch area | 13,219 / 2,349 / 4,686 | 12,398 / 2,112 / 3,455 | 12,941 / 1,679 / 6,019 | 11,991 / 2,165 / 5,148 |
 | … and a missed space with a slip, or words run together | 13,219 / 2,350 / 4,685 | 12,398 / 2,115 / 3,455 | 12,941 / 1,679 / 6,019 | 11,991 / 2,167 / 5,150 |
+| … and the validity lists | 13,219 / 2,350 / 4,685 | 12,401 / 2,113 / 3,566 | 12,949 / 1,678 / 6,019 | 11,994 / 2,166 / 5,150 |
 | iOS at fc867484, with #2244 | 13,253 / 2,289 / 3,234 | 12,364 / 2,076 / 2,901 | — | — |
 
-French and Italian strip hits (word / next / after two letters): 11,935 / 2,188 / 4,230 of 13,661 / 11,430 / 9,950, and 11,022 / 1,662 / 3,638 of 12,025 / 9,788 / 8,981.
+French and Italian strip hits (word / next / after two letters): 11,939 / 2,188 / 4,230 of 13,661 / 11,430 / 9,950, and 11,028 / 1,663 / 3,638 of 12,025 / 9,788 / 8,981.
 
 Out of 13,870 / 11,639 / 10,874 (English), 13,301 / 11,058 / 9,383 (Spanish), 13,550 / 11,326 / 12,413 (German) and 12,492 / 10,297 / 9,789 (Bokmål).
 
@@ -116,6 +119,20 @@ The [shared iOS builder](build-typing-model.py), SHA-256 `cba009fe227632d9f8d176
 
 **Capitals lists** (`en.capitals`, `es.capitals`, `de.capitals`) record how often the books write a word with a capital first letter, from the same Google Books v3 1-grams (1980–2019) as each model. A word typed in lowercase takes its capital when the books nearly always write it so (95%), as iOS does where its dictionary knows a word only capitalised: "mary" → "Mary", "monday" → "Monday", German "haus" → "Haus". A word that is also an ordinary lowercase word is held below that (English: one SCOWL spells in lowercase, such as "united" or "china"; Spanish: a model word under 98%). The English and Spanish lists also hold names outside the model, three letters or more, capitalised 90% of the time and used at least once per million words ("tom" in Spanish, "sami" in English): typed as they are, they count as real words, as iOS's spelling dictionary takes them, instead of being corrected into "toma" or "swami". Two model words run together whose pair is ten times as common ("iwant", "apartir") are left out. German's list is iOS's `de.capitals` (#2169), byte for byte; [build-capitals.py](build-capitals.py) builds the other two (en: 10,984 words, 121 KB; es: 7,586 words, 85 KB).
 
+**Validity lists** (`<lang>.valid`) are what Android has for iOS's spelling dictionary: spellings outside the model that are still real words. English's is SCOWL (above). Spanish, German, French and Italian take every spelling the same Google Books v3 1-grams (1980–2019) use at least a cut-off number of times, in lowercase or with a capital; Bokmål takes Norsk ordbank's standard full forms that the NB N-gram 2026 books use at least that often. Left out: two model words run together whose pair is ten times as common ("apartir"), a French or Italian elision without its apostrophe ("cest"), and a model word with an accent changed or left out ("volvere", "brulant"), which books misspell as typists do. Each line carries the word's cost from its count, in eighths of a nat, as the model stores its own words'. The decoder reads a listed word at that cost instead of the 22 nats of a spelling nobody knows: a one-word fix still needs only the 2-nat margin, but splitting it into words needs a known word's 7, and the missed-space fallback leaves it alone. A list without costs (English) keeps the flat known-word reading (15 nats, 7-nat margin). [build-valid-words.py](build-valid-words.py) builds all six.
+
+The cut-off was chosen per language on both counts below, not on word errors alone: real words outside the model typed exactly that are now kept, and typos that are list words now wrongly kept. Errors are the replay's; the APK stores each list uncompressed.
+
+| Language | Cut-off (uses, 1980–2019) | Spellings | Adds to the APK | Word errors | Rare words typed exactly, kept | Typos wrongly kept |
+|---|---:|---:|---:|---:|---:|---:|
+| Spanish | 3,000 | 99,228 | 1.29 MB | 1,058 → 1,033 | 228 → 242 of 262 | 3 of 594 listed typos |
+| German | 10,000 | 132,272 | 2.14 MB | 729 → 714 | 83 → 94 of 107 | 3 of 199 |
+| Bokmål | 1,000 | 51,437 | 0.84 MB | 631 → 627 | 35 → 39 of 104 | 1 of 13 |
+| French | 3,000 | 108,519 | 1.45 MB | 939 → 935 | 201 → 201 of 211 | 0 of 121 |
+| Italian | 3,000 | 80,990 | 1.11 MB | 763 → 753 | 82 → 89 of 99 | 0 of 96 |
+
+Lower cut-offs kept a few more rare words for far more bytes (Spanish at 1,000: 1,030 errors, 246 kept, 3.5 MB; German at 3,000: 712, 96, 6.9 MB; Italian at 1,000: 748, 95, 3.0 MB; Bokmål at 100: 625, 41, 3.5 MB). A flat known-word reading for every listed word, as iOS gives its dictionary's, made Spanish 1,058 → 1,227 (cut-off 100): books use many typos and unaccented forms often enough to list them.
+
 The separate [never-suggest list](../../app/src/main/assets/typing/never-suggest.tsv) is
 adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13),
 **CC BY 4.0**. Hex reviewed the English, Spanish, German and Norwegian lists for keyboard use:
@@ -165,8 +182,12 @@ adapted from Shutterstock's [LDNOOBW revision 5faf2ba](https://github.com/LDNOOB
    python3 benchmark/typing/build-layout-model.py fr "$T/source/fr" "$T/models/fr.hextm"
    python3 benchmark/typing/build-layout-model.py it "$T/source/it" "$T/models/it.hextm"
    curl -fsSL https://downloads.sourceforge.net/project/wordlist/SCOWL/2020.12.07/scowl-2020.12.07.tar.gz -o "$T/source/scowl.tar.gz"
-   python3 benchmark/typing/build-valid-words.py "$T/source/scowl.tar.gz" \
+   python3 benchmark/typing/build-valid-words.py en "$T/source/scowl.tar.gz" \
      app/src/main/assets/typing/en.hextm "$T/models/en.valid"
+   for lang in es de fr it; do  # the counts build-capitals.py caches; German's are counted here first
+     python3 benchmark/typing/build-valid-words.py $lang app/src/main/assets/typing/$lang.hextm "$T/capitals/$lang" "$T/models/$lang.valid"
+   done
+   python3 benchmark/typing/build-valid-words.py nb app/src/main/assets/typing/nb.hextm "$T/source/nb-valid" "$T/models/nb.valid"
    python3 benchmark/typing/build-capitals.py en app/src/main/assets/typing/en.hextm "$T/capitals/en" \
      "$T/models/en.capitals" "$T/source/scowl.tar.gz"
    for lang in es fr it; do

@@ -127,6 +127,7 @@ val verifyInter by tasks.registering {
 val verifyTypingModels by tasks.registering {
     val dir = file("src/main/assets/typing")
     val names = listOf("en.hextm", "es.hextm", "de.hextm", "nb.hextm", "fr.hextm", "it.hextm", "en.valid",
+        "es.valid", "de.valid", "nb.valid", "fr.valid", "it.valid",
         "en.capitals", "es.capitals", "de.capitals", "fr.capitals", "it.capitals")
     val manifest = dir.resolve("SHA256SUMS")
     inputs.files(names.map(dir::resolve) + manifest)
