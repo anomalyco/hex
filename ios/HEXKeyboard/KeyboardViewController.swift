@@ -1,4 +1,4 @@
-import AVFoundation
+import os
 import SwiftUI
 import UIKit
 
@@ -55,6 +55,12 @@ final class KeyboardViewController: UIInputViewController {
     /// The Hex key's last touch-down (wall clock), where a start's probe timeline begins.
     private var hexKeyPressedAt: TimeInterval?
     private var warmStartTimeline: WarmStartTimeline?
+    /// What `scheduleLaunchWork` will still run once the keys are up.
+    private var launchWork: [DispatchWorkItem] = []
+    /// iOS warned this keyboard about memory: optional work stays off.
+    private var memoryWarned = false
+    /// The launch's optional work ran: Translation's languages may be listed from now on.
+    private var mayRunOptionalWork = false
 
     /// Haptics need Full Access, and Settings › Keyboard › Haptics covers both keyboards.
     private var allowsKeyHaptics: Bool {
@@ -68,9 +74,7 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         reportFullAccess(force: true)
-        // Keyboard dictation sets this process's audio session to record (WebKit captures for
-        // it), and iOS mutes a recording session's haptics by default: keep key haptics on.
-        try? AVAudioSession.sharedInstance().setAllowHapticsAndSystemSoundsDuringRecording(true)
+        KeyboardLocalDictation.allowHapticsWhileRecording()
         configureView()
         syncFromBridge(animated: false)
     }
@@ -98,9 +102,34 @@ final class KeyboardViewController: UIInputViewController {
         // about 80 ms late (Record typing logs), so q, a, p, l, shift and delete lagged and
         // could land after the next key. Apple's own keyboard has no such delay.
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
-        warmFullKeyboardLexiconIfNeeded()
-        listDictationLanguagesIfNeeded()
-        prepareLocalDictationIfNeeded()
+        scheduleLaunchWork()
+    }
+
+    /// The work a keyboard needs only once its keys are up waits for its first frame
+    /// (`KeyboardLaunchWork`): the text checker and lexicon, then, while memory allows, Apple
+    /// Speech's and Translation's languages and the capture page. Until that frame iOS shows
+    /// an empty panel, and it goes back to the previous keyboard when a keyboard is slow to
+    /// draw or ends while it starts.
+    private func scheduleLaunchWork() {
+        launchWork.forEach { $0.cancel() }
+        let lexicon = DispatchWorkItem { [weak self] in
+            guard let self, self.isShown else { return }
+            self.warmFullKeyboardLexiconIfNeeded()
+        }
+        let optional = DispatchWorkItem { [weak self] in
+            guard let self, self.isShown,
+                  KeyboardLaunchWork.allowsOptionalWork(
+                      headroom: os_proc_available_memory(),
+                      memoryWarned: self.memoryWarned
+                  ) else { return }
+            self.mayRunOptionalWork = true
+            self.listDictationLanguagesIfNeeded()
+            self.listTranslationLanguagesIfNeeded()
+            self.prepareLocalDictationIfNeeded()
+        }
+        launchWork = [lexicon, optional]
+        DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.afterFirstFrame, execute: lexicon)
+        DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.optionalWorkDelay, execute: optional)
     }
 
     override func viewWillDisappear(_ animated: Bool) {
@@ -109,6 +138,8 @@ final class KeyboardViewController: UIInputViewController {
         TypingJournal.sharedIfEnabled()?.save()
         AdaptiveTouch.current?.save()
         isShown = false
+        launchWork.forEach { $0.cancel() }
+        launchWork = []
         closeBarEmojiPanel()
         // A dictation under way finishes without the keyboard, and the next one delivers it.
         localDictation.keyboardWillHide()
@@ -119,6 +150,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
+        memoryWarned = true
         fullKeyboard?.handleMemoryWarning()
         closeBarEmojiPanel()
         barEmojiLibrary = nil
@@ -967,16 +999,13 @@ final class KeyboardViewController: UIInputViewController {
         } : nil
     }
 
-    /// Loads in-keyboard dictation's capture page once the keyboard has shown, so the Hex key
-    /// only waits for the microphone. Only with Full Access, which dictation needs, and not
-    /// while a warm Hex session takes the Hex key instead; `prepare` checks memory.
+    /// Loads in-keyboard dictation's capture page once the keyboard has shown
+    /// (`scheduleLaunchWork`, after its first frame), so the Hex key only waits for the
+    /// microphone. Only with Full Access, which dictation needs, and not while a warm Hex
+    /// session takes the Hex key instead; `prepare` checks memory.
     private func prepareLocalDictationIfNeeded() {
         guard hasFullAccess, viewModel.onLocalDictateTap != nil, !viewModel.isWarmAvailable else { return }
-        // A turn after the keyboard's first frame, so making the web view never delays it.
-        DispatchQueue.main.async { [weak self] in
-            guard let self, self.isShown, !self.viewModel.isWarmAvailable else { return }
-            self.localDictation.prepare(in: self.view)
-        }
+        localDictation.prepare(in: view)
     }
 
     // MARK: - Dictation language
@@ -1055,7 +1084,7 @@ final class KeyboardViewController: UIInputViewController {
     private static var didListTranslationLanguages = false
 
     private func listTranslationLanguagesIfNeeded() {
-        guard #available(iOS 26.0, *), hasFullAccess, !Self.didListTranslationLanguages else { return }
+        guard #available(iOS 26.0, *), hasFullAccess, mayRunOptionalWork, !Self.didListTranslationLanguages else { return }
         Self.didListTranslationLanguages = true
         Task { [weak self] in
             Self.translationLanguages = await DictationTranslator.supportedTargets()

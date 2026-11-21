@@ -594,6 +594,21 @@ final class KeyboardBridgeTests: XCTestCase {
         }
     }
 
+    /// A keyboard's optional launch work (language lists, the capture page) runs only after
+    /// its first frame, and never once memory is short (TestFlight build 56's blank panel).
+    func testOptionalLaunchWorkWaitsForTheFirstFrameAndForMemory() {
+        let budget = KeyboardLaunchWork.optionalHeadroomNeeded
+        XCTAssertGreaterThan(KeyboardLaunchWork.afterFirstFrame, 0, "never in the turn that draws the keys")
+        XCTAssertGreaterThan(KeyboardLaunchWork.optionalWorkDelay, KeyboardLaunchWork.afterFirstFrame)
+        XCTAssertTrue(KeyboardLaunchWork.allowsOptionalWork(headroom: 0, memoryWarned: false), "iOS doesn't say")
+        XCTAssertTrue(KeyboardLaunchWork.allowsOptionalWork(headroom: budget, memoryWarned: false))
+        XCTAssertTrue(KeyboardLaunchWork.allowsOptionalWork(headroom: 200 * 1_048_576, memoryWarned: false))
+        XCTAssertFalse(KeyboardLaunchWork.allowsOptionalWork(headroom: budget - 1, memoryWarned: false))
+        XCTAssertFalse(KeyboardLaunchWork.allowsOptionalWork(headroom: 8 * 1_048_576, memoryWarned: false))
+        XCTAssertFalse(KeyboardLaunchWork.allowsOptionalWork(headroom: 0, memoryWarned: true), "after a memory warning")
+        XCTAssertFalse(KeyboardLaunchWork.allowsOptionalWork(headroom: 200 * 1_048_576, memoryWarned: true))
+    }
+
     private func snapshot(
         state: KeyboardDictationState,
         heartbeat: TimeInterval,
