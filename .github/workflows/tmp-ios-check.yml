@@ -1,0 +1,55 @@
+name: tmp iOS check (two-thumb)
+
+# Throwaway: compiles and tests the iOS targets on a macOS runner for
+# ios-two-thumb-selection. Never merged.
+on:
+  push:
+    branches:
+      - tmp-ios-check-two-thumb
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-26
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Xcode and simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | sed -n '1,60p'
+      - name: Install XcodeGen
+        run: command -v xcodegen >/dev/null || brew install xcodegen
+      - name: Cleanup model
+        run: ios/scripts/fetch-cleanup-model.sh
+      - name: Generate the project
+        run: cd ios && xcodegen generate
+      - name: Test
+        run: |
+          cd ios
+          udid=$(python3 - <<'PY'
+          import json, re, subprocess
+
+          data = json.loads(subprocess.check_output(["xcrun", "simctl", "list", "devices", "available", "-j"]))
+          def version(runtime):
+              found = re.search(r"iOS-(\d+)-(\d+)", runtime)
+              return tuple(map(int, found.groups())) if found else (0, 0)
+          best = None
+          for runtime, devices in data["devices"].items():
+              if "iOS" not in runtime:
+                  continue
+              for device in devices:
+                  if not device.get("isAvailable") or not device["name"].startswith("iPhone"):
+                      continue
+                  if best is None or version(runtime) > best[0]:
+                      best = (version(runtime), device["name"], device["udid"])
+          if best:
+              print(best[2])
+          PY
+          )
+          echo "Simulator: $udid"
+          xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=$udid" CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
