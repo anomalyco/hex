@@ -117,6 +117,10 @@ fn zoom_text(mark: Option<&str>, sheet: &zoom::ZoomSheet) -> String {
     out
 }
 
+/// The most PNGs one `hex annotate frames` writes: a dense look at a range,
+/// not a frame-by-frame dump of the whole recording.
+const MAX_FRAMES: u64 = 240;
+
 /// `hex annotate frames`: one PNG per frame across a time range.
 pub(crate) fn frames(
     capture: &str,
@@ -139,6 +143,8 @@ pub(crate) fn frames(
         ));
     }
     let dir = library::resolve(capture)?;
+    let bundle = library::load(&dir).ok_or_else(|| library::unreadable(&dir))?;
+    let (from_ms, to_ms) = checked_range(from_ms, to_ms, fps, bundle.duration_ms)?;
     let paths = handoff::extract_frames_range(&dir, from_ms, to_ms, fps)
         .map_err(|error| ControlError::new("failed", format!("{error:#}")))?;
     let mut out = String::new();
@@ -147,6 +153,33 @@ pub(crate) fn frames(
         out.push('\n');
     }
     Ok(out)
+}
+
+/// The range `frames` extracts: `to_ms` clamped to the recording's length, so
+/// a range past the end never asks the decoder for frames that never existed,
+/// and at most [`MAX_FRAMES`] PNGs, so one call can't write a whole recording
+/// frame by frame.
+fn checked_range(
+    from_ms: u64,
+    to_ms: u64,
+    fps: u32,
+    duration_ms: u64,
+) -> Result<(u64, u64), ControlError> {
+    let to_ms = to_ms.min(duration_ms);
+    if to_ms < from_ms {
+        return Err(ControlError::new(
+            "invalid",
+            "the range ends before it starts",
+        ));
+    }
+    let frames = to_ms.saturating_sub(from_ms).saturating_mul(u64::from(fps)) / 1_000 + 1;
+    if frames > MAX_FRAMES {
+        return Err(ControlError::new(
+            "invalid",
+            format!("a range writes at most {MAX_FRAMES} frames; narrow it or use a lower --fps"),
+        ));
+    }
+    Ok((from_ms, to_ms))
 }
 
 /// A `--from` or `--to` time: `M:SS`, seconds, or `SS.mmm`.
@@ -317,5 +350,35 @@ mod tests {
         assert_eq!(error.message, "FPS must be between 1 and 240");
         let error = frames("latest", "soon", "0:02", 4).unwrap_err();
         assert_eq!(error.message, "invalid --from time: soon");
+    }
+
+    /// The range is clamped to the recording's length, and one call writes at
+    /// most 240 PNGs, so a long or hostile range is refused before any video
+    /// is decoded.
+    #[test]
+    fn a_range_is_clamped_to_the_recording_and_capped_at_240_frames() {
+        assert_eq!(checked_range(0, 9_000, 4, 4_000).unwrap(), (0, 4_000));
+        assert_eq!(checked_range(0, 59_750, 4, 60_000).unwrap(), (0, 59_750));
+        let error = checked_range(0, 60_000, 4, 60_000).unwrap_err();
+        assert_eq!(error.code, "invalid");
+        assert!(
+            error.message.contains("at most 240 frames"),
+            "{}",
+            error.message
+        );
+        // A range that starts past the end is refused, not clamped to nothing.
+        let error = checked_range(8_000, 9_000, 4, 4_000).unwrap_err();
+        assert_eq!(error.message, "the range ends before it starts");
+        // The cap reaches `frames` before it resolves or decodes a video.
+        let root = temp_root("frames-cap");
+        let dir = bundle(&root);
+        let error = frames(dir.to_str().unwrap(), "0:00", "0:04", 240).unwrap_err();
+        assert_eq!(error.code, "invalid");
+        assert!(
+            error.message.contains("at most 240 frames"),
+            "{}",
+            error.message
+        );
+        let _ = std::fs::remove_dir_all(root);
     }
 }

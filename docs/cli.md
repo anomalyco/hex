@@ -314,7 +314,8 @@ that moment into `<bundle>/zoom/` and prints its path, `0:09.500 → 0:11.500,
 12 frames: #1 0:09.500, …`, and `Said: “…”` when anything was said over the
 window; for a mark it prints the mark's line first. `frames [<capture>]
 --from <M:SS|secs> --to <M:SS|secs> [--fps 4]` writes one PNG per frame into
-`<bundle>/zoom/range-*/` and prints each path. `skill` prints the
+`<bundle>/zoom/range-*/`, clamped to the recording's length and at most 240
+frames a call, and prints each path. `skill` prints the
 [`hex-annotate`](../skills/hex-annotate/SKILL.md) skill this Hex ships.
 
 A CLI-started meeting is the same recording the menu bar starts: the menu-bar

@@ -968,8 +968,9 @@ pub enum CaptureCommand {
 /// Runs `hex capture`: on macOS through the running Hex; on Linux the
 /// folder reads (`list`, `show`, `route`, `send`) run here, and the
 /// recording commands go to the running Hex's listener; on Windows every
-/// command goes to the running Hex. A build without the capture engine
-/// answers `unsupported`.
+/// command goes to the running Hex. The agent reads (`inspect`, `zoom`,
+/// `frames`, and `skill`) run here, in the CLI process, on every OS. A build
+/// without the capture engine answers `unsupported`.
 pub fn capture(command: CaptureCommand) -> u8 {
     use crate::control::{ControlCommand as C, ScrawlCaptureAction as A};
     // The reads run here, on every OS: they only touch bundle files and the

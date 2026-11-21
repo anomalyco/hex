@@ -27,11 +27,11 @@ or in Settings › Labs, under Annotate ("Agent tools for captures"). It writes
 
 ## Finding hex
 
-`command -v hex` finds it on Linux and Windows installs, and on macOS when
-Install was used. If PATH has none on macOS, run
+`command -v hex` finds it when it is on PATH. On macOS, if PATH has none, run
 `/Applications/Hex.app/Contents/MacOS/hex` (or the same path under
-`~/Applications`). These four commands work with Hex closed: they read the
-bundle, decode its video, and write only into its `zoom/` folder.
+`~/Applications`), or symlink it into `~/.local/bin`. These four commands
+work with Hex closed: they read the bundle, decode its video, and write only
+into its `zoom/` folder.
 
 ## Read the bundle first
 
@@ -64,9 +64,10 @@ Answer with the moments named the way the summary names them, as in
 
 ## hex annotate
 
-Every command takes the bundle as its first argument: a bundle name
-(`1792933491953.scrawl`, extension optional), a path, or `latest` (the
-default) for the newest capture in Hex's captures folder.
+`inspect`, `zoom`, and `frames` take the bundle as their first argument: a
+bundle name (`1792933491953.scrawl`, extension optional), a path, or `latest`
+(the default) for the newest capture in Hex's captures folder. `skill` takes
+no argument.
 
 ```sh
 hex annotate inspect <capture>             # summary.md
@@ -98,7 +99,16 @@ writes a dense contact sheet of frames around the moment into
 ```text
 …/captures/1792933491953.scrawl/zoom/zoom-9500-11500.png
 0:09.500 → 0:11.500, 12 frames: #1 0:09.500, #2 0:09.681, #3 0:09.863, …
-Said: "but the width changes when the panel opens"
+Said: “but the width changes when the panel opens”
+```
+
+`--mark` prints the mark's line first, then the same:
+
+```text
+#1 ✎② 0:01 marked “the width” · m2
+…/captures/1792933491953.scrawl/zoom/zoom-300-2300.png
+0:00.300 → 0:02.300, 12 frames: #1 0:00.300, #2 0:00.481, #3 0:00.663, …
+Said: “it blue”
 ```
 
 Open that PNG and look at it before you act on the feedback. The cells are
@@ -117,7 +127,11 @@ Extracts one plain PNG per frame across a time range, at `--fps` frames a
 second (default 4, 1 to 240), into
 `<bundle>/zoom/range-<from>-<to>/frame-001.png` and so on, and prints each
 path. Use it when you need stills at exact times, or when a zoom sheet's cells
-are too small to read. The range must not end before it starts.
+are too small to read. The range must not end before it starts, `--to` is
+clamped to the recording's length, and one call writes at most 240 frames;
+narrow the range or lower `--fps`. Without a video, or over an empty range, it
+prints the bundle's existing keyframe PNGs in `frames/` that fall in the range
+instead.
 
 ### Leaving the bundle as it is
 

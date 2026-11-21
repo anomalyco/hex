@@ -56,7 +56,10 @@ pub fn parse_clock_ms(input: &str) -> Option<u64> {
         if !s.is_finite() || s < 0.0 {
             return None;
         }
-        Some(m * 60_000 + (s * 1_000.0).round() as u64)
+        // Minutes are only bounded by the input, so absurd ones read as no
+        // time instead of overflowing the millisecond clock.
+        m.checked_mul(60_000)?
+            .checked_add((s * 1_000.0).round() as u64)
     } else if let Some(ms_str) = trimmed.strip_suffix("ms") {
         ms_str.trim().parse().ok()
     } else {
@@ -638,6 +641,25 @@ mod tests {
             t1,
             name: name.into(),
         }
+    }
+
+    #[test]
+    fn clock_times_parse_and_absurd_minutes_do_not_overflow() {
+        assert_eq!(parse_clock_ms("0:12"), Some(12_000));
+        assert_eq!(parse_clock_ms("1:05"), Some(65_000));
+        assert_eq!(parse_clock_ms("12.5"), Some(12_500));
+        assert_eq!(parse_clock_ms("90s"), Some(90_000));
+        assert_eq!(parse_clock_ms("250ms"), Some(250));
+        assert_eq!(parse_clock_ms("-1"), None);
+        assert_eq!(parse_clock_ms("soon"), None);
+        // Minutes that would overflow the millisecond clock read as no time.
+        assert_eq!(parse_clock_ms(&format!("{}:00", u64::MAX)), None);
+        assert_eq!(parse_clock_ms("184467440737095516:00"), None);
+        assert_eq!(
+            parse_clock_ms("307445734561825:00"),
+            Some(18_446_744_073_709_500_000),
+            "a large time that still fits parses"
+        );
     }
 
     #[test]
