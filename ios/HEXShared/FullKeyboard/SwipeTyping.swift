@@ -182,7 +182,42 @@ final class SwipeTyping {
         let words = ranked(candidates)
         let elapsed = clock() - started
         lastDecodeTime = elapsed
+        if let letter = slidTapLetter(stroke), let start = stroke.points.first,
+           words.first.map({ !Self.word($0, startsAndEndsWith: letter) }) ?? true {
+            // A tap that slid: its letter goes in as a tap's would, after the space a swiped
+            // word before it keeps pending and with the capital shift gives it.
+            engine.endSwipe(typing: [], points: stroke.points.count, decodeTime: elapsed)
+            engine.touchBegan(id: id, at: start)
+            engine.touchEnded(id: id, at: start)
+            return
+        }
         engine.endSwipe(typing: words, points: stroke.points.count, decodeTime: elapsed)
+    }
+
+    /// How far (key pitches) a swipe may go from where it went down and still be a tap
+    /// that slid, when it lifts on the key it started on.
+    static let slidTapReach: CGFloat = 1.6
+
+    /// The letter of a swipe that came back to the key it went down on without going more
+    /// than `slidTapReach` pitches from it ("a" dragged a little too far and back): the
+    /// decoder reads no word of one letter, so it read "as". Nil for any other swipe.
+    private func slidTapLetter(_ stroke: Stroke) -> String? {
+        guard let first = stroke.points.first, let last = stroke.points.last else { return nil }
+        let reach = threshold * Self.slidTapReach
+        guard stroke.points.allSatisfy({ hypot($0.x - first.x, $0.y - first.y) <= reach }) else { return nil }
+        let layout = engine.layout
+        guard let down = layout.hitTest(first), down == layout.hitTest(last),
+              let letter = down.character, letter.count == 1 else { return nil }
+        return letter.lowercased()
+    }
+
+    /// Whether `word` begins and ends on `letter`'s key ("lol" on l, "pop" on p): a word a
+    /// swipe that comes back to its key can mean.
+    static func word(_ word: String, startsAndEndsWith letter: String) -> Bool {
+        func base(_ character: Character?) -> String? {
+            character.map { String($0).lowercased().decomposedStringWithCanonicalMapping.unicodeScalars.first.map(String.init) ?? "" }
+        }
+        return word.count > 1 && base(word.first) == letter && base(word.last) == letter
     }
 
     /// The readings best first once a rare name or abbreviation costs `nameCost` more.

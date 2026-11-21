@@ -1634,6 +1634,54 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hello world keyboard", "no second space after one typed")
     }
 
+    /// TestFlight (build 56): "Swipe keyboard doesn't handle next word capitalization
+    /// correctly. Also forgets to add a space sometimes. For example try swiping 'this is a
+    /// test'. Example: This Isa test." In a field that capitalises sentences, swiping "this"
+    /// and "is", then tapping "a" (or sliding on it a little, or a little too far and back),
+    /// then swiping "test" types "This is a test"; after a full stop the next swipe starts the
+    /// sentence with a capital.
+    func testThisIsATestSwipedWithASingleLetterBetween() throws {
+        for step in ["tap", "small slide", "slide out and back"] {
+            let (field, plane) = try swipeKeyboard()
+            field.autocapitalizationType = .sentences
+            plane.engine.refreshAutoCapitalization()
+            swipe("this", on: plane)
+            swipe("is", on: plane)
+            let key = try XCTUnwrap(plane.engine.layout.key(.character("a")))
+            let a = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            switch step {
+            case "tap":
+                tap(.character("a"), on: plane)
+            case "small slide":
+                swipe(points: [a, CGPoint(x: a.x + 4, y: a.y), CGPoint(x: a.x + 8, y: a.y + 2)], on: plane)
+            default:
+                // Past the swipe threshold (a key's pitch), so it is read as a swipe.
+                let far = plane.engine.layout.swipePitch * 1.3
+                let out = stride(from: 0, through: far, by: 3).map { CGPoint(x: a.x + $0, y: a.y) }
+                swipe(points: out + out.reversed().dropFirst(), on: plane)
+            }
+            swipe("test", on: plane)
+            XCTAssertEqual(field.text, "This is a test", step)
+        }
+
+        let (field, plane) = try swipeKeyboard()
+        field.autocapitalizationType = .sentences
+        plane.engine.refreshAutoCapitalization()
+        for word in ["this", "is"] { swipe(word, on: plane) }
+        tap(.character("a"), on: plane)
+        swipe("test", on: plane)
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character("."), on: plane)
+        tap(.layerSwitch(.letters), on: plane)
+        swipe("it", on: plane)
+        swipe("works", on: plane)
+        XCTAssertEqual(field.text, "This is a test. It works")
+
+        // A word a swipe back to its first key can mean ("lol" on l) still reads as itself.
+        XCTAssertTrue(SwipeTyping.word("lol", startsAndEndsWith: "l"))
+        XCTAssertFalse(SwipeTyping.word("as", startsAndEndsWith: "a"))
+    }
+
     /// The plane hands the decoder each touch's time, so a pause on a letter the stroke runs
     /// over counts: "tired" with the finger slowing on r, "tied" on the same path without.
     func testASwipeReadsWhereTheFingerPaused() throws {

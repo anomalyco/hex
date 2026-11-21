@@ -448,7 +448,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     (`KeyboardLayout.joinedForSwipe`), so either half's G and V is the one letter, as for
     Spatial autocorrect's taps. Taps, holds for accents, slides
     shorter than a key, delete's word slide, the space bar's trackpad, 123 and the Hex key
-    work as before: no swipe starts on them, and none once an accent menu is open.
+    work as before: no swipe starts on them, and none once an accent menu is open. A swipe
+    that lifts on the key it went down on, never more than 1.6 key pitches from it, is a
+    tap that slid: its letter goes in as a tap's would ("a" dragged a little too far and
+    back), unless it read as a word that starts and ends on that key ("lol").
     `SwipeDecoder` is a shape-matching decoder after SHARK2: the path is resampled to 32
     points in key pitches; words come from the language's typing model by the keys the
     path starts and ends near (each start letter is one range of the sorted word list,
