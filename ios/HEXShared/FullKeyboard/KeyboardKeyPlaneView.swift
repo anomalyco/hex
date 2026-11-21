@@ -129,7 +129,11 @@ final class KeyboardKeyPlaneView: UIView {
                     : label.first?.isLetter == true ? LabelStyle.lowercase
                     : LabelStyle.symbolOverrides[label] ?? LabelStyle.symbol
                 if let shown = style.shows { label = shown }
-                drawText(label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
+                if !isLandscape, layout.layer == .letters, label.first?.isLetter == true {
+                    drawLetter(label, in: labelFrame, style: style, capital: isUpperLetter)
+                } else {
+                    drawText(label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
+                }
             case .space:
                 // Apple's space bar unshades as it becomes the trackpad.
                 let fill = pressed.contains(.space) && !hideGlyphs ? palette.spaceHeldFill : palette.keyFill
@@ -238,6 +242,38 @@ final class KeyboardKeyPlaneView: UIView {
         (text as NSString).draw(at: origin, withAttributes: attributes)
     }
 
+    /// Apple's portrait letters aren't centred on the key by their advance, as plain text is.
+    /// How far each one sits from that depends on where the key's middle falls between whole
+    /// points (iOS 27.2 simulators, ink centroids of every letter at native resolution, light and
+    /// dark): Hex's centred letters were up to 0.8 pt (SE: 1.2) off Apple's, alternating key by
+    /// key, and 0.27-0.58 pt typically. These are Apple's offsets from plain centring for each
+    /// place a pixel-aligned key's middle can fall, lowercase then capitals: sixths of a point
+    /// on 3x screens (17 Pro, Pro Max; checked on the Air), quarters on 2x (SE). With them
+    /// Hex's letters land 0.10-0.16 pt (median) from Apple's.
+    private static let letterNudge3x: [(lowercase: CGFloat, capital: CGFloat)] = [
+        (-0.21, -0.46), (0.45, 0.13), (0.45, 0.20), (0.54, 0.32), (0.10, -0.12), (0.22, 0.08),
+    ]
+    private static let letterNudge2x: [(lowercase: CGFloat, capital: CGFloat)] = [
+        (0.76, 0.39), (0.21, -0.12), (0.16, -0.16), (0.68, 0.50),
+    ]
+
+    private func drawLetter(_ text: String, in frame: CGRect, style: LabelStyle, capital: Bool) {
+        let attributes: [NSAttributedString.Key: Any] = [.font: style.font, .foregroundColor: palette.textBase]
+        let size = (text as NSString).size(withAttributes: attributes)
+        let scale = traitCollection.displayScale
+        let table = scale >= 3 ? Self.letterNudge3x : scale >= 2 ? Self.letterNudge2x : []
+        var nudge: CGFloat = 0
+        if !table.isEmpty {
+            let place = Int((frame.midX * CGFloat(table.count)).rounded()) % table.count
+            nudge = capital ? table[place].capital : table[place].lowercase
+        }
+        (text as NSString).draw(
+            at: CGPoint(x: frame.midX + nudge - size.width / 2, y: frame.midY - size.height / 2 + style.yOffset),
+            withAttributes: attributes
+        )
+    }
+
+
     private func drawSymbol(
         _ name: String,
         in frame: CGRect,
@@ -293,8 +329,10 @@ final class KeyboardKeyPlaneView: UIView {
 
         /// Lowercase letters: 24.5 pt (Hex drew 22.5), 2.3 pt above the centre.
         static let lowercase = LabelStyle(size: 24.5, yOffset: -2.33)
-        /// Capitals: 21 pt a little heavier than regular, 1 pt up.
-        static let capital = LabelStyle(size: 21, weight: UIFont.Weight(rawValue: 0.12), yOffset: -1)
+        /// Capitals: 21 pt a little heavier than regular, 1.33 pt up. At 1 pt they sat 0.27 pt
+        /// below Apple's (ink centroids, every letter, light and dark, 17 Pro and Pro Max); text
+        /// lands on whole pixels, so the fix is a whole pixel.
+        static let capital = LabelStyle(size: 21, weight: UIFont.Weight(rawValue: 0.12), yOffset: -1.33)
         /// Digits, punctuation and symbols: 21.5 pt, a touch heavier, case-sensitive forms.
         static let symbol = LabelStyle(size: 21.5, weight: UIFont.Weight(rawValue: 0.08), yOffset: -1.33, caseSensitive: true)
         /// The symbols Apple draws at their own sizes, fitted one by one (`<` and `>` fit
