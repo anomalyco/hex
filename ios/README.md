@@ -655,7 +655,8 @@ never at a launch by itself.
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
     Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
-    German spatial autocorrect, and Multilingual model (Parakeet).
+    German spatial autocorrect, ABC under the emoji key, and Multilingual model
+    (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1137,7 +1138,13 @@ never at a launch by itself.
   Frequently used (eight columns: your emoji, then common ones) and the eight
   categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
   delete below, drawn without keycaps as the system's are; a tap anywhere under the
-  grid goes to the key under it, each category the full width of its slot. As on the
+  grid goes to the key under it, each category the full width of its slot. With
+  Experiments › ABC under the emoji key on (off by default,
+  `experiments.emojiLettersUnderEmojiKey`, App Group), ABC sits exactly where the emoji
+  key that opened the panel was, its x and width, so switching back to the letters needs
+  no thumb move; a tap left of it still goes to ABC, and the categories take the room
+  between it and delete. Off, or in a panel with no emoji key behind it (the dictation
+  bar's), ABC keeps its leading-end place. As on the
   system emoji keyboard (iOS 27.2 simulator), a tap on a category jumps the grid there as
   the finger lifts, and a finger sliding along the bar scrubs the grid live, each icon's
   slot running through its own category from start to end, with the chip on the category

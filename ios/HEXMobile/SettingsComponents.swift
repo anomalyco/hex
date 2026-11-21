@@ -279,6 +279,7 @@ enum SettingsSnapshotFixture {
         keyboard.autocorrect = true
         keyboard.spatialAutocorrect = true
         keyboard.germanSpatialAutocorrect = on
+        keyboard.emojiLettersUnderEmojiKey = on
         keyboard.suggestSwearWords = on
         keyboard.keyPopups = true
         keyboard.haptics = true
