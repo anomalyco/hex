@@ -706,7 +706,12 @@ private struct OnboardingPracticePage: View {
             if focused { keyboardCameUpAt = Date() }
         }
         .onChange(of: scenePhase) { _, phase in
-            if phase == .active { keyboardCameUpAt = Date() }
+            guard phase == .active else { return }
+            keyboardCameUpAt = Date()
+            // The page can open while Hex comes back from Settings, before it can take focus.
+            if !fieldFocused && OnboardingFixture.current != .tryDone {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { fieldFocused = true }
+            }
         }
         .onChange(of: text) { _, _ in
             if hasText {
