@@ -657,10 +657,11 @@ final class FullKeyboardView: UIView {
         engine.horizontalInset = isLandscape ? max(safeAreaInsets.left, safeAreaInsets.right) : 0
         engine.width = bounds.width
         syncPosture()
+        let lift = appliedLift
+        engine.availableHeight = bounds.height - lift
         engine.typingLog?.commitGeometry()
         let layout = engine.layout
 
-        let lift = appliedLift
         let content = CGRect(x: 0, y: lift, width: bounds.width, height: bounds.height - lift)
         plane.frame = content
         callout.frame = content

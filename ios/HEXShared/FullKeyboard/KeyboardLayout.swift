@@ -358,6 +358,24 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         )
     }
 
+    /// These metrics with the keys fitted into a view `height` tall, where iOS gives the keyboard
+    /// less than it asked for (TestFlight, Spotlight on an iPhone 17 Pro Max, iOS 27.3: the view
+    /// ended about 20 pt short and row 4 fell below it, under iOS's globe band). The strip keeps
+    /// its size; the keycaps and the gaps between rows shrink alike. Unchanged at full height,
+    /// and while the room for the keys is under half theirs (no height yet, or a passing one).
+    func fitted(toHeight height: CGFloat) -> KeyboardMetrics {
+        let keys = height - stripArea
+        guard height < totalHeight - 0.5, keys >= keysArea / 2 else { return self }
+        let scale = (keys - keysTop - keysBottom + bottomRowTrim) / (4 * keyHeight + 3 * rowGap)
+        return KeyboardMetrics(
+            side: side, gap: gap, rowGap: rowGap * scale, keyHeight: keyHeight * scale,
+            stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
+            keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
+            bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
+            modifierLetterRatio: modifierLetterRatio
+        )
+    }
+
     var stripArea: CGFloat { stripTop + stripHeight + stripBottom }
     /// Row 4's keycap height.
     var bottomRowHeight: CGFloat { keyHeight - bottomRowTrim }
@@ -433,7 +451,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         posture: KeyboardPosture = .phone,
         windowInset: CGFloat = 0,
         hexPlacement: HexKeyPlacement = .stripTrailing,
-        phoneSize: KeyboardPhoneSize = .regular
+        phoneSize: KeyboardPhoneSize = .regular,
+        availableHeight: CGFloat? = nil
     ) {
         self.width = width
         let letters = language.offered(letters)
@@ -448,9 +467,10 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.language = language
         self.posture = posture
         let innerWidth = width - 2 * self.horizontalInset
-        let metrics = KeyboardMetrics.for(
+        var metrics = KeyboardMetrics.for(
             orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize
         )
+        if let availableHeight { metrics = metrics.fitted(toHeight: availableHeight) }
         self.metrics = metrics
         if posture.splitsKeyboard, orientation == .portrait {
             let built = Self.buildSplitKeys(

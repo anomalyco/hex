@@ -179,6 +179,8 @@ final class FullKeyboardEngine {
     var phoneSize: KeyboardPhoneSize = .regular { didSet { if phoneSize != oldValue { rebuildLayout() } } }
     /// How far iOS set the keyboard in from each side of the screen (the Duo).
     var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
+    /// The height the keys really have; the rows fit it where iOS gives less than asked for.
+    var availableHeight: CGFloat? { didSet { if availableHeight != oldValue { rebuildLayout() } } }
     /// Settings › Keyboard › Hex key: the strip's trailing (Right) or leading (Left) end.
     var hexPlacement: HexKeyPlacement = .stripTrailing {
         didSet { if hexPlacement != oldValue { rebuildLayout(cause: "hex_placement") } }
@@ -1475,7 +1477,8 @@ final class FullKeyboardEngine {
             posture: posture,
             windowInset: windowInset,
             hexPlacement: hexPlacement,
-            phoneSize: phoneSize
+            phoneSize: phoneSize,
+            availableHeight: availableHeight
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)
         syncDecoderKeys()
