@@ -530,7 +530,7 @@ impl Agents {
     /// not found, and the link already installed.
     pub(super) fn fixture() -> Self {
         let home = std::path::PathBuf::from("/Users/you");
-        let mut agents = Self {
+        Self {
             statuses: vec![
                 AgentStatus {
                     agent: Agent::ClaudeCode,
@@ -564,12 +564,7 @@ impl Agents {
                 off_path: false,
             }),
             ..Self::default()
-        };
-        #[cfg(not(target_os = "macos"))]
-        {
-            agents.cli = None;
         }
-        agents
     }
 }
 
