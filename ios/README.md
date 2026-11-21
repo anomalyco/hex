@@ -310,6 +310,47 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below).
+  - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
+    (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
+    letter key, on this device, and Spatial autocorrect's decoder and the strip read your
+    taps with those personal centres (`AdaptiveTouch.swift`). Keycaps, hit rectangles,
+    the next-letter claims and Swipe typing are unchanged, and it never makes an automatic
+    correction the keyboard wouldn't make with it off: space puts in a personal reading
+    only when the centres read without it also clear it by the margin
+    (`AutocorrectEngine.decoderBaselineKeys`, `TypingDecoder.replaces`), else their own
+    decision, and joining two words at the space bar's edge is theirs alone to decide;
+    what only the personal centres read better is offered in the strip. While
+    on, Learn how I type's per-letter offsets stop moving the decoder's centres (they stay
+    that baseline), and its word-level learning carries on.
+    - **What teaches it (`AdaptiveTouchLabels.swift`):** only taps with evidence of the
+      letter meant, and only once the next word shows the word stood: a word left as typed
+      (letters the key under the finger typed, not ones the next-letter odds claimed), a
+      picked suggestion of the same length (at most two letters changed), a word kept over
+      an autocorrection by undoing it or tapping it, and a letter erased and retyped as a
+      neighbour (the erased tap is labelled with the letter that replaced it). Never an
+      autocorrection left in place (or a word before it revised, or two joined), a swipe, a
+      slide, a strip touch, an accent pick, or a password, code, email, URL, secure or
+      no-autocorrect field. Taps and words wait in
+      memory for at most two words and 30 s, and are dropped when the cursor moves, the
+      host changes the text, the field or the keyboard's size changes.
+    - **What it keeps:** sums per physical key in four rotating bins of 200 labelled taps,
+      for each context (letters, posture, orientation, split, Hex key side, width) and one
+      of two grip profiles: offsets in keycaps (so a new key plane of the same size keeps
+      them), shrunk toward the row and the keyboard, at most 0.3 keycap and 0.05 per
+      update, fixed spread. No letters, words, times or sequences: 23,588 bytes, in a file
+      in the keyboard's own container with Full Access (protected, excluded from backup,
+      never in the App Group or its exports, written in batches off the main thread), in
+      memory only without it. Settings shows Session only, Learning (n of 400 taps) or
+      Active from counts the keyboard reports; Reset touch learning, and Delete what Hex
+      learned, bump a reset generation that drops it from memory and disk (the file is
+      the keyboard's, so it goes the next time the keyboard runs) and that a write
+      queued before can't undo.
+    - **When the decoder uses it:** a profile is used only after 400 labelled taps over
+      three sessions, while it fits your recent taps better than the centres read without
+      it (log-likelihood per tap, each axis, over 32 labels). Once it fits worse (a new
+      grip, another hand), the keyboard goes back to them at once and labels teach the
+      second profile; a grip that comes back gets its profile back. Before the first 400
+      taps nothing is in use, and a new grip just mixes into what is learned.
   - **Offensive words (Settings › Keyboard › Suggest swear words):** like Apple's
     keyboard, the strip and autocorrect never offer slurs, and offer swear words only
     with Suggest swear words on (off by default; App Store rating 4+). The list
@@ -408,8 +449,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
     learned below the switch), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
-  - **Experiments:** Hinglish (Hindi in Latin letters) and Clean up with Apple
-    Intelligence.
+  - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
+    Intelligence, and Adaptive touch (its status and Reset touch learning below the switch).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -847,6 +888,27 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   `textDidChange` after the keyboard's own edits, varies by app and is
   unverified on a physical iPhone; when the context is cut short or missing,
   the dictation is settled on where it was last seen or not learned from.
+- **Adaptive touch:** `FullKeyboardEngineTests` and `AutocorrectEngineTests` cover what
+  teaches it (words that stood, picks, undone fixes, retypes; never autocorrections,
+  swipes, claimed letters, strip touches or sensitive fields), contexts, the evidence
+  floor, the grip fallback, the file (size, backup exclusion, damage, reset) and the guard
+  (no new rewrite, no new join, names and your words kept). The autocorrect benchmark's
+  held-out sentences (Tatoeba text, synthetic taps; iPhone 17 simulator, iOS 27.2) with the
+  Experiment off, or on without evidence, match the keyboard without it item for item
+  (2,000 of 2,000 outputs and strip hits, English and Spanish). With a profile learned from
+  the 300 dev sentences, English WER goes from 5.24% to 5.16% (16 words fixed, 5 broken,
+  none typed right) and Spanish from 8.34% to 8.26% (12 fixed, 3 broken); the strip's hit
+  after two letters rises 0.8 and 0.3 points. With the personal centres deciding alone it
+  would be 5.04% and 8.00%: the guard holds back most of the gain. Learn how I type's
+  journal alone does better (5.00% and 8.02% in the same replay, offline): with both on,
+  5.04% and 8.04%. In an offline replay of a grip change (learned on taps 6 pt right,
+  typed 6 pt left), the profile without the fallback broke 38 English words stock got
+  right; the fallback stops at the stock centres and breaks none, and then learns the new
+  grip. Per-letter engine p95 changed by -0.09 to +0.04 ms against the Experiment off
+  (simulator noise), peak footprint by at most +0.25 MB. Real iPhones, real grips and
+  hands, host apps' text reports, Full Access off on a device (whether the switch is
+  readable, the extension's own container), and how often people retype or undo are
+  unverified.
 - **Record typing logs:** `TypingLogTests` cover the line format, day files,
   the cap, retention, the skip rule, and a real `FullKeyboardView` typing
   through the logger, whose edits replay to the field's text. Touches there are
