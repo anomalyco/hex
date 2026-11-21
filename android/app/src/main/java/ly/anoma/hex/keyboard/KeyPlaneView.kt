@@ -56,9 +56,12 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val switchLanguage = Runnable {
         if (spaceKey.isPressed && spaceGesture.still) { spaceKey.isPressed = false; spaceKey.performLongClick() }
     }
+    private val deleteGesture = DeleteGesture(KeyboardMetrics.DELETE_START * density, KeyboardMetrics.DELETE_STEP * density,
+        KeyboardMetrics.DELETE_CANCEL * density, slop.toFloat())
+    private var deleteSlide: DeleteSlide? = null
     private val repeatDelete = object : Runnable {
         override fun run() {
-            if (deleting) { repeated = true; ime.engine.delete(); postDelayed(this, 65) }
+            if (deleting) { repeated = true; ime.engine.delete(); postDelayed(this, KeyboardMetrics.DELETE_REPEAT_EVERY) }
         }
     }
 
@@ -178,16 +181,31 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     k.setOnTouchListener { v, e ->
                         when (e.actionMasked) {
                             MotionEvent.ACTION_DOWN -> {
-                                repeated = false; deleting = true; v.isPressed = true
-                                postDelayed(repeatDelete, 380)
+                                repeated = false; deleting = true; v.isPressed = true; deleteSlide = null
+                                deleteGesture.down(e.x)
+                                postDelayed(repeatDelete, KeyboardMetrics.DELETE_REPEAT_DELAY)
+                            }
+                            MotionEvent.ACTION_MOVE -> if (deleting) {
+                                val words = deleteGesture.move(e.x)
+                                if (words > 0 && deleteSlide == null && !repeated) {
+                                    removeCallbacks(repeatDelete)
+                                    deleteSlide = ime.engine.deleteSlide()
+                                }
+                                if (!deleteGesture.still) removeCallbacks(repeatDelete)
+                                deleteSlide?.select(words)
                             }
                             MotionEvent.ACTION_UP -> {
                                 removeCallbacks(repeatDelete); v.isPressed = false
-                                if (deleting && !repeated) v.performClick()
-                                deleting = false
+                                val slide = deleteSlide
+                                when {
+                                    slide != null -> if (slide.words > 0) ime.engine.deleteSelection()
+                                    deleting && !repeated && deleteGesture.tap -> v.performClick()
+                                }
+                                deleting = false; deleteSlide = null
                             }
                             MotionEvent.ACTION_CANCEL -> {
                                 removeCallbacks(repeatDelete); deleting = false; v.isPressed = false
+                                deleteSlide?.select(0); deleteSlide = null
                             }
                         }
                         true

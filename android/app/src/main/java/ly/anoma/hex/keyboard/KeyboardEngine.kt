@@ -262,6 +262,18 @@ internal class KeyboardEngine(
         return CursorSlide(target, minOf(selStart, selEnd), maxOf(selStart, selEnd), readable = !secure)
     }
 
+    /** A slide left from delete: null where it can't run (a password field, a selection, no known cursor). */
+    fun deleteSlide(): DeleteSlide? {
+        if (secure || selStart < 0 || selStart != selEnd || !target.connected) return null
+        resetTyping(); surface?.suggestions(emptyList())
+        return DeleteSlide(target, selStart, target.before(2000).orEmpty())
+    }
+    /** The delete slide lifted with words selected: they go. */
+    fun deleteSelection() {
+        if (!target.connected) return
+        target.commit(""); resetTyping(); surface?.suggestions(emptyList())
+    }
+
     /** Dictation starts: the word in progress is left as typed. */
     fun clearForDictation() { resetTyping(); surface?.suggestions(emptyList()) }
 

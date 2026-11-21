@@ -211,4 +211,14 @@ class InsertionTest {
         for (n in listOf(-1, -2, -3, -4, -5, -9, 1)) slide.moveTo(n)
         assertEquals(listOf(7, 6, 2, 1, 0, 8), moves)
     }
+    @Test fun aDeleteSlideSelectsWholeWordsWithTheirSpaces() {
+        assertEquals(listOf(4, 9, 14), DeleteSlide.wordLengths("far away from home").take(3))
+        assertEquals(listOf(7, 14), DeleteSlide.wordLengths("Hello, world. ").toList())
+        assertEquals(listOf(6), DeleteSlide.wordLengths("don't ").toList())
+        val delete = DeleteGesture(start = 140f, step = 95f, cancel = 84f, stillSlop = 21f)
+        delete.down(1000f)
+        assertEquals(0, delete.move(940f)); assertEquals(true, delete.tap)
+        assertEquals(0, delete.move(870f)); assertEquals(false, delete.tap)
+        assertEquals(1, delete.move(840f)); assertEquals(2, delete.move(750f)); assertEquals(0, delete.move(900f))
+    }
 }

@@ -69,6 +69,14 @@ internal object KeyboardMetrics {
      * (Gboard: about 45 px and 33 px on a 2.625 density Pixel 8). */
     const val CURSOR_START = 17f
     const val CURSOR_STEP = 12.6f
+    /** A slide left from delete selects a word after this much travel, one more each step; a press
+     * that went further than the cancel distance deletes nothing on its own (Gboard: about 140 px,
+     * 95 px, and under 107 px on the Pixel 8). Held still, delete repeats every 50 ms after 400 ms. */
+    const val DELETE_START = 53f
+    const val DELETE_STEP = 36f
+    const val DELETE_CANCEL = 32f
+    const val DELETE_REPEAT_DELAY = 400L
+    const val DELETE_REPEAT_EVERY = 50L
 
     // The bottom row, in tenths: ?123, comma, space, period, enter.
     const val MODE = 1.5f
