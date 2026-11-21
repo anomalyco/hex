@@ -139,9 +139,14 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// How much shorter row 4's keycaps are than the others: where Apple's row 4 reaches
     /// below the bottom of a third-party keyboard's view, Hex's keeps Apple's top edge.
     var bottomRowTrim: CGFloat = 0
-    /// Row 4 on row 1's and row 2's columns, as Apple's is on the Duo folded: 123, the globe and
-    /// emoji one key wide on q, w and e, space from r to n, dictation on m, return from l.
-    var bottomRowOnLetterColumns = false
+    /// Row 4 on the letter columns, as Apple's is turned and on the Duo folded: 123, the globe
+    /// and emoji one key wide on row 1's columns from q, space after them, and return from this
+    /// many letter pitches in (8, o's column, turned; 8.5, row 2's l column, on the Duo, where
+    /// Apple's dictation key sits on m before it). nil: the iPhone's portrait row.
+    var bottomRowReturnColumn: CGFloat?
+    /// Shift and delete (and #+=, 123 on row 3) as a share of a letter's width, where it isn't
+    /// the portrait rule (`KeyboardLayout.modifierWidth`): 1.33 turned, as Apple's on every iPhone.
+    var modifierLetterRatio: CGFloat?
 
     /// The suggestion strip is the part of Apple's predictive bar below the band iOS 26 draws
     /// over every third-party keyboard (16.3 pt on the iPhone 17 Pro, 12.5 pt on the SE, 13.3 pt
@@ -211,13 +216,31 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         }
     }
 
-    /// iOS 26 landscape key geometry under that strip: 50 pt + 137 pt of keys
-    /// (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 187 pt.
+    /// Turned, Apple's keys are the same on every iPhone (17e, 17 Pro, Air, 17 Pro Max and SE,
+    /// iOS 27.2, beside Hex in the same field): 32 pt keycaps on a 40 pt pitch, row 4 ending
+    /// 2 pt above the bottom of a third-party keyboard's view, 7.9 pt corners, and row 4 on the
+    /// letter columns. Under the strip: 50 pt + 154 pt of keys (4 × 32 pt + 3 × 8 pt + 2 pt) =
+    /// 204 pt. Hex drew iOS 26's 27.5 pt keys on a 35.5 pt pitch, 187 pt in all, every row
+    /// 2 to 17 pt below Apple's.
     static let landscape = KeyboardMetrics(
-        side: 4, gap: 6, rowGap: 8, keyHeight: 27.5,
+        side: 4, gap: 6, rowGap: 8, keyHeight: 32,
         stripTop: 0, stripHeight: landscapeStripHeight, stripBottom: stripGap,
-        keysTop: 0, keysBottom: 3, cornerRadius: 7.5
+        keysTop: 0, keysBottom: 2, cornerRadius: keyCornerRadius, bottomRowReturnColumn: 8,
+        modifierLetterRatio: 1.33
     )
+
+    /// Turned, a Home-button iPhone (the SE) sets Apple's keys 72 pt in from each side, 47 pt
+    /// wide, with 4 pt under row 4; Hex's ran to 4 pt from the edges, 60.5 pt wide.
+    static let homeButtonLandscape: KeyboardMetrics = {
+        var m = landscape.with(side: 72)
+        m = KeyboardMetrics(
+            side: m.side, gap: m.gap, rowGap: m.rowGap, keyHeight: m.keyHeight,
+            stripTop: m.stripTop, stripHeight: m.stripHeight, stripBottom: m.stripBottom,
+            keysTop: m.keysTop, keysBottom: 4, cornerRadius: m.cornerRadius,
+            bottomRowReturnColumn: m.bottomRowReturnColumn, modifierLetterRatio: m.modifierLetterRatio
+        )
+        return m
+    }()
 
     /// `windowInset` is how far iOS set the keyboard in from each side of the screen (the Duo).
     static func `for`(
@@ -229,7 +252,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     ) -> KeyboardMetrics {
         let base: KeyboardMetrics
         if orientation == .landscape {
-            base = .landscape
+            base = posture == .phone && phoneSize == .homeButton ? .homeButtonLandscape : .landscape
         } else if posture == .phone {
             let phone = phonePortrait(phoneSize)
             // Apple's keys start 6.5 pt in on every iPhone from the SE's 375 pt up.
@@ -276,7 +299,8 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             keysTop: base.keysTop,
             keysBottom: coverPortrait ? 7 : orientation == .portrait ? 5 : base.keysBottom,
             cornerRadius: coverPortrait ? 9.8 : base.cornerRadius,
-            bottomRowOnLetterColumns: coverPortrait
+            bottomRowReturnColumn: coverPortrait ? 8.5 : base.bottomRowReturnColumn,
+            modifierLetterRatio: base.modifierLetterRatio
         )
     }
 
@@ -285,7 +309,8 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             side: side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
-            bottomRowTrim: bottomRowTrim, bottomRowOnLetterColumns: bottomRowOnLetterColumns
+            bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
+            modifierLetterRatio: modifierLetterRatio
         )
     }
 
@@ -319,12 +344,13 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// pitch: Apple's are 1.227 pitches less 3 pt on every iPhone (45.5 pt on the 17 Pro's
     /// 39.5 pt pitch, 50.2 on the Pro Max's 43.3, 42 on the SE's 36.8; iOS 27.2). A fixed
     /// 1.34 letters was half a point narrow on the 17 Pro.
-    static func modifierWidth(letterWidth: CGFloat, gap: CGFloat) -> CGFloat {
-        1.227 * (letterWidth + gap) - 3
+    static func modifierWidth(letterWidth: CGFloat, gap: CGFloat, metrics: KeyboardMetrics? = nil) -> CGFloat {
+        if let ratio = metrics?.modifierLetterRatio { return ratio * letterWidth }
+        return 1.227 * (letterWidth + gap) - 3
     }
 
     /// Row 3's modifier width in this layout (`modifierWidth(letterWidth:gap:)`).
-    var modifierWidth: CGFloat { Self.modifierWidth(letterWidth: letterWidth, gap: metrics.gap) }
+    var modifierWidth: CGFloat { Self.modifierWidth(letterWidth: letterWidth, gap: metrics.gap, metrics: metrics) }
     static let bottomSwitchWidthRatio: CGFloat = 1.56
     static let returnWidthRatio: CGFloat = 2.40
     static let compactReturnWidthRatio: CGFloat = 2.18
@@ -556,7 +582,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// edge to edge, as on Apple's (iOS 27.0 simulator: a 38.3 pt pitch where QWERTY's is 39.5 pt
     /// on a 402 pt iPhone).
     static func dvorakLetterWidth(innerWidth: CGFloat, metrics: KeyboardMetrics) -> CGFloat {
-        let modifier = modifierWidth(letterWidth: letterWidth(innerWidth: innerWidth, metrics: metrics), gap: metrics.gap)
+        let modifier = modifierWidth(letterWidth: letterWidth(innerWidth: innerWidth, metrics: metrics), gap: metrics.gap, metrics: metrics)
         return (innerWidth - 2 * metrics.side - modifier) / 9 - metrics.gap
     }
 
@@ -610,7 +636,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         let lw = dvorak
             ? dvorakLetterWidth(innerWidth: innerWidth, metrics: m)
             : letterWidth(innerWidth: innerWidth, metrics: m, columns: columns(rows))
-        let modW = modifierWidth(letterWidth: referenceW, gap: m.gap)
+        let modW = modifierWidth(letterWidth: referenceW, gap: m.gap, metrics: m)
         let left = inset + m.side
         let right = width - inset - m.side
 
@@ -718,13 +744,14 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         }
         trailing.append((.returnKey, returnW, "return"))
 
-        if field == .text, m.bottomRowOnLetterColumns {
-            // The Duo folded: each key before the space bar one letter wide on row 1's columns,
-            // space to where row 2's k column starts, then dictation (Hex has none: space runs on,
-            // or a Hex key right of space takes that slot), and return from l's column.
+        if field == .text, let returnColumn = m.bottomRowReturnColumn {
+            // Turned, and on the Duo folded: each key before the space bar one letter wide on
+            // row 1's columns, space up to return's column (on the Duo, Apple's dictation key
+            // sits just before return: Hex has none, so space runs on) and a Hex key right of
+            // space one pitch before return.
             let pitch = referenceW + m.gap
-            let kColumn = left + 7.5 * pitch
-            let returnStart = left + 8.5 * pitch
+            let returnStart = left + returnColumn * pitch
+            let kColumn = returnStart - pitch
             var lead: [(KeyKind, String)] = [leading[0].0 == .layerSwitch(.numbers) ? (.layerSwitch(.numbers), "123") : (.layerSwitch(.letters), "ABC")]
             if showsGlobe { lead.append((.globe, "globe")) }
             if showsEmoji { lead.append((.emoji, "emoji")) }

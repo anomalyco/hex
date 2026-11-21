@@ -36,7 +36,7 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitHeightFollowsApplesKeyPlaneAndLandscapeIs187Points() {
+    func testPortraitHeightFollowsApplesKeyPlaneAndLandscapeIs204Points() {
         for width in portraitWidths {
             XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 236, "width \(width)")
         }
@@ -45,7 +45,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardLayout.height(for: .portrait), 236)
         XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 243)
         XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .large), 255)
-        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 187)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 204)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 375, height: 667)), .homeButton)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 402, height: 874)), .regular)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 390, height: 844)), .regular)
@@ -102,7 +102,7 @@ final class KeyboardLayoutTests: XCTestCase {
         // Folded in landscape the Duo keeps the iPhone's landscape keys.
         let land = KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75)
         XCTAssertEqual(land.metrics.keyHeight, KeyboardMetrics.landscape.keyHeight)
-        XCTAssertEqual(land.totalHeight, 181)
+        XCTAssertEqual(land.totalHeight, 198)
     }
 
     /// Apple's split keyboard on the Duo unfolded upright (iOS 27.2 simulator, keyboard at
@@ -525,9 +525,34 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testLandscapeKeepsInsetsAndHeight() {
         let layout = KeyboardLayout(width: 932, orientation: .landscape, horizontalInset: 60)
-        XCTAssertEqual(layout.totalHeight, 187)
+        XCTAssertEqual(layout.totalHeight, 204)
         XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 64, accuracy: 0.001)
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
+    }
+
+    /// Apple's keys turned (iPhone 17 Pro, 874 pt, keys from 79 to 795 pt; iOS 27.2): 32 pt on a
+    /// 40 pt pitch, 2 pt under row 4, and row 4 on row 1's columns: 123 on q, emoji on w, space
+    /// from e to i, return from o. On the SE they start 72 pt in, 47 pt wide.
+    func testLandscapeMatchesApplesKeys() {
+        let pro = KeyboardLayout(width: 874, orientation: .landscape, showsEmoji: true, horizontalInset: 75)
+        let col = { (c: String) in pro.key(.character(c))!.frame }
+        XCTAssertEqual(col("q").minX, 79, accuracy: 0.34)
+        XCTAssertEqual(col("p").maxX, 795, accuracy: 0.34)
+        XCTAssertEqual(col("q").height, 32)
+        XCTAssertEqual(col("a").minY - col("q").minY, 40, accuracy: 0.001)
+        XCTAssertEqual(pro.totalHeight - pro.key(.space)!.frame.maxY, 2, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.layerSwitch(.numbers))!.frame.minX, col("q").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.layerSwitch(.numbers))!.frame.maxX, col("q").maxX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.emoji)!.frame.minX, col("w").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.minX, col("e").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.maxX, col("i").maxX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.returnKey)!.frame.minX, col("o").minX, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.returnKey)!.frame.maxX, col("p").maxX, accuracy: 0.001)
+
+        let se = KeyboardLayout(width: 667, orientation: .landscape, phoneSize: .homeButton)
+        XCTAssertEqual(se.key(.character("q"))!.frame.minX, 72, accuracy: 0.5)
+        XCTAssertEqual(se.key(.character("p"))!.frame.maxX, 595, accuracy: 0.5)
+        XCTAssertEqual(se.key(.character("q"))!.frame.width, 47, accuracy: 0.2)
     }
 
     // MARK: - Languages
