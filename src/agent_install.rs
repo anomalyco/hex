@@ -140,13 +140,13 @@ impl Paths {
     }
 
     /// The folder that means the agent is installed: ~/.claude (or
-    /// $CLAUDE_CONFIG_DIR), ~/.codex (or $CODEX_HOME) or the shared
-    /// ~/.agents, $XDG_CONFIG_HOME/opencode or ~/.config/opencode, and
-    /// ~/.pi (or $PI_CODING_AGENT_DIR).
+    /// $CLAUDE_CONFIG_DIR), ~/.codex (or $CODEX_HOME), $XDG_CONFIG_HOME/opencode
+    /// or ~/.config/opencode, and ~/.pi (or $PI_CODING_AGENT_DIR). The shared
+    /// ~/.agents holds Codex's skill but does not mean Codex is installed.
     pub(crate) fn found(&self, agent: Agent) -> bool {
         match agent {
             Agent::ClaudeCode => self.claude_folder().is_dir(),
-            Agent::Codex => self.codex_folder().is_dir() || self.shared_folder().is_dir(),
+            Agent::Codex => self.codex_folder().is_dir(),
             Agent::OpenCode => self.opencode_folder().is_dir(),
             Agent::Pi if self.pi_agent.is_some() => self.pi_folder().is_dir(),
             Agent::Pi => self.pi_root().is_dir(),
@@ -433,11 +433,28 @@ pub(crate) mod cli {
     }
 
     #[cfg(unix)]
-    fn link(env: &Environment, folder: &Path) -> std::io::Result<()> {
+    pub(super) fn link(env: &Environment, folder: &Path) -> std::io::Result<()> {
         let path = folder.join("hex");
-        // A dangling link to a Hex that is gone is ours to replace.
-        if std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink()) {
-            std::fs::remove_file(&path)?;
+        // Only a dangling link to a Hex that is gone is ours to replace. A
+        // live link, a link to anything else, or a regular file is never
+        // removed, even if a caller reaches this directly.
+        match std::fs::symlink_metadata(&path) {
+            Ok(meta) => {
+                let replaceable = meta.file_type().is_symlink()
+                    && std::fs::read_link(&path).is_ok_and(|target| {
+                        let target = resolve(folder, &target);
+                        is_hex(&target, env) && !target.exists()
+                    });
+                if !replaceable {
+                    return Err(std::io::Error::other(format!(
+                        "{} is not a dangling Hex link",
+                        path.display()
+                    )));
+                }
+                std::fs::remove_file(&path)?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
         }
         std::os::unix::fs::symlink(&env.exe, path)
     }
@@ -496,7 +513,7 @@ mod tests {
         let temp = TempDir::new("agents");
         let home = temp.path().join("home");
         std::fs::create_dir_all(home.join(".claude")).unwrap();
-        std::fs::create_dir_all(home.join(".agents")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
         std::fs::create_dir_all(home.join(".pi")).unwrap();
         let paths = Paths {
             home: home.clone(),
@@ -504,7 +521,7 @@ mod tests {
         };
         let before = status(&paths);
         assert!(before[0].found, "Claude Code's folder exists");
-        assert!(before[1].found, "the shared agents folder exists");
+        assert!(before[1].found, "Codex's folder exists");
         assert!(!before[2].found, "OpenCode's folder is absent");
         assert!(before[3].found, "Pi's folder exists");
         assert_eq!(before[0].skill, SkillState::Missing);
@@ -529,6 +546,20 @@ mod tests {
         assert_eq!(std::fs::read(&installed[0].path).unwrap(), SKILL.as_bytes());
         std::fs::write(&installed[0].path, "an older skill").unwrap();
         assert_eq!(status(&paths)[0].skill, SkillState::Outdated);
+    }
+
+    #[test]
+    fn the_shared_folder_alone_does_not_show_codex() {
+        let temp = TempDir::new("agents-only");
+        let home = temp.path().join("home");
+        std::fs::create_dir_all(home.join(".agents")).unwrap();
+        let paths = Paths {
+            home,
+            ..Paths::default()
+        };
+        let statuses = status(&paths);
+        assert!(!statuses[1].found, "~/.agents alone is not a Codex install");
+        assert_eq!(statuses[1].skill, SkillState::Missing);
     }
 
     #[test]
@@ -674,7 +705,7 @@ mod tests {
 
     #[cfg(unix)]
     mod cli_tests {
-        use super::super::cli::{Environment, LinkError, State, install, status};
+        use super::super::cli::{Environment, LinkError, State, install, link, status};
         use super::TempDir;
         use std::path::{Path, PathBuf};
 
@@ -760,6 +791,33 @@ mod tests {
             link_to(&other, &homebrew);
             assert_eq!(status(&env).state, State::OwnedByAnother);
             assert_eq!(install(&env).unwrap().state, State::OwnedByAnother);
+        }
+
+        #[test]
+        fn link_never_removes_a_live_foreign_link_or_a_regular_file() {
+            let root = TempDir::new("no-clobber");
+            let (env, homebrew, _) = environment(&root, "env");
+
+            // A live link to something that isn't Hex.
+            let other = fake_hex(&root, "other-bin/hex");
+            link_to(&other, &homebrew);
+            assert!(link(&env, &homebrew).is_err());
+            assert_eq!(
+                std::fs::read_link(homebrew.join("hex")).unwrap(),
+                other,
+                "the live foreign link is still there"
+            );
+
+            // A regular file.
+            let regular = root.path().join("regular");
+            std::fs::create_dir_all(&regular).unwrap();
+            std::fs::write(regular.join("hex"), "another program").unwrap();
+            assert!(link(&env, &regular).is_err());
+            assert_eq!(
+                std::fs::read_to_string(regular.join("hex")).unwrap(),
+                "another program",
+                "the regular file is still there"
+            );
         }
 
         #[test]

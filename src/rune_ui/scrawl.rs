@@ -586,11 +586,17 @@ impl Agents {
 /// someone else manages through a symlink, has no switch: it is read by
 /// content and never written here.
 fn agent_row(ui: &Ui, p: Paint, status: &AgentStatus) -> El {
-    let label = match (status.found, status.skill) {
-        (false, _) => tr("Not found"),
-        (true, SkillState::Missing) => tr("Not installed"),
-        (true, SkillState::Current) => tr("Installed"),
-        (true, SkillState::Outdated) => tr("Update available"),
+    // A symlinked skill or folder is someone else's to update; the row says
+    // so rather than offering a state Hex can't change.
+    let label = if status.linked {
+        tr("Managed elsewhere")
+    } else {
+        match (status.found, status.skill) {
+            (false, _) => tr("Not found"),
+            (true, SkillState::Missing) => tr("Not installed"),
+            (true, SkillState::Current) => tr("Installed"),
+            (true, SkillState::Outdated) => tr("Update available"),
+        }
     };
     let key = format!("agent-{}", status.agent.key());
     if !status.found || status.linked {
@@ -1149,10 +1155,14 @@ mod tests {
             "the row says Installed now"
         );
         assert_eq!(rt.state.agents.selected, vec![false; 4]);
-        assert!(rt.find("agents-install").is_some());
-        // Nothing is checked now, so Install can't do anything.
-        tap(&mut rt, "agents-install");
-        assert_eq!(rt.state.agents.selected, vec![false; 4]);
+        // Nothing is checked now, so Install is disabled.
+        let install = crate::rune_ui::accessibility_tests::node(&rt, "agents-install");
+        assert!(
+            install["states"]
+                .as_array()
+                .is_some_and(|states| states.iter().any(|state| state == "disabled")),
+            "Install is disabled while nothing is checked: {install}"
+        );
     }
 
     /// Clicking one agent's row checks or unchecks only that agent, and a
@@ -1196,6 +1206,11 @@ mod tests {
         let mut rt = agents_pane(&home);
         assert!(rt.state.agents.statuses[0].linked);
         assert_eq!(rt.state.agents.statuses[0].skill, SkillState::Outdated);
+        assert!(
+            texts(&rt).iter().any(|text| text == "Managed elsewhere"),
+            "the row says someone else manages it: {:?}",
+            texts(&rt)
+        );
         assert_eq!(
             rt.state.agents.selected,
             vec![false; 4],

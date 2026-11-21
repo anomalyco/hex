@@ -3453,8 +3453,8 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   agent says whether its folder exists and whether it already has this Hex's
   skill: Claude Code at `$CLAUDE_CONFIG_DIR` or `~/.claude` plus
   `skills/hex-annotate/SKILL.md`, Codex at
-  `~/.agents/skills/hex-annotate/SKILL.md` (found with `~/.codex`,
-  `$CODEX_HOME`, or `~/.agents`; `$CODEX_HOME/skills` is the legacy place),
+  `~/.agents/skills/hex-annotate/SKILL.md` (found with `~/.codex` or
+  `$CODEX_HOME`; `$CODEX_HOME/skills` is the legacy place),
   OpenCode at `$XDG_CONFIG_HOME` or `~/.config` plus
   `opencode/skills/hex-annotate/SKILL.md`, and Pi at
   `~/.pi/agent/skills/hex-annotate/SKILL.md` (`$PI_CODING_AGENT_DIR` or
@@ -3467,9 +3467,9 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   checked agent's folder — directories created, a staging file renamed into
   place, no other file touched — and a not-found agent has no switch, is never
   checked, and gets no folder; Install is disabled while nothing is checked.
-  A symlinked `SKILL.md` or `hex-annotate` folder is managed elsewhere: its
-  content decides the wording, it has no switch, and nothing is written
-  through the link. Beside it, `npx skills add anomalyco/hex --skill
+  A symlinked `SKILL.md` or `hex-annotate` folder is managed elsewhere: the
+  row says Managed elsewhere, it has no switch, and nothing is written through
+  the link. Beside it, `npx skills add anomalyco/hex --skill
   hex-annotate` has Copy, for people who manage skills themselves. On macOS,
   **Command-line tool** links `hex` (this app's executable) into
   `/opt/homebrew/bin` or `/usr/local/bin` when one exists and is writable,

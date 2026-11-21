@@ -344,8 +344,8 @@ Agents (on; Labs › Install agent skill from Annotate)   // capture.agents; lab
 ├── One row per coding agent: whether its folder exists, and whether it already has this Hex's skill
 │   ├── Claude Code -> $CLAUDE_CONFIG_DIR or ~/.claude, then skills/hex-annotate/SKILL.md
 │   │   (found with that folder)
-│   ├── Codex -> ~/.agents/skills/hex-annotate/SKILL.md (found with ~/.codex, $CODEX_HOME,
-│   │   or ~/.agents); $CODEX_HOME/skills is only the legacy place
+│   ├── Codex -> ~/.agents/skills/hex-annotate/SKILL.md (found with ~/.codex or
+│   │   $CODEX_HOME); $CODEX_HOME/skills is only the legacy place
 │   ├── OpenCode -> $XDG_CONFIG_HOME or ~/.config, then opencode/skills/hex-annotate/SKILL.md
 │   │   (found with the opencode folder)
 │   └── Pi -> ~/.pi/agent/skills/hex-annotate/SKILL.md ($PI_CODING_AGENT_DIR or ~/.pi;
@@ -359,9 +359,8 @@ Agents (on; Labs › Install agent skill from Annotate)   // capture.agents; lab
 │   skills/hex-annotate/SKILL.md that hex annotate skill prints into each checked agent's
 │   folder: directories created, a staging file renamed into place in the same folder,
 │   and no other file touched
-├── A symlinked SKILL.md, or a symlinked hex-annotate folder, is managed elsewhere: its
-│   content decides Installed or Update available, it has no switch, and nothing is
-│   written through the link
+├── A symlinked SKILL.md, or a symlinked hex-annotate folder, is managed elsewhere: the
+│   row says Managed elsewhere, it has no switch, and nothing is written through the link
 ├── An agent this computer doesn't have reads Not found, has no switch, is never checked,
 │   and gets no folder created for it; Install is disabled while nothing is checked
 ├── Install with the skills CLI -> npx skills add anomalyco/hex --skill hex-annotate,
@@ -381,7 +380,8 @@ Agents (on; Labs › Install agent skill from Annotate)   // capture.agents; lab
 │   and frames commands need it
 └── Checks: agent_install (finding each agent, installing, updating an outdated file,
     leaving other files alone, the shared ~/.agents copy for Codex and Pi, a symlinked
-    skill or folder, choosing the link folder, never replacing a foreign hex, a dangling
+    skill or folder, choosing the link folder, never replacing a foreign hex (a live
+    foreign link or a regular file is never removed even by link() itself), a dangling
     Hex-app link, App Translocation), and rune_ui::scrawl's
     the_agents_section_needs_its_lab, installing_writes_each_checked_agents_skill,
     an_agents_row_checks_only_that_agent, a_linked_skill_has_no_switch.
