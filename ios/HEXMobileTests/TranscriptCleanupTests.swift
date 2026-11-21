@@ -94,6 +94,101 @@ final class TranscriptCleanupGuardTests: XCTestCase {
     }
 }
 
+/// Clean up what I say in English: `CleanupGuard` after the tagger keeps names, hyphenated
+/// words, numbers and content adverbs, and still lets fillers, repeats and self-corrections go.
+final class CleanupGuardTests: XCTestCase {
+    private func cleaned(_ text: String, _ probabilities: [Double], terms: [String] = []) -> String {
+        let words = CleanupTagger.words(in: text)
+        let deletes = CleanupGuard.deletes(
+            words, probabilities: probabilities, protectedTerms: CleanupGuard.protectedTerms(terms)
+        )
+        return CleanupReconstruction.reconstruct(words, deletes: deletes)
+    }
+
+    func testUnsetSwitchIsOnAndAStoredChoiceStays() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertTrue(CleanupTaggerSettings(defaults: defaults).isEnabled, "an unset switch is on")
+        defaults.set(false, forKey: "experiments.cleanupTagger")
+        XCTAssertFalse(CleanupTaggerSettings(defaults: defaults).isEnabled, "turning it off is kept")
+        CleanupTaggerSettings(defaults: defaults).isEnabled = true
+        XCTAssertTrue(CleanupTaggerSettings(defaults: defaults).isEnabled)
+    }
+
+    func testTheModelSeesHyphenatedWordsWhole() {
+        XCTAssertEqual(CleanupGuard.modelWord("Hye-jin"), "Hyejin")
+        XCTAssertEqual(CleanupGuard.modelWord("follow-up,"), "followup,")
+        XCTAssertEqual(CleanupGuard.modelWord("w-"), "w-", "a stutter fragment stays one")
+        XCTAssertEqual(CleanupGuard.modelWord("415-555-0198"), "415-555-0198")
+        XCTAssertEqual(CleanupGuard.modelWord("-"), "-")
+    }
+
+    /// The tagger was sure (P 0.996 to 1.0) about each of these words; none is a disfluency.
+    func testProtectedWordsStayWhenTheTaggerIsSure() {
+        XCTAssertEqual(cleaned("Tell Hye-jin I said thanks.", [0, 1, 0.999, 0.999, 0]), "Tell Hye-jin I said thanks.")
+        XCTAssertEqual(cleaned("Ask Jean-Luc and Anne-Marie.", [0, 1, 0, 1]), "Ask Jean-Luc and Anne-Marie.")
+        XCTAssertEqual(cleaned("Send the follow-up today.", [0, 0, 1, 0]), "Send the follow-up today.")
+        XCTAssertEqual(cleaned("Call me later, maybe after dinner.", [0, 0, 0, 1, 0, 0]), "Call me later, maybe after dinner.")
+        XCTAssertEqual(cleaned("It's really good.", [0, 1, 0]), "It's really good.")
+        XCTAssertEqual(cleaned("Meet at gate 12 now.", [0, 0, 0, 1, 0]), "Meet at gate 12 now.")
+        XCTAssertEqual(cleaned("I told Priya already.", [0, 0, 1, 0]), "I told Priya already.")
+        XCTAssertEqual(cleaned("Ship the opencode build.", [0, 0, 1, 0], terms: ["OpenCode"]), "Ship the opencode build.")
+        XCTAssertEqual(cleaned("It was really, really long.", [0, 0, 1, 0, 0]), "It was really, really long.")
+        XCTAssertEqual(cleaned("The cat keeps trying to scratch it.", [0, 0, 0, 0.99, 0.99, 0, 0]), "The cat keeps trying to scratch it.")
+        XCTAssertEqual(cleaned("I mean what I say.", [0, 1, 0, 0, 0]), "I mean what I say.")
+    }
+
+    func testFillersRepeatsAndSelfCorrectionsStillGo() {
+        XCTAssertEqual(cleaned("Um, tell Hye-jin I said thanks.", [1, 0, 0, 0, 0, 0]), "Tell Hye-jin I said thanks.")
+        XCTAssertEqual(cleaned("It was, like, really long.", [0, 0, 1, 0, 0]), "It was really long.")
+        XCTAssertEqual(cleaned("It's, you know, been rough.", [0, 1, 1, 0, 0]), "It's been rough.")
+        XCTAssertEqual(cleaned("I I think so.", [1, 0, 0, 0]), "I think so.")
+        XCTAssertEqual(cleaned("Ask Ji-woo Ji-woo now.", [0, 1, 0, 0]), "Ask Ji-woo now.", "a repeated name loses only its copy")
+        XCTAssertEqual(cleaned("We w- we left.", [0, 1, 0, 0]), "We we left.")
+        XCTAssertEqual(cleaned("Meet me at 5, no, at 6.", [0, 0, 1, 1, 1, 0, 0]), "Meet me at 6.")
+        XCTAssertEqual(cleaned("Send it to John, I mean Mike.", [0, 0, 0, 1, 1, 1, 0]), "Send it to Mike.")
+        XCTAssertEqual(
+            cleaned("Send it to Ji-woo, no wait, to Smith-Jones.", [0, 0, 1, 1, 1, 1, 0, 0]),
+            "Send it to Smith-Jones.", "a hyphenated name goes in a self-correction"
+        )
+        XCTAssertEqual(cleaned("It costs 15 euros, er, 50 euros.", [0, 0, 1, 1, 1, 0, 0]), "It costs 50 euros.")
+        XCTAssertEqual(cleaned("Did you, have you seen it?", [0.99, 0.99, 0, 0, 0, 0]), "Have you seen it?")
+    }
+
+    /// A self-correction or false start the tagger is unsure of stays as said.
+    func testUnsureRepairsStay() {
+        XCTAssertEqual(cleaned("Meet me at 5, no, 6.", [0, 0, 0, 0.99, 0.99, 0]), "Meet me at 5, no, 6.")
+        XCTAssertEqual(cleaned("Miss you, see you soon.", [0.99, 0.99, 0, 0, 0]), "Miss you, see you soon.")
+    }
+
+    /// The shipped model with the guard: hyphenated names it used to delete at P 0.996 to 1.0
+    /// stay, and disfluencies around them still go.
+    func testTaggerKeepsHyphenatedNamesAndStillCleans() throws {
+        let tagger = CleanupTagger()
+        for (spoken, expected) in [
+            ("Tell Hye-jin I said thanks.", "Tell Hye-jin I said thanks."),
+            ("Can you ask Jean-Luc to send the deck?", "Can you ask Jean-Luc to send the deck?"),
+            ("Anne-Marie and Ji-woo are coming on Friday.", "Anne-Marie and Ji-woo are coming on Friday."),
+            ("I met Mr. Smith-Jones and Catherine Zeta-Jones.", "I met Mr. Smith-Jones and Catherine Zeta-Jones."),
+            ("I'll ask Bo-ra about the launch.", "I'll ask Bo-ra about the launch."),
+            ("Call me later, maybe after dinner.", "Call me later, maybe after dinner."),
+            ("The cat keeps trying to scratch that chair.", "The cat keeps trying to scratch that chair."),
+            ("Um, tell Hye-jin I said thanks.", "Tell Hye-jin I said thanks."),
+            ("Send the follow-up to Ji-woo, no wait, to Smith-Jones.", "Send the follow-up to Smith-Jones."),
+            ("Let's ship it Tuesday, no wait, Thursday.", "Let's ship it Thursday."),
+            ("Can you send it to John, I mean Mike?", "Can you send it to Mike?"),
+            ("Meet me at 5, no, at 6.", "Meet me at 6."),
+            ("We need 20, sorry, 25 chairs.", "We need 25 chairs."),
+            ("I I think we're good to go.", "I think we're good to go."),
+            ("Can you, um, send me the address again?", "Can you send me the address again?"),
+            ("It was, like, really long.", "It was really long."),
+        ] {
+            XCTAssertEqual(try tagger.clean(spoken), expected, spoken)
+        }
+    }
+}
+
 /// Clean up what I say's word rules for Spanish, German and Norwegian: what goes, and what
 /// must stay because the words mean something there.
 final class SpokenCleanupRulesTests: XCTestCase {

@@ -116,7 +116,12 @@ nonisolated struct DictationPipeline: Sendable {
         let heard = hinglish && HinglishSettings.isHindi(language) ? HinglishRomanizer.romanize(heard) : heard
         let fixed = DictationCorrections.apply(corrections, to: heard)
         let spelled = VocabularySpelling.apply(vocabulary, to: fixed)
-        let tagged = await CleanupTagger.cleanIfEnabled(spelled, style: style, language: language)
+        let tagged = await CleanupTagger.cleanIfEnabled(
+            spelled,
+            style: style,
+            language: language,
+            protectedTerms: DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: corrections)
+        )
         let cleaned = await refine?(tagged) ?? tagged
         let translated = await DictationTranslator.translateIfEnabled(
             cleaned,
