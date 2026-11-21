@@ -3,6 +3,11 @@ package ly.anoma.hex.keyboard
 import android.Manifest
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.database.ContentObserver
+import android.os.Handler
+import android.os.Looper
+import android.provider.UserDictionary
+import java.util.concurrent.Executors
 import android.inputmethodservice.InputMethodService
 import android.view.View
 import android.view.inputmethod.EditorInfo
@@ -13,6 +18,7 @@ import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingPreferences
@@ -25,8 +31,14 @@ class HexKeyboard : InputMethodService() {
     internal var nextEnglish: Boolean? = null
     internal val feedback by lazy { TypingPreferences(this) }
     internal val layoutLanguage get() = feedback.layout ?: preferences.spoken.layout ?: Spoken.English
+    // Android's personal dictionary is read off the main thread, and again whenever it changes.
+    private val words = Executors.newSingleThreadExecutor { Thread(it, "Hex personal words") }
+    private val dictionaryChanged = object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) = engine.personalWordsChanged()
+    }
     internal val engine by lazy {
-        KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { SpatialDecoder(TypingModel.asset(assets, it)) })
+        KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { SpatialDecoder(TypingModel.asset(assets, it)) },
+            readPersonal = { PersonalWords.read(contentResolver, it) }, background = words)
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
@@ -37,6 +49,7 @@ class HexKeyboard : InputMethodService() {
         setTheme(R.style.HexIme)
         super.onCreate()
         getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
+        contentResolver.registerContentObserver(UserDictionary.Words.CONTENT_URI, true, dictionaryChanged)
         capture = MicCapture(LocalSpeech(applicationContext),
             update = { phase, note -> view?.status(phase, note ?: idleHint()) },
             meter = { view?.setLevel(it) }, insert = ::commitSpeech)
@@ -101,6 +114,7 @@ class HexKeyboard : InputMethodService() {
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
     override fun onDestroy() {
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
+        contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
         view?.cancelGestures(); view = null; engine.surface = null; capture.close(); super.onDestroy()
     }
 }
