@@ -884,6 +884,7 @@ final class AutocorrectEngineTests: XCTestCase {
     /// one tapped well inside the bar never does, and one backspace puts back both words.
     func testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords() throws {
         try useDecoder()
+        engine.letterOdds = engine.autocorrect.decoder?.model
         let space = engine.layout.key(.space)!
         func edgeSpace(under letter: Character) {
             let key = engine.layout.key(.character(String(letter)))!.frame
@@ -901,10 +902,10 @@ final class AutocorrectEngineTests: XCTestCase {
 
         tap(.space)
         typeTaps("so")
-        tapCentre("a")
-        edgeSpace(under: "b")
-        typeTaps("out")
-        XCTAssertTrue(target.text.hasSuffix(" so about "), target.text)
+        for ch in "ha" { tapCentre(ch) }
+        edgeSpace(under: "n")
+        typeTaps("ded")
+        XCTAssertTrue(target.text.hasSuffix(" so handed "), target.text)
 
         for ch in "deli" { tapCentre(ch) }
         tap(.space)
