@@ -240,31 +240,16 @@ final class KeyboardKeyPlaneView: UIView {
         (text as NSString).draw(at: origin, withAttributes: attributes)
     }
 
-    /// Apple's portrait letters aren't centred on the key by their advance, as plain text is.
-    /// How far each one sits from that depends on where the key's middle falls between whole
-    /// points (iOS 27.2 simulators, ink centroids of every letter at native resolution, light and
-    /// dark): Hex's centred letters were up to 0.8 pt (SE: 1.2) off Apple's, alternating key by
-    /// key, and 0.27-0.58 pt typically. These are Apple's offsets from plain centring for each
-    /// place a pixel-aligned key's middle can fall, lowercase then capitals: sixths of a point
-    /// on 3x screens (17 Pro, Pro Max; checked on the Air), quarters on 2x (SE). With them
-    /// Hex's letters land 0.10-0.16 pt (median) from Apple's.
-    private static let letterNudge3x: [(lowercase: CGFloat, capital: CGFloat)] = [
-        (-0.21, -0.46), (0.45, 0.13), (0.45, 0.20), (0.54, 0.32), (0.10, -0.12), (0.22, 0.08),
-    ]
-    private static let letterNudge2x: [(lowercase: CGFloat, capital: CGFloat)] = [
-        (0.76, 0.39), (0.21, -0.12), (0.16, -0.16), (0.68, 0.50),
-    ]
-
+    /// Apple's portrait letters sit a little right of where centring by advance puts them, by
+    /// the same amount on every iPhone of a scale (iOS 27.2 simulators, ink centroids of all 26
+    /// letters at native resolution, light and dark): lowercase 0.13-0.22 pt on 3x screens (17
+    /// Pro, 17e, Air, Pro Max), capitals within 0.13 either way, and 0.55 and 0.23 on the 2x SE.
+    /// Each key's letter also strays up to about 0.6 pt from that, in a pattern that differs from
+    /// one iPhone to the next, so it isn't modelled.
     private func drawLetter(_ text: String, in frame: CGRect, style: LabelStyle, capital: Bool) {
         let attributes: [NSAttributedString.Key: Any] = [.font: style.font, .foregroundColor: palette.textBase]
         let size = (text as NSString).size(withAttributes: attributes)
-        let scale = traitCollection.displayScale
-        let table = scale >= 3 ? Self.letterNudge3x : scale >= 2 ? Self.letterNudge2x : []
-        var nudge: CGFloat = 0
-        if !table.isEmpty {
-            let place = Int((frame.midX * CGFloat(table.count)).rounded()) % table.count
-            nudge = capital ? table[place].capital : table[place].lowercase
-        }
+        let nudge: CGFloat = traitCollection.displayScale >= 3 ? (capital ? 0 : 0.17) : (capital ? 0.23 : 0.55)
         (text as NSString).draw(
             at: CGPoint(x: frame.midX + nudge - size.width / 2, y: frame.midY - size.height / 2 + style.yOffset),
             withAttributes: attributes
