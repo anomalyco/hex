@@ -68,7 +68,8 @@ final class CleanupTaggerTests: XCTestCase {
             XCTAssertEqual(split.count, item.labels.count, "#\(item.id) splits into the reference's words")
             let probabilities = try tagger.deleteProbabilities(for: split)
             let labels = probabilities.map { $0 > CleanupTagger.deleteThreshold ? 1 : 0 }
-            let output = try tagger.clean(item.input)
+            // The reference pipeline has no CleanupGuard: rebuild from the model's own labels.
+            let output = CleanupReconstruction.reconstruct(split, deletes: labels.map { $0 == 1 })
             words += split.count
             for index in split.indices {
                 gapONNX = max(gapONNX, abs(probabilities[index] - item.pDelete[index]))

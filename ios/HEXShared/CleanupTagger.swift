@@ -23,9 +23,9 @@ nonisolated struct CleanupTaggerSettings {
     }
 }
 
-/// Experiment (Clean up what I say): a small BERT token classifier (4 layers, 512 wide,
-/// int8 Core ML weights) labels each spoken word KEEP or DELETE, and
-/// `CleanupReconstruction` joins what is kept. It runs on this iPhone only.
+/// Clean up what I say: a small BERT token classifier (4 layers, 512 wide, int8 Core ML
+/// weights) gives each spoken word P(DELETE), `CleanupGuard` lets only known disfluencies
+/// go, and `CleanupReconstruction` joins what is kept. It runs on this iPhone only.
 ///
 /// The model and vocabulary ship once, inside the keyboard extension; the app reads them
 /// from its embedded `HEXKeyboard.appex`. The model loads when a dictation stops
@@ -35,9 +35,10 @@ nonisolated struct CleanupTaggerSettings {
 nonisolated final class CleanupTagger: @unchecked Sendable {
     static let shared = CleanupTagger()
 
-    /// P(DELETE) a word must exceed to be removed (1/45 false deletes on hand-written
-    /// clean sentences, against 3/45 at 0.95, with the same self-correction accuracy).
-    static let deleteThreshold = 0.98
+    /// P(DELETE) a word must exceed to be marked (1/45 false deletes on hand-written
+    /// clean sentences, against 3/45 at 0.95, with the same self-correction accuracy);
+    /// `CleanupGuard` then decides which marked words go.
+    static let deleteThreshold = CleanupGuard.deleteThreshold
     /// Longest Core ML input, [CLS] and [SEP] included; longer transcripts are tagged in
     /// chunks of whole words.
     static let maxTokens = 128
@@ -116,11 +117,13 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
 
     /// The cleaned transcript, or `text` itself when nothing is removed. Blocks the caller
     /// until the model has loaded and run; never call it on the main thread.
-    func clean(_ text: String) throws -> String {
-        try queue.sync { try cleanOnQueue(text) }
+    /// `protectedTerms` (custom vocabulary, learned words) go only in a self-correction.
+    func clean(_ text: String, protectedTerms: [String] = []) throws -> String {
+        try queue.sync { try cleanOnQueue(text, protectedTerms: protectedTerms) }
     }
 
-    /// P(DELETE) for each whitespace-separated word, in order.
+    /// P(DELETE) for each whitespace-separated word, in order, as the model scores it (a
+    /// hyphen between letters dropped, `CleanupGuard.modelWord`).
     func deleteProbabilities(for words: [String]) throws -> [Double] {
         try queue.sync { try probabilitiesOnQueue(words) }
     }
@@ -128,11 +131,11 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     /// The cleaned transcript within `budget`, else `text` unchanged: any failure, a late
     /// answer, or a cleanup that removes every word keeps the transcript as heard. A late
     /// run still finishes in the background, so the model is ready for the next dictation.
-    func clean(_ text: String, within budget: TimeInterval) async -> String {
+    func clean(_ text: String, within budget: TimeInterval, protectedTerms: [String] = []) async -> String {
         let gate = CleanupTaggerOnceGate()
         return await withCheckedContinuation { (continuation: CheckedContinuation<String, Never>) in
             queue.async {
-                let cleaned = (try? self.cleanOnQueue(text)) ?? text
+                let cleaned = (try? self.cleanOnQueue(text, protectedTerms: protectedTerms)) ?? text
                 let result = cleaned.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? text : cleaned
                 if gate.claim() {
                     continuation.resume(returning: result)
@@ -153,11 +156,13 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
     /// `language` counts as English. Spoken symbols ("john at the rate gmail dot com" to
     /// "john@gmail.com", `SpokenCleanupRules.spokenSymbols`) apply in every style but
     /// Verbatim whether the experiment is on or off: both the app's and the keyboard's
-    /// dictation pass through here (`DictationPipeline`).
+    /// dictation pass through here (`DictationPipeline`). `protectedTerms` are custom
+    /// vocabulary and learned words, which the tagger removes only in a self-correction.
     static func cleanIfEnabled(
         _ text: String,
         style: DictationStyle,
         language: String? = nil,
+        protectedTerms: [String] = [],
         settings: CleanupTaggerSettings = CleanupTaggerSettings(),
         tagger: CleanupTagger = .shared
     ) async -> String {
@@ -169,7 +174,7 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         guard SpeechLanguagePicker.isEnglish(language) else {
             return SpokenCleanupRules.clean(text, language: language)
         }
-        return await tagger.clean(text, within: timeBudget)
+        return await tagger.clean(text, within: timeBudget, protectedTerms: protectedTerms)
     }
 
     /// Starts loading the model when a dictation stops recording, while it transcribes, so
@@ -187,10 +192,14 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
 
     // MARK: On the queue
 
-    private func cleanOnQueue(_ text: String) throws -> String {
+    private func cleanOnQueue(_ text: String, protectedTerms: [String]) throws -> String {
         let words = Self.words(in: text)
         guard !words.isEmpty else { return text }
-        let deletes = try probabilitiesOnQueue(words).map { $0 > Self.deleteThreshold }
+        let deletes = try CleanupGuard.deletes(
+            words,
+            probabilities: probabilitiesOnQueue(words),
+            protectedTerms: CleanupGuard.protectedTerms(protectedTerms)
+        )
         guard deletes.contains(true) else { return text }
         return CleanupReconstruction.reconstruct(words, deletes: deletes)
     }
@@ -199,7 +208,7 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         let state = try loadedOnQueue()
         var probabilities: [Double] = []
         probabilities.reserveCapacity(words.count)
-        for chunk in Self.chunks(words.map(state.tokenizer.encode)) {
+        for chunk in Self.chunks(words.map { state.tokenizer.encode(CleanupGuard.modelWord($0)) }) {
             probabilities += try predict(chunk, model: state.model)
         }
         return probabilities
