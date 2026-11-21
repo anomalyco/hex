@@ -1,0 +1,22 @@
+name: No pull requests into production
+
+# production only moves by fast-forwarding it to dev:
+#   git push origin origin/dev:refs/heads/production
+# so any pull request that targets it gets closed.
+on:
+  pull_request_target:
+    types: [opened, reopened, edited]
+    branches: [production]
+
+permissions:
+  pull-requests: write
+
+jobs:
+  close:
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr close "$PR" --comment "production only moves by fast-forwarding it to dev (\`git push origin origin/dev:refs/heads/production\`), so pull requests into it get closed. open this against dev instead."
