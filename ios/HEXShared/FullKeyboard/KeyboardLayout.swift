@@ -116,7 +116,9 @@ nonisolated enum KeyboardPosture: Equatable, Sendable {
     var appleKeyInset: CGFloat? {
         switch self {
         case .phone: nil
-        case .cover: 7.7
+        // Folded: 6.67 pt in, a third of a point outside the 452 pt view iOS gives a third-party
+        // keyboard, so Hex's keys run to the view's edges (`KeyboardMetrics.for`).
+        case .cover: 6.67
         case .unfoldedWide: 86
         case .unfoldedTall: 19
         }
@@ -137,6 +139,9 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// How much shorter row 4's keycaps are than the others: where Apple's row 4 reaches
     /// below the bottom of a third-party keyboard's view, Hex's keeps Apple's top edge.
     var bottomRowTrim: CGFloat = 0
+    /// Row 4 on row 1's and row 2's columns, as Apple's is on the Duo folded: 123, the globe and
+    /// emoji one key wide on q, w and e, space from r to n, dictation on m, return from l.
+    var bottomRowOnLetterColumns = false
 
     /// The suggestion strip is the part of Apple's predictive bar below the band iOS 26 draws
     /// over every third-party keyboard (16.3 pt on the iPhone 17 Pro, 12.5 pt on the SE, 13.3 pt
@@ -255,19 +260,23 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             }
         }
         let side = orientation == .portrait
-            ? max(1, (posture.appleKeyInset ?? base.side) - windowInset)
+            ? max(0, (posture.appleKeyInset ?? base.side) - windowInset)
             : base.side
         // Measured folded and upright only; unfolded, and folded in landscape, the strip is still
-        // Apple's whole bar right on the keys. The Duo keeps the 5 pt under row 4 it was
-        // measured with, and a full-height row 4.
+        // Apple's whole bar right on the keys. Folded and upright (iOS 27.2 simulator, beside
+        // Apple's keyboard) Apple's row 4 ends 7 pt above the keyboard's bottom and its keycaps
+        // round 9.8 pt; Hex drew 5 pt and 7.9 pt, its rows 2 pt low. Unfolded keeps the 5 pt
+        // under row 4 it was measured with.
         let coverPortrait = posture == .cover && orientation == .portrait
         return KeyboardMetrics(
             side: side, gap: base.gap, rowGap: rowGap, keyHeight: keyHeight,
             stripTop: base.stripTop,
             stripHeight: coverPortrait ? coverStripHeight : insetStripHeight,
             stripBottom: coverPortrait ? stripGap : 0,
-            keysTop: base.keysTop, keysBottom: orientation == .portrait ? 5 : base.keysBottom,
-            cornerRadius: base.cornerRadius
+            keysTop: base.keysTop,
+            keysBottom: coverPortrait ? 7 : orientation == .portrait ? 5 : base.keysBottom,
+            cornerRadius: coverPortrait ? 9.8 : base.cornerRadius,
+            bottomRowOnLetterColumns: coverPortrait
         )
     }
 
@@ -276,7 +285,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             side: side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
-            bottomRowTrim: bottomRowTrim
+            bottomRowTrim: bottomRowTrim, bottomRowOnLetterColumns: bottomRowOnLetterColumns
         )
     }
 
@@ -709,7 +718,29 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         }
         trailing.append((.returnKey, returnW, "return"))
 
-        if field == .text, m.keyHeight >= 40 {
+        if field == .text, m.bottomRowOnLetterColumns {
+            // The Duo folded: each key before the space bar one letter wide on row 1's columns,
+            // space to where row 2's k column starts, then dictation (Hex has none: space runs on,
+            // or a Hex key right of space takes that slot), and return from l's column.
+            let pitch = referenceW + m.gap
+            let kColumn = left + 7.5 * pitch
+            let returnStart = left + 8.5 * pitch
+            var lead: [(KeyKind, String)] = [leading[0].0 == .layerSwitch(.numbers) ? (.layerSwitch(.numbers), "123") : (.layerSwitch(.letters), "ABC")]
+            if showsGlobe { lead.append((.globe, "globe")) }
+            if showsEmoji { lead.append((.emoji, "emoji")) }
+            if placement == .leftOfSpace { lead.append((.hex, "hex")) }
+            for (i, (kind, label)) in lead.enumerated() {
+                add(kind, row: 3, x: left + CGFloat(i) * pitch, w: referenceW, label: label)
+            }
+            let spaceStart = left + CGFloat(lead.count) * pitch
+            var spaceEnd = returnStart - m.gap
+            if placement == .rightOfSpace {
+                add(.hex, row: 3, x: kColumn, w: returnStart - m.gap - kColumn, label: "hex")
+                spaceEnd = kColumn - m.gap
+            }
+            add(.space, row: 3, x: spaceStart, w: max(lw, spaceEnd - spaceStart), label: "space")
+            add(.returnKey, row: 3, x: returnStart, w: right - returnStart, label: "return")
+        } else if field == .text, m.keyHeight >= 40 {
             // Apple's portrait bottom row stands on row 3's letter columns: 123 (and emoji, or
             // the globe on a Home-button iPhone) share the width from the edge to z's right edge,
             // the space bar runs from x to n, and return from m to the edge. With no emoji key

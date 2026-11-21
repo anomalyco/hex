@@ -899,9 +899,17 @@ final class FullKeyboardEngineTests: XCTestCase {
             (44.8, 121.6), (364.4, 124.5), (77.0, 123.4), (332.3, 73.2), (158.3, 236.4), (82.4, 125.4),
             (282.4, 79.9), (137.6, 175.1), (309.7, 126.6), (72.5, 126.2), (108.8, 239.2),
         ]
+        // The taps were placed on that build's rows (45 pt keys on a 56 pt pitch from 35 pt
+        // down); put each at the same spot on today's row.
+        func onTodaysRow(_ y: CGFloat) -> CGFloat {
+            let row = min(3, max(0, Int(((y - 35 + 5.5) / 56).rounded(.down))))
+            let key = engine.layout.keys.first { $0.row == row }!.frame
+            return key.minY + (y - (35 + CGFloat(row) * 56)) / 45 * key.height
+        }
         for (i, (x, y)) in taps.enumerated() {
-            engine.touchBegan(id: i, at: CGPoint(x: x, y: y))
-            engine.touchEnded(id: i, at: CGPoint(x: x, y: y))
+            let point = CGPoint(x: x, y: onTodaysRow(y))
+            engine.touchBegan(id: i, at: point)
+            engine.touchEnded(id: i, at: point)
             now += 0.2
         }
         XCTAssertEqual(target.text, "but I miss here we more than on the built in apple keyboard which also sucks ")

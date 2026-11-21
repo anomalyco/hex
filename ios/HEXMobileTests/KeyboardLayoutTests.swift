@@ -85,7 +85,8 @@ final class KeyboardLayoutTests: XCTestCase {
     /// as far in from the screen's side as Apple's, and keys filling the width.
     func testDuoKeysMatchApplesRowsAndEdges() {
         let cases: [(KeyboardLayout, windowInset: CGFloat, pitch: CGFloat, appleEdge: CGFloat)] = [
-            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 8),
+            // Folded, Apple's keys start 6.67 pt in, just outside the view: Hex's start at its edge.
+            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 6.67),
             (KeyboardLayout(width: 655, posture: .unfoldedTall, windowInset: 7), 7, 59.7, 19),
             (KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75), 75, 51.7, 86),
         ]
@@ -355,9 +356,9 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testKeycapsSitInsideTheirTargetsAndNeverOverlap() {
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
-            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight)
+            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight).insetBy(dx: -0.001, dy: -0.001)
             for key in layout.keys {
-                XCTAssertTrue(key.hitFrame.contains(key.frame), "\(describe(layout)) \(key.label)")
+                XCTAssertTrue(key.hitFrame.insetBy(dx: -0.001, dy: -0.001).contains(key.frame), "\(describe(layout)) \(key.label)")
                 XCTAssertTrue(bounds.contains(key.frame), "\(describe(layout)) \(key.label)")
                 XCTAssertGreaterThan(key.frame.width, 20, "\(describe(layout)) \(key.label)")
             }
