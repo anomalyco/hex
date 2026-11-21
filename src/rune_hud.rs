@@ -22,6 +22,8 @@ pub(crate) use macos::{activation_policy_changed, pointer_screen};
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod rehome;
 pub(crate) mod spring;
+/// Windows' first-frame watch and its failure backoff; see its module docs.
+mod watch;
 /// Windows' own HUD frame pacing; see its module docs.
 #[cfg(any(target_os = "windows", test))]
 mod windows_pacing;
@@ -41,6 +43,8 @@ use crate::rune_hud::dot_scope::MAX_DOTS;
 use crate::rune_hud::dot_scope::PLATE_HEIGHT;
 use crate::rune_hud::hud_placement::{ISLAND_INSET, ISLAND_PAD, Island, Layout};
 use crate::rune_ui::live_text::Spot;
+#[cfg(target_os = "windows")]
+use watch::{FirstFrameCheck, Watch};
 
 #[cfg(target_os = "macos")]
 pub(crate) use macos::DictationIndicatorUi;
@@ -96,141 +100,6 @@ pub(crate) struct HudSender {
     shown: Arc<AtomicBool>,
     #[cfg(target_os = "windows")]
     watch: Arc<Mutex<Watch>>,
-}
-
-/// What Windows checks of the HUD: Rune can show the overlay without
-/// Windows ever drawing it (#510), so a show must also present a frame.
-#[cfg(target_os = "windows")]
-#[derive(Default)]
-struct Watch {
-    position: IndicatorPosition,
-    /// The overlay failure last logged, so each is logged once.
-    logged: Option<String>,
-    described: bool,
-    first_frame: FirstFrame,
-}
-
-/// The first-frame watch behind a Windows HUD show: each start opens one
-/// attempt, which resolves once and asks for at most one recovery hide. It
-/// is pure so its decisions are unit-tested on every OS; [`HudSender`] wires
-/// it to Rune only on Windows.
-#[cfg(any(target_os = "windows", test))]
-#[derive(Default)]
-struct FirstFrame {
-    /// The attempt a start began: when, and the presents before it.
-    attempt: Option<Attempt>,
-    /// How many attempts have begun. The newest one's number tags its
-    /// recovery hide, so a hide decided for an older attempt never runs against
-    /// a HUD a later start showed (#1793).
-    attempts: u64,
-    /// The last attempt that presented nothing: why, for Settings and the log.
-    unpresented: Option<String>,
-    /// This attempt asked for its recovery hide.
-    released: bool,
-}
-
-#[cfg(any(target_os = "windows", test))]
-struct Attempt {
-    started: Instant,
-    presents: u64,
-}
-
-/// A recovery hide a [`FirstFrame`] poll decided for, and the presents it read.
-/// Both are rechecked where the hide lands, because that is a queued update: a
-/// frame may have presented since, and a later start may have taken the HUD
-/// over (#1793).
-#[cfg(any(target_os = "windows", test))]
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct HideAttempt {
-    /// The attempt this hide was decided for, as `FirstFrame::attempts` numbered
-    /// it.
-    attempt: u64,
-    /// `surface_stats().totals.presents` when the poll resolved.
-    presents: u64,
-}
-
-/// What one poll of a [`FirstFrame`] found.
-#[cfg(any(target_os = "windows", test))]
-struct FirstFrameCheck {
-    /// Why the HUD can't show, for Settings and the log, when it can't.
-    reason: Option<String>,
-    /// This attempt's one recovery hide is due:
-    /// [`FirstFrame::should_apply_hide`] says whether it still applies where it
-    /// lands.
-    hide: Option<HideAttempt>,
-}
-
-/// How long a started HUD has to present its first frame.
-#[cfg(any(target_os = "windows", test))]
-const FIRST_FRAME: std::time::Duration = std::time::Duration::from_millis(1500);
-
-#[cfg(any(target_os = "windows", test))]
-impl FirstFrame {
-    /// A non-Hidden start begins a fresh attempt: its own present baseline and
-    /// clock, its own hide, and no inherited no-frame decision. A second start
-    /// while the last attempt still runs restarts it.
-    fn start(&mut self, at: Instant, presents: u64) {
-        self.attempts += 1;
-        self.attempt = Some(Attempt {
-            started: at,
-            presents,
-        });
-        self.released = false;
-    }
-
-    /// Whether a recovery hide still applies where it lands: no start has opened
-    /// a later attempt since the poll (that start's `show` owns the HUD now), and
-    /// no frame has presented since it (the HUD is drawing, only late). Either
-    /// one means the hide would take away a HUD that is up or on its way
-    /// (#1793).
-    fn should_apply_hide(&self, hide: HideAttempt, presents: u64) -> bool {
-        hide.attempt == self.attempts && hide.presents == presents
-    }
-
-    /// One poll: resolves the attempt once `FIRST_FRAME` has passed, then
-    /// decides its one hide. Only this attempt's own frame-less resolve hides:
-    /// Rune's overlay failure is a reason for Settings and the log, never a
-    /// hide of its own, since a failed overlay presents nothing and the
-    /// frame-less resolve covers it. A previous attempt's `unpresented` reason
-    /// is still returned for Settings and the log, but never hides anything.
-    /// `surface` names what draws the HUD, for the reason.
-    fn poll(
-        &mut self,
-        now: Instant,
-        presents: u64,
-        failure: Option<&str>,
-        surface: Option<&str>,
-    ) -> FirstFrameCheck {
-        let resolved = self
-            .attempt
-            .as_ref()
-            .is_some_and(|attempt| now.saturating_duration_since(attempt.started) >= FIRST_FRAME);
-        let attempt = if resolved { self.attempt.take() } else { None };
-        let mut presented_nothing = false;
-        if let Some(attempt) = attempt {
-            presented_nothing = presents == attempt.presents;
-            self.unpresented = presented_nothing.then(|| {
-                format!(
-                    "shown but presented no frame in {} ms; surface: {}",
-                    FIRST_FRAME.as_millis(),
-                    surface.unwrap_or("none")
-                )
-            });
-        }
-        let hide = (!self.released && presented_nothing).then_some(HideAttempt {
-            attempt: self.attempts,
-            presents,
-        });
-        if hide.is_some() {
-            self.released = true;
-        }
-        FirstFrameCheck {
-            reason: failure
-                .map(str::to_owned)
-                .or_else(|| self.unpresented.clone()),
-            hide,
-        }
-    }
 }
 
 impl HudSender {
@@ -313,12 +182,25 @@ impl HudSender {
             watch.described = true;
         }
         let failure = self.overlay.failure();
-        let FirstFrameCheck { reason, hide } = watch.first_frame.poll(
+        let FirstFrameCheck {
+            reason,
+            hide,
+            backoff,
+        } = watch.first_frame.poll(
             Instant::now(),
             self.overlay.surface_stats().totals.presents,
             failure.as_deref(),
             surface.as_deref(),
         );
+        if let Some(cooldown) = backoff {
+            // One line per failed attempt: the HUD stops showing, and is not
+            // rebuilt, until the cooldown ends (#2175).
+            tracing::warn!(
+                cooldown_secs = cooldown.as_secs(),
+                failures = watch.first_frame.failed_attempts(),
+                "the dictation HUD is backing off after a show presented no frame"
+            );
+        }
         if let Some(reason) = &reason
             && watch.logged.as_deref() != Some(reason.as_str())
         {
@@ -348,11 +230,10 @@ impl HudSender {
                     drop(watch);
                     hud.hide();
                     // This hide is the one recovery a frame-less show gets, and
-                    // it frees the recording's one re-ask: exactly one rebuild
-                    // follows the hide (one hide per attempt), and the clock it
-                    // restarts keeps the meter right after it from asking
-                    // (#1793).
-                    hud.reshown = false;
+                    // the recording that asked for it gets no further show: a
+                    // HUD that backs off must not be rebuilt by its own meters
+                    // (#1793, #2175).
+                    hud.reshown = true;
                     hud.last_drawn = Some(Instant::now());
                 }
             });
@@ -415,6 +296,8 @@ pub(crate) struct Hud {
     /// Windows' first-frame watch, shared with [`HudSender`]: a start opens its
     /// attempt here, where the show is requested, and tags it so the watchdog's
     /// recovery hide can tell whether a later start took the HUD over (#1793).
+    /// A failed attempt also backs shows off, so the HUD's window, swapchain
+    /// and device are not rebuilt on every dictation (#2175).
     #[cfg(target_os = "windows")]
     watch: Arc<Mutex<Watch>>,
     /// When a frame last drew, or this recording's start opened the clock: a
@@ -459,6 +342,17 @@ const RESHOW_AFTER: Duration = Duration::from_millis(250);
 #[cfg(any(target_os = "windows", test))]
 fn reshow_due(since_frame: Option<Duration>, already: bool) -> bool {
     !already && since_frame.is_some_and(|since| since >= RESHOW_AFTER)
+}
+
+/// Whether a blocked show (the HUD is backing off a failed show, or this
+/// recording's own attempt already presented nothing) hides the HUD: only when
+/// none is up. A first frame that arrives after its attempt resolved frame-less
+/// keeps its backoff for later dictations, but must not take the HUD away from
+/// the recording that is watching it. A start clears `shown` before its show, so
+/// a blocked start still runs this teardown once, and it builds nothing (#2175).
+#[cfg(any(target_os = "windows", test))]
+fn blocked_show_hides(shown: bool) -> bool {
+    !shown
 }
 
 impl Hud {
@@ -534,9 +428,14 @@ impl Hud {
             let presents = overlay.surface_stats().totals.presents;
             let mut watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
             if watch.position != IndicatorPosition::Hidden {
-                // Every start is a fresh attempt: its own baseline, clock and
-                // hide, even when the last one never resolved.
-                watch.first_frame.start(Instant::now(), presents);
+                // Every start opens a fresh attempt: its own baseline, clock
+                // and hide, even when the last one never resolved. A refused
+                // start (the HUD is backing off) opens none, so there is no
+                // first frame to wait for: its recording spends its one re-ask
+                // up front, and the show below builds nothing (#2175).
+                if !watch.first_frame.start(Instant::now(), presents) {
+                    self.reshown = true;
+                }
             }
         }
         self.model.handle(event, Instant::now(), self.reduce);
@@ -555,6 +454,7 @@ impl Hud {
                     .map(|at| Instant::now().saturating_duration_since(at)),
                 self.reshown,
             )
+            && !self.show_blocked(Instant::now())
         {
             self.reshown = true;
             self.shown.store(false, Ordering::Release);
@@ -571,6 +471,16 @@ impl Hud {
         if self.shown.load(Ordering::Acquire) {
             self.show();
         }
+    }
+
+    /// Whether the HUD must not be shown: it is backing off a failed show, or
+    /// this recording's own attempt already presented nothing. A show then only
+    /// builds another window, swapchain and device for a HUD that never
+    /// presents, on the thread that pumps Windows' messages (#2175).
+    #[cfg(target_os = "windows")]
+    fn show_blocked(&self, now: Instant) -> bool {
+        let watch = self.watch.lock().unwrap_or_else(|error| error.into_inner());
+        watch.first_frame.backing_off(now) || watch.first_frame.failed()
     }
 
     /// Shows the overlay where the HUD belongs, unless it is set to Hidden.
@@ -615,6 +525,25 @@ impl Hud {
             // The plate sits in the middle of the window.
             let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;
             set_live_text(Spot::Edge(edge, past_plate));
+        }
+        #[cfg(target_os = "windows")]
+        if self.show_blocked(Instant::now()) {
+            // Blocked, the HUD makes nothing: no `overlay.show()`, and with it
+            // no window, swapchain or device to build while a saturated GPU
+            // keeps the last one from presenting.
+            //
+            // A HUD that is up stays up. A first frame that arrives after its
+            // attempt resolved frame-less keeps the backoff for later
+            // dictations, but it is still what this recording is watching, and
+            // taking it away is not the backoff's job. Only a start, which
+            // cleared `shown` first, tears down what an older recording left;
+            // that hide costs nothing when nothing is up (#2175).
+            if !blocked_show_hides(self.shown.load(Ordering::Acquire)) {
+                return;
+            }
+            overlay.hide();
+            self.hide();
+            return;
         }
         if !self.shown.load(Ordering::Acquire) {
             overlay.show();
