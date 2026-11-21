@@ -3,8 +3,11 @@
 //! pauses, like a mode's corrections. The boost has no control here; it
 //! stays a setting (`hex settings set vocabulary_boost`).
 
+use std::path::PathBuf;
+use std::sync::mpsc::{Receiver, TryRecvError, channel};
+
 use rune::tok::motion::{SETTLE, SETTLE_EXIT};
-use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
+use rune::{El, SpringPair, TextEdit, Transition, Tx, Waker, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
 use super::Ui;
@@ -56,9 +59,22 @@ pub(super) struct VocabularyEditor {
     added: Option<u64>,
     /// The open import dialog's answer.
     chooser: Option<Pending>,
+    /// The import worker's answer.
+    worker: Option<Receiver<Result<ImportResult, String>>>,
     /// What the last import did, until the sheet closes.
     notice: Option<Notice>,
     pub(super) open: bool,
+}
+
+/// One import's worker result: the parsed rows, the list the sheet held when
+/// the file was chosen, and the list the two made together.
+struct ImportResult {
+    terms: Vec<ImportedTerm>,
+    snapshot: Vec<VocabularyEntry>,
+    entries: Vec<VocabularyEntry>,
+    merged: import::Merged,
+    /// More rows were dropped at the parser's cap.
+    capped: bool,
 }
 
 /// What an import says in the sheet.
@@ -68,8 +84,8 @@ enum Notice {
     Added { terms: usize, clamped: bool },
     /// Existing terms gained spellings; some may have been left out.
     Updated { clamped: bool },
-    /// The file held nothing new.
-    Nothing,
+    /// The file held nothing new; a full list may have refused more terms.
+    Nothing { clamped: bool },
     /// The file could not be read or parsed.
     Unreadable,
     /// The native file dialog could not open.
@@ -202,6 +218,7 @@ pub(super) fn open(ui: &mut Ui) {
     ui.vocabulary.open = true;
     ui.vocabulary.notice = None;
     ui.vocabulary.chooser = None;
+    ui.vocabulary.worker = None;
     if ui.vocabulary.rows.is_empty() {
         add_row(ui);
     }
@@ -216,6 +233,8 @@ pub(super) fn close(ui: &mut Ui) {
     ui.vocabulary.added = None;
     ui.vocabulary.notice = None;
     ui.vocabulary.chooser = None;
+    // Closing drops a chosen file whose worker is still reading it.
+    ui.vocabulary.worker = None;
     ui.flush_drafts();
     ui.vocabulary
         .rows
@@ -239,9 +258,14 @@ fn add_term(ui: &mut Ui, tx: &mut Tx) {
     tx.scroll_to_bottom("term-scroll");
 }
 
-/// Import…: the native dialog for one CSV, TSV, or text file.
+/// Import…: the native dialog for one CSV, TSV, or text file. Only a live
+/// window with the lab on opens one.
 fn start_import(ui: &mut Ui, _: &mut Tx) {
-    if ui.vocabulary.chooser.is_some() {
+    if !ui.live()
+        || !crate::labs::import_vocabulary()
+        || ui.vocabulary.chooser.is_some()
+        || ui.vocabulary.worker.is_some()
+    {
         return;
     }
     let waker = ui.modes.waker.clone();
@@ -261,38 +285,115 @@ fn start_import(ui: &mut Ui, _: &mut Tx) {
             ]),
             directory: None,
         },
-        move || {
-            if let Some(waker) = &waker {
-                waker();
-            }
-        },
+        wake(waker),
     ));
 }
 
-/// The import dialog's answer, once it has one.
-pub(super) fn poll(ui: &mut Ui) -> bool {
-    let Some(choice) = ui.vocabulary.chooser.as_ref().and_then(Pending::poll) else {
-        return false;
-    };
-    ui.vocabulary.chooser = None;
-    match choice {
-        Ok(Some(path)) => match import::read(&path) {
-            Ok(terms) => apply_import(ui, &terms),
-            Err(_) => ui.vocabulary.notice = Some(Notice::Unreadable),
-        },
-        Ok(None) => {}
-        Err(_) => ui.vocabulary.notice = Some(Notice::Chooser),
+/// Sends a worker's answer to the window.
+fn wake(waker: Option<Waker>) -> impl Fn() + Send + 'static {
+    move || {
+        if let Some(waker) = &waker {
+            waker();
+        }
     }
-    true
 }
 
-/// Merges the file's terms into the sheet's rows and saves them the way an
-/// edit does.
-fn apply_import(ui: &mut Ui, terms: &[ImportedTerm]) {
-    let mut entries = ui.vocabulary.project();
-    let merged = import::merge(&mut entries, terms);
-    ui.vocabulary.reload(&entries);
-    ui.flush_drafts();
+/// Reads and merges the chosen file on a worker: a bounded file still never
+/// runs on the frame that draws the sheet.
+fn start_worker(ui: &mut Ui, path: PathBuf) {
+    let snapshot = ui.vocabulary.project();
+    let (sender, receiver) = channel();
+    let wake = wake(ui.modes.waker.clone());
+    let started = std::thread::Builder::new()
+        .name("hex-vocabulary-import".into())
+        .spawn(move || {
+            let result = import::read(&path).map(|parsed| {
+                let capped = parsed.capped;
+                let mut entries = snapshot.clone();
+                let mut merged = import::merge(&mut entries, &parsed.terms);
+                merged.clamped |= capped;
+                ImportResult {
+                    terms: parsed.terms,
+                    snapshot,
+                    entries,
+                    merged,
+                    capped,
+                }
+            });
+            let _ = sender.send(result);
+            wake();
+        });
+    match started {
+        Ok(_) => ui.vocabulary.worker = Some(receiver),
+        Err(_) => ui.vocabulary.notice = Some(Notice::Unreadable),
+    }
+}
+
+/// Takes the dialog's answer and the worker's result. With the lab off, both
+/// are dropped, as the file drop's own lab drops its work.
+pub(super) fn poll(ui: &mut Ui) -> bool {
+    if !crate::labs::import_vocabulary() {
+        let dropped = ui.vocabulary.chooser.is_some()
+            || ui.vocabulary.worker.is_some()
+            || ui.vocabulary.notice.is_some();
+        ui.vocabulary.chooser = None;
+        ui.vocabulary.worker = None;
+        ui.vocabulary.notice = None;
+        return dropped;
+    }
+    let mut changed = false;
+    if let Some(choice) = ui.vocabulary.chooser.as_ref().and_then(Pending::poll) {
+        ui.vocabulary.chooser = None;
+        changed = true;
+        match choice {
+            // The lab can go off while the dialog is open: never start its
+            // work then.
+            Ok(Some(path)) if crate::labs::import_vocabulary() => start_worker(ui, path),
+            Ok(Some(_)) | Ok(None) => {}
+            Err(_) => ui.vocabulary.notice = Some(Notice::Chooser),
+        }
+    }
+    let result = match ui.vocabulary.worker.as_ref().map(Receiver::try_recv) {
+        Some(Ok(result)) => Some(result),
+        Some(Err(TryRecvError::Disconnected)) => Some(Err(String::new())),
+        Some(Err(TryRecvError::Empty)) | None => None,
+    };
+    if let Some(result) = result {
+        ui.vocabulary.worker = None;
+        changed = true;
+        // Closing the sheet, or turning the lab off, drops the answer.
+        if !crate::labs::import_vocabulary() || !ui.vocabulary.open {
+            return changed;
+        }
+        match result {
+            Ok(result) => apply_import(ui, result),
+            Err(_) => ui.vocabulary.notice = Some(Notice::Unreadable),
+        }
+    }
+    changed
+}
+
+/// Applies the worker's merge when the sheet still holds the list it read,
+/// else re-merges the parsed rows into what the person edited meanwhile.
+fn apply_import(ui: &mut Ui, result: ImportResult) {
+    let current = ui.vocabulary.project();
+    let (entries, merged) = if current == result.snapshot {
+        (result.entries, result.merged)
+    } else {
+        let mut entries = current;
+        let mut merged = import::merge(&mut entries, &result.terms);
+        merged.clamped |= result.capped;
+        (entries, merged)
+    };
+    if merged.changed {
+        ui.vocabulary.reload(&entries);
+    }
+    // A failed save leaves the window's own error in charge, never a note
+    // that claims the terms landed.
+    if merged.changed && !ui.flush_drafts() {
+        ui.vocabulary.notice = None;
+        return;
+    }
     ui.vocabulary.notice = Some(if merged.added > 0 {
         Notice::Added {
             terms: merged.added,
@@ -303,20 +404,24 @@ fn apply_import(ui: &mut Ui, terms: &[ImportedTerm]) {
             clamped: merged.clamped,
         }
     } else {
-        Notice::Nothing
+        Notice::Nothing {
+            clamped: merged.clamped,
+        }
     });
 }
 
 fn notice_text(notice: Notice) -> String {
     let clamped = match notice {
-        Notice::Added { clamped, .. } | Notice::Updated { clamped } => clamped,
-        Notice::Nothing | Notice::Unreadable | Notice::Chooser => false,
+        Notice::Added { clamped, .. }
+        | Notice::Updated { clamped }
+        | Notice::Nothing { clamped } => clamped,
+        Notice::Unreadable | Notice::Chooser => false,
     };
     let mut text = match notice {
         Notice::Added { terms: 1, .. } => tr("Added 1 term").to_string(),
         Notice::Added { terms, .. } => tr_fill("Added {} terms", &terms.to_string()),
         Notice::Updated { .. } => tr("Updated existing terms").to_string(),
-        Notice::Nothing => tr("No new terms").to_string(),
+        Notice::Nothing { .. } => tr("No new terms").to_string(),
         Notice::Unreadable => tr("Couldn't read that file").to_string(),
         Notice::Chooser => tr("A file could not be chosen.").to_string(),
     };
@@ -755,6 +860,25 @@ mod tests {
         assert!(unused_note(&ui).is_some());
     }
 
+    /// The worker's side of an import, for a test that has the text already.
+    fn apply_import_text(ui: &mut Ui, text: &str) {
+        let parsed = import::parse(text).unwrap();
+        let snapshot = ui.vocabulary.project();
+        let mut entries = snapshot.clone();
+        let mut merged = import::merge(&mut entries, &parsed.terms);
+        merged.clamped |= parsed.capped;
+        apply_import(
+            ui,
+            ImportResult {
+                terms: parsed.terms,
+                snapshot,
+                entries,
+                merged,
+                capped: parsed.capped,
+            },
+        );
+    }
+
     #[test]
     fn an_import_merges_into_the_sheet_and_says_what_happened() {
         let mut ui = ui();
@@ -762,9 +886,9 @@ mod tests {
         ui.vocabulary.rows.clear();
         ui.vocabulary
             .push(TextEdit::new("Rune"), TextEdit::new("roon"));
-        apply_import(
+        apply_import_text(
             &mut ui,
-            &import::parse("term,sounds like\nRune,rooney\nCappuccino,capuchin\nDax\n"),
+            "term,sounds like\nRune,rooney\nCappuccino,capuchin\nDax\n",
         );
         assert_eq!(
             ui.vocabulary.notice,
@@ -782,14 +906,14 @@ mod tests {
         assert_eq!(ui.settings.vocabulary.len(), 3);
 
         // The same file again only finds what is already there.
-        apply_import(&mut ui, &import::parse("term,sounds like\nRune,rooney\n"));
-        assert_eq!(ui.vocabulary.notice, Some(Notice::Nothing));
+        apply_import_text(&mut ui, "term,sounds like\nRune,rooney\n");
+        assert_eq!(
+            ui.vocabulary.notice,
+            Some(Notice::Nothing { clamped: false })
+        );
         assert_eq!(notice_text(ui.vocabulary.notice.unwrap()), "No new terms");
 
-        apply_import(
-            &mut ui,
-            &import::parse(&format!("term\n{}", "x".repeat(65))),
-        );
+        apply_import_text(&mut ui, &format!("{}\n", "x".repeat(65)));
         assert_eq!(
             ui.vocabulary.notice,
             Some(Notice::Added {
@@ -800,6 +924,26 @@ mod tests {
         assert_eq!(
             notice_text(ui.vocabulary.notice.unwrap()),
             "Added 1 term. Some didn't fit"
+        );
+    }
+
+    #[test]
+    fn importing_new_terms_into_a_full_list_says_some_didnt_fit() {
+        let mut ui = ui();
+        open(&mut ui);
+        ui.vocabulary.rows.clear();
+        for index in 0..vocabulary::MAX_ENTRIES {
+            ui.vocabulary
+                .push(TextEdit::new(format!("Term {index}")), TextEdit::default());
+        }
+        apply_import_text(&mut ui, "term\nExtra\n");
+        assert_eq!(
+            ui.vocabulary.notice,
+            Some(Notice::Nothing { clamped: true })
+        );
+        assert_eq!(
+            notice_text(ui.vocabulary.notice.unwrap()),
+            "No new terms. Some didn't fit"
         );
     }
 

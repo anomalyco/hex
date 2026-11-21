@@ -45,7 +45,8 @@ pub fn vocabulary_biasing() -> bool {
 }
 
 /// The Vocabulary sheet offers Import…, adding terms from a CSV, TSV, or
-/// text file (read as the sheet draws and as an import's file arrives).
+/// text file (read as the sheet draws, when the dialog answers, and as the
+/// import's file arrives).
 pub fn import_vocabulary() -> bool {
     on(IMPORT_VOCABULARY)
 }

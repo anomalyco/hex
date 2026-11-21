@@ -1464,7 +1464,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Import…", "Импортировать…"),
     ("CSV or text files", "Файлы CSV или текстовые"),
     ("Any file", "Любой файл"),
-    ("Added {} terms", "Добавлено {} терминов"),
+    ("Added {} terms", "Добавлено терминов: {}"),
     ("Added 1 term", "Добавлен 1 термин"),
     ("Updated existing terms", "Существующие термины обновлены"),
     ("No new terms", "Новых терминов нет"),

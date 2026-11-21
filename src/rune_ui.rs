@@ -971,11 +971,14 @@ impl Ui {
         self.commit(candidate)
     }
 
-    /// Saves pending text-field edits now (leaving a pane or a mode).
-    fn flush_drafts(&mut self) {
+    /// Saves pending text-field edits now (leaving a pane or a mode). True
+    /// when they are saved, or nothing needed saving.
+    fn flush_drafts(&mut self) -> bool {
         let candidate = self.drafted();
         if candidate != self.settings {
-            self.commit(candidate);
+            self.commit(candidate)
+        } else {
+            true
         }
     }
 

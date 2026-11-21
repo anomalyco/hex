@@ -437,7 +437,9 @@ const HIDE_MENU_BAR_ICON: u64 = 1 << 22;
 /// Labs › Faster live text: a shorter stream lookahead, on the bit the
 /// graduated meeting labs left free.
 const FASTER_LIVE_TEXT: u64 = 1 << 23;
-// 1 << 24 is free (More call apps graduated).
+/// The Vocabulary sheet offers Import…, adding terms from a CSV or text
+/// file.
+const IMPORT_VOCABULARY: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 // 1 << 26 is free (Vocabulary in meeting notes graduated).
 const NOTCH_INDICATOR: u64 = 1 << 27;
@@ -498,10 +500,6 @@ const API_TIMESTAMPS: u64 = PAUSE_MENU << 1;
 /// [`MICROPHONE_LINGER_SECONDS`]. A new lab can take one of the free bits
 /// below the minutes.
 const KEEP_MICROPHONE_OPEN: u64 = 1 << 60;
-/// The next never-used bit above it: the Vocabulary sheet offers Import…,
-/// adding terms from a CSV or text file. The word is this process's own, so
-/// the bit's place in it is free to move.
-const IMPORT_VOCABULARY: u64 = 1 << 61;
 
 /// This process's `labs` switches: unknown until settings load or one is
 /// first read.

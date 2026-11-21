@@ -73,7 +73,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Release notes link no labs.release_notes_link               the sidebar footer links this build's release notes: the dev changelog on a dev build, GitHub's release on a stable version
 ├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
 ├── Vocabulary help no labs.vocabulary_biasing                Parakeet transcription biased toward the vocabulary (#452/#457)
-├── Import vocabulary no labs.import_vocabulary                the Vocabulary sheet gains Import…, which reads a CSV, TSV, or text file (Microsoft Teams' custom dictionary CSV included) and merges its rows into the list in any case, keeping 500 terms, 64 characters, and 16 spellings; off, the sheet is unchanged
+├── Import vocabulary no labs.import_vocabulary                the Vocabulary sheet gains Import…, which reads a CSV, TSV, or text file (Microsoft Teams' custom dictionary CSV included), merges its rows into the list in any case and saves at once, keeping 500 terms, 64 characters, and 16 spellings; off, the sheet is unchanged
 ├── Words on screen no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped
 ├── Switch model with keyboard language  no  keyboard_model_switching.enabled  (macOS, Windows, X11)
@@ -475,7 +475,7 @@ playground only after Hex restarts.
 Gate a Labs feature where its work starts (the worker, thread, or capture),
 not only where its UI appears: `labs::live_text()`, `labs::live_chapters()`,
 `labs::playground()`, `labs::vocabulary_biasing()`,
-`labs::microphone_linger()`,
+`labs::import_vocabulary()`, `labs::microphone_linger()`,
 `labs::voice_prompt()`, `labs::stop_phrase()`,
 `app_settings::meetings_enabled()`, or
 `app_settings::hex_microphone_enabled()`.
@@ -3675,23 +3675,35 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   so.
 - Import vocabulary (`labs.import_vocabulary`, every OS): while on, General ›
   Vocabulary's sheet shows Import…, which opens the native file dialog for a
-  CSV, TSV, or text file and merges its rows into the list through
-  `dictation::vocabulary::add_clamped`, then saves through the sheet's own
-  debounced path. The first column is the term and further columns are
-  "sounds like" spellings; the delimiter comes from the first non-empty line,
-  quotes follow RFC 4180, blank and # comment lines are skipped, and a header
-  row (Term, Word, Phrase, Display form, Vocabulary) is skipped. A header that
-  names a Sounds like column, as Microsoft Teams' custom dictionary does,
-  makes that column the only spelling source, so Teams' Long form of the term
-  and Definition and context columns are ignored. Files over 1 MiB and
-  non-UTF-8 files are refused. The sheet says Added 12 terms, No new terms,
-  Updated existing terms, or Couldn't read that file, with Some didn't fit
-  after a clamped import. Off, the sheet has no Import… button and nothing
-  else changes. Checks: `dictation::vocabulary::import::tests` (quotes, the
-  three delimiters, a BOM and CRLF, a header, a quoted #, plain text, the
-  Microsoft Teams sample, and merging into a list at its limits) in
-  [vocabulary/import.rs](../../src/dictation/vocabulary/import.rs), and
-  `an_import_merges_into_the_sheet_and_says_what_happened` in
+  CSV, TSV, or text file. A worker thread reads and parses it (at most 1 MiB
+  and 5,000 rows), merges it into the list with `add_clamped`'s rules through
+  one lowercase index, and the sheet saves immediately through the host save
+  path, not on the typing debounce. The first column is the term and further
+  columns are "sounds like" spellings; the delimiter comes from the first line
+  that isn't blank or a # comment, quotes follow RFC 4180, blank and # comment
+  lines are skipped before tokenizing, and an unterminated quote is refused. A
+  first line with no delimiter makes the whole file one column, so a plain
+  list keeps "Acme, Inc." as one term. A header is skipped only when its first
+  cell is unquoted and its row has another column, or when it reads exactly
+  Term (required) or Display Form; a lone Word or Term stays a term. A header
+  that names a Sounds like column, as Microsoft Teams' custom dictionary
+  does, makes that column the only spelling source, so Teams' Long form of the
+  term and Definition and context columns are ignored. Imported spellings
+  split on commas, which is how the sheet saves them. Files over 1 MiB, files
+  that aren't UTF-8 (a UTF-16 or Windows-1252 export), and files with an
+  unterminated quote show Couldn't read that file. The sheet says Added 12
+  terms, No new terms, Updated existing terms, or Couldn't read that file,
+  with Some didn't fit after a clamped import, including a full list refusing
+  new terms and rows past the cap. Closing the sheet with the dialog open
+  drops the pick, and turning the lab off drops the dialog or the worker's
+  answer. Off, the sheet has no Import… button and nothing else changes.
+  Checks: `dictation::vocabulary::import::tests` (quotes, the three
+  delimiters, a BOM and CRLF, a plain list with a comma, a header, a quoted #,
+  plain text, the Microsoft Teams sample, a comma in a spelling, the row cap,
+  and merging at the list's limits) in
+  [vocabulary/import.rs](../../src/dictation/vocabulary/import.rs),
+  `an_import_merges_into_the_sheet_and_says_what_happened`, and
+  `importing_new_terms_into_a_full_list_says_some_didnt_fit` in
   [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs). The native picker
   and the button in a real window are unobserved.
 - Words on screen (macOS): each dictation may read the focused window's

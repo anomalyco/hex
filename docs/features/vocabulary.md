@@ -34,18 +34,29 @@ General › Vocabulary   // vocabulary.settings; after Language
 ├── Import… (Labs › Import vocabulary on) -> Native file dialog for CSV, TSV,
 │   or text; the first column is the term and further columns are "sounds
 │   like" spellings
-│   ├── Delimiter from the first non-empty line: comma, semicolon, or tab;
-│   │   RFC 4180 quotes, so quoted delimiters and line breaks stay in a term
-│   ├── Blank lines and # comment lines are skipped; plain text with one term
-│   │   a line reads the same, quote a # to keep it a term
-│   ├── An optional header row (Term, Word, Phrase, Display form, Vocabulary)
-│   │   is skipped; when it names a Sounds like column, only that column
-│   │   supplies spellings, so Microsoft Teams' custom dictionary CSV imports
-│   │   its Term and Sounds like columns and leaves Long form of the term and
+│   ├── Delimiter from the first line that isn't blank or a # comment:
+│   │   comma, semicolon, or tab; RFC 4180 quotes, so quoted delimiters and
+│   │   line breaks stay in a term
+│   ├── A first line with no delimiter makes the whole file one column, so a
+│   │   plain list keeps "Acme, Inc." as one term; a one-column header word
+│   │   (Term, Term (required), Display Form) lets the next line with a
+│   │   delimiter decide
+│   ├── Blank lines and # comment lines are skipped before tokenizing; plain
+│   │   text with one term a line reads the same, and a quoted # stays a term
+│   ├── A header is skipped only when its first cell is unquoted and its row
+│   │   has another column, or when it reads exactly Term (required) or
+│   │   Display Form; a lone Word or Term stays a term for a plain list. When
+│   │   the header names a Sounds like column, only that column supplies
+│   │   spellings, so Microsoft Teams' custom dictionary CSV imports its Term
+│   │   and Sounds like columns and leaves Long form of the term and
 │   │   Definition and context out
-│   ├── Each row merges through add_clamped: repeats in any case join the
-│   │   existing term, and 500 terms, 64 characters, and 16 spellings hold
-│   ├── Over 1 MiB or not UTF-8 -> Refused before parsing
+│   ├── Each row merges with add_clamped's rules: repeats in any case join the
+│   │   existing term, imported spellings split on commas, and 500 terms, 64
+│   │   characters, and 16 spellings hold; once the list is full, new terms are
+│   │   refused and counted as not fitting
+│   ├── Rows past 5,000 are dropped and counted as not fitting
+│   ├── Over 1 MiB, not UTF-8 (a UTF-16 or Windows-1252 export), or an
+│   │   unterminated quote -> Couldn't read that file
 │   └── A note says Added 12 terms, No new terms, Updated existing terms, or
 │       Couldn't read that file; Some didn't fit follows a clamped import
 ├── Past the limits -> Keep the term (cut to 64 characters) and the spellings
@@ -201,9 +212,12 @@ The list lives in `settings.json` as `vocabulary`, each entry a plain term
 spellings as a plain string. `hex vocabulary list --json` keeps the object form.
 Labs › Import vocabulary (`labs.import_vocabulary`, off by default, every OS)
 adds the sheet's Import… button; off, the sheet and every path through it are
-unchanged. An import reads the file in the window process (at most 1 MiB),
-merges each row into the list through `add_clamped`, and saves it the way a
-typed edit does.
+unchanged. An import reads the file on a worker thread (at most 1 MiB and
+5,000 rows), merges each row into the list with `add_clamped`'s rules through
+one lowercase index, and saves immediately through the host save path, not on
+the typing debounce. Closing the sheet with the dialog open drops the pick,
+and turning the lab off drops the dialog or worker's answer. The file must be
+UTF-8; a UTF-16 or Windows-1252 export shows Couldn't read that file.
 It is written only when non-empty, so older files load unchanged and are not
 rewritten. Terms are unique ignoring case; at most 500 terms, 64 characters
 each, and 16 spellings per term. Read-only commands (`hex history`,
@@ -283,8 +297,9 @@ trip in control.rs; `vocabulary_lists_terms_with_their_spellings` in
 `a_reload_retires_the_old_rows` in
 [rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs);
 `dictation::vocabulary::import::tests` (quotes, the three delimiters, a BOM
-and CRLF, a header, a quoted #, plain text, the Microsoft Teams sample, and
-merging into a list at its limits) in
+and CRLF, a header, a quoted #, plain text, a plain list with a comma, the
+Microsoft Teams sample, comma-split spellings, the row cap, and merging into
+a list at its limits) in
 [dictation/vocabulary/import.rs](../../src/dictation/vocabulary/import.rs);
 `the_vocabulary_row_opens_its_sheet`,
 `add_term_scrolls_the_new_row_into_view`,
