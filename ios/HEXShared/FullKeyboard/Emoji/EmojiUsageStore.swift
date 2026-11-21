@@ -104,6 +104,7 @@ final class EmojiRoutedTarget: KeyboardTextTarget {
     var textContentType: UITextContentType? { isSearching ? nil : document.textContentType }
     var smartQuotesType: UITextSmartQuotesType? { isSearching ? .no : document.smartQuotesType }
     var smartDashesType: UITextSmartDashesType? { isSearching ? .no : document.smartDashesType }
+    var selectedText: String? { isSearching ? nil : document.selectedText }
 
     func insertText(_ text: String) {
         guard let current = query else {

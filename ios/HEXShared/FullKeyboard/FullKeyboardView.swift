@@ -54,7 +54,7 @@ final class FullKeyboardView: UIView {
     private var barHold = HexKeyGesture()
     private var barHoldTouch: UITouch?
     private var barHoldWork: DispatchWorkItem?
-    private var lastDictation: String?
+    private var lastDictation: DictationUndo?
     /// A word you typed whose slot you held: the strip offers Add to vocabulary until the text
     /// changes (`FullKeyboardView+Vocabulary`).
     var vocabularyOffer: String?
@@ -573,6 +573,10 @@ final class FullKeyboardView: UIView {
         } else {
             engine.textDidChange()
         }
+        // Moved somewhere it can't take the dictation back from: no button that does nothing.
+        if let undo = lastDictation, undoPlan(undo) == nil {
+            hideUndo()
+        }
         refreshReturnKey()
         refreshStrip()
     }
@@ -608,9 +612,10 @@ final class FullKeyboardView: UIView {
         }
     }
 
-    /// Hex inserted a dictation; offer to take it back until the next edit.
-    func didInsertDictation(_ text: String) {
-        lastDictation = text
+    /// Hex inserted a dictation between `before` and `after`; offer to take it back until the
+    /// next edit, or until it can't be found from the cursor.
+    func didInsertDictation(_ text: String, before: String = "", after: String = "") {
+        lastDictation = DictationUndo(text: text, before: before, after: after)
         refreshStrip()
         undoHideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.hideUndo() }
@@ -1327,18 +1332,38 @@ final class FullKeyboardView: UIView {
         styleMenu?.debugOfferRemove(language)
     }
 
+    /// Where the dictation is from the cursor, or nil when it can't be told apart from other
+    /// text: right before the cursor (perhaps only its end shown), or found once around it.
+    private func undoPlan(_ undo: DictationUndo) -> DictationUndo.Plan? {
+        let target = engine.target
+        let selected = target.selectedText
+        guard selected?.isEmpty ?? true else { return nil }
+        let text = undo.text
+        let before = target.documentContextBeforeInput ?? ""
+        let after = target.documentContextAfterInput ?? ""
+        // Right before the cursor, with what followed it when it went in still after the cursor.
+        if after.hasPrefix(undo.after) || undo.after.hasPrefix(after),
+           before.hasSuffix(text) || (!before.isEmpty && before.count < text.count && text.hasSuffix(before)) {
+            return DictationUndo.Plan(toEnd: 0, delete: text.count, back: 0)
+        }
+        return undo.plan(before: before, after: after, selected: selected)
+    }
+
     private func undoDictation() {
-        guard let text = lastDictation else { return }
+        guard let undo = lastDictation else { return }
+        let text = undo.text
         let before = engine.target.documentContextBeforeInput ?? ""
-        // Only take back text that is still right before the cursor.
-        if before.hasSuffix(text) || (!before.isEmpty && before.count < text.count && text.hasSuffix(before)) {
+        if let plan = undoPlan(undo) {
             // The host may show only the end of it; replay removes what the keys remove.
-            typingLog?.edit("undo_dictation", before.hasSuffix(text)
+            typingLog?.edit("undo_dictation", before.hasSuffix(text) || plan.toEnd != 0
                 ? [TypingLogField("deleted", .string(text))]
                 : [TypingLogField("deletedCount", .int(text.count))])
-            for _ in 0..<text.count {
+            // Moves stay inside the text the host showed, so it doesn't drop them.
+            if plan.toEnd != 0 { engine.target.adjustTextPosition(byCharacterOffset: plan.toEnd) }
+            for _ in 0..<plan.delete {
                 engine.target.deleteBackward()
             }
+            if plan.back != 0 { engine.target.adjustTextPosition(byCharacterOffset: plan.back) }
             onUndoDictation?()
         } else {
             typingLog?.ui("undo_dictation", [TypingLogField("applied", .bool(false))])

@@ -17,6 +17,7 @@ protocol KeyboardTextTarget: AnyObject {
     var isSecureTextEntry: Bool? { get }
     var smartQuotesType: UITextSmartQuotesType? { get }
     var smartDashesType: UITextSmartDashesType? { get }
+    var selectedText: String? { get }
     func insertText(_ text: String)
     func deleteBackward()
     func adjustTextPosition(byCharacterOffset offset: Int)
@@ -27,6 +28,7 @@ extension KeyboardTextTarget {
     var enablesReturnKeyAutomatically: Bool? { false }
     var textContentType: UITextContentType? { nil }
     var isSecureTextEntry: Bool? { nil }
+    var selectedText: String? { nil }
     func adjustTextPosition(byCharacterOffset offset: Int) {}
 }
 
@@ -48,6 +50,7 @@ final class DocumentProxyTextTarget: KeyboardTextTarget {
     var keyboardAppearance: UIKeyboardAppearance? { proxy()?.keyboardAppearance }
     var textContentType: UITextContentType? { proxy()?.textContentType ?? nil }
     var isSecureTextEntry: Bool? { proxy()?.isSecureTextEntry }
+    var selectedText: String? { proxy()?.selectedText }
     func insertText(_ text: String) { proxy()?.insertText(text) }
     func deleteBackward() { proxy()?.deleteBackward() }
     func adjustTextPosition(byCharacterOffset offset: Int) { proxy()?.adjustTextPosition(byCharacterOffset: offset) }
