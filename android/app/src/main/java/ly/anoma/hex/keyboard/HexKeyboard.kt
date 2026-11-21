@@ -16,6 +16,7 @@ import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.SpeechPhase
+import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.typing.PersonalWords
@@ -29,6 +30,8 @@ class HexKeyboard : InputMethodService() {
     private lateinit var capture: MicCapture
     internal val preferences by lazy { SpeechPreferences(this) }
     internal var nextEnglish: Boolean? = null
+    /** The options the dictation in flight started with: its language decides mid-sentence case. */
+    private var dictating: SpeechOptions? = null
     internal val feedback by lazy { TypingPreferences(this) }
     internal val layoutLanguage get() = feedback.layout ?: preferences.spoken.layout ?: Spoken.English
     // Android's personal dictionary is read off the main thread, and again whenever it changes.
@@ -91,7 +94,7 @@ class HexKeyboard : InputMethodService() {
             return false
         }
         engine.clearForDictation()
-        capture.start(preferences.options(nextEnglish))
+        dictating = preferences.options(nextEnglish).also(capture::start)
         nextEnglish = null
         return true
     }
@@ -106,7 +109,8 @@ class HexKeyboard : InputMethodService() {
     internal fun cancelSpeech() = capture.cancel()
     private fun commitSpeech(text: String) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) return
-        engine.insertDictation(text)
+        val options = dictating
+        engine.insertDictation(text, if (options?.translate == true) "en" else options?.spoken?.code)
     }
     private fun leaveEditor() { view?.closeMenu(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }

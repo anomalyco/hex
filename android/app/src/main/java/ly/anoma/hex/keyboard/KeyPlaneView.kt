@@ -15,6 +15,7 @@ import ly.anoma.hex.R
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.KeyRect
+import ly.anoma.hex.typing.TypingWord
 import kotlin.math.roundToInt
 
 /** The keys: three rows from the page's layout, then ?123, comma, space, period and enter. Every
@@ -160,9 +161,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 // The letter as it was when the finger went down, so shift lifting mid-press can't change it.
                 var downText: String? = null
                 val k = caps.cap(cased(c), cased(c)) {
-                    val text = downText ?: cased(c)
                     val g = if (symbols) null else geometry()
                     val p = touch ?: g?.centres?.get(c)
+                    val text = (downText ?: cased(c)).let { if (symbols || touch == null) it else likelier(c, it, touch!!) }
                     if (g != null && p != null) ime.engine.letter(text, p.x, p.y, g) else ime.engine.type(text)
                 }
                 row.add(k, at, width); at += width
@@ -268,6 +269,22 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         EditorInfo.IME_ACTION_SEND -> R.string.keyboard_action_send
         else -> null
     }?.let(context::getString)
+
+    /** The letter a touch types: its own key's, or a neighbour's the word list makes likelier when the
+     * touch is within TypingWord.REACH dp of that neighbour's touch area (never from a key's centre). */
+    private fun likelier(c: Char, text: String, touch: KeyPoint): String {
+        val near = HashMap<Char, Double>()
+        for ((other, cap) in letters) {
+            if (other == c) continue
+            val row = cap.parent as View
+            val dx = maxOf(cap.left - touch.x, 0.0, touch.x - cap.right)
+            val dy = maxOf(row.top - touch.y, 0.0, touch.y - row.bottom)
+            val dp = Math.hypot(dx, dy) / density
+            if (dp < TypingWord.REACH) near[if (text.single().isUpperCase()) other.uppercaseChar() else other] = dp
+        }
+        if (near.isEmpty()) return text
+        return ime.engine.likelierLetter(text.single(), near, letters.keys).toString()
+    }
 
     /** A touch's x in the host's coordinates, where the accent callout is drawn. */
     private fun xInHost(row: View, key: View, x: Float) = left + rows.left + row.left + key.left + x

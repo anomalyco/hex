@@ -8,6 +8,7 @@ import android.view.KeyEvent
 import android.view.inputmethod.EditorInfo
 import java.util.concurrent.Executor
 import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.PersonalWords
@@ -207,6 +208,14 @@ internal class KeyboardEngine(
         shift.typed()
         if (was != shift.uppercase) showPlane()
     }
+    /** The letter a touch near a key's edge types: the key it landed on, or a neighbour within
+     * TypingWord.REACH dp ([near], distances in dp) that the word list makes clearly likelier next. Only
+     * while autocorrect is on in an ordinary text field on the letters page, and never with caps lock. */
+    fun likelierLetter(hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
+        val w = word ?: return hit
+        if (near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
+        return w.likelierKey(before(), hit, near, keys)
+    }
     /** Shift as the keys show it: letters type capitals while it is on or held. */
     val uppercase get() = shift.uppercase
 
@@ -218,7 +227,7 @@ internal class KeyboardEngine(
         if (w.token.isEmpty()) {
             val b = takeHeldSpace(before())
             prefix = b.takeLast(40); w.reset(b)
-            if (!TypingWord.boundary(b.lastOrNull()) || !canEndWord()) { type(text); return }
+            if (!w.startsWord(b) || !canEndWord()) { type(text); return }
         }
         clearSpaces()
         if (w.token.length >= TypingWord.MAX_LENGTH) { type(text); return }
@@ -257,7 +266,7 @@ internal class KeyboardEngine(
         if (symbols || !canEndWord()) return
         val old = w.token
         if (old.isNotEmpty() && !endsWith(prefix + old)) { resetTyping(); surface?.suggestions(emptyList()); return }
-        if (old.isEmpty() && !TypingWord.boundary(before().lastOrNull())) return
+        if (old.isEmpty() && !w.startsWord(before())) return
         val holds = SpaceRules.separates(target.after(1))
         clearSpaces()
         if (replace(old, if (holds) text else "$text ")) {
@@ -396,10 +405,18 @@ internal class KeyboardEngine(
     /** The editor or the keyboard went away: forget the word, never carry it to the next field. */
     fun leave() { resetTyping(); clearSpaces(); word = null; surface?.suggestions(emptyList()) }
 
-    /** Dictated text with only the separators missing at the cursor. */
-    fun insertDictation(text: String) {
+    /** Dictated text with only the separators missing at the cursor; mid-sentence its first word loses
+     * the capital Whisper gave it ([SpokenText.continuing], [language] as dictated or "en" translated). */
+    fun insertDictation(text: String, language: String?) {
         if (!target.connected) return
-        val result = insertion(text, target.before(1)?.lastOrNull(), target.after(1)?.firstOrNull())
+        val before = if (secure) null else target.before(64)
+        // The keyboard's own word list for that language, when loaded, knows far more ordinary words than
+        // the speech side's short list: a word it has in lowercase and the books rarely capitalise
+        // loses Whisper's capital; a name keeps it (iOS asks UITextChecker the same).
+        val model = models[if (language == "no") "nb" else language]?.model
+        val shaped = if (model == null) SpokenText.continuing(text, before, language)
+            else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
+        val result = insertion(shaped, before?.lastOrNull(), target.after(1)?.firstOrNull())
         if (result.isNotEmpty()) target.commit(result)
     }
 }
