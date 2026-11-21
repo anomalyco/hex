@@ -13,7 +13,7 @@
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jobject assets, jstring file,
                                          jshortArray samples, jint count, jint threads, jstring language,
-                                         jboolean translate) {
+                                         jboolean translate, jstring prompt) {
     if (count < 1 || count > env->GetArrayLength(samples)) return nullptr;
 #ifdef NDEBUG
     // whisper.cpp also installs this callback for ggml. Set it before either engine starts.
@@ -59,6 +59,15 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jobject assets, js
     env->ReleaseStringUTFChars(language, code);
     params.language = lang.c_str();
     params.translate = translate;
+    // Custom vocabulary as Whisper's initial prompt biases its spelling of those names.
+    std::string hint;
+    if (prompt) {
+        const char *chars = env->GetStringUTFChars(prompt, nullptr);
+        if (!chars) return nullptr;
+        hint = chars;
+        env->ReleaseStringUTFChars(prompt, chars);
+    }
+    if (!hint.empty()) params.initial_prompt = hint.c_str();
     // The measured short-dictation window; longer clips retain the full encoder context.
     if (file && count <= 8 * 16000) params.audio_ctx = 512;
     params.no_context = true;

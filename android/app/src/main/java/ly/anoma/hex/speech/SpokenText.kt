@@ -4,30 +4,44 @@ import java.util.Locale
 
 /** iOS's DictationPipeline and TranscriptFormatter: string rules only, no learned or remote rewriting. */
 internal object SpokenText {
-    /** Cleanup, the style, then Lowercase, the same wherever Hex dictates. Translation already
-     * happened in Whisper, so a translated dictation is formatted as English. */
+    /** Custom vocabulary, spoken symbols and counts, cleanup, the style, the vocabulary's spellings
+     * again (a style can capitalize "iPhone"), then Lowercase, the same wherever Hex dictates.
+     * Translation already happened in Whisper, so a translated dictation is English. */
     fun format(raw: String, options: SpeechOptions): String {
         val language = if (options.translate) "en" else options.spoken.code
-        val cleaned = if (options.clean && options.style != Style.Verbatim && raw.isNotBlank())
-            SpokenCleanup.clean(raw.trim(), language) else raw
-        val styled = style(cleaned, options.style, language, options.endWithPeriod)
-        return if (options.lowercase) styled.lowercase(Locale.ROOT) else styled
+        val spelled = VocabularySpelling.apply(options.vocabulary, raw)
+        if (options.style == Style.Verbatim || raw.isBlank()) return finished(style(spelled, options.style, language), options)
+        val spoken = SpokenCleanup.counts(SpokenCleanup.symbols(spelled.trim(), language), language)
+        val cleaned = if (options.clean) SpokenCleanup.clean(spoken, language) else spoken
+        val styled = style(cleaned, options.style, language, options.endWithPeriod, options.formatLists, options.spokenPunctuation)
+        // French spacing goes last, since every style takes the spaces before marks out; Verbatim keeps the model's.
+        return FrenchSpacing.apply(finished(styled, options), language)
     }
 
-    /** TranscriptFormatter.format. With [endsWithPeriod] off no line ends with a full stop,
-     * though "?" and "!" stay; Verbatim keeps the model's. */
-    fun style(raw: String, style: Style, language: String? = null, endsWithPeriod: Boolean = true): String {
-        val styled = styled(raw, style, language)
+    private fun finished(styled: String, options: SpeechOptions): String {
+        val text = VocabularySpelling.apply(options.vocabulary, styled)
+        return if (options.lowercase) text.lowercase(Locale.ROOT) else text
+    }
+
+    /** TranscriptFormatter.format. [lists] (SpokenLists) then [punctuation] (SpokenPunctuation) run
+     * after the fillers, in every style but Verbatim. With [endsWithPeriod] off no line ends with a
+     * full stop, though "?" and "!" stay; Verbatim keeps the model's. */
+    fun style(raw: String, style: Style, language: String? = null, endsWithPeriod: Boolean = true,
+              lists: Boolean = false, punctuation: Boolean = false): String {
+        val styled = styled(raw, style, language, lists, punctuation)
         if (endsWithPeriod || style == Style.Verbatim) return styled
         return styled.split('\n').joinToString("\n", transform = ::droppingFinalFullStop)
     }
 
-    private fun styled(raw: String, style: Style, language: String?): String {
+    private fun styled(raw: String, style: Style, language: String?, lists: Boolean, punctuation: Boolean): String {
         val trimmed = raw.trim()
         if (trimmed.isEmpty()) return ""
         val english = code(language) == "en"
         if (style == Style.Verbatim) return collapse(trimmed)
-        val cleaned = stripFillers(trimmed, fillers(language))
+        // Lists first, so "dash … dash …" stays a list and "comma, new line" keeps its comma.
+        val stripped = stripFillers(trimmed, fillers(language))
+        val listed = if (lists) SpokenLists.format(stripped, language) else stripped
+        val cleaned = if (punctuation) SpokenPunctuation.format(listed, language) else listed
         return when (style) {
             Style.Polished -> polish(cleaned, english)
             Style.Casual -> casual(cleaned, english)
@@ -360,6 +374,48 @@ internal object SpokenText {
         if (i < 0 || isAddress(text.toCharArray(), i)) return text
         return text.substring(0, i) + text[i].uppercase() + text.substring(i + 1)
     }
+
+    /** The dictation as it goes in after [before] (iOS insertionText's case rule): mid-sentence, its
+     * first word is lowercased unless it is "I", an acronym, has inner capitals or [isWord] doesn't
+     * know its lowercase form (likely a name). German capitalizes nouns, so it keeps the case. */
+    fun continuing(text: String, before: String?, language: String?,
+                   isWord: (String) -> Boolean = { commonWord(it, language) }): String {
+        if (startsSentence(before) || code(language) in setOf("de", "lb")) return text
+        return continuingSentence(text, isWord)
+    }
+
+    fun continuingSentence(text: String, isWord: (String) -> Boolean): String {
+        val first = text.firstOrNull() ?: return text
+        if (!first.isUpperCase()) return text
+        val word = text.takeWhile { it.isLetter() || it == '\'' || it == '’' }
+        if (word == "I" || word.startsWith("I'") || word.startsWith("I’")) return text
+        val letters = word.filter(Char::isLetter)
+        if (letters.length >= 2 && letters == letters.uppercase(Locale.ROOT)) return text
+        if (letters.drop(1).any(Char::isUpperCase)) return text
+        if (!isWord(word.lowercase(Locale.ROOT))) return text
+        return first.lowercase() + text.substring(1)
+    }
+
+    /** Words that are never names, so a capital on them only came from Whisper starting a segment.
+     * Android has no synchronous system dictionary and the typing models are case-folded. */
+    fun commonWord(word: String, language: String?) = word in (commonWords[code(language)] ?: emptySet())
+
+    private val commonWords = mapOf(
+        "en" to ("a about after again all also am an and another any are as at be because been before being but by " +
+            "can could did do does doing don't done each even every few for from get gets getting go goes going gonna got " +
+            "had has have having he her here hers him his how however if in into is it it's its just let let's like made " +
+            "make many maybe me might more most much must my need no not now of off oh ok okay on once one only or other our " +
+            "out over please so some still such than thank thanks that that's the their them then there there's these they " +
+            "this those though through to too under until up us very was we well were what when where which while who why " +
+            "will with would yeah yes yet you your").split(' ').toSet(),
+        "es" to ("a al algo así aunque bien cada como con cuando de del desde donde el ella ellas ellos en entonces era es " +
+            "esa ese eso esta este esto está están estoy fue gracias ha hay la las le les lo los me mi mientras muy más nada " +
+            "ni no nos o otra otro para pero poco por porque pues que qué se si sin sobre solo son su sus también tan te " +
+            "tengo tiene todo todos tu un una uno vale vamos y ya yo").split(' ').toSet(),
+        "no" to ("alle at av bare da de del dem den denne der det dette du eller en er et etter for fordi fra går ha han " +
+            "har hun hva hvis hvor i igjen ikke inn ja jeg kan kanskje med men mer meg min nei når og også om opp på så " +
+            "seg skal som til takk uten var vi vil være å").split(' ').toSet(),
+    ).let { it + ("nb" to it.getValue("no")) + ("nn" to it.getValue("no")) }
 
     /** Whether text before the cursor leaves the next words at a sentence start: none (or only
      * spaces), a line break, or a sentence's mark (closing quotes or brackets after it count too). */
