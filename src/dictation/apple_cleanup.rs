@@ -470,24 +470,43 @@ const SELF_CORRECTIONS: &[&[&str]] = &[
     &["rather"],
 ];
 
-/// Whether the cleaned words are the tail after the transcript's last spoken
-/// self-correction marker, and that tail is not empty. A cleanup that keeps
+/// Whether the cleaned words are a prefix of the transcript's own words
+/// followed by the full tail after its last spoken self-correction marker,
+/// with only a short stretch removed before the marker. A cleanup that keeps
 /// less than half the transcript may do so only in this shape; otherwise it
 /// silently truncated the speaker.
 fn keeps_self_correction_tail(original: &[String], cleaned: &[String]) -> bool {
-    let mut last_end = None;
+    let mut last: Option<(usize, usize)> = None;
     for start in 0..original.len() {
         for marker in SELF_CORRECTIONS {
             if marker_at(original, start, marker) {
-                last_end = last_end.max(Some(start + marker.len()));
+                let end = start + marker.len();
+                last = Some(match last {
+                    Some((last_end, _)) if end > last_end => (end, start),
+                    Some((last_end, last_start)) if end == last_end => (end, last_start.min(start)),
+                    Some(pair) => pair,
+                    None => (end, start),
+                });
             }
         }
     }
-    let Some(end) = last_end else {
+    let Some((end, marker_start)) = last else {
         return false;
     };
     let tail = &original[end..];
-    !tail.is_empty() && cleaned.ends_with(tail)
+    if tail.is_empty() {
+        return false;
+    }
+    // The cleaned text keeps the transcript's opening words up to `k`, skips
+    // the words from `k` to the marker, then keeps the marker's tail whole.
+    // Only a short gap before the marker may disappear this way; a long one is
+    // an ordinary word near the end of the sentence, not a self-correction.
+    (0..=marker_start).any(|k| {
+        marker_start - k <= tail.len() + 2
+            && cleaned.len() == k + tail.len()
+            && cleaned.starts_with(&original[..k])
+            && cleaned.ends_with(tail)
+    })
 }
 
 /// Whether `marker` appears in `words` at `start`.
@@ -951,6 +970,28 @@ mod tests {
             (
                 "scratch that send the invoice to sarah instead of the whole finance team today",
                 "Send the invoice to Sarah.",
+            ),
+            (
+                "we need to review the budget and the launch plan with the whole team before \
+                 friday, actually let's do it monday",
+                "Let's do it Monday.",
+            ),
+            (
+                "send the budget and the launch plan to the whole team, actually just to sarah",
+                "Just to Sarah.",
+            ),
+            (
+                "please tell the team the budget review moved so we will have to wait until monday",
+                "Until Monday.",
+            ),
+            (
+                "the team wants to delay the launch until march but i would rather we ship",
+                "We ship.",
+            ),
+            (
+                "tell sarah the launch plan and the budget are ready for review, sorry for the \
+                 delay",
+                "For the delay.",
             ),
         ];
         for (original, cleaned) in cases {

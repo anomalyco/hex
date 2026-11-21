@@ -244,23 +244,45 @@ nonisolated enum TranscriptCleanupGuard {
         ["rather"],
     ]
 
-    /// Whether the cleaned words are the tail after the transcript's last spoken
-    /// self-correction marker, and that tail is not empty. A cleanup that keeps less than
-    /// half the transcript may do so only in this shape; otherwise it silently truncated
-    /// the speaker.
+    /// Whether the cleaned words are a prefix of the transcript's own words followed by
+    /// the full tail after its last spoken self-correction marker, with only a short
+    /// stretch removed before the marker. A cleanup that keeps less than half the
+    /// transcript may do so only in this shape; otherwise it silently truncated the
+    /// speaker.
     private static func keepsSelfCorrectionTail(_ original: [String], _ cleaned: [String]) -> Bool {
-        var lastEnd: Int?
+        var last: (end: Int, start: Int)?
         for start in original.indices {
             for marker in selfCorrections where start + marker.count <= original.count {
                 if original[start..<(start + marker.count)].elementsEqual(marker) {
-                    lastEnd = max(lastEnd ?? 0, start + marker.count)
+                    let end = start + marker.count
+                    if let current = last {
+                        if end > current.end {
+                            last = (end, start)
+                        } else if end == current.end {
+                            last = (end, min(current.start, start))
+                        }
+                    } else {
+                        last = (end, start)
+                    }
                 }
             }
         }
-        guard let end = lastEnd else { return false }
-        let tail = Array(original[end...])
+        guard let last else { return false }
+        let tail = Array(original[last.end...])
         guard !tail.isEmpty else { return false }
-        return cleaned.suffix(tail.count).elementsEqual(tail)
+        // The cleaned text keeps the transcript's opening words up to `k`, skips the
+        // words from `k` to the marker, then keeps the marker's tail whole. Only a short
+        // gap before the marker may disappear this way; a long one is an ordinary word
+        // near the end of the sentence, not a self-correction.
+        for k in 0...last.start {
+            guard last.start - k <= tail.count + 2 else { continue }
+            guard cleaned.count == k + tail.count else { continue }
+            if cleaned.prefix(k).elementsEqual(original.prefix(k)),
+               cleaned.suffix(tail.count).elementsEqual(tail) {
+                return true
+            }
+        }
+        return false
     }
 
     /// Every first- and second-person pronoun in the words, with its count.
@@ -336,7 +358,7 @@ nonisolated enum TranscriptCleanupGuard {
 
     /// The cleaned text's first sentence or clause, where a preamble's colon would sit.
     private static func firstClause(in text: String) -> Substring {
-        if let end = text.firstIndex(where: { ".!?;\n。！？；".contains($0) }) {
+        if let end = text.firstIndex(where: { ".!?;\n\r\n。！？；".contains($0) }) {
             return text[..<end]
         }
         return text[...]

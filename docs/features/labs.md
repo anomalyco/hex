@@ -1237,16 +1237,18 @@ first sentence or clause when the transcript has no such colon, and no
 transcript did not say. A cleanup that only drops words may keep less than
 half the transcript only when the transcript says a self-correction marker
 ("no wait", "wait", "i mean", "actually", "scratch that", "sorry", or
-"rather") and the cleaned text ends with every word after the last one;
-otherwise it is a silent truncation and falls back. One that rewrites must
-still keep half. Counting differences remain: a length is counted in scalars
-here and in grapheme clusters on iOS; the CJK numerals
-`Character.isNumber` sees but Rust's `is_numeric` does not are read as
-digits here; and the colon exception ignores a colon between two digits as
-each platform reads them, so a CJK numeral around a colon (`三:四`) counts
-on iOS but not here. The first clause ends at `.`, `!`, `?`, `;` or a
-line feed on both sides, so a `\r` before that line feed stays in the clause
-and does not change the colon check. The guard returns the reason (empty
+"rather"), the cleaned text is the transcript's opening words followed by
+every word after the last marker, and the words removed before that marker are
+no longer than that tail plus two; otherwise it is a silent truncation and
+falls back. One that rewrites must still keep half. Counting differences
+remain: a length is counted in scalars here and in grapheme clusters on iOS;
+the CJK numerals `Character.isNumber` sees but Rust's `is_numeric` does not
+are read as digits here; and the colon exception ignores a colon between two
+digits as each platform reads them, so a CJK numeral around a colon (`三:四`)
+counts on iOS but not here. The first clause ends at `.`, `!`, `?`, `;`
+or a line feed. Swift also ends it at a `\r\n` pair as one character; Rust
+ends at its `\n` and leaves the `\r` in the clause, which does not change
+the colon check. The guard returns the reason (empty
 text, much longer or many more words than the transcript, a changed number, an
 added or dropped negation, added words the speaker did not say, a changed
 speaker, a reply opener, a preamble, text about something else, or most of the

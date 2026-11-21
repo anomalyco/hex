@@ -274,6 +274,26 @@ final class TranscriptCleanupGuardTests: XCTestCase {
                 "scratch that send the invoice to sarah instead of the whole finance team today",
                 "Send the invoice to Sarah."
             ),
+            (
+                "we need to review the budget and the launch plan with the whole team before friday, actually let's do it monday",
+                "Let's do it Monday."
+            ),
+            (
+                "send the budget and the launch plan to the whole team, actually just to sarah",
+                "Just to Sarah."
+            ),
+            (
+                "please tell the team the budget review moved so we will have to wait until monday",
+                "Until Monday."
+            ),
+            (
+                "the team wants to delay the launch until march but i would rather we ship",
+                "We ship."
+            ),
+            (
+                "tell sarah the launch plan and the budget are ready for review, sorry for the delay",
+                "For the delay."
+            ),
         ]
         for (original, cleaned) in cases {
             XCTAssertEqual(
