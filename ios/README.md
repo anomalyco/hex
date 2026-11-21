@@ -145,6 +145,18 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     vocabulary included, as desktop's Lowercase step (`str::to_lowercase` on the
     final text) does, on every path (`DictationLowercaseSettings`, App Group key
     `settings.dictationLowercase`).
+  - **French spacing (every style but Verbatim):** dictation in French, or translated
+    into it, gets the spaces French puts around punctuation, last in the pipeline
+    (`FrenchSpacing`): a narrow no-break space (U+202F) before `? ! ;` and a no-break
+    space (U+00A0) before `:` and inside `« »`; Canadian French none before `? ! ;`
+    (OQLF), Swiss French narrow ones inside `« »` too. Whatever was there becomes
+    exactly that one space, and only a mark that ends a word is spaced, so 10:30, URLs,
+    addresses, emoticons (":)", ";-)"), code in backticks and a mark at a line's start
+    stay as they are. Apple Speech writes a plain space before "?" in fr-FR and fr-CH and
+    none in fr-CA's `DictationTranscriber` (macOS 27.2.1, `say` voices), and every
+    style but Verbatim took the space out ("ça va?"). Apple's French keyboards type
+    no space before a mark (iOS 27.2 simulator, black box), so the full keyboard
+    doesn't either.
   - **Format lists (Settings › Dictation › Format lists):** On by default
     (`DictationListSettings`, App Group key `settings.dictationFormatLists`), in
     English and Spanish, every style but Verbatim (`SpokenLists`, inside the

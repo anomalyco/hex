@@ -1513,6 +1513,31 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertTrue(target.text.hasSuffix(" a,"))
     }
 
+    /// X (Philippe): French puts a space before ? ! ; and :, but Apple's French keyboards type
+    /// none (black box, iOS 27.2 simulator, Français (France) AZERTY: "Salut" then ? gave
+    /// "Salut?", and "salut ?" kept the plain space typed before it). Hex types the marks as
+    /// tapped too, in every French layout; dictation adds French spacing (`FrenchSpacing`).
+    func testFrenchMarksGoInAsTyped() {
+        for language in [KeyboardLanguage.french, .frenchCanadian, .frenchSwiss] {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.language = language
+            engine.configureForField()
+            type("salut")
+            punctuate("?")
+            XCTAssertEqual(target.text, "salut?", language.rawValue)
+            type(" oui ")
+            punctuate("!")
+            XCTAssertEqual(target.text, "salut? oui !", "\(language.rawValue): the space you typed stays as it is")
+            type(" non")
+            punctuate(":")
+            XCTAssertEqual(target.text, "salut? oui ! non:", language.rawValue)
+        }
+    }
+
     func testPunctuationNeverChangesASwipedWord() throws {
         let (field, plane) = try swipeKeyboard()
         plane.engine.autocorrect.loadLexiconEntries([("hello", "Hello, friend")])
