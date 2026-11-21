@@ -688,3 +688,51 @@ final class SpokenListsTests: XCTestCase {
         XCTAssertFalse(DictationListSettings(defaults: defaults).isEnabled)
     }
 }
+
+
+/// iOS 27's speech models write "gonna", "wanna" and "gotta" (macOS 27.2's SpeechTranscriber
+/// too: "I'm gonna call you later."); Polished writes them out, Casual and Verbatim keep them.
+final class InformalContractionTests: XCTestCase {
+    private func polished(_ text: String) -> String {
+        TranscriptFormatter.format(text, style: .polished, language: "en-US")
+    }
+
+    func testPolishedWritesThemOut() {
+        XCTAssertEqual(
+            polished("I'm gonna call you later. I wanna finish this first."),
+            "I'm going to call you later. I want to finish this first."
+        )
+        XCTAssertEqual(polished("I gotta go, lemme know. It's kinda late"), "I got to go, let me know. It's kind of late.")
+        XCTAssertEqual(polished("Gonna be a long day."), "Going to be a long day.")
+        XCTAssertEqual(polished("ok. wanna grab lunch?"), "Ok. Want to grab lunch?")
+    }
+
+    func testQuotesNamesAndOtherWordsStay() {
+        XCTAssertEqual(polished("He said \"I'm gonna win\" and left."), "He said \"I'm gonna win\" and left.")
+        XCTAssertEqual(polished("She sang “Wanna Be Startin' Somethin'” all night."), "She sang “Wanna Be Startin' Somethin'” all night.")
+        XCTAssertEqual(polished("We played Gonna Fly Now on repeat."), "We played Gonna Fly Now on repeat.")
+        XCTAssertEqual(polished("The gonnabe kinds and the wannabes."), "The gonnabe kinds and the wannabes.")
+        XCTAssertEqual(
+            TranscriptFormatter.format("Voy a gonna mañana.", style: .polished, language: "es-ES"),
+            "Voy a gonna mañana.",
+            "English only"
+        )
+    }
+
+    func testCasualAndVerbatimKeepThem() {
+        let heard = "I'm gonna be late, wanna start without me?"
+        XCTAssertEqual(TranscriptFormatter.format(heard, style: .casual, language: "en-US"), "i'm gonna be late, wanna start without me?")
+        XCTAssertEqual(TranscriptFormatter.format(heard, style: .verbatim, language: "en-US"), heard)
+    }
+
+    func testListItems() {
+        XCTAssertEqual(
+            TranscriptFormatter.format("First, gonna call Sam. Second, wanna book the hotel.", style: .polished, language: "en-US", lists: true),
+            "1. Going to call Sam.\n2. Want to book the hotel."
+        )
+        XCTAssertEqual(
+            TranscriptFormatter.format("Todo bullet gotta pack bullet lemme check the car", style: .polished, language: "en-US", lists: true),
+            "Todo:\n- Got to pack.\n- Let me check the car."
+        )
+    }
+}
