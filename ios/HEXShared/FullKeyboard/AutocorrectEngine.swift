@@ -1290,10 +1290,13 @@ final class AutocorrectEngine {
         let s = Array(source)
         let t = Array(target)
         // Polish: diacritics you didn't add, however many ("zolw" -> "żółw", "maly" -> "mały"),
-        // are as cheap as one missing Spanish accent, a little more for each further one.
-        if language == .polish, s.count == t.count {
+        // are as cheap as one missing Spanish accent, a little more for each further one. Greek
+        // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
+        // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος").
+        if language == .polish || language == .greek, s.count == t.count {
+            let same = language == .polish ? samePolishLetterIgnoringDiacritics : sameGreekLetterIgnoringAccents
             let missed = zip(s, t).filter { $0 != $1 }
-            if !missed.isEmpty, missed.allSatisfy({ samePolishLetterIgnoringDiacritics($0, $1) }) {
+            if !missed.isEmpty, missed.allSatisfy({ same($0, $1) }) {
                 return 0.15 + 0.05 * Double(missed.count - 1)
             }
         }
@@ -1354,6 +1357,12 @@ final class AutocorrectEngine {
     /// z/ż, l/ł: ł has no decomposition, so it is named).
     static func samePolishLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
         sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
+    }
+
+    /// Whether two lowercase letters are one Greek letter with or without its tonos or
+    /// diaeresis (α/ά, ι/ϊ/ΐ), or σ and its word-final form ς.
+    static func sameGreekLetterIgnoringAccents(_ a: Character, _ b: Character) -> Bool {
+        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["σ", "ς"]
     }
 
     private struct LayoutKey: Hashable {
