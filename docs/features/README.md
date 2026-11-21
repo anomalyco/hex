@@ -2378,7 +2378,7 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   │   while hidden, and make both at each show (Rune release_gpu_when_hidden);
 │   │   the HUD gives its surface back at each hide too (release_gpu_after, a
 │   │   zero idle on Windows; Linux keeps it 5 minutes), then the device goes
-│   │   ├── Dictation shortcut's modifiers down (Ctrl of Ctrl+Space) -> Rune
+│   │   ├── Dictation shortcut's modifiers down (the left Alt) -> Rune
 │   │   │   makes the device and the HUD's pipeline on a thread (warm_gpu_with,
 │   │   │   unclaimed for 30 s they go), so the HUD shows without them; this
 │   │   │   first call also makes the DX12-or-Vulkan choice
@@ -2445,10 +2445,13 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   ├── Insert, Home, End, Page Up, Page Down alone -> Labs › Special keys
 │   │   alone; off, a saved one goes back to its default
 │   └── Any other key -> the recorder says "Unsupported key" and starts over
-├── Ctrl+Space -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
+├── Left Alt -> Hold or Toggle -> Capture -> Stream (GPU) -> Paste
 ├── Toggle's cancel shortcut (Escape by default) -> Discards a toggled recording;
 │   the hook takes it only while one records. Otherwise Escape -> Nothing (#786)
-├── One modifier alone (Right Alt, Right Ctrl) -> Shortcut; Alt/Win release masked (no menu, Start)
+├── One modifier alone (left Alt by default, #2278) -> Shortcut; Alt/Win release masked (no menu, Start)
+│   ├── AltGr (a synthesized Left Ctrl plus Right Alt) -> Never presses the default;
+│   │   an either-side Alt would press on every AltGr character
+│   └── Another key joining the hold -> Its chord; the press cancels before the hold threshold
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
 │   ├── Windows default input changes -> Switch once capture is idle // cpal's default-device report

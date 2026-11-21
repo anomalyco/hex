@@ -132,11 +132,15 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
 }
 
 export function OptionKey({
+  os,
   phase,
   onStart,
   onIntent,
   onPress,
 }: {
+  // The hero's key names the selected OS's shortcut: Option on the Mac, Alt
+  // on Windows, and Alt+Space on Linux, which binds no modifier alone.
+  os: "mac" | "windows" | "linux"
   phase: Phase
   onStart(el?: HTMLElement | null): void
   onIntent(): void
@@ -226,10 +230,22 @@ export function OptionKey({
       <span className="keycap__well" aria-hidden="true" />
       <span className="keycap__cap" aria-hidden="true">
         <span className="keycap__dish">
-          <svg viewBox="0 0 24 18" className="keycap__glyph">
-            <path d="M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3" />
-          </svg>
-          <span className="keycap__label">option</span>
+          {os === "mac" && (
+            <svg viewBox="0 0 24 18" className="keycap__glyph">
+              <path d="M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3" />
+            </svg>
+          )}
+          <span className="keycap__label">
+            {os === "linux" ? (
+              <>
+                alt<span className="keycap__chord">+ space</span>
+              </>
+            ) : os === "windows" ? (
+              "alt"
+            ) : (
+              "option"
+            )}
+          </span>
         </span>
       </span>
       <span className="keycap__hint" aria-hidden="true">
