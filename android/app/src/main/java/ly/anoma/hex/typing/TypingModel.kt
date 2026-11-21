@@ -12,7 +12,7 @@ import java.nio.channels.FileChannel
  * All large tables stay in the read-only file mapping, including when mapped inside the APK. */
 internal class TypingModel private constructor(private val data: ByteBuffer, val language: String,
                                               private val validWords: ByteBuffer?, list: Reader,
-                                              val capitals: Capitals? = null) {
+                                              val capitals: Capitals? = null) : Lexicon {
     private fun u8(pos: Int) = data.get(pos).toInt() and 255
     private fun int(pos: Int) = data.getInt(pos)
     val words = int(8)
@@ -45,7 +45,8 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
         }
     }
     private fun start(word: Int) = int(starts + 4 * word)
-    fun length(word: Int) = start(word + 1) - start(word)
+    override val size get() = words
+    override fun length(word: Int) = start(word + 1) - start(word)
     fun byte(word: Int, depth: Int): Int {
         val pos = start(word) + depth
         return if (pos < start(word + 1)) u8(blob + pos) else -1
@@ -89,7 +90,7 @@ internal class TypingModel private constructor(private val data: ByteBuffer, val
     // Binary-search the mapped lexicon. Only the first three levels of boundaries are cached;
     // there is no in-memory copy of the word list.
     private val shallow = HashMap<Int, IntArray>()
-    fun child(lo: Int, hi: Int, depth: Int, c: Int): Long {
+    override fun child(lo: Int, hi: Int, depth: Int, c: Int): Long {
         val a: Int; val b: Int
         if (hi - lo == 1) return if (byte(lo, depth) == c) (lo.toLong() shl 32) or hi.toLong() else 0
         if (depth < 3 && hi - lo > 8) {

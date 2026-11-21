@@ -22,6 +22,8 @@ internal class KeyGrid(val centres: Map<Char, KeyPoint>, val pitchX: Double, val
     val missedSpaceCost = maxOf(3.9, 6.0 * rowScale * rowScale)
 }
 internal class SpatialDecoder(val model: TypingModel) {
+    /** Your own words (`PersonalWords`), read beside the model's; null or empty without any. */
+    @Volatile var personal: PersonalWords? = null
     /** `spaceCost`: what reading this tap as a space the finger missed costs when it landed on
      * the bottom row's upper half, or infinity (`spaceTapCost`). */
     class Tap(val cost: DoubleArray, val choices: IntArray, val belowLetters: Boolean, val missedSpaceCost: Double,
@@ -120,11 +122,15 @@ internal class SpatialDecoder(val model: TypingModel) {
     private data class Found(val word: Int, val cost: Double)
     // Keep at most 48 promising prefixes at each spelling depth. One extra, missing or
     // transposed letter is possible; an untyped apostrophe costs nothing.
-    private fun search(taps: List<Tap>, from: Int, end: Int, edits: Int, swears: Boolean, previous: Int): List<Found> {
+    // The words of [lexicon] (the model unless given) the taps from..end read as. Only the model's
+    // words are checked against the never-suggest list: your own words are yours to offer.
+    private fun search(taps: List<Tap>, from: Int, end: Int, edits: Int, swears: Boolean, previous: Int,
+                       lexicon: Lexicon = model): List<Found> {
         val depthLimit = end - from + edits + 2
         val context = model.neverSuggest.restrictedContext(previous)
+        val own = lexicon === model
         val layers = Array(depthLimit + 1) { ArrayList<State>() }
-        layers[0].add(State(0, model.words, from, 0, 0.0))
+        layers[0].add(State(0, lexicon.size, from, 0, 0.0))
         val found = HashMap<Int, Double>()
         // Dropping a clearly aimed, distinct tap needs more evidence than dropping a repeat or a
         // tap between keys. Accents share their physical key.
@@ -143,12 +149,12 @@ internal class SpatialDecoder(val model: TypingModel) {
             var i = 0
             while (i < layer.size) {
                 val s = layer[i++]
-                if (s.tap == end && model.length(s.lo) == d && !model.neverSuggest.blocks(s.lo, swears, context) &&
+                if (s.tap == end && lexicon.length(s.lo) == d && (!own || !model.neverSuggest.blocks(s.lo, swears, context)) &&
                     s.cost < (found[s.lo] ?: Double.POSITIVE_INFINITY))
                     found[s.lo] = s.cost
                 if (d == depthLimit) continue
                 fun push(c: Int, next: Int, e: Int, cost: Double) {
-                    val child = model.child(s.lo, s.hi, d, c)
+                    val child = lexicon.child(s.lo, s.hi, d, c)
                     if (child != 0L) layers[d + 1].add(State((child ushr 32).toInt(), child.toInt(), next, e, cost))
                 }
                 val t = s.tap
@@ -160,11 +166,11 @@ internal class SpatialDecoder(val model: TypingModel) {
                 if (t + 1 >= end || d + 2 > depthLimit) continue
                 val first = taps[t + 1]; val second = taps[t]
                 for (ai in 0 until minOf(3, first.choices.size)) {
-                    val a = first.choices[ai]; val r = model.child(s.lo, s.hi, d, a)
+                    val a = first.choices[ai]; val r = lexicon.child(s.lo, s.hi, d, a)
                     if (r == 0L) continue
                     for (bi in 0 until minOf(3, second.choices.size)) {
                         val b = second.choices[bi]; if (b == a) continue
-                        val child = model.child((r ushr 32).toInt(), r.toInt(), d + 1, b)
+                        val child = lexicon.child((r ushr 32).toInt(), r.toInt(), d + 1, b)
                         if (child != 0L) layers[d+2].add(State((child ushr 32).toInt(), child.toInt(), t+2,
                             s.edits+1, s.cost + first.cost[a] + second.cost[b] + 5))
                     }
@@ -179,18 +185,25 @@ internal class SpatialDecoder(val model: TypingModel) {
         if (typed.length !in 2..32 || taps.size != typed.length || model.neverSuggest.blocks(typed, swears, previous) ||
             typed.any { model.code(it) == 0 || it == '\'' }) return none
         val literal = model.index(typed)
-        val knownLiteral = literal >= 0 || model.known(typed)
-        var cost = lmWeight * when {
+        val personal = personal?.takeIf { it.size > 0 }
+        val yours = personal?.index(typed) ?: -1
+        val knownLiteral = literal >= 0 || model.known(typed) || yours >= 0
+        var lm = when {
             literal >= 0 -> model.languageCost(previous, literal)
             knownLiteral -> 15.0
             else -> 22.0
         }
+        // One of your own words scores as a moderately common one (about the 10,000th).
+        if (yours >= 0) lm = minOf(lm, USER_WORD_COST)
+        var cost = lmWeight * lm
         for (i in taps.indices) cost += taps[i].cost[model.code(typed[i])]
         if (!cost.isFinite()) return none
         val readings = ArrayList<Reading>()
         // iOS applies the language score only to the five best spatial readings.
         for ((w, spatial) in search(taps, 0, taps.size, 1, swears, previous).sortedWith(spatialOrder).take(5)) if (w != literal)
             readings.add(Reading(model.text(w), spatial + lmWeight * model.languageCost(previous, w), model.frequencyCost(w)))
+        if (personal != null) for ((w, spatial) in search(taps, 0, taps.size, 1, swears, previous, personal).sortedWith(spatialOrder).take(3))
+            if (w != yours) readings.add(Reading(personal.text(w), spatial + lmWeight * USER_WORD_COST, (USER_WORD_COST * 8).toInt()))
         if (taps.size >= 3) {
             fun alone(f: Found) = model.length(f.word) > 1 || model.frequencyCost(f.word) < 56
             fun half(a: Int, b: Int, prev: Int) = search(taps, a, b, 0, swears, prev).sortedWith(spatialOrder)
@@ -227,8 +240,9 @@ internal class SpatialDecoder(val model: TypingModel) {
         }
         readings.sortWith(compareBy<Reading> { it.cost }.thenBy { it.text })
         val best = readings.firstOrNull() ?: return none
-        val margin = if (!knownLiteral || foldAccents(best.text) == foldAccents(typed)) 2.0 else 7.0
-        return Decision(if (cost - best.cost >= margin) best.text else null, readings.asSequence().filter { it.cost < cost }.distinctBy { it.text }.take(3).toList())
+        val margin = if (!knownLiteral || foldAccents(best.text.lowercase()) == foldAccents(typed)) 2.0 else 7.0
+        return Decision(if (cost - best.cost >= margin) best.text else null,
+            readings.asSequence().filter { it.cost < cost && !it.text.equals(typed, ignoreCase = true) }.distinctBy { it.text.lowercase() }.take(3).toList())
     }
     private companion object {
         val spatialOrder = compareBy<Found> { it.cost }.thenBy { it.word }
@@ -239,6 +253,7 @@ internal class SpatialDecoder(val model: TypingModel) {
         const val SPACE_TAP_WEIGHT = .25
         // A space tap reads as a letter only within about the bar's top fifth.
         const val MERGE_REACH = 3.0
+        const val USER_WORD_COST = 11.0
     }
     private fun foldAccents(s: String) = Normalizer.normalize(s, Normalizer.Form.NFD).filter { it !in '\u0300'..'\u0308' || it == '\u0303' }
 }

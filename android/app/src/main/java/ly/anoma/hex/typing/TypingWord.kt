@@ -101,10 +101,12 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     fun strip(autocorrect: Boolean = true): List<Suggestion> {
         if (token.length !in 1..MAX_LENGTH) return emptyList()
         val typed = Suggestion(token, Suggestion.Kind.Typed)
+        // Your shortcut: what you typed and its phrase, which space puts in whatever autocorrect does.
+        decoder.personal?.shortcut(token)?.let { return listOf(typed, Suggestion(it, Suggestion.Kind.Fix)) }
         val fix = if (autocorrect) replacement() else null
         val pool = ArrayList<String>(4)
         val lower = token.lowercase()
-        val showTyped = fix != null || blocked(token) || model.index(lower) >= 0 || model.known(lower)
+        val showTyped = fix != null || blocked(token) || knows(lower)
         val size = if (showTyped) 2 else 3
         fun add(s: String) {
             if (pool.size < size && !s.equals(token, ignoreCase = true) && pool.none { it.equals(s, ignoreCase = true) } &&
@@ -115,10 +117,13 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val short = if (token.length <= 3) model.completionsAfter(lower, previous, suggestSwearWords).map { shown(model.text(it)) } else emptyList()
         if (fix == null) short.firstOrNull { s -> pool.none { it.equals(s, ignoreCase = true) } }?.let(::add)
         val readings = autocorrect && spatial && token.length >= 2 && !protected()
-        if (readings && token.length >= 3) for (r in decision().readings) add(shown(r.text))
+        fun reading(text: String) = if (decoder.personal?.owns(text) == true) yours(text) else shown(text)
+        if (readings && token.length >= 3) for (r in decision().readings) add(reading(r.text))
         for (s in short) add(s)
+        // Your own words before the rest of the dictionary's (iOS lists UILexicon terms with them).
+        decoder.personal?.completions(token)?.forEach { add(yours(it)) }
         for (w in model.completions(lower, suggestSwearWords, previous)) add(shown(model.text(w)))
-        if (readings && token.length < 3) for (r in decision().readings) add(shown(r.text))
+        if (readings && token.length < 3) for (r in decision().readings) add(reading(r.text))
         if (pool.isEmpty()) return listOf(typed)
         val first = if (fix != null) Suggestion(fix, Suggestion.Kind.Fix) else Suggestion(pool[0], Suggestion.Kind.Word)
         val words = listOf(first) + pool.drop(1).map { Suggestion(it, Suggestion.Kind.Word) }
@@ -140,14 +145,31 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         token = token.dropLast(1); decision = null
     }
     private fun decision() = decision ?: decoder.decide(token.lowercase(), taps, previous, suggestSwearWords).also { decision = it }
-    private fun blocked(spelling: String) = model.neverSuggest.blocks(spelling.lowercase(), suggestSwearWords, previous)
+    // Your own words are always yours to offer, as iOS offers UILexicon terms.
+    private fun blocked(spelling: String) = model.neverSuggest.blocks(spelling.lowercase(), suggestSwearWords, previous) &&
+        decoder.personal?.owns(spelling) != true
+    /** Your text replacement whose shortcut ends `before` (the text before the cursor), from the personal
+     * dictionary: on space, a closing mark or return, put it in before anything else, autocorrect on
+     * or off (iOS #2152, #2173). Null when no shortcut ends the text. */
+    fun textReplacement(before: String): Correction? = decoder.personal?.replacement(before)
+    // A capitalised word of yours that is also an ordinary lowercase word ("Will", "Bill") stays
+    // lowercase when typed so, as iOS's withoutStrayCapital.
+    private fun ordinary(word: String) = word.lowercase().let { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 95 }
+    private fun yours(word: String): String =
+        if (token.firstOrNull()?.isUpperCase() != true && word.drop(1).none { it.isUpperCase() } && ordinary(word)) word.lowercase()
+        else matchCase(token, word)
     fun literalChip(suggestions: List<String>) = token.takeIf { it.isNotEmpty() && (suggestions.isEmpty() || blocked(it)) }
     private fun protected() = token.drop(1).any { it.isUpperCase() } ||
         (model.language == "en" && token.lowercase() in shorthand)
     private fun cased(s: String) = if (token.firstOrNull()?.isUpperCase() == true) s.replaceFirstChar { it.uppercase() } else s
     /** What space puts in place of the word alone, or null. */
     fun replacement(): String? {
-        if (literalOnly || token.isEmpty() || blocked(token)) return null
+        if (token.isEmpty()) return null
+        val personal = decoder.personal
+        personal?.shortcut(token)?.let { return it }
+        // Your own word: never corrected into another, and spelled your way ("github" -> "GitHub").
+        personal?.index(token)?.takeIf { it >= 0 }?.let { return yours(personal.text(it)).takeIf { s -> s != token } }
+        if (literalOnly || blocked(token)) return null
         val lower = token.lowercase()
         val allCaps = token.length >= 2 && token.all { it.isUpperCase() }
         if (token.drop(1).any { it.isUpperCase() } && !allCaps) return null
@@ -164,7 +186,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (allCaps || !spatial) return null
         // A name, day or place typed in lowercase takes its capital ("mary" -> "Mary"), and so does a
         // German noun ("haus" -> "Haus"), as the capitals list beside the model says.
-        val fix = decision().replace?.let(::cased) ?: return capitalised(token)
+        val fix = decision().replace?.let { if (decoder.personal?.owns(it) == true) yours(it) else cased(it) } ?: return capitalised(token)
         // A missed space after English "i" ("iwant") gives "I want", as "i" alone does.
         if (model.language == "en" && ' ' in fix) return fix.split(' ').joinToString(" ") { if (it == "i") "I" else it }
         // German's model is lowercase: a noun it corrects to takes its capital ("hsus" -> "Haus").
@@ -198,7 +220,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         if (token.isEmpty() || (ending == '.' && token.lowercase() in abbreviations)) return null
         var result: Correction? = null
         if (word?.taps != null && word.space != null && spatial && !literalOnly && taps.size == token.length &&
-            listOf(word.typed, token).none { it.lowercase() in shorthand }) {
+            listOf(word.typed, token).none { it.lowercase() in shorthand || decoder.personal?.owns(it) == true }) {
             val prev = previousWord(before.dropLast(word.text.length + 1)).takeIf { it.isNotEmpty() }
             decoder.merge(word.typed.lowercase(), word.taps, word.space, word.reach, token.lowercase(), taps,
                 model.context(prev.orEmpty()), knows(word.typed), knows(token), suggestSwearWords)?.let { merged ->
@@ -227,7 +249,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return choice.takeUnless { model.neverSuggest.blocks(it.lowercase(), suggestSwearWords, model.context(prev.orEmpty())) }
     }
 
-    private fun knows(spelling: String) = spelling.lowercase().let { model.index(it) >= 0 || model.known(it) || it in shorthand }
+    private fun knows(spelling: String) = spelling.lowercase().let {
+        model.index(it) >= 0 || model.known(it) || it in shorthand || (decoder.personal?.index(it) ?: -1) >= 0
+    }
 
     // Keeps the word this space finished for the next word's revision or join. After a split or a
     // join it reads other letters than were typed: kept as it reads, without taps.
