@@ -575,7 +575,7 @@ private func center(of kind: KeyKind, in view: FullKeyboardView) -> CGPoint {
 }
 
 @MainActor
-final class FixtureTextTarget: KeyboardTextTarget {
+class FixtureTextTarget: KeyboardTextTarget {
     private(set) var text: String
     private(set) var cursorIndex: Int
     let keyboardAppearance: UIKeyboardAppearance?

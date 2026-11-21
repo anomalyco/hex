@@ -4,6 +4,11 @@ import UIKit
 /// through the text in two dimensions, faster the faster the finger.
 @MainActor
 extension FullKeyboardEngine {
+    /// Whether the space bar's trackpad is moving the cursor now.
+    var isTrackpadActive: Bool {
+        touches.values.contains(where: \.isTrackpad)
+    }
+
     /// The space bar held `trackpadHoldDelay` without sliding: the trackpad starts where the
     /// finger is, as Apple's does, so letting go types no space (a press held to move the
     /// cursor used to type one beside the space already there).

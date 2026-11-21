@@ -44,6 +44,7 @@ final class DeleteWordSwipe {
                 TypingLogField("inserted", .string(text)),
                 TypingLogField("src", .string("delete_swipe_restore")),
             ])
+            engine.forgetTextAroundKeys()
             engine.target.insertText(text)
             engine.onSelectionStep?()
             changed = true
@@ -74,6 +75,7 @@ final class DeleteWordSwipe {
             TypingLogField("deleted", .string(text)),
             TypingLogField("src", .string("delete_swipe")),
         ])
+        engine.forgetTextAroundKeys()
         for _ in 0..<count {
             engine.target.deleteBackward()
         }
@@ -105,5 +107,21 @@ final class DeleteWordSwipe {
         if character.isLetter || character.isNumber || character == "_" { return true }
         if character == "'" || character == "’" { return true }
         return character.unicodeScalars.first?.properties.isEmojiPresentation == true
+    }
+}
+
+@MainActor
+extension FullKeyboardEngine {
+    /// The delete key held down, per `repeatDelay`: one character a tick, two once it
+    /// accelerates, whole words after `wordDeleteAfter`.
+    func repeatDelete(heldFor: TimeInterval) {
+        if heldFor >= Self.wordDeleteAfter {
+            deleteWordBackward()
+        } else if heldFor >= Self.fastRepeatAfter {
+            deleteBackward(takesSwipeBack: false, source: "repeat_fast")
+            deleteBackward(takesSwipeBack: false, source: "repeat_fast")
+        } else {
+            deleteBackward(takesSwipeBack: false, source: "repeat")
+        }
     }
 }

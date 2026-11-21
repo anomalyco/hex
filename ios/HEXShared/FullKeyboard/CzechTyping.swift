@@ -58,6 +58,7 @@ extension FullKeyboardEngine {
     /// otherwise, and the mark is typed as itself.
     private func typeCzech(_ text: String) -> Bool {
         guard let accented = CzechTyping.accenting(text, after: target.documentContextBeforeInput) else { return false }
+        rememberTypingContext(before: textBefore.map { String($0.dropLast(1)) }, inserted: accented)
         target.deleteBackward()
         target.insertText(accented)
         didEdit()
