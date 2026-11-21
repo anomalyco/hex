@@ -872,6 +872,40 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertTrue(target.text.hasSuffix(" number cabin seven become "), target.text)
     }
 
+    /// X (Justin): "Space bar accidental taps or lack of taps don't seem to be factored in." A
+    /// space tapped at the space bar's top edge, under a letter the word needed, joins the
+    /// words at the next word's space, as the system keyboard does ("deli ate" -> "delicate");
+    /// one tapped well inside the bar never does, and one backspace puts back both words.
+    func testASpaceTappedAtTheSpaceBarsEdgeForALetterJoinsTheWords() throws {
+        try useDecoder()
+        let space = engine.layout.key(.space)!
+        func edgeSpace(under letter: Character) {
+            let key = engine.layout.key(.character(String(letter)))!.frame
+            let point = CGPoint(x: key.midX, y: space.hitFrame.minY + 1)
+            XCTAssertEqual(engine.layout.hitTest(point)?.kind, .space)
+            tap(at: point)
+        }
+        typeTaps("the")
+        for ch in "deli" { tapCentre(ch) }
+        edgeSpace(under: "c")
+        typeTaps("ate")
+        XCTAssertEqual(target.text, "the delicate ")
+        tap(.delete)
+        XCTAssertEqual(target.text, "the deli ate", "one backspace puts back both words")
+
+        tap(.space)
+        typeTaps("so")
+        tapCentre("a")
+        edgeSpace(under: "b")
+        typeTaps("out")
+        XCTAssertTrue(target.text.hasSuffix(" so about "), target.text)
+
+        for ch in "deli" { tapCentre(ch) }
+        tap(.space)
+        typeTaps("ate")
+        XCTAssertTrue(target.text.hasSuffix(" deli ate "), "a space inside the bar: \(target.text)")
+    }
+
     func testSpatialAutocorrectReadsAnETappedHighOnTheStripAsThe() throws {
         try useDecoder()
         typeTaps("on")

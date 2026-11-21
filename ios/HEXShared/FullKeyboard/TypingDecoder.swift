@@ -362,6 +362,10 @@ nonisolated struct TypingDecoder {
         /// such a tap costs `spaceOmissionCost`.
         var spaceTapCost = 5.0
         var spaceTapWeight = 0.25
+        /// A space tap is read as a letter meant on the row above ("deli ate" for "delicate")
+        /// only when the row is at most this many nats less likely than the space bar for it:
+        /// within about the bar's top fifth, a little deeper than the system keyboard merges.
+        var mergeReach = 3.0
         var maxEdits = 1
         var beam = 48
         /// Nats the best reading must beat what you typed by to replace it on space.
@@ -772,6 +776,53 @@ nonisolated struct TypingDecoder {
         let toRow = (Double(tap.y) - Double(keys.bottomRowY)) / sy
         let likelierRow = max(0, 0.5 * (toBar * toBar - toRow * toRow))
         return parameters.spaceTapCost + parameters.spaceTapWeight * likelierRow
+    }
+
+    /// How much likelier the space bar than the bottom letter row a space tap was, in nats
+    /// (0 when the row is likelier), or nil when it isn't above a bottom-row letter.
+    private func rowCost(of tap: CGPoint, keys: Keys) -> Double? {
+        guard let bar = keys.space, bar.width > 0 else { return nil }
+        let slack = keys.pitch.width / 2
+        guard tap.x >= bar.minX - slack, tap.x <= bar.maxX + slack else { return nil }
+        let sy = Double(keys.pitch.height) * parameters.sigmaY
+        let toBar = (Double(tap.y) - Double(bar.midY)) / sy
+        let toRow = (Double(tap.y) - Double(keys.bottomRowY)) / sy
+        return max(0, 0.5 * (toRow * toRow - toBar * toBar))
+    }
+
+    /// One word where a space was tapped for a letter on the row above ("deli ate" for
+    /// "delicate", "a out" for "about"): the likeliest reading of the first word's taps, the
+    /// space tap as a letter and the second word's taps, when it beats the two words as they
+    /// read by the margin and the tap was near enough the row (`mergeReach`). Nil to keep them.
+    func merge(
+        first: String, firstTaps: [CGPoint], space: CGPoint, second: String, secondTaps: [CGPoint],
+        previous: String?, firstIsValid: Bool, secondIsValid: Bool, keys: Keys
+    ) -> String? {
+        guard firstTaps.count == first.count, secondTaps.count == second.count, !second.isEmpty,
+              let firstCodes = model.encode(first.lowercased()), let secondCodes = model.encode(second.lowercased()),
+              let reach = rowCost(of: space, keys: keys), reach <= parameters.mergeReach else { return nil }
+        let taps = firstTaps + [space] + secondTaps
+        let centres = codeCentres(keys)
+        let costs = taps.map { tapCosts($0, centres: centres, keys: keys) }
+        let prev = previous.flatMap { model.index(of: $0) }
+        let firstIndex = model.index(ofCodes: firstCodes)
+        let secondIndex = model.index(ofCodes: secondCodes)
+        var split = 0.0
+        for (i, code) in firstCodes.enumerated() { split += costs[i][Int(code)] }
+        for (i, code) in secondCodes.enumerated() { split += costs[firstCodes.count + 1 + i][Int(code)] }
+        guard split.isFinite else { return nil }
+        let firstLM = firstIndex.map { lmCost($0, after: prev) } ?? (firstIsValid ? parameters.unknownValidCost : parameters.unknownCost)
+        let secondLM = secondIndex.map { lmCost($0, after: firstIndex) } ?? (secondIsValid ? parameters.unknownValidCost : parameters.unknownCost)
+        split += parameters.lmWeight * (firstLM + secondLM)
+        var best: (word: Int, cost: Double)?
+        for (word, spatial) in search(model, costs, range: 0..<costs.count, limit: 3, maxEdits: parameters.maxEdits, skipping: neverSuggest.words)
+        where model.length(word) > max(first.count, second.count) && !neverSuggest.follows(word, after: prev) {
+            let cost = spatial + parameters.lmWeight * lmCost(word, after: prev) + reach
+            if cost < best?.cost ?? .infinity { best = (word, cost) }
+        }
+        guard let best else { return nil }
+        let margin = firstIsValid && secondIsValid ? parameters.validMargin : parameters.autoMargin
+        return split - best.cost >= margin ? model.word(best.word) : nil
     }
 
     /// A word that may stand alone in a split: two or more letters, or a common one-letter

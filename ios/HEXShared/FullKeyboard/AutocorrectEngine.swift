@@ -1042,6 +1042,28 @@ final class AutocorrectEngine {
         return addsCapitals || word.first?.isUppercase == true ? choice : choice.lowercased()
     }
 
+    /// One word in place of `first`, a space tapped near the letter row's edge (`space`) and
+    /// the word being finished (`decoderTaps`), when Spatial autocorrect reads the space as a
+    /// letter ("deli ate" -> "delicate"); nil to keep both. `before` is the text up to the
+    /// end of `first`. `first` and `firstTaps` are as you typed them.
+    func merge(first: String, firstTaps: [CGPoint], space: CGPoint, second: String, before: String) -> String? {
+        guard isEnabled, hasDictionary, let decoder, let keys = decoderKeys, let taps = decoderTaps,
+              decoder.model.language == language.rawValue, !first.contains("'"), !second.contains("'") else { return nil }
+        for word in [first, second] {
+            let lower = word.lowercased()
+            if suppressedInSession.contains(lower) || learning.rejected.contains(lower) || learnedWords.contains(lower)
+                || Self.shorthandAllowlist.contains(lower) || lexiconTerms.contains(where: { $0.lowercased() == lower }) {
+                return nil
+            }
+        }
+        let previous = Self.previousWord(before, token: first)
+        guard let merged = decoder.merge(
+            first: first, firstTaps: firstTaps, space: space, second: second, secondTaps: taps,
+            previous: previous, firstIsValid: knowsAsTyped(first), secondIsValid: knowsAsTyped(second), keys: keys
+        ), mayOffer(merged, after: previous) else { return nil }
+        return withoutAddedCapitals(Self.matchCase(of: first, onto: merged), typed: first + second)
+    }
+
     /// Your own words for Swipe typing: Contacts names and other `UILexicon` terms, one-word
     /// text replacements, and words you kept twice that may be offered.
     var ownWords: [String] {
