@@ -1394,23 +1394,33 @@ TEST_RUNNER_HEX_SWIPE_REPLAY=/path/swipes.json xcodebuild test \
 ```
 
 Swipe recordings are `{"sentences":[{"source":String,"session":String,"words":[String],
-"gestures":[{"x":[Double],"y":[Double],"t":[Double]}]}]}`: one gesture per word, x 0…1
-across the ten columns of the top letter row, from q's left edge to p's right edge (their
-centres at 0.05 and 0.95), y 0…1 from the top of the first letter row to the bottom of the
-third (row centres at 1/6, 1/2 and 5/6), and t milliseconds since the finger landed. Hex's
-second and third letter rows are offset half a column and one and a half columns, as the
-format assumes. Tap recordings replace `gestures` with `taps`, one `{x, y, t}` per touch,
-each array holding that touch's samples (a tap is usually one) on the sentence's clock;
-y > 1 is the space bar, x 0.25…0.75 across it.
+"gestures":[{"x":[Double],"y":[Double],"t":[Double],"start":Double?}]}]}`: one gesture per
+word, x 0…1 across the ten columns of the top letter row, from q's left edge to p's right
+edge (their centres at 0.05 and 0.95), y 0…1 from the top of the first letter row to the
+bottom of the third (row centres at 1/6, 1/2 and 5/6), t milliseconds since the finger
+landed, and the optional `start` milliseconds from the sentence's first landing to that
+one, so gestures keep the person's gaps; without it each begins 0.5 s after the previous
+lift (longer than every window a lift leaves open on the next touch). Hex's second and third
+letter rows are offset half a column and one and a half columns, as the format assumes. Tap
+recordings replace `gestures` with `taps`, one `{x, y, t}` per touch, each array holding
+that touch's samples (a tap is usually one) on the sentence's clock; y > 1 is the space bar,
+x 0.25…0.75 across it.
 `TEST_RUNNER_HEX_TAP_REPLAY=/path/taps.json` does the same for taps, with Spatial
 autocorrect reading each word on its space.
 
 Both report a line per source inside `TYPING-REPLAY … TYPING-REPLAY-END`: total words,
 words outside the decoder's dictionary (counted after keeping only ASCII a–z letters, so
 accented, hyphenated and numeric tokens count as outside; their share is its own number),
-and accuracy among the in-dictionary words (case-insensitive letters). Swipes also report
-typed-or-offered in the suggestion strip, gestures not read as swipes, and the decoder's own
-median and p90 milliseconds. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT`
+and accuracy among the in-dictionary words (case-insensitive letters). Swipes report
+accuracy and typed-or-offered over the swipe attempts (`attempts`): gestures that became
+swipes, ones whose path left the key by a swipe's pitch and weren't promoted, and ones that
+read nothing. `all-words-accuracy` covers every in-dictionary word — taps included, a skipped
+gesture counted wrong — so one number matches what the person reading the field saw. `taps`
+and `taps-right` are the recordings whose path never leaves its key by a swipe's pitch: the
+keyboard types that key's letter, and the field keeps it, as for a person typing a one-letter
+word. `not-swipes` counts swipe attempts the plane never took as swipes or that read nothing;
+`skipped` counts gestures that began off the letter keys. The decoder's own median and p90
+milliseconds close the line. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT`
 writes each sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
 
 The test with no recording checks Hex's key geometry against the grid and runs clean

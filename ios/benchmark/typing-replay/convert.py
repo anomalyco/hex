@@ -21,9 +21,13 @@ def point(x, y, t):
     return (round(float(x), 5), round(float(y), 5), round(float(t), 3))
 
 
-def gesture(points):
+def gesture(points, start=None):
+    """A swipe's path; `start` is when its finger landed, from the sentence's first one."""
     points = list(points)
-    return {"x": [p[0] for p in points], "y": [p[1] for p in points], "t": [p[2] for p in points]}
+    item = {"x": [p[0] for p in points], "y": [p[1] for p in points], "t": [p[2] for p in points]}
+    if start is not None:
+        item["start"] = round(float(start), 3)
+    return item
 
 
 class Writer:
@@ -98,14 +102,19 @@ def futo(paths, writer, limit, valid_only):
                 if any(group[index].get("word") != word for index, word in enumerate(words)):
                     stats["mismatch"] += 1
                     continue
-                gestures = []
+                gestures, first = [], None
                 for index in range(len(words)):
                     data = sorted(group[index]["data"], key=lambda sample: sample["t"])
                     if len(data) < 2:
                         gestures = []
                         break
                     start = data[0]["t"]
-                    gestures.append(gesture(point(s["x"], s["y"], s["t"] - start) for s in data))
+                    if first is None:
+                        first = start
+                    gestures.append(gesture(
+                        (point(s["x"], s["y"], s["t"] - start) for s in data),
+                        start=start - first,
+                    ))
                 if not gestures:
                     stats["malformed"] += 1
                     continue
@@ -185,19 +194,22 @@ def howweswipe_log(stream, session, writer, limit, stats):
         if not chosen:
             stats["incomplete"] += 1
             continue
-        gestures = []
+        gestures, first = [], None
         for rows in chosen:
             rows = sorted(rows, key=lambda row: row["time"])
             if len(rows) < 2:
                 gestures = []
                 break
             start = rows[0]["time"]
+            if first is None:
+                first = start
             # The study's web keyboard: ten columns across the canvas, three letter
             # rows of (height - 4) / 3.7 starting one pixel down.
             pitch = (rows[0]["height"] - 4) / 3.7
             gestures.append(gesture(
-                point(row["x"] / rows[0]["width"], (row["y"] - 1) / (3 * pitch), row["time"] - start)
-                for row in rows
+                (point(row["x"] / rows[0]["width"], (row["y"] - 1) / (3 * pitch), row["time"] - start)
+                 for row in rows),
+                start=start - first,
             ))
         if not gestures:
             stats["short"] += 1

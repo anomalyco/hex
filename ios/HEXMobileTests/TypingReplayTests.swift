@@ -6,6 +6,15 @@ import XCTest
 /// A touch's timestamp base, far enough from zero to look like a touch already under way.
 private let replayClockBase: TimeInterval = 100
 
+/// The gap between gestures a recording doesn't place itself, in seconds: longer than every
+/// window a lift leaves open behind it — the swipe trail's 0.45 s (`SwipeTrailView.tail`),
+/// the accent and trackpad holds (0.36 s and 0.35 s, `FullKeyboardEngine.accentHoldDelay`
+/// and `trackpadHoldDelay`), the double-space period (0.35 s) and the strip's touch guard
+/// (0.25 s) — so a gap the replay invents never places a gesture inside a rule the one before
+/// it started. Recordings should carry their own (`start`): real ones are mostly longer
+/// (FUTO's median is 0.87 s).
+private let replayDefaultGestureGap: TimeInterval = 0.5
+
 /// Replaying recorded fingers through the full keyboard as it runs: the key plane's touches,
 /// Swipe typing or taps with Spatial autocorrect, and the engine's spacing. Two opt-in tests
 /// read recordings (`HEX_SWIPE_REPLAY`, `HEX_TAP_REPLAY`); one test with no environment
@@ -26,19 +35,28 @@ private let replayClockBase: TimeInterval = 100
 /// 0…1 across the ten columns of the top letter row, from q's left edge to p's right edge
 /// (their centres at 0.05 and 0.95), y runs 0…1 from the top of the first letter row to the
 /// bottom of the third (row centres at 1/6, 1/2 and 5/6), and t is milliseconds since that
-/// finger landed; the replay puts each gesture on one running clock for its sentence. The
-/// second and third rows sit half a column and one and a half columns right of the first, as
-/// on QWERTY
+/// finger landed. A gesture's optional `start` is when that landing was, in milliseconds from
+/// the sentence's first landing, so gestures keep the person's own gaps; without one the
+/// replay begins the gesture `replayDefaultGestureGap` after the previous lift. The second
+/// and third rows sit half a column and one and a half columns right of the first, as on
+/// QWERTY
 /// (`TypingReplayGrid` checks Hex's keys against that before replaying). A tap file replaces
 /// `gestures` with `taps`, one `{x, y, t}` per touch, each array holding that touch's
 /// samples (a tap is usually one) on the sentence's clock; y > 1 is the space-bar row, where
 /// x spans 0.25…0.75 across the recorded space bar and keeps its fraction along Hex's own.
 ///
 /// Both report a line per source between `TYPING-REPLAY` and `TYPING-REPLAY-END`: total
-/// words, words the decoder's dictionary lacks and their share, and accuracy among the words
-/// it has. The dictionary check keeps only ASCII a–z letters, so accented, hyphenated and
-/// numeric tokens count as outside. Swipes also report typed-or-offered in the strip,
-/// gestures not read as swipes, and the decoder's own median and p90 milliseconds.
+/// words, the words the decoder's dictionary lacks and their share (the check keeps only ASCII
+/// a–z letters, so accented, hyphenated and numeric tokens count as outside), and accuracy
+/// among the words it has. Taps report it over every in-dictionary word. Swipes report it over
+/// the swipe attempts (`attempts`: the gestures that became swipes, the ones whose path left
+/// its key by a swipe's pitch and weren't promoted, and the ones that read nothing) and also
+/// as an `all-words-accuracy` over every in-dictionary word, taps included and a skipped
+/// gesture counted wrong — what the person reading the field would see. They also report the
+/// tap recordings (`taps`, and how many of those left their word in the field, `taps-right`:
+/// a path that never leaves its key by a swipe's pitch is a tap, and the keyboard types its
+/// letter), the swipe attempts this keyboard missed (`not-swipes`), the gestures that began
+/// off the letter keys (`skipped`), and the decoder's own median and p90 milliseconds.
 /// `HEX_REPLAY_LIMIT` caps sentences per source and `HEX_REPLAY_OUT` writes each sentence's
 /// intended and typed words as JSON.
 @MainActor
@@ -161,6 +179,32 @@ final class TypingReplayTests: XCTestCase {
         XCTAssertTrue(tapReport.words.allSatisfy(\.right), "tapped \(tapped)")
     }
 
+    /// A recorded tap — a one-letter word's still finger — is a tap, not a missed swipe: the
+    /// keyboard types its letter, as it does for a person, so it is neither a swipe that read
+    /// nothing nor one this keyboard missed.
+    func testATapIsNotAMissedSwipe() throws {
+        let (_, engine, _) = try makeKeyboard()
+        let grid = try TypingReplayGrid(keys: engine.swipeKeys)
+        let tap = ReplayGesture(x: [0.10, 0.10], y: [0.5, 0.5], t: [0, 40])
+        let report = try XCTUnwrap(
+            replaySwipes(
+                [SwipeReplaySentence(
+                    source: "in-memory",
+                    session: "fixture",
+                    words: ["hello", "a"],
+                    gestures: [swipeGesture(for: "hello", grid: grid), tap]
+                )],
+                limit: nil
+            ).first
+        )
+        XCTAssertEqual(report.words.first?.swiped, true)
+        XCTAssertEqual(report.words.last?.tap, true, "a path that stays on its key is a tap")
+        XCTAssertEqual(report.words.last?.typed, "a", "the tap types its letter")
+        XCTAssertEqual(report.notSwipes, 0, "no swipe attempt was missed")
+        XCTAssertEqual(report.skipped, 0)
+        XCTAssertEqual(report.output.first?.typed.first.map(Self.replayKey), "hello")
+    }
+
     /// Tap word alignment: a split word and a missing word each leave the later intended
     /// words matched instead of shifting every word after them.
     func testAlignmentKeepsLaterWordsAfterASplitOrAMissingWord() {
@@ -175,9 +219,12 @@ final class TypingReplayTests: XCTestCase {
     private struct SwipeResult {
         var word: ReplayWord
         var typed: String
+        /// A swipe attempt the plane never took as a swipe, or one that read nothing.
         var notSwiped: Bool
+        /// The gesture never reached the plane: its first point wasn't on a letter key.
+        var skipped: Bool
         var decodeMilliseconds: Double?
-        /// Where the next gesture starts on the sentence's clock.
+        /// Where a gesture with no recorded start begins on the sentence's clock.
         var nextStart: TimeInterval
     }
 
@@ -197,27 +244,29 @@ final class TypingReplayTests: XCTestCase {
                 guard plane.swipe != nil else { throw ReplayError.missingSwipeModel }
                 let grid = try TypingReplayGrid(keys: engine.swipeKeys)
                 report.sentences += 1
-                // Every word's recorded times start at its finger's landing, so each gesture is
-                // put on one running clock for the sentence: the next begins after this one lifts.
-                // Nothing goes backwards, and SwipeTyping's preview throttle sees the recorded
-                // gaps.
+                // A recording's own `start` says where the person's finger landed; without one
+                // the gesture follows the previous lift by `replayDefaultGestureGap`. Either way
+                // the clock only runs forward, as a real one does.
                 var start = replayClockBase
                 var typed: [String] = []
                 for (index, word) in sentence.words.enumerated() {
+                    let gesture = sentence.gestures[index]
+                    let origin = gesture.start.map { replayClockBase + $0 / 1000 } ?? start
                     let result = try replaySwipe(
-                        sentence.gestures[index],
+                        gesture,
                         intended: word,
                         target: target,
                         engine: engine,
                         plane: plane,
                         grid: grid,
                         id: index + 1,
-                        start: start
+                        start: origin
                     )
                     start = result.nextStart
                     typed.append(result.typed)
                     report.words.append(result.word)
                     if result.notSwiped { report.notSwipes += 1 }
+                    if result.skipped { report.skipped += 1 }
                     if let milliseconds = result.decodeMilliseconds {
                         report.decodeTimes.append(milliseconds)
                     }
@@ -251,13 +300,16 @@ final class TypingReplayTests: XCTestCase {
         let before = target.text
         var typed = ""
         var couldReadAddedWord = false
+        var attempted = false
         var wasSwipe = false
         var decode: Double?
 
         // A swipe starts only on a letter key (`SwipeTyping.began`), and a path shorter than
-        // two points can't be one. Skip the plane entirely, so a stray first touch on delete
-        // can't change the context the next word reads.
+        // two points can't be one. Skip the plane entirely: a first point that isn't on a
+        // letter is a key row's gap, the page or the space bar the recording's grid can't
+        // place, and it must not change the context the next word reads.
         if samples.count >= 2, startsOnALetter(samples[0].point, engine: engine) {
+            attempted = true
             setNow(samples[0].time)
             plane.began(id: id, sample: TypingLogTouchSample(point: samples[0].point, timestamp: samples[0].time))
             for sample in samples.dropFirst().dropLast() {
@@ -281,31 +333,45 @@ final class TypingReplayTests: XCTestCase {
             }
         }
 
-        // A swipe is read only if it was still a swipe on lift and left text: a swipe that
-        // typed nothing wasn't read, while one decoded to the wrong word or a single letter
-        // is a wrong word, not a missing swipe.
-        let notSwiped = !wasSwipe || typed.isEmpty
-        if notSwiped {
-            // A tap that went in is removed, and the engine re-reads the field afterwards.
-            // `SwipeTyping.endSwipe` spaces a word from `needsSpace(before:)`, so restoring
-            // the text is enough for the next swipe to start a new word; no placeholder.
-            restore(target, to: before)
-            engine.textDidChange()
+        // The recording says whether a swipe was there to read. `SwipeTyping.moved` promotes a
+        // letter touch once it travels more than the layout's `swipePitch` (`threshold`,
+        // SwipeTyping.swift:70 and :123), so a path that never does is a tap: FUTO records a
+        // one-letter word as a still finger, and a keyboard types that key's letter for it. The
+        // field keeps that letter, because a person who tapped "a" has an "a" in their text —
+        // deleting it rewrites the sentence the next word is read in (`swipePreviousWord`,
+        // FullKeyboardEngine+SwipeTyping.swift:35, and the casing that reads the text before
+        // the cursor). A path that does travel a pitch and still wasn't promoted is a swipe the
+        // keyboard missed; one that was promoted and read nothing is a swipe it failed.
+        let travelled = samples.dropLast().contains {
+            hypot($0.point.x - samples[0].point.x, $0.point.y - samples[0].point.y) > engine.layout.swipePitch
         }
+        let tapped = attempted && !wasSwipe && !travelled
+        let missed = attempted && !wasSwipe && travelled
+        let notSwiped = missed || (wasSwipe && typed.isEmpty)
 
         let key = Self.replayKey(intended)
         let inDictionary = isInDictionary(intended)
-        let right = couldReadAddedWord && !notSwiped && inDictionary && !key.isEmpty && Self.replayKey(typed) == key
-        let offered = !notSwiped && inDictionary && !key.isEmpty && engine.suggestions.contains {
+        let right = couldReadAddedWord && inDictionary && !key.isEmpty && Self.replayKey(typed) == key
+        let offered = wasSwipe && inDictionary && !key.isEmpty && engine.suggestions.contains {
             let replacement = Self.replayKey($0.replacement)
             return !replacement.isEmpty && replacement == key
         }
         return SwipeResult(
-            word: ReplayWord(intended: intended, typed: typed, inDictionary: inDictionary, right: right, offered: offered),
+            word: ReplayWord(
+                intended: intended,
+                typed: typed,
+                inDictionary: inDictionary,
+                right: right,
+                offered: offered,
+                swiped: wasSwipe,
+                attempt: wasSwipe || missed,
+                tap: tapped
+            ),
             typed: typed,
             notSwiped: notSwiped,
+            skipped: !attempted,
             decodeMilliseconds: decode,
-            nextStart: (samples.last?.time ?? start) + 0.5
+            nextStart: (samples.last?.time ?? start) + replayDefaultGestureGap
         )
     }
 
@@ -375,10 +441,12 @@ final class TypingReplayTests: XCTestCase {
     /// Auto-capitalization from the switches, the typing model for the letter odds and, while
     /// Spatial autocorrect is on, its decoder (`FullKeyboardView.syncSpatialAutocorrect`), and
     /// Swipe typing's model while the switch is on (`FullKeyboardView.syncSwipeTyping`). The
-    /// field asks for no automatic caps, as the existing swipe fixtures do.
+    /// field keeps `FixtureTextTarget`'s own default, `.sentences`
+    /// (FullKeyboardSnapshotStage.swift:583): the people who recorded these sentences typed
+    /// them into ordinary fields, which capitalise sentence starts, and the report compares
+    /// letters only.
     private func makeKeyboard() throws -> (FixtureTextTarget, FullKeyboardEngine, KeyboardKeyPlaneView) {
         let target = FixtureTextTarget()
-        target.autocapitalizationType = .none
         let engine = FullKeyboardEngine(
             target: target,
             autocorrect: AutocorrectEngine(learnedWords: LearnedWordsStore(defaults: defaults))
@@ -407,15 +475,6 @@ final class TypingReplayTests: XCTestCase {
     private func startsOnALetter(_ point: CGPoint, engine: FullKeyboardEngine) -> Bool {
         guard case .character(let character)? = engine.keyKind(at: point) else { return false }
         return character.first?.isLetter == true
-    }
-
-    /// Deletes back to `text`: a not-read gesture only appended text, so this takes exactly
-    /// what it added. Leaves the field alone when the engine edited it elsewhere.
-    private func restore(_ target: FixtureTextTarget, to text: String) {
-        guard target.text.hasPrefix(text) else { return }
-        while target.text.count > text.count {
-            target.deleteBackward()
-        }
     }
 
     private func isInDictionary(_ word: String) -> Bool {
@@ -636,6 +695,9 @@ private struct ReplayGesture: Decodable {
     var x: [Double]
     var y: [Double]
     var t: [Double]
+    /// When the finger landed, in milliseconds from the sentence's first landing. Absent in
+    /// files written before recordings kept their gaps.
+    var start: Double? = nil
 }
 
 private struct TapReplayFile: Decodable {
@@ -719,8 +781,16 @@ private struct ReplayWord {
     var intended: String
     var typed: String
     var inDictionary: Bool
+    /// The field has the intended word (or, for a tap, its letter).
     var right: Bool
     var offered: Bool
+    /// The gesture became a swipe, so the decoder read this word.
+    var swiped = false
+    /// The gesture was a swipe attempt: it became one, or its path left the key by a swipe's
+    /// pitch and the plane didn't promote it.
+    var attempt = false
+    /// The recording is a tap: its path never left the key it went down on by a swipe's pitch.
+    var tap = false
 }
 
 private struct ReplayReport {
@@ -728,26 +798,44 @@ private struct ReplayReport {
     var mode: String
     var sentences = 0
     var words: [ReplayWord] = []
+    /// Swipe attempts the plane never took as swipes, or that read nothing.
     var notSwipes = 0
+    /// Gestures whose first point wasn't on a letter, which the replay didn't give the plane.
+    var skipped = 0
     var decodeTimes: [Double] = []
     var output: [ReplayOutput.Sentence] = []
 
     var outOfDictionary: Int { words.filter { !$0.inDictionary }.count }
     var inDictionary: Int { words.count - outOfDictionary }
+    /// Every in-dictionary word the field got right, taps included and a skipped gesture counted
+    /// wrong: the one end-to-end number, what the person reading the field would see.
     var typedRight: Int { words.filter { $0.inDictionary && $0.right }.count }
-    var typedOrOffered: Int { words.filter { $0.inDictionary && ($0.right || $0.offered) }.count }
+    /// The in-dictionary words whose gesture was a swipe attempt — one the plane promoted, one
+    /// it should have promoted, or one that read nothing: the decoder's own denominator.
+    var attempts: Int { words.filter { $0.inDictionary && $0.attempt }.count }
+    var attemptsRight: Int { words.filter { $0.inDictionary && $0.attempt && $0.right }.count }
+    var attemptsOrOffered: Int { words.filter { $0.inDictionary && $0.attempt && ($0.right || $0.offered) }.count }
+    /// The in-dictionary words recorded as taps, and how many of those left their word in the
+    /// field. They are what the person typed, not what the decoder read.
+    var taps: Int { words.filter { $0.inDictionary && $0.tap }.count }
+    var tapsRight: Int { words.filter { $0.inDictionary && $0.tap && $0.right }.count }
 
     /// One stable line for the report block.
     var line: String {
         var line = "TYPING-REPLAY mode=\(mode) source=\(source) sentences=\(sentences) "
         line += "words=\(words.count) out-of-dictionary=\(outOfDictionary) (\(percent(outOfDictionary, of: words.count))%) "
-        line += "in-dictionary=\(inDictionary) accuracy=\(percent(typedRight, of: inDictionary))%"
+        line += "in-dictionary=\(inDictionary)"
         if mode == "swipe" {
-            line += " typed-or-offered=\(percent(typedOrOffered, of: inDictionary))%"
-            line += " not-swipes=\(notSwipes)"
+            line += " attempts=\(attempts) accuracy=\(percent(attemptsRight, of: attempts))%"
+            line += " typed-or-offered=\(percent(attemptsOrOffered, of: attempts))%"
+            line += " all-words-accuracy=\(percent(typedRight, of: inDictionary))%"
+            line += " taps=\(taps) taps-right=\(tapsRight)"
+            line += " not-swipes=\(notSwipes) skipped=\(skipped)"
             let median = String(format: "%.2f", percentile(decodeTimes, 0.5))
             let p90 = String(format: "%.2f", percentile(decodeTimes, 0.9))
             line += " decode-ms-median=\(median) decode-ms-p90=\(p90)"
+        } else {
+            line += " accuracy=\(percent(typedRight, of: inDictionary))%"
         }
         return line
     }

@@ -13,8 +13,11 @@ and 0.95), y 0…1 runs from the top of the first letter row to the bottom of th
 third (row centres at 1/6, 1/2 and 5/6), and rows two and three start half and one
 and a half columns in.
 Times are milliseconds from the gesture's first point (swipes) or the sentence's first
-touch (taps); the test shifts each swipe onto one running clock for its sentence. A space
-tap has y = 1.25 and x along 0.25…0.75 of the dataset's own space bar.
+touch (taps). Each swipe also records `start`: when its finger landed, in milliseconds from
+the sentence's first landing, so the replay keeps the person's own gaps between words. A file
+without `start` still replays: the test begins each gesture 0.5 s after the previous lift,
+longer than every window a lift leaves open on the next touch. A space tap has y = 1.25 and
+x along 0.25…0.75 of the dataset's own space bar.
 
 Every subcommand writes the same JSON object and prints sentences, touches and
 what it skipped to stderr:
@@ -32,6 +35,12 @@ TEST_RUNNER_HEX_SWIPE_REPLAY=recording.json xcodebuild test \
 ```
 
 Use `TEST_RUNNER_HEX_TAP_REPLAY` for a tap recording.
+
+The report line’s fields are described in
+[`ios/README.md`](../../README.md#replaying-real-typing): swipes report `attempts` (the
+decoder’s denominator, missed attempts included), `all-words-accuracy` (every in-dictionary
+word, taps included and skipped gestures wrong), `taps`/`taps-right` (recordings that are
+taps), `not-swipes` and `skipped`.
 
 ## FUTO swipe
 
@@ -59,7 +68,10 @@ Each JSONL line is one word: `session`, `sentence`, `word_idx`, `word`, and
 `data` with epoch-millisecond `t` and canvas-normalised `x`/`y`. Records are
 grouped by `(session, sentence)` and ordered by `word_idx`; a sentence is only
 emitted when every word from `sentence.split()` is present. Words keep their
-punctuation, which the tests ignore when comparing letters.
+punctuation, which the tests ignore when comparing letters. Each gesture's `start`
+is its first sample's epoch `t` less the sentence's first word's, so the gaps the
+epoch stamps record survive the conversion (median about 0.9 s, minimum 85 ms in
+`dev`).
 
 The root splits do not carry `layout`, `language` or `dual_finger`; those are
 assumed qwerty/English/single-finger. `swipe-5` does carry them, and records
@@ -90,12 +102,13 @@ the study's `stats_create.py`; the last attempt for each word in a sentence is
 used. Rows shorter than 12 columns and rows whose `is_err` is not 0/1 are
 ignored, and extra columns are ignored.
 
-The geometry is inferred from the study's web keyboard, not exported with the
-logs: ten columns across `keyb_width`, and three letter rows of pitch
-`(keyb_height - 4) / 3.7` starting one pixel down. The converter has not been run
-over the full `swipelogs.zip`; treat the geometry as approximate. Some touches have
-no recorded `touchstart`; the first `touchmove` still starts the gesture. Sentences
-with a missing word or fewer than two points are skipped.
+Each gesture's `start` comes from its first row's `time`, so the replay keeps the
+gaps between words. The geometry is inferred from the study's web keyboard, not
+exported with the logs: ten columns across `keyb_width`, and three letter rows of
+pitch `(keyb_height - 4) / 3.7` starting one pixel down. The converter has not been
+run over the full `swipelogs.zip`; treat the geometry as approximate. Some touches
+have no recorded `touchstart`; the first `touchmove` still starts the gesture.
+Sentences with a missing word or fewer than two points are skipped.
 
 ## Noisy Typing on QWERTY Keyboards
 
