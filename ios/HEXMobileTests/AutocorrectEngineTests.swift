@@ -223,6 +223,35 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "ill be there ")
     }
 
+    /// X (Justin): "It doesn't seem to understand grammar. Its vs it's for instance." The words
+    /// around its/it's, your/you're, there/their/they're and then/than choose between them when
+    /// they're clear, at the word's own space or the next word's.
+    func testSoundAlikeWordsFollowTheWordsAroundThem() throws {
+        let cases: [(String, String)] = [
+            ("its a nice day ", "it's a nice day "),
+            ("i think its broken ", "I think it's broken "),
+            ("the dog wagged its tail ", "the dog wagged its tail "),
+            ("winter is on its way ", "winter is on its way "),
+            ("your welcome ", "you're welcome "),
+            ("i like your car ", "I like your car "),
+            ("there going home ", "they're going home "),
+            ("their is a dog ", "there is a dog "),
+            ("they lost there keys ", "they lost their keys "),
+            ("more then that ", "more than that "),
+            ("and than we left ", "and then we left "),
+            ("youre mother loves you ", "your mother loves you "),
+        ]
+        for (typed, expected) in cases {
+            XCTAssertEqual(try typedWithContext(typed), expected, typed)
+        }
+        let own = try typedWithContext("you") { _ in
+            self.tap(.layerSwitch(.numbers))
+            self.tap(.character("'"))
+            self.typeWord("re mother ")
+        }
+        XCTAssertEqual(own, "you're mother ", "an apostrophe you typed yourself stays")
+    }
+
     /// The next word's space revised the word before: one backspace puts back both as typed,
     /// and the word you kept stays.
     func testOneBackspaceTakesARevisionBack() throws {

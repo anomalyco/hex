@@ -807,7 +807,7 @@ final class AutocorrectEngine {
         // A word the same letters spell with an apostrophe ("id", "I'd"), chosen by the word
         // before when it says so clearly ("yes id" -> "yes I'd", "the id" stays). The next
         // word may still revise it (`revision(of:before:next:)`).
-        if !isAllCaps, let choice = contextChoice(
+        if !isAllCaps, !token.contains("'"), let choice = contextChoice(
             for: token, previous: Self.previousWord(beforeInput ?? "", token: token), next: nil,
             startsSentence: Self.startsSentence(before: beforeInput ?? "", token: token)
         ), mayOffer(choice, replacing: token) {
@@ -923,13 +923,14 @@ final class AutocorrectEngine {
 
     // MARK: - Words the context decides
 
-    /// English words the same letters spell with and without an apostrophe, chosen by the
-    /// words around them rather than as typos: "id" or "I'd", "ill" or "I'll". "were" and
-    /// "we're" aren't here: the word pairs can't tell them apart, so the strip offers
-    /// "we're" and space never changes it.
+    /// English words chosen by the words around them rather than as typos: the same letters
+    /// with and without an apostrophe ("id" or "I'd", "its" or "it's"), and words that sound
+    /// alike ("your", "there", "then"). "were" and "we're" aren't here: the word pairs can't
+    /// tell them apart, so the strip offers "we're" and space never changes it.
     static let contextGroups: [[String]] = [
         ["id", "I'd"], ["ill", "I'll"], ["hell", "he'll"], ["shell", "she'll"],
         ["wed", "we'd"], ["lets", "let's"], ["well", "we'll"],
+        ["its", "it's"], ["your", "you're"], ["there", "their", "they're"], ["then", "than"],
     ]
 
     /// The typing model's word pairs barely spell contractions (its books split "I'd" into
@@ -937,7 +938,8 @@ final class AutocorrectEngine {
     static let contractionWords: [String: [[String]]] = [
         "i'd": [["i", "would"], ["i", "had"]], "i'll": [["i", "will"]], "he'll": [["he", "will"]],
         "she'll": [["she", "will"]], "we'd": [["we", "would"], ["we", "had"]], "let's": [["let", "us"]],
-        "we'll": [["we", "will"]],
+        "we'll": [["we", "will"]], "it's": [["it", "is"], ["it", "has"]], "you're": [["you", "are"]],
+        "they're": [["they", "are"]],
     ]
 
     private static let contextGroupOf: [String: [String]] = {
@@ -950,16 +952,18 @@ final class AutocorrectEngine {
     /// is known too. Changing only an apostrophe needs less than changing letters ("your"
     /// and "you're"). Tuned on Tatoeba sentences outside the benchmark's held-out ones.
     static let contextMargin = (previous: 3.0, next: 1.5)
-    static let contextLetterMargin = (previous: 6.0, next: 4.0)
+    static let contextLetterMargin = (previous: 6.0, next: 3.0)
     /// -ln P of a word the model lacks.
     private static let contextUnknownCost = 15.0
     /// How much likelier a sentence starts with a contraction's pronoun ("I'd", "It's") than
     /// the word list alone says: the pairs have no sentence starts.
     private static let contextSentenceStart = 3.0
-    /// A contraction ends in "will", "would", "had" or "us", which thousands of words follow
-    /// in the pairs: one the next word never follows is evidence against it ("till hell
-    /// freezes", not "till he'll freezes").
+    /// "will", "would", "had" and "us", which thousands of words follow in the pairs: a next
+    /// word that never follows a contraction's last one of them is evidence against it
+    /// ("till hell freezes", not "till he'll freezes"). "are" and "is" are left out: the
+    /// adjectives after them are too rare for the pairs ("you're funny").
     private static let contextMissingFollower = 5.0
+    private static let contextRichFollowers: Set<String> = ["will", "would", "had", "us"]
 
     /// Whether `token`, at the end of `before`, starts a sentence.
     static func startsSentence(before: String, token: String) -> Bool {
@@ -979,7 +983,9 @@ final class AutocorrectEngine {
             if let next {
                 let last = words[words.count - 1]
                 cost += model.cost(of: next, after: last) ?? unknown
-                if expanded != nil, !model.hasPair(last, next) { cost += Self.contextMissingFollower }
+                if Self.contextRichFollowers.contains(last), !model.hasPair(last, next) {
+                    cost += Self.contextMissingFollower
+                }
             }
             best = min(best, cost)
         }

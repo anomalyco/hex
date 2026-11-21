@@ -967,6 +967,8 @@ final class FullKeyboardEngine {
     private struct FinishedWord {
         /// The word as it reads now.
         var text: String
+        /// As you typed it: one you gave an apostrophe yourself is never revised.
+        var typed: String
         /// The text before the cursor right after its space.
         var before: String
     }
@@ -983,7 +985,7 @@ final class FullKeyboardEngine {
         let fix = autocorrect.replacementOnSpace(beforeInput: before, field: field, autocorrectionType: target.autocorrectionType)
         let word = fix?.replacement ?? token
         var revised: (from: String, to: String)?
-        if let finished = finishedWord, before == finished.before + token,
+        if let finished = finishedWord, before == finished.before + token, !finished.typed.contains("'"),
            let to = autocorrect.revision(
                of: finished.text, before: String(finished.before.dropLast()), next: word,
                field: field, autocorrectionType: target.autocorrectionType
@@ -1077,7 +1079,7 @@ final class FullKeyboardEngine {
         syncLearning()
         autocorrect.decoderTaps = currentTokenTaps
         if !afterSwipe, finishWord(ending: " ") {
-            rememberFinishedWord()
+            rememberFinishedWord(typed: token)
             lastSpaceAt = now
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
@@ -1087,19 +1089,19 @@ final class FullKeyboardEngine {
         }
         autocorrect.clearPendingUndo()
         insert(" ", source: "key")
-        if !afterSwipe, token != nil { rememberFinishedWord() }
+        if !afterSwipe, let token { rememberFinishedWord(typed: token) }
         lastSpaceAt = now
         typingLog?.context("space")
     }
 
     /// The word right before the space just typed, for the next word's revision.
-    private func rememberFinishedWord() {
-        guard let before = target.documentContextBeforeInput, before.last == " ",
+    private func rememberFinishedWord(typed: String?) {
+        guard let typed, let before = target.documentContextBeforeInput, before.last == " ",
               let word = AutocorrectEngine.currentToken(in: String(before.dropLast())) else {
             finishedWord = nil
             return
         }
-        finishedWord = FinishedWord(text: word, before: before)
+        finishedWord = FinishedWord(text: word, typed: typed, before: before)
     }
 
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
