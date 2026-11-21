@@ -16,7 +16,7 @@ apk=$(adb shell pm path ly.anoma.hex | tr -d '\r' | sed 's/^package://')
 adb push app/src/main/assets/typing/en.valid "$dev/en.valid" >/dev/null
 adb push app/src/main/assets/typing/never-suggest.tsv "$dev/never-suggest.tsv" >/dev/null
 mkdir -p "$T/outputs"
-for lang in en es de nb; do
+for lang in en es de nb fr it; do
     [ -f "$T/bench/$lang.jsonl" ] || continue
     adb push "app/src/main/assets/typing/$lang.hextm" "$dev/$lang.hextm" >/dev/null
     adb shell rm -f "$dev/$lang.capitals"

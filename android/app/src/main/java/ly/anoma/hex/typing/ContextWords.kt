@@ -1,16 +1,24 @@
 package ly.anoma.hex.typing
 
-/** English words the words around them decide rather than the taps (iOS `AutocorrectEngine.contextChoice`,
- * #2144): the same letters with and without an apostrophe ("id" or "I'd", "its" or "it's") and words
- * that sound alike ("your", "there", "then"), scored with the model's word pairs. "were" and "we're"
- * aren't here: the pairs can't tell them apart. */
+/** Words the words around them decide rather than the taps (iOS `AutocorrectEngine.contextChoice`,
+ * #2144), scored with the model's word pairs. English: the same letters with and without an
+ * apostrophe ("id" or "I'd", "its" or "it's") and words that sound alike ("your", "there", "then");
+ * "were" and "we're" aren't here, the pairs can't tell them apart. French and Italian: the same
+ * letters with and without an accent, both words ("a" or "à", "ou" or "où", Italian "e" or "è"),
+ * which iOS leaves to its dictionary. */
 internal object ContextWords {
-    private val groups = listOf(
-        listOf("id", "I'd"), listOf("ill", "I'll"), listOf("hell", "he'll"), listOf("shell", "she'll"),
-        listOf("wed", "we'd"), listOf("lets", "let's"), listOf("well", "we'll"),
-        listOf("its", "it's"), listOf("your", "you're"), listOf("there", "their", "they're"), listOf("then", "than"),
+    private val groups = mapOf(
+        "en" to listOf(
+            listOf("id", "I'd"), listOf("ill", "I'll"), listOf("hell", "he'll"), listOf("shell", "she'll"),
+            listOf("wed", "we'd"), listOf("lets", "let's"), listOf("well", "we'll"),
+            listOf("its", "it's"), listOf("your", "you're"), listOf("there", "their", "they're"), listOf("then", "than"),
+        ),
+        "fr" to listOf(listOf("a", "à"), listOf("ou", "où"), listOf("la", "là"), listOf("ca", "ça"), listOf("du", "dû"),
+            listOf("sur", "sûr")),
+        "it" to listOf(listOf("e", "è"), listOf("la", "là"), listOf("li", "lì"), listOf("da", "dà"), listOf("ne", "né"),
+            listOf("se", "sé")),
     )
-    private val groupOf = groups.flatMap { group -> group.map { it.lowercase() to group } }.toMap()
+    private val groupOf = groups.mapValues { (_, list) -> list.flatMap { group -> group.map { it.lowercase() to group } }.toMap() }
     // The pairs barely spell contractions (the books split "I'd" into "I" and "'d"), so a
     // contraction is scored as the words it stands for.
     private val expansions = mapOf(
@@ -33,11 +41,13 @@ internal object ContextWords {
     // that never follows one is evidence against the contraction ("till hell freezes").
     private const val MISSING_FOLLOWER = 5.0
     private val richFollowers = setOf("will", "would", "had", "us")
+    private fun fold(s: String) = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFD).filter { it !in '\u0300'..'\u036f' }
 
-    fun inGroup(word: String) = word.lowercase() in groupOf
+    /** Whether [language] has words its context decides. */
+    fun decides(language: String) = language in groups
 
     private fun cost(model: TypingModel, word: String, previous: String?, next: String?, startsSentence: Boolean): Double {
-        val expanded = expansions[word.lowercase()]
+        val expanded = if (model.language == "en") expansions[word.lowercase()] else null
         var best = Double.POSITIVE_INFINITY
         for (words in expanded ?: listOf(listOf(word.lowercase()))) {
             var cost = model.cost(words[0], previous) ?: UNKNOWN
@@ -56,7 +66,7 @@ internal object ContextWords {
      * null to keep it. `previous` and `next` are lowercase, null when unknown. */
     fun choice(model: TypingModel, word: String, previous: String?, next: String?, startsSentence: Boolean): String? {
         val lower = word.lowercase()
-        val group = groupOf[lower] ?: return null
+        val group = groupOf[model.language]?.get(lower) ?: return null
         val own = cost(model, word, previous, next, startsSentence)
         var best: String? = null
         var bestCost = Double.POSITIVE_INFINITY
@@ -66,7 +76,7 @@ internal object ContextWords {
             if (c < bestCost) { best = other; bestCost = c }
         }
         best ?: return null
-        val sameLetters = best.replace("'", "").lowercase() == lower.replace("'", "")
+        val sameLetters = fold(best.replace("'", "").lowercase()) == fold(lower.replace("'", ""))
         val margin = when {
             sameLetters -> if (next == null) PREVIOUS_MARGIN else NEXT_MARGIN
             else -> if (next == null) LETTER_PREVIOUS_MARGIN else LETTER_NEXT_MARGIN

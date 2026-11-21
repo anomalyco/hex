@@ -148,6 +148,45 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     // Your own words are always yours to offer, as iOS offers UILexicon terms.
     private fun blocked(spelling: String) = model.neverSuggest.blocks(spelling.lowercase(), suggestSwearWords, previous) &&
         decoder.personal?.owns(spelling) != true
+    /** The key a touch near a key's edge presses (iOS FullKeyboardEngine.key(at:), #2091): the key it
+     * landed on ([hit]), or a neighbouring letter whose touch area is within [REACH] of it and which
+     * is enough likelier to come next in the word, by the word list ("th" then a touch on the e/d
+     * border types e). [near] gives each neighbouring letter's distance from the touch to its touch
+     * area, in dp (iOS's points), only those under [REACH]; [keys] is every letter on the keyboard,
+     * so a letter without a key of its own counts as its base letter's (é as e). Only while
+     * autocorrect is on in an ordinary text field, never with caps lock; the keyboard decides that. */
+    fun likelierKey(before: String, hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
+        if (near.isEmpty()) return hit
+        val token = currentToken(before)
+        if (token == null && before.lastOrNull()?.let { it.isLetterOrDigit() || it == '\'' } == true) return hit
+        val continuations = model.continuations((token ?: "").lowercase()) ?: return hit
+        val keyed = keys.mapTo(HashSet()) { model.code(it.lowercaseChar()) }
+        val mass = DoubleArray(continuations.size)
+        for (code in 1 until continuations.size) if (continuations[code] > 0)
+            mass[if (code in keyed) code else model.bases[code]] += continuations[code]
+        val total = mass.sum()
+        fun odds(c: Char) = model.code(c.lowercaseChar()).takeIf { it != 0 }?.let { kotlin.math.ln(mass[it] + total * 1e-4) }
+        var best = hit
+        var bestScore = odds(hit) ?: return hit
+        for ((c, distance) in near) {
+            if (distance >= REACH) continue
+            val score = (odds(c) ?: continue) - ODDS_PER_DP * distance
+            if (score > bestScore) { best = c; bestScore = score }
+        }
+        return if (hit.isUpperCase()) best.uppercaseChar() else best
+    }
+
+    /** Whether a letter typed after `before` starts a word the keyboard should read: after a space or
+     * an opening mark (`boundary`), and in French and Italian also right after an elided article
+     * or pronoun ("l'", "qu'", "dell'"), so "l'hpmme" is read as "homme" after "l'". */
+    fun startsWord(before: String): Boolean {
+        if (boundary(before.lastOrNull())) return true
+        val elisions = ELISIONS[model.language] ?: return false
+        if (before.lastOrNull() != '\'' && before.lastOrNull() != '\u2019') return false
+        val prefix = before.dropLast(1).takeLastWhile { it.isLetter() }.lowercase()
+        return prefix in elisions && before.dropLast(1 + prefix.length).lastOrNull().let { boundary(it) }
+    }
+
     /** Your text replacement whose shortcut ends `before` (the text before the cursor), from the personal
      * dictionary: on space, a closing mark or return, put it in before anything else, autocorrect on
      * or off (iOS #2152, #2173). Null when no shortcut ends the text. */
@@ -173,12 +212,12 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val lower = token.lowercase()
         val allCaps = token.length >= 2 && token.all { it.isUpperCase() }
         if (token.drop(1).any { it.isUpperCase() } && !allCaps) return null
+        if (model.language == "en" && lower in shorthand) return null
+        // A word the same letters spell with an apostrophe or an accent, or one that sounds alike,
+        // chosen by the word before when it says so clearly ("yes id" -> "yes I'd", "the id" stays).
+        if (!allCaps && '\'' !in token) ContextWords.choice(model, token, previousText, null, sentenceStart)
+            ?.takeUnless(::blocked)?.let { return it }
         if (model.language == "en") {
-            if (lower in shorthand) return null
-            // A word the same letters spell with an apostrophe, or one that sounds alike, chosen by
-            // the word before when it says so clearly ("yes id" -> "yes I'd", "the id" stays).
-            if (!allCaps && '\'' !in token) ContextWords.choice(model, token, previousText, null, sentenceStart)
-                ?.takeUnless(::blocked)?.let { return it }
             englishFixes[lower]?.takeUnless(::blocked)?.let { return if (allCaps) {
                 if (token.length >= 3) it.uppercase() else null
             } else cased(it) }
@@ -238,10 +277,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return result
     }
 
-    // The word before, revised now that `next` follows it, or null. English only: words the
-    // context decides (`ContextWords`); a word typed with its own apostrophe never gets here.
+    // The word before, revised now that `next` follows it, or null: words the context decides
+    // (`ContextWords`); a word typed with its own apostrophe never gets here.
     private fun revision(text: String, next: String): String? {
-        if (model.language != "en" || text.length < 2) return null
+        if (!ContextWords.decides(model.language) || text.isEmpty() || (model.language == "en" && text.length < 2)) return null
         if (text == text.uppercase() && text != text.lowercase() && !text.startsWith("I'")) return null
         val rest = before.dropLast(text.length + 1)
         val prev = previousWord(rest).takeIf { it.isNotEmpty() }
@@ -277,6 +316,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     }
     companion object {
         const val MAX_LENGTH = 32
+        /** How far past its own touch area a likelier letter may reach, in dp, and the nats of odds
+         * (ln of how many times likelier) it needs for each dp it claims (iOS letterReach, letterOddsPerPoint). */
+        const val REACH = 5.0
+        const val ODDS_PER_DP = .8
         // Words the strip offers in place of these, but space never puts in: each is a word too.
         private val suggestOnly = mapOf("ill" to "I'll", "id" to "I'd", "were" to "we're", "wed" to "we'd",
             "well" to "we'll", "its" to "it's", "lets" to "let's", "hell" to "he'll", "shell" to "she'll")
@@ -335,7 +378,14 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             else -> target
         }
         private val shorthand = "ok okay ty thx pls plz tmrw tbh idk imo imho lol lmao omg brb btw afaik fyi nvm rn irl jk np yw smh ikr ngl fr gg dm pr prs ci ui ux ios macos api apis url urls json sql ssh cli gpu cpu ram sdk hex wisp seer rune kit gonna wanna gotta kinda sorta yeah yep nope nah hey yo".split(' ').toSet()
-        fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' }.lowercase()
+        // The word before the cursor, lowercase; an elided one without its apostrophe ("l'" as "l").
+        fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
+            .lowercase().replace('\u2019', '\'').trimEnd('\'')
+        // The articles and pronouns French and Italian elide before a vowel; a word starts after them.
+        private val ELISIONS = mapOf(
+            "fr" to setOf("c", "d", "j", "l", "m", "n", "s", "t", "qu", "jusqu", "lorsqu", "puisqu", "quoiqu", "presqu"),
+            "it" to setOf("c", "d", "l", "m", "n", "s", "t", "v", "un", "all", "dall", "dell", "nell", "sull", "coll",
+                "quest", "quell", "bell", "sant", "tutt", "nessun", "buon"))
         fun boundary(c: Char?) = c == null || c.isWhitespace() || c in "([{“‘\",;!?"
     }
 }

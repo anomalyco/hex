@@ -1,15 +1,22 @@
-"""Synthetic German and Bokmål typing sets for the Android replay, made the way
+"""Synthetic German, Bokmål, French and Italian typing sets for the Android replay, made the way
 2026-11-20-hex-typing-logs/bench_make.py made the English and Spanish ones: held-out Tatoeba
 sentences (CC BY 2.0 FR), each tap sampled from the measured per-key offset and per-row spread
 in that benchmark's input.json meta (no log rows), with 2% of spaces missed and space taps that
-land on a letter typed as that letter. Keys: Android's rows (qwertzuiopü / asdfghjklöä / yxcvbnm,
-qwertyuiopå / asdfghjkløæ / zxcvbnm) on a 402 pt layout with 11 keys a row (36 pt pitch) and the
-English rows' heights and space bar. Letters without a key are typed as their base key (é with e);
-German sentences with ß are left out (it has no key; it is held on s).
+land on a letter typed as that letter. A letter AZERTY moves takes its row's average offset. Keys, with the English rows' heights and space bar on a 402 pt layout:
+- German and Bokmål: Android's rows (qwertzuiopü / asdfghjklöä / yxcvbnm, qwertyuiopå /
+  asdfghjkløæ / zxcvbnm), eleven keys a row (36 pt pitch);
+- French: AZERTY (azertyuiop / qsdfghjklm / wxcvbn and an apostrophe key, never typed), and
+  Italian: QWERTY, at English's 39.5 pt pitch.
+Letters without a key are typed as their base key (é with e), hyphens as spaces. Elisions keep
+their apostrophe: French types it on AZERTY's apostrophe key like a letter; Italian, which has
+none on its letters, as an exact tap from the 123 page (written as [0, 0]; the replay only reads
+that an apostrophe was typed). Sentences with letters no key gives (German ß, French œ, æ)
+are left out.
 
-Writes OUTDIR/{de,nb}.jsonl (id, intended, typed, taps, want, ends, ios_shared="") and {de,nb}-dev.jsonl.
-TATOEBA holds deu.tsv and nob.tsv from https://downloads.tatoeba.org/exports/per_language/.
-Usage: python3 synthetic_de_nb.py INPUT.json TATOEBA OUTDIR"""
+Writes OUTDIR/<lang>.jsonl (id, intended, typed, taps, want, ends, ios_shared="") and
+<lang>-dev.jsonl for de, nb, fr and it. TATOEBA holds deu.tsv, nob.tsv, fra.tsv and ita.tsv
+from https://downloads.tatoeba.org/exports/per_language/.
+Usage: python3 synthetic_sets.py INPUT.json TATOEBA OUTDIR"""
 import json, os, random, re, sys, unicodedata
 
 meta = json.load(open(sys.argv[1]))["meta"]
@@ -18,20 +25,36 @@ OFFSET = {k: tuple(v) for k, v in meta["offsets"].items()}
 ROW_SD = {int(k): tuple(v) for k, v in meta["row_sd"].items()}
 SPACE_MU, SPACE_SD = meta["space"][:2], meta["space"][2:]
 SPACE_OMIT = meta["space_omit"]
-PITCH, ROW_Y, TOP = 36.0, [66.5, 122.5, 178.5], 44.5
+ROW_Y, TOP = [66.5, 122.5, 178.5], 44.5
 SPACE = (64.76, 212.0, 238.34, 45.0)
-ROWS = {"de": ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"], "nb": ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]}
-ALPHABET = {"de": "abcdefghijklmnopqrstuvwxyzäöü", "nb": "abcdefghijklmnopqrstuvwxyzæøåé"}
+ROWS = {"de": ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"], "nb": ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"],
+        "fr": ["azertyuiop", "qsdfghjklm", "wxcvbn'"], "it": ["qwertyuiop", "asdfghjkl", "zxcvbnm"]}
+ALPHABET = {"de": "abcdefghijklmnopqrstuvwxyzäöü", "nb": "abcdefghijklmnopqrstuvwxyzæøåé",
+            "fr": "abcdefghijklmnopqrstuvwxyzàâçéèêëîïôùûüÿ", "it": "abcdefghijklmnopqrstuvwxyzàèéìíîòóùú"}
+PITCHES = {"de": 36.0, "nb": 36.0, "fr": 39.5, "it": 39.5}
+CODES = {"de": "deu", "nb": "nob", "fr": "fra", "it": "ita"}
+SEEDS = {"de": (11, 20261121), "nb": (13, 20261122), "fr": (17, 20261123), "it": (19, 20261124)}
+# Elisions keep their apostrophe in the sentence, which isn't typed.
+ELIDES = {"fr", "it"}
 EN_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
 
 
 def geometry(lang):
+    pitch = PITCHES[lang]
     keys = {}
     for r, letters in enumerate(ROWS[lang]):
         for i, c in enumerate(letters):
-            x = 21 + PITCH * i if len(letters) == 11 else 201 + (i - (len(letters) - 1) / 2) * PITCH
+            x = 21 + pitch * i if len(letters) == 11 else 201 + (i - (len(letters) - 1) / 2) * pitch
             keys[c] = (x, ROW_Y[r], r)
     return keys
+
+
+def same_place(lang, c):
+    """Whether `c` sits where QWERTY has it, so its measured offset applies."""
+    for r, letters in enumerate(ROWS[lang]):
+        if c in letters:
+            return r < len(EN_ROWS) and c in EN_ROWS[r] and EN_ROWS[r].index(c) == letters.index(c)
+    return False
 
 
 def row_mean(row):
@@ -45,7 +68,7 @@ def hit(keys, lang, x, y):
     row = 0 if y < ROW_Y[0] + 28 else 1 if y < ROW_Y[1] + 28 else 2
     letters = ROWS[lang][row]
     xs = [keys[c][0] for c in letters]
-    if row == 2 and (x < xs[0] - PITCH / 2 or x >= xs[-1] + PITCH / 2):
+    if row == 2 and (x < xs[0] - PITCHES[lang] / 2 or x >= xs[-1] + PITCHES[lang] / 2):
         return None
     return min(letters, key=lambda c: abs(keys[c][0] - x))
 
@@ -58,7 +81,8 @@ def fold(lang, c):
 
 def sample_letter(rng, keys, lang, ch):
     cx, cy, row = keys[ch]
-    ox, oy = OFFSET.get(ch, row_mean(row))
+    moved = lang == "fr" and not same_place(lang, ch)
+    ox, oy = row_mean(row) if moved or ch not in OFFSET else OFFSET[ch]
     sx, sy = ROW_SD[row]
     for _ in range(20):
         x, y = rng.gauss(cx + ox, sx), max(rng.gauss(cy + oy, sy), TOP)
@@ -78,27 +102,29 @@ def sample_space(rng, keys, lang, force):
 
 
 def sentences(lang):
-    code = {"de": "deu", "nb": "nob"}[lang]
-    word = re.compile(f"^[{ALPHABET[lang]}]+$")
+    code = CODES[lang]
+    word = re.compile(f"^[{ALPHABET[lang]}]+('[{ALPHABET[lang]}]+)?$" if lang in ELIDES else f"^[{ALPHABET[lang]}]+$")
     rows = []
     for line in open(os.path.join(tatoeba, f"{code}.tsv"), encoding="utf-8"):
         parts = line.rstrip("\n").split("\t")
         if len(parts) < 3:
             continue
         text = unicodedata.normalize("NFC", parts[2])
-        if "'" in text or "\u2019" in text:
+        if lang in ELIDES:
+            text = text.replace("\u2019", "'")
+        elif "'" in text or "\u2019" in text:
             continue
         ws = re.sub(r"[.,!?;:\"()\u201e\u201c\u201d\u201a\u2018\u00bb\u00ab\u2013\u2014\-]", " ", text).lower().split()
         if 3 <= len(ws) <= 14 and all(word.match(w) for w in ws):
             rows.append(ws)
-    rng = random.Random({"de": 11, "nb": 13}[lang])
+    rng = random.Random(SEEDS[lang][0])
     rng.shuffle(rows)
     return rows[:2300]
 
 
-for lang in ("de", "nb"):
+for lang in ("de", "nb", "fr", "it"):
     keys = geometry(lang)
-    rng = random.Random({"de": 20261121, "nb": 20261122}[lang])
+    rng = random.Random(SEEDS[lang][1])
     rows = sentences(lang)
     for name, part in (("dev", rows[:300]), ("test", rows[300:2300])):
         path = os.path.join(out_dir, lang + (".jsonl" if name == "test" else "-dev.jsonl"))
@@ -107,6 +133,9 @@ for lang in ("de", "nb"):
                 taps, typed, want, ends = [], [], [], []
                 for i, w in enumerate(ws):
                     for ch in w:
+                        if ch == "'" and lang == "it":
+                            taps.append([0, 0]); typed.append("'"); want.append("'")
+                            continue
                         x, y, k = sample_letter(rng, keys, lang, fold(lang, ch))
                         taps.append([round(x, 2), round(y, 2)]); typed.append(" " if k == "space" else k); want.append(ch)
                     ends.append(len(taps))

@@ -5,22 +5,23 @@ Inter by Rasmus Andersson and the Inter Project Authors. SIL Open Font License 1
 Unmodified InterVariable.ttf from https://github.com/rsms/inter/releases/tag/v4.1
 
 Keyboard suggestion filter: List of Dirty, Naughty, Obscene, and Otherwise Bad Words
-(LDNOOBW), © 2012–2020 Shutterstock, Inc., and contributors. English, Spanish, German
-and Norwegian lists. Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13
+(LDNOOBW), © 2012–2020 Shutterstock, Inc., and contributors. English, Spanish, German,
+Norwegian, French and Italian lists. Source: https://github.com/LDNOOBW/List-of-Dirty-Naughty-Obscene-and-Otherwise-Bad-Words/tree/5faf2ba42d7b1c0977169ec3611df25a3c08eb13
 Creative Commons Attribution 4.0 International: https://creativecommons.org/licenses/by/4.0/
 Full licence: cc-by-4.0.txt. Hex lowercased and classified the entries, omitted ordinary,
 medical and search-only terms, and added common slurs, inflections and spelling variants.
 
-English, Spanish and German keyboard language models (.hextm): derived from Google Books Ngram
+English, Spanish, German, French and Italian keyboard language models (.hextm): derived from Google Books Ngram
 Viewer, version 3 (2020-02-17), by Google and the Google Books Ngram contributors.
 https://storage.googleapis.com/books/ngrams/books/datasetsv3.html
 Creative Commons Attribution 3.0 Unported: https://creativecommons.org/licenses/by/3.0/
 Changes: lowercased and summed word and word-pair counts for 1980–2019, filtered
 spellings, selected informative pairs, and quantized probabilities into HXTM v3.
-The English, Spanish and German capitalization lists (.capitals) come from the same corpus's
+The English, Spanish, German, French and Italian capitalization lists (.capitals) come from the same corpus's
 word counts for 1980–2019: the share of each word written with a capital first letter.
 
-German uses the German corpus's alphabetic spellings; no external German dictionary.
+German, French and Italian use their corpus's alphabetic spellings; no external dictionary. French and
+Italian keep the books' elided forms ("c'est", "dell'anno") and leave out the same letters run together.
 English literal validity also uses SCOWL words, proper names, uppercase forms and abbreviations
 outside the frequency model, lowercased and sorted; these spellings carry no word probabilities.
 English spellings: SCOWL 2020.12.07, sizes through 70; Kevin Atkinson and contributors.
