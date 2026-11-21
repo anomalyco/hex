@@ -432,6 +432,11 @@ class NeverSuggestTest {
         assertEquals("your word that is also a common word stays lowercase", "will world Kate ", w.typed(g, "will world kate "))
         w.reset("so "); w.explicit("wor")
         assertTrue(w.strip().toString(), w.strip().none { it.text == "World" })
+        // Your word wins a slot as a completion once two letters match, beside the fix space puts in.
+        for (typed in listOf("zo", "zor")) {
+            w.reset("so "); for (c in typed) w.tap(g, c)
+            assertTrue(typed + " " + w.strip(), w.strip().any { it.text == "Zorbix" })
+        }
         w.reset(""); w.explicit("Dic")
         assertTrue("your own words are offered, even listed ones", w.strip().any { it.text == "Dick" })
         w.reset(""); w.explicit("wtf")
