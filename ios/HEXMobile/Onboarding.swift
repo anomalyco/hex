@@ -93,7 +93,7 @@ struct OnboardingView: View {
     let monitor: KeyboardSetupMonitor
     let keyboardSpeech: KeyboardSpeechPreparation
     @Binding var page: OnboardingPage?
-    @State private var forward = true
+    @Namespace private var pillSpace
     @State private var tryText = OnboardingFixture.current == .tryDone ? "On my way, see you at ten." : ""
     @State private var fixtureModel: OnboardingModel? = OnboardingView.initialFixtureModel
 
@@ -159,6 +159,7 @@ struct OnboardingView: View {
         .frame(maxWidth: 500)
         .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .environment(\.onboardingPillSpace, reduceMotion ? nil : pillSpace)
         .task {
             while !Task.isCancelled {
                 monitor.refresh()
@@ -228,20 +229,23 @@ struct OnboardingView: View {
         }
     }
 
+    /// The page leaving lifts away as the desktop's roll does; the arriving page's parts roll in
+    /// themselves, staggered (onboardingStagger).
     private var pageTransition: AnyTransition {
         guard !reduceMotion else { return .opacity }
-        let shift: CGFloat = forward ? 28 : -28
         return .asymmetric(
-            insertion: .opacity.combined(with: .offset(x: shift)),
-            removal: .opacity.combined(with: .offset(x: -shift))
+            insertion: .identity,
+            removal: AnyTransition.opacity
+                .combined(with: .offset(y: -OnboardingMotion.travel))
+                .animation(OnboardingMotion.exit)
         )
     }
 
     private func go(to next: OnboardingPage) {
         guard page != next else { return }
-        forward = next.number > (page?.number ?? 0)
         OnboardingProgress.save(next)
-        withAnimation(HexMotion.stageAnimation(reduceMotion: reduceMotion)) {
+        // The pill flies on the desktop's flight spring; the rest follows its own springs.
+        withAnimation(reduceMotion ? HexMotion.reducedFade : OnboardingMotion.fly) {
             page = next
         }
     }
@@ -269,7 +273,9 @@ private struct OnboardingSetupPage: View {
             VStack(spacing: 14) {
                 HexMarkView(size: 56)
                     .padding(.bottom, 10)
+                    .onboardingStagger(0)
                 OnboardingTitle("Setting up Hex")
+                    .onboardingStagger(1)
                 HStack(spacing: 6) {
                     Text(model.isReady ? "Ready" : "Downloading")
                     OnboardingLanguageCapsule(language: model.language)
@@ -279,6 +285,7 @@ private struct OnboardingSetupPage: View {
                 .foregroundStyle(HexTheme.textMuted)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .onboardingStagger(2)
 
                 if case .failed(let message) = model.stage {
                     OnboardingFailure(message: message, onRetry: onRetry)
@@ -287,12 +294,14 @@ private struct OnboardingSetupPage: View {
                 } else {
                     OnboardingProgressPill(model: model, large: true)
                         .padding(.top, 6)
+                        .onboardingStagger(3)
                 }
             }
             .frame(maxWidth: .infinity)
             Spacer(minLength: 24)
             OnboardingPrivacyLine()
                 .padding(.bottom, 16)
+                .onboardingStagger(4)
         }
         .task(id: model.isFailed) {
             guard OnboardingFixture.autoAdvances, !model.isFailed else { return }
@@ -332,8 +341,10 @@ private struct OnboardingDemoPage: View {
             }
             .padding(.top, 12)
             .padding(.bottom, 24)
+            .onboardingStagger(1)
 
             stage
+                .onboardingStagger(2)
             Spacer(minLength: 16)
         }
         .task { await play() }
@@ -465,6 +476,7 @@ private struct OnboardingPermissionsPage: View {
                     .multilineTextAlignment(.center)
             }
             .padding(.bottom, 24)
+            .onboardingStagger(1)
 
             VStack(spacing: 0) {
                 OnboardingPermissionRow(
@@ -494,6 +506,7 @@ private struct OnboardingPermissionsPage: View {
             }
             .padding(.horizontal, 16)
             .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
+            .onboardingStagger(2)
 
             VStack(alignment: .leading, spacing: 8) {
                 Text("Keyboards  ›  Hex Keyboard  ›  Allow Full Access")
@@ -516,12 +529,15 @@ private struct OnboardingPermissionsPage: View {
             .padding(.top, 14)
             .opacity(keyboardDone ? 0 : 1)
             .accessibilityHidden(keyboardDone)
+            .onboardingStagger(3)
 
             Spacer(minLength: 16)
             OnboardingPrivacyLine()
                 .padding(.bottom, 14)
+                .onboardingStagger(4)
             OnboardingPrimaryButton(title: "Continue", enabled: monitor.keyboardAdded != false, action: continueTapped)
                 .padding(.bottom, 12)
+                .onboardingStagger(5)
         }
         .task(id: microphoneDone && keyboardDone) {
             guard OnboardingFixture.autoAdvances, microphoneDone, keyboardDone else { return }
@@ -546,6 +562,7 @@ private struct OnboardingWaitingPage: View {
         VStack(spacing: 0) {
             Spacer(minLength: 24)
             OnboardingModelWait(model: model, onRetry: onRetry, onWithoutModel: onWithoutModel)
+                .onboardingStagger(1)
             Spacer(minLength: 24)
         }
         .task(id: model.isReady) {
@@ -670,6 +687,7 @@ private struct OnboardingPracticePage: View {
                         OnboardingTitle(complete ? "That's Hex" : "Your turn")
                             .contentTransition(.opacity)
                     }
+                    .onboardingStagger(1)
 
                     Group {
                         if complete {
@@ -682,6 +700,7 @@ private struct OnboardingPracticePage: View {
                     .foregroundStyle(HexTheme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, -8)
+                    .onboardingStagger(2)
 
                     TextField("Say anything…", text: $text, axis: .vertical)
                         .font(.system(size: 17))
@@ -691,6 +710,7 @@ private struct OnboardingPracticePage: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 14)
                         .background(HexTheme.bgBase, in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous))
+                        .onboardingStagger(3)
 
                     if heardNothing && !complete {
                         HStack(alignment: .top, spacing: 8) {
@@ -873,13 +893,16 @@ private struct OnboardingReadyPage: View {
                     .frame(maxWidth: .infinity)
                 }
             }
+            .onboardingStagger(1)
             Spacer(minLength: 24)
             if left != .model {
                 OnboardingQuietButton(title: "Try again", action: onTryAgain)
                     .padding(.bottom, 8)
+                    .onboardingStagger(2)
             }
             OnboardingPrimaryButton(title: "Start using Hex", action: onStart)
                 .padding(.bottom, 12)
+                .onboardingStagger(3)
         }
     }
 

@@ -3,6 +3,61 @@ import UIKit
 
 // The pieces onboarding's pages share, in the app's flat style.
 
+/// The desktop onboarding's motion (src/rune_ui/onboarding_kit/landing.rs and pill.rs): parts
+/// roll in 8 pt on a 0.34 s zero-bounce spring, 0.05 s apart, and lift away on 0.26 s; the
+/// download pill flies between its places on 0.42 s.
+enum OnboardingMotion {
+    static let travel: CGFloat = 8
+    static let stagger: Double = 0.05
+    static let enter = Animation.spring(duration: 0.34, bounce: 0)
+    static let exit = Animation.spring(duration: 0.26, bounce: 0)
+    static let fly = Animation.spring(duration: 0.42, bounce: 0)
+}
+
+extension EnvironmentValues {
+    /// Where the download pill flies between pages; nil under Reduce Motion, where it fades.
+    @Entry var onboardingPillSpace: Namespace.ID? = nil
+}
+
+extension View {
+    /// Rolls in on arrival after "rank" stagger steps; a plain fade under Reduce Motion.
+    func onboardingStagger(_ rank: Int) -> some View {
+        modifier(OnboardingStagger(rank: rank))
+    }
+}
+
+private struct OnboardingStagger: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let rank: Int
+    /// Stills show every part at once.
+    @State private var shown = OnboardingFixture.isSnapshot && OnboardingFixture.current != .tour
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown || reduceMotion ? 0 : OnboardingMotion.travel)
+            .onAppear {
+                guard !shown else { return }
+                let animation = reduceMotion
+                    ? HexMotion.reducedFade
+                    : OnboardingMotion.enter.delay(Double(rank) * OnboardingMotion.stagger)
+                withAnimation(animation) { shown = true }
+            }
+    }
+}
+
+private struct OnboardingPillFlight: ViewModifier {
+    @Environment(\.onboardingPillSpace) private var space
+
+    func body(content: Content) -> some View {
+        if let space {
+            content.matchedGeometryEffect(id: "download-pill", in: space)
+        } else {
+            content
+        }
+    }
+}
+
 @MainActor
 func openSettings(_ openURL: OpenURLAction) {
     // Hex's own page in Settings (Apps › Hex), which lists Keyboards and Microphone.
@@ -48,6 +103,7 @@ struct OnboardingTopBar: View {
                         .frame(minWidth: 44, minHeight: 44, alignment: .trailing)
                         .contentShape(Rectangle())
                         .buttonStyle(.plain)
+                        .onboardingStagger(0)
                 }
             }
         }
@@ -92,6 +148,7 @@ struct OnboardingProgressPill: View {
         .padding(.horizontal, large ? 14 : 11)
         .frame(height: large ? 36 : 30)
         .background(HexTheme.bgBase, in: Capsule())
+        .modifier(OnboardingPillFlight())
         .accessibilityElement(children: .combine)
     }
 }
