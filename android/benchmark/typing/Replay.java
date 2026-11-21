@@ -8,15 +8,19 @@ import java.util.*;
 /** Runs via app_process against the actual installed APK. Never built into Hex. */
 public final class Replay {
     static KeyGrid originalGeometry(String language) {
-        // Portrait KeyboardLayout at 402 pt (side 6.5, gap 6, letter height 45, row gap 11).
-        double pitch = 39.5; Map<Character,KeyPoint> points = new LinkedHashMap<>();
-        String[] rows = {"qwertyuiop", language.equals("es") ? "asdfghjklñ" : "asdfghjkl", "zxcvbnm"};
+        // Portrait KeyboardLayout at 402 pt (side 6.5, gap 6, letter height 45, row gap 11), and its
+        // space bar. German and Bokmål have Android's eleven-key rows at a 36 pt pitch.
+        boolean wide = language.equals("de") || language.equals("nb");
+        double pitch = wide ? 36 : 39.5; Map<Character,KeyPoint> points = new LinkedHashMap<>();
+        String[] rows = language.equals("de") ? new String[]{"qwertzuiopü", "asdfghjklöä", "yxcvbnm"}
+            : language.equals("nb") ? new String[]{"qwertyuiopå", "asdfghjkløæ", "zxcvbnm"}
+            : new String[]{"qwertyuiop", language.equals("es") ? "asdfghjklñ" : "asdfghjkl", "zxcvbnm"};
         for (int row=0; row<rows.length; row++) {
             String letters=rows[row];
             for (int i=0; i<letters.length(); i++)
                 points.put(letters.charAt(i),new KeyPoint(201 + (i-(letters.length()-1)/2.0)*pitch,66.5+56*row));
         }
-        return new KeyGrid(points, pitch, 56);
+        return new KeyGrid(points, pitch, 56, new KeyRect(64.76, 212, 303.1, 257));
     }
     static String[] words(String s) {
         return Arrays.stream(s.toLowerCase(Locale.ROOT).trim().split("\\s+"))
@@ -39,7 +43,9 @@ public final class Replay {
             name,ns.size(),ns.get(ns.size()/2)/1e6,ns.get(ns.size()*95/100)/1e6,ns.get(ns.size()-1)/1e6);
     }
     public static void main(String[] args) throws Exception {
-        String lang=args[2], group=lang.equals("es") ? "es-test-" : "test-";
+        String lang=args[2], group=lang.equals("en") ? "test-" : lang+"-test-";
+        PrintWriter outputs=args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
+        boolean hasIos=false;
         TypingModel model=TypingModel.Companion.file(new File(args[0]),lang);
         KeyGrid grid=originalGeometry(lang); TypingWord state=new TypingWord(new SpatialDecoder(model), true);
         List<Long> letters=new ArrayList<>(), spaces=new ArrayList<>();
@@ -65,17 +71,19 @@ public final class Replay {
                     (key==' '?spaces:letters).add(System.nanoTime()-start);
                 }
                 String[] ref=words(r.getString("intended")); total+=ref.length; count++;
-                String ios=r.getString("ios_shared");
+                String ios=r.getString("ios_shared"); hasIos|=!ios.isEmpty();
+                if(outputs!=null) outputs.println(r.getString("id")+"\t"+out.toString().trim());
                 if (Arrays.equals(words(ios),words(out.toString()))) matches++;
                 String[] results={typed,ios,out.toString()};
                 for(int i=0;i<3;i++) { int err=edits(ref,words(results[i])); errors[i]+=err; if(err==0) exact[i]++; }
             }
         }
         if(count!=2000) throw new IllegalArgumentException("Incomplete synthetic set: "+count);
+        if(outputs!=null) outputs.close();
         String[] names={"raw","ios_shared","android_spatial"};
-        for(int i=0;i<3;i++)
+        for(int i=0;i<3;i++) if(i!=1||hasIos)
             System.out.printf(Locale.ROOT,"wer\t%s\t%d\t%d\t%.4f\t%d/%d\n",lang+"_"+names[i],errors[i],total,100.0*errors[i]/total,exact[i],count);
-        System.out.printf("agreement\t%s\t%d/%d\n",lang,matches,count);
+        if(hasIos) System.out.printf("agreement\t%s\t%d/%d\n",lang,matches,count);
         latency(lang+"_letter",letters); latency(lang+"_space",spaces);
     }
 }

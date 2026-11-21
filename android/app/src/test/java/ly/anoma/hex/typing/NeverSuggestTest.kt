@@ -22,6 +22,24 @@ class NeverSuggestTest {
         }
     }
 
+    // The benchmark's 402 pt layout with its space bar, per language (benchmark/typing/Replay.java).
+    private fun layout(language: String): KeyGrid {
+        val rows = when (language) {
+            "de" -> listOf("qwertzuiopü", "asdfghjklöä", "yxcvbnm")
+            "es" -> listOf("qwertyuiop", "asdfghjklñ", "zxcvbnm")
+            else -> listOf("qwertyuiop", "asdfghjkl", "zxcvbnm")
+        }
+        val pitch = if (language == "de") 36.0 else 39.5
+        return KeyGrid(buildMap {
+            for ((row, letters) in rows.withIndex()) for ((i, c) in letters.withIndex())
+                put(c, KeyPoint(201 + (i - (letters.length - 1) / 2.0) * pitch, 66.5 + 56 * row))
+        }, pitch, 56.0, KeyRect(64.76, 212.0, 303.1, 257.0))
+    }
+    private fun TypingWord.tap(grid: KeyGrid, c: Char, dx: Double = 0.0, dy: Double = 0.0) {
+        val p = grid.centres.getValue(c)
+        letter(c.toString(), p.x + dx, p.y + dy, grid)
+    }
+
     @Test fun completionsRespectBothCategoriesInEveryShippedModel() {
         for ((lang, swear, slur) in listOf(
             Triple("en", "fuck", "nigger"), Triple("es", "mierda", "maricón"),
@@ -157,5 +175,55 @@ class NeverSuggestTest {
             w.explicit(prefix)
             assertTrue("$lang:$prefix", expected in w.suggestions())
         }
+    }
+
+    // iOS AutocorrectEngineTests.testACommonBigramDoesNotSwallowADistinctWellAimedTap.
+    @Test fun aCommonBigramDoesNotSwallowADistinctWellAimedTap() {
+        val g = layout("en")
+        val w = word()
+        w.reset("I promised ")
+        for ((c, dx, dy) in listOf(Triple('t', -7.2, 6.6), Triple('o', 14.5, 12.5), Triple('m', -10.0, 3.9))) w.tap(g, c, dx, dy)
+        assertEquals("tom", w.token)
+        assertNull(w.replacement())
+    }
+
+    // iOS testASpaceTappedAsALetterAboveTheSpaceBarOrMissedSplitsTheWords.
+    @Test fun aBottomRowTapAboveTheSpaceBarOrBelowTheLettersSplitsTheWords() {
+        val g = layout("en")
+        val w = word()
+        for (letter in "bnvc") for (dy in listOf(0.0, -8.0, 10.0)) {
+            w.reset("is this ")
+            for (c in "of") w.tap(g, c)
+            w.tap(g, letter, dy = dy)
+            for (c in "the") w.tap(g, c)
+            assertEquals("$letter $dy", "of the", w.replacement())
+        }
+        for (typed in listOf("number", "cabin", "seven", "become")) {
+            w.reset("is this ")
+            for (c in typed) w.tap(g, c)
+            assertNull(typed, w.replacement())
+        }
+        // Without the space bar's place, a bottom-row tap at its centre is only ever a letter.
+        val plain = word()
+        plain.reset("is this ")
+        for (c in "ofbthe") plain.tap(KeyGrid(g.centres, g.pitchX, g.pitchY), c)
+        assertNotEquals("of the", plain.replacement())
+    }
+
+    // iOS testSpatialAutocorrectAddsSpanishAccents: an accented letter with a key of its own is
+    // also typed from its base letter's key (ñ from n, ä from a).
+    @Test fun anAccentedLetterAlsoComesFromItsBaseKey() {
+        val es = layout("es")
+        val w = word("es")
+        for ((typed, fixed) in listOf("esta" to null, "aqui" to "aquí", "manana" to "mañana")) {
+            w.reset("")
+            for (c in typed) w.tap(es, c)
+            assertEquals(typed, fixed, w.replacement())
+        }
+        val de = layout("de")
+        val g = word("de")
+        g.reset("das ")
+        for (c in "madchen") g.tap(de, c)
+        assertEquals("mädchen", g.replacement())
     }
 }
