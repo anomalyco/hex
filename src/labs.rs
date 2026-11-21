@@ -364,7 +364,13 @@ impl Feature {
             Self::GnomeMeetingCapsules => settings.labs.gnome_meeting_capsules = on,
             Self::GnomeAnnotate => settings.labs.gnome_annotate = on,
             Self::AnnotatePointerScreen => settings.labs.annotate_pointer_screen = on,
-            Self::Screenshots => settings.labs.screenshots = on,
+            Self::Screenshots => {
+                settings.labs.screenshots = on;
+                #[cfg(hex_capture)]
+                if on {
+                    settings.clear_record_shortcut_sharing_capture();
+                }
+            }
             Self::AnnotateReplay => settings.labs.annotate_replay = on,
             Self::MeetingImport => settings.labs.meeting_import = on,
             Self::QuitClosesWindow => settings.labs.quit_closes_window = on,

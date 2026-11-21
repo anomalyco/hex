@@ -278,9 +278,10 @@ impl AppSettings {
     /// and a record saved on the replay shortcut turned replay off with the
     /// Lab off. Runs after every repair that can reset `capture.hotkey`, since
     /// a reset puts Annotate back on its default and the record shortcut may
-    /// be saved there.
+    /// be saved there, and when the Lab turns on, since with it off Annotate
+    /// may take the record shortcut's key.
     #[cfg(hex_capture)]
-    pub(super) fn clear_record_shortcut_sharing_capture(&mut self) {
+    pub(crate) fn clear_record_shortcut_sharing_capture(&mut self) {
         let shared = self
             .screenshots
             .record_hotkey
@@ -330,10 +331,12 @@ impl AppSettings {
     }
 
     /// The shortcuts `slot` counts because of the Screenshots record
-    /// shortcut. A saved record shortcut and Annotate's capture shortcuts
-    /// never share a key, whether Annotate or the Lab is on, so either one
-    /// counts the other; the record shortcut counts for every other shortcut
-    /// only while a recording is available (the Lab and Annotate on).
+    /// shortcut. The record shortcut counts Annotate's capture shortcuts
+    /// always, and they count it while the Lab is on: every Mac has one
+    /// saved (⌘⇧5), which mustn't hold Annotate's key while the Lab is off.
+    /// Turning the Lab on clears a record shortcut Annotate took meanwhile.
+    /// It counts for every other shortcut only while a recording is
+    /// available (the Lab and Annotate on).
     pub(super) fn screenshots_record_counterparts(&self, slot: HotkeySlot) -> Vec<HotkeyBinding> {
         let mut others = Vec::new();
         if !cfg!(target_os = "macos") {
@@ -341,7 +344,9 @@ impl AppSettings {
         }
         #[cfg(hex_capture)]
         if slot.is_annotate_capture() {
-            if let Some(record) = &self.screenshots.record_hotkey {
+            if self.labs.screenshots
+                && let Some(record) = &self.screenshots.record_hotkey
+            {
                 others.push(record.clone());
             }
         } else if slot == HotkeySlot::ScreenshotRecord {

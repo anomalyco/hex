@@ -106,10 +106,10 @@ mod own {
     use std::thread::JoinHandle;
     use std::time::{Duration, Instant};
 
-    use color_eyre::{Result, eyre::eyre};
+    use color_eyre::Result;
 
     use super::super::sink::{CaptureAudio, CaptureSink, CaptureSinkClosed};
-    use crate::audio::{AudioInput, AudioInputEvent, CaptureInstant, Opened};
+    use crate::audio::{AudioInput, AudioInputEvent, CaptureInstant};
 
     /// How long a closing input waits for audio through the stop.
     const CLOSE_WAIT: Duration = Duration::from_millis(300);
@@ -157,18 +157,7 @@ mod own {
 
     /// Opens `device` by its exact name, never another input in its place.
     fn open(device: &str) -> Result<AudioInput> {
-        let listed = crate::audio::input_devices()?;
-        if !listed.names.iter().any(|name| name == device) {
-            return Err(eyre!("{device} isn't connected"));
-        }
-        match crate::audio::open_meeting_input(Some(device), None, None, false)? {
-            Opened::Input(input) if input.device_name == device => Ok(*input),
-            Opened::Input(input) => Err(eyre!(
-                "{device} wouldn't open ({} stood in)",
-                input.device_name
-            )),
-            Opened::Unchanged { .. } => Err(eyre!("{device} resolved to no new input")),
-        }
+        crate::audio::open_named_input(device)
     }
 
     fn read(

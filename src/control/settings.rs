@@ -448,6 +448,10 @@ pub fn apply(
                  shortcut first",
             ));
         }
+        #[cfg(hex_capture)]
+        "labs.screenshots" if candidate.labs.screenshots => {
+            candidate.clear_record_shortcut_sharing_capture();
+        }
         "labs.standalone_special_keys" => candidate.repair_special_keys(),
         "labs.section_key_alone" => candidate.repair_section_key(),
         "labs.microphone_key" => candidate.repair_microphone_key(),

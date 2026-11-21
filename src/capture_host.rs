@@ -339,8 +339,9 @@ trait Sealed: Send {
     /// Removes the bundle.
     fn cancel(self: Box<Self>);
     /// Blocking: transcribes `audio`, picks keyframes, and writes the
-    /// bundle.
-    fn finish(self: Box<Self>, audio: RecordedAudio) -> anyhow::Result<Written>;
+    /// bundle. `None` (a recording with no microphone) keeps no audio and
+    /// transcribes nothing.
+    fn finish(self: Box<Self>, audio: Option<RecordedAudio>) -> anyhow::Result<Written>;
     /// The apps in front when it stopped, for routing; `None` when it isn't
     /// routed.
     fn route_context(&self) -> Option<scrawl_capture::capture::RouteContext> {
@@ -393,8 +394,8 @@ impl Sealed for scrawl_capture::capture::SealedCapture {
         scrawl_capture::capture::SealedCapture::cancel(*self);
     }
 
-    fn finish(self: Box<Self>, audio: RecordedAudio) -> anyhow::Result<Written> {
-        let finished = scrawl_capture::capture::SealedCapture::finish(*self, Some(audio))?;
+    fn finish(self: Box<Self>, audio: Option<RecordedAudio>) -> anyhow::Result<Written> {
+        let finished = scrawl_capture::capture::SealedCapture::finish(*self, audio)?;
         tracing::info!(
             bundle = %finished.dir.display(),
             duration_ms = finished.duration_ms,
@@ -990,8 +991,12 @@ impl AudioTimeline for DictationAudio {
         self.close_capture_sink(through)
     }
 
+    /// Only while its stream is open: a closed one's last name may not be
+    /// the input it opens next.
     fn device_name(&self) -> Option<String> {
-        Some(DictationAudio::device_name(self)).filter(|name| !name.is_empty())
+        self.is_open()
+            .then(|| DictationAudio::device_name(self))
+            .filter(|name| !name.is_empty())
     }
 }
 
@@ -1033,7 +1038,7 @@ struct Active {
 struct FinishJob {
     bundle: PathBuf,
     capture: Box<dyn Sealed>,
-    audio: RecordedAudio,
+    audio: Option<RecordedAudio>,
     /// What the router saw when it stopped, handed over once the job was
     /// queued; the sender is dropped without one when captures aren't sent.
     look: Receiver<routing::Look>,
@@ -2049,6 +2054,7 @@ impl CaptureHost {
         };
         // "While dictating" quiets the computer for a voice over it; a
         // recording of the computer's own sound, or with no voice, keeps it.
+        let silent = choice == microphone::Choice::Silent;
         let quiet = if screenshots
             .as_ref()
             .is_some_and(|settings| !wants_quiet(settings.record_system_audio, &choice))
@@ -2085,6 +2091,7 @@ impl CaptureHost {
                         .map(|target| start_request(now, recording.clone(), target, movie));
                     collect(
                         &*engine, start, &recording, chunks, sealed, &jobs, &outcomes, &input,
+                        silent,
                     );
                 })
                 .inspect_err(|_| {
@@ -3603,6 +3610,7 @@ fn collect(
     jobs: &SyncSender<FinishJob>,
     outcomes: &SharedOutcomes,
     input: &LiveInput,
+    silent: bool,
 ) {
     let bundle = bundle.to_path_buf();
     let capture = start.and_then(|start| {
@@ -3673,7 +3681,14 @@ fn collect(
             // The app in front now; its tab and terminal are read while the
             // capture is written.
             let context = capture.route_context();
-            let audio = timeline.finish(through, closed);
+            // With no microphone there's no audio.wav of silence to keep or
+            // transcribe.
+            let audio = if silent {
+                timeline.discard();
+                None
+            } else {
+                Some(timeline.finish(through, closed))
+            };
             let (give_look, look) = mpsc::sync_channel(1);
             // Starts are refused while the queue is full, so it has room
             // unless Hex is stopping.
@@ -4350,8 +4365,10 @@ mod tests {
             fs::remove_dir_all(&self.dir).unwrap();
         }
 
-        fn finish(self: Box<Self>, audio: RecordedAudio) -> anyhow::Result<Written> {
+        fn finish(self: Box<Self>, audio: Option<RecordedAudio>) -> anyhow::Result<Written> {
             use scrawl_capture::model::{CaptureMode, TargetFrame, TargetInfo};
+            let audio =
+                audio.unwrap_or_else(|| RecordedAudio::new(Vec::new(), SAMPLE_RATE, 0, Vec::new()));
             self.steps
                 .lock()
                 .unwrap()
