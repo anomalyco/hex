@@ -595,6 +595,86 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertFalse(AutocorrectEngine.isSentenceStart("first; "))
     }
 
+    /// TestFlight (build 56): "I use Czech and English." Settings › Keyboard › Languages with
+    /// English and Czech: the space bar says "Čeština", the keys are the system Czech keyboard's
+    /// (QWERTZ, the ´ and ˇ keys), and they type as observed there with real touches: ´ and ˇ
+    /// accent the letter before them (rˇ is ř, uˇ is ů, A´ is Á, but aˇ stays aˇ), and after
+    /// anything else type themselves; a held ˇ's ˚ makes ů and å; delete takes the accented letter whole.
+    /// English is its bilingual partner, and Switch dictation too dictates cs-CZ.
+    func testCzechTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .czech]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "cs-CZ"]
+        let model = KeyboardViewModel()
+        var picked: [String?] = []
+        model.onLanguageSelected = { picked.append($0) }
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.engine.autocorrect.isEnabled = false
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .czech)
+        XCTAssertEqual(view.plane.spaceLabel, "Čeština")
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Czech typing model: the dictionary engine")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "cs-CZ")
+        XCTAssertEqual(picked, [], "Automatic already follows")
+        var id = 600
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func type(_ keys: String) {
+            for character in keys { tap(character == " " ? .space : .character(String(character))) }
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        tap(.shift)
+        type("prˇi´lisˇ zˇlutˇoucˇky´ ku")
+        hold("ˇ", pick: "˚")
+        type("nˇ")
+        XCTAssertEqual(field.text, "Příliš žluťoučký kůň")
+        XCTAssertEqual(field.text.unicodeScalars.count, field.text.count, "precomposed letters, no combining marks")
+        tap(.delete)
+        XCTAssertEqual(field.text, "Příliš žluťoučký ků", "delete takes ň whole")
+        while field.hasText { tap(.delete) }
+        type("´ x´ aˇ e´´ ")
+        XCTAssertEqual(field.text, "´ x´ aˇ é´ ", "a mark with nothing to accent types itself")
+        type("a")
+        hold("ˇ", pick: "˚")
+        type("c")
+        hold("ˇ", pick: "ˇ")
+        type(" uˇ")
+        XCTAssertEqual(field.text, "´ x´ aˇ é´ åč ů")
+        tap(.shift)
+        type("a´")
+        tap(.shift)
+        type("uˇ")
+        XCTAssertTrue(field.text.hasSuffix("ÁŮ"), field.text)
+        // Apple's other Czech layout, "QWERTY – Czech/Slovak", keeps both keys and their rules.
+        XCTAssertEqual(KeyboardLanguage.czech.letterRows(.qwerty)[2].last, "ˇ")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+        XCTAssertNil(view.engine.layout.key(.character("ˇ")), "English has no ˇ key")
+    }
+
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
@@ -1468,12 +1548,13 @@ final class FullKeyboardEngineTests: XCTestCase {
                 view.plane.ended(id: id + 10, sample: sample)
             }
             // Serbian's and Romanian's e hold nothing, as on the system keyboard; Serbian's c
-            // holds č and ć, Romanian's s ș.
+            // holds č and ć, Romanian's s ș. Czech's e opens with ě before e, so its r (ř).
             let held: String = switch language {
             case .ukrainian: "ʼ"
             case .russian: "е"
             case .serbianLatin: "c"
             case .romanian: "s"
+            case .czech: "r"
             case .greek: "ε"
             default: "e"
             }
@@ -1783,6 +1864,18 @@ final class FullKeyboardEngineTests: XCTestCase {
         let plane = KeyboardKeyPlaneView(engine: keys)
         plane.swipe = SwipeTyping(engine: keys, model: try XCTUnwrap(TypingDecoderModel.bundled(language.rawValue)))
         return (field, plane)
+    }
+
+    /// Hex's vocabulary list reaches Swipe typing: a word no dictionary or model has
+    /// ("kubectl") is swiped once it's in the list.
+    func testSwipeTypesYourVocabularyWords() throws {
+        let (before, beforePlane) = try swipeKeyboard()
+        swipe("kubectl", on: beforePlane)
+        XCTAssertNotEqual(before.text, "kubectl", "not a word Swipe typing knows")
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.autocorrect.setVocabulary(["kubectl"])
+        swipe("kubectl", on: plane)
+        XCTAssertEqual(field.text, "kubectl")
     }
 
     private func sample(_ point: CGPoint) -> TypingLogTouchSample {

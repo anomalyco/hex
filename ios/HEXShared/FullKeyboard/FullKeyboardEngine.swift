@@ -989,7 +989,7 @@ final class FullKeyboardEngine {
         if layerState.layer == .letters {
             shift.didType()
         }
-        if layerState.layer == .letters, layout.language == .greek, typeGreek(&text) { return }
+        if layerState.layer == .letters, typeLayoutRules(&text) { return }
         if dropsSuggestionSpace(before: text) || !correctWord(endingWith: text) {
             insert(text, source: "key", at: point)
         }
@@ -1197,6 +1197,7 @@ final class FullKeyboardEngine {
         if layerState.layer == .letters {
             shift.didType()
         }
+        if layerState.layer == .letters, typeHeldMark(chosen) { return }
         insert(chosen, source: "accent")
         logState("typed")
     }

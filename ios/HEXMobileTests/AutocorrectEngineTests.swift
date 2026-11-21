@@ -160,6 +160,74 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "i think i'm here ")
     }
 
+    /// TestFlight (build 56): "Even with auto-capitalization off, many suggested words are
+    /// capitalized." With it off the strip offers no capital you didn't type either, as space
+    /// puts none in: a guess or completion iOS knows capitalised ("Mandy", "Monday") and
+    /// "I'd" for "id" come lowercase; your own spellings (a vocabulary word, a contact) and a
+    /// capital you typed keep theirs.
+    func testAutoCapitalizationOffSuggestsNoCapitals() {
+        let engine = stubbed {
+            $0.valid = ["id", "money"]
+            $0.capitalised = ["Monday", "Mandy"]
+            $0.guessTable = ["mondy": ["Monday", "Mandy"]]
+            $0.completionTable = ["mon": ["Monday", "money"]]
+        }
+        engine.loadLexiconEntries([("Kimberly", "Kimberly")])
+        engine.setVocabulary(["GitHub"])
+        func strip(_ typed: String) -> [String] {
+            engine.suggestions(beforeInput: typed, field: .text, autocorrectionType: .default).dropFirst().map(\.replacement)
+        }
+        XCTAssertEqual(strip("mondy"), ["Monday", "Mandy"], "on: as the dictionary spells them")
+        engine.addsCapitals = false
+        XCTAssertEqual(strip("mondy"), ["monday", "mandy"])
+        XCTAssertEqual(strip("id"), ["i'd"])
+        XCTAssertEqual(Set(strip("mon")), ["money", "monday"])
+        XCTAssertEqual(strip("git"), ["GitHub"], "your vocabulary's spelling")
+        XCTAssertEqual(strip("kim"), ["Kimberly"], "a contact's")
+        XCTAssertEqual(strip("Mondy"), ["Monday", "Mandy"], "a capital you typed")
+        func predictions(_ before: String) -> [String] {
+            engine.suggestions(beforeInput: before, field: .text, autocorrectionType: .default, capitalizesNext: true).map(\.replacement)
+        }
+        XCTAssertEqual(predictions(""), ["I", "the", "I'm"], "sentence starters: only \"I\", which always has one (#2135)")
+        XCTAssertEqual(predictions("well, "), ["I", "but", "and"], "clause starters")
+        engine.addsCapitals = true
+        XCTAssertEqual(predictions(""), ["I", "The", "I'm"])
+    }
+
+    /// TestFlight (build 56): "Custom dictionary for uncommon programmer slang." Hex's
+    /// vocabulary list (Settings › Keyboard › Vocabulary, the one dictation spells) reaches the
+    /// keys: its words are never autocorrected away, are spelled your way, are completed in
+    /// the strip, and a bilingual partner shares them.
+    func testVocabularyWordsAreKeptSpelledYourWayAndCompleted() {
+        let engine = stubbed {
+            $0.valid = ["deduce", "the"]
+            $0.guessTable = ["dedupe": ["deduce"]]
+            $0.completionTable = ["ded": ["deduce"]]
+        }
+        engine.setLanguage(.english, available: ["en_US", "fr_FR"])
+        XCTAssertEqual(fix(engine, "dedupe"), "deduce", "not yet in the vocabulary")
+        engine.setVocabulary(["dedupe", "GitHub", "Claude Code"])
+        XCTAssertNil(fix(engine, "dedupe"))
+        XCTAssertNil(fix(engine, "Dedupe"))
+        XCTAssertEqual(fix(engine, "github"), "GitHub")
+        XCTAssertNil(fix(engine, "GitHub"))
+        XCTAssertNil(fix(engine, "GITHUB"))
+        XCTAssertEqual(fix(engine, "claude"), "Claude", "a word of a phrase")
+        func strip(_ typed: String) -> [String] {
+            engine.suggestions(beforeInput: typed, field: .text, autocorrectionType: .default).map(\.replacement)
+        }
+        XCTAssertEqual(strip("dedupe"), ["dedupe"], "no guess for your word")
+        XCTAssertEqual(strip("ded").dropFirst().first, "dedupe", "completed before the dictionary's words")
+        XCTAssertEqual(strip("Cla").dropFirst().first, "Claude Code")
+        XCTAssertTrue(engine.ownWords.contains("dedupe"), "Swipe typing reads it")
+        let french = StubChecker()
+        french.valid = ["deduire"]
+        engine.setPartner(.french, available: ["en_US", "fr_FR"], checker: french)
+        XCTAssertEqual(engine.partner?.vocabulary, ["dedupe", "GitHub", "Claude Code"])
+        XCTAssertNil(fix(engine, "dedupe"), "kept beside a partner")
+        XCTAssertEqual(fix(engine, "github"), "GitHub")
+    }
+
     func testAmbiguousContractionsSuggestWithoutAutoReplacing() {
         let slots = engine.autocorrect.suggestions(
             beforeInput: "well",
@@ -546,6 +614,64 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(fix(greek, "αυπνια"), "αϋπνία")
         XCTAssertEqual(fix(greek, "λογοσ"), "λόγος")
         XCTAssertNil(fix(greek, "και"), "a word stays")
+    }
+
+    /// Czech types with iOS's cs dictionary, and háčky and čárky left out are the cheapest fix
+    /// there is, however many ("cesky" -> "český", "prilis" -> "příliš", "kun" -> "kůň"), as
+    /// Polish diacritics are; other languages keep one edit. The fixes run against a stub
+    /// dictionary answering as an iPhone's would.
+    func testCzechRestoresMissingDiacritics() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "cesky", to: "český", language: .czech)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "prilis", to: "příliš", language: .czech)!, 0.25, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kun", to: "kůň", language: .czech)!, 0.20, accuracy: 0.001)
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "prilis", to: "příliš", language: .english), "three edits elsewhere")
+        engine.language = .czech
+        XCTAssertEqual(engine.autocorrect.language, .czech)
+        XCTAssertNil(engine.autocorrect.decoder, "no Czech typing model")
+
+        let czech = stubbed {
+            $0.valid = ["český", "příliš", "kůň", "žluťoučký", "děkuji", "jsem", "dobrý", "den", "kun", "cesta"]
+            // "cesta" is one far key from "cesky" and listed first; "český" only lacks its čárka and háček.
+            $0.guessTable = ["cesky": ["cesta", "český"], "prilis": ["příliš"], "zlutoucky": ["žluťoučký"], "dekuji": ["děkuji"]]
+        }
+        czech.setLanguage(.czech, available: ["cs", "en_US"])
+        XCTAssertEqual(fix(czech, "cesky"), "český")
+        XCTAssertEqual(fix(czech, "Cesky"), "Český")
+        XCTAssertEqual(fix(czech, "prilis"), "příliš")
+        XCTAssertEqual(fix(czech, "zlutoucky"), "žluťoučký")
+        XCTAssertEqual(fix(czech, "dekuji"), "děkuji")
+        XCTAssertNil(fix(czech, "jsem"), "a word stays")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.czech).count, 3)
+    }
+
+    /// TestFlight (build 56): "Autocomplete suggests English words in Czech too." With Czech
+    /// and English chosen, a sentence the words before show is Czech (`languageLean`) gets
+    /// Czech completions only, none of English's even where Czech has none, and an English
+    /// sentence English's only; with nothing before, both languages' in turn, as before
+    /// (#2186). Autocorrect is #2186's: an English word stays as typed in a Czech sentence.
+    func testEnglishSuggestionsStayOutOfACzechSentence() {
+        let available = ["cs", "en_US"]
+        let czech = stubbed {
+            $0.valid = ["dobrý", "den", "jsem", "doma", "dnes", "děkuji", "dobře", "a", "do"]
+            $0.completionTable = ["do": ["doma", "dobře", "dobrý"], "de": ["den", "děkuji"]]
+        }
+        czech.setLanguage(.czech, available: available)
+        let english = StubChecker()
+        english.valid = ["i", "am", "at", "home", "today", "do", "dog", "done", "door", "the", "a"]
+        english.completionTable = ["do": ["dog", "done", "door"], "de": ["deal"], "kur": ["kurtosis", "kudos"]]
+        english.guessTable = ["dorr": ["door"]]
+        czech.setPartner(.english, available: available, checker: english)
+        XCTAssertEqual(czech.partner?.language, .english)
+        func strip(_ before: String) -> [String] {
+            Array(czech.suggestions(beforeInput: before, field: .text, autocorrectionType: .default).dropFirst().map(\.replacement))
+        }
+        XCTAssertEqual(strip("dobrý den jsem do"), ["doma", "dobře"], "a Czech sentence: Czech words")
+        XCTAssertEqual(strip("dobrý den jsem kur"), [], "and no English ones where Czech has none")
+        XCTAssertEqual(strip("i am at home do"), ["dog", "done"], "an English sentence: English words")
+        XCTAssertEqual(strip("do"), ["doma", "dog"], "nothing before: both, in turn")
+        XCTAssertEqual(fix(czech, before: "i am at home dorr"), "door")
+        XCTAssertEqual(fix(czech, before: "dorr"), "door")
+        XCTAssertNil(fix(czech, before: "dobrý den jsem home"), "an English word stays as typed")
     }
 
     /// Serbian (Latin) has no dictionary on iOS: nothing is "corrected", into English or anything else.

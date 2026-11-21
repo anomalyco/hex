@@ -1,0 +1,67 @@
+import Foundation
+
+/// The Czech layout's ´ and ˇ keys, as the system Czech keyboard was observed to apply them
+/// (iOS 27.2 simulator, real touches in Messages, every letter followed by each key, black box).
+/// Neither is a dead key: each accents the letter right before it, as Greek's tonos key does,
+/// and after anything else (another letter, an accented one, a space, nothing) types itself.
+/// ´ gives á ć é í ĺ ń ó ŕ ś ú ý ź; ˇ gives č ď ě ľ ň ř š ť ž, and ů after u; the ring ˚, held on
+/// ˇ, gives ů and å. Capitals take theirs (Á, Č, Ů). Delete takes the accented letter whole.
+nonisolated enum CzechTyping {
+    static let acuteKey = "\u{00B4}"
+    static let caronKey = "\u{02C7}"
+    static let ringKey = "\u{02DA}"
+
+    private static let marks: [String: [Character: Character]] = [
+        acuteKey: [
+            "a": "á", "c": "ć", "e": "é", "i": "í", "l": "ĺ", "n": "ń", "o": "ó", "r": "ŕ", "s": "ś",
+            "u": "ú", "y": "ý", "z": "ź",
+        ],
+        caronKey: [
+            "c": "č", "d": "ď", "e": "ě", "l": "ľ", "n": "ň", "r": "ř", "s": "š", "t": "ť", "z": "ž",
+            "u": "ů",
+        ],
+        ringKey: ["a": "å", "u": "ů"],
+    ]
+
+    /// The letter `before` ends with, accented by the mark `text` types after it; nil when
+    /// the key types the mark itself.
+    static func accenting(_ text: String, after before: String?) -> String? {
+        guard let table = marks[text], let last = before?.last else { return nil }
+        let lower = Character(last.lowercased())
+        guard let accented = table[lower] else { return nil }
+        return last.isUppercase ? accented.uppercased() : String(accented)
+    }
+}
+
+@MainActor
+extension FullKeyboardEngine {
+    /// The layout's own keys' typing rules: Greek's tonos key and final sigma (`GreekTyping`),
+    /// Czech's ´ and ˇ (`CzechTyping`). True when the key already did all it does; else
+    /// `text` is what to type.
+    func typeLayoutRules(_ text: inout String) -> Bool {
+        switch layout.language {
+        case .greek: typeGreek(&text)
+        case .czech: typeCzech(text)
+        default: false
+        }
+    }
+
+    /// Czech: a held ˇ's ˇ or ˚ accents the letter before it, as a tapped ˇ does. True when it
+    /// did; else the held key's choice goes in as it is.
+    func typeHeldMark(_ chosen: String) -> Bool {
+        guard layout.language == .czech else { return false }
+        var mark = chosen
+        return typeLayoutRules(&mark)
+    }
+
+    /// ´, ˇ or ˚ after a letter it accents: puts the accented letter in its place. False
+    /// otherwise, and the mark is typed as itself.
+    private func typeCzech(_ text: String) -> Bool {
+        guard let accented = CzechTyping.accenting(text, after: target.documentContextBeforeInput) else { return false }
+        target.deleteBackward()
+        target.insertText(accented)
+        didEdit()
+        logState("typed")
+        return true
+    }
+}

@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|ro|ru|uk|el|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|ro|ru|uk|el|sr-Latn|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
 /// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, or `t` on Romanian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
@@ -127,6 +127,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Spóźnię się dziesięć min"
             case "accents": Self.accentKey == "e" ? "Prosz" : "Za"
             default: "Spóźnię się dziesięć minut, "
+            }
+        case .czech:
+            return switch state {
+            case "inserted": "Přijdu o deset minut později, doma budu v 19:30. Začněte beze mě."
+            case "numbers": "Přijdu o deset minut později, doma budu v 19:3"
+            case "shift": "Přijdu o deset minut později. "
+            case "typing": "Přijdu o deset minut pozd"
+            case "accents": Self.accentKey == "r" ? "P" : "Ka"
+            default: "Přijdu o deset minut později, "
             }
         case .romanian:
             return switch state {
@@ -314,6 +323,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 let ownLetters: [String: String] = switch FullKeyboardSnapshotStage.layout {
                 case .polish: ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
                 case .romanian: ["a": "ă", "i": "î", "s": "ș", "t": "ț"]
+                case .czech: ["e": "ě", "r": "ř", "u": "ů", "a": "á", "c": "č", "s": "š", "z": "ž", "y": "ý", "n": "ň"]
                 case .greek: ["ε": "έ", "α": "ά", "ο": "ό", "η": "ή", "ι": "ί", "υ": "ύ", "ω": "ώ", "σ": "ς", "κ": "ϗ"]
                 default: [:]
                 }

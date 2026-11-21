@@ -930,6 +930,54 @@
         }
       }
     },
+    "Vocabulary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "词汇表"
+          }
+        }
+      }
+    },
+    "Words autocorrect keeps and suggests" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动更正会保留并推荐的词"
+          }
+        }
+      }
+    },
+    "%lld words autocorrect keeps and suggests" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld word autocorrect keeps and suggests"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld words autocorrect keeps and suggests"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动更正会保留并推荐的 %lld 个词"
+          }
+        }
+      }
+    },
     "Delete" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1256,6 +1304,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "修正拼写，而不是 Hex 听错的词"
+          }
+        }
+      }
+    },
+    "Hold a word you typed in the keyboard's suggestions to add it. Dictation spells these too while Custom vocabulary is on." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在键盘的建议栏中按住你输入的词即可添加。打开“自定词汇”时，听写也会按这些拼写。"
           }
         }
       }
@@ -2405,6 +2463,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "绝不会建议歧视性词语"
+          }
+        }
+      }
+    },
+    "Add to vocabulary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加到词汇表"
+          }
+        }
+      }
+    },
+    "Never autocorrected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不会被自动更正"
           }
         }
       }

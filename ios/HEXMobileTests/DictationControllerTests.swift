@@ -2274,6 +2274,30 @@ final class SpeechLanguagePickerTests: XCTestCase {
         XCTAssertEqual(SpeechLanguagePicker.shortNames(for: ["el-GR"], in: Locale(identifier: "en-US"))["el-GR"], "Greek")
     }
 
+    /// Czech is `DictationTranscriber`'s only (macOS 27.2.1 lists cs-CZ there and not in
+    /// `SpeechTranscriber`): picked by hand, by a Czech iPhone, or by the keyboard showing
+    /// Čeština, it dictates in Czech through Apple Speech, never English-only Parakeet.
+    func testCzechComesFromDictationTranscriber() async {
+        let speech = lookup(speechLocales)
+        let dictation = lookup(dictationLocales + ["cs-CZ"])
+        let chosen = await SpeechLanguagePicker.pick(
+            explicit: "cs-CZ", candidates: ["en-US"], speech: speech, dictation: dictation
+        )
+        XCTAssertEqual(chosen?.identifier, "cs-CZ")
+        XCTAssertEqual(chosen?.module, .dictation)
+        let automatic = await SpeechLanguagePicker.pick(
+            explicit: nil,
+            candidates: SpeechLanguagePicker.automaticCandidates(preferred: ["cs-CZ", "en-US"], current: "cs_CZ"),
+            speech: speech,
+            dictation: dictation
+        )
+        XCTAssertEqual(automatic?.identifier, "cs-CZ")
+        XCTAssertEqual(automatic?.module, .dictation)
+        XCTAssertFalse(SpeechLanguagePicker.isEnglish("cs-CZ"), "Apple Speech, never English-only Parakeet")
+        XCTAssertEqual(SpeechLanguagePicker.shortNames(for: ["cs-CZ"], in: Locale(identifier: "en-US"))["cs-CZ"], "Czech")
+        XCTAssertEqual(KeyboardLanguage.czech.dictationLanguage(supported: ["en-US", "cs-CZ"], preferred: ["en-US"]), "cs-CZ")
+    }
+
     func testThePreferredOrderWinsOverTheModule() async {
         // Hebrew first: DictationTranscriber's Hebrew beats SpeechTranscriber's English.
         let picked = await pick(preferred: ["he-IL", "en-US"])

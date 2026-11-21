@@ -111,11 +111,20 @@ nonisolated enum AccentCatalog {
         "η": "η ή", "κ": "κ ϗ", "ω": "ω ώ", "\"": "„ “ ” « » \"",
     ]) { _, greek in greek }
 
+    /// The Czech keyboard's (iOS 27.2 simulator, QWERTZ – Czech/Slovak), one row each; its
+    /// symbols are English's.
+    private static let czechOrder: [String: String] = englishOrder.filter { $0.key.first?.isLetter != true }.merging([
+        "e": "ě e é ê è ę ë ē ė", "r": "r ř ŕ", "t": "t ť", "z": "z ž ź ż", "u": "ū ù ü û ů ú u",
+        "i": "ī į ì ï î í i", "o": "ō ø œ õ ò ö ô ó o", "a": "a á à ą â ä æ ã å ā", "s": "s š ß ś",
+        "d": "d ď", "l": "ĺ ľ ł l", "y": "y ý ÿ", "c": "c č ç ć", "n": "ń ñ ň n", "\u{02C7}": "\u{02C7} \u{02DA}",
+    ]) { _, czech in czech }
+
     private static func displayOrder(for language: KeyboardLanguage) -> [String: String] {
         switch language {
         case .english: englishOrder
         case .spanish: spanishOrder
         case .greek: greekOrder
+        case .czech: czechOrder
         default: [:]
         }
     }

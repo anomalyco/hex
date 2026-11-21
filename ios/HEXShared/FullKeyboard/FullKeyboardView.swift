@@ -51,6 +51,9 @@ final class FullKeyboardView: UIView {
     /// The Hex key's last tap or hold started a dictation here (not by opening Hex).
     private var dictatingFromHexKey = false
     private var lastDictation: String?
+    /// A word you typed whose slot you held: the strip offers Add to vocabulary until the text
+    /// changes (`FullKeyboardView+Vocabulary`).
+    var vocabularyOffer: String?
     private var undoHideWork: DispatchWorkItem?
     /// The Hex key was tapped without Full Access: the strip says what dictation needs.
     private(set) var showsFullAccessHint = false
@@ -142,12 +145,18 @@ final class FullKeyboardView: UIView {
             }
             self.engine.acceptSuggestion(suggestion)
         }
+        stripView.onHoldSuggestion = { [weak self] suggestion in self?.offerVocabulary(suggestion) }
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
         stripView.onOpenNotice = { [weak self] in
-            self?.keyFeedback()
-            self?.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
+            guard let self else { return }
+            self.keyFeedback()
+            if let word = self.vocabularyOffer {
+                self.addToVocabulary(word)
+                return
+            }
+            self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
         stripView.onNextKeyboard = { [weak self] in
             self?.typingLog?.ui("next_keyboard")
@@ -187,6 +196,7 @@ final class FullKeyboardView: UIView {
                 return
             }
             self.hideUndo()
+            self.vocabularyOffer = nil
             self.hideFullAccessHint()
             self.hideAllowPasteHint()
             self.refreshReturnKey()
@@ -213,6 +223,7 @@ final class FullKeyboardView: UIView {
 
         engine.autocorrect.isEnabled = FullKeyboardSettings().autocorrect
         engine.autocorrect.allowsSwearing = FullKeyboardSettings().suggestSwearWords
+        engine.autocorrect.setVocabulary(CustomVocabularySettings().terms)
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         syncHexPlacement()
@@ -459,6 +470,11 @@ final class FullKeyboardView: UIView {
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
             engine.autocorrect.isEnabled = wantsAutocorrect
+            engine.refreshSuggestions()
+        }
+        let vocabulary = CustomVocabularySettings().terms
+        if engine.autocorrect.vocabulary != vocabulary {
+            engine.autocorrect.setVocabulary(vocabulary)
             engine.refreshSuggestions()
         }
         let wantsSwearing = FullKeyboardSettings().suggestSwearWords
@@ -782,7 +798,7 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: translationNotice
+            notice: vocabularyNotice ?? translationNotice
         )
     }
 
