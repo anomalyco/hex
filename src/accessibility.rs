@@ -139,10 +139,18 @@ impl PasteFocus {
 
     /// The field's whole text, for Labs › Learn from corrections. `None` for
     /// a password (the `AXSecureTextField` role or subrole is checked before
-    /// the value is read), a value that isn't a string, or one longer than
-    /// [`MAX_FIELD_CHARS`]: a long field is skipped, never truncated.
+    /// the value is read), a value that isn't a string, or a field longer
+    /// than [`MAX_FIELD_CHARS`]. A field whose app names its character count
+    /// is measured before its value is asked for, so a document is never
+    /// materialized just to be dropped; a long value is skipped, never
+    /// truncated.
     pub(crate) fn field_text(&self) -> Option<String> {
         if is_secure_text_field(&self.field) {
+            return None;
+        }
+        if copy_number(&self.field, c"AXNumberOfCharacters")
+            .is_some_and(|characters| characters > MAX_FIELD_CHARS as i64)
+        {
             return None;
         }
         copy_string_capped(&self.field, c"AXValue", MAX_FIELD_CHARS)

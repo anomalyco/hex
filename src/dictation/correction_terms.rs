@@ -17,17 +17,22 @@ const MAX_WORDS: usize = 400;
 /// Most consecutive name-like words one phrase term keeps.
 const MAX_PHRASE_WORDS: usize = 3;
 /// The share of the inserted words an edit may replace or delete before it
-/// reads as a rewrite rather than a correction.
+/// reads as a rewrite rather than a correction, once more than
+/// [`MIN_CHANGED`] of them changed.
 const MAX_CHANGED_PERCENT: usize = 60;
+/// Most inserted words an edit may replace or delete however short the
+/// paste: fixing a two- or three-word dictation usually rewrites all of it.
+const MIN_CHANGED: usize = 3;
 
 /// The vocabulary terms an edit of just-pasted text teaches.
 ///
 /// `baseline` is the whole field right after the paste, `inserted` the text
-/// Hex pasted into it (found at its last occurrence), `edited` the field when
-/// the watch ended, and `known` the current vocabulary. Empty when the field
-/// did not change, `inserted` is blank or missing from `baseline`, either
-/// field has more than [`MAX_WORDS`] words, or the edit changed more than
-/// [`MAX_CHANGED_PERCENT`] percent of the inserted words.
+/// Hex actually inserted into it (found at its last whole-word occurrence),
+/// `edited` the field when the watch ended, and `known` the current
+/// vocabulary. Empty when the field did not change, `inserted` is blank or
+/// missing from `baseline`, either field has more than [`MAX_WORDS`] words,
+/// or the edit changed more than [`MAX_CHANGED_PERCENT`] percent of the
+/// inserted words and more than [`MIN_CHANGED`] of them.
 ///
 /// Both fields are split on whitespace and compared by each token without its
 /// leading and trailing punctuation, so "Raunak," compares as Raunak while
@@ -35,9 +40,11 @@ const MAX_CHANGED_PERCENT: usize = 60;
 /// longest-common-subsequence walk, and only replacement hunks are read: a
 /// hunk must replace words (never a pure insertion or deletion), and all of
 /// its replaced words must begin inside the inserted text's span in
-/// `baseline`. Edits elsewhere in the field teach nothing. The rewrite rule
-/// counts the inserted words a hunk inside the span replaced or deleted;
-/// words the edit only inserted around them do not count.
+/// `baseline`. Edits elsewhere in the field teach nothing. The inserted text
+/// must sit on word boundaries, so a later "book" never stands in for a
+/// pasted "ok". The rewrite rule counts the inserted words a hunk inside the
+/// span replaced or deleted; words the edit only inserted around them do not
+/// count.
 ///
 /// A hunk is read when its added words include a name-like word, in the
 /// `edited` field's context:
@@ -47,9 +54,12 @@ const MAX_CHANGED_PERCENT: usize = 60;
 /// - letters mixed with digits, like GPT4 or B2B;
 /// - capitalized and not at the start of a sentence, like Raunak.
 ///
-/// A word needs at least two letters, so I and A are never learned. A sentence
-/// starts at the field's first word and after a word whose last character is
-/// a period, exclamation mark, or question mark.
+/// A word needs at least two letters, so I and A are never learned, and a
+/// word whose part before an apostrophe is shorter than two letters (I'm,
+/// I'll, I've, I'd) never is either. A sentence starts at the field's first
+/// word, after a line break, and after a word ending in a colon, or in a
+/// period, exclamation mark, or question mark once closing quotes and
+/// brackets are ignored.
 ///
 /// The exact capitalization rule is: learning is a casing decision, not a
 /// dictionary. A replacement that only capitalizes the first word of a
@@ -78,7 +88,7 @@ pub(crate) fn learned_terms(
     if inserted.is_empty() {
         return Vec::new();
     }
-    let Some(start) = baseline.rfind(inserted) else {
+    let Some(start) = last_whole_word(baseline, inserted) else {
         return Vec::new();
     };
     let baseline_tokens = tokenize(baseline);
@@ -95,7 +105,8 @@ pub(crate) fn learned_terms(
         .filter(|hunk| contained(&hunk.removed, &inserted_span))
         .map(|hunk| hunk.removed.len())
         .sum();
-    if changed * 100 > inserted_span.len() * MAX_CHANGED_PERCENT {
+    let allowed = (inserted_span.len() * MAX_CHANGED_PERCENT / 100).max(MIN_CHANGED);
+    if changed > allowed {
         return Vec::new();
     }
     let mut terms: Vec<String> = Vec::new();
@@ -130,8 +141,10 @@ struct Token<'a> {
     /// Byte offsets of the whole token in its field.
     start: usize,
     end: usize,
-    /// Whether the token opens a sentence: the field's first token, or one
-    /// after a token ending in a period, exclamation mark, or question mark.
+    /// Whether the token opens a sentence: the field's first token, one
+    /// after a line break, or one after a token ending in a colon, period,
+    /// exclamation mark, or question mark. A capitalized word there is
+    /// ordinary, so it is not name-like.
     sentence_start: bool,
 }
 
@@ -161,10 +174,8 @@ fn tokenize(text: &str) -> Vec<Token<'_>> {
 
 fn push_token<'a>(tokens: &mut Vec<Token<'a>>, text: &'a str, start: usize, end: usize) {
     let sentence_start = tokens.last().is_none_or(|previous| {
-        text[previous.start..previous.end]
-            .chars()
-            .next_back()
-            .is_some_and(|last| matches!(last, '.' | '!' | '?'))
+        text[previous.end..start].contains('\n')
+            || ends_sentence(&text[previous.start..previous.end])
     });
     tokens.push(Token {
         word: strip_punctuation(&text[start..end]),
@@ -172,6 +183,39 @@ fn push_token<'a>(tokens: &mut Vec<Token<'a>>, text: &'a str, start: usize, end:
         end,
         sentence_start,
     });
+}
+
+/// Whether a token's end closes its sentence: a colon always opens a new
+/// one, and a period, exclamation mark, or question mark does once trailing
+/// closing quotes and brackets are ignored, so "go." ends a sentence.
+fn ends_sentence(token: &str) -> bool {
+    token
+        .trim_end_matches(['"', '\'', '”', '’', ')', ']'])
+        .ends_with([':', '.', '!', '?'])
+}
+
+/// The last byte offset of `needle` in `haystack` that stands on word
+/// boundaries: the characters around it are not alphanumeric, or it touches
+/// the field's edge. A later occurrence inside a longer word ("ok" in "book")
+/// is skipped for the pasted one before it.
+fn last_whole_word(haystack: &str, needle: &str) -> Option<usize> {
+    let mut end = haystack.len();
+    loop {
+        let index = haystack[..end].rfind(needle)?;
+        let before = haystack[..index].chars().next_back();
+        let after = haystack[index + needle.len()..].chars().next();
+        if !before.is_some_and(|character| character.is_alphanumeric())
+            && !after.is_some_and(|character| character.is_alphanumeric())
+        {
+            return Some(index);
+        }
+        // Search strictly before this occurrence. `index` is a character
+        // boundary because it begins a match.
+        if index == 0 {
+            return None;
+        }
+        end = index;
+    }
 }
 
 /// A token between its first and last alphanumeric character, so internal
@@ -287,6 +331,16 @@ fn name_like(token: &Token<'_>) -> bool {
         .filter(|character| character.is_alphabetic())
         .collect();
     if letters.len() < 2 {
+        return false;
+    }
+    // I'm, I'll, I've, and I'd are never names, however they are capitalized.
+    if word.split(['\'', '’']).next().is_some_and(|before| {
+        before
+            .chars()
+            .filter(|character| character.is_alphabetic())
+            .count()
+            < 2
+    }) {
         return false;
     }
     let lowercase = letters.iter().any(|character| character.is_lowercase());
@@ -487,6 +541,79 @@ mod tests {
             ),
             ["Raunak"]
         );
+    }
+
+    #[test]
+    fn learns_a_short_correction_past_its_sixty_percent() {
+        // Two of two inserted words corrected, mid-sentence: the rewrite
+        // rule alone would refuse the fix this lab exists for.
+        assert_eq!(
+            learned("got rowan ak", "rowan ak", "got Raunak"),
+            ["Raunak"]
+        );
+        // Three inserted words with two corrected still learns.
+        assert_eq!(
+            learned("hi rowan ak", "hi rowan ak", "hi Raunak"),
+            ["Raunak"]
+        );
+    }
+
+    #[test]
+    fn ignores_a_long_rewrite() {
+        // Seven of ten inserted words replaced is a rewrite, not a fix.
+        assert_eq!(
+            learned(
+                "one two three four five six seven eight nine ten",
+                "one two three four five six seven eight nine ten",
+                "Alpha Bravo Charlie Delta Echo Foxtrot Golf eight nine ten",
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn an_apostrophe_word_is_never_a_name() {
+        assert_eq!(
+            learned("so im going", "im", "so I'm going"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_line_break_starts_a_sentence() {
+        assert_eq!(
+            learned(
+                "Hi Bob,\nthanks for the notes",
+                "thanks",
+                "Hi Bob,\nThanks for the notes",
+            ),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_colon_starts_a_sentence() {
+        assert_eq!(
+            learned("note: the plan", "the", "note: The plan"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn a_closing_quote_after_a_period_still_starts_a_sentence() {
+        assert_eq!(
+            learned("\"go.\" then", "then", "\"go.\" Then"),
+            Vec::<String>::new()
+        );
+    }
+
+    #[test]
+    fn the_pasted_text_matches_only_on_word_boundaries() {
+        // The later "ok" begins "okay", which was in the field before the
+        // paste: a fix there is not a fix of the pasted text.
+        assert_eq!(learned("ok okay", "ok", "ok Okay"), Vec::<String>::new());
+        // Of two whole-word occurrences, the last is still the pasted one.
+        assert_eq!(learned("ok ok", "ok", "ok OK"), ["OK"]);
     }
 
     #[test]

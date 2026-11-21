@@ -1078,7 +1078,7 @@ fn queue_error(error: TrySendError<impl Sized>) -> &'static str {
 
 fn finish_output(
     job: OutputJob,
-    paste: &mut impl FnMut(&str, PasteMode) -> Result<()>,
+    paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
     last_transcript: &mut Option<String>,
     history: Option<&History>,
 ) -> WorkerEvent {
@@ -1152,15 +1152,18 @@ fn finish_output(
                             // clipboard while Hex saved it) keeps the text
                             // for Paste last dictation, as above, so the
                             // dictation isn't lost.
-                            if let Err(error) = paste(&completed.text, mode) {
-                                recover_output(history, last_transcript, completed.text);
-                                return Err(error.to_string());
-                            }
+                            let pasted = match paste(&completed.text, mode) {
+                                Ok(pasted) => pasted,
+                                Err(error) => {
+                                    recover_output(history, last_transcript, completed.text);
+                                    return Err(error.to_string());
+                                }
+                            };
                             if let Some(gate) = send_gate {
                                 sent = send_unless_escaped(gate, Instant::now(), paste);
                             }
                             #[cfg(target_os = "macos")]
-                            correction_watch::watch_paste(&completed.text, target, mode, sent);
+                            correction_watch::watch_paste(&pasted, target, mode, sent);
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print
@@ -1234,14 +1237,14 @@ fn finish_output(
 fn send_unless_escaped(
     gate: crate::dictation::yolo_mode::SendGate,
     pasted_at: Instant,
-    paste: &mut impl FnMut(&str, PasteMode) -> Result<()>,
+    paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
 ) -> bool {
     if !gate.wait(pasted_at) {
         tracing::info!("YOLO mode pasted without Return: Escape after the release");
         return false;
     }
     match paste("", PasteMode::Return) {
-        Ok(()) => {
+        Ok(_) => {
             tracing::info!(
                 after_submit_ms = gate.submitted_at().elapsed().as_millis(),
                 "YOLO mode pressed Return"
@@ -1258,8 +1261,10 @@ fn send_unless_escaped(
 mod output_history;
 use output_history::{record_history, recover_output};
 
-fn paste_meeting_delta(paste: &mut impl FnMut(&str, PasteMode) -> Result<()>) -> Result<String> {
-    meeting::consume_active_or_latest_delta(|text| paste(text, PasteMode::Standalone))
+fn paste_meeting_delta(
+    paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
+) -> Result<String> {
+    meeting::consume_active_or_latest_delta(|text| paste(text, PasteMode::Standalone).map(drop))
 }
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
@@ -1678,7 +1683,7 @@ mod tests {
                     if !paste_succeeds {
                         return Err(eyre!("failed insertion"));
                     }
-                    Ok(())
+                    Ok(text.to_owned())
                 },
                 &mut Some("older dictation".into()),
                 None,
@@ -1794,7 +1799,7 @@ mod tests {
                 },
                 &mut |pasted_text, mode| {
                     pasted = Some((pasted_text.to_string(), mode));
-                    Ok(())
+                    Ok(pasted_text.to_owned())
                 },
                 &mut last_transcript,
                 Some(&history),
@@ -1836,7 +1841,7 @@ mod tests {
             presses
                 .borrow_mut()
                 .push((text.to_owned(), matches!(mode, PasteMode::Return)));
-            Ok(())
+            Ok(text.to_owned())
         };
 
         let gate = SendGate::on(&ESCAPES, submitted);

@@ -3435,10 +3435,14 @@ enum HandOff {
 fn hand_off(how: HandOff, bundle: &Path) -> anyhow::Result<()> {
     objc2::rc::autoreleasepool(|_| match how {
         // ⌘V from Hex's keyboard layout snapshot, marked as Hex's: the
-        // crate's own reads TIS off the main thread.
-        HandOff::Paste => scrawl_capture::handoff::paste_bundle_with(bundle, &|| {
-            crate::keyboard::post_command('v').map_err(|error| anyhow::anyhow!("{error:#}"))
-        }),
+        // crate's own reads TIS off the main thread. A capture replaces what
+        // a dictation watch has in front of it, as another paste would.
+        HandOff::Paste => {
+            crate::paste::note_paste();
+            scrawl_capture::handoff::paste_bundle_with(bundle, &|| {
+                crate::keyboard::post_command('v').map_err(|error| anyhow::anyhow!("{error:#}"))
+            })
+        }
         HandOff::Inspect => inspect(bundle),
     })
 }

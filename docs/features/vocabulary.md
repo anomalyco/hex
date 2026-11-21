@@ -145,27 +145,37 @@ Words on screen (Labs › Words on screen, macOS)  // vocabulary.screen
 Learn from corrections (Labs › Learn from corrections, macOS)  // vocabulary.learn
 ├── Off by default; after a dictation is pasted, Hex watches only the field it
 │   pasted into, reading it about every 100 ms for up to 5 minutes
+├── The first read retries for up to a second until the app shows the paste;
+│   it compares what Hex actually inserted, never the transcript
 ├── It stops on a focus change, an empty or vanished field, a newer paste, or
-│   the timeout; the lab turned off stops it too and learns nothing
+│   the timeout; the lab turned off stops it too and learns nothing, and a
+│   read a newer paste overtook is discarded
 ├── Only a real Paste starts a watch: a copy, a Service or Print output, a
 │   YOLO send, and Hex's own window start none
 ├── It compares the final text with what it pasted and adds up to 5 name-like
 │   corrected words to Vocabulary: capitalized mid-sentence, all caps, mixed
-│   case, letters with digits, and short phrases of those
+│   case, letters with digits, and short phrases of those. A word after a
+│   line break, colon, or sentence end is never name-like; neither is I'm
 ├── Password fields, fields over 20,000 characters, text over 400 words,
-│   rewrites (over 60% of words changed), plain lowercase words, and terms
-│   already in Vocabulary are skipped
+│   rewrites (more than 3 inserted words and over 60% changed), plain
+│   lowercase words, and terms already in Vocabulary are skipped
 ├── A learned term is saved like `hex vocabulary add` (vocabulary.add on the
 │   saved list, then one settings update that applies it, and an open window
 │   adopts it; vocabulary.cli)
 └── Nothing leaves the Mac; the one logged event holds the term count only
     // checks: learn_from_corrections_is_its_own_switch_and_macos_only in
     // labs.rs; a_tick_stops_in_the_order_the_watch_reads,
+    // a_reading_a_newer_paste_overtook_is_discarded,
     // only_the_lab_turning_off_discards_a_correction,
     // only_a_paste_the_person_can_still_fix_is_watched,
     // learned_terms_join_the_list_the_way_hex_vocabulary_add_does, and
     // a_full_list_keeps_its_terms_and_takes_no_more in correction_watch.rs;
-    // not observed on a real Mac
+    // learns_a_short_correction_past_its_sixty_percent,
+    // ignores_a_long_rewrite, the_pasted_text_matches_only_on_word_boundaries,
+    // an_apostrophe_word_is_never_a_name, a_line_break_starts_a_sentence,
+    // a_colon_starts_a_sentence, and
+    // a_closing_quote_after_a_period_still_starts_a_sentence in
+    // correction_terms.rs; not observed on a real Mac
 
 Recognition hints, folded in                // vocabulary.hints
 ├── Loading settings.json -> `recognition_hints` of the selected model and the

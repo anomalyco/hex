@@ -8,31 +8,26 @@
 //! term: its one event says how many terms were learned. Nothing leaves the
 //! Mac.
 
-#[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicU64, Ordering};
-
 use crate::dictation::vocabulary::{self, VocabularyEntry};
 
 /// How often the watched field is read.
 #[cfg(target_os = "macos")]
 const POLL: std::time::Duration = std::time::Duration::from_millis(100);
+/// How long the app may take to show a paste Hex already posted: ⌘V is
+/// handled after Hex's paste returns, so the first read is retried this long.
+#[cfg(target_os = "macos")]
+const LANDING: std::time::Duration = std::time::Duration::from_secs(1);
 /// How long one watch follows its field. A correction usually lands within
 /// seconds; five minutes keeps a forgotten field from being watched longer.
 #[cfg(target_os = "macos")]
 const WATCH: std::time::Duration = std::time::Duration::from_secs(5 * 60);
-
-/// The newest paste's watch. Every tick compares it with its own: a paste
-/// that starts another watch leaves the older one this value behind, so the
-/// older watch stops without learning anything.
-#[cfg(target_os = "macos")]
-static GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Why a tick ended the watch.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum Stop {
     /// Labs › Learn from corrections turned off: learn nothing.
     Off,
-    /// A newer paste started its own watch.
+    /// A newer paste started, so only text read before it is compared.
     Superseded,
     /// The five minutes passed; the last text read is compared.
     Timeout,
@@ -63,6 +58,20 @@ fn ending(current: bool, gate: bool, expired: bool) -> Option<Stop> {
     expired.then_some(Stop::Timeout)
 }
 
+/// What one read of the watched field means. A paste generation that moved
+/// during the read discards it: the field may already hold that paste's text,
+/// so a superseded watch learns only from readings taken before the newer
+/// paste. `None` or a blank field ends the watch.
+fn reading(current: bool, text: Option<String>) -> Result<String, Stop> {
+    if !current {
+        return Err(Stop::Superseded);
+    }
+    match text {
+        Some(text) if !text.trim().is_empty() => Ok(text),
+        _ => Err(Stop::Empty),
+    }
+}
+
 /// Whether a finished output leaves a field to watch: it pasted into one
 /// (`pasted`), never copied instead, and never sent it away.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -88,12 +97,13 @@ fn with_terms(
     (list, added)
 }
 
-/// Starts a watch when a finished output really pasted `text` into a field:
-/// not a copy, not a YOLO send, and only while Labs › Learn from corrections
-/// is on.
+/// Starts a watch when a finished output really pasted `inserted` into a
+/// field: not a copy, not a YOLO send, and only while Labs › Learn from
+/// corrections is on. Runs on the ordered output worker, so the field is the
+/// one the paste just reached; the watch thread only reads it.
 #[cfg(target_os = "macos")]
 pub(crate) fn watch_paste(
-    text: &str,
+    inserted: &str,
     target: crate::parakeet::TranscriptionTarget,
     mode: crate::paste::PasteMode,
     sent: bool,
@@ -103,28 +113,38 @@ pub(crate) fn watch_paste(
         crate::parakeet::TranscriptionTarget::Paste
             | crate::parakeet::TranscriptionTarget::RawPaste
     );
-    if watches(
+    if !watches(
         pasted,
         matches!(mode, crate::paste::PasteMode::CopyOnly),
         sent,
-    ) && crate::labs::learn_from_corrections()
+    ) || !crate::labs::learn_from_corrections()
     {
-        watch(text.to_owned());
+        return;
     }
+    // Before the field is captured: a newer paste landing between the two
+    // must look newer to this watch, never become the paste it believes it
+    // belongs to.
+    let generation = crate::paste::paste_generation();
+    let Some(focus) = crate::dictation::context::frontmost_pid()
+        .and_then(crate::accessibility::PasteFocus::capture)
+    else {
+        return;
+    };
+    watch(focus, inserted.to_owned(), generation);
 }
 
 /// Starts the one watch that follows the field a dictation pasted `inserted`
-/// into. A newer paste supersedes an older watch.
+/// into. Its focus is captured before this thread exists, and a later paste
+/// supersedes it through the paste generation.
 #[cfg(target_os = "macos")]
-pub(crate) fn watch(inserted: String) {
+fn watch(focus: crate::accessibility::PasteFocus, inserted: String, generation: u64) {
     let inserted = inserted.trim().to_owned();
     if inserted.is_empty() {
         return;
     }
-    let generation = GENERATION.fetch_add(1, Ordering::AcqRel).wrapping_add(1);
     let spawned = std::thread::Builder::new()
         .name("correction-watch".into())
-        .spawn(move || follow(generation, inserted));
+        .spawn(move || follow(focus, inserted, generation));
     if let Err(error) = spawned {
         tracing::warn!(%error, "could not start the correction watch");
     }
@@ -133,21 +153,11 @@ pub(crate) fn watch(inserted: String) {
 /// Reads the field back every [`POLL`] until it ends the watch, then
 /// compares the last text read with the baseline it started from.
 #[cfg(target_os = "macos")]
-fn follow(generation: u64, inserted: String) {
+fn follow(focus: crate::accessibility::PasteFocus, inserted: String, generation: u64) {
+    let Some(baseline) = landed(&focus, &inserted, generation) else {
+        return;
+    };
     let started = std::time::Instant::now();
-    let Some(focus) = crate::dictation::context::frontmost_pid()
-        .and_then(crate::accessibility::PasteFocus::capture)
-    else {
-        return;
-    };
-    let Some(baseline) = focus.field_text() else {
-        return;
-    };
-    if baseline.trim().is_empty() || !baseline.contains(&inserted) {
-        // The app didn't keep what was pasted as typed, so there is no
-        // inserted text to compare an edit against.
-        return;
-    }
     let mut latest = baseline.clone();
     loop {
         std::thread::sleep(POLL);
@@ -162,6 +172,43 @@ fn follow(generation: u64, inserted: String) {
     }
 }
 
+/// The field's text once the app has taken the paste: the app handles ⌘V
+/// after Hex's paste returns, so the first read is retried every [`POLL`]
+/// for up to [`LANDING`] until the field holds what was inserted. `None`
+/// when the lab turns off, a newer paste starts, the focus moves, the read
+/// outlives its generation, or the paste never lands: a paste no watch can
+/// see teaches nothing.
+#[cfg(target_os = "macos")]
+fn landed(
+    focus: &crate::accessibility::PasteFocus,
+    inserted: &str,
+    generation: u64,
+) -> Option<String> {
+    let deadline = std::time::Instant::now() + LANDING;
+    loop {
+        if !crate::labs::learn_from_corrections() || crate::paste::paste_generation() != generation
+        {
+            return None;
+        }
+        if !focus.unchanged() {
+            return None;
+        }
+        let text = focus.field_text();
+        if crate::paste::paste_generation() != generation {
+            return None;
+        }
+        if let Some(text) = text
+            && text.contains(inserted)
+        {
+            return Some(text);
+        }
+        if std::time::Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
 /// One tick's reading of the watched field: the text to remember, or the
 /// reason the watch ended. The cheap checks run first, so a tick that stops
 /// for them never reads the field.
@@ -172,7 +219,7 @@ fn tick(
     started: std::time::Instant,
 ) -> Result<String, Stop> {
     if let Some(stop) = ending(
-        GENERATION.load(Ordering::Acquire) == generation,
+        crate::paste::paste_generation() == generation,
         crate::labs::learn_from_corrections(),
         started.elapsed() >= WATCH,
     ) {
@@ -181,10 +228,8 @@ fn tick(
     if !focus.unchanged() {
         return Err(Stop::Focus);
     }
-    match focus.field_text() {
-        Some(text) if !text.trim().is_empty() => Ok(text),
-        _ => Err(Stop::Empty),
-    }
+    let text = focus.field_text();
+    reading(crate::paste::paste_generation() == generation, text)
 }
 
 /// Learns from the field's final text and saves the terms. Returns how many
@@ -255,6 +300,22 @@ mod tests {
         assert_eq!(ending(false, true, true), Some(Stop::Superseded));
         assert_eq!(ending(true, true, true), Some(Stop::Timeout));
         assert_eq!(ending(true, true, false), None);
+    }
+
+    #[test]
+    fn a_reading_a_newer_paste_overtook_is_discarded() {
+        // The generation is checked again after the field read: a paste that
+        // landed during the read means the text may be its own, not ours.
+        assert_eq!(
+            reading(false, Some("hi Raunak".to_owned())),
+            Err(Stop::Superseded)
+        );
+        assert_eq!(
+            reading(true, Some("hi Raunak".to_owned())),
+            Ok("hi Raunak".to_owned())
+        );
+        assert_eq!(reading(true, None), Err(Stop::Empty));
+        assert_eq!(reading(true, Some(" \n\t".to_owned())), Err(Stop::Empty));
     }
 
     #[test]
