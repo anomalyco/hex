@@ -6,6 +6,11 @@
     <permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" tools:node="remove" />
     <uses-permission android:name="${applicationId}.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" tools:node="remove" />
     <uses-feature android:name="android.hardware.microphone" android:required="false" />
+    <!-- The keyboard reads Android's personal dictionary (UserDictionary.Words), which only the enabled
+         input method may read; declared so package visibility never hides the provider. -->
+    <queries>
+        <provider android:authorities="user_dictionary" />
+    </queries>
     <application android:label="@string/app_name" android:icon="@mipmap/ic_launcher"
         android:theme="@style/HexApp" android:allowBackup="false" android:usesCleartextTraffic="false" android:supportsRtl="true">
         <activity android:name=".MainActivity" android:exported="true"
