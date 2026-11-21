@@ -745,7 +745,14 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     deactivates with `notifyOthersOnDeactivation`. **Always use iPhone
     microphone** (on by default) records from the built-in microphone, so a car
     or headphones never drop into call audio; turning it off also allows a
-    Bluetooth HFP microphone (still mixing).
+    Bluetooth HFP microphone (still mixing). In-keyboard dictation records
+    through WebKit, whose capture session (`playAndRecord`, `videoChat`, no
+    `mixWithOthers`) no app can change: other apps' video and music pause while
+    it records and WebKit ends it without telling them, so once it has ended the
+    keyboard activates and deactivates its own session with
+    `notifyOthersOnDeactivation` (`InterruptedAudio`), for players that resume
+    on `.shouldResume`. Unverified on an iPhone: the simulator has no audio
+    interruptions.
 - **Action Button, Control Center, Back Tap & Live Activity:**
   - `DictateWithHexIntent` (`AudioRecordingIntent` + `LiveActivityIntent`) and
     `HexDictationControl` (`ControlWidget`) start recording on first press with

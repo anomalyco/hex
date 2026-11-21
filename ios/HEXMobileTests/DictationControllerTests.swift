@@ -1936,4 +1936,18 @@ final class AudioSessionSetupTests: XCTestCase {
         XCTAssertEqual(session.calls, [.active(false, .notifyOthersOnDeactivation)])
         XCTAssertFalse(audio.isKeepaliveRunning)
     }
+
+    func testTheKeyboardAsksAudioItsCaptureStoppedToResume() throws {
+        XCTAssertTrue(InterruptedAudio.shouldAskToResume(playingAtStart: true, playingNow: false))
+        XCTAssertFalse(InterruptedAudio.shouldAskToResume(playingAtStart: true, playingNow: true), "audio that mixed kept playing")
+        XCTAssertFalse(InterruptedAudio.shouldAskToResume(playingAtStart: false, playingNow: false), "nothing was playing")
+
+        let session = FakeAudioSession()
+        try InterruptedAudio.askToResume(session)
+        XCTAssertEqual(session.calls, [
+            .category(.playback, .default, []),
+            .active(true, []),
+            .active(false, .notifyOthersOnDeactivation),
+        ])
+    }
 }
