@@ -1097,6 +1097,35 @@ final class AutocorrectEngineTests: XCTestCase {
         tap(.space)
         XCTAssertEqual(target.text, "dont ")
     }
+
+    /// A TestFlight tester (build 56) kept Autocorrect on only for text replacements. Apple's
+    /// keyboard with Auto-Correction off (iOS 27.2) still shows "omw" as "On my way!" in the
+    /// strip and puts it in on space or "."; "teh" stays.
+    func testTextReplacementsApplyWithAutocorrectOff() {
+        engine.autocorrect.loadLexiconEntries([("omw", "On my way!"), ("addr", "123 Market St")])
+        engine.autocorrect.isEnabled = false
+        typeWord("omw")
+        XCTAssertEqual(engine.suggestions.dropFirst().first?.replacement, "On my way!")
+        XCTAssertTrue(engine.suggestions.dropFirst().first?.willAutoReplace == true)
+        tap(.space)
+        XCTAssertEqual(target.text, "On my way! ")
+        tap(.delete)
+        XCTAssertEqual(target.text, "omw", "one backspace puts back the shortcut")
+
+        while target.hasText { target.deleteBackward() }
+        engine.configureForField()
+        // The backspace kept "omw" for the session, so another shortcut.
+        typeWord("teh addr")
+        tap(.layerSwitch(.numbers))
+        tap(.character("."))
+        XCTAssertEqual(target.text, "teh 123 Market St.", "a closing mark applies it too; typos stay")
+
+        while target.hasText { target.deleteBackward() }
+        target.autocorrectionType = .no
+        engine.configureForField()
+        typeWord("addr ")
+        XCTAssertEqual(target.text, "addr ", "a field without autocorrection gets none, as with Apple's")
+    }
 }
 
 
