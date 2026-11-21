@@ -51,6 +51,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     /// How long the Full Access hint stays unless a key or the strip is used first.
     static let fullAccessHintDuration: TimeInterval = 8
     private let haptics = UIImpactFeedbackGenerator(style: .light)
+    /// Every key's touch-down tick (letters, space, delete and its repeats, shift, 123,
+    /// return, suggestions): Apple's is a light, crisp tick, nearest to a soft rigid impact.
+    /// The Hex key's hold and its menu keep `haptics`' fuller thud.
+    static let keyTickStyle: UIImpactFeedbackGenerator.FeedbackStyle = .rigid
+    static let keyTickIntensity: CGFloat = 0.6
+    private let keyTicks = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle)
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
     /// What the strip's Paste chip offers now.
@@ -516,7 +522,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         refreshStrip()
         dismissStyleMenu()
         if allowsHaptics() {
-            haptics.prepare()
+            keyTicks.prepare()
             selectionHaptics.prepare()
         }
     }
@@ -1043,11 +1049,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     // MARK: - Actions
 
     func keyFeedback() {
-        UIDevice.current.playInputClick()
         if allowsHaptics() {
-            haptics.impactOccurred(intensity: 0.65)
-            haptics.prepare()
+            keyTicks.impactOccurred(intensity: Self.keyTickIntensity)
+            keyTicks.prepare()
         }
+        UIDevice.current.playInputClick()
     }
 
     func selectionFeedback() {

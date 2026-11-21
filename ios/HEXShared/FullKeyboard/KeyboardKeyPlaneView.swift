@@ -255,12 +255,17 @@ final class KeyboardKeyPlaneView: UIView {
     func began(id: Int, sample: TypingLogTouchSample) {
         // A swipe still under way types its word before this key's letter.
         swipe?.touchWillBegin()
+        // The key's tick and click go first, on touch-down as Apple's do: the press's own work
+        // (a rollover's commit, autocorrect, suggestions) used to run before them and could
+        // delay them by tens of milliseconds while typing fast.
+        if let kind = engine.keyKind(at: sample.point) {
+            onKeyDown?(kind)
+        }
         if let log = typingLog {
             log.touch(.began, id: id, sample: sample, key: engine.key(at: sample.point), under: engine.layout.hitTest(sample.point))
         }
         engine.touchBegan(id: id, at: sample.point)
         if let kind = engine.touches[id]?.key.kind {
-            onKeyDown?(kind)
             if kind == .delete {
                 startDeleteRepeat()
                 deleteSwipe?.finish()

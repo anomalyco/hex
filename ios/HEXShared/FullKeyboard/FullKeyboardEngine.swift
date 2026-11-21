@@ -538,6 +538,13 @@ final class FullKeyboardEngine {
         return (dx * dx + dy * dy).squareRoot()
     }
 
+    /// The kind of key a finger going down at `point` lands on, or nil off the keys: what
+    /// `touchBegan(id:at:)` will press, up to the next-letter odds choosing a neighbouring
+    /// letter. Cheap and free of side effects, so the key haptic can fire before any typing.
+    func keyKind(at point: CGPoint) -> KeyKind? {
+        layout.hitTest(pointOnKeys(point))?.kind
+    }
+
     func touchBegan(id: Int, at point: CGPoint) {
         let downPoint = point
         let point = pointOnKeys(point)

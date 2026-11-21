@@ -1491,6 +1491,30 @@ final class FullKeyboardEngineTests: XCTestCase {
         plane.ended(id: id, sample: sample(centre))
     }
 
+    func testKeyFeedbackFiresOnceOnTouchDownBeforeTheKeyTypes() {
+        engine.autocorrect.isEnabled = false
+        let plane = KeyboardKeyPlaneView(engine: engine)
+        var downs: [(kind: KeyKind, text: String)] = []
+        plane.onKeyDown = { [unowned self] kind in downs.append((kind, self.target.text)) }
+
+        // Rollover: the second letter ticks as it goes down, before either letter is typed.
+        plane.began(id: 1, sample: sample(point(.character("t"))))
+        plane.began(id: 2, sample: sample(point(.character("h"))))
+        XCTAssertEqual(downs.map(\.kind), [.character("t"), .character("h")])
+        XCTAssertEqual(downs.map(\.text), ["", ""], "the tick comes before the rollover types t")
+        plane.ended(id: 1, sample: sample(point(.character("t"))))
+        plane.ended(id: 2, sample: sample(point(.character("h"))))
+        XCTAssertEqual(target.text, "th")
+        XCTAssertEqual(downs.count, 2, "lifting a key never ticks")
+
+        // Every other key ticks once on the way down, before it acts.
+        downs.removeAll()
+        let kinds: [KeyKind] = [.space, .delete, .shift, .returnKey, .layerSwitch(.numbers)]
+        for kind in kinds { tap(kind, on: plane) }
+        XCTAssertEqual(downs.map(\.kind), kinds)
+        XCTAssertEqual(downs.map(\.text), ["th", "th ", "th", "th", "th\n"])
+    }
+
     func testASwipeTypesItsWordAndTheNextOneASpaceLater() throws {
         let (field, plane) = try swipeKeyboard()
         swipe("hello", on: plane)
