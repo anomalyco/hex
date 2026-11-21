@@ -899,7 +899,12 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   Frequently used (eight columns: your emoji, then common ones) and the eight
   categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
   delete below, drawn without keycaps as the system's are; a tap anywhere under the
-  grid goes to the key under it. The row reads the last eight words (the newest counts most), their plurals
+  grid goes to the key under it, each category the full width of its slot. As on the
+  system emoji keyboard (iOS 27.2 simulator), a tap on a category jumps the grid there as
+  the finger lifts, and a finger sliding along the bar scrubs the grid live, each icon's
+  slot running through its own category from start to end, with the chip on the category
+  under the finger and a light tick for each new one (`EmojiCategoryBar`); scrolling the
+  grid moves the chip. The row reads the last eight words (the newest counts most), their plurals
   and endings, letters held down ("lmaooo"), phrases ("new year") and the word still
   being typed, matched against Unicode's CLDR names and keywords for the layout's
   language and English and against Hex's own chat words ("congrats", "bday"), one
@@ -1232,7 +1237,11 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   2 MB least-recently-used cache of the bitmaps, freed with the panel and on a memory
   warning. Two runs: typing 30.6–34.6 MB, the panel open 36.4–40.0 MB, every category
   39.4–43.0 MB, every emoji 40.0–42.8 MB (peak 44.3–47.9), 31.9–35.3 MB once closed, and
-  an in-keyboard dictation after it no higher. `EmojiSuggesterTests` check that a cell
+  an in-keyboard dictation after it no higher. Measured again with the bar's scrubbing
+  (one run, same setup): tapping every category peaked at 44.5 MB and scrolling past
+  every emoji at 44.4; one slide across five categories peaked at 46.0, three slides
+  back and forth across the bar at 47.5 and ten at 48.3, each back to 42–43 MB resident
+  after. `EmojiSuggesterTests` check that a cell
   lands where a label drew its emoji and that drawing every emoji stays in the cache's
   limit; `--snap-state full-keyboard-emoji-probe` prints the app's footprint, the
   renderer's counts and each frame's work scrolling every emoji at 40 pt a frame
