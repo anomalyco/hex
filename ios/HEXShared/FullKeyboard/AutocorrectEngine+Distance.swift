@@ -1,8 +1,9 @@
 import Foundation
 
-/// Case matching and the keyboard-distance cost of a one-edit typo: what cautious autocorrect,
-/// bilingual choices, and the strip's spelling guesses measure a slip by. Kept beside the
-/// engine so its own file stays under the cap.
+/// Case matching (with the strip's and a fix's capitals, and the word before a token) and the
+/// keyboard-distance cost of a one-edit typo: what cautious autocorrect, bilingual choices,
+/// and the strip's spelling guesses measure a slip by. Kept beside the engine so its own file
+/// stays under the cap.
 @MainActor
 extension AutocorrectEngine {
     // MARK: - Case matching & QWERTY distance
@@ -23,6 +24,47 @@ extension AutocorrectEngine {
             return first.uppercased() + target.dropFirst()
         }
         return target
+    }
+
+    /// `word` without a capital first letter it only has from where it was learned: a fix
+    /// you picked at the start of a sentence ("Helli" to "Hello"), a guess iOS knows
+    /// capitalised, a Contacts name that is also a common word ("Bell", "Will"). When `typed`
+    /// starts in lowercase and the dictionary knows the word in lowercase, it is written in
+    /// lowercase, as Apple's keyboard writes "bell" mid-sentence beside a contact Kate Bell
+    /// (black box, iOS 27.2). Names the dictionary knows only capitalised ("Taylor"), "I" and
+    /// its contractions, words with more capitals ("iPhone") and German, whose nouns take
+    /// capitals, keep theirs.
+    func withoutStrayCapital(_ word: String, typed: String) -> String {
+        guard language != .german, hasDictionary, typed.first?.isUppercase != true, word.count >= 2,
+              let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
+              !word.contains(" ") else { return word }
+        let lower = first.lowercased() + word.dropFirst()
+        if language.usesEnglishFixes, lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}") { return word }
+        return checker.isWordValid(lower) ? lower : word
+    }
+
+    /// The word before `token` in `before`, lowercased, when only spaces separate them
+    /// (nil at the start of a sentence or after punctuation).
+    static func previousWord(_ before: String, token: String) -> String? {
+        var rest = before.hasSuffix(token) ? before.dropLast(token.count) : Substring(before)
+        guard rest.last == " " else { return nil }
+        while rest.last == " " { rest = rest.dropLast() }
+        var word = ""
+        while let c = rest.last, c.isLetter || c == "'" {
+            word.insert(c, at: word.startIndex)
+            rest = rest.dropLast()
+        }
+        return word.isEmpty ? nil : word.lowercased()
+    }
+
+    /// The strip's words for `token` with Auto-capitalization off: no capital you didn't type,
+    /// as space puts none in ("Mandy" and "I'd" come "mandy" and "i'd"), except your own
+    /// spellings; a word that is then what you typed, or twice there, goes.
+    func withoutAddedCapitals(_ pool: [String], typed token: String) -> [String] {
+        guard !addsCapitals, !token.contains(where: \.isUppercase) else { return pool }
+        return pool.map { isOwnSpelling($0) ? $0 : $0.lowercased() }.reduce(into: []) { kept, item in
+            if item != token, !kept.contains(item) { kept.append(item) }
+        }
     }
 
     /// Returns a weighted cost if `source` and `target` are within 1 Damerau-Levenshtein edit; `nil` otherwise.

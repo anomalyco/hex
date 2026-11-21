@@ -324,7 +324,18 @@ never at a launch by itself.
     heard.
   - **Custom vocabulary (Settings › Dictation › Custom vocabulary):** Off by default.
     A local list of up to 100 names and phrases, applied to every engine, in the
-    app and in-keyboard dictation. After
+    app and in-keyboard dictation. The full keyboard uses the same list whether or not the
+    switch is on (Settings › Keyboard › Vocabulary edits it too; TestFlight build 56:
+    "custom dictionary for uncommon programmer slang"): its words, and each word of a
+    phrase, are never autocorrected away, a different case is put right on space ("github"
+    → "GitHub"), the strip completes them before the dictionary's words ("kub" →
+    "kubectl") with no spelling guesses for them, Swipe typing reads them as your own words,
+    and a bilingual partner shares them. Holding the word you typed in the strip's left slot
+    offers **Add to vocabulary** there (`FullKeyboardView+Vocabulary`; a capital only a
+    sentence's start gave the word is left out); without Full Access
+    the keyboard can't write the App Group, so the word is kept for that session only.
+    Before this the keys knew only iOS's text replacements and Contacts names
+    (`requestSupplementaryLexicon`), never Hex's list. After
     transcription, matching words are rewritten to the listed spelling across
     case, spaces, tabs, a single hyphen, and possessive apostrophes, before
     cleanup and again after formatting, so a style cannot undo a spelling. The
@@ -397,8 +408,12 @@ never at a launch by itself.
     capital you didn't type: "i" stays "i", "im" becomes "i'm", "mary" stays "mary" and
     "mondya" becomes "monday", as Apple's keyboard does with Auto-Capitalization off (seen on
     the iOS 27.2 simulator). Words you typed with a capital, and your own spellings (text
-    replacements, Contacts names, words you kept, fixes Hex learned), keep theirs; shift and
-    caps lock work as before, and the strip may still offer a capitalised word to pick.
+    replacements, Contacts names, words you kept, fixes Hex learned, your vocabulary), keep
+    theirs; shift and caps lock work as before. The strip offers no capital you didn't type
+    either (TestFlight build 56: "even with auto-capitalization off, many suggested words are
+    capitalized"): a spelling guess or completion iOS knows capitalised ("Mandy", "Monday")
+    and the contraction "I'd" for "id" come lowercase there; sentence and clause starters
+    keep "I" and "I'm" (#2135), and next words and swipe readings already had no capital.
     Dictation has its own switch (Settings › Dictation › Lowercase).
   - **Spatial autocorrect (Settings › Keyboard › Spatial autocorrect):**
     On by default, shown under Autocorrect while it's on (it needs the full keyboard
@@ -613,7 +628,8 @@ never at a launch by itself.
     the dictation bar, so testers who turned that experiment off keep the bar;
     on an iPad, where the keyboard always shows the dictation bar, the row says so:
     "On iPad, Hex shows the dictation bar"), then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
-    on), Suggest swear words and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
+    on), Suggest swear words, Vocabulary (Hex's custom vocabulary list, how many words it
+    holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
     full keyboard while the dictation bar is chosen, and a field to try the keyboard in.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it

@@ -160,6 +160,74 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "i think i'm here ")
     }
 
+    /// TestFlight (build 56): "Even with auto-capitalization off, many suggested words are
+    /// capitalized." With it off the strip offers no capital you didn't type either, as space
+    /// puts none in: a guess or completion iOS knows capitalised ("Mandy", "Monday") and
+    /// "I'd" for "id" come lowercase; your own spellings (a vocabulary word, a contact) and a
+    /// capital you typed keep theirs.
+    func testAutoCapitalizationOffSuggestsNoCapitals() {
+        let engine = stubbed {
+            $0.valid = ["id", "money"]
+            $0.capitalised = ["Monday", "Mandy"]
+            $0.guessTable = ["mondy": ["Monday", "Mandy"]]
+            $0.completionTable = ["mon": ["Monday", "money"]]
+        }
+        engine.loadLexiconEntries([("Kimberly", "Kimberly")])
+        engine.setVocabulary(["GitHub"])
+        func strip(_ typed: String) -> [String] {
+            engine.suggestions(beforeInput: typed, field: .text, autocorrectionType: .default).dropFirst().map(\.replacement)
+        }
+        XCTAssertEqual(strip("mondy"), ["Monday", "Mandy"], "on: as the dictionary spells them")
+        engine.addsCapitals = false
+        XCTAssertEqual(strip("mondy"), ["monday", "mandy"])
+        XCTAssertEqual(strip("id"), ["i'd"])
+        XCTAssertEqual(Set(strip("mon")), ["money", "monday"])
+        XCTAssertEqual(strip("git"), ["GitHub"], "your vocabulary's spelling")
+        XCTAssertEqual(strip("kim"), ["Kimberly"], "a contact's")
+        XCTAssertEqual(strip("Mondy"), ["Monday", "Mandy"], "a capital you typed")
+        func predictions(_ before: String) -> [String] {
+            engine.suggestions(beforeInput: before, field: .text, autocorrectionType: .default, capitalizesNext: true).map(\.replacement)
+        }
+        XCTAssertEqual(predictions(""), ["I", "the", "I'm"], "sentence starters: only \"I\", which always has one (#2135)")
+        XCTAssertEqual(predictions("well, "), ["I", "but", "and"], "clause starters")
+        engine.addsCapitals = true
+        XCTAssertEqual(predictions(""), ["I", "The", "I'm"])
+    }
+
+    /// TestFlight (build 56): "Custom dictionary for uncommon programmer slang." Hex's
+    /// vocabulary list (Settings › Keyboard › Vocabulary, the one dictation spells) reaches the
+    /// keys: its words are never autocorrected away, are spelled your way, are completed in
+    /// the strip, and a bilingual partner shares them.
+    func testVocabularyWordsAreKeptSpelledYourWayAndCompleted() {
+        let engine = stubbed {
+            $0.valid = ["deduce", "the"]
+            $0.guessTable = ["dedupe": ["deduce"]]
+            $0.completionTable = ["ded": ["deduce"]]
+        }
+        engine.setLanguage(.english, available: ["en_US", "fr_FR"])
+        XCTAssertEqual(fix(engine, "dedupe"), "deduce", "not yet in the vocabulary")
+        engine.setVocabulary(["dedupe", "GitHub", "Claude Code"])
+        XCTAssertNil(fix(engine, "dedupe"))
+        XCTAssertNil(fix(engine, "Dedupe"))
+        XCTAssertEqual(fix(engine, "github"), "GitHub")
+        XCTAssertNil(fix(engine, "GitHub"))
+        XCTAssertNil(fix(engine, "GITHUB"))
+        XCTAssertEqual(fix(engine, "claude"), "Claude", "a word of a phrase")
+        func strip(_ typed: String) -> [String] {
+            engine.suggestions(beforeInput: typed, field: .text, autocorrectionType: .default).map(\.replacement)
+        }
+        XCTAssertEqual(strip("dedupe"), ["dedupe"], "no guess for your word")
+        XCTAssertEqual(strip("ded").dropFirst().first, "dedupe", "completed before the dictionary's words")
+        XCTAssertEqual(strip("Cla").dropFirst().first, "Claude Code")
+        XCTAssertTrue(engine.ownWords.contains("dedupe"), "Swipe typing reads it")
+        let french = StubChecker()
+        french.valid = ["deduire"]
+        engine.setPartner(.french, available: ["en_US", "fr_FR"], checker: french)
+        XCTAssertEqual(engine.partner?.vocabulary, ["dedupe", "GitHub", "Claude Code"])
+        XCTAssertNil(fix(engine, "dedupe"), "kept beside a partner")
+        XCTAssertEqual(fix(engine, "github"), "GitHub")
+    }
+
     func testAmbiguousContractionsSuggestWithoutAutoReplacing() {
         let slots = engine.autocorrect.suggestions(
             beforeInput: "well",

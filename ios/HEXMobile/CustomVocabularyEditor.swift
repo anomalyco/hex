@@ -1,8 +1,11 @@
 import SwiftUI
 
-/// The custom vocabulary list shown under its switch in Settings › Dictation.
+/// The custom vocabulary list shown under its switch in Settings › Dictation, and on
+/// Settings › Keyboard › Vocabulary: one list, which dictation spells (with its switch on) and
+/// the full keyboard never autocorrects away, completes and swipes.
 struct CustomVocabularyEditor: View {
     private let settings = CustomVocabularySettings()
+    var footer = String(localized: "Fixes spelling, not words Hex mishears")
 
     @State private var terms: [String] = []
     @State private var draft = ""
@@ -82,7 +85,7 @@ struct CustomVocabularyEditor: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            Text("Fixes spelling, not words Hex mishears")
+            Text(footer)
             .font(.system(size: 12))
             .foregroundStyle(HexTheme.textMuted)
             .fixedSize(horizontal: false, vertical: true)
@@ -125,5 +128,49 @@ struct CustomVocabularyEditor: View {
         terms.removeAll { $0 == term }
         settings.terms = terms
         notice = nil
+    }
+}
+
+/// Settings › Keyboard › Vocabulary: how many words the list holds, opening its page.
+struct KeyboardVocabularyRow: View {
+    @State private var count = CustomVocabularySettings().terms.count
+    @State private var showsPage = false
+
+    var body: some View {
+        Button {
+            showsPage = true
+        } label: {
+            HStack(spacing: 12) {
+                SettingsRowLabel(
+                    title: String(localized: "Vocabulary"),
+                    detail: count == 0
+                        ? String(localized: "Words autocorrect keeps and suggests")
+                        : String(localized: "\(count) words autocorrect keeps and suggests")
+                )
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(HexTheme.textMuted)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .frame(minHeight: 50)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .navigationDestination(isPresented: $showsPage) {
+            SettingsPageScaffold(title: "Vocabulary") {
+                SettingsCard {
+                    CustomVocabularyEditor(
+                        footer: String(localized: "Hold a word you typed in the keyboard's suggestions to add it. Dictation spells these too while Custom vocabulary is on.")
+                    )
+                    .padding(16)
+                }
+            }
+        }
+        .onAppear { count = CustomVocabularySettings().terms.count }
+        .onChange(of: showsPage) { _, shown in
+            if !shown { count = CustomVocabularySettings().terms.count }
+        }
     }
 }

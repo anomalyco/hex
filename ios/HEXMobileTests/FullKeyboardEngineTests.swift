@@ -1866,6 +1866,18 @@ final class FullKeyboardEngineTests: XCTestCase {
         return (field, plane)
     }
 
+    /// Hex's vocabulary list reaches Swipe typing: a word no dictionary or model has
+    /// ("kubectl") is swiped once it's in the list.
+    func testSwipeTypesYourVocabularyWords() throws {
+        let (before, beforePlane) = try swipeKeyboard()
+        swipe("kubectl", on: beforePlane)
+        XCTAssertNotEqual(before.text, "kubectl", "not a word Swipe typing knows")
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.autocorrect.setVocabulary(["kubectl"])
+        swipe("kubectl", on: plane)
+        XCTAssertEqual(field.text, "kubectl")
+    }
+
     private func sample(_ point: CGPoint) -> TypingLogTouchSample {
         TypingLogTouchSample(point: point, timestamp: 0)
     }

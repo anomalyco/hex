@@ -40,6 +40,8 @@ final class KeyboardStripView: UIView {
         }
     }
     var onSelectSuggestion: ((KeyboardSuggestion) -> Void)?
+    /// A slot was held (half a second): the word you typed offers Add to vocabulary.
+    var onHoldSuggestion: ((KeyboardSuggestion) -> Void)?
     var onUndoDictation: (() -> Void)?
     var onPaste: (() -> Void)?
     var onNextKeyboard: (() -> Void)?
@@ -150,6 +152,7 @@ final class KeyboardStripView: UIView {
         for (index, button) in slotButtons.enumerated() {
             button.tag = index
             button.addTarget(self, action: #selector(handleSlotTap(_:)), for: .touchUpInside)
+            button.addGestureRecognizer(UILongPressGestureRecognizer(target: self, action: #selector(handleSlotHold(_:))))
             addSubview(button)
         }
         applyPalette()
@@ -414,6 +417,12 @@ final class KeyboardStripView: UIView {
     @objc private func handleSlotTap(_ sender: SlotButton) {
         guard let item = Self.slots(for: currentSuggestions).firstIndex(of: sender.tag) else { return }
         onSelectSuggestion?(currentSuggestions[item])
+    }
+
+    @objc private func handleSlotHold(_ recognizer: UILongPressGestureRecognizer) {
+        guard recognizer.state == .began, let slot = recognizer.view?.tag,
+              let item = Self.slots(for: currentSuggestions).firstIndex(of: slot) else { return }
+        onHoldSuggestion?(currentSuggestions[item])
     }
 
     /// One suggestion slot. A word that changes swaps letter by letter, as Apple's bar does
