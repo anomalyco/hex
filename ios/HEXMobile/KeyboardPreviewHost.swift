@@ -169,7 +169,7 @@ struct KeyboardSnapshotStage: View {
 /// The dictation languages simulator scenes show: `--dictation-language nb-NO` picks one (put
 /// first when it isn't in the list, as `hi-IN` for Hinglish), otherwise Automatic, which
 /// resolves to English. `--translate-to en` turns on Translate what I say with that target,
-/// pasting translated unless `--paste-as-spoken`.
+/// pasting translated unless `--paste-as-spoken`; without it the switch shows off, for Japanese.
 enum DictationLanguageFixture {
     static let choices = ["nb-NO", "en-US", "es-ES", "de-DE", "he-IL"]
 
@@ -198,6 +198,13 @@ enum DictationLanguageFixture {
         model.automaticLanguage = "en-US"
         model.translationTarget = translationTarget
         model.pastesTranslation = !ProcessInfo.processInfo.arguments.contains("--paste-as-spoken")
+        model.translationLanguage = translationTarget ?? "ja"
+        model.translationTargetChoices = DictationTranslationSettings.targetChoices(
+            current: model.translationLanguage ?? "ja",
+            dictation: model.languageChoices,
+            preferred: ["zh-Hans", "ja"],
+            supported: ["en", "es", "zh", "ja", "de", "fr", "ko", "pt", "it"]
+        )
     }
 }
 

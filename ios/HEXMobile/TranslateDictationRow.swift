@@ -121,9 +121,9 @@ struct TranslateDictationRow: View {
             try? await session.prepareTranslation()
             await refreshStatus()
         }
-        .onAppear {
-            // The keyboard's menus change it too.
-            pastesTranslation = DictationTranslationSettings().pastesTranslation
+        .onAppear(perform: reload)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.willEnterForegroundNotification)) { _ in
+            reload()
         }
         .task {
             // Every language, including the one you dictate in now: you can switch the
@@ -136,6 +136,14 @@ struct TranslateDictationRow: View {
                 .sorted { name(of: $0) < name(of: $1) }
             await refreshStatus()
         }
+    }
+
+    /// The keyboard's Translate to <language> switch and its targets change these too.
+    private func reload() {
+        let settings = DictationTranslationSettings()
+        enabled = settings.isEnabled
+        target = settings.targetLanguage
+        pastesTranslation = settings.pastesTranslation
     }
 
     private func refreshStatus() async {

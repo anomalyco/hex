@@ -8,7 +8,8 @@ protocol HexDescribedError: LocalizedError {}
 
 extension Locale {
     /// The language Hex's own words are in: the app's when the iPhone's language is one Hex
-    /// is translated into, else English. The keyboard isn't translated yet, so it says English.
+    /// is translated into, else English. The keyboard shares the app's String Catalog, so it
+    /// follows the same language (its own labels are mostly English still).
     static var hexInterface: Locale {
         Locale(identifier: Bundle.main.preferredLocalizations.first ?? "en")
     }

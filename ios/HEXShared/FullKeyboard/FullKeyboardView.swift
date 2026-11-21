@@ -647,6 +647,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     private func refreshFromModel() {
         hexKey.isWarm = model.hasFullAccess && model.isWarmAvailable
+        hexKey.translatingTo = model.translatingTo
         if engine.showsGlobe != model.needsGlobeKey {
             engine.showsGlobe = model.needsGlobeKey
             setNeedsLayout()
@@ -672,8 +673,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.dictationLanguage = model.dictationLanguage
         menu.automaticLanguage = model.automaticLanguage
         menu.languageChoices = model.showsLanguageSwitch ? model.languageChoices : []
-        menu.pasteChoice = model.pasteChoice
-        menu.pastesTranslation = model.pastesTranslation
+        menu.translationTarget = model.showsTranslationSwitch ? model.translationLanguage : nil
+        menu.isTranslating = model.isTranslating
+        menu.translationTargets = model.translationTargetChoices
     }
 
     func refreshStrip() {
@@ -1019,9 +1021,14 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self?.model.onLanguageSelected?(language)
             self?.dismissStyleMenu()
         }
-        menu.onPasteTranslation = { [weak self] translated in
-            self?.typingLog?.ui("paste_translation", [TypingLogField("translated", .bool(translated))])
-            self?.model.onPasteTranslationSelected?(translated)
+        menu.onTranslationToggle = { [weak self] on in
+            self?.typingLog?.ui("translate", [TypingLogField("on", .bool(on))])
+            self?.model.onTranslationToggled?(on)
+            self?.dismissStyleMenu()
+        }
+        menu.onTranslationTarget = { [weak self] target in
+            self?.typingLog?.ui("translate", [TypingLogField("target", .string(target))])
+            self?.model.onTranslationTargetSelected?(target)
             self?.dismissStyleMenu()
         }
         menu.onStyle = { [weak self] style in

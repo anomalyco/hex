@@ -321,6 +321,8 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.debugShowStyleMenu()
             case "languages":
                 view.debugShowStyleMenu(page: .languages)
+            case "translation":
+                view.debugShowStyleMenu(page: .translation)
             case "morph":
                 // Loops idle → recording → idle so the strip morph can be screen-recorded.
                 func cycle(_ start: TimeInterval) {
