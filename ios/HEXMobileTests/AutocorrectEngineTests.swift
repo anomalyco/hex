@@ -686,6 +686,29 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(strip(engine, "Zo"), ["Zo", "Zone", "Zoo"], "a capital at the start of a sentence still means words first")
     }
 
+    /// TestFlight (build 56, the video): "helli" typed mid-sentence went in as "Hello". A fix
+    /// brought the capital of where it came from: picked at the start of a sentence ("Helli"
+    /// to "Hello", learned), a guess iOS knows capitalised, a Contacts name that is also a word
+    /// ("Bell"). Apple's keyboard writes the word as the sentence needs it, and keeps the
+    /// capital of a name the dictionary knows only capitalised ("Taylor").
+    func testAFixBringsNoCapitalOfItsOwnMidSentence() {
+        let engine = stubbed {
+            $0.valid = ["hello", "hell", "bell", "belt"]
+            $0.capitalised = ["Taylor"]
+            $0.guessTable = ["helli": ["Hello", "hell"], "taylr": ["Taylor"]]
+            $0.completionTable = ["bel": ["belt"]]
+        }
+        engine.applyLearning(TypingLearning(typos: ["hrllo": "Hello"], rejected: []))
+        engine.loadLexiconEntries([("Bell", "Bell"), ("Kate", "Kate")])
+        XCTAssertEqual(fix(engine, "myem helli"), "hello")
+        XCTAssertEqual(fix(engine, "Helli"), "Hello", "a capital you typed stays")
+        XCTAssertEqual(fix(engine, "so hrllo"), "hello", "a fix learned at the start of a sentence")
+        XCTAssertEqual(fix(engine, "so taylr"), "Taylor", "a name keeps its capital")
+        XCTAssertEqual(strip(engine, "myem helli"), ["helli", "hello", "hell"])
+        XCTAssertEqual(strip(engine, "so bel"), ["bel", "belt", "bell"], "a contact Bell, offered as the word")
+        XCTAssertEqual(strip(engine, "so Bel"), ["Bel", "Belt", "Bell"])
+    }
+
     func testNamesComeLastUnlessYouTypedACapital() {
         let engine = stubbed {
             $0.valid = ["qu"]

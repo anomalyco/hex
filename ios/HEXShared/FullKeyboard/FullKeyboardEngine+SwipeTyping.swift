@@ -72,6 +72,9 @@ extension FullKeyboardEngine {
 
     /// A reading as it's typed: all capitals with caps lock, a capital first letter with
     /// `capital`, else a name the dictionary only knows capitalised ("monday" -> "Monday").
+    /// One of your own words with a capital that is also a common word (a Contacts name such
+    /// as "Bell" or "Will") is written as the sentence needs it, as Apple's keyboard swipes
+    /// "the bell rang" beside a contact Kate Bell (`AutocorrectEngine.withoutStrayCapital`).
     /// With Auto-capitalization off, no capital you didn't ask for ("i'm", "monday"), but
     /// your own spellings keep theirs.
     func swipeCased(_ word: String, capital: Bool) -> String {
@@ -81,7 +84,8 @@ extension FullKeyboardEngine {
         if !autoCapitalizes {
             return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
         }
-        return swipeReadsAsName(word) ? first.uppercased() + word.dropFirst() : word
+        if swipeReadsAsName(word) { return first.uppercased() + word.dropFirst() }
+        return autocorrect.withoutStrayCapital(word, typed: "")
     }
 
     /// The strip's other readings after a swipe, cased as its word is (`readings` best first,

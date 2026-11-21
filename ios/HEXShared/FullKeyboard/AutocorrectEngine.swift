@@ -638,7 +638,7 @@ final class AutocorrectEngine {
         if corrects, autoFix == nil {
             if let learned = learning.typos[lower], mayOffer(learned, replacing: token) {
                 // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
-                pool.append(Self.matchCase(of: token, onto: learned))
+                pool.append(cased(learned, typed: token))
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
                 pool.append(Self.matchCase(of: token, onto: suggested))
             }
@@ -657,9 +657,9 @@ final class AutocorrectEngine {
         // Spatial autocorrect's other readings of your taps.
         if corrects, let decision = decoderDecision(for: token) {
             for reading in decision.readings where pool.count < end && mayOffer(reading.text, replacing: token) {
-                let cased = Self.matchCase(of: token, onto: reading.text)
-                if !has(cased) {
-                    pool.append(cased)
+                let text = cased(reading.text, typed: token)
+                if !has(text) {
+                    pool.append(text)
                 }
             }
         }
@@ -669,9 +669,9 @@ final class AutocorrectEngine {
             let valid = Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower) || checker.isWordValid(token)
             if !valid {
                 for guess in rankedGuesses(for: token) {
-                    let cased = Self.matchCase(of: token, onto: guess)
-                    if cased.caseInsensitiveCompare(token) != .orderedSame, mayOffer(guess, replacing: token), !has(cased) {
-                        pool.append(cased)
+                    let fixed = cased(guess, typed: token)
+                    if fixed.caseInsensitiveCompare(token) != .orderedSame, mayOffer(guess, replacing: token), !has(fixed) {
+                        pool.append(fixed)
                     }
                     if pool.count >= end { break }
                 }
@@ -712,7 +712,7 @@ final class AutocorrectEngine {
         where term.count > token.count && term.lowercased().hasPrefix(lower) && seen.insert(term.lowercased()).inserted {
             if isName(term) && !typedCapital { names.append(term) } else { yours.append(term) }
         }
-        return (common + yours + names).map { Self.matchCase(of: token, onto: $0) }
+        return (common + yours + names).map { cased($0, typed: token) }
     }
 
     /// Returns `(tokenToDelete, replacement)` only when cautious autocorrect is confident, or
@@ -810,7 +810,7 @@ final class AutocorrectEngine {
         // A typo you fixed the same way at least twice (Learn how I type), unless what you
         // typed is a real word: then it is only suggested.
         if let learned = learning.typos[lower], mayOffer(learned, replacing: token), !checker.isWordValid(token) {
-            return Self.matchCase(of: token, onto: learned)
+            return cased(learned, typed: token)
         }
         // Leave ALL-CAPS acronyms (`API`, `PR`, `NYC`) alone unless matched in `UILexicon` above,
         // except unambiguous all-caps contractions/typos of 3+ letters (`DONT` -> `DON'T`, `TEH` -> `THE`).
@@ -841,7 +841,7 @@ final class AutocorrectEngine {
         // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
         if let decision = decoderDecision(for: token) {
             if let replacement = decision.replacement, mayOffer(replacement, replacing: token) {
-                var cased = Self.matchCase(of: token, onto: replacement)
+                var cased = self.cased(replacement, typed: token)
                 // A missed space after English "i" ("iwant") gives "I want", as "i" alone does.
                 if language.usesEnglishFixes, cased.contains(" ") {
                     cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
@@ -888,7 +888,30 @@ final class AutocorrectEngine {
             }
         }
         guard let bestGuess, bestScore <= 1.35 else { return nil }
-        return withoutAddedCapitals(Self.matchCase(of: token, onto: bestGuess), typed: token)
+        return withoutAddedCapitals(cased(bestGuess, typed: token), typed: token)
+    }
+
+    /// `candidate` cased as `token` was typed (`matchCase`), less a capital it only has
+    /// from where it was learned (`withoutStrayCapital`).
+    private func cased(_ candidate: String, typed token: String) -> String {
+        withoutStrayCapital(Self.matchCase(of: token, onto: candidate), typed: token)
+    }
+
+    /// `word` without a capital first letter it only has from where it was learned: a fix
+    /// you picked at the start of a sentence ("Helli" to "Hello"), a guess iOS knows
+    /// capitalised, a Contacts name that is also a common word ("Bell", "Will"). When `typed`
+    /// starts in lowercase and the dictionary knows the word in lowercase, it is written in
+    /// lowercase, as Apple's keyboard writes "bell" mid-sentence beside a contact Kate Bell
+    /// (black box, iOS 27.2). Names the dictionary knows only capitalised ("Taylor"), "I" and
+    /// its contractions, words with more capitals ("iPhone") and German, whose nouns take
+    /// capitals, keep theirs.
+    func withoutStrayCapital(_ word: String, typed: String) -> String {
+        guard language != .german, hasDictionary, typed.first?.isUppercase != true, word.count >= 2,
+              let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
+              !word.contains(" ") else { return word }
+        let lower = first.lowercased() + word.dropFirst()
+        if language.usesEnglishFixes, lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}") { return word }
+        return checker.isWordValid(lower) ? lower : word
     }
 
     /// `fix` for `token` as autocorrect puts it in: with `addsCapitals` off and nothing

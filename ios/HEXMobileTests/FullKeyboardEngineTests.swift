@@ -1626,6 +1626,49 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertGreaterThan(afterUs - afterThink, 3, "\"I'm\" after \"think\", hardly after \"us\"")
     }
 
+    /// TestFlight (Jason, build 56): "Swipe typing keeps auto capitalising in most cases, even
+    /// when it shouldn't. It doesn't work how Apple's keyboard does, where it capitalises only
+    /// after a full stop." Shift and auto-capitalisation around swipes are right on dev (after
+    /// a comma, a swipe, a pick from the strip, a delete, a tapped word, and a sentence-start
+    /// capital you turned off; a capital after "." and for "I'm"). What still gave a capital
+    /// mid-sentence was your own words: a Contacts name that is also a common word ("Bell",
+    /// "Will") read as the name. Apple's keyboard (black box, iOS 27.2, contact Kate Bell)
+    /// swipes "the bell rang" in lowercase.
+    func testSwipedWordsTakeACapitalOnlyWhereApplesKeyboardGivesOne() throws {
+        let (field, plane) = try swipeKeyboard()
+        field.autocapitalizationType = .sentences
+        plane.engine.autocorrect.loadLexiconEntries([("Bell", "Bell"), ("Will", "Will"), ("Taylor", "Taylor")])
+        plane.engine.refreshAutoCapitalization()
+        XCTAssertTrue(plane.engine.shift.isUppercase, "an empty field starts a sentence")
+        tap(.shift, on: plane)
+        swipe("hello", on: plane)
+        swipe("there", on: plane)
+        XCTAssertEqual(field.text, "hello there", "the capital you turned off stays off")
+        let pick = try XCTUnwrap(plane.engine.suggestions.first)
+        plane.engine.acceptSuggestion(pick)
+        swipe("the", on: plane)
+        swipe("bell", on: plane)
+        tap(.delete, on: plane)
+        swipe("bell", on: plane)
+        swipe("will", on: plane)
+        XCTAssertEqual(field.text, "hello \(pick.replacement) the bell will", "after a pick and a delete")
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character(","), on: plane)
+        tap(.layerSwitch(.letters), on: plane)
+        swipe("ring", on: plane)
+        for letter in "now" { tap(.character(String(letter)), on: plane) }
+        tap(.space, on: plane)
+        swipe("for", on: plane)
+        tap(.layerSwitch(.numbers), on: plane)
+        tap(.character("."), on: plane)
+        tap(.layerSwitch(.letters), on: plane)
+        swipe("will", on: plane)
+        XCTAssertEqual(field.text, "hello \(pick.replacement) the bell will, ring now for. Will", "a capital only after the full stop")
+        XCTAssertEqual(plane.engine.swipeCased("Taylor", capital: false), "Taylor", "a name keeps its capital")
+        XCTAssertEqual(plane.engine.swipeCased("Bell", capital: false), "bell")
+        XCTAssertEqual(plane.engine.swipeCased("I'm", capital: false), "I'm")
+    }
+
     func testDeleteRightAfterASwipeTakesTheWholeWordBack() throws {
         let (field, plane) = try swipeKeyboard()
         swipe("hello", on: plane)
