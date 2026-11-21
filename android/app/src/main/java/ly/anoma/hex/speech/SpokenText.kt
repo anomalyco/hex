@@ -412,6 +412,9 @@ internal object SpokenText {
             "esa ese eso esta este esto está están estoy fue gracias ha hay la las le les lo los me mi mientras muy más nada " +
             "ni no nos o otra otro para pero poco por porque pues que qué se si sin sobre solo son su sus también tan te " +
             "tengo tiene todo todos tu un una uno vale vamos y ya yo").split(' ').toSet(),
+        "fr" to ("à au aux avec ce cela ces cette c'est comme dans de des donc du elle elles en est et était il ils je j'ai la le les leur lui mais me merci moi mon ne nous on ou où oui par pas peut plus pour quand que qui sa sans se ses si son sont sur ta te tes toi ton tout tous très tu un une vous vos votre y ça").split(' ').toSet(),
+        "it" to ("a al alla anche che chi ci come con da dal del della di e è gli grazie ha hanno i il in io la le li lo lui ma mi mio mia ne nel nella no non noi per perché più poi qui se si sì sono su sua suo ti tu tutto tutti un una uno voi").split(' ').toSet(),
+        "nl" to ("aan als bij dan dat de die dit door een en er het hij hem hun ik in is je jij kan maar me met mijn naar niet nog nu of om ook op te toch tot u uit van voor wat we wij wel zal ze zij zijn").split(' ').toSet(),
         "no" to ("alle at av bare da de del dem den denne der det dette du eller en er et etter for fordi fra går ha han " +
             "har hun hva hvis hvor i igjen ikke inn ja jeg kan kanskje med men mer meg min nei når og også om opp på så " +
             "seg skal som til takk uten var vi vil være å").split(' ').toSet(),

@@ -464,9 +464,26 @@ class InsertionTest {
     @Test fun automaticDictationFollowsTheKeyboardLayout() {
         assertEquals(DictationLanguage.Spanish, DictationLanguage.automatic(Spoken.Spanish, listOf("en")))
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(Spoken.Norwegian, listOf("en")))
-        assertEquals(DictationLanguage.German, DictationLanguage.automatic(null, listOf("fr", "de", "en")))
+        assertEquals(DictationLanguage.German, DictationLanguage.automatic(null, listOf("ja", "de", "en")))
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
         assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
+    }
+    @Test fun frenchItalianAndDutchAreDictationLanguages() {
+        assertEquals(DictationLanguage.French, DictationLanguage.automatic(Spoken.French, listOf("en")))
+        assertEquals(DictationLanguage.Italian, DictationLanguage.automatic(Spoken.Italian, listOf("en")))
+        assertEquals(DictationLanguage.Dutch, DictationLanguage.automatic(null, listOf("nl", "en")))
+        assertEquals(DictationLanguage.French, DictationLanguage.automatic(null, listOf("fr")))
+        assertEquals(Spoken.French, DictationLanguage.French.layout)
+        assertEquals(null, DictationLanguage.Dutch.layout)
+        fun polished(text: String, language: DictationLanguage) =
+            SpokenText.format(text, SpeechOptions(Style.Polished, language, false, false, spokenPunctuation = true))
+        assertEquals("Bonjour, comment ça va\u202F?", polished("bonjour virgule comment ça va point d'interrogation", DictationLanguage.French))
+        assertEquals("Ciao, come stai?", polished("ciao virgola come stai punto interrogativo", DictationLanguage.Italian))
+        assertEquals("Heel erg bedankt voor je hulp.", polished("heel erg bedankt voor je hulp", DictationLanguage.Dutch))
+        assertEquals("la réunion", SpokenText.continuing("La réunion", "et", "fr"))
+        assertEquals("Paris est", SpokenText.continuing("Paris est", "et", "fr"))
+        assertEquals("il treno", SpokenText.continuing("Il treno", "e", "it"))
+        assertEquals("de trein", SpokenText.continuing("De trein", "en", "nl"))
     }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
