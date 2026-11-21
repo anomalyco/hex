@@ -31,6 +31,133 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertFalse(closedWithResult.hasDeliverableResult(at: now + 26))
     }
 
+    /// TestFlight build 56: dictate in the keyboard, dismiss it, dictate again (Hex opens and
+    /// records), swipe back. Hex ended mid-job and its last snapshot still said recording, so
+    /// every keyboard after showed a recording nothing would finish: Done and Cancel went to
+    /// no one, and no text came until Hex was opened again.
+    func testAJobHexStoppedHeartbeatingForNoLongerHoldsTheKeyboard() {
+        let t0 = 10_000.0
+        let recording = KeyboardSnapshot(
+            state: .recording,
+            heartbeat: t0,
+            expiresAt: t0 + 900,
+            recordingStartedAt: t0 - 3,
+            audioLevel: 0.4,
+            jobID: "handoff"
+        )
+        let model = KeyboardViewModel()
+        func show(_ snapshot: KeyboardSnapshot, at now: TimeInterval, on model: KeyboardViewModel) {
+            model.applyBridgeState(
+                hasFullAccess: true,
+                snapshot: snapshot,
+                isModelInstalled: true,
+                style: .polished,
+                now: now,
+                animated: false
+            )
+        }
+
+        show(recording, at: t0, on: model)
+        XCTAssertEqual(model.stagePhase, .recording)
+        show(recording, at: t0 + 5, on: model)
+        XCTAssertEqual(model.stagePhase, .recording, "a late heartbeat isn't a Hex that ended")
+
+        // Done, sent to a Hex that will never read it.
+        model.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .stop, jobID: "handoff", sentAt: t0 + 6),
+            now: t0 + 6,
+            animated: false
+        )
+        XCTAssertEqual(model.stagePhase, .transcribing)
+        show(recording, at: t0 + 7, on: model)
+        XCTAssertEqual(model.stagePhase, .idle, "the job is over: the Hex key dictates again")
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(model.currentSnapshot.jobID)
+        XCTAssertFalse(model.isWarmAvailable)
+
+        // A keyboard opened later, in this process or a new one, reads the same snapshot the same way.
+        let later = KeyboardViewModel()
+        show(recording, at: t0 + 600, on: later)
+        XCTAssertEqual(later.stagePhase, .idle)
+        let transcribing = KeyboardSnapshot(state: .transcribing, heartbeat: t0, expiresAt: 0, jobID: "handoff")
+        show(transcribing, at: t0 + 2, on: later)
+        XCTAssertEqual(later.stagePhase, .transcribing)
+        show(transcribing, at: t0 + 7, on: later)
+        XCTAssertEqual(later.stagePhase, .idle)
+        XCTAssertTrue(
+            KeyboardSnapshot(state: .recording, heartbeat: 0, expiresAt: 0, jobID: "handoff").isOrphanedJob(at: t0),
+            "never heartbeated"
+        )
+
+        // A result the snapshot carries still arrives, and a Hex heartbeating again is live again.
+        let finished = KeyboardSnapshot(
+            state: .transcribing,
+            heartbeat: t0,
+            expiresAt: 0,
+            jobID: "handoff",
+            resultID: "result",
+            resultExpiresAt: t0 + 30,
+            transcript: "Ship it."
+        )
+        XCTAssertTrue(finished.droppingOrphanedJob(at: t0 + 7).hasDeliverableResult(at: t0 + 7))
+        let back = KeyboardSnapshot(state: .recording, heartbeat: t0 + 600, expiresAt: t0 + 900, jobID: "next")
+        show(back, at: t0 + 600, on: later)
+        XCTAssertEqual(later.stagePhase, .recording)
+    }
+
+    /// The same keyboard's own dictation: one still recording or transcribing when the keyboard
+    /// was dismissed finishes without it, goes back into its field when the keyboard returns
+    /// there while it's fresh, and is offered as Paste dictation anywhere else or later. A
+    /// capture that went quiet or a transcription that never returns resets the keyboard.
+    func testADictationTheKeyboardFinishedAfterItHidReachesTheNextKeyboard() {
+        let suiteName = "hex.tests.heldDictation.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        let field = UUID()
+        let held = KeyboardHeldDictation(
+            id: "held",
+            text: "Meet at ten.",
+            heard: "meet at ten",
+            document: field,
+            finishedAt: 1_000
+        )
+
+        XCTAssertNil(bridge.heldDictation)
+        bridge.heldDictation = held
+        XCTAssertEqual(KeyboardBridge(defaults: defaults).heldDictation, held, "a new keyboard process finds it")
+        XCTAssertEqual(held.delivery(in: field, at: 1_010), .insert)
+        XCTAssertEqual(held.delivery(in: nil, at: 1_010), .insert, "a field UIKit hasn't named yet")
+        XCTAssertEqual(held.delivery(in: UUID(), at: 1_010), .offer, "another field")
+        XCTAssertEqual(held.delivery(in: field, at: 1_031), .offer, "back after its time to go in by itself")
+        XCTAssertEqual(held.delivery(in: field, at: 1_000 + KeyboardSnapshot.resultOfferWindow), .expired)
+        bridge.heldDictation = nil
+        XCTAssertNil(KeyboardBridge(defaults: defaults).heldDictation)
+
+        XCTAssertFalse(KeyboardJobWatchdog.isStalled(.recording, lastProgress: 100, now: 105), "a capture still starting")
+        XCTAssertTrue(KeyboardJobWatchdog.isStalled(.recording, lastProgress: 100, now: 107), "no audio for 7 s")
+        XCTAssertFalse(KeyboardJobWatchdog.isStalled(.transcribing, lastProgress: 100, now: 160), "a long dictation")
+        XCTAssertTrue(KeyboardJobWatchdog.isStalled(.transcribing, lastProgress: 100, now: 230))
+    }
+
+    /// Hex's text that came after its time to go in by itself (Done in Hex, then back late)
+    /// is offered as Paste dictation for ten minutes rather than lost.
+    func testAResultPastItsTimeToGoInIsOfferedForTenMinutes() {
+        let snap = KeyboardSnapshot(
+            state: .offline,
+            heartbeat: 0,
+            expiresAt: 0,
+            resultID: "result",
+            resultExpiresAt: 5_030,
+            transcript: "Ship it."
+        )
+        XCTAssertTrue(snap.hasDeliverableResult(at: 5_029))
+        XCTAssertFalse(snap.hasDeliverableResult(at: 5_031))
+        XCTAssertTrue(snap.hasOfferableResult(at: 5_031))
+        XCTAssertFalse(snap.hasOfferableResult(at: 5_030 + KeyboardSnapshot.resultOfferWindow))
+        XCTAssertFalse(KeyboardSnapshot.offline.hasOfferableResult(at: 5_031))
+    }
+
     func testKeyboardMessagesRoundTripThroughJSON() throws {
         let command = KeyboardCommand(
             id: "command",

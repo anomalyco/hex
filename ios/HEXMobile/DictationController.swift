@@ -487,6 +487,10 @@ final class DictationController {
         endStaleLiveActivities()
 
         publishKeyboardSnapshot()
+        // An accepted transcription the keyboard waits on keeps its heartbeat.
+        if keyboardJobInFlight {
+            startKeyboardSessionLoop()
+        }
     }
 
     /// Ends Live Activities no dictation owns, such as one a suspended or killed process left.
@@ -590,6 +594,9 @@ final class DictationController {
                     styleOverride: handoff?.style,
                     copyToPasteboard: false
                 )
+                // The keyboard finishes what it handed off: without the loop its Done and
+                // Cancel went unread and the recording ran to its 60 s limit.
+                startKeyboardSessionLoop()
             } else {
                 handoffNotice = String(localized: "Timed out")
             }
@@ -883,11 +890,16 @@ final class DictationController {
         publishKeyboardSnapshot()
 
         let activeTranscriber = transcriber
+        // A keyboard's dictation finishes with Hex in the background, and in One shot nothing
+        // keeps Hex running once the microphone closes: iOS would suspend it mid-transcription
+        // and the text would never reach the keyboard.
+        let backgroundTime = keyboardJobID == nil ? nil : BackgroundTime("Keyboard dictation")
 
         transcriptionTask?.cancel()
         transcriptionTask = Task { [weak self] in
             defer {
                 try? FileManager.default.removeItem(at: captureURL)
+                backgroundTime?.end()
             }
             let transcribeStarted = Date()
 
@@ -1069,6 +1081,15 @@ final class DictationController {
 
     // MARK: - Warm Session Loop & Snapshot Truth
 
+    /// A keyboard's dictation is recording or transcribing: Hex reads its commands and
+    /// heartbeats its snapshot until the text is in, warm session or not (One shot).
+    private var keyboardJobInFlight: Bool {
+        activeKeyboardJobID != nil
+    }
+
+    /// Reads the keyboard's commands and keeps its snapshot's heartbeat fresh, for a warm
+    /// session and for any keyboard dictation in flight. The keyboard takes a job whose
+    /// heartbeat stops as over (`KeyboardSnapshot.isOrphanedJob`).
     private func startKeyboardSessionLoop() {
         keyboardSessionTask?.cancel()
         keepaliveRestartedAt = -.infinity
@@ -1076,10 +1097,10 @@ final class DictationController {
         keepaliveRestartDue = nil
         keyboardSessionTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self, self.keyboardSessionEnabled else { return }
+                guard let self, self.keyboardSessionEnabled || self.keyboardJobInFlight else { return }
 
                 // Never expire an in-flight recording or accepted transcription mid-work.
-                if self.phase != .recording && self.phase != .transcribing {
+                if self.keyboardSessionEnabled, self.phase != .recording && self.phase != .transcribing {
                     // The keyboard's language switch writes the App Group; follow it.
                     self.followDictationLanguageSetting()
                     let remaining = self.keyboardSessionExpiresAt - self.now()
@@ -1166,7 +1187,8 @@ final class DictationController {
     private func publishKeyboardSnapshot(minInterval: TimeInterval = 0) {
         let currentTime = now()
 
-        if let expires = keyboardResultExpiresAt, expires <= currentTime {
+        // Past its time to go in by itself the keyboard can still offer it as Paste dictation.
+        if let expires = keyboardResultExpiresAt, expires + KeyboardSnapshot.resultOfferWindow <= currentTime {
             keyboardResultID = nil
             keyboardResult = nil
             keyboardResultHeard = nil
@@ -1395,5 +1417,24 @@ final class DictationController {
         while phase == .preparingModel && now() < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
+    }
+}
+
+/// Background time from iOS while Hex finishes a keyboard's dictation, ended when it's done
+/// or when iOS asks for it back.
+@MainActor
+private final class BackgroundTime {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(_ name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }

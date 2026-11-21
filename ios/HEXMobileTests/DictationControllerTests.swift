@@ -292,6 +292,96 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(snap.transcript, "ship it tonight")
     }
 
+    /// TestFlight build 56's sequence from Hex's side: the keyboard couldn't dictate by itself
+    /// and handed the dictation to Hex, you swiped back and tapped Done in the keyboard. Done
+    /// reaches Hex in One shot as in a warm session (One shot never read it, so the recording
+    /// ran to its limit), Hex heartbeats the job until its text is in, so the keyboard never
+    /// takes it for over, and the text stays on offer after its time to go in by itself.
+    func testAKeyboardHandoffFinishedFromTheKeyboardDeliversItsTextInEitherMode() async throws {
+        for duration in [WarmSessionDuration.off, .fifteenMinutes] {
+            var now = 7_000.0
+            let audio = FakeAudioManager()
+            let transcriber = ControlledTranscriber()
+            let bridge = KeyboardBridge(defaults: defaults)
+            let controller = DictationController(
+                audio: audio,
+                keyboardBridge: bridge,
+                transcriber: transcriber,
+                transcriberFactory: { transcriber },
+                now: { now },
+                autoPrepareOnInit: false
+            )
+            controller.prepareModel()
+            try await settle()
+            controller.setWarmDuration(duration)
+            await transcriber.armSuspension()
+
+            let job = "handoff-\(duration.rawValue)"
+            controller.handleKeyboardLaunch(.startRecording(jobID: job, requestedAt: now, style: .polished))
+            try await settle()
+            XCTAssertEqual(controller.phase, .recording, "\(duration)")
+            XCTAssertEqual(bridge.snapshot().jobID, job)
+
+            // Back in the app: only the keyboard's command tells Hex to stop.
+            now += 2
+            bridge.send(.stop, jobID: job, sentAt: now)
+            try await settle()
+            XCTAssertEqual(controller.phase, .transcribing, "\(duration): Done reached Hex")
+
+            now += 4
+            try await settle()
+            let waiting = bridge.snapshot()
+            XCTAssertEqual(waiting.state, .transcribing)
+            XCTAssertFalse(waiting.isOrphanedJob(at: now), "\(duration): the transcription heartbeats")
+
+            await transcriber.resumeSuspended(with: "ship it tonight")
+            try await settle()
+            XCTAssertEqual(controller.phase, .ready)
+            let done = bridge.snapshot()
+            XCTAssertTrue(done.hasDeliverableResult(at: now), "\(duration)")
+            XCTAssertEqual(done.transcript, controller.transcript)
+
+            now += 40
+            controller.processPendingKeyboardCommandForTesting()
+            XCTAssertFalse(bridge.snapshot().hasDeliverableResult(at: now))
+            XCTAssertTrue(bridge.snapshot().hasOfferableResult(at: now), "\(duration): offered as Paste dictation")
+            now += KeyboardSnapshot.resultOfferWindow
+            controller.processPendingKeyboardCommandForTesting()
+            XCTAssertNil(bridge.snapshot().transcript, "\(duration): not kept past the offer")
+            controller.endWarmSession()
+        }
+    }
+
+    /// A keyboard's Cancel in One shot ends the handed-off recording, as in a warm session.
+    func testAOneShotHandoffCancelledFromTheKeyboardStops() async throws {
+        let now = 7_500.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.setWarmDuration(.off)
+        controller.handleKeyboardLaunch(.startRecording(jobID: "one-shot", requestedAt: now, style: .polished))
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+
+        bridge.send(.cancel, jobID: "one-shot", sentAt: now)
+        try await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertNil(bridge.snapshot().jobID)
+        XCTAssertNotEqual(bridge.snapshot().state, .recording)
+        let transcribed = await transcriber.transcribedURLs
+        XCTAssertTrue(transcribed.isEmpty, "nothing transcribed")
+    }
+
     func testTenSecondHandoffWindow() async throws {
         var now = 5_000.0
         let audio = FakeAudioManager()

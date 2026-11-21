@@ -21,7 +21,25 @@ final class KeyboardLocalDictation {
         case failed(message: String, until: TimeInterval)
     }
 
+    /// The job being captured or transcribed, shared with its transcription task: whether the
+    /// keyboard hid before it finished (its text is then held in the App Group for the next
+    /// keyboard, `KeyboardHeldDictation`) and the field it was started in.
+    private final class Job {
+        let id: String
+        let document: UUID?
+        var interrupted = false
+
+        init(id: String, document: UUID?) {
+            self.id = id
+            self.document = document
+        }
+    }
+
     private var phase: Phase = .idle
+    private var job: Job?
+    /// When the job last showed progress: its start, its capture's last audio, or the start of
+    /// its transcription (`KeyboardJobWatchdog`).
+    private var lastProgressAt: TimeInterval = 0
     private var capture: KeyboardWebCapture?
     private var pcmFile: KeyboardPCMFile?
     private var loudness: Float = -62
@@ -40,6 +58,8 @@ final class KeyboardLocalDictation {
     static let armedTimeout: TimeInterval = 3
     /// Learn how I type's dictation fixes, read when a dictation starts; empty while off.
     var corrections: () -> [DictationCorrection] = { [] }
+    /// The field the keyboard is in, read when a dictation starts.
+    var currentDocument: () -> UUID? = { nil }
     private var activeCorrections: [DictationCorrection] = []
 
     static var isSupported: Bool {
@@ -118,6 +138,7 @@ final class KeyboardLocalDictation {
 
     func markDelivered(resultID: String) {
         if case .finished(_, let current, _, _, _) = phase, current == resultID {
+            job = nil
             phase = .idle
         }
     }
@@ -214,6 +235,7 @@ final class KeyboardLocalDictation {
         pcmFile = nil
         timeline = nil
         armedFailure = nil
+        job = nil
         phase = .idle
         releaseAudioSession()
         KeyboardProbeLog.shared.write("touch-down capture discarded after \(Int((Date().timeIntervalSince1970 - startedAt) * 1000)) ms (\(reason))")
@@ -247,6 +269,8 @@ final class KeyboardLocalDictation {
         }
         let jobID = UUID().uuidString
         let requestedAt = Date()
+        job = Job(id: jobID, document: currentDocument())
+        lastProgressAt = requestedAt.timeIntervalSince1970
         activeCorrections = corrections()
         loudness = -62
         armedFailure = nil
@@ -344,6 +368,7 @@ final class KeyboardLocalDictation {
                 timeline = nil
             }
             pcmFile?.append(data)
+            lastProgressAt = Date().timeIntervalSince1970
             loudness = peak > 0 ? max(-62, 20 * log10(peak)) : -62
         case .stopped:
             finishRecording(jobID: jobID)
@@ -381,6 +406,7 @@ final class KeyboardLocalDictation {
         }
         if let url = pcmFile?.url { try? FileManager.default.removeItem(at: url) }
         pcmFile = nil
+        job = nil
         phase = .idle
         releaseAudioSession()
         KeyboardProbeLog.shared.write("cancelled")
@@ -391,12 +417,77 @@ final class KeyboardLocalDictation {
         capture?.stop()
     }
 
+    /// The keyboard is going away mid-dictation (dismissed, or another app came forward).
+    /// A touch still deciding is dropped; a recording stops and keeps what was said, without
+    /// waiting for the page (WebKit may not answer once the keyboard is gone); and the job's
+    /// text is held for the next keyboard instead of being lost with this one.
+    func keyboardWillHide() {
+        switch phase {
+        case .armed:
+            discard(reason: "keyboard hidden")
+        case .recording(let jobID, _):
+            job?.interrupted = true
+            KeyboardProbeLog.shared.write("keyboard hidden while recording: finishing with what was said")
+            if let capture {
+                listenWhileIdle(capture)
+                capture.stop()
+            }
+            finishRecording(jobID: jobID)
+        case .transcribing:
+            guard let job, !job.interrupted else { return }
+            job.interrupted = true
+            KeyboardProbeLog.shared.write("keyboard hidden while transcribing: holding its text for the next keyboard")
+        case .finished(_, let resultID, let transcript, let heard, _):
+            // Shown but not yet inserted: the next keyboard inserts it.
+            Self.hold(resultID: resultID, text: transcript, heard: heard, document: job?.document)
+            job = nil
+            phase = .idle
+        case .idle, .failed:
+            break
+        }
+    }
+
+    /// Self-heal, on every poll while the keyboard shows: a capture that went quiet finishes
+    /// with what it heard, and a transcription that never returns is given up, so the
+    /// keyboard never stays in recording or transcribing with nothing behind it.
+    func healIfStalled(now: TimeInterval) {
+        switch phase {
+        case .recording(let jobID, _) where KeyboardJobWatchdog.isStalled(.recording, lastProgress: lastProgressAt, now: now):
+            KeyboardProbeLog.shared.write("capture silent for \(Int(now - lastProgressAt)) s: finishing with what it heard")
+            if let capture {
+                listenWhileIdle(capture)
+                capture.stop()
+            }
+            finishRecording(jobID: jobID)
+        case .transcribing where KeyboardJobWatchdog.isStalled(.transcribing, lastProgress: lastProgressAt, now: now):
+            KeyboardProbeLog.shared.write("transcription stuck for \(Int(now - lastProgressAt)) s: giving up")
+            transcription?.cancel()
+            transcription = nil
+            job = nil
+            phase = .idle
+        default:
+            break
+        }
+    }
+
+    private static func hold(resultID: String, text: String, heard: String?, document: UUID?) {
+        KeyboardBridge().heldDictation = KeyboardHeldDictation(
+            id: resultID,
+            text: text,
+            heard: heard,
+            document: document,
+            finishedAt: Date().timeIntervalSince1970
+        )
+        KeyboardProbeLog.shared.write("held a dictation for the next keyboard: \(text.count) chars")
+    }
+
     private func finishRecording(jobID: String) {
         guard case .recording(_, let startedAt) = phase else { return }
         guard let file = pcmFile else {
             endQuietly("stopped before the microphone started")
             return
         }
+        let job = self.job
         pcmFile = nil
         releaseAudioSession()
         let seconds = Date().timeIntervalSince1970 - startedAt
@@ -409,6 +500,7 @@ final class KeyboardLocalDictation {
         }
         guard #available(iOS 26.0, *) else { return }
         phase = .transcribing(jobID: jobID)
+        lastProgressAt = Date().timeIntervalSince1970
         let url = file.url
         let fixes = activeCorrections
         let hints = DictationCorrections.recognitionHints(vocabulary: [], corrections: fixes)
@@ -436,7 +528,21 @@ final class KeyboardLocalDictation {
                 let translated = steps.translated
                 let text = steps.formatted
                 KeyboardProbeLog.shared.write("transcribed in \(String(format: "%.2f", Date().timeIntervalSince(started))) s: \(text.count) chars \(KeyboardProbeLog.memory())")
-                guard let self, !Task.isCancelled else { return }
+                guard !Task.isCancelled else { return }
+                // A translation's words can't be compared with what was heard, so it isn't learned from.
+                let resultID = UUID().uuidString
+                let learnable = translated == nil ? steps.heard : nil
+                guard let self, !(job?.interrupted ?? false) else {
+                    // The keyboard hid before it finished, or is gone: the next one delivers it.
+                    if !text.isEmpty {
+                        Self.hold(resultID: resultID, text: text, heard: learnable, document: job?.document)
+                    }
+                    if let self, self.job === job {
+                        self.job = nil
+                        self.phase = .idle
+                    }
+                    return
+                }
                 // Record typing logs keeps every step; nothing is kept while it is off.
                 let stages: DictationStages? = TypingLogSettings().isEnabled
                     ? DictationStages(
@@ -455,12 +561,11 @@ final class KeyboardLocalDictation {
                         formatted: steps.formatted
                     )
                     : nil
-                // A translation's words can't be compared with what was heard, so it isn't learned from.
                 self.phase = .finished(
                     jobID: jobID,
-                    resultID: UUID().uuidString,
+                    resultID: resultID,
                     transcript: text,
-                    heard: translated == nil ? steps.heard : nil,
+                    heard: learnable,
                     stages: stages
                 )
             } catch {

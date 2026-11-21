@@ -253,6 +253,99 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         guard state == .recording, let recordingStartedAt else { return 0 }
         return max(0, now - recordingStartedAt)
     }
+
+    /// Hex heartbeats a keyboard's recording or transcription at least every 0.6 s
+    /// (`DictationController`'s keyboard loop). One whose heartbeat is older than this has no
+    /// one working on it: Hex ended, crashed or was suspended mid-job.
+    static let orphanedJobTimeout: TimeInterval = 6
+    /// How long a finished dictation the keyboard didn't insert by itself stays on offer as
+    /// Paste dictation. Inserting it, or a newer one, ends the offer.
+    static let resultOfferWindow: TimeInterval = 10 * 60
+
+    /// A recording or transcription Hex stopped heartbeating for. Nothing will finish it, and
+    /// a new keyboard process reads it the same way: the heartbeat is wall-clock time.
+    func isOrphanedJob(at now: TimeInterval) -> Bool {
+        guard state == .recording || state == .transcribing else { return false }
+        return heartbeat <= 0 || now - heartbeat > Self.orphanedJobTimeout
+    }
+
+    /// The snapshot as the keyboard acts on it: an orphaned job reads as offline, so it can't
+    /// hold the keyboard in recording or transcribing. A result it carries still arrives.
+    func droppingOrphanedJob(at now: TimeInterval) -> KeyboardSnapshot {
+        guard isOrphanedJob(at: now) else { return self }
+        return KeyboardSnapshot(
+            state: .offline,
+            heartbeat: heartbeat,
+            expiresAt: expiresAt,
+            resultID: resultID,
+            resultExpiresAt: resultExpiresAt,
+            transcript: transcript,
+            message: message,
+            heard: heard,
+            stages: stages
+        )
+    }
+
+    /// A finished dictation still on offer as Paste dictation: past its time to insert by
+    /// itself (`hasDeliverableResult`), within `resultOfferWindow` of it.
+    func hasOfferableResult(at now: TimeInterval = Date().timeIntervalSince1970) -> Bool {
+        guard let resultID, !resultID.isEmpty, let transcript, !transcript.isEmpty else { return false }
+        guard let resultExpiresAt else { return true }
+        return now < resultExpiresAt + Self.resultOfferWindow
+    }
+}
+
+/// An in-keyboard dictation that finished after the keyboard hid (dismissed, or another app
+/// came forward mid-dictation). It's kept in the App Group, so the next keyboard, in this
+/// process or a new one, inserts it into the field it was said for while it's fresh, and
+/// offers it as Paste dictation anywhere else or later.
+nonisolated struct KeyboardHeldDictation: Codable, Equatable, Sendable {
+    let id: String
+    let text: String
+    /// Learn how I type's raw transcript, as `KeyboardSnapshot.heard`.
+    let heard: String?
+    /// The field it was started in (`UITextDocumentProxy.documentIdentifier`), when UIKit named it.
+    let document: UUID?
+    let finishedAt: TimeInterval
+
+    /// How long after it finished it still goes straight into its own field.
+    static let insertWindow: TimeInterval = 30
+
+    enum Delivery: Equatable {
+        case insert
+        case offer
+        case expired
+    }
+
+    /// `document` is the field the keyboard is in now. A field either side couldn't name
+    /// counts as the same one, as Hex's own results go into whichever field is open.
+    func delivery(in document: UUID?, at now: TimeInterval) -> Delivery {
+        let age = now - finishedAt
+        guard age < KeyboardSnapshot.resultOfferWindow else { return .expired }
+        let sameField = self.document == nil || document == nil || self.document == document
+        return sameField && age < Self.insertWindow ? .insert : .offer
+    }
+}
+
+/// When an in-keyboard dictation has stopped making progress, so the keyboard resets to idle
+/// instead of showing it forever: its capture went quiet (WebKit's page ended or lost the
+/// microphone without saying so), or its transcription never returned.
+nonisolated enum KeyboardJobWatchdog {
+    enum Stage {
+        case recording
+        case transcribing
+    }
+
+    /// The capture page sends audio about twelve times a second once it starts, and starting
+    /// (web view, page, microphone) takes a second or two.
+    static let captureSilence: TimeInterval = 6
+    /// Apple Speech takes seconds for a long dictation; this is far past any of them.
+    static let transcription: TimeInterval = 120
+
+    /// `lastProgress`: the stage's start, or the capture's last audio.
+    static func isStalled(_ stage: Stage, lastProgress: TimeInterval, now: TimeInterval) -> Bool {
+        now - lastProgress > (stage == .recording ? captureSilence : transcription)
+    }
 }
 
 /// What a keyboard saw of Full Access, written from inside the keyboard: iOS tells only the
@@ -309,6 +402,7 @@ struct KeyboardBridge {
         static let fullAccessOff = "keyboard.fullAccessOff"
         static let appMicrophoneAllowed = "app.microphoneAllowed"
         static let lastEmptyDictationAt = "keyboard.lastEmptyDictationAt"
+        static let heldDictation = "keyboard.heldDictation"
     }
 
     private let defaults: UserDefaults?
@@ -492,6 +586,22 @@ struct KeyboardBridge {
                 defaults?.set(newValue, forKey: Key.lastEmptyDictationAt)
             } else {
                 defaults?.removeObject(forKey: Key.lastEmptyDictationAt)
+            }
+        }
+    }
+
+    /// Only the keyboard writes it: a dictation it finished after it hid, until it's
+    /// inserted, pasted from the strip, or expired (`KeyboardHeldDictation`).
+    var heldDictation: KeyboardHeldDictation? {
+        get {
+            guard let data = defaults?.data(forKey: Key.heldDictation) else { return nil }
+            return try? decoder.decode(KeyboardHeldDictation.self, from: data)
+        }
+        nonmutating set {
+            if let newValue, let data = try? encoder.encode(newValue) {
+                defaults?.set(data, forKey: Key.heldDictation)
+            } else {
+                defaults?.removeObject(forKey: Key.heldDictation)
             }
         }
     }
