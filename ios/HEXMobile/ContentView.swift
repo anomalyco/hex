@@ -40,6 +40,7 @@ struct ContentView: View {
     @Binding var openedFromKeyboard: Bool
     @Binding var showSetup: Bool
     @State private var setupMonitor = KeyboardSetupMonitor()
+    @State private var keyboardSpeech = KeyboardSpeechPreparation()
     @State private var onboardingPage = OnboardingProgress.launchPage
     @State private var settingsPath = SettingsSnapshotFixture.initialPath
     @State private var showAcknowledgements = false
@@ -65,7 +66,7 @@ struct ContentView: View {
                 keyboardHandoffView
                     .transition(.opacity)
             } else if onboardingPage != nil {
-                OnboardingView(dictation: dictation, monitor: setupMonitor, page: $onboardingPage)
+                OnboardingView(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech, page: $onboardingPage)
                     .transition(.opacity)
             } else {
                 standaloneView
@@ -73,6 +74,7 @@ struct ContentView: View {
             }
         }
         .preferredColorScheme(.dark)
+        .task { keyboardSpeech.start { dictation.engineName } }
         .animation(HexMotion.reducedFade, value: openedFromKeyboard)
         .animation(HexMotion.reducedFade, value: onboardingPage == nil)
     }
@@ -121,7 +123,8 @@ struct ContentView: View {
     }
 
     private var setupStepsLeft: Int {
-        setupMonitor.stepsLeft(modelReady: dictation.isModelReady)
+        // The Hex key's own model counts: Ready means dictation works in other apps.
+        setupMonitor.stepsLeft(modelReady: dictation.isModelReady && keyboardSpeech.isReady)
     }
 
     private var hasTranscript: Bool {
@@ -141,7 +144,7 @@ struct ContentView: View {
         }
         .tint(HexTheme.textBase)
         .sheet(isPresented: $showSetup) {
-            SetupSheet(dictation: dictation, monitor: setupMonitor)
+            SetupSheet(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech)
         }
         .task {
             while !Task.isCancelled {

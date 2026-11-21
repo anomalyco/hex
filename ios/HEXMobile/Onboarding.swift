@@ -29,17 +29,27 @@ struct OnboardingModel: Equatable {
         }
     }
 
+    /// Hex's own model and the one the Hex key dictates with (KeyboardSpeechPreparation): ready
+    /// only once both are, so Ready means the Hex key works in other apps.
     @MainActor
-    init(dictation: DictationController) {
+    init(dictation: DictationController, keyboard: KeyboardSpeechPreparation) {
+        let app: Stage
         if dictation.isModelReady {
-            stage = .ready
+            app = .ready
         } else {
             switch dictation.phase {
-            case .preparingModel: stage = .downloading(dictation.modelPreparation.fractionCompleted)
-            case .failed(let message): stage = .failed(message)
-            default: stage = .starting
+            case .preparingModel: app = .downloading(dictation.modelPreparation.fractionCompleted)
+            case .failed(let message): app = .failed(message)
+            default: app = .starting
             }
         }
+        let keys: Stage? = switch keyboard.state {
+        case .ready, .followsApp: keyboard.downloads ? .ready : nil
+        case .downloading(let fraction): .downloading(fraction)
+        case .failed(let message): .failed(message)
+        case .checking: .starting
+        }
+        stage = Self.combine(app, keys)
         let id: String
         if dictation.isModelReady {
             id = dictation.transcriptionLanguageID
@@ -55,6 +65,25 @@ struct OnboardingModel: Equatable {
         self.stage = stage
         self.language = language
     }
+
+    /// One stage for two downloads: a failure first, then ready only when both are, else the
+    /// two fractions averaged (a ready one counts as whole). No "b": the keyboard has nothing
+    /// to download.
+    static func combine(_ a: Stage, _ b: Stage?) -> Stage {
+        guard let b else { return a }
+        if case .failed = a { return a }
+        if case .failed = b { return b }
+        if a == .ready, b == .ready { return .ready }
+        if a == .starting, b == .starting { return .starting }
+        func fraction(_ stage: Stage) -> Double {
+            switch stage {
+            case .ready: 1
+            case .downloading(let value): value
+            default: 0
+            }
+        }
+        return .downloading((fraction(a) + fraction(b)) / 2)
+    }
 }
 
 struct OnboardingView: View {
@@ -62,6 +91,7 @@ struct OnboardingView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let dictation: DictationController
     let monitor: KeyboardSetupMonitor
+    let keyboardSpeech: KeyboardSpeechPreparation
     @Binding var page: OnboardingPage?
     @State private var forward = true
     @State private var tryText = OnboardingFixture.current == .tryDone ? "On my way, see you at ten." : ""
@@ -83,7 +113,7 @@ struct OnboardingView: View {
     }
 
     private var model: OnboardingModel {
-        fixtureModel ?? OnboardingModel(dictation: dictation)
+        fixtureModel ?? OnboardingModel(dictation: dictation, keyboard: keyboardSpeech)
     }
 
     var body: some View {
@@ -158,7 +188,10 @@ struct OnboardingView: View {
 
     private func retryModel() {
         guard !OnboardingFixture.isSnapshot else { return }
-        dictation.prepareModel()
+        if !dictation.isModelReady {
+            dictation.prepareModel()
+        }
+        keyboardSpeech.start(retry: true) { dictation.engineName }
     }
 
     /// "onboarding-tour": steps through every page on the fixture timeline.

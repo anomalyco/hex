@@ -45,6 +45,12 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     three words are typed with Full Access; an empty dictation says Hex heard
     nothing (the keyboard notes it in the App Group). **Hex is ready** shows
     only once every step is done, else Almost ready with what's left. The
+    model step counts the keyboard's own model too
+    (`KeyboardSpeechPreparation`): on iOS 26 the keyboard dictates with
+    Apple Speech even when Hex uses Parakeet, so Hex installs that language's
+    model as the keyboard would; where Apple has none on the iPhone, it marks
+    `keyboardNeedsHex` so the Hex key opens Hex from the first tap. Home's
+    Ready counts it the same way. The
     model's progress pill sits in the top bar until it's ready; Skip shows on
     the demo and the practice only. It shows once: `onboarding.completed` in
     the app's UserDefaults records Start using Hex or Continue without a

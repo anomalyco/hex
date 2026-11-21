@@ -119,6 +119,19 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(OnboardingPractice.words(in: "我们十点见"), 2, "Chinese splits into words without spaces")
     }
 
+    func testOnboardingIsReadyOnlyOnceHexAndTheHexKeyModelsAre() {
+        typealias Stage = OnboardingModel.Stage
+        XCTAssertEqual(OnboardingModel.combine(.ready, .ready), .ready)
+        XCTAssertEqual(OnboardingModel.combine(.ready, .downloading(0.4)), .downloading(0.7), "Parakeet ready, the keyboard's Apple Speech still downloading")
+        XCTAssertEqual(OnboardingModel.combine(.downloading(0.2), .ready), .downloading(0.6))
+        XCTAssertEqual(OnboardingModel.combine(.ready, .starting), .downloading(0.5))
+        XCTAssertEqual(OnboardingModel.combine(.starting, .starting), .starting)
+        XCTAssertEqual(OnboardingModel.combine(.ready, .failed("no")), .failed("no"))
+        XCTAssertEqual(OnboardingModel.combine(.failed("app"), .failed("keys")), .failed("app"))
+        XCTAssertEqual(OnboardingModel.combine(.downloading(0.2), nil), .downloading(0.2), "nothing for the keyboard to download")
+        XCTAssertEqual(OnboardingModel.combine(.ready, nil), .ready)
+    }
+
     func testOnboardingResumesPagesEarlierBuildsSaved() {
         XCTAssertEqual(OnboardingPage(saved: "welcome"), .setup)
         XCTAssertEqual(OnboardingPage(saved: "allow"), .permissions)
