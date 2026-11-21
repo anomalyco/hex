@@ -2093,6 +2093,35 @@ final class KeyboardClipboardTests: XCTestCase {
         )
         XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 0.01, refused: true), "refused: the chip did nothing, always say why")
     }
+
+    func testCodeFromMessagesNeedsApplesKeyboard() {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        let tracker = KeyboardClipboardTracker(defaults: defaults)
+        func offer(appleKeyboard: Bool) -> KeyboardClipboardOffer? {
+            tracker.offer(textContentType: .oneTimeCode, hasFullAccess: true, hasAppleKeyboard: { appleKeyboard }, pasteboard: pasteboard)
+        }
+        XCTAssertEqual(offer(appleKeyboard: true), .code(canPaste: false))
+        XCTAssertNil(offer(appleKeyboard: false), "Hex and Emoji only: the next keyboard gets no code (TestFlight build 56)")
+        pasteboard.string = "482913"
+        XCTAssertEqual(offer(appleKeyboard: true), .code(canPaste: true))
+        XCTAssertEqual(offer(appleKeyboard: false), .paste, "a copied code still pastes")
+        XCTAssertEqual(
+            tracker.offer(textContentType: nil, hasFullAccess: true, hasAppleKeyboard: { XCTFail("asked outside a code field"); return true }, pasteboard: pasteboard),
+            .paste
+        )
+    }
+
+    func testApplesKeyboardIsNotEmojiOrAnExtension() {
+        typealias Mode = KeyboardInputModes.Mode
+        let english = Mode(primaryLanguage: "en-US", className: "UIKeyboardInputMode")
+        let hex = Mode(primaryLanguage: "en-US", className: "UIKeyboardExtensionInputMode")
+        let emoji = Mode(primaryLanguage: "emoji", className: "UIKeyboardInputMode")
+        XCTAssertTrue(KeyboardInputModes.hasAppleKeyboard([hex, emoji, english]))
+        XCTAssertFalse(KeyboardInputModes.hasAppleKeyboard([hex, emoji]))
+        XCTAssertFalse(KeyboardInputModes.hasAppleKeyboard([hex]))
+        XCTAssertFalse(KeyboardInputModes.hasAppleKeyboard([hex, hex, emoji]), "another third-party keyboard gets no code either")
+    }
 }
 
 
