@@ -1,16 +1,16 @@
-//! Brazilian Portuguese (pt-BR) interface strings, keyed by the English
-//! source string like [`super::TRANSLATIONS`]; used for any Portuguese
-//! system language. Not yet reviewed by a native speaker. Terms: dictation is "ditado",
-//! vocabulary "vocabulário", replacements "substituições", and meetings
-//! "reuniões".
+//! Brazilian Portuguese (pt-BR) interface strings; not yet reviewed by a
+//! native speaker. Terms: dictation is "ditado", vocabulary "vocabulário",
+//! replacements "substituições", and meetings "reuniões".
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use super::screenshots::{Language, merged};
+
 /// The Portuguese strings by their English source.
 pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| super::screenshots::merged(TRANSLATIONS, super::screenshots::PORTUGUESE))
+    TABLE.get_or_init(|| merged(TRANSLATIONS, Language::Portuguese))
 }
 
 #[rustfmt::skip]

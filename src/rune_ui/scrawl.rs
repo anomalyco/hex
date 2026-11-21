@@ -3,18 +3,19 @@
 //! captures are kept, and Scrawl's own app, which keeps the shortcut while
 //! it runs until "Use Hex for annotations" asks it to quit.
 
-use rune::{El, row};
+use rune::{El, row, text};
 use scrawl_capture::retention::{Policy, Preset};
 
 use super::controls::{
     ButtonKind, Choice, Paint, button, card, described_row, folder_label, folding, note, page,
-    section, segmented, select, setting_row, step_row, toggle_row,
+    section, section_with, segmented, select, setting_row, step_row, toggle_row,
 };
 use super::general::keys_button;
 use super::lists::permission_control;
 use super::platform::{PlatformRequest, ScrawlRequest, ScrawlView};
 use super::settings::cancel_capture;
 use super::{Menu, ShortcutTarget, Ui};
+use crate::agent_install::{self, Agent, AgentStatus, SkillState};
 use crate::app_settings::{AppSettings, CaptureTranscriber};
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::desktop::onboarding::{PermissionAction, PermissionKind};
@@ -431,6 +432,305 @@ fn storage_rows(ui: &Ui, p: Paint, view: &ScrawlView, layer: &mut Vec<El>) -> Ve
     rows
 }
 
+/// The command the copy row hands to people who manage skills themselves.
+const SKILLS_COMMAND: &str = "npx skills add anomalyco/hex --skill hex-annotate";
+
+/// The Annotate pane's Agents section (Labs › Install agent skill from
+/// Annotate): each coding agent's skill folder and, on macOS, the hex link.
+/// The folders are read when the pane opens and after an install, never
+/// while drawing.
+#[derive(Default)]
+pub(super) struct Agents {
+    paths: Option<agent_install::Paths>,
+    statuses: Vec<AgentStatus>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    cli: Option<agent_install::cli::Status>,
+    /// One per `statuses` row: checked means Install writes there.
+    selected: Vec<bool>,
+    error: Option<String>,
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    cli_error: Option<String>,
+}
+
+impl Agents {
+    /// Reads every agent's folder and the hex link, and checks each found
+    /// agent that cannot read this Hex's skill.
+    pub(super) fn refresh(&mut self) {
+        self.paths = agent_install::Paths::current();
+        self.read();
+    }
+
+    fn read(&mut self) {
+        if let Some(paths) = &self.paths {
+            self.statuses = agent_install::status(paths);
+        }
+        #[cfg(target_os = "macos")]
+        {
+            self.cli = Some(agent_install::cli::status(
+                &agent_install::cli::Environment::current(),
+            ));
+        }
+        self.selected = self
+            .statuses
+            .iter()
+            .map(|status| status.found && status.skill != SkillState::Current)
+            .collect();
+    }
+
+    fn selected_for(&self, agent: Agent) -> bool {
+        self.statuses
+            .iter()
+            .position(|status| status.agent == agent)
+            .and_then(|index| self.selected.get(index).copied())
+            .unwrap_or(false)
+    }
+
+    fn toggle(&mut self, agent: Agent) {
+        let Some(index) = self
+            .statuses
+            .iter()
+            .position(|status| status.agent == agent && status.found)
+        else {
+            return;
+        };
+        if let Some(selected) = self.selected.get_mut(index) {
+            *selected = !*selected;
+        }
+    }
+
+    /// Writes the skill into every checked agent's folder, then reads them
+    /// again so each row says Installed.
+    fn install(&mut self) {
+        let Some(paths) = self.paths.clone() else {
+            return;
+        };
+        let mut failure = None;
+        for (index, status) in self.statuses.iter().enumerate() {
+            if !self.selected.get(index).copied().unwrap_or(false) {
+                continue;
+            }
+            if let Err(error) = agent_install::install(&paths, status.agent) {
+                failure.get_or_insert(error);
+            }
+        }
+        self.read();
+        self.error = failure;
+    }
+
+    #[cfg(target_os = "macos")]
+    fn install_cli(&mut self) {
+        self.cli_error = None;
+        match agent_install::cli::install(&agent_install::cli::Environment::current()) {
+            Ok(status) => self.cli = Some(status),
+            Err(error) => self.cli_error = Some(error),
+        }
+    }
+
+    /// A scene's rows: one ready to install, one outdated, one current, one
+    /// not found, and the link already installed.
+    pub(super) fn fixture() -> Self {
+        let home = std::path::PathBuf::from("/Users/you");
+        let mut agents = Self {
+            statuses: vec![
+                AgentStatus {
+                    agent: Agent::ClaudeCode,
+                    found: true,
+                    skill: SkillState::Missing,
+                    path: home.join(".claude/skills/hex-annotate/SKILL.md"),
+                },
+                AgentStatus {
+                    agent: Agent::Codex,
+                    found: true,
+                    skill: SkillState::Outdated,
+                    path: home.join(".codex/skills/hex-annotate/SKILL.md"),
+                },
+                AgentStatus {
+                    agent: Agent::OpenCode,
+                    found: true,
+                    skill: SkillState::Current,
+                    path: home.join(".config/opencode/skills/hex-annotate/SKILL.md"),
+                },
+                AgentStatus {
+                    agent: Agent::Pi,
+                    found: false,
+                    skill: SkillState::Missing,
+                    path: home.join(".pi/agent/skills/hex-annotate/SKILL.md"),
+                },
+            ],
+            selected: vec![true, true, false, false],
+            cli: Some(agent_install::cli::Status {
+                state: agent_install::cli::State::Installed,
+                path: std::path::PathBuf::from("/opt/homebrew/bin/hex"),
+                off_path: false,
+            }),
+            ..Self::default()
+        };
+        #[cfg(not(target_os = "macos"))]
+        {
+            agents.cli = None;
+        }
+        agents
+    }
+}
+
+/// One agent's row: its name, whether it is found and has this Hex's skill,
+/// and a switch that checks it for Install.
+fn agent_row(ui: &Ui, p: Paint, status: &AgentStatus) -> El {
+    let label = match (status.found, status.skill) {
+        (false, _) => tr("Not found"),
+        (true, SkillState::Missing) => tr("Not installed"),
+        (true, SkillState::Current) => tr("Installed"),
+        (true, SkillState::Outdated) => tr("Update available"),
+    };
+    let checked = ui.agents.selected_for(status.agent);
+    let key = format!("agent-{}", status.agent.key());
+    let row = setting_row(
+        p,
+        &key,
+        status.agent.name(),
+        Some(label),
+        super::controls::row_switch(p, checked),
+    );
+    if status.found {
+        let agent = status.agent;
+        super::controls::pressable_row(row, checked)
+            .on_press(move |ui: &mut Ui| ui.agents.toggle(agent))
+    } else {
+        row
+    }
+}
+
+/// The command people who manage skills themselves run, with its copy.
+fn agent_command_row(p: Paint) -> El {
+    let command = row()
+        .key("command")
+        .gap(8.0)
+        .center_y()
+        .child(
+            text(SKILLS_COMMAND)
+                .key("line")
+                .font(p.k.ty.mono)
+                .color(p.muted())
+                .a11y_hidden(),
+        )
+        .child(button(
+            p,
+            "agents-skill-copy",
+            tr("Copy"),
+            ButtonKind::Secondary,
+            |_, tx| tx.copy(SKILLS_COMMAND.to_owned()),
+        ));
+    setting_row(
+        p,
+        "agents-skill-command",
+        tr("Install with the skills CLI"),
+        Some(tr("For skills you manage yourself")),
+        command,
+    )
+}
+
+/// The macOS Command-line tool row, with its Install, and where the link is
+/// when it landed in `~/.local/bin`, which may not be on PATH.
+#[cfg(target_os = "macos")]
+fn cli_rows(ui: &Ui, p: Paint) -> Vec<El> {
+    use agent_install::cli::{State, Status};
+    let status: Option<&Status> = ui.agents.cli.as_ref();
+    let (label, installable) = match status {
+        Some(Status {
+            state: State::Installed,
+            path,
+            ..
+        }) => (tr_fill("Installed at {}", &folder_label(path)), false),
+        Some(Status {
+            state: State::OwnedByAnother,
+            ..
+        }) => (tr("Owned by another program").to_string(), false),
+        Some(_) | None => (tr("Not installed").to_string(), true),
+    };
+    let control = if installable {
+        button(
+            p,
+            "agents-cli-install",
+            tr("Install"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.agents.install_cli(),
+        )
+    } else {
+        row()
+    };
+    let mut rows = vec![setting_row(
+        p,
+        "agents-cli",
+        tr("Command-line tool"),
+        Some(label.as_str()),
+        control,
+    )];
+    if let Some(Status {
+        path,
+        off_path: true,
+        ..
+    }) = status
+    {
+        let folder = path.parent().unwrap_or(path);
+        rows.push(note(
+            "agents-cli-path",
+            &tr_fill("{} isn't on your PATH", &folder_label(folder)),
+            p.muted(),
+        ));
+    }
+    if let Some(error) = &ui.agents.cli_error {
+        rows.push(note(
+            "agents-cli-error",
+            &tr_fill("Couldn't link the command-line tool: {}", error),
+            p.danger(),
+        ));
+    }
+    rows
+}
+
+/// The Agents section: the intro, each agent's row, the copyable skills
+/// command, and on macOS the Command-line tool.
+fn agents_section(ui: &Ui, p: Paint) -> El {
+    let mut rows = vec![note(
+        "agents-intro",
+        tr("Let coding agents read your captures with the hex-annotate skill"),
+        p.muted(),
+    )];
+    for status in &ui.agents.statuses {
+        rows.push(agent_row(ui, p, status));
+    }
+    if let Some(error) = &ui.agents.error {
+        rows.push(note(
+            "agents-error",
+            &tr_fill("Couldn't install the skill: {}", error),
+            p.danger(),
+        ));
+    }
+    rows.push(agent_command_row(p));
+    #[cfg(target_os = "macos")]
+    rows.extend(cli_rows(ui, p));
+    if !ui.settings.labs.annotate_agent_tools {
+        rows.push(note(
+            "agents-tools-off",
+            tr("The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on."),
+            p.muted(),
+        ));
+    }
+    section_with(
+        p,
+        "agents",
+        tr("Agents"),
+        button(
+            p,
+            "agents-install",
+            tr("Install"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| ui.agents.install(),
+        ),
+        rows,
+    )
+}
+
 pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     let view = ui.platform.scrawl.clone().unwrap_or_default();
     let enabled = ui.settings.capture.enabled;
@@ -475,6 +775,9 @@ pub(super) fn pane(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
     ));
     if enabled {
         content = content.child(section(p, "how", tr("How it works"), how_it_works(ui, p)));
+    }
+    if enabled && ui.settings.labs.annotate_agent_install {
+        content = content.child(agents_section(ui, p));
     }
     // Apple's speech recognizer is macOS's; Linux transcribes with Hex's model.
     if enabled && cfg!(target_os = "macos") {
@@ -562,22 +865,53 @@ mod tests {
         let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
         let (_, apply) = SCENES.iter().find(|(name, _)| *name == scene).unwrap();
         apply(&mut state);
+        render(state, (980.0, 760.0))
+    }
+
+    fn render(state: Ui, size: (f32, f32)) -> rune::Runtime<Ui> {
         let env = rune::Env {
             system_dark: true,
             scale: 1.0,
         };
         let text =
             rune::text::TextSystem::new(rune_theme_opencode::FONTS, rune_theme_opencode::FAMILIES);
-        let mut rt = crate::rune_ui::offscreen::runtime(
-            state,
-            crate::rune_ui::view,
-            (980.0, 760.0),
-            env,
-            text,
-        );
+        let mut rt =
+            crate::rune_ui::offscreen::runtime(state, crate::rune_ui::view, size, env, text);
         rt.settle_all();
         rt.frame(0.0);
         rt
+    }
+
+    /// A folder under the temp directory for one test's agents.
+    fn temp(name: &str) -> std::path::PathBuf {
+        let folder =
+            std::env::temp_dir().join(format!("hex-scrawl-agents-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        folder
+    }
+
+    /// The Annotate pane with the Agents lab on and these agents' folders.
+    fn agents_pane(home: &std::path::Path) -> rune::Runtime<Ui> {
+        use crate::rune_ui::{Pane, Service};
+        let mut state = Ui::with(AppSettings::default(), Service::Fixture(Vec::new()));
+        state.settings.capture.enabled = true;
+        state.settings.labs.annotate_agent_install = true;
+        state.platform.scrawl = Some(ScrawlView::preview());
+        state.pane = Pane::Annotate;
+        state.agents.paths = Some(agent_install::Paths::new(home.to_path_buf(), None, None));
+        state.agents.read();
+        // Tall enough that every agent row and the CLI row are on screen.
+        render(state, (980.0, 1720.0))
+    }
+
+    /// The text shown, without the recorder's invisible sizing faces.
+    fn texts(rt: &rune::Runtime<Ui>) -> Vec<String> {
+        rt.elements()
+            .into_iter()
+            .filter(|e| !e.path.contains("/faces/size"))
+            .filter_map(|e| e.text)
+            .collect()
     }
 
     fn tap(rt: &mut rune::Runtime<Ui>, key: &str) {
@@ -697,5 +1031,107 @@ mod tests {
         };
         assert_eq!(retention_label(imported), "Video for 3 days");
         assert!(retention_description(imported).contains("30 days"));
+    }
+
+    /// The Agents section is exactly absent while its lab is off.
+    #[test]
+    fn the_agents_section_needs_its_lab() {
+        let off = pane("mac-scrawl");
+        assert!(off.find("agents").is_none());
+        assert!(off.find("agents-install").is_none());
+        assert!(
+            !texts(&off)
+                .iter()
+                .any(|text| text
+                    == "Let coding agents read your captures with the hex-annotate skill")
+        );
+
+        let on = pane("mac-scrawl-agents");
+        assert!(on.find("agents").is_some());
+        assert!(on.find("agents-install").is_some());
+        assert!(on.find("agents-skill-copy").is_some());
+        for agent in Agent::ALL {
+            assert!(
+                on.find(&format!("agent-{}", agent.key())).is_some(),
+                "{} has no row",
+                agent.name()
+            );
+        }
+        let shown = texts(&on);
+        for status in [
+            "Not installed",
+            "Update available",
+            "Installed",
+            "Not found",
+        ] {
+            assert!(shown.iter().any(|text| text == status), "{status}");
+        }
+        // The skill's agent commands are their own lab, named here while off.
+        assert!(shown.iter().any(|text| text
+            == "The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on."));
+        #[cfg(target_os = "macos")]
+        {
+            assert!(on.find("agents-cli").is_some());
+            assert!(
+                shown
+                    .iter()
+                    .any(|text| text == "Installed at /opt/homebrew/bin/hex")
+            );
+        }
+    }
+
+    /// Install writes the skill into each checked, found agent's own folder
+    /// and never creates one for an agent this computer doesn't have.
+    #[test]
+    fn installing_writes_each_checked_agents_skill() {
+        let home = temp("install");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".codex")).unwrap();
+        let mut rt = agents_pane(&home);
+        assert_eq!(
+            rt.state.agents.selected,
+            vec![true, true, false, false],
+            "found agents without the skill start checked"
+        );
+        tap(&mut rt, "agents-install");
+        assert_eq!(
+            std::fs::read(home.join(".claude/skills/hex-annotate/SKILL.md")).unwrap(),
+            agent_install::SKILL.as_bytes()
+        );
+        assert_eq!(
+            std::fs::read(home.join(".codex/skills/hex-annotate/SKILL.md")).unwrap(),
+            agent_install::SKILL.as_bytes()
+        );
+        assert!(
+            std::fs::read(home.join(".pi/agent/skills/hex-annotate/SKILL.md")).is_err(),
+            "Pi was not found, so nothing was written for it"
+        );
+        assert_eq!(
+            rt.state.agents.statuses[0].skill,
+            SkillState::Current,
+            "the row says Installed now"
+        );
+        assert_eq!(rt.state.agents.selected, vec![false; 4]);
+        let _ = std::fs::remove_dir_all(home);
+    }
+
+    /// Clicking one agent's row checks or unchecks only that agent, and a
+    /// not-found agent's row does nothing.
+    #[test]
+    fn an_agents_row_checks_only_that_agent() {
+        let home = temp("toggle");
+        std::fs::create_dir_all(home.join(".claude")).unwrap();
+        std::fs::create_dir_all(home.join(".pi")).unwrap();
+        let mut rt = agents_pane(&home);
+        assert_eq!(rt.state.agents.selected, vec![true, false, false, true]);
+        tap(&mut rt, "agent-claude-code");
+        assert_eq!(rt.state.agents.selected, vec![false, false, false, true]);
+        tap(&mut rt, "agent-claude-code");
+        assert_eq!(rt.state.agents.selected, vec![true, false, false, true]);
+        // Pi is found, so its row toggles; OpenCode is not, so its row is not
+        // a switch at all.
+        tap(&mut rt, "agent-pi");
+        assert_eq!(rt.state.agents.selected, vec![true, false, false, false]);
+        let _ = std::fs::remove_dir_all(home);
     }
 }

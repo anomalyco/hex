@@ -218,6 +218,10 @@ pub struct LabsSettings {
     /// `hex annotate inspect`, `zoom`, `frames`, and `skill` read a capture
     /// bundle for a coding agent (Labs › Agent tools for captures).
     pub annotate_agent_tools: bool,
+    /// The Annotate pane's Agents section writes the hex-annotate skill into
+    /// coding agents' own folders and, on macOS, links `hex` onto PATH
+    /// (Labs › Install agent skill from Annotate).
+    pub annotate_agent_install: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -424,6 +428,7 @@ impl Default for LabsSettings {
             paste_last_picker: false,
             vocabulary_files: false,
             annotate_agent_tools: false,
+            annotate_agent_install: false,
             api_processing: false,
             api_timestamps: false,
             speakers_only: false,

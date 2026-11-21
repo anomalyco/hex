@@ -18,6 +18,7 @@ impl Feature {
                     | Self::AnnotatePointerScreen
                     | Self::CopyCaptureZip
                     | Self::AnnotateAgentTools
+                    | Self::AnnotateAgentInstall
             )
     }
 
@@ -124,6 +125,7 @@ mod tests {
             Feature::AnnotatePointerScreen,
             Feature::CopyCaptureZip,
             Feature::AnnotateAgentTools,
+            Feature::AnnotateAgentInstall,
         ] {
             assert!(!feature.on_the_web(), "{}", feature.name());
         }

@@ -80,7 +80,10 @@ and Windows) records the screen while you draw and talk and sends it to an agent
 its Labs › Agent tools for captures toggle (off by default, every OS) adds
 `hex annotate inspect`, `zoom`, `frames`, and `skill`, which read a bundle in
 the CLI process so a coding agent can see its summary, marks, a dense frame
-sheet, or a range of frames itself.
+sheet, or a range of frames itself. Its Labs › Install agent skill from
+Annotate toggle (off by default, every OS) adds an Agents section that writes
+the `hex-annotate` skill into Claude Code, Codex, OpenCode, or Pi, and on macOS
+links `hex` onto PATH.
 [Screenshots](labs.md) (Labs, macOS) takes CleanShot-style ⌘⇧4 area and
 window screenshots, and with Annotate on records from a ⌘⇧5 toolbar.
 The other capabilities stay here until they need their own verification recipe.

@@ -85,6 +85,7 @@ impl Feature {
             Self::PasteLastPicker => "Paste Last picker",
             Self::VocabularyFiles => "Vocabulary files",
             Self::AnnotateAgentTools => "Agent tools for captures",
+            Self::AnnotateAgentInstall => "Install agent skill from Annotate",
         }
     }
 
@@ -309,6 +310,9 @@ impl Feature {
             }
             Self::AnnotateAgentTools => {
                 "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
+            }
+            Self::AnnotateAgentInstall => {
+                "Adds an Agents section to the Annotate pane that writes the hex-annotate skill into Claude Code, Codex, OpenCode, or Pi, and on macOS links hex onto PATH"
             }
         }
     }

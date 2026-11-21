@@ -339,6 +339,42 @@ Settings › Annotate                      // capture.pane
 └── No iPhone pairing row: ScrawlKit pairing needs the ingest server, which Hex
     doesn't run. A cabled iPhone needs no row (capture.phone)
 
+Agents (on; Labs › Install agent skill from Annotate)   // capture.agents; labs.annotate_agent_install
+├── Off -> the pane is exactly as before, and nothing reads a coding agent's folder
+├── One row per coding agent: whether its folder exists, and whether it already has this Hex's skill
+│   ├── Claude Code -> ~/.claude/skills/hex-annotate/SKILL.md (found with ~/.claude)
+│   ├── Codex -> $CODEX_HOME or ~/.codex, then skills/hex-annotate/SKILL.md (found with that folder)
+│   ├── OpenCode -> $XDG_CONFIG_HOME or ~/.config, then opencode/skills/hex-annotate/SKILL.md
+│   │   (found with the opencode folder)
+│   └── Pi -> ~/.pi/agent/skills/hex-annotate/SKILL.md (found with ~/.pi)
+├── A found agent without the skill reads Not installed and starts checked; the file
+│   differing from this Hex's reads Update available, and installing replaces it
+├── Install -> agent_install::install writes the same embedded
+│   skills/hex-annotate/SKILL.md that hex annotate skill prints into each checked agent's
+│   folder: directories created, a staging file renamed into place in the same folder,
+│   and no other file touched
+├── An agent this computer doesn't have reads Not found, is never checked, and gets
+│   no folder created for it
+├── Install with the skills CLI -> npx skills add anomalyco/hex --skill hex-annotate,
+│   beside Copy for people who manage skills themselves
+├── Command-line tool (macOS) -> a hex symlink to this app's executable (current_exe) in
+│   the first of /opt/homebrew/bin and /usr/local/bin that exists and is writable, else
+│   ~/.local/bin (created)
+│   ├── An existing hex that is a symlink to this Hex or any
+│   │   Hex.app/Contents/MacOS/hex is kept and reads Installed at <path>
+│   ├── A regular file, or a link to anything else, is never replaced: the row reads
+│   │   Owned by another program
+│   └── A ~/.local/bin link that $PATH doesn't name adds "<folder> isn't on your PATH"
+├── While Labs › Agent tools for captures is off, a note says the skill's zoom, inspect,
+│   and frames commands need it
+└── Checks: agent_install (finding each agent, installing, updating an outdated file,
+    leaving other files alone, choosing the link folder, never replacing a foreign hex),
+    and rune_ui::scrawl's the_agents_section_needs_its_lab,
+    installing_writes_each_checked_agents_skill, an_agents_row_checks_only_that_agent.
+    Proof limits: the macOS symlink path runs the same POSIX rules its unit tests
+    cover on Linux; nothing was run on a real Mac, and no real Claude Code, Codex,
+    OpenCode, or Pi read a capture after this installed the skill
+
 First launch with Annotate on            // capture.import
 ├── ~/.config/scrawl/config.json -> transcriber (apple; else Parakeet), capturesDir,
 │   retention, read once (migration `scrawl-capture-settings`); token not used

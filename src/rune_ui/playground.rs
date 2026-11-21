@@ -245,6 +245,8 @@ const PATHS: &[(&str, &str)] = &[
         "mac-scrawl-restart",
         "Window/Annotate/Screen Recording needs restart",
     ),
+    #[cfg(hex_capture)]
+    ("mac-scrawl-agents", "Window/Annotate/Agents"),
     ("mac-voice-filter", "Window/Voice Filter/Voice Filter"),
     ("mac-voice-filter-muted", "Window/Voice Filter/Muted"),
     (
