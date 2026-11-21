@@ -39,8 +39,9 @@ struct AcknowledgementsView: View {
         let body: String
     }
 
-    /// Spatial autocorrect's word lists (`scripts/build-typing-model.py`) and the keyboard's
-    /// never-suggest list (`OffensiveWords`); keep in step with ios/README.md.
+    /// Spatial autocorrect's word lists (`scripts/build-typing-model.py`), the keyboard's
+    /// never-suggest list (`OffensiveWords`), and the model Experiments › Multilingual model
+    /// downloads (`ParakeetUltraModel`); keep in step with ios/README.md.
     static let entries: [Entry] = [
         Entry(
             title: "Google Books Ngram data",
@@ -92,6 +93,19 @@ struct AcknowledgementsView: View {
             (creativecommons.org/licenses/by/4.0). Hex lowercased and classified the entries, \
             omitted ordinary, medical and search-only terms, and added common slurs, \
             inflections and spelling variants.
+            """
+        ),
+        Entry(
+            title: "Parakeet Ultra",
+            body: """
+            Experiments › Multilingual model downloads Parakeet Ultra by Moondream \
+            (huggingface.co/moondream/parakeet-ultra), a post-training of NVIDIA's Parakeet \
+            TDT 0.6B v3 (huggingface.co/nvidia/parakeet-tdt-0.6b-v3), both licensed under \
+            Creative Commons Attribution 4.0 International \
+            (creativecommons.org/licenses/by/4.0). Core ML conversion by FluidInference \
+            (huggingface.co/FluidInference/parakeet-ultra-coreml, revision 95eaa59), which \
+            stores the encoder's weights as 8-bit integers and re-exports the decoder and \
+            joint; Hex uses its files unchanged.
             """
         ),
         Entry(

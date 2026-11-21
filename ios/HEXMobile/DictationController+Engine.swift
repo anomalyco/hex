@@ -11,6 +11,7 @@ extension DictationController {
         let parakeetLoads = ParakeetLoadGuard()
         parakeetLoads.noteLaunch()
         let parakeetInterrupted = parakeetLoads.lastLoadWasInterrupted
+        if prepareMultilingualParakeetAtLaunch() { return }
         guard #available(iOS 26.0, *) else {
             prepareBeforeAppleSpeechAtLaunch(hasCachedModel: hasCachedModel)
             return
@@ -33,6 +34,21 @@ extension DictationController {
                 }
             }
         }
+    }
+
+    /// Experiments › Multilingual model (Parakeet) at launch: true when Parakeet Ultra takes
+    /// the dictation language and is getting ready. With the experiment off, it only deletes a
+    /// download turning it off left mid-way.
+    private func prepareMultilingualParakeetAtLaunch() -> Bool {
+        ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).noteLaunch()
+        guard MultilingualParakeetSettings().isEnabled else {
+            ParakeetUltraModel.remove()
+            return false
+        }
+        guard ParakeetUltraTranscriber.chosenLanguage() != nil else { return false }
+        engineName = ParakeetUltraTranscriber.name
+        prepareModel()
+        return true
     }
 
     /// Before iOS 26: Parakeet loads at launch once downloaded, as before. The recognizer gets
@@ -70,6 +86,10 @@ extension DictationController {
     }
 
     static func defaultTranscriber() async -> any LocalTranscribing {
+        // Experiments › Multilingual model (Parakeet), for its languages; off, nothing changes.
+        if let language = ParakeetUltraTranscriber.chosenLanguage() {
+            return ParakeetUltraTranscriber(language: language)
+        }
         let choice = SpeechEngineChoice.current
         guard #available(iOS 26.0, *) else {
             return transcriberBeforeAppleSpeech(choice: choice)
@@ -129,6 +149,9 @@ extension DictationController {
         }
         if (error as? ParakeetTranscriber.TranscriberError) == .notEnoughMemory {
             return String(localized: "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead.")
+        }
+        if (error as? ParakeetUltraTranscriber.TranscriberError) == .notEnoughMemory {
+            return String(localized: "Parakeet Ultra needs more memory than Hex has here. Hex uses its usual speech model instead.")
         }
         return nil
     }

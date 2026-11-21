@@ -59,7 +59,8 @@ final class KeyboardSpeechPreparation {
             try? await Task.sleep(for: .milliseconds(100))
         }
         guard !Task.isCancelled else { return }
-        if appEngine() == "Apple Speech" {
+        // Parakeet Ultra (Experiments › Multilingual model): the Hex key hands its dictations to Hex.
+        if appEngine() == "Apple Speech" || appEngine() == ParakeetUltraTranscriber.name {
             state = .followsApp
             return
         }

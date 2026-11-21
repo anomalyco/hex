@@ -221,6 +221,30 @@ never at a launch by itself.
     misheard words and spoken self-corrections, within a 2 s budget. A
     timeout, error, empty or implausible output keeps the raw transcript, and
     the toggle is disabled with a reason when Apple Intelligence is unusable.
+  - **Multilingual model (Settings › Experiments › Multilingual model (Parakeet), iOS
+    18+):** Off by default, and disabled on iPhones under 6 GB
+    (`MultilingualParakeetSettings`, in the App Group). While on, Hex dictates
+    Parakeet Ultra's 25 languages (Moondream's post-training of NVIDIA Parakeet TDT
+    0.6B v3) with it, which hears them mixed within a sentence (Dutch with English
+    words, a TestFlight request); any other dictation language keeps the engine Hex
+    picks without it. The language Ultra takes is the one set, else the one Automatic
+    follows on the keyboard, else the iPhone's first. Turning it on downloads
+    FluidInference's Core ML build (632 MB, pinned to revision `95eaa59`, each file
+    checked against its SHA-256 and resumed from its `.partial`) into Application
+    Support, out of backups, through the usual preparation bar ("Downloading 632.2 MB ·
+    Wi-Fi recommended", then Core ML's compile); turning it off deletes it, as does a
+    launch that finds a download left with it off. FluidAudio 0.15.5 has no
+    `.ultra`, so `ParakeetUltraModel` loads the four models itself and hands
+    FluidAudio v3 `AsrModels` (its own loader would replace a folder it can't load
+    with v3's download). It is chosen only with 1.5 GB left to load it
+    (`os_proc_available_memory`), and never again after a load that ended Hex
+    (`ParakeetLoadGuard`, its own keys) until the switch is turned off and on. The
+    keyboard can't load it, so while it takes the dictation language, Dictate and the
+    Hex key open Hex, as before iOS 26 (a warm session still dictates without
+    leaving the app). Measured on a Mac (`~/dev/experiments/2026-11-21-hex-multilingual-parakeet`):
+    mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
+    pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
+    on an iPhone are unmeasured.
   - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by
     default. For every style but `Verbatim`, Hex's dictation cleanup tagger
     labels each spoken word KEEP or DELETE on the iPhone and drops ums,
@@ -549,7 +573,8 @@ never at a launch by itself.
     learned below the switch), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
-    Intelligence, and Adaptive touch (its status and Reset touch learning below the switch).
+    Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
+    German spatial autocorrect, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1115,6 +1140,14 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
   Hex lowercased and classified the entries, omitted ordinary, medical and search-only
   terms, and added common slurs, inflections and spelling variants.
+- **Parakeet Ultra:** Experiments › Multilingual model downloads
+  [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) by Moondream, a
+  post-training of NVIDIA's
+  [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3), both licensed
+  under [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/),
+  as FluidInference's [Core ML conversion](https://huggingface.co/FluidInference/parakeet-ultra-coreml)
+  (revision `95eaa59`: 8-bit integer encoder weights, decoder and joint re-exported), used
+  unchanged.
 - **RLA-ES:** Spanish words are checked against RLA-ES, the Spanish spelling dictionaries
   for LibreOffice by Santiago Bosio and contributors (Spain and Mexico), used under the
   [Mozilla Public License 1.1](https://www.mozilla.org/en-US/MPL/1.1/)

@@ -357,6 +357,17 @@ final class DictationController {
         }
     }
 
+    /// Experiments › Multilingual model (Parakeet) turned on or off: prepares the engine Hex
+    /// picks now, or once the dictation in flight is done.
+    func multilingualParakeetChanged() {
+        switch phase {
+        case .recording, .transcribing, .requestingPermission:
+            pendingLanguagePreparation = true
+        case .modelRequired, .preparingModel, .ready, .failed:
+            prepareModel()
+        }
+    }
+
     /// Runs a language change that waited for the dictation in flight.
     private func prepareDeferredLanguageIfNeeded() {
         guard pendingLanguagePreparation else { return }
@@ -748,6 +759,7 @@ final class DictationController {
 
     nonisolated static func isDownloadInterruption(_ error: Error) -> Bool {
         if error is StallWatch.Stalled || error is URLError { return true }
+        if (error as? ParakeetUltraTranscriber.TranscriberError) == .downloadFailed { return true }
         return (error as? ParakeetTranscriber.TranscriberError) == .downloadFailed
     }
 

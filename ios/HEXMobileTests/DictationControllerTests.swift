@@ -1468,6 +1468,123 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertFalse(nextLaunch.lastLoadWasInterrupted, "a load that worked clears it")
     }
 
+    // MARK: - Experiments › Multilingual model (Parakeet)
+
+    /// 6 GB and 4 GB iPhones report about this much.
+    private static let sixGB: UInt64 = 5_900_000_000
+    private static let fourGB: UInt64 = 3_700_000_000
+
+    func testMultilingualParakeetIsOffByDefaultAndPicksNothing() {
+        let settings = MultilingualParakeetSettings(defaults: defaults)
+        XCTAssertFalse(settings.isEnabled)
+        XCTAssertNil(settings.language(set: "nl-NL", keyboard: nil, preferred: ["nl-NL"], physicalMemory: Self.sixGB))
+        XCTAssertNil(
+            ParakeetUltraTranscriber.chosenLanguage(language: settings.language(), availableMemory: 0, setAside: false),
+            "off, Hex keeps the engine it uses without it"
+        )
+    }
+
+    func testMultilingualParakeetTakesItsLanguagesOnIPhonesWithRoom() {
+        let settings = MultilingualParakeetSettings(defaults: defaults)
+        settings.isEnabled = true
+        func language(set: String? = nil, keyboard: String? = nil, preferred: [String] = ["en-US"], memory: UInt64 = Self.sixGB) -> String? {
+            settings.language(set: set, keyboard: keyboard, preferred: preferred, physicalMemory: memory)
+        }
+        XCTAssertEqual(language(set: "nl-NL"), "nl-NL")
+        XCTAssertEqual(language(keyboard: "de-DE"), "de-DE", "Automatic follows the keyboard's language")
+        XCTAssertEqual(language(preferred: ["en-NL", "nl-NL"]), "en-NL", "else the iPhone's first language")
+        XCTAssertNil(language(set: "ja-JP"), "a language it doesn't know stays with Apple Speech")
+        XCTAssertNil(language(set: "hi-IN"))
+        XCTAssertNil(language(preferred: ["ja-JP", "en-US"]), "Automatic doesn't skip the iPhone's first language")
+        XCTAssertNil(language(set: "nl-NL", memory: Self.fourGB), "4 GB iPhones can't load it")
+
+        XCTAssertEqual(ParakeetUltraTranscriber.chosenLanguage(language: "nl-NL", availableMemory: 2_500 << 20, setAside: false), "nl-NL")
+        XCTAssertEqual(ParakeetUltraTranscriber.chosenLanguage(language: "nl-NL", availableMemory: 0, setAside: false), "nl-NL", "no limit (simulator)")
+        XCTAssertNil(ParakeetUltraTranscriber.chosenLanguage(language: "nl-NL", availableMemory: 900 << 20, setAside: false), "too little left")
+        XCTAssertNil(ParakeetUltraTranscriber.chosenLanguage(language: "nl-NL", availableMemory: 0, setAside: true), "a load ended Hex")
+    }
+
+    func testAMultilingualParakeetLoadThatEndedHexIsKeptApartFromV2s() {
+        let ultra = ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel, defaults: defaults)
+        ultra.begin()
+        let v2 = ParakeetLoadGuard(defaults: defaults)
+        v2.noteLaunch()
+        ultra.noteLaunch()
+        XCTAssertFalse(v2.lastLoadWasInterrupted)
+        XCTAssertTrue(ultra.lastLoadWasInterrupted)
+        ultra.forget()
+        XCTAssertFalse(ultra.lastLoadWasInterrupted, "turning the experiment on again tries again")
+        XCTAssertFalse(ParakeetCompileRecord(key: ParakeetUltraTranscriber.compileRecordKey, defaults: defaults).isCurrent)
+    }
+
+    func testMultilingualParakeetsDownloadSaysItsSizeAndWiFi() {
+        var progress = ParakeetPreparationProgress(
+            downloads: true,
+            compiledBefore: false,
+            downloadDetail: ParakeetUltraTranscriber.downloadDetail
+        )
+        progress.download(0.5)
+        let detail = progress.snapshot(at: 1).detail
+        XCTAssertEqual(detail, ParakeetUltraTranscriber.downloadDetail)
+        XCTAssertTrue(detail.contains("632"), detail)
+        XCTAssertTrue(detail.contains("Wi-Fi"), detail)
+        XCTAssertEqual(
+            ParakeetPreparationProgress(downloads: true, compiledBefore: false).downloadDetail,
+            "Downloading the speech model",
+            "V2's words are unchanged"
+        )
+        XCTAssertTrue(DictationController.isDownloadInterruption(ParakeetUltraTranscriber.TranscriberError.downloadFailed))
+    }
+
+    func testParakeetUltrasFilesArePinnedAndComplete() throws {
+        let files = ParakeetUltraModel.files
+        XCTAssertEqual(Set(files.map(\.path)).count, files.count)
+        for model in ["Preprocessor", "Encoder", "Decoder", "JointDecisionv3"] {
+            XCTAssertTrue(files.contains { $0.path == "\(model).mlmodelc/weights/weight.bin" }, model)
+            XCTAssertTrue(files.contains { $0.path == "\(model).mlmodelc/model.mil" }, model)
+        }
+        XCTAssertTrue(files.allSatisfy { $0.sha256.count == 64 })
+        XCTAssertEqual(ParakeetUltraModel.totalBytes, 632_162_964)
+        for file in files {
+            XCTAssertTrue(ParakeetUltraModel.url(for: file).absoluteString.contains("/resolve/\(ParakeetUltraModel.revision)/"))
+        }
+
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        XCTAssertFalse(ParakeetUltraModel.isDownloaded(in: folder))
+        let vocabulary = folder.appendingPathComponent("vocab.json")
+        try Data(#"{"0": "<unk>", "8191": "▁ja"}"#.utf8).write(to: vocabulary)
+        XCTAssertEqual(try ParakeetUltraModel.vocabulary(at: vocabulary), [0: "<unk>", 8191: "▁ja"])
+        XCTAssertEqual(
+            try ParakeetUltraModel.sha256(of: vocabulary),
+            "ec2185c71d79a203174eba2b46e5d20431bdc1d0f275735d1f22f284d1759b24"
+        )
+    }
+
+    func testTurningMultilingualParakeetOnOrOffPreparesAgainOnceIdle() async throws {
+        let transcriber = ControlledTranscriber()
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: {
+                made += 1
+                return transcriber
+            },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(made, 1)
+
+        controller.multilingualParakeetChanged()
+        try await settle()
+        XCTAssertEqual(made, 2)
+        XCTAssertEqual(controller.phase, .ready)
+    }
+
     func testWarmSessionAudioErrorReachesAppAndKeyboardAsASentence() async throws {
         let audio = FakeAudioManager()
         audio.keepaliveShouldThrow = true
