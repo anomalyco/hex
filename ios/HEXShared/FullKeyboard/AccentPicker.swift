@@ -1,37 +1,37 @@
 import UIKit
 
-/// Alternate diacritics and punctuation variants shown when holding a key for 400 ms.
+/// The options a held key offers after 400 ms: the language's letters (`KeyboardLanguage.letterHolds`),
+/// else the 123 and #+= pages' list, the system English keyboard's observed long-press options
+/// (iOS 27.2 simulator) unless the language's differ (`KeyboardLanguage.symbolHolds`).
 nonisolated enum AccentCatalog {
-    private static let table: [String: [String]] = [
-        "e": ["e", "è", "é", "ê", "ë", "ē", "ė", "ę"],
-        "a": ["a", "à", "á", "â", "ä", "æ", "ã", "å", "ā"],
-        "i": ["i", "ì", "í", "î", "ï", "ī", "į"],
-        "o": ["o", "ô", "ö", "ò", "ó", "œ", "ø", "ō", "õ"],
-        "u": ["u", "û", "ü", "ù", "ú", "ū"],
-        "y": ["y", "ÿ"],
-        "n": ["n", "ñ", "ń"],
-        "c": ["c", "ç", "ć", "č"],
-        "s": ["s", "ß", "ś", "š"],
-        "z": ["z", "ž", "ź", "ż"],
-        "l": ["l", "ł"],
+    private static let symbols: [String: [String]] = [
+        "0": ["0", "°"],
         "-": ["-", "–", "—", "•"],
-        "\"": ["\"", "“", "”", "„", "«", "»"],
-        "'": ["'", "‘", "’", "`"],
+        "/": ["/", "\\"],
+        "$": ["$", "₩", "£", "¢", "€", "¥", "₽"],
+        "\"": ["\"", "”", "“", "„", "»", "«"],
         ".": [".", "…"],
         "?": ["?", "¿"],
         "!": ["!", "¡"],
-        "$": ["$", "€", "£", "¥", "¢"],
-        "/": ["/", "\\"],
+        "'": ["'", "’", "‘", "`"],
+        "&": ["&", "§"],
+        "%": ["%", "‰"],
+        "=": ["=", "≠", "≈"],
     ]
 
-    /// The accents for a held key; `language` may replace a key's list (`KeyboardLanguage.accentOverrides`).
+    /// The options for a held key, base first; nil when it holds nothing.
     static func options(for base: String, uppercase: Bool, language: KeyboardLanguage = .english) -> [String]? {
         let key = base.lowercased()
-        guard let list = language.accentOverrides[key] ?? table[key] else { return nil }
+        guard let list = language.letterHolds[key] ?? language.symbolHolds[key] ?? symbols[key],
+              list.count > 1 else { return nil }
         guard uppercase else { return list }
         return list.map { option in
-            // German sharp s capitalizes to SS or ẞ; standard `.uppercased()` matches system expectations.
-            option == "ß" ? "ẞ" : option.uppercased()
+            // ẞ, Unicode's capital ß; İ for the dotless ı, as the system keyboard shows it in capitals.
+            switch option {
+            case "ß": "ẞ"
+            case "ı": "İ"
+            default: option.uppercased()
+            }
         }
     }
 }

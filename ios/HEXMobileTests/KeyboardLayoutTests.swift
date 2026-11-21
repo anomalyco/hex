@@ -630,6 +630,17 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    /// A held key's callout as Hex shows it, left to right, without the base.
+    private func shownHolds(_ character: String, _ language: KeyboardLanguage, width: CGFloat = 402) -> [String] {
+        let layout = KeyboardLayout(width: width, language: language)
+        guard let key = layout.key(.character(character)),
+              let options = AccentCatalog.options(for: character, uppercase: false, language: language) else { return [] }
+        return AccentMenu.build(for: key.frame, rawOptions: options, in: layout.width).options.filter { $0 != character }
+    }
+
+    /// Each language's held keys match the system keyboard's long-press options as observed
+    /// (iOS 27.2 simulator): a key it holds nothing on holds nothing, and Hex's callout shows
+    /// the others in the system's left-to-right order, the base under the thumb.
     func testAccentsMatchEachLanguage() {
         XCTAssertEqual(AccentCatalog.options(for: "ø", uppercase: false, language: .norwegian), ["ø", "ö"])
         XCTAssertEqual(AccentCatalog.options(for: "æ", uppercase: true, language: .norwegian), ["Æ", "Ä"])
@@ -638,28 +649,30 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertFalse(norwegianA.contains("å") || norwegianA.contains("æ"), "they have their own keys")
         XCTAssertTrue(AccentCatalog.options(for: "s", uppercase: false, language: .german)!.contains("ß"))
         XCTAssertFalse(AccentCatalog.options(for: "u", uppercase: false, language: .german)!.contains("ü"))
+        XCTAssertNil(AccentCatalog.options(for: "ü", uppercase: false, language: .german))
+        XCTAssertNil(AccentCatalog.options(for: "z", uppercase: false, language: .german))
         XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .spanish)?.dropFirst().first, "é")
-        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: true, language: .spanish), ["N", "Ñ", "Ń"])
-        XCTAssertEqual(
-            AccentCatalog.options(for: "a", uppercase: false),
-            AccentCatalog.options(for: "a", uppercase: false, language: .english),
-            "English is unchanged"
-        )
-        // Italian's accents come first on each vowel: à è ì ò ù, and é right after è.
-        let italian = ["a", "e", "i", "o", "u"].map {
-            AccentCatalog.options(for: $0, uppercase: false, language: .italian)!.dropFirst().first
-        }
-        XCTAssertEqual(italian, ["à", "è", "ì", "ò", "ù"])
-        XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .italian)?.dropFirst(2).first, "é")
-        XCTAssertEqual(AccentCatalog.options(for: "o", uppercase: true, language: .italian)?.prefix(2), ["O", "Ò"])
+        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: true, language: .spanish), ["N", "Ń"], "ñ has its own key")
+        XCTAssertNil(AccentCatalog.options(for: "ñ", uppercase: false, language: .spanish))
+        XCTAssertEqual(AccentCatalog.options(for: "l", uppercase: false, language: .spanish), ["l", "l·l"])
+        XCTAssertNil(AccentCatalog.options(for: "z", uppercase: false, language: .spanish))
+        XCTAssertEqual(AccentCatalog.options(for: "z", uppercase: false), ["z", "ź", "ž", "ż"])
+        XCTAssertNil(AccentCatalog.options(for: "q", uppercase: false))
+        // English's held I offers the dotless ı, İ in capitals; never a second I.
+        let capitalI = AccentCatalog.options(for: "i", uppercase: true)!
+        XCTAssertTrue(capitalI.contains("İ"))
+        XCTAssertEqual(capitalI.filter { $0 == "I" }.count, 1)
+        XCTAssertEqual(shownHolds("u", .english), ["ų", "ů", "ű", "ũ", "ü", "ú", "ù", "û", "ǔ", "ū"])
+        XCTAssertEqual(shownHolds("a", .english), ["à", "á", "â", "ä", "ǎ", "æ", "ã", "å", "ā", "ă", "ą"])
+        XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .italian)?.prefix(3), ["e", "é", "è"])
+        XCTAssertEqual(AccentCatalog.options(for: "a", uppercase: false, language: .italian)?.dropFirst().first, "à")
+        XCTAssertTrue(AccentCatalog.options(for: "o", uppercase: false, language: .italian)!.contains("ò"))
         XCTAssertEqual(AccentCatalog.options(for: "e", uppercase: false, language: .french)?.dropFirst().first, "é")
         XCTAssertEqual(AccentCatalog.options(for: "c", uppercase: false, language: .french)?.dropFirst().first, "ç")
-        // Apple's French order (TextInput_fr): û before ù, and ª and º after the French accents.
         XCTAssertEqual(AccentCatalog.options(for: "u", uppercase: false, language: .french)?.prefix(3), ["u", "û", "ù"])
-        XCTAssertEqual(AccentCatalog.options(for: "a", uppercase: true, language: .french)?.prefix(4), ["A", "À", "Â", "ª"])
-        XCTAssertEqual(AccentCatalog.options(for: "o", uppercase: false, language: .french)?.prefix(4), ["o", "ô", "œ", "º"])
+        XCTAssertEqual(AccentCatalog.options(for: "a", uppercase: true, language: .french)?.prefix(4), ["A", "À", "Â", "Æ"])
         for language in [KeyboardLanguage.frenchCanadian, .frenchSwiss] {
-            for letter in ["a", "e", "i", "o", "u", "c"] {
+            for letter in ["a", "e", "i", "o", "u", "c", "y", "n"] {
                 XCTAssertEqual(
                     AccentCatalog.options(for: letter, uppercase: false, language: language),
                     AccentCatalog.options(for: letter, uppercase: false, language: .french),
@@ -668,28 +681,35 @@ final class KeyboardLayoutTests: XCTestCase {
             }
         }
         XCTAssertEqual(AccentCatalog.options(for: "a", uppercase: false, language: .portuguese)?.prefix(3), ["a", "á", "ã"])
-        // Russian: ё on е and ъ on ь, as on Apple's; Serbian (Latin): č ć on c, đ on d, š on s, ž on z.
+        // Russian: ё on е and ъ on ь, with the letters of other Cyrillic languages.
         XCTAssertEqual(AccentCatalog.options(for: "е", uppercase: false, language: .russian)?.prefix(2), ["е", "ё"])
         XCTAssertEqual(AccentCatalog.options(for: "Е", uppercase: true, language: .russian)?.prefix(2), ["Е", "Ё"])
         XCTAssertEqual(AccentCatalog.options(for: "ь", uppercase: false, language: .russian)?.prefix(2), ["ь", "ъ"])
         XCTAssertEqual(AccentCatalog.options(for: "ь", uppercase: true, language: .russian)?.prefix(2), ["Ь", "Ъ"])
         XCTAssertNil(AccentCatalog.options(for: "б", uppercase: false, language: .russian))
-        // Ukrainian, as the system keyboard's long-press options were observed: only ʼ offers
-        // anything (the other apostrophes); ₴ on $; no ё, and no other Cyrillic language's
-        // letters.
+        XCTAssertEqual(shownHolds("ж", .russian), ["ѥ", "ӂ", "ӝ", "җ"])
+        // Ukrainian: only ʼ offers anything among the letters (the other apostrophes); ₴ on $.
         XCTAssertEqual(AccentCatalog.options(for: "ʼ", uppercase: false, language: .ukrainian), ["ʼ", "'", "’", "‘", "`"])
         for letter in KeyboardLanguage.ukrainian.letterRows.joined() where letter != "ʼ" {
             XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .ukrainian), letter)
         }
-        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .ukrainian)?.prefix(2), ["$", "₴"])
+        XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .ukrainian)?.last, "₴")
         XCTAssertFalse(AccentCatalog.options(for: "$", uppercase: false)?.contains("₴") ?? true, "the hryvnia is Ukrainian's")
-        XCTAssertNil(AccentCatalog.options(for: "е", uppercase: false, language: .ukrainian))
-        XCTAssertNil(AccentCatalog.options(for: "и", uppercase: false, language: .ukrainian))
         XCTAssertFalse(KeyboardLanguage.ukrainian.letterRows.joined().contains { ["ы", "э", "ъ", "ё"].contains($0) })
+        // Serbian (Latin): č ć on c, đ on d, š on s, ž on z, and nothing else.
         XCTAssertEqual(AccentCatalog.options(for: "c", uppercase: false, language: .serbianLatin)?.prefix(3), ["c", "č", "ć"])
         XCTAssertEqual(AccentCatalog.options(for: "d", uppercase: true, language: .serbianLatin), ["D", "Đ"])
         XCTAssertEqual(AccentCatalog.options(for: "s", uppercase: false, language: .serbianLatin)?.prefix(2), ["s", "š"])
-        XCTAssertEqual(AccentCatalog.options(for: "z", uppercase: false, language: .serbianLatin)?.prefix(2), ["z", "ž"])
+        XCTAssertEqual(shownHolds("z", .serbianLatin), ["ž", "ź", "ż"])
+        XCTAssertNil(AccentCatalog.options(for: "e", uppercase: false, language: .serbianLatin))
+        // The 123 and #+= pages: English's, with each language's own where its keyboard differs.
+        XCTAssertEqual(AccentCatalog.options(for: "&", uppercase: false), ["&", "§"])
+        XCTAssertNil(AccentCatalog.options(for: "#", uppercase: false))
+        XCTAssertEqual(AccentCatalog.options(for: "#", uppercase: false, language: .russian), ["#", "№"])
+        XCTAssertEqual(AccentCatalog.options(for: "1", uppercase: false, language: .spanish), ["1", "1º", "1ª"])
+        XCTAssertNil(AccentCatalog.options(for: "1", uppercase: false))
+        XCTAssertEqual(AccentCatalog.options(for: "\"", uppercase: false, language: .german)?.dropFirst().first, "„")
+        XCTAssertEqual(AccentCatalog.options(for: ".", uppercase: false, language: .french), [".", "…", "·"])
     }
 
     func testAccentMenusOnTheNewKeysStayInside() {

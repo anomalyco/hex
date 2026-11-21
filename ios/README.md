@@ -549,10 +549,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   rows the iOS 27.2 simulator's own Ukrainian keyboard shows: 12, 12 and 10 keys,
   `йцукенгшщзхї`, `фівапролджєʼ`, `ячсмитьбюґ`, with ʼ the U+02BC apostrophe Ukrainian
   spells with; as the system keyboard's long-press options were observed, only ʼ offers
-  anything, the other apostrophes (' ’ ‘ and the backtick), and ₴, the system keyboard's
-  currency key, is held on $; no ы, э, ъ or ё) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  anything, the other apostrophes (' ’ ‘ and the backtick), and ₴, which the system keyboard
+  offers on its held currency key, is held on $; no ы, э, ъ or ё) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
-  and z, and only the iPad's Croatian layouts give them keys), as Apple's iOS keyboards
+  and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
   Automatic follows the dictation language (Hebrew, Greek, Cyrillic Serbian and other
   languages without a layout get English; Serbian only in Latin script, `sr-Latn`);
@@ -562,12 +562,16 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   only the letters: shift, delete and the bottom row keep their English sizes,
   and row 3's letters sit centred between shift and delete. Russian's nine-letter row 3
   wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's;
-  Ukrainian's twelve-key rows leave them one letter wide, as on Apple's. Long-press accents
-  drop letters that have their own key (Norwegian A has no å or æ; Æ and Ø offer
-  Ä and Ö), put the language's own first (Spanish á, é, í, ó, ú, ñ, ª, º; Italian
-  à, è, ì, ò, ù; French é, à, î, ô, û in Apple's order; Portuguese á, ã, é, ó, õ, ú; Russian and
-  Serbian copy Apple's lists from the simulator's `TextInput_ru` and `TextInput_sr`,
-  base letter first), and German keeps ß on a held S. Autocorrect and suggestions use the layout's
+  Ukrainian's twelve-key rows leave them one letter wide, as on Apple's. Long-press options
+  match each language's system keyboard and its observed long-press options (iOS 27.2
+  simulator: every letter, 123 and #+= key held for about 3 s with a real touch, the
+  callout read from the accessibility tree; `KeyboardLanguage.letterHolds` and
+  `symbolHolds`, `AccentCatalog`): a key the system keyboard holds nothing on holds
+  nothing (Spanish Z, Serbian E), letters with their own key drop out (Norwegian A has no
+  å or æ, and Æ and Ø offer Ä and Ö; Spanish N offers only ń), German keeps ß on a held
+  S, and Hex's callout shows the options in the system's left-to-right order with the base
+  letter at the end under the thumb, in one row where the system wraps a long list
+  (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
   `pt_PT`, `ru`, `uk`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
@@ -579,9 +583,10 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   neighbouring key (or one swap) from a very common two-letter word is fixed too
   ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
   Spanish and Italian only). Auto-capitalization is unchanged.
-  The 123 and #+= pages are English's in every language (the system Ukrainian keyboard
-  shows ₴ on its currency key; Hex holds it on $), and the accent lists
-  come from Apple's layouts as remembered, not checked against a device.
+  The 123 and #+= pages are English's in every language; their held keys follow each
+  language's system keyboard where it differs (# holds № in Russian and Ukrainian, the
+  digits º and ª in Spanish and Italian, . holds · in French, $ holds ₴ in Ukrainian and
+  kr in Norwegian).
 - **Size (full keyboard):** The suggestion strip is Apple's 44 pt predictive bar in
   every state (suggestions, Undo dictation, the Full Access hint, the recording bar,
   the emoji panel's top row, the Logging mark) and both orientations, with 8 pt under
