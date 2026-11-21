@@ -634,14 +634,17 @@ never at a launch by itself.
   `settings.dictationLanguage.supported`). One variant per language, the first
   of the current, the recents and the preferred winning, so Spain's Spanish and
   Mexico's never both take a chip; picking one drops its siblings from the
-  recents (Norwegian's nb/nn/no aliases stay one language). Names are each
-  language's own ("Español", "Deutsch", "עברית"), with the region where Apple
-  Speech has more than one of that language ("Español (US)" or "Español (ES)",
-  "English (GB)"; Norwegian stays "Norsk"), so the menu says which variant
-  dictation actually uses. Under Automatic, Settings › Dictation language says the
-  same itself while the keyboard follows: "Follows keyboard: English (US) ·
-  Spanish (US)" names each keyboard language's dictation language, and is
-  refreshed when Hex comes back to the foreground, not only when the row
+  recents (Norwegian's nb/nn/no aliases stay one language). Chinese stays
+  apart, so Mandarin's zh-CN, Taiwan's zh-TW and Cantonese's zh-HK each keep a
+  chip and a pick keeps the others in the recents. Names are each language's
+  own ("Español", "Deutsch", "עברית"), with the region where Apple Speech has
+  more than one of that language ("Español (US)" or "Español (ES)", "English
+  (GB)"; Norwegian stays "Norsk"), so the menu and the dictation bar's chips
+  say which variant dictation actually uses. Under Automatic, Settings ›
+  Dictation language says the same itself while the keyboard follows: "Follows
+  keyboard: English (US) · Spanish (US)" names each keyboard language's
+  dictation language, and is refreshed when Hex comes back to the foreground,
+  not only when the row
   appears. A long press on a language (a chip, or a row on the Hex key menu's Language
   page) shows **Remove**, which takes it off (`settings.dictationLanguage.removed`, so one
   of the iPhone's own languages stays off too) and puts the one set back on Automatic;
@@ -1156,9 +1159,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   becomes ς ("ΟΔΟΣ" → "οδος"), as desktop's `to_lowercase` does.
   **Spanish variants** have unit tests only: es-419 and es-CO resolve to es-US then
   es-MX, plain `es` by the iPhone's Region, a picked variant survives a swipe away and
-  back, the switch offers one variant per language, and the Hex key menu names the
-  region. No iPhone or simulator ran the Spanish variants for this change, and the
-  Settings line and menu labels weren't captured.
+  back, the switch offers one variant per language with Chinese's variants kept apart,
+  and the Hex key menu names the region. No iPhone or simulator ran the Spanish variants
+  for this change, and the Settings line and menu labels weren't captured.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes

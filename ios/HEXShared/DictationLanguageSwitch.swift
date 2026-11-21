@@ -9,9 +9,11 @@ nonisolated enum DictationLanguageSwitch {
     /// Experiments › Hinglish is on (shown as Hinglish), then the iPhone's preferred languages.
     /// Each is matched to a language Apple Speech has (`supported`, BCP 47) when that list is
     /// known, and dropped when it has none. One variant per language: the first of es-US and
-    /// es-ES wins, so no two chips mean the same language. Languages taken off the switch
-    /// (`removed`, as it listed them) stay off, except the one set now. `region` is the
-    /// iPhone's Region, which Spanish without one of its own follows.
+    /// es-ES wins, so no two chips mean the same language (`variantKey`), except Chinese,
+    /// whose variants stay apart (Mandarin's zh-CN, Taiwan's zh-TW and Cantonese's zh-HK each
+    /// get a chip). Languages taken off the switch (`removed`, as it listed them) stay off,
+    /// except the one set now. `region` is the iPhone's Region, which Spanish without one of
+    /// its own follows.
     static func choices(
         current: String?,
         recent: [String],
@@ -24,14 +26,14 @@ nonisolated enum DictationLanguageSwitch {
         var result: [String] = []
         var languages = Set<String>()
         if let current, let match = supportedMatch(for: current, in: supported, region: region) {
-            languages.insert(languageCode(of: match) ?? match)
+            languages.insert(variantKey(of: match) ?? match)
             result.append(match)
         }
         func offer(_ identifier: String) {
             guard result.count < maxChoices,
                   let match = supportedMatch(for: identifier, in: supported, region: region),
                   !removed.contains(match),
-                  languages.insert(languageCode(of: match) ?? match).inserted else { return }
+                  languages.insert(variantKey(of: match) ?? match).inserted else { return }
             result.append(match)
         }
         let offered = hinglish ? [HinglishSettings.language] : []
@@ -151,6 +153,17 @@ nonisolated enum DictationLanguageSwitch {
     static func languageCode(of identifier: String) -> String? {
         let code = Locale(identifier: identifier).language.languageCode?.identifier
         return code == "nn" || code == "no" ? "nb" : code
+    }
+
+    /// Which languages count as one on the switch and in the recents: the language a variant
+    /// belongs to, as `languageCode` names it, so es-US and es-ES are one and picking either
+    /// drops the other. Chinese is never one: the written language splits by script and region
+    /// (Mandarin's zh-CN and Taiwan's zh-TW), and Cantonese (zh-HK, yue) is a language of its
+    /// own, so each keeps its full identifier and its own chip.
+    static func variantKey(of identifier: String) -> String? {
+        guard let code = languageCode(of: identifier) else { return nil }
+        guard code == "zh" || code == "yue" else { return code }
+        return Locale(identifier: identifier).identifier(.bcp47)
     }
 
     /// The language's own short name: "English", "Norsk", "Español", "Deutsch", "עברית",

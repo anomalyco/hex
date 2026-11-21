@@ -738,7 +738,12 @@ struct KeyboardSurfaceView: View {
     }
 
     private func languageTrayBar(palette p: KeyboardChromePalette) -> some View {
-        let names = DictationLanguageSwitch.nativeNames(for: model.languageChoices)
+        // Apple Speech's languages here, as the Hex key menu names them: the chips and More
+        // languages together name a language's region where it has several ("Español (US)").
+        let names = DictationLanguageSwitch.nativeNames(
+            for: model.languageChoices,
+            supported: model.languageChoices + model.moreLanguages
+        )
         return HStack(spacing: 4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {

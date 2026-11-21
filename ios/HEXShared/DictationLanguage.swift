@@ -274,16 +274,18 @@ nonisolated struct LanguageSettings {
     /// A choice made in Hex or the keyboard: the setting, and the front of the recents. The
     /// other variants of that language leave the recents, so es-US and es-ES never both take
     /// a chip (`DictationLanguageSwitch.choices` offers one per language); Norwegian's
-    /// nb/nn/no aliases are one language, as Hinglish's Hindi is one.
+    /// nb/nn/no aliases are one language, as Hinglish's Hindi is one, and Chinese's variants
+    /// stay apart (`DictationLanguageSwitch.variantKey`), so picking Mandarin's zh-CN leaves
+    /// Cantonese's zh-HK in the recents.
     func chooseDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
         clearKeyboardNeedsHex()
         if let identifier {
-            let code = DictationLanguageSwitch.languageCode(of: identifier)
+            let key = DictationLanguageSwitch.variantKey(of: identifier)
             recentDictationLanguages = [identifier] + recentDictationLanguages.filter {
                 guard $0 != identifier else { return false }
-                guard let code else { return true }
-                return DictationLanguageSwitch.languageCode(of: $0) != code
+                guard let key else { return true }
+                return DictationLanguageSwitch.variantKey(of: $0) != key
             }
             let match = DictationLanguageSwitch.supportedMatch(for: identifier, in: supportedDictationLanguages)
             let removed = removedDictationLanguages

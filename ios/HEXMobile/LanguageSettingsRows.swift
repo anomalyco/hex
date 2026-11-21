@@ -54,7 +54,9 @@ struct DictationLanguageRow: View {
                                     if dictation.dictationLanguage != nil, settings.dictationLanguage == nil {
                                         dictation.setDictationLanguage(nil)
                                     }
-                                    keyboardChoices = settings.keyboardLanguageChoices()
+                                    // The switch's chips and the "Follows keyboard" line
+                                    // both change when a language comes off.
+                                    refreshLanguageChoices()
                                 } label: {
                                     Text(name(for: id))
                                 }
@@ -136,7 +138,6 @@ struct DictationLanguageRow: View {
     /// bar's language: each keyboard language's dictation language, short.
     private func followsKeyboardSummary(_ settings: LanguageSettings) -> String? {
         guard settings.keyboardDictationLanguage() != nil else { return nil }
-        let supported = settings.supportedDictationLanguages
         let preferred = Locale.preferredLanguages
         let region = Locale.current.region?.identifier
         var names: [String] = []

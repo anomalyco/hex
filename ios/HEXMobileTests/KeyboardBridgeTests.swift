@@ -731,6 +731,33 @@ final class DictationLanguageSwitchTests: XCTestCase {
         XCTAssertEqual(settings.recentDictationLanguages, ["hi-IN", "nb-NO", "es-MX", "en-GB"])
     }
 
+    /// Chinese is more than one spoken language: Mandarin's zh-CN, Taiwan's zh-TW and
+    /// Cantonese's zh-HK are told apart by script and region, so each keeps a chip and
+    /// picking one leaves the others in the recents.
+    func testChineseVariantsStayApart() throws {
+        let chinese = ["en-US", "zh-CN", "zh-TW", "zh-HK"]
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(
+                current: "zh-CN",
+                recent: ["zh-HK"],
+                preferred: ["zh-TW"],
+                supported: chinese,
+                region: "US"
+            ),
+            ["zh-CN", "zh-HK", "zh-TW"],
+            "one chip per language, but not one for all of Chinese"
+        )
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        settings.chooseDictationLanguage("zh-CN")
+        settings.chooseDictationLanguage("zh-HK")
+        XCTAssertEqual(settings.recentDictationLanguages, ["zh-HK", "zh-CN"])
+        settings.chooseDictationLanguage("zh-TW")
+        XCTAssertEqual(settings.recentDictationLanguages, ["zh-TW", "zh-HK", "zh-CN"])
+    }
+
     /// A language with more than one variant in Apple Speech names its region, as Apple's own
     /// keyboards do; one with a single variant keeps its plain name.
     func testNamesTheRegionOnlyWhereAppleHasMoreThanOneVariant() {
