@@ -24,7 +24,8 @@ internal enum class Spoken(val code: String, val label: String) {
  * keyboard follows while it is the dictation language, when there is one. */
 internal enum class DictationLanguage(val code: String, val label: String, val layout: Spoken?) {
     English("en", "English", Spoken.English), Spanish("es", "Español", Spoken.Spanish),
-    German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian);
+    German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian),
+    French("fr", "Français", Spoken.French), Italian("it", "Italiano", Spoken.Italian), Dutch("nl", "Nederlands", null);
 
     companion object {
         fun matching(code: String?): DictationLanguage? = when (code) {
