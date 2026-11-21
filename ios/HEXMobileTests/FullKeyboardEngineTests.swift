@@ -298,9 +298,11 @@ final class FullKeyboardEngineTests: XCTestCase {
         type("helo")
         let spaceStart = point(.space)
         engine.touchBegan(id: 1, at: spaceStart)
-        // Enter trackpad mode (-12 pt) then drag left by 16 pt (-2 chars: before "lo").
         let enterPoint = CGPoint(x: spaceStart.x - 12, y: spaceStart.y)
         engine.touchMoved(id: 1, to: enterPoint)
+        XCTAssertFalse(engine.isTrackpadActive, "a slide alone doesn't start it")
+        // Held, then dragged left by 16 pt (-2 chars: before "lo").
+        engine.holdSpace(forTouch: 1)
         XCTAssertTrue(engine.isTrackpadActive)
         engine.touchMoved(id: 1, to: CGPoint(x: enterPoint.x - 16, y: spaceStart.y))
         engine.touchEnded(id: 1, at: CGPoint(x: enterPoint.x - 16, y: spaceStart.y))
@@ -405,8 +407,9 @@ final class FullKeyboardEngineTests: XCTestCase {
 
     /// With two or more languages a quick swipe along the space bar switches language (to the
     /// left the next, to the right the one before) and types nothing; a slip shorter than a
-    /// swipe is still a space; a hold, then a slide, moves the cursor. With one language any
-    /// slide moves the cursor at once, as before.
+    /// swipe is still a space; a hold, then a slide, moves the cursor. With one language a
+    /// quick slide is a space too, as on Apple's (TestFlight build 56: "missing the space
+    /// key", where a tap that drifted 10 pt started the trackpad and typed nothing).
     func testASpaceBarSwipeSwitchesLanguageAndAHoldThenSlideMovesTheCursor() {
         var steps: [Int] = []
         engine.onLanguageSwipe = { steps.append($0) }
@@ -452,11 +455,16 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(steps, [1, -1, 1])
 
         engine.switchesLanguage = false
-        engine.touchBegan(id: 5, at: start)
-        now += 0.05
-        engine.touchMoved(id: 5, to: CGPoint(x: start.x + 12, y: start.y))
-        XCTAssertTrue(engine.isTrackpadActive, "one language: a quick slide moves the cursor")
-        engine.touchEnded(id: 5, at: CGPoint(x: start.x + 12, y: start.y))
+        let spaces = target.text.filter { $0 == " " }.count
+        for (id, dx) in [(5, CGFloat(12)), (7, -24), (8, 40)] {
+            engine.touchBegan(id: id, at: start)
+            now += 0.05
+            engine.touchMoved(id: id, to: CGPoint(x: start.x + dx, y: start.y))
+            XCTAssertFalse(engine.isTrackpadActive, "one language: a quick slide is still a tap")
+            engine.touchEnded(id: id, at: CGPoint(x: start.x + dx, y: start.y))
+            now += 1
+        }
+        XCTAssertEqual(target.text.filter { $0 == " " }.count, spaces + 3, "each typed a space")
         XCTAssertEqual(steps, [1, -1, 1])
     }
 
@@ -2450,7 +2458,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         plane.began(id: 2, sample: sample(CGPoint(x: space.midX, y: space.midY)))
         plane.moved(id: 2, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
         plane.ended(id: 2, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
-        XCTAssertEqual(field.text, "one ", "the space bar's trackpad moves the cursor, types nothing")
+        XCTAssertEqual(field.text, "one  ", "a quick slide along the space bar is a space, as on Apple's")
         XCTAssertFalse(plane.engine.isSwiping)
 
         // With two languages a quick slide along the space bar switches language, never a swipe.
@@ -2463,7 +2471,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         plane.ended(id: 3, sample: sample(CGPoint(x: space.midX - 60, y: space.midY)))
         XCTAssertEqual(steps, [1])
         XCTAssertFalse(plane.engine.isSwiping)
-        XCTAssertEqual(field.text, "one ")
+        XCTAssertEqual(field.text, "one  ")
     }
 
     /// Swipe typing follows the language the space bar switches to: on for English and

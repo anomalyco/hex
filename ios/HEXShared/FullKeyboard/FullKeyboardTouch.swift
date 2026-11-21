@@ -21,7 +21,7 @@ extension FullKeyboardEngine {
         /// True once such a press slid onto a character key, so letting go back on the page
         /// key is a slide taken back rather than a tap.
         var hasSlid = false
-        /// True once a spacebar press crosses `trackpadActivationDistance`.
+        /// True once a spacebar press is held `trackpadHoldDelay` (`holdSpace`).
         var isTrackpad = false
         /// True once a spacebar press slides before its hold (`holdSpace`) while it switches
         /// language: letting go far enough along switches instead of typing a space.

@@ -219,8 +219,8 @@ Taps that aren't text: `action`:
 
 - `accent_open` (`id`, `key`, `options`), `accent_pick` (`id`, `index`, `chosen`,
   `rollover` when another key committed it), `accent_cancel`;
-- `trackpad_start` (`id`; `hold: true` when holding space still for 0.4 s
-  started it), `trackpad_end` (`id`, `offset`: total UTF-16 units);
+- `trackpad_start` (`id`; `hold: true`, as only holding the space bar starts it;
+  older logs without it had a 10 pt slide start it), `trackpad_end` (`id`, `offset`: total UTF-16 units);
 - `language_swipe` (`id`, `step`: 1 the next language, -1 the one before) and
   `keyboard_language` (`language`: the layout it switched to), with two or more
   keyboard languages;
