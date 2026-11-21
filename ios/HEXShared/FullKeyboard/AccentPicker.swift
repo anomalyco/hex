@@ -104,10 +104,18 @@ nonisolated enum AccentCatalog {
         "6": "6 6º 6ª", "7": "7 7º 7ª", "8": "8 8º 8ª", "9": "9ª 9 9º", "0": "0 0ª ° 0º",
     ]) { _, spanish in spanish }
 
+    /// The Greek keyboard's: each held letter opens from the key's own on the left, and its
+    /// held " differs from English's; every other symbol's is English's.
+    private static let greekOrder: [String: String] = englishOrder.filter { $0.key.first?.isLetter != true }.merging([
+        "ε": "ε έ", "υ": "υ ύ ϋ ΰ", "ι": "ι ί ϊ ΐ", "ο": "ο ό", "α": "α ά", "σ": "σ ς",
+        "η": "η ή", "κ": "κ ϗ", "ω": "ω ώ", "\"": "„ “ ” « » \"",
+    ]) { _, greek in greek }
+
     private static func displayOrder(for language: KeyboardLanguage) -> [String: String] {
         switch language {
         case .english: englishOrder
         case .spanish: spanishOrder
+        case .greek: greekOrder
         default: [:]
         }
     }
@@ -123,10 +131,14 @@ nonisolated enum AccentCatalog {
         let key = base.lowercased()
         guard let order = displayOrder(for: language)[key],
               let options = options(for: key, uppercase: false, language: language, letters: letters) else { return nil }
-        let rows = order.split(separator: "|").map { $0.split(separator: " ").map(String.init) }
+        var rows = order.split(separator: "|").map { $0.split(separator: " ").map(String.init) }
         let all = rows.flatMap { $0 }
-        guard all.count == options.count, Set(all) == Set(options),
-              let baseRow = rows.firstIndex(where: { $0.contains(key) }),
+        guard all.count == options.count, Set(all) == Set(options) else { return nil }
+        if uppercase, language == .greek {
+            rows = rows.map { $0.filter { !greekWithoutCapitals.contains($0) } }.filter { !$0.isEmpty }
+            guard rows.joined().count > 1 else { return nil }
+        }
+        guard let baseRow = rows.firstIndex(where: { $0.contains(key) }),
               let baseColumn = rows[baseRow].firstIndex(of: key) else { return nil }
         let shown = uppercase ? rows.map { $0.map(upper) } : rows
         return AccentArrangement(rows: shown, baseRow: baseRow, baseColumn: baseColumn)

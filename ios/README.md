@@ -726,7 +726,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   ϊ´ → ΐ, and after anything else, an accented vowel included, types ´ itself, as the system
   keyboard was observed to with real touches in Messages (no dead key, no ¨ key); held, each
   vowel offers its tonos form, ι and υ also ϊ ΐ and ϋ ΰ, σ offers ς and κ the kai sign ϗ, and
-  in capitals Σ offers nothing and Ι, Υ only Ί Ϊ, Ύ Ϋ; σ types ς while it ends the word and
+  in capitals Σ offers nothing and Ι, Υ only Ί Ϊ, Ύ Ϋ, each callout laid out as the system's,
+  the key's own on the left (`AccentCatalog.arrangement`, as for English and Spanish); σ types ς while it ends the word and
   turns back into σ when another letter follows, as the system keyboard does; its 123 page
   has the ano teleia · in ;'s place and ; (the Greek question mark, which also starts the next
   sentence with a capital) in ?'s, its #+= page ? in |'s, its currency key is $ held as

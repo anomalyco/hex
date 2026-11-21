@@ -1099,6 +1099,17 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(AccentCatalog.options(for: "\"", uppercase: false, language: .greek), ["\"", "»", "«", "”", "“", "„"])
         XCTAssertEqual(AccentCatalog.options(for: "$", uppercase: false, language: .greek), AccentCatalog.options(for: "$", uppercase: false))
         XCTAssertEqual(AccentCatalog.options(for: "?", uppercase: false, language: .greek), ["?", "¿"])
+        // Laid out as the system Greek keyboard's callouts: the key's own on the left, capitals
+        // without the forms that have none, and its own order for ".
+        XCTAssertEqual(AccentCatalog.arrangement(for: "ι", uppercase: false, language: .greek), AccentArrangement(rows: [["ι", "ί", "ϊ", "ΐ"]], baseRow: 0, baseColumn: 0))
+        XCTAssertEqual(AccentCatalog.arrangement(for: "ι", uppercase: true, language: .greek), AccentArrangement(rows: [["Ι", "Ί", "Ϊ"]], baseRow: 0, baseColumn: 0))
+        XCTAssertEqual(AccentCatalog.arrangement(for: "κ", uppercase: false, language: .greek)?.rows, [["κ", "ϗ"]])
+        XCTAssertNil(AccentCatalog.arrangement(for: "σ", uppercase: true, language: .greek))
+        XCTAssertEqual(AccentCatalog.arrangement(for: "\"", uppercase: false, language: .greek)?.rows, [["„", "“", "”", "«", "»", "\""]])
+        XCTAssertEqual(
+            AccentCatalog.arrangement(for: "$", uppercase: false, language: .greek),
+            AccentCatalog.arrangement(for: "$", uppercase: false)
+        )
         XCTAssertEqual(
             AccentCatalog.options(for: "\"", uppercase: false, language: .romanian),
             ["\"", "„", "”", "»", "«", "“"]
