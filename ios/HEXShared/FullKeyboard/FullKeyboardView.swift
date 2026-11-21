@@ -34,6 +34,8 @@ final class FullKeyboardView: UIView {
     var onReturnKey: (() -> Void)?
 
     let stripView = KeyboardStripView()
+    /// The strip's two-thumb selection: the range, then its actions (Settings › Experiments).
+    let selectionStrip = TrackpadSelectionStripView()
     /// The keys' touch surface; tests feed it touch samples.
     let plane: KeyboardKeyPlaneView
     let callout = KeyCalloutView()
@@ -55,6 +57,10 @@ final class FullKeyboardView: UIView {
     private var barHoldTouch: UITouch?
     private var barHoldWork: DispatchWorkItem?
     private var lastDictation: DictationUndo?
+    /// The model's stage last seen, for a selection's dictation ending.
+    private var lastStagePhase: KeyboardViewModel.StagePhase?
+    private var selectionDictationStarted = false
+    private var selectionDictationSettle: DispatchWorkItem?
     /// A word you typed whose slot you held: the strip offers Add to vocabulary until the text
     /// changes (`FullKeyboardView+Vocabulary`).
     var vocabularyOffer: String?
@@ -137,6 +143,7 @@ final class FullKeyboardView: UIView {
         morph.isHidden = true
         addSubview(morph)
         addSubview(plane)
+        addSubview(selectionStrip)
         addSubview(hexKey)
         addSubview(globeButton)
         addSubview(callout)
@@ -168,6 +175,7 @@ final class FullKeyboardView: UIView {
             self?.typingLog?.ui("next_keyboard")
             self?.hostController?.advanceToNextInputMode()
         }
+        selectionStrip.onAction = { [weak self] action in self?.selectionAction(action) }
 
         globeButton.accessibilityLabel = "Next keyboard"
         globeButton.isAccessibilityElement = true
@@ -232,6 +240,7 @@ final class FullKeyboardView: UIView {
         engine.autocorrect.setVocabulary(CustomVocabularySettings().terms)
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
+        engine.trackpadSelectionState.enabled = FullKeyboardSettings().twoThumbSelection
         syncHexPlacement()
         refreshEmojiKey()
         syncSpatialAutocorrect()
@@ -470,6 +479,7 @@ final class FullKeyboardView: UIView {
         }
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
+        engine.trackpadSelectionState.enabled = FullKeyboardSettings().twoThumbSelection
         hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
         refreshEmojiKey()
@@ -616,6 +626,7 @@ final class FullKeyboardView: UIView {
     /// next edit, or until it can't be found from the cursor.
     func didInsertDictation(_ text: String, before: String = "", after: String = "") {
         lastDictation = DictationUndo(text: text, before: before, after: after)
+        engine.finishSelectionDictation()
         refreshStrip()
         undoHideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.hideUndo() }
@@ -666,6 +677,7 @@ final class FullKeyboardView: UIView {
         callout.frame = content
         accentCallout.frame = content
         stripView.frame = layout.stripFrame.offsetBy(dx: 0, dy: lift)
+        selectionStrip.frame = stripView.frame
         stripView.slotFrames = layout.stripSlotFrames.map { $0.offsetBy(dx: -layout.stripFrame.minX, dy: -layout.stripFrame.minY) }
         stripView.pillInset = layout.metrics.stripInset
         stripView.textCenterY = layout.metrics.stripTextCenter
@@ -715,6 +727,7 @@ final class FullKeyboardView: UIView {
         didApplyPalette = true
         palette = next
         stripView.palette = next
+        selectionStrip.palette = next
         plane.palette = next
         callout.palette = next
         callout.setNeedsDisplay()
@@ -756,6 +769,7 @@ final class FullKeyboardView: UIView {
             menu.style = model.style
             applyLanguages(to: menu)
         }
+        trackSelectionDictation()
         refreshStrip()
     }
 
@@ -770,6 +784,15 @@ final class FullKeyboardView: UIView {
     }
 
     func refreshStrip() {
+        // A two-thumb selection takes the strip: the range while both thumbs are down, then
+        // its actions. The keyboard's own strip (suggestions, Undo, chips) waits behind it.
+        let selection = engine.selectionPresentation
+        selectionStrip.update(selection, canUseClipboard: model.hasFullAccess)
+        if selection != nil {
+            stripView.isHidden = true
+        } else if !showsRecording {
+            stripView.isHidden = false
+        }
         // Without Full Access the strip suggests and corrects like any keyboard's; what
         // dictation needs shows only once the Hex key is tapped (`showFullAccessHint`).
         let status: String? = if model.hasFullAccess, model.stagePhase == .failed {
@@ -813,6 +836,73 @@ final class FullKeyboardView: UIView {
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
             notice: vocabularyNotice ?? translationNotice
         )
+    }
+
+    // MARK: - Two-thumb selection (Settings › Experiments)
+
+    /// Delete, Cut, Copy, Dictate or Cancel on the range two thumbs picked.
+    private func selectionAction(_ action: TrackpadSelectionSession.Action) {
+        keyFeedback()
+        if action == .dictate {
+            startSelectionDictation()
+            return
+        }
+        engine.performTrackpadSelectionAction(action) { [weak self] text in
+            guard let self, self.model.hasFullAccess else { return }
+            UIPasteboard.general.string = text
+        }
+        refreshStrip()
+    }
+
+    /// Dictate takes the range out and starts the keyboard's usual dictation where it was.
+    /// Without a dictation that can run in the keyboard (the warm Hex session or in-keyboard
+    /// dictation), opening Hex would leave the range behind, so it opens Hex as the Hex key
+    /// does and the text stays.
+    private func startSelectionDictation() {
+        guard model.hasFullAccess, model.dictatesThroughHex || model.onLocalDictateTap != nil else {
+            engine.performTrackpadSelectionAction(.cancel) { _ in }
+            refreshStrip()
+            hexKeyHeld(from: "selection_dictate")
+            return
+        }
+        guard engine.performTrackpadSelectionAction(.dictate, copy: { _ in }) else { return }
+        selectionDictationStarted = false
+        lastStagePhase = model.stagePhase
+        hexKeyHeld(from: "selection_dictate")
+        // A dictation that never starts puts the text back rather than leaving it out.
+        scheduleSelectionDictationSettle(after: 3)
+    }
+
+    /// The dictation around a selection: from recording to idle or failed, a cancelled or
+    /// empty one puts the taken range back once the field has settled.
+    private func trackSelectionDictation() {
+        let phase = model.stagePhase
+        guard phase != lastStagePhase else { return }
+        lastStagePhase = phase
+        guard engine.hasPendingSelectionDictation else { return }
+        switch phase {
+        case .recording, .transcribing:
+            selectionDictationStarted = true
+            selectionDictationSettle?.cancel()
+            selectionDictationSettle = nil
+        case .failed:
+            scheduleSelectionDictationSettle()
+        case .idle:
+            guard selectionDictationStarted else { return }
+            scheduleSelectionDictationSettle()
+        }
+    }
+
+    private func scheduleSelectionDictationSettle(after delay: TimeInterval = 0.7) {
+        selectionDictationSettle?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.engine.hasPendingSelectionDictation else { return }
+            self.engine.restoreSelectionDictation()
+            self.selectionDictationStarted = false
+            self.refreshStrip()
+        }
+        selectionDictationSettle = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
     }
 
     /// The last dictation went in as spoken while Translate what I say was on: what happened,

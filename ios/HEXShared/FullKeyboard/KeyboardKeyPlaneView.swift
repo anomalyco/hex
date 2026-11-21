@@ -84,6 +84,7 @@ final class KeyboardKeyPlaneView: UIView {
     /// this view lies over the strip, so it gets those touches before the suggestions.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         engine.layout.touchAreaFrame.contains(point) || engine.takesStripTouch(at: point)
+            || (engine.startsTwoThumbSelection && engine.layout.stripFrame.contains(point))
     }
 
     // MARK: - Drawing
@@ -98,7 +99,7 @@ final class KeyboardKeyPlaneView: UIView {
         pressed.formUnion(lingeringFunctionKinds)
         // Like Apple's spacebar trackpad, key glyphs fade out while sliding the cursor, and the
         // keycaps fade most of the way to blank (`trackpadKeycapAlpha`).
-        let hideGlyphs = engine.isTrackpadActive
+        let hideGlyphs = engine.isTrackpadActive || engine.isSelectionActive
         let glyphAlpha = currentGlyphAlpha()
         let keycapAlpha = 1 - (1 - Self.trackpadKeycapAlpha) * (1 - glyphAlpha)
         let showGlyphs = { () -> Bool in
@@ -485,8 +486,15 @@ final class KeyboardKeyPlaneView: UIView {
     // and after a move, so the line names the key the finger slid onto.
 
     func began(id: Int, sample: TypingLogTouchSample) {
-        // A second finger on the trackpad's blank keys: no click, no key (`touchBegan`).
-        if engine.isTrackpadActive { return }
+        // A second finger on the trackpad: Two-thumb selection takes it, or it's ignored as
+        // before (no click, no key). With its actions showing, the key goes on to dismiss them.
+        if engine.isSelectionActive, !engine.selectionActionsShown { return }
+        if engine.isTrackpadActive, !engine.isSelectionActive {
+            guard engine.startsTwoThumbSelection else { return }
+            typingLog?.touch(.began, id: id, sample: sample, key: engine.key(at: sample.point), under: engine.layout.hitTest(sample.point))
+            engine.touchBegan(id: id, at: sample.point)
+            return
+        }
         // A swipe still under way types its word before this key's letter.
         swipe?.touchWillBegin()
         // The key's tick and click go first, on touch-down as Apple's do: the press's own work
@@ -589,7 +597,7 @@ final class KeyboardKeyPlaneView: UIView {
 
     /// The labels' opacity for this frame, easing toward hidden while the trackpad is on.
     private func currentGlyphAlpha() -> CGFloat {
-        let target: CGFloat = engine.isTrackpadActive ? 0 : 1
+        let target: CGFloat = engine.isTrackpadActive || engine.isSelectionActive ? 0 : 1
         if glyphFade?.to != target, glyphFade != nil || glyphAlpha != target {
             if window == nil || UIAccessibility.isReduceMotionEnabled {
                 endGlyphFade(at: target)

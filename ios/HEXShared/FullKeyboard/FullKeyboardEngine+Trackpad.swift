@@ -72,6 +72,7 @@ extension FullKeyboardEngine {
     /// It may show more of the text, or that the cursor is at the text's start or a line's end,
     /// so the cursor goes where the point is once more.
     func trackpadFieldChanged() {
+        guard trackpadSelectionState.session == nil else { return }
         guard let (id, found) = touches.first(where: { $0.value.isTrackpad }), var state = found.trackpad else { return }
         var touch = found
         if state.nearsEdge { _ = catchUp(&state) }

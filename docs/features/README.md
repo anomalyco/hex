@@ -2873,7 +2873,7 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Adaptive touch, German spatial autocorrect, ABC under the emoji key,
-│   Learn each language separately
+│   Two-thumb selection, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2899,6 +2899,22 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Abend"), and Auto-capitalization off adds none.
 │   Off, German keeps the dictionary engine and has no word list, so no letter odds,
 │   model completions or bilingual partner model
+├── Two-thumb selection (off by default, `experiments.twoThumbSelection`): while
+│   the space bar is the trackpad, a second finger starts a selection from the cursor;
+│   the finger further left moves the range's start and the other its end, each with its
+│   own `TrackpadCursor.State` (the trackpad's gain, acceleration and rows), and the host
+│   cursor doesn't move while selecting. `UITextDocumentProxy` can read a selection but
+│   not set one, so the strip shows the text around the range with the selected part
+│   highlighted, within the text the host shares (`documentContextBeforeInput`/
+│   `AfterInput`). Both thumbs up shows Delete · Cut · Copy · Dictate · Cancel: Delete
+│   moves to the range's end with `adjustTextPosition` and deletes its characters one by
+│   one (an emoji is one), Cut copies then deletes, Copy copies and puts the cursor at the
+│   end, Cancel changes nothing, and any other key dismisses them. Cut and Copy appear only
+│   with Full Access (the strip's clipboard rule). Dictate removes the range and starts the
+│   keyboard's warm or in-keyboard dictation there, restoring the text if it's cancelled or
+│   hears nothing; where dictation would open Hex instead the text stays. An empty range
+│   ends like a normal trackpad lift. Off, a second finger is ignored exactly as before.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed
 │   or dictated in; on, the keys learn a language's typos and rejections from that

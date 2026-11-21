@@ -71,11 +71,9 @@ final class FullKeyboardEngine {
     static let trackpadActivationDistance: CGFloat = 10
     /// The dictation bar's space bar moves the cursor a character per this many points.
     static let trackpadPointsPerCharacter: CGFloat = 7.5
-    /// Holding the space bar this long without sliding starts the trackpad, as Apple's does;
-    /// letting go then types no space. A slide moves the cursor only after it; before it, a
-    /// slide is still a tap, or with two or more languages a language swipe.
-    /// Apple's space bar turns into the trackpad 330 to 365 ms after touch-down (iOS 27.2, the
-    /// cursor's first move after holds of 250 to 550 ms), and travel before then doesn't count.
+    /// Holding the space bar this long without sliding starts the trackpad, as Apple's does
+    /// (330 to 365 ms after touch-down, iOS 27.2); letting go then types no space, and a slide
+    /// before it is still a tap, or a language swipe. Travel before then doesn't count.
     static let trackpadHoldDelay: TimeInterval = 0.35
     /// A finger on the strip's lower half this soon after a key went down or came up (or
     /// while one is down) types the row-1 key below it (`takesStripTouch(at:)`).
@@ -95,6 +93,8 @@ final class FullKeyboardEngine {
     var suggestionSpaceBefore: String?
     /// When a key last went down or came up, for `takesStripTouch(at:)`.
     private var lastKeyTouchAt: TimeInterval?
+    /// Two-thumb selection: the switch, the range picked, and what Dictate took out.
+    var trackpadSelectionState = TrackpadSelectionState()
 
     /// Where each letter of the word being typed was tapped (nil for one that came another
     /// way, such as an accent), for Spatial autocorrect.
@@ -320,6 +320,7 @@ final class FullKeyboardEngine {
         adaptiveTouch?.beginSession()
         syncAdaptiveField()
         cancelAllTouches()
+        trackpadSelectionState.pendingRemoval = nil
         rebuildLayout(cause: "field")
         refreshAutoCapitalization()
         refreshSuggestions()
@@ -545,9 +546,13 @@ final class FullKeyboardEngine {
     }
 
     func touchBegan(id: Int, at point: CGPoint) {
-        // A second finger while the space bar is the trackpad starts a selection on Apple's,
-        // which a keyboard can't make, so it's ignored rather than typing the blank key under it.
-        guard !isTrackpadActive else { return }
+        // A key while a selection's actions show dismisses them; a second finger on the
+        // trackpad starts the two-thumb selection (Settings › Experiments), or is ignored.
+        dismissTrackpadSelectionIfNeeded()
+        if isTrackpadActive {
+            beginTwoThumbSelectionIfEnabled(with: id, at: point)
+            return
+        }
         let downPoint = point
         let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
@@ -666,6 +671,7 @@ final class FullKeyboardEngine {
 
     /// `time` is the touch's own (`UITouch.timestamp`), else now.
     func touchMoved(id: Int, to point: CGPoint, time: TimeInterval? = nil) {
+        if moveTwoThumbSelection(id: id, to: point, time: time) { return }
         guard var touch = touches[id] else { return }
         touch.point = point
 
@@ -742,6 +748,7 @@ final class FullKeyboardEngine {
     }
 
     func touchEnded(id: Int, at point: CGPoint) {
+        if endTwoThumbSelection(id: id, at: point) { return }
         guard var touch = touches.removeValue(forKey: id) else { return }
         touchOrder.removeAll { $0 == id }
         lastKeyTouchAt = clock()
@@ -856,6 +863,7 @@ final class FullKeyboardEngine {
     }
 
     func touchCancelled(id: Int) {
+        if cancelTwoThumbSelection(id: id) { return }
         if activeAccentTouchID == id {
             activeAccentMenu = nil
             activeAccentTouchID = nil
@@ -866,8 +874,15 @@ final class FullKeyboardEngine {
         onChange?()
     }
 
+    /// A selection finger is over: its touch goes with it, the space bar's trackpad touch too.
+    func removeSelectionTouch(_ id: Int) {
+        touches.removeValue(forKey: id)
+        touchOrder.removeAll { $0 == id }
+    }
+
     func cancelAllTouches() {
-        let hadTouches = !touches.isEmpty || activeAccentMenu != nil || isSwiping
+        let hadTouches = !touches.isEmpty || activeAccentMenu != nil || isSwiping || trackpadSelectionState.session != nil
+        trackpadSelectionState.session = nil
         touches.removeAll()
         touchOrder.removeAll()
         isSwiping = false

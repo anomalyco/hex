@@ -178,8 +178,8 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 
 | `op` | fields |
 | --- | --- |
-| `insert` | `inserted`, `src`: `key` (a character or space), `accent` (long-press pick), `slide` (hold 123, slide, let go), `bar` (the dictation bar's space) |
-| `delete` | `deleted` (the character), `src`: `key` (on press), `repeat` (held, 75 ms), `repeat_fast` (after 0.85 s, two at a time), `bar` |
+| `insert` | `inserted`, `src`: `key` (a character or space), `accent` (long-press pick), `slide` (hold 123, slide, let go), `bar` (the dictation bar's space), `selection_restore` (Two-thumb selection's Dictate putting a cancelled one back; `insertedCount` when longer than 80 characters) |
+| `delete` | `deleted` (the character), `src`: `key` (on press), `repeat` (held, 75 ms), `repeat_fast` (after 0.85 s, two at a time), `bar`, `selection` (Two-thumb selection's Delete), `selection_cut`, `selection_dictate` (its Dictate, before the dictation; `deletedCount` when the range is longer than 80 characters) |
 | `delete_word` | `deleted`, `src`: `repeat_word` (held past 1.4 s) |
 | `autocorrect` | `from`, `to`, `deleted` (= `from`), `inserted` (`to` + space). Applied on space. |
 | `autocorrect_undo` | `deleted` (the correction, without its space or mark), `inserted` (what was typed), `src`: `strip`. The strip's revert, offered once delete took the correction's space or mark (or the cursor came back to its end), put back what was typed. |
@@ -221,6 +221,13 @@ Taps that aren't text: `action`:
   `rollover` when another key committed it), `accent_cancel`;
 - `trackpad_start` (`id`; `hold: true`, as only holding the space bar starts it;
   older logs without it had a 10 pt slide start it), `trackpad_end` (`id`, `offset`: total UTF-16 units);
+- `selection_start` (`id`, the second finger; `thumb: second`, `anchor`: the host cursor's
+  UTF-16 offset into the text it shared), `selection_end` (`id`, `empty: true` when the range
+  was; otherwise `start` and `end`: the range's UTF-16 offsets from that anchor),
+  `selection_action` (`action`: `delete`, `cut`, `copy`, `dictate`, `cancel`, `dismiss`
+  (another key closed the actions) or `restore` (a cancelled dictation put the range back);
+  `start` and `end` as `selection_end`, and `length` for a restore), `selection_cancel`
+  (`id`: the system took a finger away, nothing changed);
 - `language_swipe` (`id`, `step`: 1 the next language, -1 the one before) and
   `keyboard_language` (`language`: the layout it switched to), with two or more
   keyboard languages;
