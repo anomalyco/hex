@@ -1465,12 +1465,13 @@ final class AutocorrectEngineTests: XCTestCase {
         }
     }
 
-    /// A run the dictionary knows is never split by the fallback, even when its letters
-    /// are words the fallback does split when nothing knows the run ("seeyoutomorrow",
-    /// "specialchsracter").
+    /// A run the dictionary knows is never split by the fallback, even when its words alone
+    /// cost less than the valid literal would: "in the morning" costs 20.5 without its
+    /// spaces, under the 22.5 a valid unknown word costs, so only the guard keeps
+    /// "inthemorning" as typed.
     func testTheFallbackNeverSplitsAWordTheDictionaryAccepts() throws {
         let checker = StubChecker()
-        checker.valid = ["seeyoutomorrow", "specialchsracter"]
+        checker.valid = ["inthemorning"]
         target = FixtureTextTarget()
         target.autocapitalizationType = UITextAutocapitalizationType.none
         engine = FullKeyboardEngine(
@@ -1481,9 +1482,8 @@ final class AutocorrectEngineTests: XCTestCase {
         engine.clock = { [unowned self] in self.now }
         engine.configureForField()
         try useDecoder()
-        typeTaps("seeyoutomorrow")
-        typeTaps("specialchsracter")
-        XCTAssertEqual(target.text, "seeyoutomorrow specialchsracter ")
+        typeTaps("inthemorning")
+        XCTAssertEqual(target.text, "inthemorning ")
     }
 
     /// A one-word typo is not read as a word and a rare one ("tommorow" as "tom morrow"):
