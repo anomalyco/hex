@@ -113,6 +113,12 @@ pub enum ControlCommand {
     },
     MeetingStop,
     MeetingCopyLast,
+    /// Move a finished meeting to the Trash, as the Meetings pane's Delete
+    /// does: its exported Markdown and notes file, then its recording folder.
+    MeetingDelete {
+        /// The exact id `hex meetings list --json` prints.
+        id: String,
+    },
     SettingsGet {
         #[serde(default)]
         key: Option<String>,
@@ -283,6 +289,19 @@ impl ControlReply {
 impl From<ControlError> for ControlReply {
     fn from(error: ControlError) -> Self {
         Self::error(error.code, error.message)
+    }
+}
+
+/// `hex meetings delete`: the meeting module's typed answer as a reply, so
+/// the refusal codes travel with the reply the wire and the CLI print.
+pub fn meeting_deleted(
+    answer: Result<crate::meeting::TrashedMeeting, crate::meeting::DeleteError>,
+) -> ControlReply {
+    match answer {
+        Ok(meeting) => {
+            ControlReply::done(format!("Deleted “{}”; moved to the Trash", meeting.title))
+        }
+        Err(error) => ControlReply::error(error.code(), error.message()),
     }
 }
 
@@ -1283,6 +1302,9 @@ mod tests {
             },
             ControlCommand::MeetingStop,
             ControlCommand::MeetingCopyLast,
+            ControlCommand::MeetingDelete {
+                id: "1790000500000-1002".into(),
+            },
             ControlCommand::SettingsGet { key: None },
             ControlCommand::SettingsSet {
                 key: "release_microphone_while_idle".into(),
@@ -1385,6 +1407,16 @@ mod tests {
             json,
             serde_json::json!({"version": 4, "command": "meeting-record", "title": "Standup"})
         );
+        // A meeting delete names its id, and nothing else.
+        let json = serde_json::to_value(ControlRequest::new(ControlCommand::MeetingDelete {
+            id: "1790000500000-1002".into(),
+        }))
+        .unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({"version": 4, "command": "meeting-delete",
+                "id": "1790000500000-1002"})
+        );
         // Optional fields may be left out.
         let request: ControlRequest =
             serde_json::from_str(r#"{"version":4,"command":"quit"}"#).unwrap();
@@ -1411,6 +1443,42 @@ mod tests {
                 always: false,
             }
         );
+    }
+
+    #[test]
+    fn deleting_a_meeting_answers_its_refusal_code() {
+        let deleted = meeting_deleted(Ok(crate::meeting::TrashedMeeting {
+            id: "1790000500000-1002".into(),
+            title: "Design sync".into(),
+            markdown: true,
+        }));
+        assert_eq!(
+            deleted,
+            ControlReply::done("Deleted “Design sync”; moved to the Trash")
+        );
+        for (refusal, code) in [
+            (crate::meeting::DeleteRefusal::Unknown, "not-found"),
+            (
+                crate::meeting::DeleteRefusal::Recording,
+                "meeting-recording",
+            ),
+            (
+                crate::meeting::DeleteRefusal::Transcribing,
+                "meeting-transcribing",
+            ),
+            (crate::meeting::DeleteRefusal::Notes, "meeting-notes"),
+            (
+                crate::meeting::DeleteRefusal::FinalPending,
+                "meeting-final-pending",
+            ),
+            (crate::meeting::DeleteRefusal::Busy, "busy"),
+        ] {
+            assert_eq!(
+                meeting_deleted(Err(refusal.into())),
+                ControlReply::error(code, refusal.message()),
+                "{refusal:?}"
+            );
+        }
     }
 
     #[test]

@@ -175,6 +175,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             Ok(()) => ControlReply::done("Copied the last meeting transcript"),
             Err(error) => ControlReply::error("failed", format!("couldn't copy it: {error}")),
         },
+        ControlCommand::MeetingDelete { id } => super::meeting_deleted(crate::meeting::delete(&id)),
         ControlCommand::SettingsGet { key } => reply(load().and_then(|settings| {
             Ok(ControlReply::Settings {
                 settings: match key {

@@ -1,3 +1,4 @@
+use super::delete::{delete_in, delete_meeting};
 use super::retention::{
     audio_expired_meetings, expired_meetings, trash_audio_tracks, trash_expired,
 };
@@ -576,36 +577,88 @@ fn deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording(
     let export = read_manifest(&directory).unwrap().export_path.unwrap();
     let mut trashed = Vec::new();
 
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Recording;
+    write_manifest(&directory, &manifest).unwrap();
     let active = ActiveMeeting::acquire(&directory).unwrap();
-    let refused = trash_meeting(&directory, |path| {
+    let refused = delete_meeting(&directory, |path| {
         trashed.push(path.to_path_buf());
         Ok(())
     });
-    assert!(
-        refused
-            .unwrap_err()
-            .to_string()
-            .contains("Stop the recording")
-    );
+    let error = refused.unwrap_err();
+    assert_eq!(error.code(), "meeting-recording");
+    assert!(error.to_string().contains("Stop the recording"));
     assert!(trashed.is_empty());
     drop(active);
 
-    trash_meeting(&directory, |path| {
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Complete;
+    write_manifest(&directory, &manifest).unwrap();
+    let deleted = delete_meeting(&directory, |path| {
         trashed.push(path.to_path_buf());
         Ok(())
     })
     .unwrap();
+    assert_eq!(deleted.id, "1760000000000-1");
+    assert_eq!(deleted.title, "Design sync");
+    assert!(deleted.markdown);
     assert_eq!(trashed, [export.clone(), directory.clone()]);
 
     // Without a Markdown copy only the recording moves.
     fs::remove_file(&export).unwrap();
     trashed.clear();
-    trash_meeting(&directory, |path| {
+    let deleted = delete_meeting(&directory, |path| {
         trashed.push(path.to_path_buf());
         Ok(())
     })
     .unwrap();
+    assert!(!deleted.markdown);
     assert_eq!(trashed, [directory]);
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn deleting_refuses_a_transcribing_meeting_and_one_still_awaiting_its_final_transcript() {
+    let (base, directory) = finished_meeting("trash-busy", "Design sync");
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Transcribing;
+    write_manifest(&directory, &manifest).unwrap();
+    let active = ActiveMeeting::acquire(&directory).unwrap();
+    let refused = delete_meeting(&directory, |_| Ok(())).unwrap_err();
+    assert_eq!(refused.code(), "meeting-transcribing");
+    assert!(refused.message().contains("transcript"));
+    drop(active);
+
+    // A quit mid-final-pass leaves final.pending until the next launch
+    // finishes it: that draft is not deleted.
+    manifest.status = MeetingStatus::Interrupted;
+    write_manifest(&directory, &manifest).unwrap();
+    fs::write(directory.join(FINAL_PENDING_FILE), b"").unwrap();
+    let refused = delete_meeting(&directory, |_| Ok(())).unwrap_err();
+    assert_eq!(refused.code(), "meeting-final-pending");
+    assert!(directory.exists());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn deleting_refuses_ids_that_are_not_one_meeting_folder() {
+    let base = std::env::temp_dir().join(format!("hex-trash-unknown-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&base);
+    fs::create_dir_all(base.join("1760000000000-1")).unwrap();
+    let mut trashed = Vec::new();
+    for id in ["", ".", "..", "../1760000000000-1", "a/b", r"a\b"] {
+        let refused = delete_in(&base, id, |path| {
+            trashed.push(path.to_path_buf());
+            Ok(())
+        })
+        .unwrap_err();
+        assert_eq!(refused.code(), "not-found", "{id:?}");
+    }
+    // A folder with no manifest isn't a meeting either.
+    let refused = delete_in(&base, "1760000000000-1", |_| Ok(())).unwrap_err();
+    assert_eq!(refused.code(), "not-found");
+    assert!(trashed.is_empty());
+    assert!(base.join("1760000000000-1").exists());
     fs::remove_dir_all(base).unwrap();
 }
 
@@ -621,7 +674,7 @@ fn deleting_trashes_a_tracked_notes_file_after_the_transcript() {
     write_manifest(&directory, &manifest).unwrap();
 
     let mut trashed = Vec::new();
-    trash_meeting(&directory, |path| {
+    delete_meeting(&directory, |path| {
         trashed.push(path.to_path_buf());
         Ok(())
     })

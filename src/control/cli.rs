@@ -831,6 +831,9 @@ fn meetings(command: crate::control::transcript_cli::MeetingsCommand) -> u8 {
         }
         MeetingsCommand::Stop { output } => send(ControlCommand::MeetingStop, output),
         MeetingsCommand::CopyLast { output } => send(ControlCommand::MeetingCopyLast, output),
+        MeetingsCommand::Delete { id, output } => {
+            send(ControlCommand::MeetingDelete { id }, output)
+        }
         command => report(crate::control::transcript_cli::meetings(&command)),
     }
 }
