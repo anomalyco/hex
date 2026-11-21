@@ -269,6 +269,7 @@ struct KeyboardBridge {
         static let lastInsertedResultID = "keyboard.lastInsertedResultID"
         static let fullAccessSeenAt = "keyboard.fullAccessSeenAt"
         static let appMicrophoneAllowed = "app.microphoneAllowed"
+        static let lastEmptyDictationAt = "keyboard.lastEmptyDictationAt"
     }
 
     private let defaults: UserDefaults?
@@ -378,6 +379,22 @@ struct KeyboardBridge {
         nonmutating set {
             guard newValue != appMicrophoneAllowed else { return }
             defaults?.set(newValue, forKey: Key.appMicrophoneAllowed)
+        }
+    }
+
+    /// When the keyboard's own dictation last ended with nothing to insert (no speech, or too
+    /// short). The keyboard stays quiet about it; onboarding's practice says it heard nothing.
+    var lastEmptyDictationAt: TimeInterval? {
+        get {
+            let value = defaults?.double(forKey: Key.lastEmptyDictationAt) ?? 0
+            return value > 0 ? value : nil
+        }
+        nonmutating set {
+            if let newValue {
+                defaults?.set(newValue, forKey: Key.lastEmptyDictationAt)
+            } else {
+                defaults?.removeObject(forKey: Key.lastEmptyDictationAt)
+            }
         }
     }
 

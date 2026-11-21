@@ -462,6 +462,8 @@ final class KeyboardLocalDictation {
     private func endQuietly(_ reason: String) {
         Self.releaseAudioSession()
         KeyboardProbeLog.shared.write("ended quietly: \(reason)")
+        // For onboarding's practice only; the keyboard shows nothing.
+        KeyboardBridge().lastEmptyDictationAt = Date().timeIntervalSince1970
         phase = .idle
     }
 

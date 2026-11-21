@@ -29,11 +29,16 @@ final class KeyboardSetupMonitor {
         let args = ProcessInfo.processInfo.arguments
         if let idx = args.firstIndex(of: "--snap-state"), idx + 1 < args.count {
             switch args[idx + 1] {
-            case "setup", "setup-sheet", "onboarding-try", "onboarding-try-off":
+            case "setup", "setup-sheet", "onboarding-try", "onboarding-try-off", "onboarding-try-empty",
+                 "onboarding-permissions-done", "onboarding-waiting", "onboarding-failed":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .granted
-            case "onboarding-welcome", "onboarding-allow", "setup-sheet-microphone":
+            case "onboarding-setup", "onboarding-demo", "onboarding-permissions":
+                keyboardAdded = false
+                fullAccessOn = false
+                microphone = .undetermined
+            case "setup-sheet-microphone":
                 keyboardAdded = true
                 fullAccessOn = false
                 microphone = .undetermined
@@ -132,7 +137,13 @@ struct SetupSheet: View {
     @Environment(\.dismiss) private var dismiss
     @Bindable var dictation: DictationController
     let monitor: KeyboardSetupMonitor
+    let keyboardSpeech: KeyboardSpeechPreparation
     @State private var checkText = ""
+
+    /// Hex's model and the Hex key's own (KeyboardSpeechPreparation).
+    private var modelReady: Bool {
+        dictation.isModelReady && keyboardSpeech.isReady
+    }
     @State private var contentHeight: CGFloat = 360
     @FocusState private var checkFocused: Bool
 
@@ -159,7 +170,7 @@ struct SetupSheet: View {
     private var content: some View {
         VStack(alignment: .leading, spacing: 16) {
             HStack(spacing: 12) {
-                (monitor.stepsLeft(modelReady: dictation.isModelReady) == 0 ? Text("Hex is ready") : Text("Finish setup"))
+                (monitor.stepsLeft(modelReady: modelReady) == 0 ? Text("Hex is ready") : Text("Finish setup"))
                     .font(.system(size: 17, weight: .semibold))
                     .tracking(-0.2)
                     .foregroundStyle(HexTheme.textBase)
@@ -208,7 +219,7 @@ struct SetupSheet: View {
                 row(
                     title: "Speech model",
                     status: modelStatus,
-                    icon: dictation.isModelReady ? .done : .todo
+                    icon: modelReady ? .done : .todo
                 )
             }
             .background(
@@ -277,6 +288,13 @@ struct SetupSheet: View {
     }
 
     private var modelStatus: String {
+        if dictation.isModelReady && !keyboardSpeech.isReady {
+            switch keyboardSpeech.state {
+            case .downloading(let fraction): return "\(Int(fraction * 100))%"
+            case .failed: return String(localized: "Failed")
+            default: return String(localized: "Preparing")
+            }
+        }
         if dictation.isModelReady {
             // "Norwegian Bokmål · Apple": the language it really transcribes, short enough
             // for the row.
