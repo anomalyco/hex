@@ -1045,6 +1045,10 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   Polish is too (macOS 27.2.1 lists `pl-PL` for `DictationTranscriber` only):
   `say -v Zosia` clips came back with every diacritic (ą ć ę ł ń ó ś ź ż), numbers as
   digits ("10 min", "19:30"), and no punctuation.
+  Greek is too (macOS 27.2 lists `el-GR` for `DictationTranscriber` only): `say -v Melina`
+  clips came back with every tonos, final ς, numbers as digits ("10 λεπτά", "7:30"), and no
+  punctuation. Lowercase lowers with Unicode's context-aware mapping, so a word-final Σ
+  becomes ς ("ΟΔΟΣ" → "οδος"), as desktop's `to_lowercase` does.
   Unverified on a physical iPhone.
 - **Speech model fallback:** `SpeechModelInstallTests` and `StallWatchTests` run
   the fallback, set-aside, offline, stall and keyboard-handoff rules against fakes
