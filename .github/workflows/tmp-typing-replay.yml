@@ -1,0 +1,168 @@
+name: tmp typing replay
+
+# Temporary: builds the iOS app and test target, then replays public datasets of
+# real typing through TypingReplayTests. Drop this file before merging.
+on:
+  push:
+    branches: [typing-replay]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tmp-typing-replay
+  cancel-in-progress: true
+
+jobs:
+  replay:
+    runs-on: blacksmith-6vcpu-macos-26
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Xcode
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available
+      - name: Install the Metal toolchain
+        run: xcrun --sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain
+      - name: Install XcodeGen
+        run: |
+          # The runner image already has XcodeGen 2.45.4, which project.yml's
+          # minimumXcodeGenVersion (2.46.0) rejects, and brew install skips it.
+          curl -fsSL -o "$RUNNER_TEMP/xcodegen.zip" \
+            https://github.com/yonaskolb/XcodeGen/releases/download/2.48.0/xcodegen.zip
+          unzip -q "$RUNNER_TEMP/xcodegen.zip" -d "$RUNNER_TEMP/xcodegen"
+          echo "$RUNNER_TEMP/xcodegen/xcodegen/bin" >> "$GITHUB_PATH"
+          "$RUNNER_TEMP/xcodegen/xcodegen/bin/xcodegen" --version
+      - name: Generate the Xcode project
+        run: |
+          cd ios
+          scripts/fetch-cleanup-model.sh
+          xcodegen generate
+      - name: Pick an iPhone simulator
+        id: simulator
+        run: |
+          udid=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+
+          devices = json.load(sys.stdin)["devices"]
+          best = None
+          for runtime, entries in devices.items():
+              match = re.search(r"iOS-(\d+)(?:-(\d+))?", runtime)
+              if not match:
+                  continue
+              version = (int(match.group(1)), int(match.group(2) or 0))
+              for device in entries:
+                  if not device.get("isAvailable") or not device["name"].startswith("iPhone"):
+                      continue
+                  model = [int(number) for number in re.findall(r"\d+", device["name"])]
+                  rank = (
+                      0 if device["name"].startswith("iPhone 17") else 1,
+                      [-number for number in model],
+                      [-part for part in version],
+                  )
+                  if best is None or rank < best[0]:
+                      best = (rank, device["udid"], device["name"], runtime)
+          if best is None:
+              sys.exit("no available iPhone simulator")
+          print(f"{best[2]} ({best[3]}) {best[1]}", file=sys.stderr)
+          print(best[1])
+          ')
+          echo "Simulator: $udid"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+      - name: Replay tests (default mapping test; env tests skip)
+        env:
+          REPLAY_DATA: ${{ runner.temp }}/typing-replay
+          UDID: ${{ steps.simulator.outputs.udid }}
+        run: |
+          set -o pipefail
+          status=0
+          mkdir -p "$REPLAY_DATA"
+          cd ios
+          xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+            -destination "id=$UDID" \
+            -only-testing:HEXMobileTests/TypingReplayTests 2>&1 \
+            | tee "$REPLAY_DATA/default.log" || status=$?
+          grep -A 20 '^TYPING-REPLAY$' "$REPLAY_DATA/default.log" || true
+          exit $status
+      - name: Download and convert real samples
+        env:
+          REPLAY_DATA: ${{ runner.temp }}/typing-replay
+        run: |
+          set -eu
+          mkdir -p "$REPLAY_DATA"
+          cd "$REPLAY_DATA"
+          convert="$GITHUB_WORKSPACE/ios/benchmark/typing-replay/convert.py"
+
+          # FUTO's dev split is about 304 MB; the first 40 MB is plenty, without
+          # the partial line the range ends on.
+          curl -fsSL --retry 3 -r 0-40000000 -o futo-dev.jsonl \
+            https://huggingface.co/datasets/futo-org/swipe.futo.org/resolve/main/dev.jsonl
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("futo-dev.jsonl")
+          data = path.read_bytes()
+          path.write_bytes(data[: data.rfind(b"\n") + 1])
+          PY
+          python3 "$convert" futo futo-dev.jsonl --limit 300 -o futo.json
+
+          base=https://raw.githubusercontent.com/google-research-datasets/tap-typing-with-touch-sensing-images/main
+          for file in touch_data.csv prompt_data.csv keyboard_data.json; do
+            curl -fsSL --retry 3 -o "$file" "$base/$file"
+          done
+          python3 "$convert" tsi touch_data.csv prompt_data.csv keyboard_data.json -o tsi.json
+
+          curl -fsSL --retry 3 -o vertanen_noisy_typing_json.zip \
+            'https://zenodo.org/records/24225302/files/vertanen_noisy_typing_json.zip?download=1'
+          python3 "$convert" noisy vertanen_noisy_typing_json.zip --set test --limit 400 -o noisy.json
+
+          ls -lh
+      - name: Replay FUTO swipes
+        env:
+          REPLAY_DATA: ${{ runner.temp }}/typing-replay
+          UDID: ${{ steps.simulator.outputs.udid }}
+          TEST_RUNNER_HEX_SWIPE_REPLAY: ${{ runner.temp }}/typing-replay/futo.json
+        run: |
+          set -o pipefail
+          status=0
+          cd ios
+          xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+            -destination "id=$UDID" \
+            -only-testing:HEXMobileTests/TypingReplayTests/testReplaysRecordedSwipes 2>&1 \
+            | tee "$REPLAY_DATA/swipes.log" || status=$?
+          grep -A 20 '^TYPING-REPLAY$' "$REPLAY_DATA/swipes.log" || true
+          exit $status
+      - name: Replay TSI taps
+        env:
+          REPLAY_DATA: ${{ runner.temp }}/typing-replay
+          UDID: ${{ steps.simulator.outputs.udid }}
+          TEST_RUNNER_HEX_TAP_REPLAY: ${{ runner.temp }}/typing-replay/tsi.json
+        run: |
+          set -o pipefail
+          status=0
+          cd ios
+          xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+            -destination "id=$UDID" \
+            -only-testing:HEXMobileTests/TypingReplayTests/testReplaysRecordedTaps 2>&1 \
+            | tee "$REPLAY_DATA/tsi-taps.log" || status=$?
+          grep -A 20 '^TYPING-REPLAY$' "$REPLAY_DATA/tsi-taps.log" || true
+          exit $status
+      - name: Replay Noisy Typing taps
+        env:
+          REPLAY_DATA: ${{ runner.temp }}/typing-replay
+          UDID: ${{ steps.simulator.outputs.udid }}
+          TEST_RUNNER_HEX_TAP_REPLAY: ${{ runner.temp }}/typing-replay/noisy.json
+        run: |
+          set -o pipefail
+          status=0
+          cd ios
+          xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+            -destination "id=$UDID" \
+            -only-testing:HEXMobileTests/TypingReplayTests/testReplaysRecordedTaps 2>&1 \
+            | tee "$REPLAY_DATA/noisy-taps.log" || status=$?
+          grep -A 20 '^TYPING-REPLAY$' "$REPLAY_DATA/noisy-taps.log" || true
+          exit $status
