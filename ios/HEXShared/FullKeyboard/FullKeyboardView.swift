@@ -731,6 +731,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         menu.dictationLanguage = model.dictationLanguage
         menu.automaticLanguage = model.automaticLanguage
         menu.languageChoices = model.showsLanguageSwitch ? model.languageChoices : []
+        menu.moreLanguages = model.showsLanguageSwitch ? model.moreLanguages : []
         menu.translationTarget = model.showsTranslationSwitch ? model.translationLanguage : nil
         menu.isTranslating = model.isTranslating
         menu.translationTargets = model.translationTargetChoices
@@ -1168,6 +1169,11 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
             self?.model.onLanguageSelected?(language)
             self?.dismissStyleMenu()
         }
+        // The menu stays open, so the language is seen to go.
+        menu.onRemoveLanguage = { [weak self] language in
+            self?.typingLog?.ui("dictation_language_removed", [TypingLogField("language", .string(language))])
+            self?.model.onLanguageRemoved?(language)
+        }
         menu.onTranslationToggle = { [weak self] on in
             self?.typingLog?.ui("translate", [TypingLogField("on", .bool(on))])
             self?.model.onTranslationToggled?(on)
@@ -1202,6 +1208,12 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     func debugShowStyleMenu(page: HexStyleMenuView.Page = .styles) {
         showStyleMenu()
         styleMenu?.show(page: page)
+    }
+
+    /// Fixtures: the language page with Remove on a language's row.
+    func debugOfferRemove(_ language: String) {
+        showStyleMenu()
+        styleMenu?.debugOfferRemove(language)
     }
 
     private func undoDictation() {

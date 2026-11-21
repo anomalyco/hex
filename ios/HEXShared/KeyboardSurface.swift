@@ -29,6 +29,8 @@ final class KeyboardViewModel: ObservableObject {
         case none
         case style
         case language
+        /// More languages…: every other language Apple Speech has, in place of the keys.
+        case moreLanguages
     }
 
     enum StagePhase: Equatable {
@@ -62,6 +64,10 @@ final class KeyboardViewModel: ObservableObject {
     @Published var dictationLanguage: String?
     @Published var automaticLanguage: String?
     @Published var languageChoices: [String] = []
+    /// Every other language Apple Speech has, for More languages… (`DictationLanguageSwitch.more`).
+    @Published var moreLanguages: [String] = []
+    /// The language a long press on its chip offered to remove: Remove shows beside it.
+    @Published var removingLanguage: String?
     /// Translate what I say's target (BCP 47) while it is on, else nil.
     @Published var translationTarget: String?
     /// The last dictation went in as spoken while Translate what I say was on: both keyboards
@@ -102,11 +108,15 @@ final class KeyboardViewModel: ObservableObject {
     var onStyleSelected: ((DictationStyle) -> Void)?
     /// A language picked in the keyboard's switch; nil is Automatic.
     var onLanguageSelected: ((String?) -> Void)?
+    /// A language taken off the keyboard's switch (a long press on it, then Remove).
+    var onLanguageRemoved: ((String) -> Void)?
     /// Translate to <language> switched on (true) or off where you dictate.
     var onTranslationToggled: ((Bool) -> Void)?
     /// A target picked in the Hex key menu; it also turns translation on.
     var onTranslationTargetSelected: ((String) -> Void)?
     var onSpace: (() -> Void)?
+    /// A long press that opened Remove, for the selection haptic.
+    var onSelectionStep: (() -> Void)?
     /// A punctuation key on the dictation bar.
     var onInsertText: ((String) -> Void)?
     /// The dictation bar's emoji key: the full keyboard's emoji panel opens in its place.
@@ -131,7 +141,7 @@ final class KeyboardViewModel: ObservableObject {
     }
 
     var showsLanguageSwitch: Bool {
-        hasFullAccess && !languageChoices.isEmpty
+        hasFullAccess && !(languageChoices.isEmpty && moreLanguages.isEmpty)
     }
 
     /// "Paste in English" or "Paste in Spanish", when Translate what I say is on and you
@@ -182,6 +192,7 @@ final class KeyboardViewModel: ObservableObject {
         guard activeTray != tray else { return }
         withAnimation(HexMotion.trayAnimation(reduceMotion: reduceMotion)) {
             activeTray = tray
+            removingLanguage = nil
         }
     }
 
@@ -671,6 +682,8 @@ struct KeyboardSurfaceView: View {
     /// This press's hold started the dictation, so the Dictate button's tap action skips it.
     @State private var holdTookPress = false
     @GestureState private var isPressingWell = false
+    /// That long press's own touch-up, so it doesn't also pick the language.
+    @State private var removeTookPress = false
 
     private static let wellHeight: CGFloat = 44
     private static let controlHeight: CGFloat = 34
@@ -694,10 +707,25 @@ struct KeyboardSurfaceView: View {
     }
 
     var body: some View {
+        let showsMore = model.activeTray == .moreLanguages
         VStack(spacing: 8) {
             topBar
-            primaryStage
-            utilityRow
+            ZStack {
+                VStack(spacing: 8) {
+                    primaryStage
+                    utilityRow
+                }
+                .opacity(showsMore ? 0 : 1)
+                .allowsHitTesting(!showsMore)
+                .accessibilityHidden(showsMore)
+                if showsMore {
+                    moreLanguagesGrid(palette: palette)
+                        .transition(.opacity)
+                }
+            }
+        }
+        .onChange(of: model.activeTray) { _, _ in
+            removeTookPress = false
         }
         .padding(.horizontal, 10)
         .padding(.top, isHostedExtension ? 4 : 6)
@@ -720,6 +748,9 @@ struct KeyboardSurfaceView: View {
 
             languageTrayBar(palette: p)
                 .hexTrayReveal(model.activeTray == .language, reduceMotion: reduceMotion, offsetY: 3.5)
+
+            moreLanguagesBar(palette: p)
+                .hexTrayReveal(model.activeTray == .moreLanguages, reduceMotion: reduceMotion, offsetY: 3.5)
         }
         .frame(height: 26)
     }
@@ -933,9 +964,15 @@ struct KeyboardSurfaceView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     if model.showsLanguageSwitch {
-                        languageChip(id: nil, label: "Auto", palette: p)
+                        languageChip(id: nil, label: String(localized: "Auto"), palette: p)
                         ForEach(model.languageChoices, id: \.self) { id in
                             languageChip(id: id, label: names[id] ?? id, palette: p)
+                            if model.removingLanguage == id {
+                                removeChip(id: id, label: names[id] ?? id, palette: p)
+                            }
+                        }
+                        if !model.moreLanguages.isEmpty {
+                            moreChip(palette: p)
                         }
                     }
                 }
@@ -977,9 +1014,21 @@ struct KeyboardSurfaceView: View {
         .accessibilityAddTraits(active ? .isSelected : [])
     }
 
+    /// A language: a tap picks it; a long press offers Remove beside it (not Automatic).
     private func languageChip(id: String?, label: String, palette p: KeyboardChromePalette) -> some View {
         let active = model.dictationLanguage == id
         return Button {
+            if let id, model.removingLanguage == id {
+                // The long press's own release keeps Remove up; a later tap puts it away.
+                if removeTookPress {
+                    removeTookPress = false
+                } else {
+                    setRemovingLanguage(nil)
+                }
+                return
+            }
+            model.removingLanguage = nil
+            removeTookPress = false
             model.onKeyFeedback?()
             model.onLanguageSelected?(id)
             model.setActiveTray(.none, reduceMotion: reduceMotion)
@@ -992,7 +1041,123 @@ struct KeyboardSurfaceView: View {
                 .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
         }
         .buttonStyle(.plain)
+        .simultaneousGesture(
+            LongPressGesture(minimumDuration: Self.removeHoldDuration).onEnded { _ in
+                guard let id, model.removingLanguage != id else { return }
+                model.onSelectionStep?()
+                removeTookPress = true
+                setRemovingLanguage(id)
+            },
+            including: id == nil ? .subviews : .all
+        )
         .accessibilityLabel(id == nil ? "Automatic language" : label)
+        .accessibilityActions {
+            if let id {
+                Button("Remove") { model.onLanguageRemoved?(id) }
+            }
+        }
+    }
+
+    /// How long a language chip is held before Remove shows beside it.
+    private static let removeHoldDuration: Double = 0.45
+
+    private func setRemovingLanguage(_ id: String?) {
+        withAnimation(HexMotion.trayAnimation(reduceMotion: reduceMotion)) {
+            model.removingLanguage = id
+        }
+    }
+
+    private func removeChip(id: String, label: String, palette p: KeyboardChromePalette) -> some View {
+        Button {
+            model.onKeyFeedback?()
+            model.onLanguageRemoved?(id)
+            removeTookPress = false
+            setRemovingLanguage(nil)
+        } label: {
+            Text("Remove")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HexTheme.danger)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(p.chipIdleFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .transition(.opacity)
+        .accessibilityLabel(Text("Remove \(label)"))
+    }
+
+    private func moreChip(palette p: KeyboardChromePalette) -> some View {
+        Button {
+            model.onKeyFeedback?()
+            model.setActiveTray(.moreLanguages, reduceMotion: reduceMotion)
+        } label: {
+            Text("More languages…")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(p.textMuted)
+                .lineLimit(1)
+                .padding(.horizontal, 10)
+                .frame(height: 26)
+                .background(p.chipIdleFill, in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// More languages…'s bar: back to the language chips, and close.
+    private func moreLanguagesBar(palette p: KeyboardChromePalette) -> some View {
+        HStack(spacing: 8) {
+            Button {
+                model.onKeyFeedback?()
+                model.setActiveTray(.language, reduceMotion: reduceMotion)
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 11, weight: .semibold))
+                    Text("More languages")
+                        .font(.system(size: 13, weight: .medium))
+                        .lineLimit(1)
+                }
+                .foregroundStyle(p.textMuted)
+                .padding(.horizontal, 8)
+                .frame(height: 26)
+                .contentShape(Capsule())
+            }
+            .buttonStyle(TopBarTriggerButtonStyle(palette: p))
+            .accessibilityLabel("Back")
+            Spacer(minLength: 4)
+            closeTrayButton(palette: p)
+        }
+        .frame(height: 26)
+    }
+
+    /// Every other language Apple Speech has, in place of the keys; a tap picks it, which puts
+    /// it on the switch.
+    private func moreLanguagesGrid(palette p: KeyboardChromePalette) -> some View {
+        let names = DictationLanguageSwitch.nativeNames(for: model.languageChoices + model.moreLanguages)
+        return ScrollView(.vertical, showsIndicators: false) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 96), spacing: 6)], spacing: 6) {
+                ForEach(model.moreLanguages, id: \.self) { id in
+                    Button {
+                        model.onKeyFeedback?()
+                        model.onLanguageSelected?(id)
+                        model.setActiveTray(.none, reduceMotion: reduceMotion)
+                    } label: {
+                        Text(names[id] ?? id)
+                            .font(.system(size: 14, weight: .regular))
+                            .foregroundStyle(p.textBase)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
+                            .padding(.horizontal, 8)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 34)
+                            .background(p.chipIdleFill, in: Capsule())
+                            .contentShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .hexScrollEdgeEffectHidden()
+        .frame(height: Self.wellHeight + 8 + Self.keyHeight)
     }
 
     private func closeTrayButton(palette p: KeyboardChromePalette) -> some View {
@@ -1226,6 +1391,7 @@ struct KeyboardSurfaceView: View {
     private static let punctuation = [",", ".", "?", "!", "'", "\"", "@", "#"]
     private static let punctuationKeyWidth: CGFloat = 30
     private static let minSpaceWidth: CGFloat = 60
+    private static let keyHeight: CGFloat = 42
 
     private var utilityRow: some View {
         ViewThatFits(in: .horizontal) {

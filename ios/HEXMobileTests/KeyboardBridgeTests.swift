@@ -708,4 +708,45 @@ final class DictationLanguageSwitchTests: XCTestCase {
         XCTAssertNil(settings.dictationLanguage, "Automatic")
         XCTAssertEqual(settings.recentDictationLanguages.first, "es-ES", "Automatic isn't a recent")
     }
+
+    /// TestFlight build 56: a language couldn't be taken off the keyboard's switch. Removed, a
+    /// recent or one of the iPhone's own languages stays off until it is picked again; the one
+    /// set goes back to Automatic.
+    func testARemovedLanguageStaysOffUntilPickedAgain() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        settings.supportedDictationLanguages = supported
+        settings.chooseDictationLanguage("he-IL")
+        settings.chooseDictationLanguage("es")
+        let preferred = ["zh-Hans-CN", "nb-NO", "en-US"]
+        XCTAssertEqual(settings.keyboardLanguageChoices(preferred: preferred, hinglish: false), ["es-ES", "he-IL", "nb-NO", "en-US"])
+
+        settings.removeDictationLanguage("es-ES")
+        XCTAssertNil(settings.dictationLanguage, "the one set goes back to Automatic")
+        XCTAssertEqual(settings.recentDictationLanguages, ["he-IL"])
+        settings.removeDictationLanguage("nb-NO")
+        XCTAssertEqual(settings.keyboardLanguageChoices(preferred: preferred, hinglish: false), ["he-IL", "en-US"])
+
+        settings.chooseDictationLanguage("nb-NO")
+        XCTAssertEqual(settings.removedDictationLanguages, ["es-ES"])
+        XCTAssertEqual(settings.keyboardLanguageChoices(preferred: preferred, hinglish: false), ["nb-NO", "he-IL", "en-US"])
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(current: "es-ES", recent: [], preferred: [], supported: supported, removed: ["es-ES"]),
+            ["es-ES"],
+            "the one set always shows"
+        )
+    }
+
+    /// More languages… lists every other language Apple Speech has, the iPhone's own first
+    /// (with their other regions), then the rest by name.
+    func testMoreLanguagesPutsTheIPhonesOwnFirst() {
+        let supported = ["en-US", "en-GB", "es-ES", "de-DE", "zh-CN", "zh-TW", "fr-FR", "nb-NO"]
+        XCTAssertEqual(
+            DictationLanguageSwitch.more(choices: ["en-US", "de-DE"], preferred: ["zh-Hans-CN", "en-US"], supported: supported),
+            ["zh-CN", "zh-TW", "en-GB", "es-ES", "fr-FR", "nb-NO"]
+        )
+        XCTAssertEqual(DictationLanguageSwitch.more(choices: [], preferred: ["en-US"], supported: []), [], "no list yet")
+    }
 }

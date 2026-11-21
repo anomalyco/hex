@@ -347,6 +347,10 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.debugShowStyleMenu()
             case "languages":
                 view.debugShowStyleMenu(page: .languages)
+            case "languages-remove":
+                view.debugOfferRemove(model.languageChoices[1])
+            case "more-languages":
+                view.debugShowStyleMenu(page: .moreLanguages)
             case "translation":
                 view.debugShowStyleMenu(page: .translation)
             case "morph":

@@ -50,6 +50,8 @@ final class KeyboardViewController: UIInputViewController {
             if hapticStrength != oldValue { barHaptics = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(hapticStrength)) }
         }
     }
+    /// The dictation bar's selection ticks, as the full keyboard's.
+    private lazy var barSelectionHaptics = UISelectionFeedbackGenerator()
     /// The Hex key's last touch-down (wall clock), where a start's probe timeline begins.
     private var hexKeyPressedAt: TimeInterval?
     private var warmStartTimeline: WarmStartTimeline?
@@ -427,6 +429,11 @@ final class KeyboardViewController: UIInputViewController {
             self.barHaptics.impactOccurred(intensity: FullKeyboardView.keyTickIntensity(self.hapticStrength))
             self.barHaptics.prepare()
         }
+        viewModel.onSelectionStep = { [weak self] in
+            guard let self, self.allowsKeyHaptics else { return }
+            self.barSelectionHaptics.selectionChanged()
+            self.barSelectionHaptics.prepare()
+        }
         viewModel.onStopTap = { [weak self] in
             guard let self else { return }
             if self.localDictation.isActive {
@@ -456,6 +463,12 @@ final class KeyboardViewController: UIInputViewController {
         }
         viewModel.onLanguageSelected = { [weak self] language in
             LanguageSettings().chooseDictationLanguage(language)
+            self?.languageSignature = nil
+            self?.syncLanguageState()
+        }
+        viewModel.onLanguageRemoved = { [weak self] language in
+            self?.typingLog?.ui("dictation_language_removed", [TypingLogField("language", .string(language))])
+            LanguageSettings().removeDictationLanguage(language)
             self?.languageSignature = nil
             self?.syncLanguageState()
         }
@@ -993,6 +1006,7 @@ final class KeyboardViewController: UIInputViewController {
         // Automatic follows the keyboard's language while it switches between two or more.
         let automatic = settings.keyboardDictationLanguage() ?? settings.automaticDictationLanguage
         let recent = settings.recentDictationLanguages
+        let removed = settings.removedDictationLanguages
         let supported = settings.supportedDictationLanguages
         let translation = DictationTranslationSettings()
         let target = translation.isEnabled ? translation.targetLanguage : nil
@@ -1001,22 +1015,19 @@ final class KeyboardViewController: UIInputViewController {
         let translationLanguages = Self.translationLanguages
         let hinglish = HinglishSettings().isEnabled
         let signature = [
-            explicit ?? "", automatic ?? "", recent.joined(separator: ","), "\(supported.count)",
+            explicit ?? "", automatic ?? "", recent.joined(separator: ","), removed.joined(separator: ","),
+            "\(supported.count)",
             target ?? "", "\(hinglish)",
             translationLanguage ?? "", "\(translationLanguages?.count ?? -1)",
         ].joined(separator: "|")
         guard signature != languageSignature else { return }
         languageSignature = signature
-        let choices = DictationLanguageSwitch.choices(
-            current: explicit,
-            recent: recent,
-            preferred: Locale.preferredLanguages,
-            supported: supported,
-            hinglish: hinglish
-        )
+        let choices = settings.keyboardLanguageChoices(hinglish: hinglish)
+        let more = DictationLanguageSwitch.more(choices: choices, preferred: Locale.preferredLanguages, supported: supported)
         if viewModel.dictationLanguage != explicit { viewModel.dictationLanguage = explicit }
         if viewModel.automaticLanguage != automatic { viewModel.automaticLanguage = automatic }
         if viewModel.languageChoices != choices { viewModel.languageChoices = choices }
+        if viewModel.moreLanguages != more { viewModel.moreLanguages = more }
         if viewModel.translationTarget != target { viewModel.translationTarget = target }
         if viewModel.translationLanguage != translationLanguage { viewModel.translationLanguage = translationLanguage }
         let targets = translationLanguage.map {
