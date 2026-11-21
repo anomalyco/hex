@@ -18,6 +18,8 @@ protocol KeyboardTextTarget: AnyObject {
     var smartQuotesType: UITextSmartQuotesType? { get }
     var smartDashesType: UITextSmartDashesType? { get }
     var selectedText: String? { get }
+    /// `UITextDocumentProxy.documentIdentifier`: the field, where UIKit names it.
+    var documentIdentifier: UUID? { get }
     func insertText(_ text: String)
     func deleteBackward()
     func adjustTextPosition(byCharacterOffset offset: Int)
@@ -29,6 +31,7 @@ extension KeyboardTextTarget {
     var textContentType: UITextContentType? { nil }
     var isSecureTextEntry: Bool? { nil }
     var selectedText: String? { nil }
+    var documentIdentifier: UUID? { nil }
     func adjustTextPosition(byCharacterOffset offset: Int) {}
 }
 
@@ -51,6 +54,10 @@ final class DocumentProxyTextTarget: KeyboardTextTarget {
     var textContentType: UITextContentType? { proxy()?.textContentType ?? nil }
     var isSecureTextEntry: Bool? { proxy()?.isSecureTextEntry }
     var selectedText: String? { proxy()?.selectedText }
+    var documentIdentifier: UUID? {
+        guard let proxy = proxy() else { return nil }
+        return TypingLogTraits.documentIdentifier(of: proxy)
+    }
     func insertText(_ text: String) { proxy()?.insertText(text) }
     func deleteBackward() { proxy()?.deleteBackward() }
     func adjustTextPosition(byCharacterOffset offset: Int) { proxy()?.adjustTextPosition(byCharacterOffset: offset) }
@@ -97,7 +104,9 @@ final class FullKeyboardEngine {
     /// text before it (a lagging proxy; `FullKeyboardEngine+HostText`).
     var expectedTypingContext: ExpectedTypingContext?
     /// When a key last went down or came up, for `takesStripTouch(at:)`.
-    private var lastKeyTouchAt: TimeInterval?
+    private(set) var lastKeyTouchAt: TimeInterval?
+    /// Two-thumb selection: the switch, the range picked, and the Dictate waiting on its words.
+    var trackpadSelectionState = TrackpadSelectionState()
 
     /// Where each letter of the word being typed was tapped (nil for one that came another
     /// way, such as an accent), for Spatial autocorrect.
@@ -303,6 +312,7 @@ final class FullKeyboardEngine {
         adaptiveTouch?.beginSession()
         syncAdaptiveField()
         cancelAllTouches()
+        trackpadSelectionState.pendingDictation = nil
         rebuildLayout(cause: "field")
         refreshAutoCapitalization()
         refreshSuggestions()
@@ -451,51 +461,9 @@ final class FullKeyboardEngine {
         insert(text, source: source)
     }
 
-    // MARK: - Touches
-
-    /// The key a touch going down at `point` presses: the one under it, or a neighbouring
-    /// letter within `letterReach` points that is enough likelier to come next in the word.
-    func key(at point: CGPoint) -> KeyboardKey? {
-        let point = pointOnKeys(point)
-        guard let key = layout.hitTest(point) else { return nil }
-        guard key.character != nil, let model = letterOdds, layerState.layer == .letters,
-              field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
-              shift.state != .locked, model.language == language.rawValue else { return key }
-        let reach = letterReach
-        let near = layout.keys.filter {
-            $0.character != nil && $0.kind != key.kind && Self.distance(from: point, to: $0.hitFrame) < reach
-        }
-        guard !near.isEmpty, let continuations = continuationMass(model) else { return key }
-        // An accented letter without a key of its own is typed from its base letter's (é from e).
-        var mass = [Double](repeating: 0, count: continuations.count)
-        let keyed = Set(layout.keys.compactMap { key in
-            key.character.flatMap { $0.count == 1 ? model.codes[Character($0)] : nil }
-        })
-        for (code, m) in continuations.enumerated() where m > 0 {
-            mass[keyed.contains(UInt8(code)) ? code : Int(model.baseCodes[code])] += m
-        }
-        let total = mass.reduce(0, +)
-        func odds(_ k: KeyboardKey) -> Double? {
-            guard let c = k.character, c.count == 1, let code = model.codes[Character(c)] else { return nil }
-            return log(mass[Int(code)] + total * 1e-4)
-        }
-        guard let own = odds(key) else { return key }
-        var best = key
-        var bestScore = own
-        for other in near {
-            guard let theirs = odds(other) else { continue }
-            let score = theirs - letterOddsPerPoint * Double(Self.distance(from: point, to: other.hitFrame))
-            if score > bestScore {
-                best = other
-                bestScore = score
-            }
-        }
-        return best
-    }
-
     /// The word list's next-letter frequencies after the word being typed, or nil when they
     /// can't help: inside something that isn't a word, or a word the list doesn't have.
-    private func continuationMass(_ model: TypingDecoderModel) -> [Double]? {
+    func continuationMass(_ model: TypingDecoderModel) -> [Double]? {
         let before = textBefore ?? ""
         let token = AutocorrectEngine.currentToken(in: before)
         if token == nil, let last = before.last, last.isLetter || last.isNumber || last == "'" { return nil }
@@ -512,25 +480,20 @@ final class FullKeyboardEngine {
         return mass
     }
 
-    /// Whether a finger going down at `point`, in the strip above the keys, belongs to the
-    /// keys: in the strip's lower half while you type (a key is down, or one went down or came
-    /// up within `stripTouchGuard`) it is a row-1 key aimed high, not a pick. Nobody reads a
-    /// new suggestion and taps it that fast; Record typing logs showed such picks were the e
-    /// below the left slot, which kept "th" and typed a space where "the" was meant.
-    func takesStripTouch(at point: CGPoint) -> Bool {
-        let strip = layout.stripFrame
-        guard point.y < layout.touchAreaFrame.minY, point.y >= strip.midY,
-              point.x >= strip.minX, point.x < strip.maxX else { return false }
-        if !touches.isEmpty { return true }
-        guard let last = lastKeyTouchAt else { return false }
-        let elapsed = clock() - last
-        return elapsed >= 0 && elapsed < Self.stripTouchGuard
-    }
+    // MARK: - Touches
 
     func touchBegan(id: Int, at point: CGPoint) {
-        // A second finger while the space bar is the trackpad starts a selection on Apple's,
-        // which a keyboard can't make, so it's ignored rather than typing the blank key under it.
-        guard !isTrackpadActive else { return }
+        // A key while a selection's actions show only dismisses them: it types nothing, and
+        // neither does a third finger while both thumbs are still down.
+        if selectionActionsShown {
+            dismissTrackpadSelectionIfNeeded()
+            return
+        }
+        if isSelectionActive { return }
+        if isTrackpadActive {
+            beginTwoThumbSelectionIfEnabled(with: id, at: point)
+            return
+        }
         let downPoint = point
         let point = pointOnKeys(point)
         guard let key = key(at: point) else { return }
@@ -649,6 +612,7 @@ final class FullKeyboardEngine {
 
     /// `time` is the touch's own (`UITouch.timestamp`), else now.
     func touchMoved(id: Int, to point: CGPoint, time: TimeInterval? = nil) {
+        if moveTwoThumbSelection(id: id, to: point, time: time) { return }
         guard var touch = touches[id] else { return }
         touch.point = point
 
@@ -727,6 +691,7 @@ final class FullKeyboardEngine {
     }
 
     func touchEnded(id: Int, at point: CGPoint) {
+        if endTwoThumbSelection(id: id, at: point) { return }
         guard var touch = touches.removeValue(forKey: id) else { return }
         touchOrder.removeAll { $0 == id }
         lastKeyTouchAt = clock()
@@ -841,6 +806,7 @@ final class FullKeyboardEngine {
     }
 
     func touchCancelled(id: Int) {
+        if cancelTwoThumbSelection(id: id) { return }
         if activeAccentTouchID == id {
             activeAccentMenu = nil
             activeAccentTouchID = nil
@@ -851,8 +817,15 @@ final class FullKeyboardEngine {
         onChange?()
     }
 
+    /// A selection finger is over: its touch goes with it, the space bar's trackpad touch too.
+    func removeSelectionTouch(_ id: Int) {
+        touches.removeValue(forKey: id)
+        touchOrder.removeAll { $0 == id }
+    }
+
     func cancelAllTouches() {
-        let hadTouches = !touches.isEmpty || activeAccentMenu != nil || isSwiping
+        let hadTouches = !touches.isEmpty || activeAccentMenu != nil || isSwiping || trackpadSelectionState.session != nil
+        trackpadSelectionState.session = nil
         touches.removeAll()
         touchOrder.removeAll()
         isSwiping = false
@@ -1293,13 +1266,6 @@ final class FullKeyboardEngine {
             journal?.typingLearning(for: autocorrect.language) ?? TypingLearning(),
             partner: journal?.typingLearning(for: autocorrect.partner?.language) ?? TypingLearning()
         )
-    }
-
-    func didEdit() {
-        suggestionSpaceBefore = nil
-        refreshAutoCapitalization()
-        refreshSuggestions()
-        onEdit?()
     }
 
     // MARK: - Swipe typing (Settings › Keyboard › Swipe typing; SwipeTyping.swift)

@@ -3732,6 +3732,56 @@
           }
         }
       }
+    },
+    "Two-thumb selection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "双拇指选择"
+          }
+        }
+      }
+    },
+    "With the space bar as a trackpad, a second thumb selects: each thumb moves one end." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空格键作为触控板时，第二根拇指可选择：每根拇指移动一端。"
+          }
+        }
+      }
+    },
+    "Cut" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剪切"
+          }
+        }
+      }
+    },
+    "No text selected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未选择文本"
+          }
+        }
+      }
+    },
+    "Selected: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择：%@"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -28,6 +28,21 @@ extension FullKeyboardEngine {
         typingLog?.keyboardState(layout: layout, shift: shift, cause: cause)
     }
 
+    /// Whether a finger going down at `point`, in the strip above the keys, belongs to the
+    /// keys: in the strip's lower half while you type (a key is down, or one went down or came
+    /// up within `stripTouchGuard`) it is a row-1 key aimed high, not a pick. Nobody reads a
+    /// new suggestion and taps it that fast; Record typing logs showed such picks were the e
+    /// below the left slot, which kept "th" and typed a space where "the" was meant.
+    func takesStripTouch(at point: CGPoint) -> Bool {
+        let strip = layout.stripFrame
+        guard point.y < layout.touchAreaFrame.minY, point.y >= strip.midY,
+              point.x >= strip.minX, point.x < strip.maxX else { return false }
+        if !touches.isEmpty { return true }
+        guard let last = lastKeyTouchAt else { return false }
+        let elapsed = clock() - last
+        return elapsed >= 0 && elapsed < Self.stripTouchGuard
+    }
+
     /// `point`, or for one above the keys (a strip touch `takesStripTouch(at:)` gave them)
     /// the same spot on row 1's top edge.
     func pointOnKeys(_ point: CGPoint) -> CGPoint {
@@ -61,5 +76,45 @@ extension FullKeyboardEngine {
     func keycapLabel(for key: KeyboardKey) -> String {
         guard let character = key.character else { return key.label }
         return keycapsUppercase ? character.uppercased() : character
+    }
+
+    /// The key a touch going down at `point` presses: the one under it, or a neighbouring
+    /// letter within `letterReach` points that is enough likelier to come next in the word.
+    func key(at point: CGPoint) -> KeyboardKey? {
+        let point = pointOnKeys(point)
+        guard let key = layout.hitTest(point) else { return nil }
+        guard key.character != nil, let model = letterOdds, layerState.layer == .letters,
+              field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
+              shift.state != .locked, model.language == language.rawValue else { return key }
+        let reach = letterReach
+        let near = layout.keys.filter {
+            $0.character != nil && $0.kind != key.kind && Self.distance(from: point, to: $0.hitFrame) < reach
+        }
+        guard !near.isEmpty, let continuations = continuationMass(model) else { return key }
+        // An accented letter without a key of its own is typed from its base letter's (é from e).
+        var mass = [Double](repeating: 0, count: continuations.count)
+        let keyed = Set(layout.keys.compactMap { key in
+            key.character.flatMap { $0.count == 1 ? model.codes[Character($0)] : nil }
+        })
+        for (code, m) in continuations.enumerated() where m > 0 {
+            mass[keyed.contains(UInt8(code)) ? code : Int(model.baseCodes[code])] += m
+        }
+        let total = mass.reduce(0, +)
+        func odds(_ k: KeyboardKey) -> Double? {
+            guard let c = k.character, c.count == 1, let code = model.codes[Character(c)] else { return nil }
+            return log(mass[Int(code)] + total * 1e-4)
+        }
+        guard let own = odds(key) else { return key }
+        var best = key
+        var bestScore = own
+        for other in near {
+            guard let theirs = odds(other) else { continue }
+            let score = theirs - letterOddsPerPoint * Double(Self.distance(from: point, to: other.hitFrame))
+            if score > bestScore {
+                best = other
+                bestScore = score
+            }
+        }
+        return best
     }
 }
