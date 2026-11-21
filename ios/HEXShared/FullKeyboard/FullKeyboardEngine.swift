@@ -1466,15 +1466,21 @@ final class FullKeyboardEngine {
     }
 
     /// The letter keys Spatial autocorrect scores taps against: this layout's, moved by
-    /// `tapOffsets`, or with Adaptive touch on by its personal centres (and then the stock
-    /// ones beside them, `AutocorrectEngine.decoderStockKeys`). Off the letters page the last
+    /// `tapOffsets`; with Adaptive touch on, by its personal centres instead (none while it
+    /// has too little evidence), with the others beside them as the baseline no correction
+    /// may go past (`AutocorrectEngine.decoderBaselineKeys`). Off the letters page the last
     /// letters page's stay: a closing mark from the 123 page still reads the word's taps
     /// ("ofthe." -> "of the.").
     private func syncDecoderKeys() {
         guard let keys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets) else { return }
-        let adaptive = adaptiveTouch?.offsets(for: layout)
-        autocorrect.decoderKeys = adaptive.flatMap { TypingDecoder.Keys(layout: layout, offsets: $0) } ?? keys
-        autocorrect.decoderStockKeys = adaptive?.isEmpty == false ? TypingDecoder.Keys(layout: layout) : nil
+        guard let adaptive = adaptiveTouch?.offsets(for: layout),
+              let personal = TypingDecoder.Keys(layout: layout, offsets: adaptive) else {
+            autocorrect.decoderKeys = keys
+            autocorrect.decoderBaselineKeys = nil
+            return
+        }
+        autocorrect.decoderKeys = personal
+        autocorrect.decoderBaselineKeys = personal == keys ? nil : keys
     }
 
     /// Hands the layout and shift to typing logs, which writes a line when either changed.

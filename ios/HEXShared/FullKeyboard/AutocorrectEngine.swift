@@ -256,11 +256,12 @@ final class AutocorrectEngine {
     var decoderKeys: TypingDecoder.Keys? {
         didSet { partner?.decoderKeys = decoderKeys }
     }
-    /// The stock centres while `decoderKeys` has Adaptive touch's personal ones: what space
-    /// puts in is a reading the stock centres also clear by the margin, else the stock
-    /// decision. Personal centres rank readings; they never make a correction of their own.
-    var decoderStockKeys: TypingDecoder.Keys? {
-        didSet { partner?.decoderStockKeys = decoderStockKeys }
+    /// The centres Spatial autocorrect reads with Adaptive touch off (the stock ones, or
+    /// moved by Learn how I type), while `decoderKeys` has its personal ones: what space puts
+    /// in is a reading these also clear by the margin, else their own decision. Personal
+    /// centres rank readings; they never make a correction the keyboard wouldn't without them.
+    var decoderBaselineKeys: TypingDecoder.Keys? {
+        didSet { partner?.decoderBaselineKeys = decoderBaselineKeys }
     }
     /// Where each letter of the word being typed was tapped, one point per letter; nil when
     /// the keys don't know (the cursor moved, the text came from elsewhere).
@@ -401,7 +402,7 @@ final class AutocorrectEngine {
         engine.allowsSwearing = allowsSwearing
         engine.addsCapitals = addsCapitals
         engine.decoderKeys = decoderKeys
-        engine.decoderStockKeys = decoderStockKeys
+        engine.decoderBaselineKeys = decoderBaselineKeys
         engine.decoderTaps = decoderTaps
         partner = engine
     }
@@ -918,9 +919,9 @@ final class AutocorrectEngine {
             || properNoun(for: token) != nil
         let previous = Self.previousWord(before, token: token)
         var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
-        if let stock = decoderStockKeys, let replacement = decision?.replacement,
-           decoder.replaces(with: replacement, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: stock) != true {
-            decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: stock)?.replacement
+        if let baseline = decoderBaselineKeys, let replacement = decision?.replacement,
+           decoder.replaces(with: replacement, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline) != true {
+            decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)?.replacement
         }
         decoderCache = (before, taps, decision)
         return decision
@@ -1056,8 +1057,8 @@ final class AutocorrectEngine {
     /// letter ("deli ate" -> "delicate"); nil to keep both. `before` is the text up to the
     /// end of `first`. `first` and `firstTaps` are as you typed them.
     func merge(first: String, firstTaps: [CGPoint], space: CGPoint, second: String, before: String) -> String? {
-        // Adaptive touch's personal centres never join words: the stock ones decide.
-        guard isEnabled, hasDictionary, let decoder, let keys = decoderStockKeys ?? decoderKeys, let taps = decoderTaps,
+        // Adaptive touch's personal centres never join words: the centres read without it decide.
+        guard isEnabled, hasDictionary, let decoder, let keys = decoderBaselineKeys ?? decoderKeys, let taps = decoderTaps,
               decoder.model.language == language.rawValue, !first.contains("'"), !second.contains("'") else { return nil }
         for word in [first, second] {
             let lower = word.lowercased()

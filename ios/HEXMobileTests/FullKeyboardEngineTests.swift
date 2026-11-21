@@ -1880,7 +1880,7 @@ extension FullKeyboardEngineTests {
 
         let touch = adaptive()
         XCTAssertEqual(engine.autocorrect.decoderKeys, stockCentres, "nothing learned yet: the stock centres")
-        XCTAssertNil(engine.autocorrect.decoderStockKeys)
+        XCTAssertNil(engine.autocorrect.decoderBaselineKeys)
         try teach(touch, dx: 0.2)
         XCTAssertTrue(touch.isActive)
         XCTAssertEqual(engine.layout.keys, keys, "keycaps and hit rectangles stay where they are")
@@ -1890,8 +1890,25 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(personal.y, e.midY, accuracy: 0.01)
         XCTAssertGreaterThan(personal.x - e.midX, 0.12 * e.width)
         XCTAssertLessThanOrEqual(personal.x - e.midX, CGFloat(AdaptiveTouchModel.bound) * e.width + 0.01)
-        XCTAssertEqual(engine.autocorrect.decoderStockKeys, stockCentres, "beside them, the stock centres")
+        XCTAssertEqual(engine.autocorrect.decoderBaselineKeys, stockCentres, "beside them, the stock centres")
         XCTAssertEqual(engine.swipeKeys.centres["e"]?.x, e.midX, "Swipe typing reads the drawn keys")
+    }
+
+    /// With Adaptive touch on, Learn how I type's per-letter offsets no longer move the centres
+    /// the decoder reads (no stacking), but stay the baseline a correction must also clear.
+    func testAdaptiveTouchReplacesLearnHowITypesOffsetsButKeepsThemAsTheBaseline() throws {
+        let e = engine.layout.key(.character("e"))!.frame
+        engine.tapOffsets = ["e": CGVector(dx: -4, dy: 2)]
+        let journal = try XCTUnwrap(TypingDecoder.Keys(layout: engine.layout, offsets: engine.tapOffsets))
+        let touch = adaptive()
+        XCTAssertEqual(engine.autocorrect.decoderKeys, TypingDecoder.Keys(layout: engine.layout), "too little evidence: the stock centres")
+        XCTAssertEqual(engine.autocorrect.decoderBaselineKeys, journal)
+        try teach(touch, dx: 0.2)
+        XCTAssertGreaterThan(try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["e"]).x, e.midX)
+        XCTAssertEqual(engine.autocorrect.decoderBaselineKeys, journal)
+        engine.adaptiveTouch = nil
+        XCTAssertEqual(engine.autocorrect.decoderKeys, journal, "off: Learn how I type's offsets, as before")
+        XCTAssertNil(engine.autocorrect.decoderBaselineKeys)
     }
 
     func testAdaptiveTouchKeepsEachKeyboardSizeAndHexKeySideApart() throws {
@@ -1924,7 +1941,7 @@ extension FullKeyboardEngineTests {
         try teach(touch, dx: -0.2, taps: 24, sessions: 1)
         XCTAssertFalse(touch.isActive, "the profile fits worse than the stock centres: stock at once")
         XCTAssertEqual(engine.autocorrect.decoderKeys, TypingDecoder.Keys(layout: engine.layout))
-        XCTAssertNil(engine.autocorrect.decoderStockKeys)
+        XCTAssertNil(engine.autocorrect.decoderBaselineKeys)
         try teach(touch, dx: -0.2, taps: 420, sessions: 4)
         XCTAssertTrue(touch.isActive, "the new grip learned its own profile")
         XCTAssertLessThan(try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["e"]).x, e.midX)
@@ -1972,7 +1989,7 @@ extension FullKeyboardEngineTests {
                 // The decoder reads exactly what it reads with the experiment off. (Suggestions
                 // that tie can swap between runs: Swift seeds each dictionary's order.)
                 XCTAssertEqual(keys.autocorrect.decoderKeys, TypingDecoder.Keys(layout: keys.layout))
-                XCTAssertNil(keys.autocorrect.decoderStockKeys)
+                XCTAssertNil(keys.autocorrect.decoderBaselineKeys)
                 out.append(field.text)
             }
             return out

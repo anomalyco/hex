@@ -445,13 +445,17 @@ final class AdaptiveTouch {
 
     static let fileName = "adaptive-touch.bin"
     /// Grip regimes: the profile in use falls back to the stock centres once it fits recent
-    /// taps worse than they do (mean log-likelihood gain per tap, nats); labels then teach the
-    /// other regime, and a profile is taken back once it fits better again.
+    /// taps worse than they do (mean log-likelihood gain per tap and axis, nats, over the last
+    /// `monitorWindow` labels): a grip that moves taps sideways but not up or down still
+    /// counts. Labels then teach the other regime, and a profile is taken back once it fits
+    /// better again on both axes.
     static let monitorWindow = 32
     static let monitorMinimum = 16
+    static let disengageAxis: Float = -0.06
     static let disengageGain: Float = -0.1
+    static let switchAxis: Float = -0.08
     static let switchGain: Float = -0.12
-    static let engageGain: Float = 0
+    static let engageAxis: Float = -0.02
     /// Label weights: a word kept as typed, a picked suggestion, a retype or an undone fix.
     static let weakQuality: Float = 1
     static let pickedQuality: Float = 2
@@ -501,9 +505,9 @@ final class AdaptiveTouch {
     private(set) var version = 0
     private(set) var geometry: AdaptiveTouchGeometry?
     var spans = AdaptiveTouchSpans()
-    /// [context][window]: each recent label's log-likelihood gain of the context's centres
-    /// over the stock ones. Memory only.
-    private var gains = [Float](repeating: 0, count: AdaptiveTouchModel.contextLimit * AdaptiveTouch.monitorWindow)
+    /// [context][window][x, y]: each recent label's log-likelihood gain of the context's
+    /// centres over the stock ones, per axis. Memory only.
+    private var gains = [Float](repeating: 0, count: AdaptiveTouchModel.contextLimit * AdaptiveTouch.monitorWindow * 2)
     private var gainCount = [Int](repeating: 0, count: AdaptiveTouchModel.contextLimit)
     private var gainHead = [Int](repeating: 0, count: AdaptiveTouchModel.contextLimit)
     private var unsaved = 0
@@ -652,7 +656,7 @@ final class AdaptiveTouch {
         let rx = Float(x) * shrink, ry = Float(y) * shrink
         for c in model.contexts.indices where model.contexts[c].geometry == geometry.key && model.contexts[c].hasSnapshot {
             let o = model.offset(context: c, slot: slot)
-            pushGain((rx * o.x - 0.5 * o.x * o.x) / (sx * sx) + (ry * o.y - 0.5 * o.y * o.y) / (sy * sy), context: c)
+            pushGain(x: (rx * o.x - 0.5 * o.x * o.x) / (sx * sx), y: (ry * o.y - 0.5 * o.y * o.y) / (sy * sy), context: c)
         }
 
         if mode == .learn {
@@ -698,14 +702,15 @@ final class AdaptiveTouch {
     private func decideRegime(geometry: UInt64) {
         let regimes = model.contexts.indices.filter { model.contexts[$0].geometry == geometry }
         var didChange = false
-        for c in regimes where model.contexts[c].inUse && gainCount[c] >= Self.monitorMinimum && meanGain(c) < Self.disengageGain {
+        for c in regimes where model.contexts[c].inUse && gainCount[c] >= Self.monitorMinimum
+            && misfits(c, axis: Self.disengageAxis, total: Self.disengageGain) {
             model.contexts[c].inUse = false
             didChange = true
         }
         // The window and its newest quarter agree the learning profile stopped fitting.
         if mode == .learn, let learning = regimes.first(where: { model.contexts[$0].learning }),
            model.contexts[learning].hasSnapshot, gainCount[learning] >= Self.monitorMinimum + 8,
-           meanGain(learning) < Self.switchGain, recentGain(learning) < 0 {
+           misfits(learning, axis: Self.switchAxis, total: Self.switchGain), recentGain(learning) < 0 {
             let regime: UInt8 = model.contexts[learning].regime == 0 ? 1 : 0
             let next: Int
             if let other = model.context(geometry: geometry, regime: regime) {
@@ -727,10 +732,12 @@ final class AdaptiveTouch {
         }
         if !model.contexts.indices.contains(where: { model.contexts[$0].geometry == geometry && model.contexts[$0].inUse }) {
             let ready = model.contexts.indices.filter {
-                model.contexts[$0].geometry == geometry && model.contexts[$0].isActiveEligible
-                    && gainCount[$0] >= Self.monitorMinimum && meanGain($0) > Self.engageGain && recentGain($0) > 0
+                guard model.contexts[$0].geometry == geometry, model.contexts[$0].isActiveEligible,
+                      gainCount[$0] >= Self.monitorMinimum else { return false }
+                let g = meanGain($0)
+                return g.x + g.y > 0 && min(g.x, g.y) > Self.engageAxis && recentGain($0) > 0
             }
-            if let best = ready.max(by: { meanGain($0) < meanGain($1) }) {
+            if let best = ready.max(by: { meanGain($0).x + meanGain($0).y < meanGain($1).x + meanGain($1).y }) {
                 model.contexts[best].inUse = true
                 if mode == .learn {
                     for c in model.contexts.indices where model.contexts[c].geometry == geometry {
@@ -743,10 +750,18 @@ final class AdaptiveTouch {
         if didChange { changed() }
     }
 
-    private func pushGain(_ gain: Float, context c: Int) {
-        gains[c * Self.monitorWindow + gainHead[c]] = gain
+    private func pushGain(x: Float, y: Float, context c: Int) {
+        let i = (c * Self.monitorWindow + gainHead[c]) * 2
+        gains[i] = x
+        gains[i + 1] = y
         gainHead[c] = (gainHead[c] + 1) % Self.monitorWindow
         gainCount[c] = min(Self.monitorWindow, gainCount[c] + 1)
+    }
+
+    /// The profile fits worse than the stock centres along one axis, or overall.
+    private func misfits(_ c: Int, axis: Float, total: Float) -> Bool {
+        let g = meanGain(c)
+        return min(g.x, g.y) < axis || g.x + g.y < total
     }
 
     private func resetGains(_ c: Int) {
@@ -754,20 +769,24 @@ final class AdaptiveTouch {
         gainHead[c] = 0
     }
 
-    private func meanGain(_ c: Int) -> Float {
-        guard gainCount[c] > 0 else { return 0 }
-        var sum: Float = 0
-        for k in 0..<gainCount[c] { sum += gains[c * Self.monitorWindow + k] }
-        return sum / Float(gainCount[c])
+    private func meanGain(_ c: Int) -> (x: Float, y: Float) {
+        guard gainCount[c] > 0 else { return (0, 0) }
+        var x: Float = 0, y: Float = 0
+        for k in 0..<gainCount[c] {
+            x += gains[(c * Self.monitorWindow + k) * 2]
+            y += gains[(c * Self.monitorWindow + k) * 2 + 1]
+        }
+        return (x / Float(gainCount[c]), y / Float(gainCount[c]))
     }
 
-    /// The newest quarter of the window: a second, later window that must agree.
+    /// The newest quarter of the window, both axes: a second, later window that must agree.
     private func recentGain(_ c: Int) -> Float {
         let n = min(gainCount[c], Self.monitorWindow / 4)
         guard n > 0 else { return 0 }
         var sum: Float = 0
         for k in 1...n {
-            sum += gains[c * Self.monitorWindow + (gainHead[c] - k + Self.monitorWindow) % Self.monitorWindow]
+            let i = (c * Self.monitorWindow + (gainHead[c] - k + Self.monitorWindow) % Self.monitorWindow) * 2
+            sum += gains[i] + gains[i + 1]
         }
         return sum / Float(n)
     }

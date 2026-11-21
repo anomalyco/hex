@@ -1114,7 +1114,7 @@ extension AutocorrectEngineTests {
         ac.decoderKeys = personal
         let bat = "bat".map { stock.centres[$0]! }
         func atSpace(_ taps: [CGPoint], stockKeys: TypingDecoder.Keys?) -> String? {
-            ac.decoderStockKeys = stockKeys
+            ac.decoderBaselineKeys = stockKeys
             ac.decoderTaps = taps
             return ac.replacementOnSpace(beforeInput: "the bat", field: .text, autocorrectionType: .default)?.replacement
         }
@@ -1127,7 +1127,7 @@ extension AutocorrectEngineTests {
         // A fix both make still goes in.
         ac.decoderKeys = stock
         let thw = "thw".map { stock.centres[$0]! }
-        ac.decoderStockKeys = stock
+        ac.decoderBaselineKeys = stock
         ac.decoderTaps = thw
         XCTAssertEqual(ac.replacementOnSpace(beforeInput: "see thw", field: .text, autocorrectionType: .default)?.replacement, "the")
     }
