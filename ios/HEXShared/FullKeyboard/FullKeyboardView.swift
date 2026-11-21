@@ -632,6 +632,7 @@ final class FullKeyboardView: UIView {
             hexKey.inStrip = hex.row < 0
             hexKey.frame = hex.hitFrame.offsetBy(dx: 0, dy: lift)
             hexKey.keycapFrame = hex.frame.offsetBy(dx: -hex.hitFrame.minX, dy: -hex.hitFrame.minY)
+            hexKey.markCenterY = layout.metrics.stripTop + layout.metrics.stripTextCenter - hex.hitFrame.minY
         }
         if let globe = layout.key(.globe), emojiPanel == nil || routedTarget.isSearching {
             globeButton.isHidden = false
