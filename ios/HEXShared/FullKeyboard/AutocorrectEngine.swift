@@ -826,7 +826,12 @@ final class AutocorrectEngine {
         // Spatial autocorrect, when on, decides alone: your taps, the word before, and a margin.
         if let decision = decoderDecision(for: token) {
             if let replacement = decision.replacement, mayOffer(replacement, replacing: token) {
-                return withoutAddedCapitals(Self.matchCase(of: token, onto: replacement), typed: token)
+                var cased = Self.matchCase(of: token, onto: replacement)
+                // A missed space after English "i" ("iwant") gives "I want", as "i" alone does.
+                if language.usesEnglishFixes, cased.contains(" ") {
+                    cased = cased.split(separator: " ").map { $0 == "i" ? "I" : String($0) }.joined(separator: " ")
+                }
+                return withoutAddedCapitals(cased, typed: token)
             }
             // A name, day or place its lowercase word list lacks, typed in lowercase, is
             // capitalised as the dictionary path does ("mary" -> "Mary"), unless

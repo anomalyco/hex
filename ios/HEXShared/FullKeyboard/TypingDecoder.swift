@@ -356,6 +356,12 @@ nonisolated struct TypingDecoder {
         var insertionCost = 7.0
         var transpositionCost = 5.0
         var spaceOmissionCost = 6.0
+        /// A tap on the bottom row's upper half read as a space the finger missed ("ofbthe"):
+        /// this, plus `spaceTapWeight` times how much nearer its letter row than the space bar
+        /// it landed (the bar's Gaussian likelihood against the row's). Below the row's centre
+        /// such a tap costs `spaceOmissionCost`.
+        var spaceTapCost = 5.0
+        var spaceTapWeight = 0.25
         var maxEdits = 1
         var beam = 48
         /// Nats the best reading must beat what you typed by to replace it on space.
@@ -384,6 +390,9 @@ nonisolated struct TypingDecoder {
         static func tuned(for language: String) -> Parameters {
             var p = Parameters()
             if language == "en" { p.lmWeight = 1.5 }
+            // Spanish's many one- and two-letter words ("a", "es", "va") make a letter read as
+            // a space too cheap a split ("vaxes" -> "va es"): there, only below the row's centre.
+            if language == "es" { p.spaceTapCost = .infinity }
             return p
         }
     }
@@ -394,11 +403,15 @@ nonisolated struct TypingDecoder {
         var pitch: CGSize
         /// The bottom letter row's centre, below which a tap may have been meant for space.
         var bottomRowY: CGFloat
+        /// The space bar's keycap as on the unsplit keyboard (both bars on a split one), or
+        /// nil when unknown: a bottom-row tap above it may have been meant for space.
+        var space: CGRect?
 
-        init(centres: [Character: CGPoint], pitch: CGSize, bottomRowY: CGFloat) {
+        init(centres: [Character: CGPoint], pitch: CGSize, bottomRowY: CGFloat, space: CGRect? = nil) {
             self.centres = centres
             self.pitch = pitch
             self.bottomRowY = bottomRowY
+            self.space = space
         }
 
         /// The letter keys of `layout` (nil off the letters page). `offsets` (in points, by
@@ -407,6 +420,12 @@ nonisolated struct TypingDecoder {
             guard layout.layer == .letters else { return nil }
             var centres: [Character: CGPoint] = [:]
             var bottom: CGFloat = 0
+            var space: CGRect?
+            for key in layout.keys where key.kind == .space {
+                let minX = layout.unsplitX(key.frame.minX), maxX = layout.unsplitX(key.frame.maxX)
+                let bar = CGRect(x: minX, y: key.frame.minY, width: max(0, maxX - minX), height: key.frame.height)
+                space = space.map { $0.union(bar) } ?? bar
+            }
             for key in layout.keys {
                 guard let c = key.character, c.count == 1, let letter = c.first, letter.isLetter else { continue }
                 let shift = offsets[letter] ?? .zero
@@ -422,7 +441,8 @@ nonisolated struct TypingDecoder {
                     width: layout.isSplit ? SplitGeometry.pitch : layout.letterWidth + m.gap,
                     height: m.keyHeight + m.rowGap
                 ),
-                bottomRowY: bottom
+                bottomRowY: bottom,
+                space: space
             )
         }
     }
@@ -537,7 +557,7 @@ nonisolated struct TypingDecoder {
             }
         }
         if parameters.splits, letters.count >= 3 {
-            readings += splitReadings(costs, taps: taps, keys: keys, prev: prev)
+            readings += splitReadings(costs, taps: taps, letters: letters, keys: keys, prev: prev)
         }
         readings.sort { $0.cost < $1.cost }
         var seen = Set<String>()
@@ -702,16 +722,23 @@ nonisolated struct TypingDecoder {
     }
 
     /// Two words where the taps had no space, or one meant for space ("seehow", "seenhow").
-    /// Each half is read with substitutions only, which keeps this cheap.
-    private func splitReadings(_ costs: [[Double]], taps: [CGPoint], keys: Keys, prev: Int?) -> [Reading] {
+    /// Each half is read with substitutions only, which keeps this cheap; around a tap on
+    /// the bottom row's upper half read as a space ("ofbthe"), only as the letters typed, so
+    /// a name's middle letter ("rima") is never a space with slips around it.
+    private func splitReadings(_ costs: [[Double]], taps: [CGPoint], letters: [UInt8], keys: Keys, prev: Int?) -> [Reading] {
         let n = costs.count
         var out: [Reading] = []
-        func pair(left: Range<Int>, right: Range<Int>, extra: Double) {
+        func pair(left: Range<Int>, right: Range<Int>, extra: Double, exact: Bool = false) {
             guard !left.isEmpty, !right.isEmpty else { return }
             let never = neverSuggest
-            let lefts = search(model, costs, range: left, limit: 3, maxEdits: 0, skipping: never.words).filter { canStandAlone($0.0) }
+            func halves(_ range: Range<Int>) -> [(Int, Double)] {
+                guard exact else { return search(model, costs, range: range, limit: 3, maxEdits: 0, skipping: never.words) }
+                guard let word = model.index(ofCodes: Array(letters[range])), !never.words.contains(word) else { return [] }
+                return [(word, range.reduce(0) { $0 + costs[$1][Int(letters[$1])] })]
+            }
+            let lefts = halves(left).filter { canStandAlone($0.0) }
             guard !lefts.isEmpty else { return }
-            let rights = search(model, costs, range: right, limit: 3, maxEdits: 0, skipping: never.words).filter { canStandAlone($0.0) }
+            let rights = halves(right).filter { canStandAlone($0.0) }
             for (l, ls) in lefts {
                 let lcost = ls + parameters.lmWeight * lmCost(l, after: prev)
                 for (r, rs) in rights where !never.follows(r, after: l) {
@@ -722,11 +749,29 @@ nonisolated struct TypingDecoder {
         }
         for k in 1..<n {
             pair(left: 0..<k, right: k..<n, extra: parameters.spaceOmissionCost)
-            if k < n - 1, taps[k].y > keys.bottomRowY {
+            guard k < n - 1 else { continue }
+            if taps[k].y > keys.bottomRowY {
                 pair(left: 0..<k, right: (k + 1)..<n, extra: parameters.spaceOmissionCost)
+            } else if let extra = spaceCost(of: taps[k], keys: keys) {
+                pair(left: 0..<k, right: (k + 1)..<n, extra: extra, exact: true)
             }
         }
         return out
+    }
+
+    /// The cost of reading a tap on the bottom row's upper half as a space the finger missed,
+    /// or nil when it can't be one: above the space bar, priced by how much nearer the row's
+    /// centre than the bar's it landed.
+    private func spaceCost(of tap: CGPoint, keys: Keys) -> Double? {
+        guard parameters.spaceTapCost.isFinite, let bar = keys.space, bar.width > 0 else { return nil }
+        let slack = keys.pitch.width / 2
+        guard tap.x >= bar.minX - slack, tap.x <= bar.maxX + slack,
+              tap.y > keys.bottomRowY - keys.pitch.height / 2 else { return nil }
+        let sy = Double(keys.pitch.height) * parameters.sigmaY
+        let toBar = (Double(tap.y) - Double(bar.midY)) / sy
+        let toRow = (Double(tap.y) - Double(keys.bottomRowY)) / sy
+        let likelierRow = max(0, 0.5 * (toBar * toBar - toRow * toRow))
+        return parameters.spaceTapCost + parameters.spaceTapWeight * likelierRow
     }
 
     /// A word that may stand alone in a split: two or more letters, or a common one-letter

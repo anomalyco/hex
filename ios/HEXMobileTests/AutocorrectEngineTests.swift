@@ -839,6 +839,39 @@ final class AutocorrectEngineTests: XCTestCase {
     /// left slot. Record typing logs showed that picked what was typed and a space ("th  "),
     /// and kept "th" from being corrected for the rest of the session. The keys take the
     /// tap now, on row 1's top edge, and Spatial autocorrect keeps the "the" it spells.
+    private func tapCentre(_ letter: Character) {
+        let key = engine.layout.key(.character(String(letter)))!.frame
+        tap(at: CGPoint(x: key.midX, y: key.midY))
+    }
+
+    /// X (Erick, Justin): "Auto correct does not separate two words like apple does." A space
+    /// tapped as the b, n, v or c above the space bar is read as one wherever on the key it
+    /// lands (the system keyboard turns "ofbthe" into "of the" at the key's centre too), and
+    /// a missed space splits the words, with English "i" a capital.
+    func testASpaceTappedAsALetterAboveTheSpaceBarOrMissedSplitsTheWords() throws {
+        try useDecoder()
+        typeTaps("is")
+        typeTaps("this")
+        for letter in ["b", "n", "v", "c"] {
+            for dy: CGFloat in [0, -8, 10] {
+                for ch in "of" { tapCentre(ch) }
+                let key = engine.layout.key(.character(letter))!.frame
+                let point = CGPoint(x: key.midX, y: key.midY + dy)
+                XCTAssertEqual(engine.layout.hitTest(point)?.kind, .character(letter))
+                tap(at: point)
+                typeTaps("the")
+                XCTAssertTrue(target.text.hasSuffix(" of the "), "\(letter) \(dy): \(target.text)")
+            }
+        }
+        typeTaps("iwant")
+        XCTAssertTrue(target.text.hasSuffix(" I want "), target.text)
+        typeTaps("lookat")
+        XCTAssertTrue(target.text.hasSuffix(" look at "), target.text)
+        // A word with a bottom-row letter stays one word.
+        for word in ["number", "cabin", "seven", "become"] { typeTaps(word) }
+        XCTAssertTrue(target.text.hasSuffix(" number cabin seven become "), target.text)
+    }
+
     func testSpatialAutocorrectReadsAnETappedHighOnTheStripAsThe() throws {
         try useDecoder()
         typeTaps("on")
