@@ -2393,12 +2393,17 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   shown, checked every 250 ms; moves once two checks agree (#807)
 ├── HUD start -> a fresh first-frame attempt (own baseline, clock, and one
 │   recovery hide): no frame in 1.5 s -> hidden at once (not the exit fade,
-│   which needs a frame), so Rune releases the window and GPU surface and the
-│   next capture makes both again. A second start restarts the attempt, a
-│   previous attempt's reason never hides the new one, each attempt hides at
-│   most once, and the next start hides again if it is frame-less too. Rune's
-│   overlay failure is the Settings/log reason only. Logged once per reason;
-│   Settings' listener warning (dictation.md, rune_hud::FirstFrame)
+│   which needs a frame), so Rune releases the window and GPU surface. A
+│   frame-less attempt also backs the HUD off, so a GPU that can't present
+│   one is not asked to make a window, swapchain and device on every
+│   dictation: no show for 1 min, doubled per failed attempt in a row to
+│   30 min; a presented frame resets it, and a recording whose own attempt
+│   failed gets no further show either (one warning with the cooldown). A
+│   second start restarts a pending attempt, a previous attempt's reason
+│   never hides the new one, and each attempt hides at most once. Rune's
+│   overlay failure is the Settings/log reason only, still shown while the
+│   HUD backs off. Logged once per reason; Settings' listener warning
+│   (dictation.md, rune_hud::FirstFrame)
 ├── Launch again -> Running app shows its window; hidden (login) launch -> no-op
 ├── Tray icon -> White Hex mark; light taskbar (SystemUsesLightTheme) -> black mark
 │   └── Theme read when the tray is created; a later switch applies at the next launch
