@@ -885,7 +885,7 @@ final class KeyboardViewController: UIInputViewController {
             logDictationEdits.finish(context)
         }
         textDocumentProxy.insertText(insertion)
-        fullKeyboard?.didInsertDictation(insertion)
+        fullKeyboard?.didInsertDictation(insertion, before: context.before ?? "", after: context.after ?? "")
         typingLog?.dictation(
             source: source,
             resultID: resultID,

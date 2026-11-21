@@ -386,6 +386,71 @@ final class TranslationPasteSwitchTests: XCTestCase {
         XCTAssertFalse(visibleLabels(in: strip).contains("Couldn't translate, pasted as spoken"))
     }
 
+    /// Undo dictation still takes the dictation back after the cursor moves within it, before it
+    /// or after it, and the cursor stays in the text you moved it to. Where it can't tell the
+    /// dictation from other text it goes, and deletes nothing.
+    @MainActor
+    func testUndoDictationAfterTheCursorMoves() throws {
+        func keyboard(_ field: FixtureTextTarget) -> FullKeyboardView {
+            let view = FullKeyboardView(model: KeyboardViewModel(), target: field)
+            view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+            view.layoutIfNeeded()
+            return view
+        }
+        func undo(_ view: FullKeyboardView) -> UIButton? {
+            visibleControls(in: view).first { $0.configuration?.title == "Undo dictation" }
+        }
+        func dictate(_ text: String, into field: FixtureTextTarget, at cursor: Int, moveBy offset: Int) -> FullKeyboardView {
+            let view = keyboard(field)
+            field.adjustTextPosition(byCharacterOffset: cursor - field.cursorIndex)
+            let before = field.documentContextBeforeInput ?? "", after = field.documentContextAfterInput ?? ""
+            field.insertText(text)
+            view.didInsertDictation(text, before: before, after: after)
+            field.adjustTextPosition(byCharacterOffset: offset)
+            view.textDidChange()
+            return view
+        }
+
+        for (offset, text, cursor) in [(-6, "Hi. Bye.", 3), (-16, "Hi. Bye.", 1), (5, "Hi. Bye.", 8)] {
+            let field = FixtureTextTarget(text: "Hi. Bye.")
+            let view = dictate(" Meet at noon.", into: field, at: 3, moveBy: offset)
+            try XCTUnwrap(undo(view), "moved by \(offset)").sendActions(for: .touchUpInside)
+            XCTAssertEqual(field.text, text, "moved by \(offset)")
+            XCTAssertEqual(field.cursorIndex, cursor, "moved by \(offset)")
+            XCTAssertNil(undo(view))
+        }
+
+        // The same words twice: no telling which went in last.
+        let twice = FixtureTextTarget(text: "Yes. Yes.")
+        var view = dictate(" Yes.", into: twice, at: 9, moveBy: -6)
+        XCTAssertNil(undo(view), "gone as the cursor moved")
+        XCTAssertEqual(twice.text, "Yes. Yes. Yes.")
+
+        // Changed outside the keys: it can't be found whole any more.
+        let edited = FixtureTextTarget(text: "Hi.")
+        view = dictate(" Meet at noon.", into: edited, at: 3, moveBy: 0)
+        XCTAssertNotNil(undo(view))
+        edited.deleteBackward()
+        edited.deleteBackward()
+        view.textDidChange()
+        XCTAssertNil(undo(view))
+        XCTAssertEqual(edited.text, "Hi. Meet at noo")
+
+        // Moves are UTF-16 units; a selection, or other text where it went in, finds nothing.
+        let undoable = DictationUndo(text: " Ok 👍🏽", before: "Hi", after: "")
+        XCTAssertEqual(undoable.plan(before: "H", after: "i Ok 👍🏽", selected: nil), DictationUndo.Plan(toEnd: 9, delete: 5, back: -1))
+        XCTAssertEqual(undoable.plan(before: "Hi Ok 👍🏽 and", after: "", selected: nil), DictationUndo.Plan(toEnd: -4, delete: 5, back: 4))
+        XCTAssertNil(undoable.plan(before: "H", after: "i Ok 👍🏽", selected: "i"))
+        XCTAssertNil(undoable.plan(before: "Bye Ok", after: " 👍🏽", selected: nil))
+
+        // A text view shows only the cursor's sentence, without the space before it (iOS 27.0
+        // simulator): the space goes too. Not when the sentence is cut short or follows other text.
+        let sentence = DictationUndo(text: " See you at ten.", before: "Hi Sam.", after: "")
+        XCTAssertEqual(sentence.plan(before: "See you ", after: "at ten.", selected: nil), DictationUndo.Plan(toEnd: 7, delete: 16, back: 0))
+        XCTAssertNil(sentence.plan(before: "you ", after: "at ten.", selected: nil))
+        XCTAssertNil(sentence.plan(before: "Ok. See you ", after: "at ten.", selected: nil))
+    }
+
     private func visibleControls(in view: UIView) -> [UIButton] {
         view.subviews.filter { !$0.isHidden && $0.alpha > 0 }.flatMap { ($0 as? UIButton).map { [$0] } ?? [] + visibleControls(in: $0) }
     }
