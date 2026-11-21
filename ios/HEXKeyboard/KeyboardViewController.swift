@@ -14,6 +14,8 @@ final class KeyboardViewController: UIInputViewController {
     private var surface: UIView?
     private var fullKeyboard: FullKeyboardView?
     private var heightConstraint: NSLayoutConstraint?
+    /// Opaque, under the surface: nothing iOS leaves behind the keyboard shows through it.
+    private let backdrop = KeyboardBackdropView()
     private var pollInterval: TimeInterval = 0
     private var didHandOffCurrentField = false
     private var didWarmLexicon = false
@@ -94,9 +96,25 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillLayoutSubviews() {
         super.viewWillLayoutSubviews()
-        if let fullKeyboard, heightConstraint?.constant != fullKeyboard.preferredHeight {
-            heightConstraint?.constant = fullKeyboard.preferredHeight
-            preferredContentSize.height = fullKeyboard.preferredHeight
+        if let fullKeyboard { applyHeight(fullKeyboard.preferredHeight) }
+    }
+
+    /// The keyboard's height. Set once before the first layout (the surface's own height), then
+    /// only when the surface asks for another (the emoji search's row), and never animated:
+    /// iOS sizes the panel from it while it swaps keyboards.
+    private func applyHeight(_ height: CGFloat) {
+        guard let heightConstraint else {
+            let constraint = view.heightAnchor.constraint(equalToConstant: height)
+            constraint.priority = UILayoutPriority(999)
+            constraint.isActive = true
+            heightConstraint = constraint
+            preferredContentSize.height = height
+            return
+        }
+        guard heightConstraint.constant != height else { return }
+        UIView.performWithoutAnimation {
+            heightConstraint.constant = height
+            preferredContentSize.height = height
         }
     }
 
@@ -130,7 +148,7 @@ final class KeyboardViewController: UIInputViewController {
         log.contextSource = { [weak self] in
             self?.typingLogContext ?? TypingLogContext(before: nil, after: nil, hasText: false)
         }
-        let traits = TypingLogTraits(textDocumentProxy, document: textDocumentProxy.documentIdentifier)
+        let traits = TypingLogTraits(textDocumentProxy, document: TypingLogTraits.documentIdentifier(of: textDocumentProxy))
         typingLogTraits = traits
         log.beginSession(typingLogSessionInfo(trigger: trigger, traits: traits))
         attachTypingLog()
@@ -181,8 +199,12 @@ final class KeyboardViewController: UIInputViewController {
     /// Another field, or the same field with new traits: a new session (which may be skipped).
     private func followTypingLogField() {
         guard typingLog != nil, isShown else { return }
-        let traits = TypingLogTraits(textDocumentProxy, document: textDocumentProxy.documentIdentifier)
-        guard traits.signature != typingLogTraits?.signature else { return }
+        let traits = TypingLogTraits(textDocumentProxy, document: TypingLogTraits.documentIdentifier(of: textDocumentProxy))
+        if let current = typingLogTraits, !current.isOtherField(than: traits) {
+            // The same field: keep its document once UIKit names it.
+            if current.document == nil { typingLogTraits?.document = traits.document }
+            return
+        }
         endTypingLogSession(reason: "field_changed", settleDictation: nil)
         beginTypingLogSession(trigger: "field")
     }
@@ -317,7 +339,16 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func configureView() {
+        guard backdrop.superview == nil else { return }
         view.backgroundColor = .clear
+        backdrop.translatesAutoresizingMaskIntoConstraints = false
+        view.insertSubview(backdrop, at: 0)
+        NSLayoutConstraint.activate([
+            backdrop.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            backdrop.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            backdrop.topAnchor.constraint(equalTo: view.topAnchor),
+            backdrop.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
 
         viewModel.inputViewController = self
         dictationEdits.onResult = { result in
@@ -420,10 +451,6 @@ final class KeyboardViewController: UIInputViewController {
             ContainingAppOpener.open(url, from: self)
         }
 
-        let heightConstraint = view.heightAnchor.constraint(equalToConstant: 140)
-        heightConstraint.priority = UILayoutPriority(999)
-        heightConstraint.isActive = true
-        self.heightConstraint = heightConstraint
         mountSurface()
     }
 
@@ -436,11 +463,15 @@ final class KeyboardViewController: UIInputViewController {
         guard surface == nil || wantsFull != (fullKeyboard != nil) else { return }
         guard surface == nil || viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
 
+        // Hex's own views only (UIKit may keep views of its own here): the surface, and any
+        // keyboard or bar an earlier mount left behind.
         children.forEach { child in
             child.willMove(toParent: nil)
+            child.viewIfLoaded?.removeFromSuperview()
             child.removeFromParent()
         }
         surface?.removeFromSuperview()
+        view.subviews.filter { $0 is FullKeyboardView }.forEach { $0.removeFromSuperview() }
         fullKeyboard = nil
         didWarmLexicon = false
 
@@ -466,7 +497,7 @@ final class KeyboardViewController: UIInputViewController {
             keyboard.onReturnKey = { [weak self] in self?.returnKeyWillInsert() }
             fullKeyboard = keyboard
             mounted = keyboard
-            heightConstraint?.constant = keyboard.preferredHeight
+            applyHeight(keyboard.preferredHeight)
         } else {
             let hosting = UIHostingController(
                 rootView: KeyboardSurfaceView(model: viewModel, defersDotScopeUntilActive: true)
@@ -475,11 +506,10 @@ final class KeyboardViewController: UIInputViewController {
             addChild(hosting)
             hosting.didMove(toParent: self)
             mounted = hosting.view
-            heightConstraint?.constant = 140
+            applyHeight(140)
         }
-        preferredContentSize.height = heightConstraint?.constant ?? 140
         mounted.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(mounted)
+        view.insertSubview(mounted, aboveSubview: backdrop)
         NSLayoutConstraint.activate([
             mounted.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             mounted.trailingAnchor.constraint(equalTo: view.trailingAnchor),

@@ -186,6 +186,40 @@ final class TypingLogTests: XCTestCase {
         XCTAssertFalse(try String(contentsOf: TypingLogStore.days(in: directory)[0].url, encoding: .utf8).contains("hunter"))
     }
 
+    // MARK: - Which field
+
+    /// The keyboard's proxy names no document early on (nil, though UIKit declares it
+    /// non-optional): reading it gives nil instead of trapping, and a document reads as itself.
+    func testDocumentIdentifierReadsNilInsteadOfTrapping() {
+        let proxy = DocumentProxyStandIn()
+        XCTAssertNil(TypingLogTraits.documentIdentifier(of: proxy))
+        let id = UUID()
+        proxy.documentIdentifier = id as NSUUID
+        XCTAssertEqual(TypingLogTraits.documentIdentifier(of: proxy), id)
+        XCTAssertNil(TypingLogTraits.documentIdentifier(of: NSObject()), "an object without one")
+    }
+
+    /// A document that wasn't named yet is the field the session is in; another document, or
+    /// other traits, is another field.
+    func testAnUnnamedDocumentIsTheSameField() {
+        let unnamed = TypingLogTraits()
+        var named = TypingLogTraits()
+        named.document = "A"
+        var other = TypingLogTraits()
+        other.document = "B"
+        XCTAssertFalse(unnamed.isOtherField(than: named))
+        XCTAssertFalse(named.isOtherField(than: unnamed))
+        XCTAssertFalse(named.isOtherField(than: named))
+        XCTAssertTrue(named.isOtherField(than: other))
+        var email = named
+        email.keyboardType = "emailAddress"
+        XCTAssertTrue(unnamed.isOtherField(than: email))
+    }
+
+    private final class DocumentProxyStandIn: NSObject {
+        @objc var documentIdentifier: NSUUID?
+    }
+
     // MARK: - The real keyboard
 
     private static func info(_ traits: TypingLogTraits = TypingLogTraits()) -> TypingLogSessionInfo {
