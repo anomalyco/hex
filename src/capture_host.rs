@@ -70,6 +70,7 @@ use scrawl_capture::transcribe::Transcriber;
 // them yet.
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
+mod microphone;
 #[cfg(target_os = "macos")]
 pub(crate) mod paste_source;
 mod permissions;
@@ -966,6 +967,10 @@ fn remove_bundle(dir: &Path) {
 pub trait AudioTimeline {
     fn open_sink(&self, sink: SyncSender<CaptureAudio>, since: CaptureInstant) -> Result<()>;
     fn close_sink(&self, through: CaptureInstant) -> Result<Option<CaptureSinkClosed>>;
+    /// The microphone the timeline records from, when it has one open.
+    fn device_name(&self) -> Option<String> {
+        None
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -976,6 +981,10 @@ impl AudioTimeline for DictationAudio {
 
     fn close_sink(&self, through: CaptureInstant) -> Result<Option<CaptureSinkClosed>> {
         self.close_capture_sink(through)
+    }
+
+    fn device_name(&self) -> Option<String> {
+        Some(DictationAudio::device_name(self)).filter(|name| !name.is_empty())
     }
 }
 
@@ -1009,6 +1018,8 @@ struct Active {
     quiet: Option<Quiet>,
     /// A Screenshots recording ([`CaptureCommand::Clip`]).
     clip: bool,
+    /// Where its microphone audio comes from.
+    microphone: microphone::Microphone,
 }
 
 /// A stopped capture and its audio, waiting for the finisher.
@@ -1912,7 +1923,7 @@ impl CaptureHost {
             && let Some(active) = self.active.take()
         {
             self.input.recording(None);
-            let _ = audio.close_sink(now);
+            let _ = active.microphone.close(audio, now);
             self.ended.push(active.collector);
         }
     }
@@ -2020,10 +2031,23 @@ impl CaptureHost {
             .unwrap_or_else(|| crate::app_settings::capture_settings().captures_dir());
         let bundle = new_bundle_dir(&captures_dir)?;
         let (sink, chunks) = mpsc::sync_channel(SINK_CAPACITY);
-        if let Err(error) = audio.open_sink(sink, now) {
-            remove_bundle(&bundle);
-            return Err(error);
-        }
+        // A Screenshots recording keeps the microphone it asks for; every
+        // other capture copies the dictation timeline.
+        let choice = if clip {
+            microphone::Choice::of(
+                &crate::app_settings::screenshot_settings().record_microphone,
+                audio.device_name().as_deref(),
+            )
+        } else {
+            microphone::Choice::Timeline
+        };
+        let mut microphone = match microphone::Microphone::open(choice, audio, sink, now) {
+            Ok(microphone) => Some(microphone),
+            Err(error) => {
+                remove_bundle(&bundle);
+                return Err(error);
+            }
+        };
         // Unfinished from here until its collector or the finisher settles
         // it, whatever stop or cancel does meanwhile.
         lock(&self.outcomes).start(bundle.clone(), now, target.kind(), clip);
@@ -2047,7 +2071,9 @@ impl CaptureHost {
                     );
                 })
                 .inspect_err(|_| {
-                    let _ = audio.close_sink(now);
+                    if let Some(microphone) = microphone.take() {
+                        let _ = microphone.close(audio, now);
+                    }
                     remove_bundle(&bundle);
                     lock(&self.outcomes).settle(bundle.clone(), Stage::Failed, None);
                 })?
@@ -2061,6 +2087,7 @@ impl CaptureHost {
             collector,
             quiet: quiet.or_else(|| self.quiet()),
             clip,
+            microphone: microphone.unwrap_or(microphone::Microphone::Timeline),
         });
         self.find_phone();
         Ok(self.report(true, None))
@@ -2097,7 +2124,9 @@ impl CaptureHost {
         // Input after the stop belongs to no capture.
         self.input.recording(None);
         drop(active.quiet.take());
-        let closed = audio.close_sink(now).unwrap_or_else(|error| {
+        let microphone =
+            std::mem::replace(&mut active.microphone, microphone::Microphone::Timeline);
+        let closed = microphone.close(audio, now).unwrap_or_else(|error| {
             tracing::warn!(%error, "could not close the capture sink");
             None
         });
@@ -3980,6 +4009,7 @@ mod tests {
                 long_edge: None,
                 fps: 30,
                 quality: 50,
+                system_audio: false,
             })
         );
         let full = ScreenshotSettings {
@@ -3996,6 +4026,7 @@ mod tests {
                 long_edge: Some(1920),
                 fps: 60,
                 quality: 20,
+                system_audio: false,
             })
         );
         assert_eq!(movie_for(false, &full), MovieQuality::Compact);

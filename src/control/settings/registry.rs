@@ -225,9 +225,9 @@ pub(super) const KEYS: &[Key] = &[
     optional(
         "screenshots.record_hotkey",
         Kind::Shortcut(HotkeySlot::ScreenshotRecord),
-        "Labs: records an area or a window, picked like a screenshot, and press it again \
-         to stop; none (the default) turns it off (macOS, with labs.screenshots and \
-         capture.enabled)",
+        "Labs: opens the recording toolbar (area, window, or full screen, and its audio), \
+         and press it again to stop; command+shift+5 by default, none turns it off (macOS, \
+         with labs.screenshots and capture.enabled)",
     ),
     optional(
         "screenshots.folder",
@@ -262,6 +262,23 @@ pub(super) const KEYS: &[Key] = &[
         Kind::Choice(&["original", "1080p", "720p"]),
         "Labs: the size the screenshot editor exports a recording at; original (the \
          default) copies it as recorded (macOS)",
+    ),
+    key(
+        "screenshots.record_kind",
+        Kind::Choice(&["area", "window", "screen"]),
+        "Labs: what the recording toolbar records, as last chosen; area by default (macOS)",
+    ),
+    key(
+        "screenshots.record_microphone",
+        Kind::Text,
+        "Labs: the microphone a screen recording keeps: none, default (the one dictation \
+         uses, the default), or an input device's name (macOS)",
+    ),
+    key(
+        "screenshots.record_system_audio",
+        Kind::Bool,
+        "Labs: a screen recording also keeps what the computer plays, through the Screen \
+         Recording grant it already has; off by default (macOS)",
     ),
     key(
         "show_dock_icon",

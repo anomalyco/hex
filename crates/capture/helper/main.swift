@@ -162,6 +162,17 @@ case "trim":
 case "export":
   guard arguments.count >= 2 else { fail("export needs PLAN.json") }
   runAsync { try await Exporter.run(plan: URL(filePath: arguments[1])) }
+case "mux":
+  // mux MOVIE --out FILE.mp4 [--audio FILE --offset MS]…
+  guard arguments.count >= 2, let out = option("--out", in: arguments) else {
+    fail("mux needs MOVIE --out FILE.mp4 [--audio FILE --offset MS]…")
+  }
+  var audio: [Mux.Audio] = []
+  for (index, argument) in arguments.enumerated() where argument == "--audio" && index + 1 < arguments.count {
+    let offset = index + 3 < arguments.count && arguments[index + 2] == "--offset" ? Int(arguments[index + 3]) ?? 0 : 0
+    audio.append(Mux.Audio(url: URL(filePath: arguments[index + 1]), offsetMs: offset))
+  }
+  runAsync { emit(try await Mux.run(movie: URL(filePath: arguments[1]), audio: audio, out: URL(filePath: out))) }
 case "probe":
   guard arguments.count >= 2 else { fail("probe needs MOVIE") }
   runAsync { emit(try await Media.probe(URL(filePath: arguments[1]))) }
@@ -176,5 +187,5 @@ case "qr":
   }
   emit(["qr": qr])
 default:
-  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|trim|permissions|sck-probe|qr …")
+  fail("usage: scrawl-helper devices|mirror|transcribe|transcribe-stream|speech-model|frames|audio|probe|export|shrink|trim|mux|permissions|sck-probe|qr …")
 }

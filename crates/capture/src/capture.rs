@@ -379,6 +379,8 @@ pub struct MovieSize {
     pub fps: u32,
     /// HEVC's constant quality, in hundredths.
     pub quality: u8,
+    /// Also records other apps' audio (never Hex's) into `system.m4a`.
+    pub system_audio: bool,
 }
 
 impl Default for MovieSize {
@@ -389,6 +391,7 @@ impl Default for MovieSize {
             long_edge: None,
             fps: 60,
             quality: 70,
+            system_audio: false,
         }
     }
 }

@@ -21,7 +21,7 @@ impl Picker {
         }
     }
 
-    pub(super) fn begin(&mut self, record: bool) -> Option<u64> {
+    pub(super) fn begin(&mut self, record: bool, window: bool) -> Option<u64> {
         if self.active.is_some() {
             return None;
         }
@@ -30,7 +30,7 @@ impl Picker {
         self.active = Some(Pick {
             id,
             record,
-            window: false,
+            window,
             ready: false,
         });
         Some(id)
@@ -60,10 +60,10 @@ mod tests {
     #[test]
     fn cancelled_permission_never_reopens_or_changes_a_new_pick() {
         let mut picker = Picker::new();
-        let old = picker.begin(true).unwrap();
+        let old = picker.begin(true, false).unwrap();
         picker.active = None;
         assert!(!picker.permission(old, true));
-        let new = picker.begin(false).unwrap();
+        let new = picker.begin(false, false).unwrap();
         assert!(!picker.permission(old, false));
         assert!(!picker.permission(old, true));
         assert!(picker.current(new));

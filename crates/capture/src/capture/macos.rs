@@ -26,6 +26,8 @@ pub const MAX_CAPTURE_SCALE: f64 = 2.0;
 
 /// ScreenCaptureKit records a frame only when the screen changes, at most this often.
 const RECORDING_FPS: u32 = 60;
+/// The bundle file a [`super::MovieSize::system_audio`] recording writes.
+const SYSTEM_AUDIO_FILE: &str = "system.m4a";
 
 /// Where a session's clicks and keys come from, for the log.
 pub(super) const MOUSE_SOURCE: &str = "the mouse monitor";
@@ -1456,10 +1458,14 @@ fn start_recording(
         _ => (target.frame.width, target.frame.height),
     };
     let (source, fps) = recording_plan(source, target.mode, points, quality);
+    let system_audio = matches!(quality, super::MovieQuality::Full(size) if size.system_audio);
     let plan = capture_core::Plan {
         sources: vec![source],
         cursor: capture_core::CursorDrawing::Baked,
-        audio: capture_core::AudioPlan::default(),
+        audio: capture_core::AudioPlan {
+            system: system_audio,
+            ..capture_core::AudioPlan::default()
+        },
         input: capture_core::Input::None,
         frames: None,
         exclude,
@@ -1467,6 +1473,7 @@ fn start_recording(
         dir: dir.to_path_buf(),
         names: capture_core::Names {
             videos: vec![name.to_string_lossy().into_owned()],
+            system_audio: system_audio.then(|| SYSTEM_AUDIO_FILE.to_owned()),
             ..capture_core::Names::default()
         },
     };
@@ -2121,6 +2128,7 @@ mod tests {
             long_edge: None,
             fps: 30,
             quality: 55,
+            system_audio: false,
         });
         let (one_x, fps) = recording_plan(source, CaptureMode::Display, points, small);
         assert_eq!(

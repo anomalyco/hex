@@ -48,8 +48,9 @@ pub use meetings::*;
 pub(crate) use microphone_key::{MicrophoneKey, MicrophoneKeyTap};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{
-    ExportSize, MaxResolution, RecordingQuality, ScreenshotSettings, screenshot_hotkey,
-    screenshot_record_hotkey, screenshot_settings,
+    ExportSize, MaxResolution, RECORD_MICROPHONE_DEFAULT, RECORD_MICROPHONE_NONE, RecordKind,
+    RecordingQuality, ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey,
+    screenshot_settings,
 };
 pub use typing_speed::{
     DEFAULT_TYPING_WPM, MAX_TYPING_WPM, MIN_TYPING_WPM, clamp as clamp_typing_wpm,

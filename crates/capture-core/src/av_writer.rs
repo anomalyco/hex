@@ -26,7 +26,10 @@ use objc2_foundation::{NSDictionary, NSNumber, NSString, NSURL};
 pub(crate) const AUDIO_SAMPLE_RATE: u32 = 48_000;
 pub(crate) const AUDIO_CHANNELS: u32 = 2;
 const AAC_BIT_RATE: u32 = 192_000;
-const HEVC_KEYFRAME_SECONDS: f64 = 5.0;
+/// A trim without re-encoding starts at the keyframe before its cut, so they come often enough
+/// to cut close; on a busy screen 2 s costs about 5% over 5 s, and a still one only gets them
+/// when it changes.
+const HEVC_KEYFRAME_SECONDS: f64 = 2.0;
 /// Every frame time at up to 120 fps, to a sixtieth of a millisecond.
 const VIDEO_TIMESCALE: i32 = 60_000;
 
@@ -66,7 +69,7 @@ impl AvWriter {
 
     /// A writer with one hardware HEVC input for `width`×`height` screen frames arriving at up
     /// to `fps`, at constant `quality` (0 to 1; [`crate::HEVC_QUALITY`] is sized for crisp
-    /// Retina text), Rec. 709 tags, no frame reordering, and a keyframe at least every 5 s.
+    /// Retina text), Rec. 709 tags, no frame reordering, and a keyframe at least every 2 s.
     pub(crate) fn hevc(
         path: &Path,
         width: u32,

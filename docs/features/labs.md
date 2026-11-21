@@ -327,8 +327,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        remembered screen for all, as before. See capture.linux
 │                                        // checks: entered (linux/pointer_output.rs), token_file_name and
 │                                        // recorded_output (crates/capture/src/linux/portal.rs); not run on a compositor exporting the protocol
-├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (unbound) + screenshots.folder
-│                                        + screenshots.scale_to_1x/max_resolution/frame_rate/quality/export_size (macOS)
+├── Screenshots     no    labs.screenshots + screenshots.hotkey (default ⌘⇧4) + screenshots.record_hotkey (default ⌘⇧5) + screenshots.folder
+│                                        + screenshots.scale_to_1x/max_resolution/frame_rate/quality/export_size
+│                                        + screenshots.record_kind/record_microphone/record_system_audio (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail;
 │                                        a saved record shortcut and Annotate's capture shortcuts never share a key, on or off
 ├── Annotate last 15 seconds no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
@@ -3087,9 +3088,13 @@ Recording the screen
 ([screenshots/recording.rs](../../src/screenshots/recording.rs)) needs
 Annotate on (`capture.enabled`): a recording is an Annotate capture
 (`CaptureCommand::Clip`) on capture-core's recorder, narrated from the
-dictation timeline. Its shortcut (`screenshots.record_hotkey`) is unbound
-until the drawer's Record screen row sets one (a key is required; the
-trash button clears it); without Annotate the row says "Needs Annotate".
+dictation timeline. Its shortcut (`screenshots.record_hotkey`) is ⌘⇧5 by
+default, set or cleared on the drawer's Record screen row (a key is
+required; the trash button clears it); without Annotate the row says "Needs
+Annotate". macOS's own ⌘⇧5 (symbolic hot key 184, Keyboard Shortcuts ›
+Screenshots › "Screenshot and recording options") is matched in the window
+server first, so while it's on the drawer shows the same "macOS takes this
+shortcut first" note as for ⌘⇧4 (`system_shortcut.rs`).
 A saved record shortcut and Annotate's capture shortcuts never share a key,
 whether Annotate or the Lab is on: giving one the other's chord is refused,
 so turning either on can't leave the record shortcut dead while Annotate's
@@ -3102,9 +3107,52 @@ key while a recording is available (the Lab and Annotate on). Without
 Annotate, the row still shows a saved shortcut with its clear button, so the
 key it holds stays visible and can be freed.
 
+The record shortcut opens the recording toolbar
+([screenshots/toolbar.rs](../../src/screenshots/toolbar.rs), its view in
+[capture_capsule/toolbar.rs](../../src/rune_ui/capture_capsule/toolbar.rs)),
+as macOS's own ⌘⇧5 bar: a capsule at the bottom of the display under the
+pointer, never focused and left out of every capture. Each choice is saved
+as it's made, off the UI thread.
+
 ```ts
-record shortcut  -> the same picker, "Full screen · Click to record"; area, window (Space), or display
-│                   while an Annotate capture records -> nothing
+record shortcut  -> the toolbar: ✕ │ Area · Window · Full screen │ [display ▾] [sound ▾] [Options ▾] │ Record
+│                   while an Annotate capture records -> nothing; while recording -> stops
+│                   without Screen Recording -> Annotate's permission helper, no toolbar
+├── kind         -> Area (default), Window, or Full screen; remembered (screenshots.record_kind)
+├── display ▾    -> only with two or more displays: their macOS names, the one under the pointer
+│                   first chosen; picking one moves the toolbar there. Not remembered
+├── sound ▾      -> Microphone: None, Same as dictation (default), or any input but Hex Microphone
+│                   (screenshots.record_microphone: "none", "default", or the device's name);
+│                   Record computer audio (screenshots.record_system_audio, off)
+├── Options ▾    -> Scale Retina to 1x, 30 or 60 fps, High · Medium · Low (the Recording settings)
+├── Record / Return -> Area: the picker on an area; Window: the picker on windows;
+│                      Full screen: records the chosen display at once
+└── Esc, ✕, or the record shortcut again -> closes; the shot shortcut does nothing meanwhile
+// check: the_toolbar_takes_escape_return_and_its_shortcut_and_leaves_the_shot (screenshots.rs)
+// check: a_choice_shows_before_the_controller_hears_it, the_sound_button_names_what_it_keeps (capture_capsule/toolbar.rs)
+// not run: the toolbar on a real display, popups, and a display move; no golden or --snap scene shows it
+```
+
+The sound a recording keeps: Same as dictation copies the dictation
+timeline, as every Annotate capture does, so no second stream of that
+device opens. Another device opens for that recording alone
+([capture_host/microphone.rs](../../src/capture_host/microphone.rs)), on
+its own thread, closed at stop, cancel, or quit (waiting at most 300 ms
+for the tail); a device that fails is opened again every second and what
+it missed is a gap, and one that won't open at all falls back to the
+timeline. A device dictation already has open is copied from the
+timeline. None keeps no microphone. Computer audio is ScreenCaptureKit's
+own stream audio with Hex's own sounds left out, written beside the movie
+as `system.m4a` under the Screen Recording grant the recording already
+has. When the movie saves, `scrawl-helper mux` mixes the microphone
+(`audio.wav`, 16 kHz mono, skipped when it is all silence) and computer
+audio into one AAC track (48 kHz stereo, 192 kbit/s) with the video
+copied as it is, each placed by its start on capture-core's clock and cut
+at the movie's end; the bundle keeps the separate files. A failed mix
+saves the plain movie.
+
+```ts
+record shortcut  -> the toolbar (above); Area and Window use the same picker as a shot
 ├── recording    -> Annotate's capsule shows it recording, as any capture; talk to narrate
 ├── record shortcut again (or the capsule's stop) -> stops; the capsule folds unless it failed
 │                   ├── the movie saves itself: "Hex Recording 2026-11-04 at 14.03.22.mp4" in
@@ -3158,7 +3206,9 @@ costs about 1.27× 30 fps; below 0.45 changing digits ghost, and 0.2 smears.
 Then capture-core's
 `Encoder::Hevc` writes hardware HEVC Main at that constant quality with
 VideoToolbox's real-time mode off, Rec. 709 tags, no B-frames, a keyframe at
-least every 5 s, and a frame only when the picture changes, up to 60 fps. An
+least every 2 s (so a cut at Original, which starts at the keyframe before
+it, lands close; 2 s measured 5% larger than 5 s on that busy clip at High,
+1 s 8%), and a frame only when the picture changes, up to 60 fps. An
 area above 8192×4320 pixels (4320×8192 tall), the hardware limit, is scaled
 to fit. Annotate's own captures stay sized for agents: H.264 from
 `SCRecordingOutput` with a 1280 px long edge (2560 for a whole display). On a

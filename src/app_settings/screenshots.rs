@@ -10,7 +10,7 @@ use super::*;
 pub struct ScreenshotSettings {
     /// Starts a screenshot: Command-Shift-4 by default.
     pub hotkey: HotkeyBinding,
-    /// Starts a recording of an area or a window; unbound by default.
+    /// Opens the recording toolbar: Command-Shift-5 by default.
     pub record_hotkey: Option<HotkeyBinding>,
     /// Where screenshots are saved; `None` is the Desktop.
     pub folder: Option<PathBuf>,
@@ -24,19 +24,68 @@ pub struct ScreenshotSettings {
     pub quality: RecordingQuality,
     /// The size the editor last exported a recording at.
     pub export_size: ExportSize,
+    /// What the recording toolbar records, as last chosen.
+    pub record_kind: RecordKind,
+    /// The microphone a recording keeps: `none`, `default` (the one
+    /// dictation uses), or an input device's name.
+    pub record_microphone: String,
+    /// A recording keeps what the computer plays.
+    pub record_system_audio: bool,
 }
 
 impl Default for ScreenshotSettings {
     fn default() -> Self {
         Self {
             hotkey: HotkeyBinding::screenshot_default(),
-            record_hotkey: None,
+            record_hotkey: Some(HotkeyBinding::screenshot_record_default()),
             folder: None,
             scale_to_1x: true,
             max_resolution: MaxResolution::Original,
             frame_rate: 30,
             quality: RecordingQuality::High,
             export_size: ExportSize::Original,
+            record_kind: RecordKind::Area,
+            record_microphone: RECORD_MICROPHONE_DEFAULT.into(),
+            record_system_audio: false,
+        }
+    }
+}
+
+/// `record_microphone`'s value for no microphone.
+pub const RECORD_MICROPHONE_NONE: &str = "none";
+/// `record_microphone`'s value for the microphone dictation uses.
+pub const RECORD_MICROPHONE_DEFAULT: &str = "default";
+
+/// What a recording takes: an area dragged out, a window, or a whole
+/// display.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordKind {
+    #[default]
+    Area,
+    Window,
+    Screen,
+}
+
+impl RecordKind {
+    /// Every choice, in the order the toolbar shows them.
+    pub const ALL: [Self; 3] = [Self::Area, Self::Window, Self::Screen];
+
+    /// The English label the toolbar shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Area => "Area",
+            Self::Window => "Window",
+            Self::Screen => "Full screen",
+        }
+    }
+
+    /// The `hex settings` value.
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Area => "area",
+            Self::Window => "window",
+            Self::Screen => "screen",
         }
     }
 }
@@ -217,6 +266,7 @@ impl ScreenshotSettings {
             long_edge: self.max_resolution.long_edge(),
             fps: self.fps(),
             quality: self.quality.hundredths(),
+            system_audio: self.record_system_audio,
         }
     }
 }

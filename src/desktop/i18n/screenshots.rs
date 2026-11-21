@@ -27,6 +27,13 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("1440p", ["1440p", "1440p", "1440p", "1440p", "1440p", "1440p"]),
     ("1080p", ["1080p", "1080p", "1080p", "1080p", "1080p", "1080p"]),
     ("720p", ["720p", "720p", "720p", "720p", "720p", "720p"]),
+    ("Full screen", ["Cały ekran", "全屏", "全画面", "Ganzer Bildschirm", "Pantalla completa", "Увесь екран"]),
+    ("No microphone", ["Bez mikrofonu", "无麦克风", "マイクなし", "Kein Mikrofon", "Sin micrófono", "Без мікрофона"]),
+    ("Computer audio", ["Dźwięk komputera", "电脑音频", "コンピュータのオーディオ", "Computer-Audio", "Audio del ordenador", "Звук комп’ютера"]),
+    ("Options", ["Opcje", "选项", "オプション", "Optionen", "Opciones", "Параметри"]),
+    ("Same as dictation", ["Jak przy dyktowaniu", "与听写相同", "音声入力と同じ", "Wie beim Diktieren", "El mismo que el dictado", "Як для диктування"]),
+    ("Record computer audio", ["Nagrywaj dźwięk komputera", "录制电脑音频", "コンピュータのオーディオを録音", "Computer-Audio aufnehmen", "Grabar el audio del ordenador", "Записувати звук комп’ютера"]),
+    ("Display {}", ["Ekran {}", "显示器 {}", "ディスプレイ {}", "Display {}", "Pantalla {}", "Дисплей {}"]),
 ];
 
 #[rustfmt::skip]
@@ -43,6 +50,13 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ("1440p", "1440p"),
     ("1080p", "1080p"),
     ("720p", "720p"),
+    ("Full screen", "Plein écran"),
+    ("No microphone", "Aucun micro"),
+    ("Computer audio", "Son de l’ordinateur"),
+    ("Options", "Options"),
+    ("Same as dictation", "Comme la dictée"),
+    ("Record computer audio", "Enregistrer le son de l’ordinateur"),
+    ("Display {}", "Écran {}"),
 ];
 
 #[rustfmt::skip]
@@ -59,6 +73,13 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("1440p", "1440p"),
     ("1080p", "1080p"),
     ("720p", "720p"),
+    ("Full screen", "Tela inteira"),
+    ("No microphone", "Sem microfone"),
+    ("Computer audio", "Áudio do computador"),
+    ("Options", "Opções"),
+    ("Same as dictation", "O mesmo do ditado"),
+    ("Record computer audio", "Gravar o áudio do computador"),
+    ("Display {}", "Tela {}"),
 ];
 
 #[rustfmt::skip]
@@ -75,4 +96,11 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("1440p", "1440p"),
     ("1080p", "1080p"),
     ("720p", "720p"),
+    ("Full screen", "Весь экран"),
+    ("No microphone", "Без микрофона"),
+    ("Computer audio", "Звук компьютера"),
+    ("Options", "Параметры"),
+    ("Same as dictation", "Как для диктовки"),
+    ("Record computer audio", "Записывать звук компьютера"),
+    ("Display {}", "Дисплей {}"),
 ];

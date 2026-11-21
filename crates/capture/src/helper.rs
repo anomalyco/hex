@@ -416,6 +416,43 @@ pub fn trim(movie: &Path, out: &Path, from_ms: u64, to_ms: u64) -> Result<Trimme
     )
 }
 
+/// One audio file [`mux`] lays into a movie: its time zero sits `offset_ms` after the movie's
+/// start, or before it when negative.
+pub struct MuxAudio<'a> {
+    pub file: &'a Path,
+    pub offset_ms: i64,
+}
+
+/// `movie`'s video copied into `out` (an `.mp4`) with `audio` mixed into one AAC track,
+/// trimmed to the movie. Runs at utility priority.
+pub fn mux(movie: &Path, audio: &[MuxAudio<'_>], out: &Path) -> Result<()> {
+    let helper = path()?;
+    let offsets: Vec<String> = audio.iter().map(|a| a.offset_ms.to_string()).collect();
+    let mut args = vec![
+        os("-c"),
+        os("utility"),
+        helper.as_os_str(),
+        os("mux"),
+        movie.as_os_str(),
+        os("--out"),
+        out.as_os_str(),
+    ];
+    for (input, offset) in audio.iter().zip(&offsets) {
+        args.extend([
+            os("--audio"),
+            input.file.as_os_str(),
+            os("--offset"),
+            os(offset),
+        ]);
+    }
+    let _: serde_json::Value = run_program(
+        Path::new("/usr/sbin/taskpolicy"),
+        &args,
+        Duration::from_secs(600),
+    )?;
+    Ok(())
+}
+
 /// Mixes a movie's audio to 16 kHz mono WAV, aligned to the movie's start.
 pub fn export_audio(movie: &Path, wav: &Path) -> Result<()> {
     let _: serde_json::Value = run(

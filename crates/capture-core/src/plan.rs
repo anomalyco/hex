@@ -112,7 +112,7 @@ pub enum Encoder {
     #[default]
     System,
     /// Hardware HEVC at a constant quality, sized for crisp text: Rec. 709 tags, no B-frames, a
-    /// keyframe at least every 5 s, frames only when the picture changes. At most 8192×4320
+    /// keyframe at least every 2 s, frames only when the picture changes. At most 8192×4320
     /// pixels (4320×8192 tall), the hardware encoder's limit; a larger source is scaled to fit.
     /// The movie holds video only: a plan with a [`Mic::Device`] is refused, and system audio
     /// goes only to [`Names::system_audio`].

@@ -584,7 +584,7 @@ enum Media {
   }
 
   /// How `shrink` re-encodes, beyond its size. `quality` (0–1) encodes at a constant quality as a
-  /// screen recording does (no reordering, a keyframe at least every 5 s) in place of a bit rate;
+  /// screen recording does (no reordering, a keyframe at least every 2 s) in place of a bit rate;
   /// `fps` drops frames closer together than its interval; `span` keeps only that part, in ms.
   struct ShrinkOptions {
     var quality: Double?
@@ -644,7 +644,7 @@ enum Media {
       // quality is the size a recording at it would be.
       compression = [
         AVVideoQualityKey: quality,
-        AVVideoMaxKeyFrameIntervalDurationKey: 5,
+        AVVideoMaxKeyFrameIntervalDurationKey: 2,
         AVVideoAllowFrameReorderingKey: false,
         AVVideoProfileLevelKey: "HEVC_Main_AutoLevel",
       ]
