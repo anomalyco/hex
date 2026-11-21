@@ -50,6 +50,8 @@ final class DictationController {
         let usesCleanup: Bool
         /// Settings › Dictation › Lowercase, read at start.
         let lowercase: Bool
+        /// Settings › Dictation › Format lists, read at start.
+        let formatLists: Bool
         /// Experiments › Hinglish, read at start.
         let hinglish: Bool
         let vocabularyTerms: [String]
@@ -76,6 +78,7 @@ final class DictationController {
     private let cleanupSettings: AppleIntelligenceCleanupSettings
     private let customVocabularySettings: CustomVocabularySettings
     private let lowercaseSettings: DictationLowercaseSettings
+    private let listSettings: DictationListSettings
     private let hinglishSettings: HinglishSettings
     private let typingJournalSettings: TypingJournalSettings
     private let learnedDictationCorrections: @MainActor () -> [DictationCorrection]
@@ -181,6 +184,7 @@ final class DictationController {
         cleanupSettings: AppleIntelligenceCleanupSettings = AppleIntelligenceCleanupSettings(),
         customVocabularySettings: CustomVocabularySettings = CustomVocabularySettings(),
         lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
+        listSettings: DictationListSettings = DictationListSettings(),
         hinglishSettings: HinglishSettings = HinglishSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
         learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
@@ -198,6 +202,7 @@ final class DictationController {
         self.cleanupSettings = cleanupSettings
         self.customVocabularySettings = customVocabularySettings
         self.lowercaseSettings = lowercaseSettings
+        self.listSettings = listSettings
         self.hinglishSettings = hinglishSettings
         self.typingJournalSettings = typingJournalSettings
         self.learnedDictationCorrections = learnedDictationCorrections ?? {
@@ -743,6 +748,7 @@ final class DictationController {
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
         let lowercase = lowercaseSettings.isEnabled
+        let formatLists = listSettings.isEnabled
         let hinglish = hinglishSettings.isEnabled
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
@@ -794,6 +800,7 @@ final class DictationController {
                     style: effectiveStyle,
                     usesCleanup: usesCleanup,
                     lowercase: lowercase,
+                    formatLists: formatLists,
                     hinglish: hinglish,
                     vocabularyTerms: vocabularyTerms,
                     personalCorrections: personalCorrections,
@@ -882,6 +889,7 @@ final class DictationController {
                     vocabulary: session.vocabularyTerms,
                     corrections: session.personalCorrections,
                     lowercase: session.lowercase,
+                    formatLists: session.formatLists,
                     hinglish: session.hinglish
                 )
                 let stages = await pipeline.run(rawText) { tagged in

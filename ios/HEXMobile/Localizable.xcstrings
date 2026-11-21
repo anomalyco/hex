@@ -1413,6 +1413,26 @@
         }
       }
     },
+    "Format lists" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整理列表"
+          }
+        }
+      }
+    },
+    "Say “first, second” or “bullet” for a list" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "说“first, second”或“bullet”即可分行列出"
+          }
+        }
+      }
+    },
     "Messages" : {
       "shouldTranslate" : false
     },

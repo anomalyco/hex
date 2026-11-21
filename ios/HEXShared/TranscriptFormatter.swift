@@ -43,7 +43,11 @@ nonisolated enum TranscriptFormatter {
     /// - Notes: concise lines: spoken "bullet" and "new line" markers, else several
     ///   sentences become a list (and a list after a colon becomes bullets), with no
     ///   opening "so", "yeah" or "and then" and no final periods.
-    static func format(_ raw: String, style: DictationStyle, language: String? = nil) -> String {
+    ///
+    /// `lists` (Settings › Dictation › Format lists) writes spoken lists and line breaks as
+    /// lines (`SpokenLists`) after the fillers and before the style's punctuation, in every
+    /// style but Verbatim, which keeps the model's exact words.
+    static func format(_ raw: String, style: DictationStyle, language: String? = nil, lists: Bool = false) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         let fillers = fillerPattern(for: language)
@@ -54,17 +58,21 @@ nonisolated enum TranscriptFormatter {
             return collapseHorizontalSpaces(in: trimmed)
 
         case .polished:
-            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            let cleaned = listed(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, language)
             return polishSentences(cleaned, english: english)
 
         case .casual:
-            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            let cleaned = listed(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, language)
             return casualMessage(cleaned, english: english)
 
         case .notes:
-            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            let cleaned = listed(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, language)
             return formatNotes(cleaned, english: english)
         }
+    }
+
+    private static func listed(_ text: String, _ lists: Bool, _ language: String?) -> String {
+        lists ? SpokenLists.format(text, language: language) : text
     }
 
     /// Joins dictated text cleanly with existing text around the insertion cursor: one space
@@ -290,6 +298,12 @@ nonisolated enum TranscriptFormatter {
         var atStart = true
         var index = 0
         while index < chars.count {
+            // A list item ("1. Eggs", "- Eggs") keeps its capital.
+            if index == 0 || chars[index - 1].isNewline, let marker = listMarkerLength(chars, at: index) {
+                index += marker
+                atStart = false
+                continue
+            }
             let ch = chars[index]
             if atStart, ch.isLetter {
                 var end = index
@@ -314,6 +328,15 @@ nonisolated enum TranscriptFormatter {
             index += 1
         }
         return String(chars)
+    }
+
+    /// The length of a list marker ("1. ", "- ") at `index`, if one starts there.
+    private static func listMarkerLength(_ chars: [Character], at index: Int) -> Int? {
+        if index + 1 < chars.count, chars[index] == "-" || chars[index] == "•", chars[index + 1] == " " { return 2 }
+        var end = index
+        while end < chars.count, end - index < 2, chars[end].isASCII, chars[end].isNumber { end += 1 }
+        guard end > index, end + 1 < chars.count, chars[end] == ".", chars[end + 1] == " " else { return nil }
+        return end + 2 - index
     }
 
     private static func keepsCapital(_ word: String) -> Bool {

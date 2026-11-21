@@ -128,6 +128,23 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     vocabulary included, as desktop's Lowercase step (`str::to_lowercase` on the
     final text) does, on every path (`DictationLowercaseSettings`, App Group key
     `settings.dictationLowercase`).
+  - **Format lists (Settings › Dictation › Format lists):** On by default
+    (`DictationListSettings`, App Group key `settings.dictationFormatLists`), in
+    English and Spanish, every style but Verbatim (`SpokenLists`, inside the
+    style after its fillers, so each style ends the lines its own way). "first …
+    second …" ("1st … 2nd …", "primero … segundo …", "en primer lugar …"),
+    "number one … number two …" (also "step", "item", "point", "número", "paso")
+    and "one, … two, …" become `1. …` lines; "bullet", "bullet point", "next
+    item", "dash" ("viñeta", "guion") said twice or more become `- …` lines; "new
+    line" and "new paragraph" ("nueva línea", "nuevo párrafo", "salto de línea")
+    break lines. Text before the list gets its own line (with a colon unless it
+    ends a sentence), and what follows the last item's sentence its own line.
+    Guards keep prose: markers count up from one, at least two non-empty items,
+    each marker at a clause start (the start, after a mark or line break, or
+    after "and"/"then"/"y"/"luego" that are), a bare number needs its comma, and
+    words like "the first time", "second guess", "a new line of", "bullet
+    points" stay as said. `TranscriptCleanupTests` holds the list cases and
+    62 prose sentences that must not change.
   - **Spoken "@" (English, every style but Verbatim):** "at the rate" (India's
     name for @) and "at sign" become "@", and an address said around it joins
     up: "John at the rate Gmail dot com" becomes "john@gmail.com", "dot" turning
@@ -369,7 +386,7 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
   `https://dev.anoma.ly/hex` until the production site serves
   `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
-  - **Dictation:** Style, Lowercase, Dictation language, Translate what I say, Clean up
+  - **Dictation:** Style, Lowercase, Format lists, Dictation language, Translate what I say, Clean up
     what I say, Custom vocabulary (its list below the switch), Keep mic warm,
     and Always use iPhone microphone.
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
