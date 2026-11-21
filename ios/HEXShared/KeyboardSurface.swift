@@ -188,9 +188,13 @@ private struct TopBarTriggerButtonStyle: ButtonStyle {
 
 /// A tray chip: its capsule keeps its size and the row's tap area surrounds it.
 private struct TopBarChipButtonStyle: ButtonStyle {
+    /// The row's side inset, owned by the first chip in a tray.
+    var leadingHitInset: CGFloat = 0
+
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .topBarHitTarget()
+            .padding(.leading, leadingHitInset)
+            .topBarHitTarget(alignment: leadingHitInset == 0 ? .center : .leading)
     }
 }
 
@@ -645,7 +649,8 @@ struct KeyboardSurfaceView: View {
     }
 
     private func styleTrayBar(palette p: KeyboardChromePalette) -> some View {
-        HStack(spacing: 4) {
+        let firstStyle = DictationStyle.allCases.first
+        return HStack(spacing: 4) {
             ForEach(DictationStyle.allCases, id: \.self) { candidate in
                 let active = candidate == model.style
                 Button {
@@ -660,12 +665,13 @@ struct KeyboardSurfaceView: View {
                         .frame(height: 26)
                         .background(active ? p.chipActiveFill : p.chipIdleFill, in: Capsule())
                 }
-                .buttonStyle(TopBarChipButtonStyle())
+                .buttonStyle(TopBarChipButtonStyle(
+                    leadingHitInset: candidate == firstStyle ? TopBarMetrics.sideInset : 0
+                ))
             }
             Spacer(minLength: 4)
             closeTrayButton(palette: p)
         }
-        .padding(.leading, TopBarMetrics.sideInset)
         .frame(height: TopBarMetrics.height)
     }
 
@@ -809,7 +815,10 @@ struct KeyboardSurfaceView: View {
             for: model.languageChoices,
             supported: model.languageChoices + model.moreLanguages
         )
-        return HStack(spacing: 4) {
+        // The close's 44 pt tap area ends on the screen's edge, so the spacing before
+        // its pair keeps the scroll view's end at the same place either way.
+        let hasTranslationChip = model.showsTranslationSwitch && model.translationLanguage != nil
+        return HStack(spacing: hasTranslationChip ? 4 : -4) {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 4) {
                     if model.showsLanguageSwitch {
@@ -831,11 +840,13 @@ struct KeyboardSurfaceView: View {
             .hexScrollEdgeEffectHidden()
             .hexHorizontalEdgeFade(leading: 4, trailing: 14)
 
-            // The close's 44 pt tap area ends on the screen's edge; it overlaps the
-            // chip's last 4 pt so the chip and the scroll view keep today's place.
+            // The close overlaps 4 pt of what is beside it: with the chip, the pair
+            // keeps the chip where it was and the chip wins its own pixels; without
+            // it, the overlap is the scroll view's trailing fade.
             HStack(spacing: -4) {
-                if model.showsTranslationSwitch, let target = model.translationLanguage {
+                if hasTranslationChip, let target = model.translationLanguage {
                     translationChip(target: target, palette: p)
+                        .zIndex(1)
                 }
                 closeTrayButton(palette: p)
             }
