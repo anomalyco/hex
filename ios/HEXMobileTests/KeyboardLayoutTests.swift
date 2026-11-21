@@ -28,29 +28,31 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs270PointsAndLandscapeIs189Points() {
+    func testPortraitIs253PointsAndLandscapeIs172Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 270, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
         }
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 270)
-        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 189)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 172)
     }
 
-    /// The strip is Apple's 44 pt predictive bar on every iPhone, either way up, and on the Duo;
-    /// row 1 starts 52 pt down (Apple's keycaps start 53 pt down), or right under the strip on
-    /// the Duo, where iOS draws its own band above the keyboard.
+    /// The strip is the 27 pt of Apple's predictive bar below the band iOS draws over a
+    /// third-party keyboard on every iPhone, either way up; row 1 starts 35 pt down, where
+    /// Apple's keycaps start relative to this view (35-35.5 pt, iOS 27.2). On the Duo it is
+    /// Apple's whole 44 pt bar right on the keys.
     func testStripIsPinnedInEveryOrientationAndPosture() {
         let postures: [KeyboardPosture] = [.phone, .cover, .unfoldedWide, .unfoldedTall]
         for posture in postures {
             for orientation in [KeyboardOrientation.portrait, .landscape] {
                 let m = KeyboardMetrics.for(orientation, posture: posture)
                 XCTAssertEqual(m.stripTop, 0, "\(posture) \(orientation)")
-                XCTAssertEqual(m.stripHeight, 44, "\(posture) \(orientation)")
-                XCTAssertEqual(m.stripArea, posture == .phone ? 52 : 44, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripHeight, posture == .phone ? 27 : 44, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripArea, posture == .phone ? 35 : 44, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripPillHeight, posture == .phone ? 26 : 36, "\(posture) \(orientation)")
             }
         }
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
-            XCTAssertEqual(layout.stripFrame.height, 44, describe(layout))
+            XCTAssertEqual(layout.stripFrame.height, layout.posture == .phone ? 27 : 44, describe(layout))
             let rowOneTop = layout.keys.filter { $0.row == 0 }.map(\.frame.minY).min()
             XCTAssertEqual(rowOneTop ?? -1, layout.metrics.stripArea, accuracy: 0.001, describe(layout))
         }
@@ -190,7 +192,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
-        XCTAssertEqual(q.frame.minY, 52, accuracy: 0.001)
+        XCTAssertEqual(q.frame.minY, 35, accuracy: 0.001)
         XCTAssertEqual(q.frame.height, 45)
         let shift = proMax.key(.shift)!
         XCTAssertEqual(shift.frame.width, proMax.letterWidth * 1.34, accuracy: 0.001)
@@ -333,6 +335,30 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertLessThanOrEqual(layout.stripFrame.maxX, hex.frame.minX)
     }
 
+    /// Apple's slots are thirds of the keyboard (dividers end at 134 and 268 pt on a 402 pt
+    /// iPhone); the Hex key takes its room from the slot beside it, on either side.
+    func testSuggestionSlotsAreThirdsOfTheBarLessTheHexKey() {
+        let right = KeyboardLayout(width: 402)
+        let slots = right.stripSlotFrames
+        for (x, expected) in zip(slots.map(\.minX), [0, 134, 268] as [CGFloat]) { XCTAssertEqual(x, expected, accuracy: 0.001) }
+        XCTAssertEqual(slots[0].maxX, 134, accuracy: 0.001)
+        XCTAssertEqual(slots[1].maxX, 268, accuracy: 0.001)
+        XCTAssertEqual(slots[2].maxX, right.stripFrame.maxX, accuracy: 0.001)
+        XCTAssertTrue(slots.allSatisfy { $0.minY == right.stripFrame.minY && $0.height == right.stripFrame.height })
+
+        let left = KeyboardLayout(width: 402, hexPlacement: .stripLeading)
+        let mirrored = left.stripSlotFrames
+        XCTAssertEqual(mirrored[0].minX, left.stripFrame.minX, accuracy: 0.001)
+        for (x, expected) in zip(mirrored.map(\.maxX), [134, 268, 402] as [CGFloat]) { XCTAssertEqual(x, expected, accuracy: 0.001) }
+
+        for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
+            let frames = layout.stripSlotFrames
+            XCTAssertEqual(frames.first!.minX, layout.stripFrame.minX, accuracy: 0.001, describe(layout))
+            XCTAssertEqual(frames.last!.maxX, layout.stripFrame.maxX, accuracy: 0.001, describe(layout))
+            XCTAssertTrue(frames.allSatisfy { $0.width > 40 }, describe(layout))
+        }
+    }
+
     /// Settings › Keyboard › Hex key › Left: the key at the strip's leading edge, the strip
     /// after it to the keyboard's side, and every other key where Right puts it.
     func testHexKeyOnTheLeftSitsAtTheStripsLeadingEdge() {
@@ -386,7 +412,7 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testLandscapeKeepsInsetsAndHeight() {
         let layout = KeyboardLayout(width: 932, orientation: .landscape, horizontalInset: 60)
-        XCTAssertEqual(layout.totalHeight, 189)
+        XCTAssertEqual(layout.totalHeight, 172)
         XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 64, accuracy: 0.001)
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
     }

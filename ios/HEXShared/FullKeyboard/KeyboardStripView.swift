@@ -1,19 +1,32 @@
 import UIKit
 
-/// The 3-slot top bar above the keys, matching Apple's iOS 26 suggestion strip:
-/// two 1 pt vertical hairlines at 1/3 and 2/3 width when idle or suggesting, replaced by
-/// the centered `Undo dictation` chip or a status message when needed.
+/// The 3-slot top bar above the keys, drawn as Apple's iOS 26 predictive bar is (measured in
+/// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
+/// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
+/// capsule with the divider beside it hidden. iOS's band above the keyboard takes the top of
+/// Apple's bar, so everything here is centred in the 27 pt below it. The centred
+/// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { applyPalette() } } }
-    /// Hosted extensions sit inside iOS 26's +17 pt Liquid Glass crown above `bounds.minY`,
-    /// so nudge the strip's visual centre slightly upward within `bounds` to align with Apple's bar.
+    /// Hosted in iOS's platter (not a snapshot scene's own backdrop).
     var inSystemPlatter = true {
         didSet {
             guard inSystemPlatter != oldValue else { return }
             for button in slotButtons { button.inSystemPlatter = inSystemPlatter }
             setNeedsLayout()
             setNeedsDisplay()
+        }
+    }
+    /// Each slot's frame in this view, from `KeyboardLayout.stripSlotFrames`; thirds of the
+    /// view until the keyboard lays it out.
+    var slotFrames: [CGRect]? { didSet { if slotFrames != oldValue { setNeedsLayout(); setNeedsDisplay() } } }
+    /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
+    var pillInset: CGFloat = 0.5 {
+        didSet {
+            guard pillInset != oldValue else { return }
+            for button in slotButtons { button.pillInset = pillInset }
+            setNeedsLayout()
         }
     }
     var onSelectSuggestion: ((KeyboardSuggestion) -> Void)?
@@ -246,7 +259,7 @@ final class KeyboardStripView: UIView {
         super.layoutSubviews()
         let midY = contentCenterY
         statusLabel.frame = CGRect(x: 16, y: max(0, midY - 12), width: max(0, bounds.width - 32), height: 24)
-        let chipH = min(34, max(24, bounds.height - 10))
+        let chipH = min(34, max(24, bounds.height - 2 * pillInset))
         let chipSize = undoChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
         undoChip.frame = CGRect(
             x: (bounds.width - chipSize.width) / 2,
@@ -281,11 +294,17 @@ final class KeyboardStripView: UIView {
         }
         fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
-        let slotW = bounds.width / 3
+        let slots = currentSlotFrames
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
-            button.frame = CGRect(x: CGFloat(idx) * slotW, y: 0, width: slotW, height: bounds.height)
+            button.frame = slots[idx]
         }
+    }
+
+    private var currentSlotFrames: [CGRect] {
+        if let slotFrames, slotFrames.count == 3 { return slotFrames }
+        let slotW = bounds.width / 3
+        return (0..<3).map { CGRect(x: CGFloat($0) * slotW, y: 0, width: slotW, height: bounds.height) }
     }
 
     override func draw(_ rect: CGRect) {
@@ -294,15 +313,13 @@ final class KeyboardStripView: UIView {
         let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
         guard !primaryHighlighted else { return }
 
-        let scale = max(1, traitCollection.displayScale)
-        let hairline = 1 / scale
-        let lineH: CGFloat = min(22, bounds.height * 0.66)
-        let y = max(1, contentCenterY - lineH / 2)
-        let slotW = bounds.width / 3
-
-        palette.separator.setFill()
-        UIRectFill(CGRect(x: (slotW * 1).rounded() - hairline / 2, y: y, width: hairline, height: lineH))
-        UIRectFill(CGRect(x: (slotW * 2).rounded() - hairline / 2, y: y, width: hairline, height: lineH))
+        // Apple's dividers: 1 pt wide, ending on the slot boundary, 24 pt tall on the text's centre.
+        let lineH: CGFloat = min(24, bounds.height - 2)
+        let y = contentCenterY - lineH / 2
+        palette.stripDivider.setFill()
+        for slot in currentSlotFrames.prefix(2) where slot.maxX < bounds.width - 1 {
+            UIRectFill(CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH))
+        }
     }
 
     @objc private func handleUndo() {
@@ -316,6 +333,7 @@ final class KeyboardStripView: UIView {
 
     private final class SlotButton: UIControl {
         var inSystemPlatter = true { didSet { if inSystemPlatter != oldValue { setNeedsDisplay() } } }
+        var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
         private var suggestion: KeyboardSuggestion?
         private var palette = FullKeyboardPalette(isDark: false)
 
@@ -346,28 +364,23 @@ final class KeyboardStripView: UIView {
         override func draw(_ rect: CGRect) {
             guard let suggestion else { return }
             let midY = bounds.height * 0.5
-            // Like Apple's strip, the highlight fills its slot, 4 pt in from each edge.
-            let pillH = max(22, bounds.height - 8)
+            // Like Apple's, the highlight is a capsule as wide as its slot.
+            let pillH = max(22, bounds.height - 2 * pillInset)
             let pillInset = CGRect(
-                x: 4,
+                x: 0,
                 y: max(0.5, midY - pillH / 2),
-                width: max(0, bounds.width - 8),
+                width: bounds.width,
                 height: pillH
             )
-            if isHighlighted {
-                palette.keyPressedFill.setFill()
-                UIBezierPath(roundedRect: pillInset, cornerRadius: 10).fill()
-            } else if suggestion.willAutoReplace {
-                palette.selectFill.setFill()
-                UIBezierPath(roundedRect: pillInset, cornerRadius: 10).fill()
+            let pilled = isHighlighted || suggestion.willAutoReplace
+            if pilled {
+                (isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill).setFill()
+                UIBezierPath(roundedRect: pillInset, cornerRadius: pillH / 2).fill()
             }
 
-            let isLiteral = suggestion.kind == .keepLiteral
-            let font = UIFont.systemFont(
-                ofSize: suggestion.kind == .emoji ? 24 : 17,
-                weight: suggestion.willAutoReplace ? .medium : .regular
-            )
-            let ink = isLiteral && !suggestion.willAutoReplace ? palette.textBase.withAlphaComponent(0.88) : palette.textBase
+            // Apple's words are all SF 17 pt regular, the one in the pill included.
+            let font = UIFont.systemFont(ofSize: suggestion.kind == .emoji ? 22 : 17, weight: .regular)
+            let ink = pilled ? palette.stripPillText : palette.stripText
             let attributes: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: ink,
@@ -377,7 +390,7 @@ final class KeyboardStripView: UIView {
             var size = (drawString as NSString).size(withAttributes: attributes)
             if size.width > maxTextW {
                 let smallAttrs: [NSAttributedString.Key: Any] = [
-                    .font: UIFont.systemFont(ofSize: 15, weight: suggestion.willAutoReplace ? .medium : .regular),
+                    .font: UIFont.systemFont(ofSize: 15, weight: .regular),
                     .foregroundColor: ink,
                 ]
                 size = (drawString as NSString).size(withAttributes: smallAttrs)
@@ -425,9 +438,9 @@ final class FullAccessHintView: UIView {
         super.init(frame: frame)
         backgroundColor = .clear
         titleLabel.text = Self.title
-        titleLabel.font = .systemFont(ofSize: 13.5, weight: .medium)
+        titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         pathLabel.text = Self.path
-        pathLabel.font = .systemFont(ofSize: 12)
+        pathLabel.font = .systemFont(ofSize: 11.5)
         pathLabel.accessibilityLabel = "Settings, Apps, Hex, Keyboards"
         for label in [titleLabel, pathLabel] {
             label.adjustsFontSizeToFitWidth = true
@@ -473,10 +486,11 @@ final class FullAccessHintView: UIView {
         )
         let textX = chipLeads ? openButton.frame.maxX + 10 : 0
         let textWidth = chipLeads ? max(0, bounds.width - textX) : max(0, openButton.frame.minX - 10)
-        let lineHeight: CGFloat = 16
-        let top = (bounds.height - 2 * lineHeight - 1) / 2
+        // Two lines in the strip's 27 pt.
+        let lineHeight: CGFloat = min(16, (bounds.height + 1) / 2)
+        let top = (bounds.height - 2 * lineHeight) / 2
         titleLabel.frame = CGRect(x: textX, y: top, width: textWidth, height: lineHeight)
-        pathLabel.frame = CGRect(x: textX, y: top + lineHeight + 1, width: textWidth, height: lineHeight)
+        pathLabel.frame = CGRect(x: textX, y: top + lineHeight, width: textWidth, height: lineHeight)
     }
 }
 

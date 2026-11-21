@@ -143,7 +143,8 @@ final class HexKeyControl: UIControl {
             palette.keyPressedFill.setFill()
             UIBezierPath(roundedRect: cap, cornerRadius: cap.height / 2).fill()
         }
-        let markSize: CGFloat = min(19, cap.height * 0.56)
+        // In the strip the mark keeps its 19 pt in the 26 pt pill as in the Duo's 36 pt one.
+        let markSize: CGFloat = inStrip ? min(19, cap.height) : min(19, cap.height * 0.56)
         let markRect = CGRect(x: cap.midX - markSize / 2, y: cap.midY - markSize / 2, width: markSize, height: markSize)
         if isWarm {
             HexMarkPath.draw(in: context, rect: markRect, color: palette.textBase, coreColor: palette.warmCore)
@@ -220,7 +221,7 @@ final class HexKeyRecordingPanel: UIView {
 
     init(loudness: @escaping () -> Float) {
         var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 5)
-        tuning.height = 44
+        tuning.height = Float(KeyboardMetrics.portrait.stripPillHeight)
         // Cap drawables at 2 inside the keyboard extension to save ~2.2 MB of IOSurface RAM.
         scope = DotScopeHostView(tuning: tuning, maximumDrawableCount: 2)
         super.init(frame: .zero)
@@ -299,8 +300,8 @@ final class HexKeyRecordingPanel: UIView {
         super.layoutSubviews()
         let innerLeft = horizontalInset + metrics.side
         let innerRight = bounds.width - horizontalInset - metrics.side
-        // The strip's 44 pt with 4 pt above and below, as the strip's chips sit.
-        let rowH = max(28, bounds.height - 8)
+        // The strip's pill height, inset from its top and bottom as its pills are.
+        let rowH = metrics.stripPillHeight
         let rowY = (bounds.height - rowH) / 2
 
         doneButton.cornerRadius = rowH / 2
