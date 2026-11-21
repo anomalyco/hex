@@ -172,6 +172,10 @@ final class DictationController {
     var transcriptionLanguageID = "en-US"
     /// Settings › Dictation language: a BCP 47 identifier, or nil for Automatic.
     private(set) var dictationLanguage: String?
+    /// The keyboard's language Automatic followed when the model was last asked for
+    /// (`LanguageSettings.keyboardDictationLanguage`), so a switch on the space bar prepares
+    /// the new one.
+    private var followedKeyboardLanguage: String?
     /// A language change made while busy, applied once the dictation in flight is done.
     private var pendingLanguagePreparation = false
     /// Said once Automatic moved on from a language this iPhone can't dictate yet
@@ -227,6 +231,7 @@ final class DictationController {
         self.now = now
         self.languageSettings = languageSettings
         self.dictationLanguage = languageSettings.dictationLanguage
+        self.followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
@@ -258,8 +263,7 @@ final class DictationController {
             } else if #available(iOS 26.0, *) {
                 Task { [weak self] in
                     guard let self else { return }
-                    if let language = await AppleSpeechTranscriber.preferredLanguage(),
-                       AppleSpeechTranscriber.shouldUse(language) {
+                    if await Self.appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) != nil {
                         self.engineName = "Apple Speech"
                         self.prepareModel()
                     } else {
@@ -342,10 +346,12 @@ final class DictationController {
         applyDictationLanguage(normalized)
     }
 
-    /// Picks up a language the keyboard switched to in the App Group.
+    /// Picks up a language the keyboard switched to in the App Group: a pick in its language
+    /// switch, or, on Automatic, the keyboard's own language switched on the space bar.
     func followDictationLanguageSetting() {
         let stored = languageSettings.dictationLanguage
-        guard stored != dictationLanguage else { return }
+        let following = languageSettings.keyboardDictationLanguage()
+        guard stored != dictationLanguage || following != followedKeyboardLanguage else { return }
         applyDictationLanguage(stored)
     }
 
@@ -357,6 +363,7 @@ final class DictationController {
 
     private func applyDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
+        followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         languageNotice = nil
         languageOffer = nil
         switch phase {
@@ -487,6 +494,10 @@ final class DictationController {
         endStaleLiveActivities()
 
         publishKeyboardSnapshot()
+        // An accepted transcription the keyboard waits on keeps its heartbeat.
+        if keyboardJobInFlight {
+            startKeyboardSessionLoop()
+        }
     }
 
     /// Ends Live Activities no dictation owns, such as one a suspended or killed process left.
@@ -590,6 +601,9 @@ final class DictationController {
                     styleOverride: handoff?.style,
                     copyToPasteboard: false
                 )
+                // The keyboard finishes what it handed off: without the loop its Done and
+                // Cancel went unread and the recording ran to its 60 s limit.
+                startKeyboardSessionLoop()
             } else {
                 handoffNotice = String(localized: "Timed out")
             }
@@ -731,11 +745,31 @@ final class DictationController {
 
     private static func defaultTranscriber() async -> any LocalTranscribing {
         if #available(iOS 26.0, *),
-           let language = await AppleSpeechTranscriber.preferredLanguage(),
-           AppleSpeechTranscriber.shouldUse(language) {
+           let language = await appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage()) {
             return AppleSpeechTranscriber(language: language)
         }
         return ParakeetTranscriber()
+    }
+
+    /// The language Apple Speech dictates in, or nil for Parakeet V2, which knows only
+    /// English: Apple Speech's pick, unless it is English that Parakeet takes
+    /// (`AppleSpeechTranscriber.shouldUse`). With no pick (Speech not answering), English goes
+    /// to Parakeet and any other language (`wanted`: the one set, else the keyboard's
+    /// Automatic follows, else the iPhone's) stays on Apple Speech, which says it can't
+    /// dictate it rather than Parakeet hearing Spanish as English words.
+    @available(iOS 26.0, *)
+    nonisolated static func appleSpeechLanguage(
+        picked: SpeechLanguage?,
+        wanted: String? = LanguageSettings().dictationLanguage
+            ?? LanguageSettings().keyboardDictationLanguage()
+            ?? Locale.preferredLanguages.first,
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+    ) -> SpeechLanguage? {
+        if let picked {
+            return AppleSpeechTranscriber.shouldUse(picked, parakeetFits: parakeetFits) ? picked : nil
+        }
+        guard let wanted, !SpeechLanguagePicker.isEnglish(wanted) else { return nil }
+        return SpeechLanguage(locale: Locale(identifier: wanted), module: .dictation)
     }
 
     // MARK: - Capture & Generation-Scoped Transcription
@@ -883,11 +917,16 @@ final class DictationController {
         publishKeyboardSnapshot()
 
         let activeTranscriber = transcriber
+        // A keyboard's dictation finishes with Hex in the background, and in One shot nothing
+        // keeps Hex running once the microphone closes: iOS would suspend it mid-transcription
+        // and the text would never reach the keyboard.
+        let backgroundTime = keyboardJobID == nil ? nil : BackgroundTime("Keyboard dictation")
 
         transcriptionTask?.cancel()
         transcriptionTask = Task { [weak self] in
             defer {
                 try? FileManager.default.removeItem(at: captureURL)
+                backgroundTime?.end()
             }
             let transcribeStarted = Date()
 
@@ -1069,6 +1108,15 @@ final class DictationController {
 
     // MARK: - Warm Session Loop & Snapshot Truth
 
+    /// A keyboard's dictation is recording or transcribing: Hex reads its commands and
+    /// heartbeats its snapshot until the text is in, warm session or not (One shot).
+    private var keyboardJobInFlight: Bool {
+        activeKeyboardJobID != nil
+    }
+
+    /// Reads the keyboard's commands and keeps its snapshot's heartbeat fresh, for a warm
+    /// session and for any keyboard dictation in flight. The keyboard takes a job whose
+    /// heartbeat stops as over (`KeyboardSnapshot.isOrphanedJob`).
     private func startKeyboardSessionLoop() {
         keyboardSessionTask?.cancel()
         keepaliveRestartedAt = -.infinity
@@ -1076,10 +1124,10 @@ final class DictationController {
         keepaliveRestartDue = nil
         keyboardSessionTask = Task { [weak self] in
             while !Task.isCancelled {
-                guard let self, self.keyboardSessionEnabled else { return }
+                guard let self, self.keyboardSessionEnabled || self.keyboardJobInFlight else { return }
 
                 // Never expire an in-flight recording or accepted transcription mid-work.
-                if self.phase != .recording && self.phase != .transcribing {
+                if self.keyboardSessionEnabled, self.phase != .recording && self.phase != .transcribing {
                     // The keyboard's language switch writes the App Group; follow it.
                     self.followDictationLanguageSetting()
                     let remaining = self.keyboardSessionExpiresAt - self.now()
@@ -1166,7 +1214,8 @@ final class DictationController {
     private func publishKeyboardSnapshot(minInterval: TimeInterval = 0) {
         let currentTime = now()
 
-        if let expires = keyboardResultExpiresAt, expires <= currentTime {
+        // Past its time to go in by itself the keyboard can still offer it as Paste dictation.
+        if let expires = keyboardResultExpiresAt, expires + KeyboardSnapshot.resultOfferWindow <= currentTime {
             keyboardResultID = nil
             keyboardResult = nil
             keyboardResultHeard = nil
@@ -1395,5 +1444,24 @@ final class DictationController {
         while phase == .preparingModel && now() < deadline {
             try await Task.sleep(for: .milliseconds(100))
         }
+    }
+}
+
+/// Background time from iOS while Hex finishes a keyboard's dictation, ended when it's done
+/// or when iOS asks for it back.
+@MainActor
+private final class BackgroundTime {
+    private var id = UIBackgroundTaskIdentifier.invalid
+
+    init(_ name: String) {
+        id = UIApplication.shared.beginBackgroundTask(withName: name) { [weak self] in
+            self?.end()
+        }
+    }
+
+    func end() {
+        guard id != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(id)
+        id = .invalid
     }
 }

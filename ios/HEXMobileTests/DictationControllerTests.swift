@@ -292,6 +292,96 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(snap.transcript, "ship it tonight")
     }
 
+    /// TestFlight build 56's sequence from Hex's side: the keyboard couldn't dictate by itself
+    /// and handed the dictation to Hex, you swiped back and tapped Done in the keyboard. Done
+    /// reaches Hex in One shot as in a warm session (One shot never read it, so the recording
+    /// ran to its limit), Hex heartbeats the job until its text is in, so the keyboard never
+    /// takes it for over, and the text stays on offer after its time to go in by itself.
+    func testAKeyboardHandoffFinishedFromTheKeyboardDeliversItsTextInEitherMode() async throws {
+        for duration in [WarmSessionDuration.off, .fifteenMinutes] {
+            var now = 7_000.0
+            let audio = FakeAudioManager()
+            let transcriber = ControlledTranscriber()
+            let bridge = KeyboardBridge(defaults: defaults)
+            let controller = DictationController(
+                audio: audio,
+                keyboardBridge: bridge,
+                transcriber: transcriber,
+                transcriberFactory: { transcriber },
+                now: { now },
+                autoPrepareOnInit: false
+            )
+            controller.prepareModel()
+            try await settle()
+            controller.setWarmDuration(duration)
+            await transcriber.armSuspension()
+
+            let job = "handoff-\(duration.rawValue)"
+            controller.handleKeyboardLaunch(.startRecording(jobID: job, requestedAt: now, style: .polished))
+            try await settle()
+            XCTAssertEqual(controller.phase, .recording, "\(duration)")
+            XCTAssertEqual(bridge.snapshot().jobID, job)
+
+            // Back in the app: only the keyboard's command tells Hex to stop.
+            now += 2
+            bridge.send(.stop, jobID: job, sentAt: now)
+            try await settle()
+            XCTAssertEqual(controller.phase, .transcribing, "\(duration): Done reached Hex")
+
+            now += 4
+            try await settle()
+            let waiting = bridge.snapshot()
+            XCTAssertEqual(waiting.state, .transcribing)
+            XCTAssertFalse(waiting.isOrphanedJob(at: now), "\(duration): the transcription heartbeats")
+
+            await transcriber.resumeSuspended(with: "ship it tonight")
+            try await settle()
+            XCTAssertEqual(controller.phase, .ready)
+            let done = bridge.snapshot()
+            XCTAssertTrue(done.hasDeliverableResult(at: now), "\(duration)")
+            XCTAssertEqual(done.transcript, controller.transcript)
+
+            now += 40
+            controller.processPendingKeyboardCommandForTesting()
+            XCTAssertFalse(bridge.snapshot().hasDeliverableResult(at: now))
+            XCTAssertTrue(bridge.snapshot().hasOfferableResult(at: now), "\(duration): offered as Paste dictation")
+            now += KeyboardSnapshot.resultOfferWindow
+            controller.processPendingKeyboardCommandForTesting()
+            XCTAssertNil(bridge.snapshot().transcript, "\(duration): not kept past the offer")
+            controller.endWarmSession()
+        }
+    }
+
+    /// A keyboard's Cancel in One shot ends the handed-off recording, as in a warm session.
+    func testAOneShotHandoffCancelledFromTheKeyboardStops() async throws {
+        let now = 7_500.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let bridge = KeyboardBridge(defaults: defaults)
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: bridge,
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.setWarmDuration(.off)
+        controller.handleKeyboardLaunch(.startRecording(jobID: "one-shot", requestedAt: now, style: .polished))
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+
+        bridge.send(.cancel, jobID: "one-shot", sentAt: now)
+        try await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertNil(bridge.snapshot().jobID)
+        XCTAssertNotEqual(bridge.snapshot().state, .recording)
+        let transcribed = await transcriber.transcribedURLs
+        XCTAssertTrue(transcribed.isEmpty, "nothing transcribed")
+    }
+
     func testTenSecondHandoffWindow() async throws {
         var now = 5_000.0
         let audio = FakeAudioManager()
@@ -1004,6 +1094,78 @@ final class DictationControllerTests: XCTestCase {
         try await settle()
         XCTAssertEqual(preparations, 5, "no change, no preparation")
         XCTAssertEqual(languages.recentDictationLanguages, ["de-DE", "nb-NO"], "picks in Hex are recents")
+    }
+
+    /// With English and Spanish on the keyboard and dictation on Automatic, a switch on the
+    /// space bar prepares the other language before the next dictation (TestFlight build 56:
+    /// Spanish speech transcribed as English was "incomprehensible"); a language picked by
+    /// hand stays put.
+    func testAutomaticDictationFollowsTheKeyboardsLanguage() async throws {
+        let transcriber = ControlledTranscriber()
+        let languages = LanguageSettings(defaults: defaults)
+        languages.supportedDictationLanguages = ["en-US", "es-ES"]
+        languages.automaticDictationLanguage = "en-US"
+        var preparations = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: {
+                preparations += 1
+                return transcriber
+            },
+            autoPrepareOnInit: false,
+            languageSettings: languages
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(preparations, 1)
+
+        languages.keyboardLanguages = [.english, .spanish]
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 2, "now following the keyboard's English")
+        languages.currentKeyboardLanguage = .spanish
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 3, "switched to Español on the space bar")
+        XCTAssertEqual(languages.effectiveDictationLanguage, "es-ES")
+        XCTAssertNil(controller.dictationLanguage, "still Automatic")
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 3, "no change, no preparation")
+        languages.currentKeyboardLanguage = .english
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 4, "and back to English")
+
+        controller.setDictationLanguage("es-MX")
+        try await settle()
+        XCTAssertEqual(preparations, 5)
+        languages.currentKeyboardLanguage = .spanish
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 5, "a language picked by hand doesn't follow")
+        XCTAssertEqual(languages.effectiveDictationLanguage, "es-MX")
+    }
+
+    /// Parakeet V2 knows only English: Spanish goes to Apple Speech whatever happens, even when
+    /// Apple Speech doesn't answer, rather than Parakeet hearing it as English words.
+    func testSpanishNeverGoesToEnglishOnlyParakeet() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech arrived in iOS 26") }
+        func language(_ identifier: String, _ module: SpeechModuleKind) -> SpeechLanguage {
+            SpeechLanguage(locale: Locale(identifier: identifier), module: module)
+        }
+        typealias Controller = DictationController
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: language("es-ES", .speech), wanted: "es-ES", parakeetFits: true)?.identifier, "es-ES")
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: language("es-MX", .dictation), wanted: "es-MX", parakeetFits: true)?.identifier, "es-MX")
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: language("en-US", .speech), wanted: nil, parakeetFits: true)?.identifier, "en-US")
+        XCTAssertNil(Controller.appleSpeechLanguage(picked: language("en-US", .dictation), wanted: nil, parakeetFits: true), "English on DictationTranscriber: Parakeet, as before")
+        // Speech not answering: English may go to Parakeet, Spanish never.
+        XCTAssertNil(Controller.appleSpeechLanguage(picked: nil, wanted: "en-US", parakeetFits: true))
+        XCTAssertNil(Controller.appleSpeechLanguage(picked: nil, wanted: nil, parakeetFits: true))
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: nil, wanted: "es-ES", parakeetFits: true)?.identifier, "es-ES")
+        XCTAssertEqual(Controller.appleSpeechLanguage(picked: nil, wanted: "es-US", parakeetFits: true)?.identifier, "es-US")
     }
 
     func testErrorsShowShortMessagesNeverCodesOrTypeNames() {

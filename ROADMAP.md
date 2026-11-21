@@ -313,6 +313,7 @@ aren't being built yet. Everything stays on device and commercially safe.
   (Apple Speech, Parakeet). No cloud models.
 - **Grammar-aware autocorrect:** use the whole phrase, not just the word, beyond
   the its/it's and their/they're pairs.
+- **Clipboard history:** recent copies to paste again from the keyboard, kept on device. iOS asks before each clipboard read, so it can only remember copies the keyboard sees.
 - **More translation:** detect the language you speak instead of picking it, and translate a copied message back into your own language from the keyboard, all on device.
 - **Interface languages:** translate the app into Ukrainian and more, with help
   from testers who offered.

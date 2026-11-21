@@ -880,6 +880,69 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(partner([.english], .english))
     }
 
+    /// English and Spanish chosen together are Apple's bilingual English & Spanish keyboard:
+    /// both type on the first one's keys (QWERTY with ñ on a held n when English leads, the ñ
+    /// key when Spanish does), whichever the space bar switched to; Spanish alone keeps its
+    /// ñ key, and a third language its own letters (TestFlight build 56: English and Spanish
+    /// showed the ñ key "stuck" right of L).
+    func testEnglishAndSpanishTypeOnTheFirstOnesKeys() {
+        func layout(_ chosen: [KeyboardLanguage], _ current: KeyboardLanguage) -> KeyboardLanguage {
+            KeyboardLanguageList.resolve(chosen: chosen, stored: current, automatic: .english).layout
+        }
+        XCTAssertEqual(layout([.english, .spanish], .english), .english)
+        XCTAssertEqual(layout([.english, .spanish], .spanish), .english, "Español on English's keys")
+        XCTAssertEqual(layout([.spanish, .english], .english), .spanish, "English on Spanish's keys")
+        XCTAssertEqual(layout([.spanish, .english], .spanish), .spanish)
+        XCTAssertEqual(layout([.spanish], .spanish), .spanish)
+        XCTAssertEqual(layout([.english, .spanish, .french], .french), .french)
+        XCTAssertEqual(layout([.french, .spanish, .english], .english), .spanish, "the first of the two")
+        XCTAssertEqual(layout([.french, .spanish], .spanish), .spanish, "no English beside it")
+        XCTAssertEqual(layout([.english, .french], .french), .french)
+        XCTAssertFalse(KeyboardLanguage.english.letterRows[1].contains("ñ"))
+        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: false, language: .english), ["n", "ñ", "ń", "ņ", "ň"])
+        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: false, language: .spanish), ["n", "ń"])
+    }
+
+    /// While the keyboard switches between two or more languages, Automatic dictates in the
+    /// one it shows (TestFlight build 56: Spanish dictation came out "incomprehensible"),
+    /// in the iPhone's region; a language picked by hand, one keyboard language, or an iPhone
+    /// language without a layout (Hebrew) keeps dictation where it was, unless Switch dictation
+    /// too asks to follow.
+    func testAutomaticDictationFollowsTheKeyboardsLanguage() {
+        let suite = "KeyboardLayoutTests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = LanguageSettings(defaults: defaults)
+        settings.supportedDictationLanguages = ["en-US", "en-GB", "es-ES", "es-MX", "es-US", "fr-FR"]
+        settings.automaticDictationLanguage = "en-US"
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["en-US"]), "Automatic keyboard")
+        XCTAssertEqual(settings.effectiveDictationLanguage, "en-US")
+
+        settings.keyboardLanguages = [.english, .spanish]
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"]), "en-US", "the first until switched")
+        settings.currentKeyboardLanguage = .spanish
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"]), "es-ES")
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US", "es-MX"]), "es-MX", "the iPhone's region")
+        settings.currentKeyboardLanguage = .english
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-GB"]), "en-GB")
+        settings.currentKeyboardLanguage = .french
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["en-US"]), "en-US", "not chosen: the first")
+
+        settings.dictationLanguage = "es-MX"
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["en-US"]), "picked by hand")
+        XCTAssertEqual(settings.effectiveDictationLanguage, "es-MX")
+        settings.dictationLanguage = nil
+
+        settings.keyboardLanguages = [.spanish]
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["en-US"]), "one language: nothing to follow")
+
+        settings.keyboardLanguages = [.english, .spanish]
+        settings.automaticDictationLanguage = "he-IL"
+        XCTAssertNil(settings.keyboardDictationLanguage(preferred: ["he-IL"]), "Hebrew is dictated, never typed")
+        settings.dictationFollowsKeyboard = true
+        XCTAssertEqual(settings.keyboardDictationLanguage(preferred: ["he-IL"]), "en-US", "Switch dictation too")
+    }
+
     /// Settings › Keyboard › Languages offers the iPhone's own keyboards first, then its
     /// languages; Switch dictation too dictates in the iPhone's region where it has one.
     func testLanguagesOfferTheIPhonesKeyboardsAndDictateInItsRegion() {

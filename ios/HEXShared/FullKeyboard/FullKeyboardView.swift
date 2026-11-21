@@ -53,6 +53,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     private let haptics = UIImpactFeedbackGenerator(style: .light)
     private let selectionHaptics = UISelectionFeedbackGenerator()
     private let clipboard = KeyboardClipboardTracker()
+    /// What the strip's Paste chip offers now.
+    private var stripOffer: KeyboardClipboardOffer?
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     private var showsAllowPasteHint = false
     private var allowPasteHintHideWork: DispatchWorkItem?
@@ -336,6 +338,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         guard list != languages || engine.language != list.current else { return }
         languages = list
         engine.switchesLanguage = list.switches
+        engine.layoutLanguage = list.layout == list.current ? nil : list.layout
         engine.language = list.current
         engine.partnerLanguage = list.partner(available: Self.spellCheckLanguages)
         syncSpatialAutocorrect()
@@ -345,8 +348,9 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     /// A swipe along the space bar: the next or previous language (its letters, accents and
-    /// autocorrect), kept for next time, and with Switch dictation too the dictation
-    /// language with it.
+    /// autocorrect), kept for next time. Dictation on Automatic follows it
+    /// (`LanguageSettings.keyboardDictationLanguage`); with Switch dictation too, a dictation
+    /// language picked by hand goes back to Automatic, so it follows too.
     func switchLanguage(by step: Int) {
         guard languages.switches, languageOverride == nil else { return }
         let next = languages.switched(by: step)
@@ -356,12 +360,8 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         selectionFeedback()
         syncLanguage()
         guard languageSettings.dictationFollowsKeyboard, model.hasFullAccess,
-              let dictation = next.dictationLanguage(
-                  supported: languageSettings.supportedDictationLanguages,
-                  preferred: preferredLanguages
-              ),
-              languageSettings.dictationLanguage != dictation else { return }
-        model.onLanguageSelected?(dictation)
+              languageSettings.dictationLanguage != nil else { return }
+        model.onLanguageSelected?(nil)
     }
 
     /// With two or more languages the space bar names the keyboard's; otherwise, with Full
@@ -705,10 +705,15 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         } else {
             nil
         }
-        let clipboardOffer = clipboard.offer(
+        var clipboardOffer = clipboard.offer(
             textContentType: engine.target.textContentType,
             hasFullAccess: model.hasFullAccess
         )
+        // A dictation that didn't go in by itself comes before a copy, but not in a code field.
+        if model.hasFullAccess, model.offeredDictation != nil {
+            if case .code = clipboardOffer {} else { clipboardOffer = .dictation }
+        }
+        stripOffer = clipboardOffer
         var suggestions = engine.suggestions
         if showsAllowPasteHint, status != nil {
             // The pasted text's last word would otherwise hide where to stop Allow Paste.
@@ -769,6 +774,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
     }
 
     private func pasteFromClipboard() {
+        if stripOffer == .dictation {
+            keyFeedback()
+            typingLog?.ui("paste_dictation")
+            model.onPasteDictation?()
+            refreshStrip()
+            return
+        }
         let pasteboard = UIPasteboard.general
         // The read blocks while iOS asks Allow Paste, so its length tells whether it asked.
         let start = ProcessInfo.processInfo.systemUptime

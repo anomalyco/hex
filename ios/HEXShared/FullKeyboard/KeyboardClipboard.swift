@@ -16,6 +16,9 @@ enum KeyboardClipboardOffer: Equatable {
     /// A one-time-code field: paste a copied code, or switch keyboards so iOS can offer
     /// a code from Messages or Mail (only Apple's keyboard receives those).
     case code(canPaste: Bool)
+    /// A finished dictation the keyboard didn't insert by itself
+    /// (`KeyboardViewModel.offeredDictation`); it never touches the clipboard.
+    case dictation
 }
 
 /// Remembers which copy the keyboard first noticed and which one it already pasted, in

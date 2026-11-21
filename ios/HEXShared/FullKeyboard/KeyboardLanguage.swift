@@ -544,6 +544,19 @@ nonisolated struct KeyboardLanguageList: Equatable, Sendable {
     /// Two or more: the space bar names the language and switches it.
     var switches: Bool { languages.count > 1 }
 
+    /// The language whose letters and long presses the keys show while `current` types. Apple
+    /// types English and Spanish on one bilingual keyboard laid out as the first of the two
+    /// (iOS 27.2 simulator, black box: Spanish added to the English keyboard is QWERTY with ñ
+    /// on a held n and English's long presses; English added to the Spanish keyboard keeps its
+    /// ñ key and Spanish's). So with both chosen, both type on whichever comes first, and the
+    /// space bar switches the language they autocorrect and dictate in; any other language
+    /// types on its own.
+    var layout: KeyboardLanguage {
+        let bilingual: Set<KeyboardLanguage> = [.english, .spanish]
+        guard bilingual.contains(current), bilingual.isSubset(of: languages) else { return current }
+        return languages.first(where: bilingual.contains) ?? current
+    }
+
     /// The language a swipe along the space bar goes to: `step` 1 the next, -1 the one
     /// before, round the list.
     func switched(by step: Int) -> KeyboardLanguage {
