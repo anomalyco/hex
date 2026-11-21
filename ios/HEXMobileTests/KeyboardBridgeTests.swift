@@ -446,11 +446,17 @@ final class KeyboardBridgeTests: XCTestCase {
     }
 
     func testOnboardingPracticeCountsADictationOrAFewTypedWords() {
-        XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, fullAccessOn: true), "one letter")
-        XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, fullAccessOn: true))
-        XCTAssertTrue(OnboardingPractice.isDone(text: "See you at", dictated: false, fullAccessOn: true))
-        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, fullAccessOn: false), "not the Hex keyboard")
-        XCTAssertTrue(OnboardingPractice.isDone(text: "", dictated: true, fullAccessOn: false), "a dictation arrived")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "S", dictated: false, typedWithHex: 1, fullAccessOn: true), "one letter")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you", dictated: false, typedWithHex: 2, fullAccessOn: true))
+        XCTAssertTrue(OnboardingPractice.isDone(text: "See you at", dictated: false, typedWithHex: 3, fullAccessOn: true))
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, typedWithHex: 4, fullAccessOn: false), "not the Hex keyboard")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, typedWithHex: 0, fullAccessOn: true), "iOS's dictation or another keyboard typed it")
+        XCTAssertFalse(OnboardingPractice.isDone(text: "See you at ten", dictated: false, typedWithHex: 2, fullAccessOn: true), "two words from Hex, the rest from elsewhere")
+        XCTAssertTrue(OnboardingPractice.isDone(text: "", dictated: true, typedWithHex: 0, fullAccessOn: false), "a dictation arrived")
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "See yo", to: "See you"), 0, "a letter inside a word")
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "See you ", to: "See you a"), 1)
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "", to: "See you at ten"), 4, "a dictation's words at once")
+        XCTAssertEqual(OnboardingPractice.wordsAdded(from: "See you at", to: "See you"), 0, "a deletion")
         XCTAssertGreaterThanOrEqual(OnboardingPractice.words(in: "我们十点见"), 2, "Chinese splits into words without spaces")
     }
 

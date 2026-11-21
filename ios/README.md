@@ -51,7 +51,10 @@ never at a launch by itself.
     nothing (the keyboard notes it in the App Group). The keyboard also notes
     when it comes on screen and leaves (`KeyboardPresence`): when Hex's
     keyboard isn't up 2 s after a keyboard switch, the page says to tap the
-    globe until it is. **Hex is ready** shows
+    globe until it is, and only words that arrive while it's up count as
+    typed. iOS's dictation and other keyboards take it off screen, so their
+    text never finishes the practice; the page says to tap the Hex key
+    instead. **Hex is ready** shows
     only once every step is done, else Almost ready with what's left. The
     model step counts the keyboard's own model too
     (`KeyboardSpeechPreparation`): on iOS 26 the keyboard dictates with

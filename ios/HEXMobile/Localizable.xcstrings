@@ -3622,6 +3622,16 @@
           }
         }
       }
+    },
+    "That came from iOS dictation or another keyboard, not Hex. Tap the Hex key on Hex's keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这段文字来自 iOS 听写或其他键盘，不是 Hex。请轻点 Hex 键盘上的 Hex 键。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

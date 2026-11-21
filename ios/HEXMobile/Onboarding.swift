@@ -685,6 +685,10 @@ private struct OnboardingPracticePage: View {
     @State private var hexKeyboardAwaySince: Date?
     /// Hex's keyboard didn't come on screen after a switch: the page says how to bring it up.
     @State private var hexKeyboardMissing = false
+    /// Words that arrived while Hex's keyboard was on screen: only these count as typed.
+    @State private var hexWords = 0
+    /// The last text that arrived came from iOS's dictation or another keyboard.
+    @State private var otherInput = false
     @FocusState private var fieldFocused: Bool
 
     /// How long the keyboard gets to report Full Access after a switch or new text.
@@ -699,7 +703,7 @@ private struct OnboardingPracticePage: View {
     }
 
     private var complete: Bool {
-        OnboardingPractice.isDone(text: text, dictated: dictated, fullAccessOn: monitor.fullAccessOn)
+        OnboardingPractice.isDone(text: text, dictated: dictated, typedWithHex: hexWords, fullAccessOn: monitor.fullAccessOn)
     }
 
     var body: some View {
@@ -747,7 +751,12 @@ private struct OnboardingPracticePage: View {
                         practiceNote(icon: "waveform", Text("Hex didn't hear any words. Try again a little louder."))
                     }
 
-                    if hexKeyboardMissing && !complete {
+                    if otherInput && !complete && monitor.fullAccessOn {
+                        practiceNote(
+                            icon: "hand.raised",
+                            Text("That came from iOS dictation or another keyboard, not Hex. Tap the Hex key on Hex's keyboard.")
+                        )
+                    } else if hexKeyboardMissing && !complete {
                         practiceNote(
                             icon: "keyboard",
                             Text("Don't see the Hex key? Tap \(Image(systemName: "globe")) until Hex's keyboard comes up.")
@@ -774,6 +783,7 @@ private struct OnboardingPracticePage: View {
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: fullAccessLooksOff)
         .animation(HexMotion.reducedFade, value: heardNothing)
         .animation(HexMotion.reducedFade, value: hexKeyboardMissing)
+        .animation(HexMotion.reducedFade, value: otherInput)
         .onAppear {
             guard OnboardingFixture.current != .tryDone else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -797,11 +807,12 @@ private struct OnboardingPracticePage: View {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { fieldFocused = true }
             }
         }
-        .onChange(of: text) { _, _ in
+        .onChange(of: text) { old, new in
             if hasText {
                 heardNothing = false
                 noteKeyboardActivity()
             }
+            attributeText(from: old, to: new)
         }
         .onChange(of: monitor.fullAccessOn) { _, on in
             if on { fullAccessLooksOff = false }
@@ -857,6 +868,26 @@ private struct OnboardingPracticePage: View {
         hexKeyboardAwaySince = since
         let missing = Date().timeIntervalSince(since) >= Self.hexKeyboardGrace
         if hexKeyboardMissing != missing { hexKeyboardMissing = missing }
+    }
+
+    /// New words count only while Hex's keyboard is on screen (`KeyboardPresence`): iOS's
+    /// dictation and other keyboards take it off screen, so what they type never finishes the
+    /// practice, and the page says to use the Hex key. Text Hex's keyboard adds clears that.
+    private func attributeText(from old: String, to new: String) {
+        let total = OnboardingPractice.words(in: new)
+        guard total > 0 else {
+            hexWords = 0
+            otherInput = false
+            return
+        }
+        hexWords = min(hexWords, total)
+        guard new.count > old.count else { return }
+        if OnboardingFixture.isSnapshot || KeyboardBridge().isKeyboardShown() {
+            hexWords = min(total, hexWords + OnboardingPractice.wordsAdded(from: old, to: new))
+            otherInput = false
+        } else {
+            otherInput = true
+        }
     }
 
     private func practiceNote(icon: String, _ text: Text) -> some View {
