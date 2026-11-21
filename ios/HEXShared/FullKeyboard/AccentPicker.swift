@@ -56,7 +56,8 @@ nonisolated struct AccentMenu: Equatable, Sendable {
         for keyFrame: CGRect,
         rawOptions: [String],
         in layoutWidth: CGFloat,
-        horizontalInset: CGFloat = 0
+        horizontalInset: CGFloat = 0,
+        cellWidth: CGFloat? = nil
     ) -> AccentMenu {
         let minX = max(2, horizontalInset + 4)
         let maxX = max(minX + 60, layoutWidth - horizontalInset - 4)
@@ -69,7 +70,7 @@ nonisolated struct AccentMenu: Equatable, Sendable {
         let defaultIndex = opensLeft ? max(0, ordered.count - 1) : 0
 
         let count = CGFloat(max(1, ordered.count))
-        let idealCellW = min(38, max(28, keyFrame.width))
+        let idealCellW = cellWidth ?? min(38, max(28, keyFrame.width))
         let maxCellW = (availableWidth - 2 * padding) / count
         let cellW = min(idealCellW, maxCellW)
         let bubbleW = count * cellW + 2 * padding
@@ -116,6 +117,10 @@ nonisolated struct AccentMenu: Equatable, Sendable {
 final class AccentCalloutView: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { setNeedsDisplay() } } }
     private(set) var menu: AccentMenu?
+    /// The options' size: 22 pt for letters; the emoji panel's skin tones are drawn larger.
+    var optionFontSize: CGFloat = 22 { didSet { setNeedsDisplay() } }
+    /// An option set apart from the rest by a hairline (an emoji's untoned form).
+    var separatedOption: String? { didSet { setNeedsDisplay() } }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -154,6 +159,14 @@ final class AccentCalloutView: UIView {
         context.strokePath()
         context.restoreGState()
 
+        if let separatedOption, let idx = menu.options.firstIndex(of: separatedOption), menu.options.count > 1 {
+            let cell = menu.cellFrames[idx]
+            let x = idx == 0 ? cell.maxX : cell.minX
+            context.saveGState()
+            context.setFillColor(palette.separator.cgColor)
+            context.fill(CGRect(x: x - 0.5 / scale, y: cell.minY + 9, width: 1 / scale, height: cell.height - 18))
+            context.restoreGState()
+        }
         for (idx, option) in menu.options.enumerated() {
             let cell = menu.cellFrames[idx]
             let isSelected = idx == menu.selectedIndex
@@ -166,7 +179,7 @@ final class AccentCalloutView: UIView {
                 context.restoreGState()
             }
             let attributes: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 22, weight: isSelected ? .medium : .regular),
+                .font: UIFont.systemFont(ofSize: optionFontSize, weight: isSelected ? .medium : .regular),
                 .foregroundColor: isSelected ? UIColor.white : palette.textBase,
             ]
             let size = (option as NSString).size(withAttributes: attributes)

@@ -35,6 +35,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
 
     let library: EmojiLibrary
     let usage: EmojiUsageStore
+    /// The panel's emoji bitmaps, shared with its suggestion row and the search's results,
+    /// and gone with the panel.
+    let glyphs = EmojiGlyphRenderer()
     private(set) var sections: [Section] = []
     private(set) var suggestions: [Int] = []
 
@@ -83,6 +86,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         searchButton.addTarget(self, action: #selector(searchTapped), for: .touchUpInside)
         addSubview(searchButton)
 
+        suggestionRow.renderer = glyphs
         suggestionRow.onPick = { [weak self] index in self?.pickSuggestion(index) }
         addSubview(suggestionRow)
         rowSeparator.isUserInteractionEnabled = false
@@ -91,7 +95,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         grid.backgroundColor = .clear
         grid.showsHorizontalScrollIndicator = false
         grid.delaysContentTouches = false
-        // Each drawn cell holds a bitmap of its emoji; only the visible ones should.
+        // Cells draw their emoji when they're configured; only the visible ones should.
         grid.isPrefetchingEnabled = false
         grid.hideEdgeEffects()
         grid.dataSource = self
@@ -113,6 +117,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         lettersKey.title = "ABC"
         lettersKey.isPrimary = true
         lettersKey.drawsLikeKeys = true
+        lettersKey.isPlain = true
         lettersKey.accessibilityLabel = "Letters"
         lettersKey.addTarget(self, action: #selector(lettersTapped), for: .touchUpInside)
         addSubview(lettersKey)
@@ -120,6 +125,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         deleteKey.symbol = "delete.left"
         deleteKey.isPrimary = true
         deleteKey.drawsLikeKeys = true
+        deleteKey.isPlain = true
         deleteKey.accessibilityLabel = "Delete"
         deleteKey.addTarget(self, action: #selector(deleteDown), for: .touchDown)
         deleteKey.addTarget(self, action: #selector(deleteUp), for: [.touchUpInside, .touchUpOutside, .touchCancel])
@@ -176,6 +182,16 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         CGRect(x: horizontalInset, y: metrics.stripTop, width: bounds.width - 2 * horizontalInset, height: metrics.stripHeight)
     }
 
+    /// The grid's rows: four on roomy keyboards, three on compact ones.
+    var gridRows: Int {
+        metrics.keyHeight >= 40 ? 4 : 3
+    }
+
+    /// How many emoji Frequently used holds: eight columns of the grid's rows.
+    var frequentCapacity: Int {
+        gridRows * 8
+    }
+
     /// The suggestion row's and the search results' emoji size.
     var rowFontSize: CGFloat {
         metrics.keyHeight >= 40 ? 27 : 23
@@ -198,7 +214,9 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         suggestionRow.fontSize = rowFontSize
 
         let barY = bounds.height - metrics.keysBottom - barKeyHeight
-        let keyWidth = KeyboardLayout.letterWidth(innerWidth: bounds.width - 2 * horizontalInset, metrics: metrics) * KeyboardLayout.bottomSwitchWidthRatio
+        // ABC and delete are drawn without keys, so they take only their label's room and the
+        // categories get the rest.
+        let keyWidth = min(44, KeyboardLayout.letterWidth(innerWidth: bounds.width - 2 * horizontalInset, metrics: metrics) * KeyboardLayout.bottomSwitchWidthRatio)
         lettersKey.frame = CGRect(x: horizontalInset + side, y: barY, width: keyWidth, height: barKeyHeight)
         deleteKey.frame = CGRect(x: bounds.width - horizontalInset - side - keyWidth, y: barY, width: keyWidth, height: barKeyHeight)
         lettersKey.cornerRadius = metrics.cornerRadius
@@ -208,22 +226,40 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
         let gridTop = row.maxY
         let gridFrame = CGRect(x: horizontalInset, y: gridTop, width: bounds.width - 2 * horizontalInset, height: barY - 4 - gridTop)
         grid.frame = gridFrame
+        let band = UIEdgeInsets(top: barY - gridFrame.maxY, left: 0, bottom: max(0, bounds.height - barY - barKeyHeight), right: 0)
+        categoryBar.hitOutsets = band
+        lettersKey.hitOutsets = UIEdgeInsets(top: band.top, left: lettersKey.frame.minX, bottom: band.bottom, right: categoryBar.frame.minX - lettersKey.frame.maxX)
+        deleteKey.hitOutsets = UIEdgeInsets(top: band.top, left: deleteKey.frame.minX - categoryBar.frame.maxX, bottom: band.bottom, right: bounds.width - deleteKey.frame.maxX)
         callout.frame = bounds
         tonePicker.frame = bounds
         applyGridLayout(height: gridFrame.height)
     }
 
+    /// The bar's keys take the whole band under the grid: the gap above them and the margin
+    /// down to the keyboard's edge, where a thumb aiming at a small icon often lands. Taps
+    /// there used to hit nothing, so a category could take two taps.
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        guard !isHidden, isUserInteractionEnabled, alpha > 0.01, self.point(inside: point, with: event) else { return nil }
+        if tonePicker.menu == nil, point.y >= grid.frame.maxY {
+            if point.x < categoryBar.frame.minX { return lettersKey }
+            if point.x >= categoryBar.frame.maxX { return deleteKey }
+            if let button = categoryBar.button(atX: point.x - categoryBar.frame.minX) { return button }
+        }
+        return super.hitTest(point, with: event)
+    }
+
     private func applyGridLayout(height: CGFloat) {
         let isRoomy = metrics.keyHeight >= 40
         let headerHeight: CGFloat = isRoomy ? 20 : 16
-        let rows = isRoomy ? 4 : 3
+        let rows = gridRows
         let rowHeight = max(20, (height - headerHeight) / CGFloat(rows))
         let geometry = GridGeometry(
             rows: rows,
             rowHeight: rowHeight,
-            columnWidth: isRoomy ? 42 : 38,
+            // The system emoji keyboard's pitch and emoji size, measured from screenshots.
+            columnWidth: isRoomy ? 46 : 42,
             headerHeight: headerHeight,
-            fontSize: isRoomy ? 29 : 23,
+            fontSize: isRoomy ? 32 : 26,
             counts: sections.map(\.entries.count)
         )
         guard geometry != layoutKey, height > 0 else { return }
@@ -235,7 +271,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private static func makeLayout(_ g: GridGeometry) -> UICollectionViewCompositionalLayout {
         let config = UICollectionViewCompositionalLayoutConfiguration()
         config.scrollDirection = .horizontal
-        config.interSectionSpacing = 8
+        config.interSectionSpacing = 10
         let counts = g.counts
         return UICollectionViewCompositionalLayout(sectionProvider: { index, _ in
             let item = NSCollectionLayoutItem(layoutSize: NSCollectionLayoutSize(
@@ -302,8 +338,10 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
             cell.configure(
                 emoji: display(for: entry),
                 name: library.name(of: entry),
-                fontSize: layoutKey?.fontSize ?? 29,
-                palette: palette
+                fontSize: layoutKey?.fontSize ?? 32,
+                palette: palette,
+                renderer: glyphs,
+                scale: collectionView.traitCollection.displayScale
             )
         }
         return cell
@@ -371,7 +409,7 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     private func keepHeadersInView() {
         let left = grid.contentOffset.x
         for case let header as EmojiSectionHeader in grid.visibleSupplementaryViews(ofKind: UICollectionView.elementKindSectionHeader) {
-            let room = max(0, header.frame.width - header.label.intrinsicContentSize.width - 12)
+            let room = max(0, header.frame.width - header.label.intrinsicContentSize.width - 16)
             header.shift = min(room, max(0, left - header.frame.minX))
         }
     }
@@ -459,7 +497,16 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// Opens the skin tone picker over a cell, the remembered tone selected.
     func showTones(for entry: Int, over frame: CGRect) {
         let item = library.entries[entry]
-        var menu = AccentMenu.build(for: frame, rawOptions: [item.emoji] + item.tones, in: bounds.width, horizontalInset: horizontalInset)
+        // As the system keyboard's: emoji about its grid's size, the untoned one set apart.
+        var menu = AccentMenu.build(
+            for: frame,
+            rawOptions: [item.emoji] + item.tones,
+            in: bounds.width,
+            horizontalInset: horizontalInset,
+            cellWidth: 44
+        )
+        tonePicker.optionFontSize = 28
+        tonePicker.separatedOption = item.emoji
         if let index = menu.options.firstIndex(of: display(for: entry)) { menu.selectedIndex = index }
         toneEntry = entry
         tonePicker.show(menu)
@@ -502,6 +549,23 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// Fixtures and probes: the section the grid shows first.
     func debugJump(toSection section: Int) {
         jump(toSection: section)
+    }
+
+    /// Probes: the grid scrolled to its `page`th screen (clamped to the end).
+    func debugScroll(toPage page: Int) {
+        grid.layoutIfNeeded()
+        let maxX = max(0, grid.contentSize.width - grid.bounds.width)
+        grid.setContentOffset(CGPoint(x: min(maxX, CGFloat(page) * grid.bounds.width), y: 0), animated: false)
+        grid.layoutIfNeeded()
+    }
+
+    /// Probes: the grid scrolled `dx` points on; false once it's at the end.
+    func debugScroll(by dx: CGFloat) -> Bool {
+        let maxX = max(0, grid.contentSize.width - grid.bounds.width)
+        guard grid.contentOffset.x < maxX else { return false }
+        grid.setContentOffset(CGPoint(x: min(maxX, grid.contentOffset.x + dx), y: 0), animated: false)
+        grid.layoutIfNeeded()
+        return true
     }
 
     // MARK: - Keys

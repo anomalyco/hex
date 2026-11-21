@@ -353,6 +353,11 @@ final class PanelKeyButton: UIControl {
     /// Draws its title and symbol as the letter keys' 123 and delete do (the emoji panel's
     /// ABC and delete), not the recording panel's bolder ones.
     var drawsLikeKeys = false { didSet { setNeedsDisplay() } }
+    /// Only the title or symbol, with a keycap only while pressed (the emoji panel's ABC and
+    /// delete, which the system emoji keyboard draws without keys).
+    var isPlain = false { didSet { setNeedsDisplay() } }
+    /// How far past its edges a touch still counts as on the key (the emoji panel's bar).
+    var hitOutsets: UIEdgeInsets = .zero
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -370,12 +375,17 @@ final class PanelKeyButton: UIControl {
     override var isEnabled: Bool { didSet { setNeedsDisplay() } }
     @objc private func redraw() { setNeedsDisplay() }
 
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        bounds.inset(by: UIEdgeInsets(top: -hitOutsets.top, left: -hitOutsets.left, bottom: -hitOutsets.bottom, right: -hitOutsets.right)).contains(point)
+    }
+
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
-        let fill: UIColor = isHighlighted
-            ? palette.keyPressedFill
-            : (isPrimary ? palette.keyFill : palette.functionFill)
-        context.fillKeycap(bounds, fill: fill, radius: cornerRadius)
+        if isHighlighted {
+            context.fillKeycap(bounds, fill: palette.keyPressedFill, radius: cornerRadius)
+        } else if !isPlain {
+            context.fillKeycap(bounds, fill: isPrimary ? palette.keyFill : palette.functionFill, radius: cornerRadius)
+        }
         let ink = isEnabled ? palette.textBase : palette.textMuted
         if let symbol {
             let config = drawsLikeKeys

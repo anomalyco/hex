@@ -498,6 +498,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         if emojiPanel == nil {
             emojiLibrary = nil
         }
+        emojiPanel?.glyphs.purge()
         if !showsRecording, let panel = recordingPanel {
             panel.tearDown()
             panel.removeFromSuperview()

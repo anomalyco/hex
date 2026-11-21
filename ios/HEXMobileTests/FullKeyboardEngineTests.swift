@@ -543,6 +543,32 @@ final class FullKeyboardEngineTests: XCTestCase {
         defaults?.removePersistentDomain(forName: "anomaly.hex.tests.emoji-panel")
     }
 
+    /// Frequently used is a full block, as the system keyboard's: eight columns of the
+    /// grid's rows, your emoji first (squidlee on X: Hex showed three columns).
+    func testFrequentlyUsedFillsEightColumns() throws {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.emojiOverride = true
+        let suite = "anomaly.hex.tests.emoji-frequent"
+        let defaults = UserDefaults(suiteName: suite)
+        defaults?.removePersistentDomain(forName: suite)
+        let usage = EmojiUsageStore(defaults: defaults)
+        for _ in 0..<3 { usage.record("🦦") }
+        usage.record("🍕")
+        view.makeEmojiUsage = { usage }
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 306)
+        view.layoutIfNeeded()
+        view.debugOpenEmoji()
+        view.layoutIfNeeded()
+        let panel = try XCTUnwrap(view.emojiPanel)
+        let frequent = try XCTUnwrap(panel.sections.first?.entries)
+        XCTAssertEqual(panel.frequentCapacity, panel.gridRows * 8)
+        XCTAssertEqual(frequent.count, panel.frequentCapacity)
+        XCTAssertEqual(Set(frequent).count, frequent.count, "no emoji twice")
+        XCTAssertEqual(frequent.prefix(2).map { panel.library.entries[$0].emoji }, ["🦦", "🍕"])
+        view.closeEmojiPanel()
+        defaults?.removePersistentDomain(forName: suite)
+    }
+
     func testSpaceBarNamesTheDictationLanguage() {
         let model = KeyboardViewModel()
         let view = FullKeyboardView(model: model, target: target)
