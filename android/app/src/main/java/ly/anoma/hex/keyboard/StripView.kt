@@ -51,6 +51,9 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val dividers = List(2) { View(context) }
     private var offered = arrayOfNulls<String>(3)
     private val menuKey = TextView(context)
+    // Undo dictation, in the slots' place after a dictation (iPhone Hex's chip).
+    private val undoChip = TextView(context)
+    private var undoing = false
 
     private val well = FrameLayout(context)
     private val scope = DotScopeView(context)
@@ -107,6 +110,21 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             slotRow.addView(slotViews[i], LinearLayout.LayoutParams(0, -1, 1f))
         }
         idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
+        val undoBox = FrameLayout(context).apply {
+            undoChip.apply {
+                text = context.getString(R.string.keyboard_undo_dictation); useInter(500); textSize = 14f; setTextColor(ink)
+                gravity = Gravity.CENTER; includeFontPadding = false; isFocusable = true
+                background = shape(key, dp(15).toFloat()); setPadding(dp(12), 0, dp(14), 0)
+                compoundDrawablePadding = dp(6)
+                setCompoundDrawablesRelativeWithIntrinsicBounds(context.getDrawable(R.drawable.ic_undo)?.mutate()?.apply {
+                    setTint(ink); setBounds(0, 0, dp(16), dp(16))
+                }, null, null, null)
+                setOnClickListener { ime.engine.undoDictation() }
+            }
+            addView(undoChip, LayoutParams(LayoutParams.WRAP_CONTENT, dp(30), Gravity.CENTER))
+            visibility = GONE
+        }
+        idleRow.addView(undoBox, LinearLayout.LayoutParams(0, -1, 1f))
         menuKey.apply {
             useInter(550); gravity = Gravity.CENTER; textSize = 14f; setTextColor(ink)
             setOnClickListener { if (choosing) host.closeMenu() else host.openMenu() }
@@ -118,6 +136,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         well.background = shape(color(R.color.sheet), pill / 2f)
         well.clipToOutline = true
         well.addView(scope, LayoutParams(-1, -1).apply { marginStart = dp(10); marginEnd = dp(10) })
+        // TalkBack says "Recording" as the bar appears and "Transcribing" when it changes (a live region:
+        // a pane title would stay behind as the keyboard window's name).
+        scope.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_YES
+        scope.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
         val wellStart = side + px(KeyboardMetrics.GAP / 2)
         addView(well, LayoutParams(-1, pill, Gravity.CENTER_VERTICAL).apply {
             marginStart = wellStart; marginEnd = side + hexWidth + cancelWidth - (cancelWidth - pill) / 2 + dp(6)
@@ -202,10 +224,14 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         dividers[1].visibility = if (chip == 1 || chip == 2) INVISIBLE else VISIBLE
         update()
     }
+    /** Undo dictation shows in the slots' place, or goes. */
+    fun undo(shown: Boolean) { undoing = shown; update() }
     fun update() {
-        val show = idle && !choosing && offered.any { it != null }
+        val undo = idle && !choosing && undoing
+        val show = idle && !choosing && !undo && offered.any { it != null }
+        (undoChip.parent as View).visibility = if (undo) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
-        statusText.visibility = if (idle && !show) VISIBLE else GONE
+        statusText.visibility = if (idle && !show && !undo) VISIBLE else GONE
         menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
     }
@@ -229,7 +255,9 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             processing -> R.string.keyboard_transcribing
             else -> R.string.keyboard_finish_dictation
         })
-        scope.contentDescription = context.getString(if (processing) R.string.keyboard_transcribing else R.string.keyboard_recording)
+        // Set just after the bar shows, so the live region announces it.
+        val state = context.getString(if (processing) R.string.keyboard_transcribing else R.string.keyboard_recording)
+        if (idle) scope.contentDescription = null else scope.postDelayed({ if (!this.idle) scope.contentDescription = state }, 200)
         if (idle || phase == SpeechPhase.Opening) scope.clear()
     }
     /** Before [status]: this phase's hint and whether it is idle, so the caller can close the menu first. */

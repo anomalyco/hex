@@ -12,6 +12,7 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
@@ -28,6 +29,11 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
     /** The system's key click this key plays as it goes down, when the system's Touch sounds are on. */
     var sound = AudioManager.FX_KEYPRESS_STANDARD
     private var hint: TextView? = null
+    /** TalkBack types a text entry key as the finger lifts from it (its Typing preference, as for Gboard's
+     * keys); switches and enter take a double tap. */
+    var textEntry = true
+    /** What TalkBack names the key's long press, when it has one. */
+    var longClickLabel: String? = null
     private var downAt = 0L
     private var liftAt = 0L
     init {
@@ -84,7 +90,14 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
         }
         return true
     }
-    override fun getAccessibilityClassName() = "android.widget.Button"
+    // No "Button" after every key, as Gboard's keys say nothing but their names.
+    override fun getAccessibilityClassName(): CharSequence = View::class.java.name
+    override fun onInitializeAccessibilityNodeInfo(info: AccessibilityNodeInfo) {
+        super.onInitializeAccessibilityNodeInfo(info)
+        info.isTextEntryKey = textEntry
+        val label = longClickLabel
+        if (label != null && isLongClickable) info.addAction(AccessibilityNodeInfo.AccessibilityAction(AccessibilityNodeInfo.ACTION_LONG_CLICK, label))
+    }
 }
 
 /** Hex's Haptics setting and the system's Keyboard vibration both on. */
