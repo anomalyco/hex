@@ -967,6 +967,7 @@ final class FullKeyboardEngine {
     /// `down`: where a tap's finger went down, for Adaptive touch (nil for a slide from shift).
     private func commitCharacter(_ key: KeyboardKey, at point: CGPoint, down: CGPoint? = nil) {
         guard let character = key.character else { return }
+        spaceAfterSwipedWord(before: character)
         let text = layerState.layer == .letters && shift.isUppercase ? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
@@ -1107,6 +1108,7 @@ final class FullKeyboardEngine {
     }
 
     private func commitAccentSelection(_ chosen: String) {
+        spaceAfterSwipedWord(before: chosen)
         if layerState.layer == .letters {
             shift.didType()
         }
@@ -1420,6 +1422,32 @@ final class FullKeyboardEngine {
         lastSpaceAt = nil
         didEdit()
         typingLog?.context("suggestion")
+    }
+
+    /// What goes against a swiped word, as on Apple's keyboard: closing punctuation and
+    /// brackets, an apostrophe, a hyphen and a slash. Anything else tapped right after a swipe
+    /// (a straight quote and opening brackets included) starts the next word.
+    static let swipeJoiners: Set<Character> = [",", ".", "!", "?", ";", ":", ")", "]", "}", "'", "’", "-", "/"]
+
+    /// Right after a swipe, a tapped letter, digit, opening mark or symbol goes in after a
+    /// space, as Apple's keyboard keeps one pending after a swiped word ("hello" then "w"
+    /// types "hello w", "(" types "hello ("); punctuation in `swipeJoiners` goes against the
+    /// word ("hello,"). Shift as you set it stays; with it off, the space may bring a capital
+    /// (a field that capitalises every word).
+    private func spaceAfterSwipedWord(before text: String) {
+        guard let swiped = swipedWord, let first = text.first, !Self.swipeJoiners.contains(first),
+              let before = target.documentContextBeforeInput, before.hasSuffix(swiped.word) else { return }
+        swipedWord = nil
+        learning?.didFinish(word: AutocorrectEngine.currentToken(in: before))
+        typingLog?.edit("insert", [
+            TypingLogField("inserted", .string(" ")),
+            TypingLogField("src", .string("swipe_space")),
+        ])
+        target.insertText(" ")
+        tokenTaps.removeAll()
+        finishedWord = nil
+        lastSpaceAt = nil
+        if shift.state == .off { refreshAutoCapitalization() }
     }
 
     /// Takes back what a swipe typed when it is still right before the cursor.

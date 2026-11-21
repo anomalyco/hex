@@ -385,8 +385,13 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     capitalised. The strip then offers the next three readings, the likeliest in the
     centre; tapping one puts it in the word's place. Until anything else changes the
     text, delete takes the whole word back (with the space it added) and space never
-    autocorrects it; a tap after it adds to the word. A second finger going down ends the
-    swipe first, so its word goes before that key's letter. On the iPhone Duo's split
+    autocorrects it. As on Apple's keyboard (watched on iOS 27.2), a space stays pending
+    after the word: a tapped letter, digit, opening mark or symbol goes in after a space
+    ("hello" then w-o-r-l-d types "hello world", "(" types "hello ("), while
+    `, . ! ? ; : ) ] } ' - /` go against the word ("hello,") and take that space; shift you
+    set stays, and delete then takes the letters and the space one at a time. A second
+    finger going down ends the swipe first, so its word goes a space before that key's
+    letter. On the iPhone Duo's split
     keyboard a swipe reads across the middle between the halves: its points are read with
     the right half pushed against the left and the middle shrunk to one key's gap
     (`KeyboardLayout.joinedForSwipe`), so either half's G and V is the one letter, as for
