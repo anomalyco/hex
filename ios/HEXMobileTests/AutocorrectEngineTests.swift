@@ -1168,22 +1168,50 @@ extension AutocorrectEngineTests {
             engine.configureForField()
             try useDecoder()
             engine.autocorrect.loadLexiconEntries([("Zorbix", "Zorbix"), ("Kit", "Kit")])
-            if profile {
-                let touch = AdaptiveTouch(storage: .memory, settings: AdaptiveTouchSettings(defaults: defaults))
-                engine.adaptiveTouch = touch
-                let geometry = try XCTUnwrap(touch.geometry)
-                for n in 0..<600 {
-                    if n % 150 == 0 { touch.beginSession() }
-                    let s = n % geometry.letters.count
-                    let f = geometry.frames[s]
-                    touch.admit(slot: s, point: CGPoint(x: f.midX + 0.45 * f.width, y: f.midY), quality: AdaptiveTouch.weakQuality)
-                }
-                XCTAssertTrue(touch.isActive)
-                XCTAssertNotEqual(engine.autocorrect.decoderKeys, engine.autocorrect.decoderBaselineKeys)
-            }
+            if profile { try engageStrongProfile() }
             for word in words { typeTaps(word) }
             return target.text
         }
         XCTAssertEqual(try typed(profile: true), try typed(profile: false))
+    }
+
+    /// Joining two words at a space tapped on the bar's edge ("deli ate") is the centres'
+    /// read without Adaptive touch to decide.
+    func testPersonalCentresNeverJoinWordsTheirOwnWay() throws {
+        func typed(profile: Bool) throws -> String {
+            target = FixtureTextTarget()
+            target.autocapitalizationType = UITextAutocapitalizationType.none
+            engine = FullKeyboardEngine(target: target, autocorrect: AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults)))
+            engine.width = 393
+            engine.clock = { [unowned self] in self.now }
+            engine.configureForField()
+            try useDecoder()
+            engine.letterOdds = engine.autocorrect.decoder?.model
+            if profile { try engageStrongProfile() }
+            let space = try XCTUnwrap(engine.layout.key(.space))
+            typeTaps("the")
+            for ch in "deli" { tapCentre(ch) }
+            let c = try XCTUnwrap(engine.layout.key(.character("c"))).frame
+            tap(at: CGPoint(x: c.midX, y: space.hitFrame.minY + 1))
+            typeTaps("ate")
+            return target.text
+        }
+        XCTAssertEqual(try typed(profile: false), "the delicate ")
+        XCTAssertEqual(try typed(profile: true), "the delicate ")
+    }
+
+    /// Every key's personal centre at the bound, a third of a key to the right, in use.
+    private func engageStrongProfile() throws {
+        let touch = AdaptiveTouch(storage: .memory, settings: AdaptiveTouchSettings(defaults: defaults))
+        engine.adaptiveTouch = touch
+        let geometry = try XCTUnwrap(touch.geometry)
+        for n in 0..<600 {
+            if n % 150 == 0 { touch.beginSession() }
+            let s = n % geometry.letters.count
+            let f = geometry.frames[s]
+            touch.admit(slot: s, point: CGPoint(x: f.midX + 0.45 * f.width, y: f.midY), quality: AdaptiveTouch.weakQuality)
+        }
+        XCTAssertTrue(touch.isActive)
+        XCTAssertNotEqual(engine.autocorrect.decoderKeys, engine.autocorrect.decoderBaselineKeys)
     }
 }
