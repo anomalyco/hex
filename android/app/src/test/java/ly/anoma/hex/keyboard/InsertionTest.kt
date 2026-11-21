@@ -468,4 +468,35 @@ class InsertionTest {
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
         assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
     }
+    // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
+    @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
+        val typed = StringBuilder()
+        val roll = Rollover()
+        fun down(key: String) = roll.down(key) { typed.append(key) }
+        fun up(key: String) { if (roll.up(key)) typed.append(key) }
+        down("a"); down("s"); up("s"); up("a")              // a down, s down, s up, a up
+        down("d"); up("d")
+        down(" "); down("f"); up(" "); up("f")             // space held, f down: the space first
+        roll.down("shift"); down("g"); up("g"); up("shift") // shift acts as it goes down; it types nothing
+        down("h"); roll.down("shift"); up("h")              // h held, shift down: h types first
+        assertEquals("asd fgh", typed.toString())
+    }
+    @Test fun heldKeysOfferGboardsOptions() {
+        assertEquals(listOf("3", "e", "è", "é"), LetterFeedback.holds('e', "en", KeyboardLetters.digit(0, 2)).take(4))
+        assertEquals(listOf("1"), LetterFeedback.holds('q', "en", KeyboardLetters.digit(0, 0)))
+        assertEquals(listOf("0"), LetterFeedback.holds('p', "en", KeyboardLetters.digit(0, 9)))
+        assertEquals(null, KeyboardLetters.digit(0, 10))                 // å, ü: no digit
+        assertEquals(null, KeyboardLetters.digit(1, 0))
+        assertEquals("¢", LetterFeedback.symbolHolds('$').first())
+        assertEquals(",", LetterFeedback.periodHolds[0][LetterFeedback.PERIOD_DEFAULT])
+        assertEquals(emptyList<String>(), LetterFeedback.symbolHolds('@'))
+    }
+    @Test fun emailAndWebAddressFieldsSwapTheComma() {
+        val text = android.text.InputType.TYPE_CLASS_TEXT
+        assertEquals("@", FieldKind.of(text or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS).mark)
+        assertEquals("@", FieldKind.of(text or android.text.InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS).mark)
+        assertEquals("/", FieldKind.of(text or android.text.InputType.TYPE_TEXT_VARIATION_URI).mark)
+        assertEquals(",", FieldKind.of(text or android.text.InputType.TYPE_TEXT_FLAG_CAP_SENTENCES).mark)
+        assertEquals(",", FieldKind.of(android.text.InputType.TYPE_CLASS_NUMBER).mark)
+    }
 }

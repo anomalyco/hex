@@ -121,9 +121,10 @@ internal class KeyboardEngine(
         background.execute { decoder.personal = read(decoder.model) }
     }
 
-    /** Whether the field asks for a capital here, or caps lock is on: what shift would show. */
+    /** Whether the field asks for a capital here (with Auto-capitalisation on), or caps lock is on: what shift would show. */
     private fun capsWanted(): Boolean {
         if (shift.locked) return true
+        if (!feedback.autoCapitalize) return false
         val mask = (editor?.inputType ?: 0) and
             (InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
         return !secure && mask != 0 && target.capsMode(mask) != 0
@@ -134,7 +135,8 @@ internal class KeyboardEngine(
         if (force || was != shift.uppercase) showPlane()
     }
     private fun showPlane() {
-        surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor)))
+        surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
+            FieldKind.of(editor?.inputType ?: 0)))
     }
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */
     fun shiftDown() {

@@ -20,48 +20,72 @@ internal class LetterFeedback(private val host: ViewGroup) {
         if (border) setStroke(dp(1), context.getColor(R.color.modifier))
     }
     private var panel: LinearLayout? = null
-    private var choices: List<String> = emptyList()
+    // The options shown, nearest the key first; a held key's options are chosen by sliding.
+    private var rows: List<List<String>> = emptyList()
+    private var row = 0
     private var index = 0
     private var left = 0
+    private var bottom = 0
     private var cell = 0
-    val choosing get() = choices.size > 1
-    fun selected() = choices.getOrNull(index)
-    fun clear() { panel?.let { host.overlay.remove(it) }; panel = null; choices = emptyList() }
-    fun present(key: View, options: List<String>) {
+    private var holding = false
+    private val pad get() = dp(3)
+    private val rowHeight get() = dp(36)
+    val choosing get() = holding
+    fun selected() = rows.getOrNull(row)?.getOrNull(index)
+    fun clear() { panel?.let { host.overlay.remove(it) }; panel = null; rows = emptyList(); holding = false }
+    /** The key's pop-up: one option shows the letter above the finger; more are a held key's list in one
+     * row, the first under the finger and the rest reading away from the nearer edge. */
+    fun present(key: View, options: List<String>) = show(key, listOf(options), 0, options.size > 1)
+    /** A held key's options in rows, the first row nearest the key, with [default] of it under the finger;
+     * held with a single option, that option still types on lifting. */
+    fun hold(key: View, options: List<List<String>>, default: Int = 0) = show(key, options, default, true)
+    private fun show(key: View, options: List<List<String>>, default: Int, hold: Boolean) {
         clear()
-        if (host.width <= 0 || options.isEmpty()) return
+        if (host.width <= 0 || options.firstOrNull().isNullOrEmpty()) return
         val r = Rect(0, 0, key.width, key.height); host.offsetDescendantRectToMyCoords(key, r)
-        val reverse = options.size > 1 && r.centerX() > host.width * .52
-        choices = if (reverse) options.reversed() else options
-        index = if (reverse) choices.lastIndex else 0
-        val pad = dp(3); val edge = dp(4)
-        cell = if (choosing) minOf(key.width.coerceIn(dp(28), dp(38)), (host.width - 2 * (edge + pad)) / choices.size) else key.width + dp(6)
-        val w = cell * choices.size + 2 * pad; val h = dp(42)
+        val reverse = hold && options.size == 1 && options[0].size > 1 && r.centerX() > host.width * .52
+        rows = if (reverse) listOf(options[0].reversed()) else options
+        holding = hold; row = 0
+        index = (if (reverse) rows[0].lastIndex - default else default).coerceIn(0, rows[0].lastIndex)
+        val columns = rows.maxOf { it.size }
+        val edge = dp(4)
+        cell = if (hold) minOf(key.width.coerceIn(dp(28), dp(38)), (host.width - 2 * (edge + pad)) / columns) else key.width + dp(6)
+        val w = cell * columns + 2 * pad; val h = rowHeight * rows.size + 2 * pad
         left = (r.centerX() - pad - cell * index - cell / 2).coerceIn(edge, host.width - w - edge)
         val y = (r.top - h - dp(2)).coerceAtLeast(0)
+        bottom = y + h
         val bar = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
             background = face(R.color.sheet, 10, true); setPadding(pad, pad, pad, pad)
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS
         }
-        for (s in choices) bar.addView(TextView(context).apply {
-            text = s; gravity = Gravity.CENTER; setTextColor(context.getColor(R.color.ink))
-            useInter(500); textSize = if (choosing) 21f else 27f; includeFontPadding = false
-        }, LinearLayout.LayoutParams(cell, -1))
+        for (line in rows.asReversed()) bar.addView(LinearLayout(context).apply {
+            for (s in line) addView(TextView(context).apply {
+                text = s; gravity = Gravity.CENTER; setTextColor(context.getColor(R.color.ink))
+                useInter(500); textSize = if (hold) 21f else 27f; includeFontPadding = false
+            }, LinearLayout.LayoutParams(cell, -1))
+        }, LinearLayout.LayoutParams(-1, rowHeight))
         panel = bar; highlight()
         bar.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
         bar.layout(left, y, left + w, y + h); host.overlay.add(bar)
     }
-    fun move(x: Float) {
-        if (!choosing) return
-        val next = ((x - left - dp(3)) / cell).toInt().coerceIn(0, choices.lastIndex)
-        if (index != next) { index = next; highlight() }
+    /** The finger moved to ([x], [y]) in the host's coordinates: the option under it, the nearest row's below the list. */
+    fun move(x: Float, y: Float) {
+        if (!holding) return
+        val nextRow = ((bottom - pad - y) / rowHeight).toInt().coerceIn(0, rows.lastIndex)
+        val next = ((x - left - pad) / cell).toInt().coerceIn(0, rows[nextRow].lastIndex)
+        if (row != nextRow || index != next) { row = nextRow; index = next; highlight() }
     }
     private fun highlight() {
         val bar = panel ?: return
-        for (i in choices.indices) {
-            val label = bar.getChildAt(i) as TextView
-            label.background = if (choosing && i == index) face(R.color.ink, 7) else null
-            label.setTextColor(context.getColor(if (choosing && i == index) R.color.page else R.color.ink))
+        for ((r, line) in rows.withIndex()) {
+            val cells = bar.getChildAt(rows.lastIndex - r) as LinearLayout
+            for (i in line.indices) {
+                val label = cells.getChildAt(i) as TextView
+                val on = holding && r == row && i == index
+                label.background = if (on) face(R.color.ink, 7) else null
+                label.setTextColor(context.getColor(if (on) R.color.page else R.color.ink))
+            }
         }
     }
     companion object {
@@ -94,5 +118,26 @@ internal class LetterFeedback(private val host: ViewGroup) {
             }
             return raw.orEmpty().map { (if (c.isUpperCase()) (if (it == 'ß') 'ẞ' else it.uppercaseChar()) else it).toString() }
         }
+
+        /** What a held letter offers: on row 1 its digit first, under the finger (Gboard types the digit
+         * when a held q to p lifts), then its accents with the letter itself. */
+        fun holds(c: Char, language: String, digit: Char?): List<String> {
+            val accents = options(c, language)
+            return if (digit == null) accents else listOf(digit.toString()) + accents
+        }
+
+        // Gboard's held symbols (Pixel 8 emulator, API 36, black box) on the keys Hex's pages share with
+        // its: the option Gboard selects first, then the rest left to right. Digits offer themselves first.
+        private val symbols = mapOf('1' to "1½⅓¼⅕⅙⅐⅛⅑⅒", '2' to "2⅔⅖", '3' to "3⅗¾⅜", '4' to "4⅘", '5' to "5⅝⅚",
+            '7' to "7⅞", '0' to "0∅ⁿ", '#' to "№", '$' to "¢€£₹¥₱", '-' to "_—–·", '+' to "±", '(' to "<[{",
+            ')' to ">]}", '*' to "†★‡", '"' to "”„“«»", '\'' to "’‚‘‹›", '!' to "¡", '?' to "¿‽", '.' to "…",
+            '%' to "‰℅", '^' to "↑←↓→", '=' to "≠∞≈", '<' to "≤«‹⟨", '>' to "≥⟩»›", '•' to "♪♣♠♥♦")
+        fun symbolHolds(c: Char): List<String> = symbols[c].orEmpty().map { it.toString() }
+
+        /** The period key's held punctuation on the letters page, as Gboard's three rows (nearest the key
+         * first), with the comma under the finger. */
+        val periodHolds = listOf(listOf("(", ")", "#", "!", ",", "?"), listOf("-", ":", "@", "'", "/", ";"),
+            listOf("·", "_", "&", "%", "\"", "+"))
+        const val PERIOD_DEFAULT = 4
     }
 }

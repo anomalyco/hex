@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.StateListDrawable
+import android.media.AudioManager
 import android.provider.Settings
 import android.text.TextUtils
 import android.view.Gravity
@@ -24,9 +25,15 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
     var label: TextView? = null
     val face = FrameLayout(context)
+    /** The system's key click this key plays as it goes down, when the system's Touch sounds are on. */
+    var sound = AudioManager.FX_KEYPRESS_STANDARD
+    private var hint: TextView? = null
+    private var downAt = 0L
+    private var liftAt = 0L
     init {
         contentDescription = description
-        isFocusable = true; setOnClickListener { click() }
+        // The key click below replaces View's own, which would sound again as performClick runs on lifting.
+        isFocusable = true; isSoundEffectsEnabled = false; setOnClickListener { click() }
         val paints = StateListDrawable()
         fun shape(c: Int) = GradientDrawable().apply { cornerRadius = KeyboardMetrics.CORNER * resources.displayMetrics.density; setColor(c) }
         paints.addState(intArrayOf(android.R.attr.state_pressed), shape(context.getColor(R.color.pressed)))
@@ -36,11 +43,33 @@ internal class KeyCap(context: Context, fill: Int, description: String, private 
         face.background = paints
         addView(face, LayoutParams(-1, -1))
     }
+    private fun vibrates() = haptics() && Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0
+    // A tap as each key goes down, as on Gboard. The click is the system's own, so it follows Touch
+    // sounds as iPhone Hex's follows Keyboard clicks (AudioManager.playSoundEffect checks the setting).
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN && haptics() &&
-            Settings.System.getInt(context.contentResolver, "keyboard_vibration_enabled", 1) != 0)
-            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+        if (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_POINTER_DOWN) {
+            downAt = event.eventTime
+            if (vibrates()) performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+            context.getSystemService(AudioManager::class.java)?.playSoundEffect(sound)
+        }
+        if (event.actionMasked == MotionEvent.ACTION_UP) liftAt = event.eventTime
         return super.dispatchTouchEvent(event)
+    }
+    /** A key that acts as it lifts lifted: Gboard's second, lighter tick, only after a press of
+     * [KeyboardMetrics.RELEASE_TICK_MS] or more (Gboard: none at 190 ms, one at 200 ms). */
+    fun typedOnLift() {
+        if (liftAt - downAt >= KeyboardMetrics.RELEASE_TICK_MS && vibrates())
+            performHapticFeedback(HapticFeedbackConstants.KEYBOARD_RELEASE)
+    }
+    /** Row 1's digit, small in the corner, quiet enough that the key still reads as its letter. */
+    fun hint(text: String?) {
+        if (text == null) { hint?.visibility = GONE; return }
+        val h = hint ?: TextView(context).apply {
+            textSize = 9.5f; useInter(500); includeFontPadding = false; setTextColor(context.getColor(R.color.quiet))
+            val d = resources.displayMetrics.density
+            face.addView(this, LayoutParams(-2, -2, Gravity.TOP or Gravity.END).apply { topMargin = (3 * d).roundToInt(); marginEnd = (4.5f * d).roundToInt() })
+        }.also { hint = it }
+        h.text = text; h.visibility = VISIBLE
     }
     // View normally posts its click after UP. Letter gestures commit on UP itself;
     // posting space or shift behind the next letter can reorder fast input.
