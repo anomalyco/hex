@@ -897,6 +897,33 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(fix(english, before: "we said that im"), "I'm")
     }
 
+    /// TestFlight build 56 (English and Portuguese): Apple's keyboard puts "nao sei" right once
+    /// "sei" says it was Portuguese. A word only one language knows as typed ("voce" is an
+    /// English word) takes the other's accents once the next word leans that one; never a
+    /// guess that changes its letters, nor when the words before lean the other way.
+    func testTheNextWordGivesTheWordBeforeItsLanguagesAccents() {
+        let available = ["en_US", "pt_BR"]
+        let english = stubbed { $0.valid = ["voce", "ate", "so", "we", "i", "lunch", "logo"] }
+        english.setLanguage(.english, available: available)
+        let portuguese = StubChecker()
+        portuguese.valid = ["você", "esta", "até", "amanhã", "só", "logo", "eu"]
+        portuguese.guessTable = ["voce": ["voe", "você"], "ate": ["até", "ata"], "so": ["só", "sol"], "we": ["wi"]]
+        english.setPartner(.portuguese, available: available, checker: portuguese)
+
+        func revised(_ word: String, before: String? = nil, next: String) -> String? {
+            english.revision(of: word, before: before ?? word, next: next, field: .text, autocorrectionType: .default)
+        }
+        XCTAssertEqual(revised("voce", next: "esta"), "você")
+        XCTAssertEqual(english.lastRevisionLanguage, .portuguese, "the fix is Portuguese's")
+        XCTAssertEqual(revised("Voce", next: "esta"), "Você")
+        XCTAssertEqual(revised("ate", next: "amanhã"), "até")
+        XCTAssertNil(revised("ate", next: "lunch"), "an English word after it")
+        XCTAssertNil(revised("ate", next: "logo"), "a word both know tells nothing")
+        XCTAssertNil(revised("so", before: "we ate lunch so", next: "esta"), "English words before it")
+        XCTAssertNil(revised("we", next: "esta"), "only a respelling with accents")
+        XCTAssertNil(revised("lunch", next: "esta"), "no guess of Portuguese's")
+    }
+
     /// How often one language's keyboard changes the other's words, against iOS's own
     /// dictionaries and English's Spatial autocorrect model: common French words typed on the
     /// English keyboard and common English words on the French one (taps where the layout has

@@ -185,7 +185,7 @@ final class AutocorrectEngine {
     /// language whose word data isn't there (the iOS 27.2 simulator's `pl_PL`), and such a
     /// partner would keep every typo as "a word in the other language". Checked once per
     /// language, on first use.
-    private var workingPartner: AutocorrectEngine? {
+    var workingPartner: AutocorrectEngine? {
         guard let partner else { return nil }
         if partner.acceptsAnyLetters == nil {
             partner.acceptsAnyLetters = partner.checker.isWordValid("qzxjvkq")
@@ -202,13 +202,15 @@ final class AutocorrectEngine {
     private(set) var lexiconTerms: [String] = []
     private var systemLexiconTerms: [String] = []
     private(set) var vocabulary: [String] = []
-    private var suppressedInSession: Set<String> = []
+    private(set) var suppressedInSession: Set<String> = []
     /// Learn how I type: typos you fixed the same way twice and words you turned down twice.
     private(set) var learning = TypingLearning()
     private(set) var lastCorrection: AppliedCorrection?
     /// The language of the fix space would apply to the word it was asked about: the
     /// partner's when its fix won, else this engine's; nil for a text replacement.
     private(set) var lastFixLanguage: KeyboardLanguage?
+    /// The language of the last revision `revision(of:)` returned: the partner's for its accents.
+    private(set) var lastRevisionLanguage: KeyboardLanguage?
     /// Experiment (Spatial autocorrect): reads the word's taps with a language model in place
     /// of `UITextChecker`'s one-edit guesses, for the language its model was built for. Nil
     /// while off or without a model.
@@ -969,7 +971,7 @@ final class AutocorrectEngine {
     /// Whether `token` is a word in this language as typed: the dictionary's, one of your
     /// own (`UILexicon`, kept twice) or chat shorthand. A name it knows only capitalised
     /// doesn't count ("paris").
-    private func knowsAsTyped(_ token: String) -> Bool {
+    func knowsAsTyped(_ token: String) -> Bool {
         let lower = token.lowercased()
         return Self.shorthandAllowlist.contains(lower) || learnedWords.contains(lower)
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
@@ -988,7 +990,7 @@ final class AutocorrectEngine {
     /// `commonFrom`: the fewest letters a word both dictionaries know needs to count by the
     /// typing models. Three, as French "de", "la" and "et" are common in the English model's
     /// books, except for the word after a sentence's first (`bilingualRevision`: "Im in").
-    private func languageLean(_ partner: AutocorrectEngine, before: String, commonFrom: Int = 3) -> Int {
+    func languageLean(_ partner: AutocorrectEngine, before: String, commonFrom: Int = 3) -> Int {
         var lean = 0
         for word in before.suffix(120).split(whereSeparator: { !$0.isLetter && $0 != "'" }).suffix(4) where word.count >= 2 {
             let mine = checker.isWordValid(String(word))
@@ -1156,7 +1158,7 @@ final class AutocorrectEngine {
     /// `fix` for `token` as autocorrect puts it in: with `addsCapitals` off and nothing
     /// typed in capitals, all lowercase unless it is your own spelling; nil when that leaves
     /// just what you typed ("i").
-    private func withoutAddedCapitals(_ fix: String, typed token: String) -> String? {
+    func withoutAddedCapitals(_ fix: String, typed token: String) -> String? {
         guard !addsCapitals, !token.contains(where: \.isUppercase), !isOwnSpelling(fix) else { return fix }
         let lowered = fix.lowercased()
         return lowered == token ? nil : lowered
@@ -1360,7 +1362,9 @@ final class AutocorrectEngine {
         let isAllCaps = word == word.uppercased() && word != word.lowercased() && !word.hasPrefix("I'")
         guard !isAllCaps, let nextWord = next.split(separator: " ").first.map(String.init) else { return nil }
         let previous = Self.previousWord(before, token: word)
+        lastRevisionLanguage = language
         if let fixed = bilingualRevision(of: word, before: before, next: nextWord) { return fixed }
+        if let (fixed, into) = accentRevision(of: word, before: before, next: nextWord) { lastRevisionLanguage = into; return fixed }
         guard let choice = contextChoice(
             for: word, previous: previous, next: nextWord.lowercased(),
             startsSentence: Self.startsSentence(before: before, token: word)
