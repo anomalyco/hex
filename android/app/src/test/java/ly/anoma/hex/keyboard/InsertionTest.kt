@@ -507,4 +507,28 @@ class InsertionTest {
         assertEquals(1, DeleteSlide.lastCharacter("ab"))
         assertEquals(0, DeleteSlide.lastCharacter(""))
     }
+    @Test fun fieldsGetGboardsPads() {
+        assertEquals(Pad.Number, Pad.of(android.text.InputType.TYPE_CLASS_NUMBER))
+        assertEquals(Pad.Number, Pad.of(android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_FLAG_DECIMAL))
+        assertEquals(Pad.Pin, Pad.of(android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD))
+        assertEquals(Pad.Phone, Pad.of(android.text.InputType.TYPE_CLASS_PHONE))
+        assertEquals(Pad.Date, Pad.of(android.text.InputType.TYPE_CLASS_DATETIME or android.text.InputType.TYPE_DATETIME_VARIATION_DATE))
+        assertEquals(Pad.Time, Pad.of(android.text.InputType.TYPE_CLASS_DATETIME or android.text.InputType.TYPE_DATETIME_VARIATION_TIME))
+        assertEquals(Pad.DateTime, Pad.of(android.text.InputType.TYPE_CLASS_DATETIME))
+        assertEquals(null, Pad.of(android.text.InputType.TYPE_CLASS_TEXT))
+        // Every pad has four rows that fill their cells without overlapping (the symbol pad's first three
+        // leave its operator column's 1.5 cells), and the phone pad's 0 holds a plus.
+        for (pad in Pad.entries) {
+            val rows = KeyPads.rows(pad)
+            assertEquals(4, rows.size)
+            for ((i, row) in rows.withIndex()) {
+                val first = if (pad == Pad.Symbols && i < 3) 1.5f else if (pad == Pad.Pin) 0.5f else 0f
+                var at = first
+                for (key in row) { assertEquals(at, key.start, 0.001f); at += key.width }
+                assertEquals(if (pad == Pad.Pin) 3.5f else KeyPads.cells(pad), at, 0.001f)
+            }
+        }
+        assertEquals("+", KeyPads.rows(Pad.Phone)[3][1].hold)
+        assertEquals(listOf(",", "0", "."), KeyPads.rows(Pad.Number)[3].take(3).map { it.label })
+    }
 }

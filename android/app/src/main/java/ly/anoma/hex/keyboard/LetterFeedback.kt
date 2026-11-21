@@ -20,6 +20,13 @@ internal class LetterFeedback(private val host: ViewGroup) {
         if (border) setStroke(dp(1), context.getColor(R.color.modifier))
     }
     private var panel: LinearLayout? = null
+    // While a held key's list is open the keys behind it fade, as Gboard's do, so the list's edges never
+    // sit against half a key.
+    private val scrim = View(context).apply {
+        setBackgroundColor(context.getColor(R.color.keyboard)); alpha = 0.67f
+        importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+    }
+    private var dimmed = false
     // The options shown, nearest the key first; a held key's options are chosen by sliding.
     private var rows: List<List<String>> = emptyList()
     private var row = 0
@@ -32,7 +39,10 @@ internal class LetterFeedback(private val host: ViewGroup) {
     private val rowHeight get() = dp(36)
     val choosing get() = holding
     fun selected() = rows.getOrNull(row)?.getOrNull(index)
-    fun clear() { panel?.let { host.overlay.remove(it) }; panel = null; rows = emptyList(); holding = false }
+    fun clear() {
+        panel?.let { host.overlay.remove(it) }; panel = null; rows = emptyList(); holding = false
+        if (dimmed) { host.overlay.remove(scrim); dimmed = false }
+    }
     /** The key's pop-up: one option shows the letter above the finger; more are a held key's list in one
      * row, the first under the finger and the rest reading away from the nearer edge. */
     fun present(key: View, options: List<String>) = show(key, listOf(options), 0, options.size > 1)
@@ -67,7 +77,9 @@ internal class LetterFeedback(private val host: ViewGroup) {
         }, LinearLayout.LayoutParams(-1, rowHeight))
         panel = bar; highlight()
         bar.measure(View.MeasureSpec.makeMeasureSpec(w, View.MeasureSpec.EXACTLY), View.MeasureSpec.makeMeasureSpec(h, View.MeasureSpec.EXACTLY))
-        bar.layout(left, y, left + w, y + h); host.overlay.add(bar)
+        bar.layout(left, y, left + w, y + h)
+        if (hold) { scrim.layout(0, 0, host.width, host.height); host.overlay.add(scrim); dimmed = true }
+        host.overlay.add(bar)
     }
     /** The finger moved to ([x], [y]) in the host's coordinates: the option under it, the nearest row's below the list. */
     fun move(x: Float, y: Float) {

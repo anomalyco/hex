@@ -1,0 +1,14 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- The emoji picker's section titles in sentence case, as the rest of Hex: its own translations
+         for the keyboard's languages, with the capitals it writes them in taken out. -->
+    <string name="emoji_category_recent" tools:override="true">Zuletzt verwendet</string>
+    <string name="emoji_category_emotions" tools:override="true">Smileys und Emotionen</string>
+    <string name="emoji_category_people" tools:override="true">Personen</string>
+    <string name="emoji_category_animals_nature" tools:override="true">Tiere und Natur</string>
+    <string name="emoji_category_food_drink" tools:override="true">Essen und Trinken</string>
+    <string name="emoji_category_travel_places" tools:override="true">Reisen und Orte</string>
+    <string name="emoji_category_activity" tools:override="true">Aktivitäten und Events</string>
+    <string name="emoji_category_objects" tools:override="true">Objekte</string>
+    <string name="emoji_category_symbols" tools:override="true">Symbole</string>
+    <string name="emoji_category_flags" tools:override="true">Flaggen</string>
+</resources>
