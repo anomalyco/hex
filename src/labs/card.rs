@@ -18,6 +18,7 @@ impl Feature {
             Self::LiveChapters => "Live chapters",
             Self::VocabularyBiasing => "Vocabulary help",
             Self::ScreenVocabulary => "Words on screen",
+            Self::LearnFromCorrections => "Learn from corrections",
             Self::TerminalPaste => "Terminal paste",
             Self::KeyboardModelSwitching => "Switch model with keyboard language",
             Self::AppModelSwitching => "Switch model with app",
@@ -118,6 +119,9 @@ impl Feature {
             }
             Self::ScreenVocabulary => {
                 "Names in the window you're dictating into help Hex spell them. Never saved"
+            }
+            Self::LearnFromCorrections => {
+                "When you fix a name in text Hex just pasted, Hex adds the corrected spelling to Vocabulary. It watches only that field, for up to 5 minutes, and never sends it anywhere."
             }
             Self::TerminalPaste => "Paste with Ctrl+Shift+V so terminals accept it",
             Self::KeyboardModelSwitching => {

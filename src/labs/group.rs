@@ -71,6 +71,7 @@ impl Feature {
             | Self::NotchIndicator
             | Self::VocabularyBiasing
             | Self::ScreenVocabulary
+            | Self::LearnFromCorrections
             | Self::PauseBrowser
             | Self::KeepMicrophoneOpen
             | Self::SkipPauses

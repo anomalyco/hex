@@ -2267,6 +2267,10 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
         ("lab-vocabulary-files", settings.labs.vocabulary_files),
         ("lab-screen-vocabulary", settings.labs.screen_vocabulary),
+        (
+            "lab-learn-from-corrections",
+            settings.labs.learn_from_corrections,
+        ),
         ("lab-cursor-context", settings.labs.cursor_context),
         ("lab-return-to-app", settings.labs.return_to_app),
         ("lab-speakers-only", settings.labs.speakers_only),
@@ -2304,6 +2308,10 @@ fn labs_lists_every_toggle_off_by_default() {
     open_labs(&mut rt);
     assert!(rt.find("lab-return-to-app").is_none(), "macOS only");
     assert!(rt.find("lab-screen-vocabulary").is_none(), "macOS only");
+    assert!(
+        rt.find("lab-learn-from-corrections").is_none(),
+        "macOS only"
+    );
     assert!(rt.find("lab-cursor-context").is_none(), "macOS only");
     assert!(
         rt.find("lab-second-dictation-shortcut").is_some(),

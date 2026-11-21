@@ -22,6 +22,7 @@ impl Feature {
             | Self::LiveChapters
             | Self::VocabularyBiasing
             | Self::ScreenVocabulary
+            | Self::LearnFromCorrections
             | Self::TerminalPaste
             | Self::KeyboardModelSwitching
             | Self::AppModelSwitching
@@ -174,6 +175,7 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::FasterLiveText
             | Self::VocabularyFiles => 20261120,
+            Self::LearnFromCorrections => 20261121,
         }
     }
 
@@ -281,6 +283,7 @@ impl Feature {
             | Self::PauseMenu
             | Self::PrintStart
             | Self::ScreenVocabulary
+            | Self::LearnFromCorrections
             | Self::CursorContext
             | Self::MoreDictationShortcuts
             | Self::CalendarMenu
@@ -348,6 +351,7 @@ impl Feature {
             Self::LiveChapters => "live-chapters",
             Self::VocabularyBiasing => "vocabulary-biasing",
             Self::ScreenVocabulary => "screen-vocabulary",
+            Self::LearnFromCorrections => "learn-from-corrections",
             Self::TerminalPaste => "terminal-paste",
             Self::KeyboardModelSwitching => "keyboard-model-switching",
             Self::AppModelSwitching => "app-model-switching",
@@ -437,6 +441,7 @@ impl Feature {
             Self::LiveChapters => "labs.live_chapters",
             Self::VocabularyBiasing => "labs.vocabulary_biasing",
             Self::ScreenVocabulary => "labs.screen_vocabulary",
+            Self::LearnFromCorrections => "labs.learn_from_corrections",
             Self::TerminalPaste => "paste_with_shift",
             Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
             Self::AppModelSwitching => "labs.app_model_switching",

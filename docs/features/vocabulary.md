@@ -142,6 +142,21 @@ Words on screen (Labs › Words on screen, macOS)  // vocabulary.screen
     // one_screen_read_runs_at_a_time in screen_vocabulary.rs; not observed on
     // a real Mac
 
+Learn from corrections (Labs › Learn from corrections, macOS)  // vocabulary.learn
+├── Off by default; after a dictation is pasted, Hex watches only the field it
+│   pasted into, reading it about every 100 ms for up to 5 minutes
+├── It stops on a focus change, an empty or vanished field, a newer paste, or
+│   the timeout
+├── It compares the final text with what it pasted and adds up to 5 name-like
+│   corrected words to Vocabulary: capitalized mid-sentence, all caps, mixed
+│   case, letters with digits, and short phrases of those
+├── Password fields, long text (over 400 words), rewrites (over 60% of words
+│   changed), plain lowercase words, and terms already in Vocabulary are
+│   skipped
+└── Nothing leaves the Mac
+    // checks: learn_from_corrections_is_its_own_switch_and_macos_only in
+    // labs.rs; the reader itself is not wired yet
+
 Recognition hints, folded in                // vocabulary.hints
 ├── Loading settings.json -> `recognition_hints` of the selected model and the
 │   recent models (newest first), split on commas, semicolons, and line
