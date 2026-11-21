@@ -949,7 +949,8 @@ final class KeyboardViewController: UIInputViewController {
         guard KeyboardLocalDictation.isSupported else { return }
         let settings = LanguageSettings()
         let explicit = settings.dictationLanguage
-        let automatic = settings.automaticDictationLanguage
+        // Automatic follows the keyboard's language while it switches between two or more.
+        let automatic = settings.keyboardDictationLanguage() ?? settings.automaticDictationLanguage
         let recent = settings.recentDictationLanguages
         let supported = settings.supportedDictationLanguages
         let translation = DictationTranslationSettings()

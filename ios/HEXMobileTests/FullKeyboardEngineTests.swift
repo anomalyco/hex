@@ -385,7 +385,8 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.engine.language, .polish)
         XCTAssertEqual(view.plane.spaceLabel, "Polski")
         XCTAssertNil(view.engine.autocorrect.decoder, "no Polish typing model: the dictionary engine")
-        XCTAssertEqual(picked, ["pl-PL"])
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "pl-PL")
+        XCTAssertEqual(picked, [], "Automatic already follows")
         var id = 400
         func press(_ character: String) {
             let key = view.engine.layout.key(.character(character))!
@@ -447,7 +448,8 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.spaceLabel, "Українська")
         XCTAssertNil(view.engine.partnerLanguage)
         XCTAssertNil(view.engine.autocorrect.decoder, "no Ukrainian typing model: the dictionary engine")
-        XCTAssertEqual(picked, ["uk-UA"])
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "uk-UA")
+        XCTAssertEqual(picked, [], "Automatic already follows")
         var id = 300
         func press(_ character: String) {
             let key = view.engine.layout.key(.character(character))!
@@ -479,7 +481,8 @@ final class FullKeyboardEngineTests: XCTestCase {
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back
-    /// in the language it was left in. Switch dictation too picks the dictation language.
+    /// in the language it was left in. Dictation follows on Automatic; Switch dictation too
+    /// puts a language picked by hand back on Automatic.
     func testTheSpaceBarSwitchesBetweenTheChosenLanguages() {
         let settings = LanguageSettings(defaults: defaults)
         settings.keyboardLanguages = [.english, .french, .russian]
@@ -505,16 +508,23 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.spaceLabel, "Français")
         XCTAssertEqual(settings.currentKeyboardLanguage, .french)
 
-        settings.dictationFollowsKeyboard = true
         settings.supportedDictationLanguages = ["en-US", "fr-FR", "ru-RU"]
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "fr-FR", "Automatic follows the keyboard")
+        settings.dictationLanguage = "de-DE"
         var picked: [String?] = []
         model.onLanguageSelected = { picked.append($0) }
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(picked, [], "a language picked by hand stays")
+        view.switchLanguage(by: -1)
+        settings.dictationFollowsKeyboard = true
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .russian)
         XCTAssertEqual(firstLetter(), "й")
         XCTAssertNil(view.engine.partnerLanguage, "Cyrillic has no bilingual partner")
         XCTAssertEqual(view.plane.spaceLabel, "Русский")
-        XCTAssertEqual(picked, ["ru-RU"])
+        XCTAssertEqual(picked, [nil], "Switch dictation too: back to Automatic, which follows")
+        settings.dictationLanguage = nil
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "ru-RU")
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .english, "round the list")
         view.switchLanguage(by: -1)

@@ -172,6 +172,10 @@ final class DictationController {
     var transcriptionLanguageID = "en-US"
     /// Settings › Dictation language: a BCP 47 identifier, or nil for Automatic.
     private(set) var dictationLanguage: String?
+    /// The keyboard's language Automatic followed when the model was last asked for
+    /// (`LanguageSettings.keyboardDictationLanguage`), so a switch on the space bar prepares
+    /// the new one.
+    private var followedKeyboardLanguage: String?
     /// A language change made while busy, applied once the dictation in flight is done.
     private var pendingLanguagePreparation = false
     /// Said once Automatic moved on from a language this iPhone can't dictate yet
@@ -227,6 +231,7 @@ final class DictationController {
         self.now = now
         self.languageSettings = languageSettings
         self.dictationLanguage = languageSettings.dictationLanguage
+        self.followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.allowBluetoothMic = resolvedBridge.allowBluetoothMic
@@ -342,10 +347,12 @@ final class DictationController {
         applyDictationLanguage(normalized)
     }
 
-    /// Picks up a language the keyboard switched to in the App Group.
+    /// Picks up a language the keyboard switched to in the App Group: a pick in its language
+    /// switch, or, on Automatic, the keyboard's own language switched on the space bar.
     func followDictationLanguageSetting() {
         let stored = languageSettings.dictationLanguage
-        guard stored != dictationLanguage else { return }
+        let following = languageSettings.keyboardDictationLanguage()
+        guard stored != dictationLanguage || following != followedKeyboardLanguage else { return }
         applyDictationLanguage(stored)
     }
 
@@ -357,6 +364,7 @@ final class DictationController {
 
     private func applyDictationLanguage(_ identifier: String?) {
         dictationLanguage = identifier
+        followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         languageNotice = nil
         languageOffer = nil
         switch phase {

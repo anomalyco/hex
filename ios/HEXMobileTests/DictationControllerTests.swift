@@ -1096,6 +1096,59 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(languages.recentDictationLanguages, ["de-DE", "nb-NO"], "picks in Hex are recents")
     }
 
+    /// With English and Spanish on the keyboard and dictation on Automatic, a switch on the
+    /// space bar prepares the other language before the next dictation (TestFlight build 56:
+    /// Spanish speech transcribed as English was "incomprehensible"); a language picked by
+    /// hand stays put.
+    func testAutomaticDictationFollowsTheKeyboardsLanguage() async throws {
+        let transcriber = ControlledTranscriber()
+        let languages = LanguageSettings(defaults: defaults)
+        languages.supportedDictationLanguages = ["en-US", "es-ES"]
+        languages.automaticDictationLanguage = "en-US"
+        var preparations = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: {
+                preparations += 1
+                return transcriber
+            },
+            autoPrepareOnInit: false,
+            languageSettings: languages
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(preparations, 1)
+
+        languages.keyboardLanguages = [.english, .spanish]
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 2, "now following the keyboard's English")
+        languages.currentKeyboardLanguage = .spanish
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 3, "switched to Español on the space bar")
+        XCTAssertEqual(languages.effectiveDictationLanguage, "es-ES")
+        XCTAssertNil(controller.dictationLanguage, "still Automatic")
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 3, "no change, no preparation")
+        languages.currentKeyboardLanguage = .english
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 4, "and back to English")
+
+        controller.setDictationLanguage("es-MX")
+        try await settle()
+        XCTAssertEqual(preparations, 5)
+        languages.currentKeyboardLanguage = .spanish
+        controller.followDictationLanguageSetting()
+        try await settle()
+        XCTAssertEqual(preparations, 5, "a language picked by hand doesn't follow")
+        XCTAssertEqual(languages.effectiveDictationLanguage, "es-MX")
+    }
+
     func testErrorsShowShortMessagesNeverCodesOrTypeNames() {
         // 560557684 is '!int', AVAudioSession's cannotInterruptOthers.
         let cannotInterrupt = NSError(domain: NSOSStatusErrorDomain, code: 560_557_684)

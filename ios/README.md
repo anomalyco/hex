@@ -493,7 +493,9 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone
   dictates Norwegian with no setup; Nynorsk tries Bokmål, the only Norwegian
-  Apple has. The menu also lists every locale `SpeechTranscriber` or
+  Apple has. While the keyboard switches between two or more languages, Automatic follows
+  the one it shows (Keyboard languages, below). The menu also lists every locale
+  `SpeechTranscriber` or
   `DictationTranscriber` supports, by name. `SpeechTranscriber` is used wherever
   it has the language (as before); `DictationTranscriber` (preset
   `longDictation`) covers the rest (`SpeechLanguagePicker`,
@@ -591,12 +593,23 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   space bar was held still for 0.4 s (the hold that starts Apple's trackpad, below), a slide
   before that is a swipe, and one shorter than 24 pt types a space
   (`FullKeyboardEngine.trackpadHoldDelay`, `languageSwipeDistance`).
-  The globe key is unchanged. The keyboard comes back in the language it was left in
-  (`settings.keyboardLanguages.current`; without Full Access an iPhone may keep it only
-  while the keyboard runs). **Switch dictation too** (off by default, shown with two or more
-  on iOS 26+) sets the dictation language to the keyboard's on each switch, in the
-  iPhone's region where Apple Speech has it (`KeyboardLanguage.dictationLanguage`; none for
-  Srpski). **Bilingual autocorrect:** the first other chosen language with Latin letters and
+  The globe key is unchanged. The keyboard comes back in the language it was left in, in
+  every app and field, as Apple's keyboards do (black box: a switch in Messages held in
+  Safari and back; `settings.keyboardLanguages.current`; without Full Access an iPhone may
+  keep it only while the keyboard runs). A field gives a third-party keyboard nothing to go
+  on: `documentInputMode` is nil in Messages and Hex's own en-US in a field that asks for
+  English. **Dictation follows the keyboard:** with two or more languages and Dictation
+  language on Automatic, dictation is in the language the space bar shows, in the iPhone's
+  region where Apple Speech has it (`LanguageSettings.keyboardDictationLanguage`,
+  `KeyboardLanguage.dictationLanguage`; none for Srpski), in the keyboard and in Hex,
+  which prepares the new language between dictations (TestFlight build 56: with the
+  keyboard on Español, dictation stayed English and Spanish came out "incomprehensible").
+  It doesn't where the iPhone's own language has no layout (Hebrew), as dictating is how
+  that language gets written. **Switch dictation too** (off by default, shown with two or
+  more on iOS 26+) follows there too, and puts a dictation language picked by hand back on
+  Automatic at each switch (it used to write the keyboard's language as a pick, which
+  stayed after Spanish was unticked or the switch turned off). **Bilingual autocorrect:**
+  the first other chosen language with Latin letters and
   an iOS dictionary (`KeyboardLanguageList.partner`: English beside French, French beside
   English; none for Русский, Українська, Srpski, or two French layouts) is checked on the same keys,
   with its Spatial model where it has one, as Apple's "Français et English" keyboard does: a
@@ -907,7 +920,8 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   for `DictationTranscriber`; Hex sets them on both modules, and Parakeet's
   batch path gets no hint.
 - **Dictation languages:** `SpeechLanguagePickerTests` cover the picking rule
-  and `DictationControllerTests` a language change during a dictation. The
+  and `DictationControllerTests` a language change during a dictation and Automatic
+  following the keyboard's language. The
   simulator can't transcribe: `SpeechTranscriber.isAvailable` is false there
   and `DictationTranscriber` fails with "Model not available", so
   `AppleSpeechClipTests` (skipped unless `HEX_SPEECH_CLIPS` names a folder of
@@ -935,8 +949,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   ever moves again, the reservation limit on a full iPhone, and Parakeet's
   memory on 4 GB iPhones are unverified on hardware.
 - **Keyboard languages:** `KeyboardLayoutTests` cover the list (resolution, switching,
-  space-bar label, pairing, migration, the dictation pick), `FullKeyboardEngineTests` the
-  swipe against the hold-then-slide trackpad and switching in a `FullKeyboardView`, and
+  space-bar label, pairing, migration, the dictation pick, dictation following the
+  keyboard), `FullKeyboardEngineTests` the swipe against the hold-then-slide trackpad and
+  switching in a `FullKeyboardView`, and
   `AutocorrectEngineTests` bilingual autocorrect on stub dictionaries and iOS's own
   (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
