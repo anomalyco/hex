@@ -770,6 +770,14 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     already-accepted transcription (deliverable for 30s), while a stale
     winding-down inference can never overwrite a newer capture or delete its
     audio file.
+  - A keyboard's dictation never leaves the keyboard stuck. Hex reads the
+    keyboard's Done and Cancel and heartbeats the job's snapshot until its
+    text is in, in a warm session and in One shot alike (One shot used to
+    ignore them, so a handed-off recording ran to its 60 s limit), and asks
+    iOS for background time to finish the text. The keyboard takes a
+    recording or transcription whose heartbeat is more than 6 s old as over
+    (`KeyboardSnapshot.isOrphanedJob`): a Hex that ended, crashed or was
+    suspended mid-job used to hold every keyboard in recording for good.
   - Phone/FaceTime/Siri audio interruptions finalize captures `>= 300 ms` so
     spoken words are not lost, cancel shorter taps cleanly out of `Listening`,
     and resume warm keepalive when iOS signals `.shouldResume`. Hex's own

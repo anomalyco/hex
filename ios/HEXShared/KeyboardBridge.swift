@@ -253,6 +253,35 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
         guard state == .recording, let recordingStartedAt else { return 0 }
         return max(0, now - recordingStartedAt)
     }
+
+    /// Hex heartbeats a keyboard's recording or transcription at least every 0.6 s
+    /// (`DictationController`'s keyboard loop). One whose heartbeat is older than this has no
+    /// one working on it: Hex ended, crashed or was suspended mid-job.
+    static let orphanedJobTimeout: TimeInterval = 6
+
+    /// A recording or transcription Hex stopped heartbeating for. Nothing will finish it, and
+    /// a new keyboard process reads it the same way: the heartbeat is wall-clock time.
+    func isOrphanedJob(at now: TimeInterval) -> Bool {
+        guard state == .recording || state == .transcribing else { return false }
+        return heartbeat <= 0 || now - heartbeat > Self.orphanedJobTimeout
+    }
+
+    /// The snapshot as the keyboard acts on it: an orphaned job reads as offline, so it can't
+    /// hold the keyboard in recording or transcribing. A result it carries still arrives.
+    func droppingOrphanedJob(at now: TimeInterval) -> KeyboardSnapshot {
+        guard isOrphanedJob(at: now) else { return self }
+        return KeyboardSnapshot(
+            state: .offline,
+            heartbeat: heartbeat,
+            expiresAt: expiresAt,
+            resultID: resultID,
+            resultExpiresAt: resultExpiresAt,
+            transcript: transcript,
+            message: message,
+            heard: heard,
+            stages: stages
+        )
+    }
 }
 
 /// What a keyboard saw of Full Access, written from inside the keyboard: iOS tells only the

@@ -31,6 +31,80 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertFalse(closedWithResult.hasDeliverableResult(at: now + 26))
     }
 
+    /// TestFlight build 56: dictate in the keyboard, dismiss it, dictate again (Hex opens and
+    /// records), swipe back. Hex ended mid-job and its last snapshot still said recording, so
+    /// every keyboard after showed a recording nothing would finish: Done and Cancel went to
+    /// no one, and no text came until Hex was opened again.
+    func testAJobHexStoppedHeartbeatingForNoLongerHoldsTheKeyboard() {
+        let t0 = 10_000.0
+        let recording = KeyboardSnapshot(
+            state: .recording,
+            heartbeat: t0,
+            expiresAt: t0 + 900,
+            recordingStartedAt: t0 - 3,
+            audioLevel: 0.4,
+            jobID: "handoff"
+        )
+        let model = KeyboardViewModel()
+        func show(_ snapshot: KeyboardSnapshot, at now: TimeInterval, on model: KeyboardViewModel) {
+            model.applyBridgeState(
+                hasFullAccess: true,
+                snapshot: snapshot,
+                isModelInstalled: true,
+                style: .polished,
+                now: now,
+                animated: false
+            )
+        }
+
+        show(recording, at: t0, on: model)
+        XCTAssertEqual(model.stagePhase, .recording)
+        show(recording, at: t0 + 5, on: model)
+        XCTAssertEqual(model.stagePhase, .recording, "a late heartbeat isn't a Hex that ended")
+
+        // Done, sent to a Hex that will never read it.
+        model.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .stop, jobID: "handoff", sentAt: t0 + 6),
+            now: t0 + 6,
+            animated: false
+        )
+        XCTAssertEqual(model.stagePhase, .transcribing)
+        show(recording, at: t0 + 7, on: model)
+        XCTAssertEqual(model.stagePhase, .idle, "the job is over: the Hex key dictates again")
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertNil(model.currentSnapshot.jobID)
+        XCTAssertFalse(model.isWarmAvailable)
+
+        // A keyboard opened later, in this process or a new one, reads the same snapshot the same way.
+        let later = KeyboardViewModel()
+        show(recording, at: t0 + 600, on: later)
+        XCTAssertEqual(later.stagePhase, .idle)
+        let transcribing = KeyboardSnapshot(state: .transcribing, heartbeat: t0, expiresAt: 0, jobID: "handoff")
+        show(transcribing, at: t0 + 2, on: later)
+        XCTAssertEqual(later.stagePhase, .transcribing)
+        show(transcribing, at: t0 + 7, on: later)
+        XCTAssertEqual(later.stagePhase, .idle)
+        XCTAssertTrue(
+            KeyboardSnapshot(state: .recording, heartbeat: 0, expiresAt: 0, jobID: "handoff").isOrphanedJob(at: t0),
+            "never heartbeated"
+        )
+
+        // A result the snapshot carries still arrives, and a Hex heartbeating again is live again.
+        let finished = KeyboardSnapshot(
+            state: .transcribing,
+            heartbeat: t0,
+            expiresAt: 0,
+            jobID: "handoff",
+            resultID: "result",
+            resultExpiresAt: t0 + 30,
+            transcript: "Ship it."
+        )
+        XCTAssertTrue(finished.droppingOrphanedJob(at: t0 + 7).hasDeliverableResult(at: t0 + 7))
+        let back = KeyboardSnapshot(state: .recording, heartbeat: t0 + 600, expiresAt: t0 + 900, jobID: "next")
+        show(back, at: t0 + 600, on: later)
+        XCTAssertEqual(later.stagePhase, .recording)
+    }
+
     func testKeyboardMessagesRoundTripThroughJSON() throws {
         let command = KeyboardCommand(
             id: "command",

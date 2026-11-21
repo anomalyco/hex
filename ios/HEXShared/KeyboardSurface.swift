@@ -201,6 +201,10 @@ final class KeyboardViewModel: ObservableObject {
         clearPending: Bool = false,
         animated: Bool
     ) {
+        // A job Hex stopped heartbeating for is over (Hex ended, crashed or was suspended
+        // mid-dictation): without this its last snapshot held every keyboard in recording or
+        // transcribing for good, with Done and Cancel sent to no one.
+        let newSnapshot = newSnapshot.droppingOrphanedJob(at: now)
         currentTimestamp = now
         currentSnapshot = newSnapshot
         liveLoudnessDB = newSnapshot.state == .recording ? newSnapshot.effectiveLoudnessDB : -62.0
