@@ -1116,9 +1116,10 @@ hex annotate inspect|zoom|frames|skill   // capture.agents; labs.annotate_agent_
 ├── frames [<capture>=latest] --from <M:SS|secs> --to <M:SS|secs> [--fps 4] ->
 │   `handoff::extract_frames_range`'s PNGs under `<bundle>/zoom/range-*/`,
 │   each path printed. `--to` is clamped to the bundle's `durationMs`, and a
-│   range over 240 frames is refused `invalid` (the count is
-│   `(to − from) * fps / 1000 + 1`); without a video, or over an empty range,
-│   it prints the keyframes in `frames/` that fall in the range instead
+│   range over 240 frames is refused `invalid`, counted as the larger of
+│   `(to − from) * fps / 1000 + 1` and the engine decoder's inclusive
+│   `(to − from) / max(1000 / fps, 1) + 1`; without a video, or over an empty
+│   range, it prints the keyframes in `frames/` that fall in the range instead
 ├── skill -> `include_str!` of `skills/hex-annotate/SKILL.md`, the guide an
 │   agent installs with `npx skills add anomalyco/hex --skill hex-annotate`
 ├── Every command resolves `<capture>` as `hex capture list` does (bundle name,

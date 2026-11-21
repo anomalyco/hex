@@ -157,8 +157,8 @@ pub(crate) fn frames(
 
 /// The range `frames` extracts: `to_ms` clamped to the recording's length, so
 /// a range past the end never asks the decoder for frames that never existed,
-/// and at most [`MAX_FRAMES`] PNGs, so one call can't write a whole recording
-/// frame by frame.
+/// and at most [`MAX_FRAMES`] PNGs, counted the way whichever decoder runs
+/// counts them, so one call can't write a whole recording frame by frame.
 fn checked_range(
     from_ms: u64,
     to_ms: u64,
@@ -172,14 +172,26 @@ fn checked_range(
             "the range ends before it starts",
         ));
     }
-    let frames = to_ms.saturating_sub(from_ms).saturating_mul(u64::from(fps)) / 1_000 + 1;
-    if frames > MAX_FRAMES {
+    if frame_count(from_ms, to_ms, fps) > MAX_FRAMES {
         return Err(ControlError::new(
             "invalid",
             format!("a range writes at most {MAX_FRAMES} frames; narrow it or use a lower --fps"),
         ));
     }
     Ok((from_ms, to_ms))
+}
+
+/// How many PNGs a range asks for, as the larger of the two counts its
+/// decoders produce: `ffmpeg` samples at the rate, and the engine's own
+/// decoder steps inclusively by `max(1000 / fps, 1)` ms, which asks for more
+/// frames when `fps` doesn't divide 1000 (240 fps steps 4 ms, so 999 ms is
+/// 250 frames, not 240). The cap must hold for whichever one runs.
+fn frame_count(from_ms: u64, to_ms: u64, fps: u32) -> u64 {
+    let span = to_ms.saturating_sub(from_ms);
+    let at_rate = span.saturating_mul(u64::from(fps)) / 1_000 + 1;
+    let step_ms = (1_000 / u64::from(fps.max(1))).max(1);
+    let at_decoder_step = span / step_ms + 1;
+    at_rate.max(at_decoder_step)
 }
 
 /// A `--from` or `--to` time: `M:SS`, seconds, or `SS.mmm`.
@@ -366,6 +378,21 @@ mod tests {
             "{}",
             error.message
         );
+        // The engine's own decoder steps by max(1000 / fps, 1) ms, so at 240
+        // fps it asks for 250 frames over 999 ms even though the rate says
+        // 240; the cap counts the larger formula and refuses.
+        assert_eq!(frame_count(0, 999, 240), 250);
+        let error = checked_range(0, 999, 240, 60_000).unwrap_err();
+        assert_eq!(error.code, "invalid");
+        assert!(
+            error.message.contains("at most 240 frames"),
+            "{}",
+            error.message
+        );
+        // Just within the cap under both formulas: 959 ms is 240 frames
+        // stepping 4 ms and 231 at the rate.
+        assert_eq!(frame_count(0, 959, 240), 240);
+        assert_eq!(checked_range(0, 959, 240, 60_000).unwrap(), (0, 959));
         // A range that starts past the end is refused, not clamped to nothing.
         let error = checked_range(8_000, 9_000, 4, 4_000).unwrap_err();
         assert_eq!(error.message, "the range ends before it starts");
