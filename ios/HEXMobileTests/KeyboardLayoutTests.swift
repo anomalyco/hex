@@ -28,17 +28,19 @@ final class KeyboardLayoutTests: XCTestCase {
         return layouts
     }
 
-    func testPortraitIs253PointsAndLandscapeIs172Points() {
+    func testPortraitIs253PointsAndLandscapeIs187Points() {
         for width in portraitWidths {
             XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
         }
         XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
-        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 172)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 187)
     }
 
     /// The strip is the 27 pt of Apple's predictive bar below the band iOS draws over a
-    /// third-party keyboard on every iPhone, either way up; row 1 starts 35 pt down, where
-    /// Apple's keycaps start relative to this view (35-35.5 pt, iOS 27.2). On the Duo it is
+    /// third-party keyboard on every iPhone; row 1 starts 35 pt down, where Apple's keycaps start
+    /// relative to this view (35-35.5 pt, iOS 27.2). Turned there is no band: 42 pt, row 1 at
+    /// 50 pt, as Apple's. On the Duo folded and
+    /// upright it is 32 pt and the same gap (row 1 at 40 pt, as Apple's); elsewhere on the Duo,
     /// Apple's whole 44 pt bar right on the keys.
     func testStripIsPinnedInEveryOrientationAndPosture() {
         let postures: [KeyboardPosture] = [.phone, .cover, .unfoldedWide, .unfoldedTall]
@@ -46,13 +48,17 @@ final class KeyboardLayoutTests: XCTestCase {
             for orientation in [KeyboardOrientation.portrait, .landscape] {
                 let m = KeyboardMetrics.for(orientation, posture: posture)
                 XCTAssertEqual(m.stripTop, 0, "\(posture) \(orientation)")
-                XCTAssertEqual(m.stripHeight, posture == .phone ? 27 : 44, "\(posture) \(orientation)")
-                XCTAssertEqual(m.stripArea, posture == .phone ? 35 : 44, "\(posture) \(orientation)")
-                XCTAssertEqual(m.stripPillHeight, posture == .phone ? 26 : 36, "\(posture) \(orientation)")
+                let cover = posture == .cover && orientation == .portrait
+                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (27, 35, 26) : (42, 50, 36)
+                let expected = posture == .phone ? phone : cover ? (32, 40, 31) : (44, 44, 36)
+                XCTAssertEqual(m.stripHeight, expected.0, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripArea, expected.1, "\(posture) \(orientation)")
+                XCTAssertEqual(m.stripPillHeight, expected.2, "\(posture) \(orientation)")
             }
         }
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
-            XCTAssertEqual(layout.stripFrame.height, layout.posture == .phone ? 27 : 44, describe(layout))
+            XCTAssertEqual(layout.stripFrame.height, layout.metrics.stripHeight, describe(layout))
+            XCTAssertTrue([27, 32, 42, 44].contains(layout.stripFrame.height), describe(layout))
             let rowOneTop = layout.keys.filter { $0.row == 0 }.map(\.frame.minY).min()
             XCTAssertEqual(rowOneTop ?? -1, layout.metrics.stripArea, accuracy: 0.001, describe(layout))
         }
@@ -412,7 +418,7 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testLandscapeKeepsInsetsAndHeight() {
         let layout = KeyboardLayout(width: 932, orientation: .landscape, horizontalInset: 60)
-        XCTAssertEqual(layout.totalHeight, 172)
+        XCTAssertEqual(layout.totalHeight, 187)
         XCTAssertEqual(layout.key(.character("q"))!.frame.minX, 64, accuracy: 0.001)
         XCTAssertEqual(layout.key(.character("q"))!.hitFrame.minX, 0)
     }

@@ -131,13 +131,17 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// On the iPhone Duo iOS sets the keyboard in a platter with its own band above, and the
     /// strip is Apple's whole 44 pt bar, right on the keys.
     static let insetStripHeight: CGFloat = 44
+    /// The Duo folded and upright: iOS's band there is 8.7 pt and Apple's keycaps start 48.7 pt
+    /// below the panel's edge (iOS 27.2), so the strip is 32 pt with the iPhone's 8 pt gap.
+    static let coverStripHeight: CGFloat = 32
 
     /// How far the strip's pills (an autocorrection, a pressed suggestion, the Hex key, the
     /// recording bar) sit in from its top and bottom: Apple's pill fills its bar but the
     /// edge band iOS draws, so in the 27 pt strip half a point, in the Duo's 44 pt bar 4 pt.
-    var stripInset: CGFloat { stripHeight >= Self.insetStripHeight ? 4 : 0.5 }
-    /// The pills' height (26 pt in the phone strip, 36 pt in the Duo's bar).
-    var stripPillHeight: CGFloat { stripHeight - 2 * stripInset }
+    var stripInset: CGFloat { (stripHeight - stripPillHeight) / 2 }
+    /// The pills' height: the strip less half a point above and below, at most 36 pt (26 pt in
+    /// the phone's portrait strip, 36 pt in landscape and in the Duo's 44 pt bar).
+    var stripPillHeight: CGFloat { min(stripHeight - 1, 36) }
 
     /// iOS 26 key geometry under the pinned strip: 35 pt + 218 pt of keys
     /// (4 × 45 pt + 3 × 11 pt + 5 pt) = 253 pt.
@@ -147,11 +151,15 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         keysTop: 0, keysBottom: 5, cornerRadius: 8.5
     )
 
-    /// iOS 26 landscape key geometry under the same strip: 35 pt + 137 pt of keys
-    /// (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 172 pt.
+    /// Turned, iOS draws no band above the keyboard (iPhone 17 Pro Max, iOS 27.2): Apple's keycaps
+    /// start 50 pt below the panel's edge, so the strip is 42 pt and the same gap.
+    static let landscapeStripHeight: CGFloat = 42
+
+    /// iOS 26 landscape key geometry under that strip: 50 pt + 137 pt of keys
+    /// (4 × 27.5 pt + 3 × 8 pt + 3 pt) = 187 pt.
     static let landscape = KeyboardMetrics(
         side: 4, gap: 6, rowGap: 8, keyHeight: 27.5,
-        stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
+        stripTop: 0, stripHeight: landscapeStripHeight, stripBottom: stripGap,
         keysTop: 0, keysBottom: 3, cornerRadius: 7.5
     )
 
@@ -198,9 +206,14 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         let side = orientation == .portrait
             ? max(1, (posture.appleKeyInset ?? base.side) - windowInset)
             : base.side
+        // Measured folded and upright only; unfolded, and folded in landscape, the strip is still
+        // Apple's whole bar right on the keys.
+        let coverPortrait = posture == .cover && orientation == .portrait
         return KeyboardMetrics(
             side: side, gap: base.gap, rowGap: rowGap, keyHeight: keyHeight,
-            stripTop: base.stripTop, stripHeight: insetStripHeight, stripBottom: 0,
+            stripTop: base.stripTop,
+            stripHeight: coverPortrait ? coverStripHeight : insetStripHeight,
+            stripBottom: coverPortrait ? stripGap : 0,
             keysTop: base.keysTop, keysBottom: base.keysBottom, cornerRadius: base.cornerRadius
         )
     }
