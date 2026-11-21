@@ -136,6 +136,10 @@ final class HexKeyControl: UIControl {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let cap = keycapFrame == .zero ? bounds : keycapFrame
+        // In the strip the mark sits on the suggestions' line, as tall as fits evenly around it
+        // there (19 pt, or less where the line leaves less room), and so does its pressed chip.
+        let markMidY = inStrip ? (markCenterY ?? cap.midY) : cap.midY
+        let room = inStrip ? 2 * min(markMidY - cap.minY, cap.maxY - markMidY) : cap.height
         if !inStrip {
             context.fillKeycap(
                 cap,
@@ -144,12 +148,9 @@ final class HexKeyControl: UIControl {
             )
         } else if isHighlighted {
             palette.keyPressedFill.setFill()
-            UIBezierPath(roundedRect: cap, cornerRadius: cap.height / 2).fill()
+            let chip = CGRect(x: cap.minX, y: markMidY - room / 2, width: cap.width, height: room)
+            UIBezierPath(roundedRect: chip, cornerRadius: room / 2).fill()
         }
-        // In the strip the mark sits on the suggestions' line, as tall as fits around it there
-        // (19 pt, or less where the line leaves less room).
-        let markMidY = inStrip ? (markCenterY ?? cap.midY) : cap.midY
-        let room = inStrip ? 2 * min(markMidY - cap.minY, cap.maxY - markMidY) : cap.height
         let markSize: CGFloat = inStrip ? min(19, room) : min(19, cap.height * 0.56)
         let markRect = CGRect(x: cap.midX - markSize / 2, y: markMidY - markSize / 2, width: markSize, height: markSize)
         if isWarm {

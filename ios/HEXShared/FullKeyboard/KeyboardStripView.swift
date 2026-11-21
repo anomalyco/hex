@@ -31,6 +31,15 @@ final class KeyboardStripView: UIView {
             setNeedsDisplay()
         }
     }
+    /// A suggestion's chip and the dividers' height (`KeyboardMetrics.stripChipHeight`).
+    var chipHeight: CGFloat? {
+        didSet {
+            guard chipHeight != oldValue else { return }
+            for button in slotButtons { button.chipHeight = chipHeight }
+            setNeedsLayout()
+            setNeedsDisplay()
+        }
+    }
     /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
     var pillInset: CGFloat = 0.5 {
         didSet {
@@ -329,7 +338,7 @@ final class KeyboardStripView: UIView {
         super.layoutSubviews()
         let midY = contentCenterY
         statusLabel.frame = CGRect(x: 16, y: max(0, midY - 12), width: max(0, bounds.width - 32), height: 24)
-        let chipH = min(34, max(24, bounds.height - 2 * pillInset))
+        let chipH = min(34, max(18, min(bounds.height - 2 * pillInset, chipHeight ?? .infinity)))
         let chipSize = undoChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
         undoChip.frame = CGRect(
             x: (bounds.width - chipSize.width) / 2,
@@ -389,17 +398,14 @@ final class KeyboardStripView: UIView {
 
     override func draw(_ rect: CGRect) {
         guard !showsUndo, !showsClipboard, !showsFullAccessHint, notice == nil, statusLabel.isHidden, bounds.width > 60 else { return }
-        // Hide the divider adjacent to a highlighted primary pill, matching Apple's strip, and the
-        // one beside a revert's.
-        let primaryHighlighted = currentSuggestions.count > 1 && currentSuggestions[1].willAutoReplace
-        guard !primaryHighlighted else { return }
+        // A chip sits inside its slot, so the dividers stay beside it, but for the one beside a
+        // revert, which Apple's bar hides.
         let reverting = currentSuggestions.first?.kind == .revert
 
-        // Apple's dividers: 1 pt wide, ending on the slot boundary, 24 pt tall on the text's centre
-        // (in the phone's portrait strip their top 4 pt fall in iOS's band, so they start at 0).
-        let fullH: CGFloat = min(24, bounds.height - 2)
-        let y = max(0, contentCenterY - fullH / 2)
-        let lineH = contentCenterY + fullH / 2 - y
+        // Apple's dividers: 1 pt wide, ending on the slot boundary, centred on the words' line, and
+        // no taller than a chip (24 pt where there's room).
+        let lineH: CGFloat = min(24, bounds.height - 2, chipHeight ?? .infinity, 2 * contentCenterY)
+        let y = contentCenterY - lineH / 2
         palette.stripDivider.setFill()
         // Only between two filled slots: nothing to show, no dividers (as Apple's bar in a
         // field it offers nothing for).
@@ -433,6 +439,7 @@ final class KeyboardStripView: UIView {
         var inSystemPlatter = true { didSet { if inSystemPlatter != oldValue { setNeedsDisplay() } } }
         var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
         var textCenterY: CGFloat? { didSet { if textCenterY != oldValue { setNeedsDisplay() } } }
+        var chipHeight: CGFloat? { didSet { if chipHeight != oldValue { setNeedsDisplay() } } }
         /// Room the Logging mark takes at the slot's outer end: the word centres in the rest.
         var leadingRoom: CGFloat = 0 { didSet { if leadingRoom != oldValue { setNeedsDisplay() } } }
         var trailingRoom: CGFloat = 0 { didSet { if trailingRoom != oldValue { setNeedsDisplay() } } }
@@ -573,6 +580,7 @@ final class KeyboardStripView: UIView {
             return CGFloat(x * x * (3 - 2 * x))
         }
 
+        static let chipPadding: CGFloat = 12
         static let revertArrowSize: CGFloat = 13
         static let revertArrowGap: CGFloat = 5
 
@@ -587,17 +595,27 @@ final class KeyboardStripView: UIView {
         }
 
         override func draw(_ rect: CGRect) {
-            let midY = bounds.height * 0.5
             let pilled = suggestion != nil && (isHighlighted || suggestion?.willAutoReplace == true || suggestion?.kind == .revert)
-            if pilled {
-                // Like Apple's, the highlight is a capsule as wide as its slot.
-                let pillH = max(22, bounds.height - 2 * pillInset)
-                let pill = CGRect(x: 0, y: max(0, midY - pillH / 2), width: bounds.width, height: pillH)
-                (isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill).setFill()
-                UIBezierPath(roundedRect: pill, cornerRadius: pillH / 2).fill()
-            }
             let ink = pilled ? palette.stripPillText : palette.stripText
             let incoming = suggestion.map { layout($0, ink: ink) }
+            if pilled, let incoming {
+                // A chip around the word (and a revert's arrow), even above and below the words'
+                // line: Apple's slot-wide 38 pt pill reaches into the band iOS draws over a
+                // third-party keyboard, and cut short there it read as squashed.
+                let textW = incoming.truncatedRect?.width ?? (incoming.text as NSString).size(withAttributes: incoming.attributes).width
+                let arrowRoom = suggestion?.kind == .revert ? Self.revertArrowSize + Self.revertArrowGap : 0
+                let chipH = chipHeight ?? max(22, bounds.height - 2 * pillInset)
+                let chipW = min(bounds.width, textW + arrowRoom + 2 * Self.chipPadding)
+                let midY = textCenterY ?? bounds.height * 0.5
+                let chip = CGRect(
+                    x: max(0, min(bounds.width - chipW, incoming.origin.x - (chipW - textW - arrowRoom) / 2)),
+                    y: midY - chipH / 2,
+                    width: chipW,
+                    height: chipH
+                )
+                (isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill).setFill()
+                UIBezierPath(roundedRect: chip, cornerRadius: chipH / 2).fill()
+            }
             if let incoming, suggestion?.kind == .revert { drawRevertArrow(after: incoming, ink: ink) }
             guard var leaving = outgoing.map({ layout($0, ink: ink) }) else {
                 if let incoming { draw(incoming) { _ in 1 } }
