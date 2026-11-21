@@ -90,14 +90,18 @@ Agent or terminal                                  // control.cli; every OS
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
 │   ├── No meetings cancel: Hex cannot discard a recording
-│   └── delete -> the pane's Delete for the exact `meetings list --json` id:
-│       Markdown, tracked notes file, then recording folder to the Trash,
-│       never `rm`; works with Meetings off, asks no confirmation
-│       ├── unknown id -> not-found; recording | transcribing | notes |
-│       │   final.pending -> meeting-recording | -transcribing | -notes |
+│   └── delete <id|unique prefix> (Labs › Delete meetings from the command line)
+│       ├── Meetings off, or the lab off -> feature-off (names
+│       │   `hex labs on meetings-cli-delete`); nothing is read or moved
+│       ├── The running Hex resolves the id through the read-only query library,
+│       │   then calls the pane's own delete (`meeting/delete`)
+│       ├── Markdown, tracked notes file, then recording folder to the Trash,
+│       │   never `rm`; asks no confirmation
+│       ├── unknown or ambiguous id -> not-found; recording | transcribing |
+│       │   notes | final.pending -> meeting-recording | -transcribing | -notes |
 │       │   -final-pending, exit 1, nothing moved
-│       └── done -> "Deleted “<title>”; moved to the Trash", the open Meetings
-│           window drops the row at its next 1 s scan
+│       └── done -> "Deleted meeting “<title>” (<id>); moved to the Trash", the
+│           open Meetings window drops the row at its next 1 s scan
 ├── hex settings list | get <key|prefix> | set <key> <value>
 │   ├── The window's save, then ReloadSettings -> live, no restart
 │   ├── Unknown key, bad value, read-only key -> refused, nothing written
@@ -174,11 +178,13 @@ dictation, paste-last, and Linux's typed-text go to the listener's own queue
 reload as the window's do, and `settings set` refuses a key whose capability
 the OS lacks
 (`settings list` marks it "not on this OS"). `meetings record|stop|copy-last`
-go to the meeting recorder (`meeting/runtime`) as the tray's items do, and
-`meetings delete` calls the pane's own delete (`meeting/delete`);
-`window story` answers `unsupported`; Windows sends every `annotate`
-command to the running Hex. `hex history`, `hex meetings list|show|search`, and
-`hex mcp` read files on every OS.
+go to the meeting recorder (`meeting/runtime`) as the tray's items do;
+`meetings delete` resolves the id through the read-only query library and calls
+the pane's own delete (`meeting/delete`) in the running Hex, where the
+recording lock and notes writer live, on every OS; `window story` answers
+`unsupported`; Windows sends every `annotate` command to the running Hex.
+`hex history`, `hex meetings list|show|search`, and `hex mcp` read files on
+every OS.
 
 `dictation start --print` is macOS's: the listener
 stores the command's reply with the recording (`recognition::Hotkeys::print_capture`)
@@ -238,7 +244,12 @@ and a suspension; `control::tests::cancel_parses_and_takes_no_flags`
 covers `cancel` and its flags; local API's
 `control_requests_are_authenticated_versioned_and_typed` covers authentication,
 bounds, and error codes; `tests::control_commands_parse_beside_the_read_commands`
-covers parsing next to `history` and `meetings`; `control::host::tests` cover
+covers parsing next to `history` and `meetings`; `control::tests`
+`meeting_delete_resolves_ids_and_keeps_the_refusal_codes` covers exact ids, a
+unique prefix resolving to the full id, ambiguous and unknown ids, a refusal
+code, and a failed trash, and
+`control::host::tests::meeting_delete_refuses_off_and_unknown_ids`
+covers the lab-off refusal; `control::host::tests` cover
 the quit refusal, printing stops (and Linux's and Windows' `unsupported` for a
 printing start), and runtime `unsupported` replies;
 `quit_and_status_use_the_owner_even_without_dictating_log_events` covers SDK
@@ -288,8 +299,9 @@ kept microphone loss, and a paused listener is covered only by
 recording, so expect to verify it by hand (a locked recording finished by the
 shortcut, by `stop`, and by `stop --print`) before trusting it. A CLI volume
 change does not preview a tone as the window does. Onboarding
-permission prompts, calendar connection, and meeting deletion or renaming have
-no command. `hex restart`'s relaunch has no end-to-end test on any OS: the
+permission prompts, calendar connection, and meeting renaming have no command;
+`hex meetings delete` has run only through the fixtures, never against a live
+app and a real Trash. `hex restart`'s relaunch has no end-to-end test on any OS: the
 process wait it uses is unit-tested on Linux and Windows
 (`local_api::discovery::exit_watch_tests::waiting_for_a_process_reports_whether_it_exited`;
 macOS never takes the watch), and the handoff from the old process's exit to

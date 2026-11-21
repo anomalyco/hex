@@ -170,8 +170,8 @@ pub enum ControlCli {
     /// it in the running Hex (`hex history clear --yes`).
     #[command(args_conflicts_with_subcommands = true)]
     History(crate::control::transcript_cli::HistoryArgs),
-    /// Read and search recorded meetings without starting the app; record
-    /// and stop them in the running Hex.
+    /// Read and search recorded meetings without starting the app; record,
+    /// stop, and (Labs) delete them in the running Hex.
     Meetings {
         #[command(subcommand)]
         command: crate::control::transcript_cli::MeetingsCommand,

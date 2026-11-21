@@ -527,6 +527,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
         }
+        rows.push(row(Feature::MeetingsCliDelete, None));
     }
     rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
     // macOS reads the focused window through Accessibility as a capture
@@ -914,6 +915,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ModesEditor => "lab-modes-editor",
         Feature::DropTranscribe => "lab-drop-transcribe",
         Feature::VocabularyFiles => "lab-vocabulary-files",
+        Feature::MeetingsCliDelete => "lab-meetings-cli-delete",
     }
 }
 

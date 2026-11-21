@@ -24,6 +24,8 @@ code, and can be captured like any other (`docs/windows.md`).
 
 The read-only `hex history` and `hex meetings list|show|chapters|search` commands, and
 `hex mcp`, read files rather than the running Hex; see `docs/transcript-cli.md`.
+`hex meetings delete` is not a read: the running Hex trashes the meeting, behind
+Labs › Delete meetings from the command line.
 
 ## Commands
 
@@ -44,7 +46,7 @@ hex
 │   ├── record [--title T]         as the menu bar's Record Meeting; needs meetings.enabled
 │   ├── stop                       Stop & Transcribe
 │   ├── copy-last                  copy the last meeting transcript to the clipboard
-│   ├── delete <id>                move a finished meeting's Markdown and recording to the Trash
+│   ├── delete <id|prefix>         move a finished meeting's Markdown and recording to the Trash (Labs)
 │   └── list | show | search       read-only (docs/transcript-cli.md)
 ├── settings
 │   ├── list                       every setting: key, value, kind, choices, writable, about
@@ -326,17 +328,20 @@ state, the recording capsule, and Stop & Transcribe all apply to it.
 `meetings record` replies once the recording has started (or after 8 s);
 `meetings stop` replies once transcription has begun.
 
-`meetings delete <id>` is the Meetings pane's Delete, carried out by the
-running Hex on every OS: it moves the meeting's exported Markdown, any
+`meetings delete <id>` needs the running Hex, Meetings on, and Labs › Delete
+meetings from the command line (`hex labs on meetings-cli-delete`). It is the
+Meetings pane's Delete, carried out by the running Hex on every OS after the
+id (an exact id, or a unique prefix of at least six characters) passes the
+read-only query library: it moves the meeting's exported Markdown, any
 separate notes file Hex tracks, and then its recording folder to the Trash,
 never removing anything outright, so an open Meetings window drops the row at
-its next scan and the files stay recoverable from the Trash. The id is
-exactly the one `hex meetings list --json` prints (no prefixes). An unknown
-id, or a meeting that is recording, transcribing, writing notes, or waiting for
-the final transcript of a run Hex quit during, is refused with its own code
-(see Error codes) and exit 1, and nothing moves. It asks no confirmation and
-works whether or not Meetings is on, so a caller should ask the person first
-and offer the same two-step confirmation the pane does.
+its next scan and the files stay recoverable from the Trash. An unknown or
+ambiguous id is refused with `not-found`, before anything moves. A meeting that
+is recording, transcribing, writing notes, or waiting for the final transcript
+of a run Hex quit during is refused with its own code (see Error codes) and
+exit 1. It asks no confirmation, so a caller should ask the person first and
+offer the same two-step confirmation the pane does. Its reply names the deleted
+id, and with `--json` it is a `done` reply like `record` and `stop`.
 
 ## Exit codes
 

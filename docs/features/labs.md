@@ -242,6 +242,16 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
+├── Delete meetings from the command line no labs.meetings_cli_delete (every OS)
+│                                        `hex meetings delete <id|unique prefix>` in the running Hex trashes a finished
+│                                        meeting's exported Markdown, tracked notes file, and recording folder exactly as
+│                                        the pane's Delete… does; it refuses while the meeting records, transcribes, or
+│                                        writes notes, and needs Meetings on. Off, the command refuses feature-off naming
+│                                        `hex labs on meetings-cli-delete`, and every read verb is unchanged
+│                                        // checks: meetings_cli_delete_is_its_own_switch_and_everywhere (labs.rs),
+│                                        // meeting_delete_resolves_ids_and_keeps_the_refusal_codes (control.rs),
+│                                        // meeting_delete_refuses_off_and_unknown_ids (control/host.rs); not observed
+│                                        // deleting a real meeting from a terminal
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by

@@ -7,10 +7,17 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod labs;
+
 /// The Russian strings by their English source.
 pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| super::screenshots::merged(TRANSLATIONS, super::screenshots::RUSSIAN))
+    TABLE.get_or_init(|| {
+        super::screenshots::merged(TRANSLATIONS, super::screenshots::RUSSIAN)
+            .into_iter()
+            .chain(labs::TRANSLATIONS.iter().copied())
+            .collect()
+    })
 }
 
 #[rustfmt::skip]
@@ -452,12 +459,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Term (e.g. cappuccino)", "Термин (например, капучино)"),
     ("Sounds like (e.g. capuchin, cap a chino)", "Звучит как (например, капуцин, капу чина)"),
     ("Up to 16 spellings per term are saved, and 64 characters per term or spelling.", "Сохраняется до 16 вариантов написания на термин и до 64 символов на термин или вариант."),
-    ("Import…", "Импортировать…"),
-    ("Export…", "Экспортировать…"),
-    ("Import vocabulary", "Импортировать словарь"),
-    ("Export vocabulary", "Экспортировать словарь"),
-    ("CSV files", "Файлы CSV"),
-    ("Text files", "Текстовые файлы"),
     ("Couldn't import that file: {}", "Не удалось импортировать этот файл: {}"),
     ("Couldn't export the vocabulary: {}", "Не удалось экспортировать словарь: {}"),
     ("the file is larger than 1 MB", "файл больше 1 МБ"),
@@ -482,8 +483,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Added {added} terms, updated {updated}", "Добавлено терминов: {added}, обновлено {updated}"),
     ("Added 1 term, updated {updated}, skipped {skipped}", "Добавлен 1 термин, обновлено {updated}, пропущено {skipped}"),
     ("Added {added} terms, updated {updated}, skipped {skipped}", "Добавлено терминов: {added}, обновлено {updated}, пропущено {skipped}"),
-    ("Vocabulary files", "Файлы словаря"),
-    ("Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one", "Импортируйте термины из файла CSV в листе словаря или сохраните весь список как такой файл"),
     ("History off", "История выключена"),
     ("Kept forever", "Хранится всегда"),
     ("Kept {}", "Хранится {}"),

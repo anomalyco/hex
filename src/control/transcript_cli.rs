@@ -1,4 +1,6 @@
-//! Read-only, release-available transcript commands. No app services or migrations.
+//! Release-available transcript commands. Every read runs here without app
+//! services or migrations; `meetings delete` and the meeting recording
+//! commands are sent to the running Hex by [`crate::control::cli`].
 
 use std::io::{self, Read, Write};
 use std::path::Path;
@@ -165,9 +167,10 @@ pub enum MeetingsCommand {
     /// Delete a finished meeting: move its exported Markdown and its recording
     /// folder to the Trash, as the Meetings pane's Delete does. Nothing is
     /// removed outright, and Hex asks for no confirmation; ask the person
-    /// first.
+    /// first (Labs › Delete meetings from the command line).
     Delete {
-        /// The exact id `hex meetings list --json` prints.
+        /// The exact id `hex meetings list --json` prints, or a unique prefix
+        /// of at least six characters.
         id: String,
         #[command(flatten)]
         output: crate::control::cli::Output,

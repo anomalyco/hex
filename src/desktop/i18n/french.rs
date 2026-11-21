@@ -7,10 +7,17 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+mod labs;
+
 /// The French strings by their English source.
 pub(super) fn table() -> &'static HashMap<&'static str, &'static str> {
     static TABLE: OnceLock<HashMap<&'static str, &'static str>> = OnceLock::new();
-    TABLE.get_or_init(|| super::screenshots::merged(TRANSLATIONS, super::screenshots::FRENCH))
+    TABLE.get_or_init(|| {
+        super::screenshots::merged(TRANSLATIONS, super::screenshots::FRENCH)
+            .into_iter()
+            .chain(labs::TRANSLATIONS.iter().copied())
+            .collect()
+    })
 }
 
 #[rustfmt::skip]
@@ -455,12 +462,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Term (e.g. cappuccino)", "Terme (ex. : cappuccino)"),
     ("Sounds like (e.g. capuchin, cap a chino)", "Se prononce comme (ex. : capuchin, cap a chino)"),
     ("Up to 16 spellings per term are saved, and 64 characters per term or spelling.", "Jusqu'à 16 graphies par terme sont enregistrées, et 64 caractères par terme ou graphie."),
-    ("Import…", "Importer…"),
-    ("Export…", "Exporter…"),
-    ("Import vocabulary", "Importer le vocabulaire"),
-    ("Export vocabulary", "Exporter le vocabulaire"),
-    ("CSV files", "Fichiers CSV"),
-    ("Text files", "Fichiers texte"),
     ("Couldn't import that file: {}", "Impossible d’importer ce fichier : {}"),
     ("Couldn't export the vocabulary: {}", "Impossible d’exporter le vocabulaire : {}"),
     ("the file is larger than 1 MB", "le fichier dépasse 1 Mo"),
@@ -485,8 +486,6 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Added {added} terms, updated {updated}", "{added} termes ajoutés, {updated} mis à jour"),
     ("Added 1 term, updated {updated}, skipped {skipped}", "1 terme ajouté, {updated} mis à jour, {skipped} ignoré(s)"),
     ("Added {added} terms, updated {updated}, skipped {skipped}", "{added} termes ajoutés, {updated} mis à jour, {skipped} ignoré(s)"),
-    ("Vocabulary files", "Fichiers de vocabulaire"),
-    ("Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one", "Importez des termes depuis un fichier CSV dans la feuille Vocabulaire, ou enregistrez toute la liste dans un fichier"),
     ("History off", "Historique désactivé"),
     ("Kept forever", "Conservé indéfiniment"),
     ("Kept {}", "Conservé {}"),

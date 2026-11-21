@@ -114,9 +114,10 @@ pub enum ControlCommand {
     MeetingStop,
     MeetingCopyLast,
     /// Move a finished meeting to the Trash, as the Meetings pane's Delete
-    /// does: its exported Markdown and notes file, then its recording folder.
+    /// does: its exported Markdown and notes file, then its recording folder
+    /// (Labs › Delete meetings from the command line). Its id is an exact id
+    /// or one unique prefix of at least six characters.
     MeetingDelete {
-        /// The exact id `hex meetings list --json` prints.
         id: String,
     },
     SettingsGet {
@@ -298,9 +299,10 @@ pub fn meeting_deleted(
     answer: Result<crate::meeting::TrashedMeeting, crate::meeting::DeleteError>,
 ) -> ControlReply {
     match answer {
-        Ok(meeting) => {
-            ControlReply::done(format!("Deleted “{}”; moved to the Trash", meeting.title))
-        }
+        Ok(meeting) => ControlReply::done(format!(
+            "Deleted “{}” ({}); moved to the Trash",
+            meeting.title, meeting.id
+        )),
         Err(error) => ControlReply::error(error.code(), error.message()),
     }
 }
@@ -1063,6 +1065,66 @@ pub fn edit_vocabulary(
     }
 }
 
+/// What `hex meetings delete` removes, resolved through the read-only query
+/// library (an exact id, or one unique prefix of at least six characters) so
+/// only a meeting the store lists is joined into its folder. This process
+/// trashes it because the recording lock and the notes writer live here.
+/// `enabled` is Labs › Delete meetings from the command line, and `delete` is
+/// the store's own [`crate::meeting::delete`], whose refusal codes travel
+/// through unchanged.
+pub fn delete_meeting_in(
+    meetings: &std::path::Path,
+    id: &str,
+    enabled: bool,
+    delete: impl FnOnce(&str) -> Result<crate::meeting::TrashedMeeting, crate::meeting::DeleteError>,
+) -> Result<ControlReply, ControlError> {
+    if !enabled {
+        return Err(ControlError::new(
+            "feature-off",
+            "Deleting meetings from the command line is a Labs feature and is off. \
+             Turn it on with `hex labs on meetings-cli-delete` or in Settings › Labs.",
+        ));
+    }
+    let id = id.trim();
+    if id.is_empty() {
+        return Err(ControlError::new(
+            "invalid-value",
+            "give the id of the meeting to delete; `hex meetings list` shows them",
+        ));
+    }
+    let library = crate::meeting::query::Library::new(meetings);
+    let meeting = library
+        .meeting(id)
+        .map_err(|error| ControlError::new("not-found", error.to_string()))?;
+    match delete(&meeting.id) {
+        Ok(trashed) => Ok(meeting_deleted(Ok(trashed))),
+        Err(error) => Err(ControlError::new(error.code(), error.message())),
+    }
+}
+
+/// `hex meetings delete <id>` in the running Hex: Meetings must be on, and so
+/// must its Labs toggle, before the store is read.
+pub fn delete_meeting(id: &str) -> Result<ControlReply, ControlError> {
+    if !crate::app_settings::meetings_enabled() {
+        return Err(ControlError::new(
+            "feature-off",
+            crate::app_settings::meetings_off_reason(),
+        ));
+    }
+    let meetings = crate::meeting::root().map_err(|error| {
+        ControlError::new(
+            "unavailable",
+            format!("couldn't find the meetings folder: {error:#}"),
+        )
+    })?;
+    delete_meeting_in(
+        &meetings,
+        id,
+        crate::labs::meetings_cli_delete(),
+        crate::meeting::delete,
+    )
+}
+
 /// Process memory footprint on macOS; `None` where unmeasured.
 pub fn memory_footprint() -> Option<u64> {
     #[cfg(target_os = "macos")]
@@ -1161,6 +1223,72 @@ mod tests {
         crate::transcription::custom_models::remove(plain).unwrap();
         crate::transcription::models::set_test_models_dir(None);
         std::fs::remove_dir_all(models).unwrap();
+    }
+
+    /// `hex meetings delete` resolves an exact id or one unique prefix
+    /// through the read-only library, and only that resolved id reaches the
+    /// store's delete rule, whose refusal codes travel unchanged.
+    #[test]
+    fn meeting_delete_resolves_ids_and_keeps_the_refusal_codes() {
+        let meetings =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
+        let trashed = |id: &str, title: &str| crate::meeting::TrashedMeeting {
+            id: id.into(),
+            title: title.into(),
+            markdown: true,
+        };
+        let reply = delete_meeting_in(&meetings, "1790000500000-1002", true, |id| {
+            assert_eq!(id, "1790000500000-1002");
+            Ok(trashed(id, "Roadmap review"))
+        })
+        .unwrap();
+        assert!(matches!(
+            reply,
+            ControlReply::Done { changed: true, message }
+                if message.contains("Roadmap review") && message.contains("1790000500000-1002")
+        ));
+        let reply = delete_meeting_in(&meetings, " 17900005 ", true, |id| {
+            assert_eq!(id, "1790000500000-1002", "the full id, never the prefix");
+            Ok(trashed(id, "Roadmap review"))
+        })
+        .unwrap();
+        assert!(matches!(reply, ControlReply::Done { changed: true, .. }));
+        let ambiguous = delete_meeting_in(&meetings, "179000", true, |_| {
+            panic!("an ambiguous prefix deletes nothing")
+        })
+        .unwrap_err();
+        assert_eq!(ambiguous.code, "not-found");
+        assert!(ambiguous.message.contains("matches 3 meetings"));
+        let unknown = delete_meeting_in(&meetings, "not-a-meeting", true, |_| {
+            panic!("an unknown id deletes nothing")
+        })
+        .unwrap_err();
+        assert_eq!(unknown.code, "not-found");
+        let failed = delete_meeting_in(&meetings, "latest", true, |_| {
+            panic!("latest is not a meeting id here")
+        })
+        .unwrap_err();
+        assert_eq!(failed.code, "not-found");
+        let refused = delete_meeting_in(&meetings, "1790000500000-1002", true, |_| {
+            Err(crate::meeting::DeleteRefusal::Recording.into())
+        })
+        .unwrap_err();
+        assert_eq!(refused.code, "meeting-recording");
+        assert_eq!(refused.message, "Stop the recording before deleting it");
+        let failed = delete_meeting_in(&meetings, "1790000500000-1002", true, |_| {
+            Err(crate::meeting::DeleteError::Failed(
+                color_eyre::eyre::eyre!("the Trash is full"),
+            ))
+        })
+        .unwrap_err();
+        assert_eq!(failed.code, "failed");
+        assert!(failed.message.contains("the Trash is full"));
+        assert_eq!(
+            delete_meeting_in(&meetings, "", true, |_| panic!("no id"))
+                .unwrap_err()
+                .code,
+            "invalid-value"
+        );
     }
 
     #[test]
@@ -1454,7 +1582,7 @@ mod tests {
         }));
         assert_eq!(
             deleted,
-            ControlReply::done("Deleted “Design sync”; moved to the Trash")
+            ControlReply::done("Deleted “Design sync” (1790000500000-1002); moved to the Trash")
         );
         for (refusal, code) in [
             (crate::meeting::DeleteRefusal::Unknown, "not-found"),

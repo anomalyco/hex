@@ -487,6 +487,16 @@ pub(crate) fn annotate_agent_tools_under(policy: crate::policy::Policy) -> bool 
         && policy.labs_lock(Feature::AnnotateAgentTools).is_none()
 }
 
+/// Labs › Delete meetings from the command line: `hex meetings delete <id>`
+/// carries the command out in the running Hex, which owns the recording and
+/// notes state the trash rule reads (read when the command starts).
+pub fn meetings_cli_delete() -> bool {
+    // The state word is full, so the switch has its own atomic, loaded here
+    // first in a process that never applied its settings.
+    let _ = state();
+    MEETINGS_CLI_DELETE.load(Ordering::Acquire) && Feature::MeetingsCliDelete.on_this_os()
+}
+
 /// Labs › Transcribe dropped audio: a file with one of this build's
 /// extensions, dropped on the window, is transcribed in this process and saved
 /// as a text file beside it (read as each drop starts, and by the window's

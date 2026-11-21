@@ -825,6 +825,19 @@
       ],
       "summary": "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one",
       "title": "Vocabulary files"
+    },
+    {
+      "added": "2026-11-21",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "meetings-cli-delete",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Delete a finished meeting and its files from a terminal with hex meetings delete",
+      "title": "Delete meetings from the command line"
     }
   ]
 }

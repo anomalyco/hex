@@ -811,6 +811,18 @@ mod tests {
             })))
         ));
         assert!(matches!(
+            parse(&[
+                "hex",
+                "meetings",
+                "delete",
+                "1790000500000-1002",
+                "--json"
+            ]),
+            Ok(Some(Command::Control(ControlCli::Meetings {
+                command: transcript_cli::MeetingsCommand::Delete { output, .. }
+            }))) if output.json
+        ));
+        assert!(matches!(
             parse(&["hex", "commands", "check"]),
             Ok(Some(Command::Control(ControlCli::Commands {
                 command: CommandsCommand::Check

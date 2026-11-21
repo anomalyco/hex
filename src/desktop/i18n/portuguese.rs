@@ -484,6 +484,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Added {added} terms, updated {updated}, skipped {skipped}", "{added} termos adicionados, {updated} atualizados, {skipped} ignorado(s)"),
     ("Vocabulary files", "Arquivos de vocabulário"),
     ("Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one", "Importe termos de um arquivo CSV na folha de vocabulário ou salve a lista inteira como um"),
+    ("Delete meetings from the command line", "Excluir reuniões pela linha de comando"),
+    ("Delete a finished meeting and its files from a terminal with hex meetings delete", "Exclua uma reunião concluída e os arquivos dela em um terminal com hex meetings delete"),
     ("History off", "Histórico desativado"),
     ("Kept forever", "Mantido para sempre"),
     ("Kept {}", "Mantido por {}"),

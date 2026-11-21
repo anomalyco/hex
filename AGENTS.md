@@ -482,11 +482,14 @@ substitute for source inspection or a second roadmap.
   (`history/recordings`: one owner-only WAV per entry, Transcribe again), and
   Labs › Dictation stats' owner-only daily rollup (`history/usage`, counts but
   no text, 400 days) that outlives retention.
-- `control/transcript_cli`: read-only release commands `hex history` and
-  `hex meetings list|show|search` on every OS, versioned JSON projections and
-  filters.
-  Reads history snapshots without opening the writable store, and shares
-  meeting selection, search, and Markdown with `meeting::query` / MCP.
+- `control/transcript_cli`: release commands `hex history` and `hex meetings`
+  on every OS, versioned JSON projections and filters. `hex history` and
+  `hex meetings list|show|search` read in the CLI process: History snapshots
+  without the writable store, and meeting selection, search, and Markdown
+  through `meeting::query` / MCP. `hex meetings delete` is sent to the running
+  Hex, which owns the recording lock and notes writer, resolves the id through
+  the query library, and calls the pane's `meeting::delete` (Labs › Delete
+  meetings from the command line).
 - `desktop/events`, `control/dashboard`: bounded asynchronous append-only NDJSON observations
   and bounded incremental reading; the debug `dashboard` TUI and the Activity
   pane are read-only projections. Context events name the foreground app,
@@ -1143,7 +1146,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   before process logging, the instance lock, local API, GUI, permissions, or Hex
   Microphone. `hex meetings delete <id>` is the one writing command: a control
   command the running Hex carries out through the pane's own delete
-  (`meeting::delete`), refusing while the meeting records, transcribes, writes
+  (`meeting::delete`), resolving an exact id or one unique prefix through the
+  query library first. It needs Meetings on and Labs › Delete meetings from the
+  command line, and refuses while the meeting records, transcribes, writes
   notes, or waits for its final transcript.
   History reads one open
   file through concurrent atomic replacements, applies the saved retention at

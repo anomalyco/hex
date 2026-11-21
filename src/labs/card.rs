@@ -85,6 +85,7 @@ impl Feature {
             Self::PasteLastPicker => "Paste Last picker",
             Self::VocabularyFiles => "Vocabulary files",
             Self::AnnotateAgentTools => "Agent tools for captures",
+            Self::MeetingsCliDelete => "Delete meetings from the command line",
         }
     }
 
@@ -309,6 +310,9 @@ impl Feature {
             }
             Self::AnnotateAgentTools => {
                 "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
+            }
+            Self::MeetingsCliDelete => {
+                "Delete a finished meeting and its files from a terminal with hex meetings delete"
             }
         }
     }

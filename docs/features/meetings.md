@@ -1837,29 +1837,38 @@ Delete… (overflow menu) -> "Trash recording & Markdown" (or "Trash recording")
   // deleting_refuses_a_transcribing_meeting_and_one_still_awaiting_its_final_transcript,
   // deleting_refuses_ids_that_are_not_one_meeting_folder
 
-Agents -> hex meetings delete <id>                 // exact `meetings list --json` id
-  -> the same delete_meeting path the pane uses, through the running Hex
-     (control host; docs/cli.md), so both refuse and trash identically
-  -> unknown id -> not-found; recording/transcribing/notes/final.pending ->
-     meeting-recording/meeting-transcribing/meeting-notes/meeting-final-pending,
-     exit 1, nothing moved
+Agents -> hex meetings delete <id|unique prefix>   // Labs › Delete meetings from
+  the command line (labs.meetings_cli_delete)
+  -> the running Hex resolves the id through the read-only query library
+     (never a raw path), then the same delete_meeting path the pane uses
+     through its control host, so both refuse and trash identically
+  -> Meetings or the lab off -> feature-off naming `hex labs on
+     meetings-cli-delete`, nothing read or moved
+  -> unknown or ambiguous id -> not-found; recording/transcribing/notes/
+     final.pending -> their codes, exit 1, nothing moved
   -> no interactive confirmation in the CLI; the companion asks first
-  -> done -> "Deleted “<title>”; moved to the Trash"; an open pane drops the
-     row at its next 1 s rescan
+  -> done -> "Deleted meeting “<title>” (<id>); moved to the Trash"; an open
+     pane drops the row at its next 1 s rescan
   // checks: deleting_a_meeting_answers_its_refusal_code; JSON shape
   // {"version":4,"command":"meeting-delete","id":"…"} (control.rs)
 ```
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;
 a separate notes file Hex tracks goes with it, and all stay recoverable from
-the Trash. Sources:
+the Trash. `hex meetings delete` is the same delete from a terminal, carried
+out in the running Hex (which owns the recording lock and notes writer), after
+the id passes the read-only query library. Sources:
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs), the requests in
-[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `RevealTarget` /
-`rename` in [meeting.rs](../../src/meeting.rs) with `delete` / `trash` in
+[rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), `delete_meeting` in
+[control.rs](../../src/control.rs), and `RevealTarget` / `rename` in
+[meeting.rs](../../src/meeting.rs) with `delete` / `trash` in
 [meeting/delete.rs](../../src/meeting/delete.rs) (the pane's Delete and
 `hex meetings delete` share it). Checks:
 `deleting_trashes_the_markdown_then_the_recording_and_refuses_while_recording`,
 `deleting_trashes_a_tracked_notes_file_after_the_transcript`,
+`meeting_delete_resolves_ids_and_keeps_the_refusal_codes` and
+`meeting_delete_refuses_off_and_unknown_ids` in
+[control.rs](../../src/control.rs) and [control/host.rs](../../src/control/host.rs),
 `renaming_updates_the_manifest_and_an_unedited_markdown_heading`,
 `a_rename_follows_the_title_when_descriptive_file_names_are_on`,
 `a_rename_without_descriptive_names_still_retitles_the_notes_file`,

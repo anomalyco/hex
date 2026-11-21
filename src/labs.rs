@@ -194,6 +194,7 @@ impl Feature {
             Self::PasteLastPicker => settings.labs.paste_last_picker,
             Self::VocabularyFiles => settings.labs.vocabulary_files,
             Self::AnnotateAgentTools => settings.labs.annotate_agent_tools,
+            Self::MeetingsCliDelete => settings.labs.meetings_cli_delete,
         }
     }
 
@@ -280,6 +281,7 @@ impl Feature {
             &mut labs.paste_last_picker,
             &mut labs.vocabulary_files,
             &mut labs.annotate_agent_tools,
+            &mut labs.meetings_cli_delete,
         ]
     }
 
@@ -377,6 +379,7 @@ impl Feature {
             Self::PasteLastPicker => settings.labs.paste_last_picker = on,
             Self::VocabularyFiles => settings.labs.vocabulary_files = on,
             Self::AnnotateAgentTools => settings.labs.annotate_agent_tools = on,
+            Self::MeetingsCliDelete => settings.labs.meetings_cli_delete = on,
             // Off, no shortcut keeps a key only the feature allows.
             Self::StandaloneSpecialKeys => {
                 settings.labs.standalone_special_keys = on;
@@ -572,6 +575,11 @@ static PASTE_LAST_PICKER: AtomicBool = AtomicBool::new(false);
 /// reads it in a CLI process that never applied settings.
 static ANNOTATE_AGENT_TOOLS: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Delete meetings from the command line's switch, set beside
+/// [`STATE`] like [`SCREEN_VOCABULARY`]: the state word is full, so this lab
+/// has its own atomic, written by [`state`] and [`apply`].
+static MEETINGS_CLI_DELETE: AtomicBool = AtomicBool::new(false);
+
 /// The words that start a voice prompt, set beside [`STATE`] by [`state`] and
 /// [`apply`]. An invalid saved phrase reads as the default.
 static VOICE_PROMPT_PHRASE: LazyLock<RwLock<String>> =
@@ -615,6 +623,7 @@ fn state() -> u64 {
                 MICROPHONE_KEY.store(microphone_key_enabled(&saved), Ordering::Release);
                 PASTE_LAST_PICKER.store(paste_last_picker_enabled(&saved), Ordering::Release);
                 ANNOTATE_AGENT_TOOLS.store(annotate_agent_tools_enabled(&saved), Ordering::Release);
+                MEETINGS_CLI_DELETE.store(meetings_cli_delete_enabled(&saved), Ordering::Release);
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
                 store_stop_phrase_text(&saved.stop_phrase_text);
             }
@@ -763,6 +772,14 @@ fn annotate_agent_tools_enabled(settings: &LabsSettings) -> bool {
         && Feature::AnnotateAgentTools.managed().is_none()
 }
 
+/// Whether `settings` turn on Labs › Delete meetings from the command line in
+/// this build, before its managed lock; the state word has no bit for it.
+fn meetings_cli_delete_enabled(settings: &LabsSettings) -> bool {
+    settings.meetings_cli_delete
+        && Feature::MeetingsCliDelete.shipped()
+        && Feature::MeetingsCliDelete.managed().is_none()
+}
+
 /// Records the trigger phrase matching reads; an invalid value never turns
 /// matching off.
 fn store_voice_prompt_phrase(phrase: &str) {
@@ -822,6 +839,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     MICROPHONE_KEY.store(microphone_key_enabled(settings), Ordering::Release);
     PASTE_LAST_PICKER.store(paste_last_picker_enabled(settings), Ordering::Release);
     ANNOTATE_AGENT_TOOLS.store(annotate_agent_tools_enabled(settings), Ordering::Release);
+    MEETINGS_CLI_DELETE.store(meetings_cli_delete_enabled(settings), Ordering::Release);
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     // Labs › Pause from menu bar: turning it off resumes at once, without
@@ -1973,6 +1991,35 @@ mod tests {
             "labs.drop_transcribe"
         );
         assert_eq!(Feature::DropTranscribe.name(), "drop-transcribe");
+    }
+
+    #[test]
+    fn meetings_cli_delete_is_its_own_switch_and_everywhere() {
+        let mut labs = LabsSettings::default();
+        assert!(!meetings_cli_delete_enabled(&labs));
+        labs.meetings_cli_delete = true;
+        labs.unload_idle_minutes = 24 * 60;
+        assert!(meetings_cli_delete_enabled(&labs));
+        // The state word has no bit for it: the other switches keep theirs.
+        let state = encode_where(&labs, |_| true);
+        assert_eq!(state & PARAKEET_ULTRA, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert!(
+            Feature::MeetingsCliDelete.on_this_os(),
+            "the command exists on every OS"
+        );
+        assert_eq!(Feature::MeetingsCliDelete.added(), 20261121);
+        assert_eq!(Feature::MeetingsCliDelete.audience(), Audience::Everyone);
+        assert_eq!(Feature::MeetingsCliDelete.group(), Group::Meetings);
+        assert_eq!(
+            Feature::MeetingsCliDelete.settings_key(),
+            "labs.meetings_cli_delete"
+        );
+        assert_eq!(Feature::MeetingsCliDelete.name(), "meetings-cli-delete");
+        assert_eq!(
+            Feature::MeetingsCliDelete.oses(),
+            &[Os::Macos, Os::Windows, Os::Linux]
+        );
     }
 
     #[test]

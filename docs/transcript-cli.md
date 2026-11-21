@@ -17,6 +17,7 @@ hex meetings chapters latest --json
 hex meetings show 1790003000000-1005 --chapter 2
 hex meetings show latest --srt > call.srt
 hex meetings search 'release schedule'
+hex meetings delete 1790000500000-1002   # Labs › Delete meetings from the command line
 ```
 
 ## History filters apply before the limit
@@ -151,14 +152,24 @@ one-word vocabulary term also finds its "sounds like" spellings and the term
 split into two adjacent words (0.5, like a prefix), and words that sound like
 it (0.3) unless they are common. Neither ever counts as an exact match.
 
+## Deleting a meeting
+
+`meetings delete <id>` is the one verb here that needs the running Hex and
+changes the store. Turn it on with `hex labs on meetings-cli-delete` or in
+Settings › Labs, with Meetings on. It takes the same exact id or unique prefix
+of at least six characters as `show` (not `latest`), then asks the running Hex
+to move the meeting's exported Markdown, its tracked separate notes file, and
+its recording folder to the Trash, as the Meetings pane's Delete… does, so
+everything stays recoverable. An unknown or ambiguous id fails without deleting
+anything. A meeting that is recording, transcribing, writing notes, or waiting
+for its final transcript is refused with its own code
+([cli.md](cli.md#commands)). Success names the deleted id; with the lab off it
+fails, naming the command that turns it on.
+
 Debug builds retain `meeting record`, `watch`, `probe`, `transcribe`, and other
 developer commands. Their `meeting list/show` commands use the read-only query
 path too. The plural `meetings` commands are available in release builds.
-`meetings delete <id>` is the one that writes: it moves nothing itself but
-asks the running Hex to move the meeting's exported Markdown and its recording
-folder to the Trash, as the pane's Delete does, and refuses while the meeting
-still records, transcribes, writes notes, or waits for its final transcript
-([cli.md](cli.md#commands)). Everything above only reads.
+Everything above except `meetings delete` only reads.
 
 ## JSON version 1
 
@@ -270,7 +281,9 @@ type MeetingChapters = {
 
 ## Reads never start or change the app
 
-These commands dispatch before logging, instance locking,
+Every command here except `meetings delete` reads only; that one asks the
+running Hex to move a meeting to the Trash, and never starts Hex itself. Reads
+dispatch before logging, instance locking,
 local API startup, permissions, GUI, and Hex Microphone. They open no microphone,
 load no model, make no network request, and create no files or directories.
 History reads one file descriptor, so an atomic replacement yields a complete

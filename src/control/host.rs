@@ -175,7 +175,7 @@ fn command(host: &dyn Host, command: ControlCommand) -> ControlReply {
             Ok(()) => ControlReply::done("Copied the last meeting transcript"),
             Err(error) => ControlReply::error("failed", format!("couldn't copy it: {error}")),
         },
-        ControlCommand::MeetingDelete { id } => super::meeting_deleted(crate::meeting::delete(&id)),
+        ControlCommand::MeetingDelete { id } => reply(crate::control::delete_meeting(&id)),
         ControlCommand::SettingsGet { key } => reply(load().and_then(|settings| {
             Ok(ControlReply::Settings {
                 settings: match key {
@@ -731,6 +731,30 @@ mod tests {
             ControlReply::Error { code, .. } => code,
             _ => "ok",
         }
+    }
+
+    /// The host refuses a delete before the store is read while its Labs
+    /// toggle is off, and an id the library can't resolve never reaches the
+    /// trash rule.
+    #[test]
+    fn meeting_delete_refuses_off_and_unknown_ids() {
+        let meetings =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/meetings");
+        let off = super::super::delete_meeting_in(&meetings, "1790000500000-1002", false, |_| {
+            panic!("nothing is trashed while the lab is off")
+        })
+        .unwrap_err();
+        assert_eq!(off.code, "feature-off");
+        assert!(
+            off.message.contains("hex labs on meetings-cli-delete"),
+            "{}",
+            off.message
+        );
+        let unknown = super::super::delete_meeting_in(&meetings, "nope", true, |_| {
+            panic!("nothing is trashed for an unknown id")
+        })
+        .unwrap_err();
+        assert_eq!(unknown.code, "not-found");
     }
 
     #[test]

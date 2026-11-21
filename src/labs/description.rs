@@ -225,6 +225,9 @@ impl Feature {
             Self::AnnotateAgentTools => {
                 "Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely"
             }
+            Self::MeetingsCliDelete => {
+                "Delete a meeting and its files from a terminal with hex meetings delete"
+            }
         }
     }
 }

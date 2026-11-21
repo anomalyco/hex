@@ -364,6 +364,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: import vocabulary terms from a CSV file in the Vocabulary sheet, and export the list as one",
     ),
     key(
+        "labs.meetings_cli_delete",
+        Kind::Bool,
+        "Labs: delete a finished meeting and its files from a terminal with hex meetings delete",
+    ),
+    key(
         "labs.screen_vocabulary",
         Kind::Bool,
         "Labs: use names and terms visible in the focused window as temporary vocabulary for each dictation (macOS)",

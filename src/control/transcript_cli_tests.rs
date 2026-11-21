@@ -785,6 +785,31 @@ fn subtitles_follow_the_range_and_need_the_labs_toggle() {
 }
 
 #[test]
+fn meeting_delete_parses_an_id_and_json_beside_the_read_commands() {
+    let cli = Cli::try_parse_from(["hex", "meetings", "delete", "1790000500000-1002"]).unwrap();
+    match cli.command.unwrap() {
+        ControlCli::Meetings {
+            command: MeetingsCommand::Delete { id, output },
+        } => {
+            assert_eq!(id, "1790000500000-1002");
+            assert!(!output.json);
+        }
+        _ => panic!("expected meetings delete"),
+    }
+    let cli = Cli::try_parse_from(["hex", "meetings", "delete", "17900005", "--json"]).unwrap();
+    match cli.command.unwrap() {
+        ControlCli::Meetings {
+            command: MeetingsCommand::Delete { id, output },
+        } => {
+            assert_eq!(id, "17900005");
+            assert!(output.json);
+        }
+        _ => panic!("expected meetings delete"),
+    }
+    assert!(Cli::try_parse_from(["hex", "meetings", "delete"]).is_err());
+}
+
+#[test]
 fn parses_release_commands_and_rejects_invalid_limits_and_times() {
     for command in [
         vec!["hex", "history"],
