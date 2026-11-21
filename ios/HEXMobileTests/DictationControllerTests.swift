@@ -1363,6 +1363,57 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
+    func testADownloadCutOffInTheBackgroundStartsAgainOnReturn() async throws {
+        let failing = UnpreparableTranscriber(error: ParakeetTranscriber.TranscriberError.downloadFailed)
+        let working = ControlledTranscriber()
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: working,
+            transcriberFactory: {
+                made += 1
+                return made == 1 ? failing : working
+            },
+            autoPrepareOnInit: false
+        )
+        controller.appMovedToBackground()
+        controller.prepareModel()
+        try await settle()
+        guard case .failed = controller.phase else { return XCTFail("\(controller.phase)") }
+
+        controller.appBecameActive()
+        try await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertEqual(made, 2)
+
+        controller.appBecameActive()
+        try await settle()
+        XCTAssertEqual(made, 2, "once")
+    }
+
+    func testAFailureWhileHexIsOpenWaitsForTryAgain() async throws {
+        var made = 0
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: ControlledTranscriber(),
+            transcriberFactory: {
+                made += 1
+                return UnpreparableTranscriber(error: ParakeetTranscriber.TranscriberError.downloadFailed)
+            },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        controller.appMovedToBackground()
+        controller.appBecameActive()
+        try await settle()
+        XCTAssertEqual(made, 1)
+        XCTAssertFalse(DictationController.isDownloadInterruption(CancellationError()))
+        XCTAssertTrue(DictationController.isDownloadInterruption(StallWatch.Stalled()))
+    }
+
     func testAParakeetLoadThatEndedHexIsNotRepeatedAtLaunch() {
         let loads = ParakeetLoadGuard(defaults: defaults)
         loads.noteLaunch()

@@ -205,11 +205,15 @@ nonisolated enum SpeechModelInstall {
 /// Ends an operation whose progress stopped moving instead of waiting on it forever: after
 /// `limit` at the same value it cancels the operation and throws `Stalled` without waiting
 /// for it to notice. A nil reading pauses the watch (a step that reports nothing, such as
-/// compiling a model, which can't be cancelled anyway).
+/// compiling a model, which can't be cancelled anyway). Time while iOS had the app suspended
+/// doesn't count: a poll that comes back far later than asked restarts the wait.
 nonisolated enum StallWatch {
     struct Stalled: HexDescribedError {
         var errorDescription: String? { String(localized: "The download stopped. Check your connection and try again.") }
     }
+
+    /// How much later than asked a poll may come back before the wait counts as suspended.
+    static let suspensionGap: Duration = .seconds(5)
 
     static func run<T: Sendable>(
         limit: Duration,
@@ -233,13 +237,17 @@ nonisolated enum StallWatch {
                     let clock = ContinuousClock()
                     var last = progress()
                     var since = clock.now
+                    var polled = since
                     while !outcome.isFinished {
                         try? await Task.sleep(for: poll)
+                        let tick = clock.now
+                        let resumed = tick - polled > poll + suspensionGap
+                        polled = tick
                         let now = progress()
-                        if now == nil || now != last {
+                        if now == nil || now != last || resumed {
                             last = now
-                            since = clock.now
-                        } else if clock.now - since >= limit {
+                            since = tick
+                        } else if tick - since >= limit {
                             work.cancel()
                             outcome.finish(.failure(Stalled()))
                             return
