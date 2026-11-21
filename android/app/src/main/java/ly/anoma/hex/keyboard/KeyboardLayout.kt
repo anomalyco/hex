@@ -65,6 +65,10 @@ internal object KeyboardMetrics {
     const val PILL = 34f
     const val MARK = 24f
     const val MENU_ROWS = 4
+    /** A slide on space moves the cursor one character after this much travel, then one more each step
+     * (Gboard: about 45 px and 33 px on a 2.625 density Pixel 8). */
+    const val CURSOR_START = 17f
+    const val CURSOR_STEP = 12.6f
 
     // The bottom row, in tenths: ?123, comma, space, period, enter.
     const val MODE = 1.5f

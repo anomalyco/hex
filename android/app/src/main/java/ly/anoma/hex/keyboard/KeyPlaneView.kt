@@ -51,8 +51,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private var deleting = false
     private var repeated = false
     private val slop = ViewConfiguration.get(context).scaledTouchSlop
+    private val spaceGesture = SpaceGesture(KeyboardMetrics.CURSOR_START * density, KeyboardMetrics.CURSOR_STEP * density, slop.toFloat())
+    private var cursorSlide: CursorSlide? = null
     private val switchLanguage = Runnable {
-        if (spaceKey.isPressed) { spaceKey.isPressed = false; spaceKey.performLongClick() }
+        if (spaceKey.isPressed && spaceGesture.still) { spaceKey.isPressed = false; spaceKey.performLongClick() }
     }
     private val repeatDelete = object : Runnable {
         override fun run() {
@@ -71,14 +73,25 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         spaceKey = caps.cap("", context.getString(R.string.keyboard_space), caps.key, 14f) { ime.engine.type(" ") }
         spaceKey.label?.setTextColor(quiet)
         spaceKey.setOnLongClickListener { host.openLanguageMenu(); true }
+        // A press that leaves the key still types its space on lifting: a quick tap that drifts must
+        // never lose it. Only a slide that moved the cursor, or the long press's menu, types none.
         spaceKey.setOnTouchListener { v, e ->
             when (e.actionMasked) {
-                MotionEvent.ACTION_DOWN -> { v.isPressed = true; postDelayed(switchLanguage, ViewConfiguration.getLongPressTimeout().toLong()) }
-                MotionEvent.ACTION_MOVE -> if (e.x < -slop || e.x > v.width + slop || e.y < -slop || e.y > v.height + slop) {
-                    removeCallbacks(switchLanguage); v.isPressed = false
+                MotionEvent.ACTION_DOWN -> {
+                    v.isPressed = true; cursorSlide = null; spaceGesture.down(e.x, e.y, e.eventTime)
+                    postDelayed(switchLanguage, ViewConfiguration.getLongPressTimeout().toLong())
                 }
-                MotionEvent.ACTION_UP -> { removeCallbacks(switchLanguage); val tap = v.isPressed; v.isPressed = false; if (tap) v.performClick() }
-                MotionEvent.ACTION_CANCEL -> { removeCallbacks(switchLanguage); v.isPressed = false }
+                MotionEvent.ACTION_MOVE -> if (v.isPressed) {
+                    val characters = spaceGesture.move(e.x, e.y, e.eventTime)
+                    if (!spaceGesture.still) removeCallbacks(switchLanguage)
+                    if (characters != null) (cursorSlide ?: ime.engine.cursorSlide().also { cursorSlide = it }).moveTo(characters)
+                }
+                MotionEvent.ACTION_UP -> {
+                    removeCallbacks(switchLanguage); val pressed = v.isPressed; v.isPressed = false
+                    if (pressed && spaceGesture.up()) v.performClick()
+                    cursorSlide = null
+                }
+                MotionEvent.ACTION_CANCEL -> { removeCallbacks(switchLanguage); v.isPressed = false; cursorSlide = null }
             }
             true
         }

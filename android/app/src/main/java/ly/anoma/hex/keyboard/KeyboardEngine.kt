@@ -241,6 +241,12 @@ internal class KeyboardEngine(
         }
     }
 
+    /** A space-bar slide starts moving the cursor: the word in progress stays as typed. */
+    fun cursorSlide(): CursorSlide {
+        resetTyping(); surface?.suggestions(emptyList())
+        return CursorSlide(target, minOf(selStart, selEnd), maxOf(selStart, selEnd), readable = !secure)
+    }
+
     /** Dictation starts: the word in progress is left as typed. */
     fun clearForDictation() { resetTyping(); surface?.suggestions(emptyList()) }
 
