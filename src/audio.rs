@@ -1361,6 +1361,25 @@ pub fn open_named_input(device: &str) -> Result<AudioInput> {
     }
 }
 
+/// Opens the input dictation would open now: the saved microphone, else the
+/// system default, passing over Hex Microphone and (as set) a Bluetooth
+/// default. For a level meter while dictation's own is closed.
+#[cfg(target_os = "macos")]
+pub fn open_dictation_input(selected_device: Option<&str>) -> Result<AudioInput> {
+    match open_configured_input(&OpenRequest {
+        device_override: None,
+        selected_device: selected_device.map(str::to_owned),
+        fallback: SelectedFallback::Immediate,
+        keep: None,
+        avoids_bluetooth: true,
+        call_input: None,
+        renegotiate_rate: false,
+    })? {
+        Opened::Input(input) => Ok(*input),
+        Opened::Unchanged { .. } => Err(eyre!("nothing was open to keep")),
+    }
+}
+
 /// Opens the microphone a meeting records: the input its call app records
 /// from (`call_input`, a device UID) when that opens, else one resolved like
 /// dictation's but keeping a Bluetooth default a call app on a headset uses;

@@ -14,7 +14,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 /// The window, in points: the island, its Record label in the longest
 /// translation, and room for its shadow.
-pub(crate) const SIZE: (f32, f32) = (480.0, 76.0);
+pub(crate) const SIZE: (f32, f32) = (520.0, 80.0);
 /// How far above the display's bottom edge it rests, clear of the Dock.
 pub(crate) const MARGIN: f32 = 64.0;
 
@@ -55,6 +55,9 @@ pub(crate) struct Toolbar {
     pub(crate) one_x: bool,
     pub(crate) fps: u32,
     pub(crate) quality: RecordingQuality,
+    /// What the chosen microphone hears, 0 to 1, while the toolbar meters
+    /// it; `None` when it keeps none or can't be heard.
+    pub(crate) level: Option<f32>,
     /// The controller, told of every choice after the toolbar shows it.
     pub(crate) act: Option<fn(&Toolbar, ToolbarAction)>,
 }
@@ -190,11 +193,11 @@ fn island(p: Paint, s: &Toolbar) -> El {
     let k = p.k;
     let mut body = row()
         .key("island")
-        .h(surface::ISLAND_H)
-        .px(surface::ISLAND_INSET)
+        .h(ISLAND_H)
+        .px(ISLAND_PX)
         .gap(2.0)
         .center_y()
-        .radius(surface::SHELL_RADIUS)
+        .radius(ISLAND_RADIUS)
         .fill(k.c.bg_base)
         .border(p.hair, k.c.border_weak);
     for shadow in &k.elevation.overlay {
@@ -210,14 +213,25 @@ fn island(p: Paint, s: &Toolbar) -> El {
         .hit()
 }
 
+/// The toolbar draws a step larger than the capsule: its island, buttons,
+/// and icons, in points, with the capsule's proportions.
+const ISLAND_H: f32 = 44.0;
+const ISLAND_INSET: f32 = 6.0;
+const ISLAND_PX: f32 = 5.0;
+const ISLAND_RADIUS: f32 = 16.0;
+const TOOL_H: f32 = ISLAND_H - 2.0 * ISLAND_INSET;
+const TOOL_RADIUS: f32 = 9.0;
+const ICON: f32 = 18.0;
+const KIND_ICON: f32 = 16.0;
+const WAVEFORM: f32 = 16.0;
 /// Space between the toolbar's groups, which have no lines between them.
 const GROUP_GAP: f32 = 6.0;
-/// A segment of the kind control and the icon buttons, in points.
-const SEGMENT: (f32, f32) = (32.0, 24.0);
+/// A segment of the kind control.
+const SEGMENT: (f32, f32) = (36.0, TOOL_H - 2.0 * TRACK_PAD);
 const TRACK_PAD: f32 = 2.0;
-const TRACK_RADIUS: f32 = 8.0;
+const TRACK_RADIUS: f32 = TOOL_RADIUS;
 const SEGMENT_RADIUS: f32 = TRACK_RADIUS - TRACK_PAD;
-const CHEVRON: f32 = 10.0;
+const CHEVRON: f32 = 11.0;
 
 /// Area, Window, and Full screen as one icon-only segmented control: a
 /// recessed track with the chosen segment raised, its name in the tooltip.
@@ -276,7 +290,7 @@ fn kind_segment(p: Paint, s: &Toolbar, kind: RecordKind, on: bool) -> El {
         .size(SEGMENT.0, SEGMENT.1)
         .center()
         .radius(SEGMENT_RADIUS)
-        .child(mark(Id::Mode(mode), SEG_ICON, fg));
+        .child(mark(Id::Mode(mode), KIND_ICON, fg));
     if !on {
         segment = segment.hover(p.k.c.hover).press(p.k.c.pressed);
     }
@@ -304,8 +318,8 @@ fn display_chevron(p: Paint, s: &Toolbar) -> El {
         .unwrap_or_default();
     row()
         .key("display")
-        .size(14.0, SEGMENT.1)
-        .pr(4.0)
+        .size(16.0, SEGMENT.1)
+        .pr(5.0)
         .center()
         .radius(SEGMENT_RADIUS)
         .hover(p.k.c.hover)
@@ -326,11 +340,11 @@ fn chevron(p: Paint) -> El {
 fn menu_button(p: Paint, key: &'static str, name: String) -> El {
     row()
         .key(key)
-        .h(BUTTON_H)
-        .px(6.0)
-        .gap(3.0)
+        .h(TOOL_H)
+        .px(7.0)
+        .gap(4.0)
         .center_y()
-        .radius(view::ICON_BUTTON_RADIUS)
+        .radius(TOOL_RADIUS)
         .hover(p.k.c.hover)
         .press(p.k.c.pressed)
         .role("button")
@@ -360,26 +374,60 @@ fn sound(p: Paint, s: &Toolbar) -> El {
     } else {
         &crate::rune_ui::icons::MIC_OFF
     };
-    let mut button = menu_button(p, "audio", name).child(rune::icon(glyph, 16.0).color(fg));
+    let mut button = menu_button(p, "audio", name).child(rune::icon(glyph, ICON).color(fg));
+    if microphone {
+        button = button.child(level_bars(p, s.level));
+    }
     if s.system_audio {
-        button = button.child(rune::icon(&rune_theme_opencode::icons::WAVEFORM, 14.0).color(fg));
+        button =
+            button.child(rune::icon(&rune_theme_opencode::icons::WAVEFORM, WAVEFORM).color(fg));
     }
     button
         .child(chevron(p))
         .on_press_tx(|s: &mut Toolbar, tx| audio_menu(s, tx))
 }
 
+/// What the chosen microphone hears, as the recording capsule shows it:
+/// three bars, dim and low while it hears nothing or can't be heard.
+fn level_bars(p: Paint, level: Option<f32>) -> El {
+    let level = level.unwrap_or(0.0);
+    let mut bars = el()
+        .key("level")
+        .size(super::LEVEL_W, super::CHIP_H)
+        .opacity(super::level_ink(level))
+        .a11y_hidden();
+    for k in 0..3 {
+        let [x, y, w, h] = super::level_bar(k, level);
+        bars = bars.child(el().absolute(x, y).size(w, h).radius(1.0).fill(p.text()));
+    }
+    bars
+}
+
+/// The steps the level moves in, so the toolbar redraws only when it
+/// crosses one.
+pub(crate) const LEVEL_STEPS: f32 = 8.0;
+
+/// `level` in the steps the toolbar shows.
+pub(crate) fn level_step(level: f32) -> u8 {
+    (level.clamp(0.0, 1.0) * LEVEL_STEPS).round() as u8
+}
+
 fn options(p: Paint) -> El {
     menu_button(p, "options", tr("Options").to_owned())
-        .child(rune::icon(&rune_theme_opencode::icons::SLIDERS, 16.0).color(p.text()))
+        .child(rune::icon(&rune_theme_opencode::icons::SLIDERS, ICON).color(p.text()))
         .child(chevron(p))
         .on_press_tx(|s: &mut Toolbar, tx| options_menu(s, tx))
 }
 
 fn close(p: Paint) -> El {
-    button_box(p, BUTTON_H)
+    row()
         .key("close")
-        .child(close_glyph(p))
+        .size(TOOL_H, TOOL_H)
+        .center()
+        .radius(TOOL_RADIUS)
+        .hover(p.k.c.hover)
+        .press(p.k.c.pressed)
+        .child(rune::icon(p.k.glyph.close, ICON).color(p.muted()))
         .role("button")
         .label(tr("Close"))
         .help(tr("Close"))
@@ -390,15 +438,15 @@ fn close(p: Paint) -> El {
 fn record(p: Paint) -> El {
     let c = &p.k.c;
     let name = tr("Record");
-    const DOT: f32 = 7.0;
+    const DOT: f32 = 8.0;
     row()
         .key("record")
-        .h(BUTTON_H)
-        .pl(10.0)
-        .pr(12.0)
-        .gap(6.0)
+        .h(TOOL_H)
+        .pl(12.0)
+        .pr(14.0)
+        .gap(7.0)
         .center_y()
-        .radius(view::ICON_BUTTON_RADIUS)
+        .radius(TOOL_RADIUS)
         .fill(c.bg_contrast)
         .hover(c.contrast_hover)
         .press(c.contrast_pressed)
@@ -543,6 +591,14 @@ mod tests {
     }
 
     #[test]
+    fn the_level_moves_in_whole_steps() {
+        assert_eq!(level_step(0.0), 0);
+        assert_eq!(level_step(0.04), 0);
+        assert_eq!(level_step(1.0), LEVEL_STEPS as u8);
+        assert_eq!(level_step(2.0), LEVEL_STEPS as u8);
+    }
+
+    #[test]
     fn the_sound_button_names_what_it_keeps() {
         let mut toolbar = Toolbar {
             microphone: RECORD_MICROPHONE_NONE.into(),
@@ -596,10 +652,25 @@ mod tests {
             microphone: RECORD_MICROPHONE_NONE.into(),
             ..one.clone()
         };
+        let quiet = Toolbar {
+            level: Some(0.0),
+            ..one.clone()
+        };
+        let speaking = Toolbar {
+            level: Some(0.7),
+            ..one.clone()
+        };
+        let speaking_two = Toolbar {
+            level: Some(1.0),
+            ..two.clone()
+        };
         for (name, toolbar) in [
             ("one-display", one),
             ("two-displays", two),
             ("silent", silent),
+            ("quiet", quiet),
+            ("speaking", speaking),
+            ("speaking-two-displays", speaking_two),
         ] {
             for dark in [false, true] {
                 let theme = if dark { "dark" } else { "light" };

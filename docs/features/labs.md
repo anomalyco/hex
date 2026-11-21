@@ -2931,13 +2931,16 @@ record shortcut  -> the toolbar: ✕  [Area | Window | Full screen ▾]  [sound 
 ├── sound ▾      -> Microphone: None, Same as dictation (default), or any input but Hex Microphone
 │                   (screenshots.record_microphone: "none", "default", or the device's name);
 │                   Record computer audio (screenshots.record_system_audio, off). The button shows
-│                   a microphone (crossed out for None) and a waveform while computer audio is on
+│                   a microphone (crossed out for None) and a waveform while computer audio is on;
+│                   with a microphone chosen, three bars beside it show what it hears, dim and
+│                   low while silent (screenshots/toolbar_level.rs)
 ├── Options ▾    -> Scale Retina to 1x, 30 or 60 fps, High · Medium · Low (the Recording settings)
 ├── Record / Return -> Area: the picker on an area; Window: the picker on windows;
 │                      Full screen: records the chosen display at once
 └── Esc, ✕, or the record shortcut again -> closes; the shot shortcut does nothing meanwhile
 // check: the_toolbar_takes_escape_return_and_its_shortcut_and_leaves_the_shot (screenshots.rs)
-// check: a_choice_shows_before_the_controller_hears_it, the_sound_button_names_what_it_keeps (capture_capsule/toolbar.rs)
+// check: a_choice_shows_before_the_controller_hears_it, the_sound_button_names_what_it_keeps,
+//        the_level_moves_in_whole_steps (capture_capsule/toolbar.rs)
 // not run: the toolbar on a real display, popups, and a display move; no golden or --snap scene shows it
 ```
 
@@ -2949,7 +2952,26 @@ its own thread, closed at stop, cancel, or quit (waiting at most 300 ms
 for the tail); a device that fails is opened again every second and what
 it missed is a gap, and one that won't open at all falls back to the
 timeline. A device dictation already has open is copied from the
-timeline. None keeps no microphone. Computer audio is ScreenCaptureKit's
+timeline. None keeps no microphone.
+
+The toolbar's bars read dictation's level while dictation's microphone is
+the chosen one and delivering audio. Otherwise (Release microphone while
+idle, or another device chosen) the toolbar opens the chosen input for
+the meter alone while it shows: no samples are kept, dictation's stream
+is never touched, and it closes when the toolbar closes, Record takes
+over, or another microphone is chosen. macOS shows its orange microphone
+indicator meanwhile. The toolbar redraws only when the level crosses one
+of eight steps. While a Screenshots recording with a microphone runs, the
+recording capsule shows the same three bars after its timer
+(`capture_host::recording_level`: the dictation timeline's level, or the
+recording's own input's); Annotate captures and None show none. Checks:
+`a_metered_recording_makes_room_for_its_level` (capture_capsule/surface.rs);
+the stills `renders_the_toolbar` and `renders_the_recording_level` are
+`#[ignore]`d and write only with `HEX_TOOLBAR_RENDERS` /
+`HEX_CAPSULE_RENDERS`. Not yet observed: the bars on a real display with
+a live microphone.
+
+Computer audio is ScreenCaptureKit's
 own stream audio with Hex's own sounds left out, written beside the movie
 as `system.m4a` under the Screen Recording grant the recording already
 has. When the movie saves, `scrawl-helper mux` mixes the microphone

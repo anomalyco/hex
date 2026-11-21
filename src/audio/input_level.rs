@@ -1,15 +1,48 @@
 //! The latest peak of the microphone audio Hex receives, for the window's
 //! level meters. The audio owner stores one atomic per chunk and the window
 //! reads it, so a meter never blocks or slows capture. Nothing is stored
-//! while the microphone is closed, so a stale peak reads as no audio.
+//! while the microphone is closed, so a stale peak reads as no audio. A
+//! recording's or a meter's own input keeps its own [`Peak`].
 
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 
-/// The latest peak's bits (high 32) and when it arrived, in milliseconds
-/// since `epoch` plus one (low 32; zero before any audio).
-static LATEST: AtomicU64 = AtomicU64::new(0);
+/// Dictation's microphone, as the window's meters read it.
+static DICTATION: Peak = Peak::new();
+
+/// One input's latest peak: its bits (high 32) and when it arrived, in
+/// milliseconds since `epoch` plus one (low 32; zero before any audio).
+pub struct Peak(AtomicU64);
+
+impl Default for Peak {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Peak {
+    pub const fn new() -> Self {
+        Self(AtomicU64::new(0))
+    }
+
+    /// Records the peak of a chunk the input delivered, measured around the
+    /// chunk's mean so a DC offset never reads as a level.
+    pub fn record(&self, samples: &[f32]) {
+        if samples.is_empty() {
+            return;
+        }
+        self.0
+            .store(pack(chunk_peak(samples), clock()), Ordering::Relaxed);
+    }
+
+    /// The peak of the audio received in the last quarter second, 0 to 1,
+    /// or `None` when none arrived.
+    pub fn recent(&self) -> Option<f32> {
+        unpack(self.0.load(Ordering::Relaxed), clock())
+    }
+}
+
 /// How long a peak stays current. Chunks arrive every 10 to 20 ms while the
 /// microphone is open.
 const FRESH_MS: u32 = 250;
@@ -23,13 +56,9 @@ fn clock() -> u32 {
     (epoch().elapsed().as_millis() as u32).wrapping_add(1)
 }
 
-/// Records the peak of a chunk the microphone delivered, measured around the
-/// chunk's mean so a DC offset never reads as a level.
+/// Records the peak of a chunk dictation's microphone delivered.
 pub fn record(samples: &[f32]) {
-    if samples.is_empty() {
-        return;
-    }
-    LATEST.store(pack(chunk_peak(samples), clock()), Ordering::Relaxed);
+    DICTATION.record(samples);
 }
 
 /// The chunk's absolute peak around its mean; zero for no samples.
@@ -48,7 +77,7 @@ fn chunk_peak(samples: &[f32]) -> f32 {
 /// `None` when none arrived: the microphone is closed, released while idle,
 /// failed, or not allowed.
 pub fn recent() -> Option<f32> {
-    unpack(LATEST.load(Ordering::Relaxed), clock())
+    DICTATION.recent()
 }
 
 fn pack(peak: f32, at: u32) -> u64 {

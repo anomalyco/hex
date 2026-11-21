@@ -361,10 +361,17 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 .hit()
                 .on_press_tx(press(id)),
         ),
-        Id::Lead => placed(el(), shown)
-            .trace_name("lead")
-            .child(dot(p, &live.meter))
-            .child(timer(p, surface, live)),
+        Id::Lead => {
+            let lead = placed(el(), shown)
+                .trace_name("lead")
+                .child(dot(p, &live.meter))
+                .child(timer(p, surface, live));
+            if surface.metered {
+                lead.child(level(p, surface, &live.meter))
+            } else {
+                lead
+            }
+        }
         Id::Processing => placed(el(), shown)
             .trace_name("processing")
             .child(spinner(p, &live.meter))
@@ -711,6 +718,27 @@ pub(super) fn timer(p: Paint, surface: &Surface, live: &Animated) -> El {
             .live_text(&live.clock)
             .w(clock_width(&surface.clock)),
     )
+}
+
+/// The microphone's level after the timer: three bars as tall as the
+/// recording hears it, dim while it hears nothing.
+pub(super) fn level(p: Paint, surface: &Surface, meter: &Meter) -> El {
+    let mut bars = el()
+        .absolute(LEAD_TEXT_X + clock_width(&surface.clock) + LEVEL_GAP, 0.0)
+        .size(LEVEL_W, CHIP_H)
+        .live_opacity(&meter.level_ink)
+        .a11y_hidden();
+    for live in &meter.level_bars {
+        let [x, y, w, h] = live.get();
+        bars = bars.child(
+            el().absolute(x, y)
+                .size(w, h)
+                .radius(1.0)
+                .fill(p.text())
+                .live_rect(live),
+        );
+    }
+    bars
 }
 
 /// "Processing…", each glyph at its place in the shaped label and lit by

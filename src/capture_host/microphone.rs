@@ -5,6 +5,7 @@
 //! closed when it stops. Its own input never touches dictation's stream: a
 //! device dictation already has open is copied from the timeline instead.
 
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::mpsc::SyncSender;
 
 use color_eyre::Result;
@@ -12,6 +13,32 @@ use color_eyre::Result;
 use super::AudioTimeline;
 use super::sink::{CaptureAudio, CaptureSinkClosed};
 use crate::audio::CaptureInstant;
+use crate::audio::input_level::{self, Peak};
+
+/// Whose level the recording capsule shows: none (Annotate, or a recording
+/// that keeps no microphone), dictation's input, or the recording's own.
+static LEVEL: AtomicU8 = AtomicU8::new(NO_LEVEL);
+const NO_LEVEL: u8 = 0;
+const DICTATION_LEVEL: u8 = 1;
+const OWN_LEVEL: u8 = 2;
+/// The latest peak of a recording's own input.
+static OWN_PEAK: Peak = Peak::new();
+
+/// The recording's microphone level, 0 to 1 (0 while no audio arrives), or
+/// `None` when its capsule shows none.
+pub(crate) fn recording_level() -> Option<f32> {
+    let peak = match LEVEL.load(Ordering::Acquire) {
+        DICTATION_LEVEL => input_level::recent(),
+        OWN_LEVEL => OWN_PEAK.recent(),
+        _ => return None,
+    };
+    Some(peak.unwrap_or(0.0))
+}
+
+/// The capsule shows no level: the recording stopped.
+pub(super) fn hide_level() {
+    LEVEL.store(NO_LEVEL, Ordering::Release);
+}
 
 /// The microphone a capture keeps.
 pub(super) enum Microphone {
@@ -78,6 +105,19 @@ impl Microphone {
             #[cfg(not(target_os = "macos"))]
             Choice::Device(_) => audio.open_sink(sink, since).map(|()| Self::Timeline),
         }
+    }
+
+    /// Shows this microphone's level on the recording capsule while
+    /// `shown`, or none.
+    pub(super) fn show_level(&self, shown: bool) {
+        let level = match self {
+            _ if !shown => NO_LEVEL,
+            Self::Timeline => DICTATION_LEVEL,
+            Self::Silent(_) => NO_LEVEL,
+            #[cfg(target_os = "macos")]
+            Self::Own(_) => OWN_LEVEL,
+        };
+        LEVEL.store(level, Ordering::Release);
     }
 
     /// Stops copying once audio through `through` arrived (bounded wait).
@@ -202,6 +242,7 @@ mod own {
                     samples,
                     captured_through,
                 } => {
+                    super::OWN_PEAK.record(&samples);
                     if !sink.offer(&samples, open.sample_rate, captured_through) {
                         break;
                     }

@@ -67,6 +67,10 @@ const CLOSE_HUG: f32 = 6.0;
 pub(crate) const CHIP_PX: f32 = 12.0;
 /// After the lead's text, equal to the dot's 12 pt inset.
 const LEAD_TRAIL: f32 = 12.0;
+/// The microphone's level after the timer: three 2 pt bars 2 pt apart, 6 pt
+/// after the digits.
+pub(crate) const LEVEL_GAP: f32 = 6.0;
+pub(crate) const LEVEL_W: f32 = 10.0;
 /// A mode chip: its icon, the gap after it, and the padding either side.
 pub(crate) const SEG_ICON: f32 = 14.0;
 pub(crate) const SEG_ICON_GAP: f32 = 5.0;
@@ -546,7 +550,7 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
 /// notch instead of the panel.
 #[cfg(test)]
 pub(crate) fn layout(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
-    layout_at(pres, clock, Anchor::Top, notch::Geometry::default())
+    layout_at(pres, clock, false, Anchor::Top, notch::Geometry::default())
 }
 
 /// The guesses `pres` lists as rows in a card, not as chips.
@@ -558,13 +562,15 @@ fn card_picks(pres: &Pres) -> &[(String, String)] {
 }
 
 /// [`layout`] resting at `anchor`, with a card's rows under the top line.
+/// A `metered` recording shows its microphone's level after the timer.
 pub(crate) fn layout_at(
     pres: &Pres,
     clock: &str,
+    metered: bool,
     anchor: Anchor,
     notch: notch::Geometry,
 ) -> ([f32; 4], Vec<Item>) {
-    let (mut shell, mut items) = line(pres, clock);
+    let (mut shell, mut items) = line(pres, clock, metered);
     let picks = card_picks(pres);
     let (dx, dy) = match anchor {
         Anchor::Top => (0.0, 0.0),
@@ -623,7 +629,7 @@ pub(crate) fn layout_at(
 }
 
 /// The capsule's one line: [`layout`] before any anchor or card.
-fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
+fn line(pres: &Pres, clock: &str, metered: bool) -> ([f32; 4], Vec<Item>) {
     let mut raw: Vec<(Id, String, f32, bool)> = Vec::with_capacity(8);
     let mut held_row = false;
     let modes = |raw: &mut Vec<(Id, String, f32, bool)>, active: Mode, phone: bool| {
@@ -656,7 +662,8 @@ fn line(pres: &Pres, clock: &str) -> ([f32; 4], Vec<Item>) {
             discarding,
             pen,
         } => {
-            let lead = LEAD_TEXT_X + clock_width(clock) + LEAD_TRAIL;
+            let level = if metered { LEVEL_GAP + LEVEL_W } else { 0.0 };
+            let lead = LEAD_TEXT_X + clock_width(clock) + level + LEAD_TRAIL;
             raw.push((Id::Lead, String::new(), lead, false));
             // The chips' row lines up with the picker's, so the pen waits
             // for them to fold.
@@ -798,6 +805,8 @@ impl Shown {
 pub(crate) struct Surface {
     pub(crate) pres: Pres,
     pub(crate) clock: String,
+    /// A recording shows its microphone's level after the timer.
+    pub(crate) metered: bool,
     pub(crate) reduced: bool,
     /// The capsule's resting rect, whether it shows, and the springs for
     /// its next change.
@@ -840,6 +849,7 @@ impl Surface {
         Self {
             pres: Pres::Hidden,
             clock: "0:00".into(),
+            metered: false,
             reduced: false,
             shell: pose(shell, Anchor::Top, notch),
             shell_on: false,
@@ -865,7 +875,7 @@ impl Surface {
     )]
     pub(crate) fn settled(mut self, pres: Pres) -> Self {
         self.anchor = anchor_for(&pres, self.anchor);
-        let (rest, items) = layout_at(&pres, &self.clock, self.anchor, self.notch);
+        let (rest, items) = layout_at(&pres, &self.clock, self.metered, self.anchor, self.notch);
         self.shell_on = !matches!(pres, Pres::Hidden);
         self.shell = if self.shell_on {
             rest
@@ -892,7 +902,7 @@ impl Surface {
         if self.anchor != Anchor::Notch {
             return true;
         }
-        let (rest, items) = layout_at(&self.pres, &self.clock, self.anchor, notch);
+        let (rest, items) = layout_at(&self.pres, &self.clock, self.metered, self.anchor, notch);
         if let Some((_, due, due_items)) = self.entry.as_mut() {
             *due = rest;
             *due_items = items;
@@ -957,6 +967,21 @@ impl Surface {
         resize
     }
 
+    /// Whether a recording shows its microphone's level. True when the
+    /// capsule re-lays out for it.
+    pub(crate) fn set_metered(&mut self, metered: bool, now: f64) -> bool {
+        if self.metered == metered {
+            return false;
+        }
+        self.metered = metered;
+        let recording = matches!(self.pres, Pres::Recording { .. });
+        if recording {
+            let same = self.pres.clone();
+            self.transition(same, now);
+        }
+        recording
+    }
+
     /// Shows `next`. Retargets keep every element's position and velocity
     /// (Rune's springs).
     pub(crate) fn set(&mut self, next: Pres, now: f64) {
@@ -1005,7 +1030,7 @@ impl Surface {
             return;
         }
 
-        let (rest, items) = layout_at(&next, &self.clock, self.anchor, self.notch);
+        let (rest, items) = layout_at(&next, &self.clock, self.metered, self.anchor, self.notch);
         if !self.shell_on || moved || matches!(prev, Pres::Hidden) {
             // Entry: this commit puts the capsule at its origin pose,
             // invisibly and instantly; the next frame springs it to rest.
@@ -1253,6 +1278,17 @@ mod tests {
         });
     }
 
+    /// A recording that shows its microphone's level makes room for it
+    /// after the timer, and only then.
+    #[test]
+    fn a_metered_recording_makes_room_for_its_level() {
+        let (plain, _) = line(&recording(false), "0:07", false);
+        let (metered, _) = line(&recording(false), "0:07", true);
+        assert!((metered[2] - plain[2] - (LEVEL_GAP + LEVEL_W)).abs() < 1e-3);
+        let (processing, _) = line(&Pres::Processing, "0:07", false);
+        assert_eq!(line(&Pres::Processing, "0:07", true).0, processing);
+    }
+
     /// The default geometry is the pretend notch: the resting capsule is
     /// exactly where it was before any notch was measured.
     #[test]
@@ -1260,6 +1296,7 @@ mod tests {
         let (shell, _) = layout_at(
             &Pres::Processing,
             "0:00",
+            false,
             Anchor::Notch,
             notch::Geometry::default(),
         );
@@ -1290,7 +1327,7 @@ mod tests {
             (663.0, 873.0),
             "the tucked shell is the notch itself"
         );
-        let (shell, items) = layout_at(&Pres::Processing, "0:00", Anchor::Notch, geometry);
+        let (shell, items) = layout_at(&Pres::Processing, "0:00", false, Anchor::Notch, geometry);
         assert_eq!(shell[2], 210.0 + 2.0 * 12.0);
         assert_eq!(shell[0], geometry.left - 12.0);
         assert_eq!(shell[0] + shell[2], geometry.right + 12.0);
@@ -1311,7 +1348,7 @@ mod tests {
             left: 200.0,
             right: 420.0,
         };
-        let (shell, items) = layout_at(&Pres::Processing, "0:00", Anchor::Notch, geometry);
+        let (shell, items) = layout_at(&Pres::Processing, "0:00", false, Anchor::Notch, geometry);
         assert_eq!(shell[0], geometry.centre() - geometry.min_width() * 0.5);
         let item = items.first().expect("the processing label").rect;
         assert_eq!(item[0] + item[2] * 0.5, 310.0);
@@ -1351,12 +1388,12 @@ mod tests {
     fn a_wide_recording_row_stays_inside_the_notch_shell() {
         // A 210 pt notch, 12 pt right of its 1512 pt display's middle.
         let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
-        let (row, _) = line(&recording(true), "0:00");
+        let (row, _) = line(&recording(true), "0:00", false);
         assert!(
             row[2] > geometry.min_width(),
             "the chips row is wider than the notch's minimum"
         );
-        let (shell, items) = layout_at(&recording(true), "0:00", Anchor::Notch, geometry);
+        let (shell, items) = layout_at(&recording(true), "0:00", false, Anchor::Notch, geometry);
         assert_eq!(shell[2], row[2], "the shell keeps the row's width");
         assert_eq!(shell[0], row[0] + (geometry.centre() - CX));
         for item in &items {
@@ -1375,7 +1412,7 @@ mod tests {
     fn a_measured_notch_never_tucks_under_reduce_motion() {
         tuning::with_flow(CapsuleFlow::Notch, || {
             let notch::Measured { geometry, .. } = notch::fitted(663.0, 873.0, 1.0);
-            let (rest, _) = layout_at(&recording(false), "0:00", Anchor::Notch, geometry);
+            let (rest, _) = layout_at(&recording(false), "0:00", false, Anchor::Notch, geometry);
             let mut entering = Surface::new();
             entering.reduced = true;
             entering.set(recording(false), 0.0);
@@ -1424,7 +1461,7 @@ mod tests {
                 let mut s = Surface::new();
                 s.reduced = true;
                 s.set(recording(false), 0.0);
-                let (rest, _) = layout_at(&s.pres, &s.clock, s.anchor, s.notch);
+                let (rest, _) = layout_at(&s.pres, &s.clock, s.metered, s.anchor, s.notch);
                 assert_eq!(s.shell, rest, "{flow:?} enters at rest");
                 let now = run(&mut s, 0.0, 1.0);
                 assert!(s.shell_on);

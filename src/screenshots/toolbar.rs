@@ -50,6 +50,7 @@ pub(super) fn open() -> bool {
                 return;
             }
             let settings = crate::app_settings::screenshot_settings();
+            let metered = settings.record_microphone.clone();
             let microphones = microphones();
             let (displays, under) = displays();
             let handle = overlay.clone();
@@ -87,6 +88,7 @@ pub(super) fn open() -> bool {
                     one_x: settings.scale_to_1x,
                     fps: settings.fps(),
                     quality: settings.quality,
+                    level: None,
                     act: Some(act),
                 };
                 if let Some(id) = on {
@@ -97,6 +99,7 @@ pub(super) fn open() -> bool {
                 handle.show();
                 tx.animated();
             });
+            super::toolbar_level::start(overlay.clone(), metered);
         });
     if spawned.is_err() {
         OPEN.store(false, Ordering::Release);
@@ -106,6 +109,7 @@ pub(super) fn open() -> bool {
 
 /// Closes the toolbar. Safe from any thread.
 pub(super) fn close() {
+    super::toolbar_level::stop();
     if OPEN.swap(false, Ordering::AcqRel)
         && let Some(overlay) = OVERLAY.get()
     {
@@ -138,6 +142,9 @@ fn act(toolbar: &Toolbar, action: ToolbarAction) {
             }
         }
         ToolbarAction::Microphone(name) => {
+            if let Some(overlay) = OVERLAY.get() {
+                super::toolbar_level::start(overlay.clone(), name.clone());
+            }
             remember("microphone", move |settings| {
                 settings.record_microphone.clone_from(&name);
             });
