@@ -82,10 +82,16 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
     **Continue**, which iOS's prompt follows, until it's asked; never a button
     that says Allow, per App Review 5.1.1(iv)), and the speech model, a field to
     switch to Hex in while Full Access is unconfirmed, and **Open Settings**
-    (Hex's page in Settings) while the keyboard isn't ready. Full Access shows
-    as on once the keyboard has run with it (`keyboard.fullAccessSeenAt`): iOS
-    reports Full Access only inside the keyboard, so the app can't tell on from
-    off until then, and the sheet calls it "Not confirmed yet".
+    (Hex's page in Settings) while the keyboard isn't ready. iOS reports Full
+    Access only inside the keyboard, so the keyboard reports it to the App Group
+    as it loads, each time it appears and every 5 s while shown
+    (`keyboard.fullAccessOn`/`Off`, with when its process started, and
+    `keyboard.fullAccessSeenAt` for an on), and posts a Darwin notification the
+    app refreshes on. Full Access shows as on once a keyboard has run with it,
+    and as off only when a keyboard said so since Hex last came to the
+    foreground (it changes only in Settings), from a keyboard process no older
+    than the one that last saw it on. Otherwise the sheet says "Not confirmed
+    yet" with "Switch to Hex below to confirm." under it, and focuses the field.
   - **Opening Hex:** SwiftUI `Link`, `openURL`, and `extensionContext.open`
     do nothing in a keyboard extension, so the keyboard opens Hex through
     the `UIApplication` at the end of its responder chain

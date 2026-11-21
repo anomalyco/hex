@@ -10,14 +10,32 @@ final class KeyboardSetupMonitor {
     static let keyboardBundleID = "anomaly.hex.mobile.keyboard"
 
     private let bridge: KeyboardBridge
+    private let observers = NotificationObservers()
 
     /// nil when iOS doesn't say which keyboards are enabled.
     private(set) var keyboardAdded: Bool?
-    private(set) var fullAccessOn = false
+    private(set) var fullAccess = KeyboardFullAccess.unconfirmed
     private(set) var microphone = AVAudioApplication.shared.recordPermission
+    /// When Hex last came to the foreground (KeyboardFullAccess.resolve).
+    private(set) var activeSince: TimeInterval
 
-    init(bridge: KeyboardBridge = KeyboardBridge()) {
+    var fullAccessOn: Bool { fullAccess == .on }
+
+    init(bridge: KeyboardBridge = KeyboardBridge(), activeSince: TimeInterval = Date().timeIntervalSince1970) {
         self.bridge = bridge
+        self.activeSince = activeSince
+        refresh()
+        // The keyboard says when it reports, so the sheet changes as soon as it opens.
+        KeyboardBridge.forwardFullAccessReports()
+        observers.observe(KeyboardBridge.fullAccessReported) { [weak self] in self?.refresh() }
+        observers.observe(UIApplication.willEnterForegroundNotification) { [weak self] in
+            self?.cameToForeground()
+        }
+    }
+
+    /// Back from Settings, or anywhere else Full Access might have changed.
+    func cameToForeground(at now: TimeInterval = Date().timeIntervalSince1970) {
+        activeSince = now
         refresh()
     }
 
@@ -32,30 +50,31 @@ final class KeyboardSetupMonitor {
             case "setup", "setup-sheet", "onboarding-try", "onboarding-try-off", "onboarding-try-empty",
                  "onboarding-permissions-done", "onboarding-waiting", "onboarding-failed":
                 keyboardAdded = true
-                fullAccessOn = false
+                fullAccess = .unconfirmed
                 microphone = .granted
             case "onboarding-setup", "onboarding-demo", "onboarding-permissions":
                 keyboardAdded = false
-                fullAccessOn = false
+                fullAccess = .unconfirmed
                 microphone = .undetermined
             case "setup-sheet-microphone":
                 keyboardAdded = true
-                fullAccessOn = false
+                fullAccess = .unconfirmed
                 microphone = .undetermined
             case "onboarding-tour":
                 let elapsed = OnboardingFixture.Tour.elapsed
                 keyboardAdded = elapsed >= OnboardingFixture.Tour.keyboardAdded
-                fullAccessOn = elapsed >= OnboardingFixture.Tour.fullAccess
+                fullAccess = elapsed >= OnboardingFixture.Tour.fullAccess ? .on : .unconfirmed
                 microphone = elapsed >= OnboardingFixture.Tour.microphoneAllowed ? .granted : .undetermined
             default:
                 keyboardAdded = true
-                fullAccessOn = true
+                fullAccess = .on
                 microphone = .granted
             }
             return
         }
 
-        fullAccessOn = bridge.fullAccessSeenAt != nil
+        let latest = bridge.fullAccess(activeSince: activeSince)
+        if fullAccess != latest { fullAccess = latest }
         if let keyboards = UserDefaults.standard.stringArray(forKey: "AppleKeyboards") {
             keyboardAdded = keyboards.contains(Self.keyboardBundleID) || fullAccessOn
         } else {
@@ -72,6 +91,21 @@ final class KeyboardSetupMonitor {
                 done?()
             }
         }
+    }
+}
+
+/// Block observers on NotificationCenter, removed with their owner.
+private final class NotificationObservers {
+    private var tokens: [NSObjectProtocol] = []
+
+    func observe(_ name: Notification.Name, _ handler: @escaping @MainActor () -> Void) {
+        tokens.append(NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+            MainActor.assumeIsolated { handler() }
+        })
+    }
+
+    deinit {
+        tokens.forEach(NotificationCenter.default.removeObserver)
     }
 }
 
@@ -135,6 +169,7 @@ struct SetupStatusRow: View {
 struct SetupSheet: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var dictation: DictationController
     let monitor: KeyboardSetupMonitor
     let keyboardSpeech: KeyboardSpeechPreparation
@@ -165,6 +200,35 @@ struct SetupSheet: View {
             .onChange(of: monitor.fullAccessOn) { _, on in
                 if on { checkFocused = false }
             }
+            .onAppear { focusCheckSoon() }
+            .onChange(of: scenePhase) { _, phase in
+                if phase == .active { focusCheckSoon() }
+            }
+    }
+
+    /// While Full Access is unconfirmed, the field takes focus so the keyboard comes up: Hex,
+    /// if it was the last one, confirms at once; any other keyboard shows the switch hint.
+    private func focusCheckSoon() {
+        guard needsKeyboardCheck, monitor.fullAccess == .unconfirmed, !checkFocused else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if needsKeyboardCheck, monitor.fullAccess == .unconfirmed { checkFocused = true }
+        }
+    }
+
+    private var fullAccessStatus: String {
+        switch monitor.fullAccess {
+        case .on: String(localized: "On")
+        case .off: String(localized: "Off")
+        case .unconfirmed: needsKeyboardCheck ? String(localized: "Not confirmed yet") : String(localized: "Off")
+        }
+    }
+
+    /// What to do next, under the row, once the keyboard is added.
+    private var fullAccessNote: String? {
+        guard needsKeyboardCheck else { return nil }
+        return monitor.fullAccess == .off
+            ? String(localized: "Turn on Allow Full Access in Settings.")
+            : String(localized: "Switch to Hex below to confirm.")
     }
 
     private var content: some View {
@@ -200,8 +264,9 @@ struct SetupSheet: View {
                 SettingsDivider(leading: 42)
                 row(
                     title: "Full Access",
-                    status: monitor.fullAccessOn ? String(localized: "On") : needsKeyboardCheck ? String(localized: "Not confirmed yet") : String(localized: "Off"),
-                    icon: monitor.fullAccessOn ? .done : needsKeyboardCheck ? .unconfirmed : .todo
+                    status: fullAccessStatus,
+                    icon: monitor.fullAccessOn ? .done : needsKeyboardCheck && monitor.fullAccess == .unconfirmed ? .unconfirmed : .todo,
+                    note: fullAccessNote
                 )
                 SettingsDivider(leading: 42)
                 row(
@@ -231,8 +296,10 @@ struct SetupSheet: View {
                 TextField(
                     "",
                     text: $checkText,
-                    prompt: Text("Tap here, then switch to Hex with \(Image(systemName: "globe"))")
-                        .foregroundStyle(HexTheme.textFaint)
+                    prompt: (checkFocused
+                        ? Text("Switch to Hex with \(Image(systemName: "globe"))")
+                        : Text("Tap here, then switch to Hex with \(Image(systemName: "globe"))"))
+                        .foregroundStyle(HexTheme.textMuted)
                 )
                 .font(.system(size: 15))
                 .foregroundStyle(HexTheme.textBase)
@@ -243,6 +310,10 @@ struct SetupSheet: View {
                     HexTheme.bgBase,
                     in: RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
                 )
+                .overlay {
+                    RoundedRectangle(cornerRadius: HexTheme.cardRadius, style: .continuous)
+                        .strokeBorder(checkFocused ? HexTheme.borderStrong : .clear)
+                }
             }
 
             if !monitor.keyboardReady || monitor.microphone == .denied {
@@ -315,11 +386,33 @@ struct SetupSheet: View {
         }
     }
 
-    private func row(title: LocalizedStringKey, status: String, icon: RowIcon) -> some View {
-        row(title: title, status: status, icon: icon) { EmptyView() }
+    private func row(title: LocalizedStringKey, status: String, icon: RowIcon, note: String? = nil) -> some View {
+        row(title: title, status: status, icon: icon, note: note) { EmptyView() }
     }
 
     private func row<Trailing: View>(
+        title: LocalizedStringKey,
+        status: String,
+        icon: RowIcon,
+        note: String? = nil,
+        @ViewBuilder trailing: () -> Trailing
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            rowLine(title: title, status: status, icon: icon, trailing: trailing)
+            if let note {
+                Text(note)
+                    .font(.system(size: 13))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.leading, 26)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, note == nil ? 0 : 12)
+        .frame(minHeight: 46)
+    }
+
+    private func rowLine<Trailing: View>(
         title: LocalizedStringKey,
         status: String,
         icon: RowIcon,
@@ -355,8 +448,6 @@ struct SetupSheet: View {
 
             trailing()
         }
-        .padding(.horizontal, 16)
-        .frame(minHeight: 46)
     }
 
     private func smallButton(_ title: LocalizedStringKey, action: @escaping () -> Void) -> some View {

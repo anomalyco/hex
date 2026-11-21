@@ -153,6 +153,31 @@ final class KeyboardBridgeTests: XCTestCase {
     }
 
     @MainActor
+    func testSetupMonitorFollowsTheKeyboardsReports() {
+        let suiteName = "hex.tests.setupMonitor.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        let monitor = KeyboardSetupMonitor(bridge: bridge, activeSince: 1_000)
+        XCTAssertEqual(monitor.fullAccess, .unconfirmed)
+
+        bridge.recordFullAccess(KeyboardFullAccessReport(isOn: false, at: 1_010, launchedAt: 1_005))
+        monitor.refresh()
+        XCTAssertEqual(monitor.fullAccess, .off, "the keyboard said off while Hex was up")
+        monitor.cameToForeground(at: 1_020)
+        XCTAssertEqual(monitor.fullAccess, .unconfirmed, "back from Settings: off is no longer known")
+
+        // No refresh call: the keyboard's Darwin notification brings the report in.
+        bridge.recordFullAccess(KeyboardFullAccessReport(isOn: true, at: 1_030, launchedAt: 1_025))
+        let deadline = Date().addingTimeInterval(3)
+        while monitor.fullAccess != .on, Date() < deadline {
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+        XCTAssertEqual(monitor.fullAccess, .on)
+        XCTAssertTrue(monitor.fullAccessOn)
+    }
+
+    @MainActor
     func testEmptyKeyboardDictationIsNotedInTheAppGroup() {
         let suiteName = "hex.tests.emptyDictation.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suiteName)!
