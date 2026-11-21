@@ -560,13 +560,6 @@ fn listener_command(
         } => background(reply, move || {
             let action = control::check_flags(action, true, raw)?;
             let printing_start = action == control::CaptureAction::Start;
-            if printing_start && !crate::labs::print_start() {
-                return Err(control::ControlError::new(
-                    "disabled",
-                    "Labs › Dictation for a command is off; turn it on with \
-                     `hex labs on print-start`",
-                ));
-            }
             listener_ready(&runtime)?;
             let (print, printed) = control::PrintReply::channel();
             // A printing start answers only when its dictation ends; a

@@ -417,7 +417,6 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-keep-on-clipboard",
         "lab-copy-only",
         "lab-return-to-app",
-        "lab-print-start",
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-clean-up",
@@ -456,9 +455,6 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.return_to_app);
     tap(&mut rt, "lab-return-to-app");
     assert!(rt.state.settings.labs.return_to_app);
-    assert!(!rt.state.settings.labs.print_start);
-    tap(&mut rt, "lab-print-start");
-    assert!(rt.state.settings.labs.print_start);
     assert!(!rt.state.settings.labs.copy_dictation_audio);
     tap(&mut rt, "lab-copy-dictation-audio");
     assert!(rt.state.settings.labs.copy_dictation_audio);
@@ -1327,16 +1323,9 @@ fn an_update_is_a_secondary_button_with_a_dot_and_its_own_label() {
 }
 
 #[test]
-fn release_notes_link_shows_only_with_its_lab() {
+fn release_notes_link_shows_only_for_a_published_build() {
     let mut rt = runtime("portal", true, PANE_SIZE);
     rt.state.build_preview = Some(BuildKind::Release);
-    refresh(&mut rt);
-    assert!(
-        rt.find("release-notes").is_none(),
-        "off, the footer is unchanged"
-    );
-
-    rt.state.settings.labs.release_notes_link = true;
     refresh(&mut rt);
     assert!(rt.find("release-notes").is_some());
     assert!(rt.find("nav-whats-new").is_some());
@@ -1346,7 +1335,7 @@ fn release_notes_link_shows_only_with_its_lab() {
         refresh(&mut rt);
         assert!(
             rt.find("release-notes").is_none(),
-            "the lab is on, but a {name} build has no published notes"
+            "a {name} build has no published notes"
         );
     }
 }
@@ -2264,7 +2253,6 @@ fn labs_lists_every_toggle_off_by_default() {
         ("lab-playground", settings.labs.playground),
         ("lab-live-text", settings.labs.live_text),
         ("lab-live-chapters", settings.labs.live_chapters),
-        ("lab-vocabulary-biasing", settings.labs.vocabulary_biasing),
         ("lab-vocabulary-files", settings.labs.vocabulary_files),
         ("lab-screen-vocabulary", settings.labs.screen_vocabulary),
         (
@@ -2292,8 +2280,6 @@ fn labs_lists_every_toggle_off_by_default() {
     );
     tap(&mut rt, "lab-live-text");
     assert!(rt.state.settings.labs.live_text);
-    tap(&mut rt, "lab-vocabulary-biasing");
-    assert!(rt.state.settings.labs.vocabulary_biasing);
     tap(&mut rt, "lab-vocabulary-files");
     assert!(rt.state.settings.labs.vocabulary_files);
     tap(&mut rt, "lab-cursor-context");
@@ -2346,7 +2332,7 @@ fn a_labs_link_shows_its_labs_group_and_leaves_it_off() {
     use super::super::labs::LabsLink;
     use crate::labs::Feature;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
-    let feature = Feature::VocabularyBiasing;
+    let feature = Feature::VocabularyFiles;
     assert!(!feature.on(&rt.state.settings));
     let link = LabsLink {
         lab: Some(feature.name().into()),
@@ -2356,7 +2342,7 @@ fn a_labs_link_shows_its_labs_group_and_leaves_it_off() {
     settle(&mut rt);
     assert!(rt.state.labs_open);
     assert_eq!(rt.state.lab_store.group, Some(feature.group()));
-    assert!(rt.find("lab-card-vocabulary-biasing").is_some());
+    assert!(rt.find("lab-card-vocabulary-files").is_some());
     assert!(!feature.on(&rt.state.settings), "a link never flips it");
 }
 
@@ -2365,7 +2351,7 @@ fn a_labs_link_keeps_the_category_it_names() {
     use super::super::labs::LabsLink;
     let mut rt = runtime("mac-settings", true, (980.0, 2000.0));
     let link = LabsLink {
-        lab: Some(crate::labs::Feature::VocabularyBiasing.name().into()),
+        lab: Some(crate::labs::Feature::VocabularyFiles.name().into()),
         category: Some("shortcuts".into()),
         ..LabsLink::default()
     };
@@ -2531,103 +2517,6 @@ fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
     tap(&mut rt, "lab-stop-phrase");
     assert!(!rt.state.settings.labs.stop_phrase);
     assert!(rt.find("stop-phrase-text").is_none());
-}
-
-#[test]
-fn browser_access_shows_its_origins_on_its_card_while_on() {
-    use crate::labs::Feature;
-    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
-    rt.update(|ui, _| {
-        ui.lab_store.group = Some(Feature::ApiBrowserAccess.group());
-    });
-    settle(&mut rt);
-    assert!(rt.find("api-browser-origins").is_none(), "hidden while off");
-    tap(&mut rt, "lab-api-browser-access");
-    assert!(rt.state.settings.labs.api_browser_access);
-    assert!(rt.find("api-browser-origins").is_some());
-    assert_eq!(rt.state.lab_store.origins.text, "", "nothing saved yet");
-
-    // The field saves what it holds, keeping only real origins, normalized.
-    rt.update(|ui, _| {
-        ui.lab_store.origins =
-            rune::TextEdit::new("HTTPS://Example.com/, http://localhost:5173, *, null".to_string());
-    });
-    rt.state.flush_drafts();
-    assert_eq!(
-        rt.state.settings.labs.api_browser_origins,
-        vec![
-            "https://example.com".to_string(),
-            "http://localhost:5173".to_string()
-        ]
-    );
-
-    // A list saved elsewhere updates the field in its normalized form, and
-    // reopening Labs shows it too.
-    let mut external = rt.state.settings.clone();
-    external.labs.api_browser_origins = vec![
-        "HTTPS://Other.example:443/".to_string(),
-        "not an origin".to_string(),
-    ];
-    assert!(rt.state.adopt(external));
-    refresh(&mut rt);
-    assert_eq!(rt.state.lab_store.origins.text, "https://other.example");
-
-    // The field leaves with its lab.
-    tap(&mut rt, "lab-api-browser-access");
-    assert!(!rt.state.settings.labs.api_browser_access);
-    assert!(rt.find("api-browser-origins").is_none());
-
-    // A window that never opened the field (the lab was turned on by the
-    // CLI, say) leaves the saved list alone when another setting saves.
-    let mut untouched = runtime("mac-labs", true, (980.0, 2000.0));
-    untouched.state.settings.labs.api_browser_access = true;
-    untouched.state.settings.labs.api_browser_origins = vec!["https://saved.example".to_string()];
-    untouched.state.flush_drafts();
-    assert_eq!(
-        untouched.state.settings.labs.api_browser_origins,
-        vec!["https://saved.example".to_string()]
-    );
-}
-
-#[test]
-fn browser_access_keeps_its_typing_through_its_own_save() {
-    use crate::labs::Feature;
-    let mut rt = runtime("mac-labs", true, (980.0, 2000.0));
-    rt.update(|ui, _| {
-        ui.lab_store.group = Some(Feature::ApiBrowserAccess.group());
-    });
-    settle(&mut rt);
-    tap(&mut rt, "lab-api-browser-access");
-
-    // The saved list is normalized, but the field keeps exactly what was
-    // typed, so a later keystroke lands after the port rather than inside a
-    // rewritten origin.
-    rt.update(|ui, _| {
-        ui.lab_store.origins = rune::TextEdit::new("http://localhost:80".to_string());
-    });
-    rt.state.flush_drafts();
-    assert_eq!(
-        rt.state.settings.labs.api_browser_origins,
-        vec!["http://localhost".to_string()]
-    );
-    assert_eq!(rt.state.lab_store.origins.text, "http://localhost:80");
-
-    rt.update(|ui, _| {
-        ui.lab_store.origins =
-            rune::TextEdit::new("http://localhost:80, https://example.com,".to_string());
-    });
-    rt.state.flush_drafts();
-    assert_eq!(
-        rt.state.settings.labs.api_browser_origins,
-        vec![
-            "http://localhost".to_string(),
-            "https://example.com".to_string()
-        ]
-    );
-    assert_eq!(
-        rt.state.lab_store.origins.text,
-        "http://localhost:80, https://example.com,"
-    );
 }
 
 #[test]

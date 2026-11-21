@@ -391,11 +391,8 @@ fn footer(ui: &Ui, p: Paint) -> El {
         .children(sidebar_update::blocked(ui, p))
 }
 
-/// The version itself links to this build's notes while its lab is on.
+/// The version itself links to this build's notes.
 fn release_notes_url(ui: &Ui) -> Option<String> {
-    if !crate::labs::Feature::ReleaseNotesLink.on(&ui.settings) {
-        return None;
-    }
     // A source or test build has no published notes for its code.
     if ui.build_preview.unwrap_or_else(build_kind) != BuildKind::Release {
         return None;

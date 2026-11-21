@@ -6,7 +6,6 @@
 //! Voice Filter, Playground, Modes editor) joins the main sidebar while on
 //! and is hidden while off.
 
-mod browser_access;
 mod group;
 #[cfg(all(target_os = "macos", hex_capture))]
 pub(super) mod screenshots;
@@ -226,11 +225,6 @@ pub(super) struct Store {
     pub(super) stop_phrase: TextEdit,
     /// Whether `stop_phrase` started from the saved phrase.
     pub(super) stop_phrase_synced: bool,
-    /// Labs › Browser access to the local API's origins while it's on: a
-    /// draft, saved as the comma-separated field shows it.
-    pub(super) origins: TextEdit,
-    /// Whether `origins` started from the saved origins.
-    pub(super) origins_synced: bool,
     /// The lab a `hex://labs/<feature>` link named and when, so its card
     /// shows a focus border for [`FLASH`].
     pub(super) flash: Option<(&'static str, std::time::Instant)>,
@@ -310,53 +304,6 @@ impl Store {
         let draft = self.stop_phrase.text.trim();
         !draft.is_empty() && draft != settings.labs.stop_phrase_text
     }
-
-    /// Starts the origins field at the saved origins, normalized.
-    pub(super) fn sync_origins(&mut self, saved: &[String]) {
-        self.origins = TextEdit::new(origins_text(saved));
-        self.origins_synced = true;
-    }
-
-    /// Adopts origins another writer saved, unless the field holds an unsaved
-    /// draft. The field's own save passes the same list on both sides and
-    /// leaves the text (and its caret) as typed.
-    pub(super) fn rebase_origins(&mut self, before: &[String], after: &[String]) {
-        let before = crate::app_settings::normalize_browser_origins(before);
-        let after = crate::app_settings::normalize_browser_origins(after);
-        if before == after {
-            return;
-        }
-        let draft = crate::app_settings::parse_browser_origins(&self.origins.text);
-        if !self.origins_synced || draft == before {
-            self.sync_origins(&after);
-        }
-    }
-
-    /// The origins `settings` should hold: the field's entries, ignoring
-    /// anything that isn't an `http://` or `https://` origin. A lab that's
-    /// off, or a field this window never opened, leaves its saved list alone.
-    pub(super) fn project_origins(&self, settings: &mut crate::app_settings::AppSettings) {
-        if !settings.labs.api_browser_access || !self.origins_synced {
-            return;
-        }
-        settings.labs.api_browser_origins =
-            crate::app_settings::parse_browser_origins(&self.origins.text);
-    }
-
-    /// Whether the origins field holds typing the saved origins don't have.
-    /// A lab that's off, or a field this window never opened, has no draft.
-    pub(super) fn origins_dirty(&self, settings: &crate::app_settings::AppSettings) -> bool {
-        if !settings.labs.api_browser_access || !self.origins_synced {
-            return false;
-        }
-        crate::app_settings::parse_browser_origins(&self.origins.text)
-            != crate::app_settings::normalize_browser_origins(&settings.labs.api_browser_origins)
-    }
-}
-
-/// The saved origins as the card's comma-separated field shows them.
-fn origins_text(origins: &[String]) -> String {
-    crate::app_settings::normalize_browser_origins(origins).join(", ")
 }
 
 /// What a `hex://labs` link asks the store to show.
@@ -425,8 +372,6 @@ fn open(ui: &mut Ui, tx: &mut Tx) {
         .sync_phrase(&ui.settings.labs.voice_prompt_phrase);
     ui.lab_store
         .sync_stop_phrase(&ui.settings.labs.stop_phrase_text);
-    ui.lab_store
-        .sync_origins(&ui.settings.labs.api_browser_origins);
     tx.settle();
 }
 
@@ -570,7 +515,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
         }
     }
     rows.push(row(Feature::Appearance, Some(&PANEL)));
-    rows.push(row(Feature::ReleaseNotesLink, None));
     if caps.meetings {
         rows.push(row(Feature::LiveChapters, None));
         // macOS's status item lists them, from the meeting controller's own
@@ -584,7 +528,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             rows.push(row(Feature::MeetingImport, None));
         }
     }
-    rows.push(row(Feature::VocabularyBiasing, Some(&BOOK)));
     rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
     // macOS reads the focused window through Accessibility as a capture
     // becomes real.
@@ -595,9 +538,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
     }
     if caps.keyboard_model_switching {
         rows.push(row(Feature::KeyboardModelSwitching, Some(&KEYBOARD)));
-    }
-    if caps.app_model_switching {
-        rows.push(row(Feature::AppModelSwitching, Some(&KEYBOARD)));
     }
     // Every OS's paster can leave a dictation on the clipboard; only macOS's
     // and Windows' can skip the paste.
@@ -614,7 +554,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
     if caps.os == super::platform::Os::Macos {
         rows.push(row(Feature::ReturnToApp, Some(&PANEL)));
         // macOS's listener answers a printing start when its dictation ends.
-        rows.push(row(Feature::PrintStart, None));
     }
     // macOS's shortcut machine takes a shortcut without a key.
     if caps.os == super::platform::Os::Macos {
@@ -644,7 +583,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
             // listener stays up.
             rows.push(row(Feature::PauseMenu, None));
             // macOS's app menu Quit Hex closes the window instead.
-            rows.push(row(Feature::QuitClosesWindow, None));
             // macOS's HUD reads the screen's notch from NSScreen.
             rows.push(row(Feature::NotchIndicator, Some(&WAVE)));
             // Hex's session tap takes the shortcut; ScreenCaptureKit shoots.
@@ -739,7 +677,6 @@ fn rows(ui: &Ui) -> Vec<Row> {
     }
     rows.push(row(Feature::PickerSortFilter, None));
     rows.push(row(Feature::BenchmarkDetails, None));
-    rows.push(row(Feature::PickerActiveFirst, None));
     rows.push(row(Feature::ModelInPlace, None));
     // Metal has the K-quant kernels; the Vulkan builds embed shaders only for
     // the catalog's types.
@@ -761,10 +698,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
             ..drop
         },
     });
-    rows.push(row(Feature::ShellCompletions, None));
     rows.push(row(Feature::ApiProcessing, None));
     rows.push(row(Feature::ApiTimestamps, None));
-    rows.push(row(Feature::ApiBrowserAccess, Some(&GLOBE)));
     rows.push(row(Feature::SpeakersOnly, None));
     rows.push(row(Feature::KeepMicrophoneOpen, Some(&TIMER)));
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
@@ -896,12 +831,10 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::FailureNotices => "lab-failure-notices",
         Feature::LiveTyping => "lab-live-typing",
         Feature::LiveChapters => "lab-live-chapters",
-        Feature::VocabularyBiasing => "lab-vocabulary-biasing",
         Feature::ScreenVocabulary => "lab-screen-vocabulary",
         Feature::LearnFromCorrections => "lab-learn-from-corrections",
         Feature::TerminalPaste => "lab-terminal-paste",
         Feature::KeyboardModelSwitching => "lab-keyboard-model-switching",
-        Feature::AppModelSwitching => "lab-app-model-switching",
         Feature::MouseShortcuts => "lab-mouse-shortcuts",
         Feature::PauseBrowser => "lab-pause-browser",
         Feature::ShareShortcut => "lab-share-shortcut",
@@ -929,7 +862,6 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
         Feature::OutputFixes => "lab-output-fixes",
-        Feature::PickerActiveFirst => "lab-picker-active-first",
         Feature::ModelInPlace => "lab-model-in-place",
         Feature::KQuantModels => "lab-k-quant-models",
         Feature::PickerDownloaded => "lab-picker-downloaded",
@@ -939,12 +871,10 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CopyDictationAudio => "lab-copy-dictation-audio",
         Feature::PasteLastPicker => "lab-paste-last-picker",
         Feature::Appearance => "lab-appearance",
-        Feature::ReleaseNotesLink => "lab-release-notes-link",
         Feature::HideMenuBarIcon => "lab-hide-menu-bar-icon",
         Feature::PauseMenu => "lab-pause-menu",
         Feature::CalendarMenu => "lab-calendar-menu",
         Feature::CalendarSelectAll => "lab-calendar-select-all",
-        Feature::QuitClosesWindow => "lab-quit-closes-window",
         Feature::CapsLockDictation => "lab-caps-lock-dictation",
         Feature::GnomeClipboardRestore => "lab-gnome-clipboard-restore",
         Feature::TypedText => "lab-typed-text",
@@ -957,14 +887,11 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
-        Feature::ShellCompletions => "lab-shell-completions",
         Feature::YoloMode => "lab-yolo-mode",
         Feature::ApiProcessing => "lab-api-processing",
         Feature::ApiTimestamps => "lab-api-timestamps",
-        Feature::ApiBrowserAccess => "lab-api-browser-access",
         Feature::SpeakersOnly => "lab-speakers-only",
         Feature::KeepMicrophoneOpen => "lab-keep-microphone-open",
-        Feature::PrintStart => "lab-print-start",
         Feature::VoicePrompt => "lab-voice-prompt",
         Feature::CursorContext => "lab-cursor-context",
         Feature::StopPhrase => "lab-stop-phrase",
@@ -1003,8 +930,6 @@ fn flip(ui: &mut Ui, lab: Lab) {
     ui.update(|settings| feature.set(settings, on));
     match feature {
         Feature::KeyboardModelSwitching => ui.open = None,
-        // Its selects live only in the Modes pane, and they close with it.
-        Feature::AppModelSwitching => ui.open = None,
         // The card's duration menu closes when its lab does.
         Feature::KeepMicrophoneOpen => ui.open = None,
         // Its application picker closes with it.
@@ -1024,11 +949,6 @@ fn flip(ui: &mut Ui, lab: Lab) {
         Feature::StopPhrase => {
             let saved = ui.settings.labs.stop_phrase_text.clone();
             ui.lab_store.sync_stop_phrase(&saved);
-        }
-        // Its origins field starts at (and shows) the saved origins.
-        Feature::ApiBrowserAccess => {
-            let saved = ui.settings.labs.api_browser_origins.clone();
-            ui.lab_store.sync_origins(&saved);
         }
         // A notice already on screen leaves with its lab.
         Feature::FailureNotices if !on => crate::rune_ui::live_text::dismiss_failure(),
@@ -1106,7 +1026,6 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         ),
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::StopPhrase) => Some(stop_phrase::body(ui, p)),
-        Lab::Feature(Feature::ApiBrowserAccess) => Some(browser_access::body(ui, p)),
         // Wayland reports no file drags, so its card offers the file dialog.
         Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
         #[cfg(all(target_os = "macos", hex_capture))]

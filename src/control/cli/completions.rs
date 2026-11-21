@@ -1,38 +1,15 @@
-//! `hex completions <shell>` (Labs › Tab completion for hex): a completion script
-//! for `hex`, generated at runtime from the same clap definitions the CLI
-//! parses, so it stays in sync with every command and flag instead of being
-//! written out by hand.
-//!
-//! The gate reads the saved Labs switch (`AppSettings::read`), as `hex labs`
-//! lists it, so it works with Hex running or stopped. While the lab is off
-//! the command refuses, as `hex typed-text` does; it stays out of `hex
-//! --help` either way (`hide`), so `hex labs` is where its toggle shows.
+//! `hex completions <shell>`: a completion script for `hex`, generated at
+//! runtime from the same clap definitions the CLI parses, so it stays in sync
+//! with every command and flag instead of being written out by hand. It works
+//! with Hex running or stopped.
 
 use std::io::Write;
 
 use clap::Command;
 use clap_complete::Shell;
 
-use super::{Output, print};
-use crate::app_settings::AppSettings;
-use crate::control::ControlReply;
-use crate::labs::Feature;
-
-/// `hex completions <shell>`: the lab's gate, then the script on stdout and
-/// nothing else.
+/// `hex completions <shell>`: the script on stdout and nothing else.
 pub(super) fn run(shell: Shell, mut top_level: Command) -> u8 {
-    let settings = match AppSettings::read() {
-        Ok(settings) => settings,
-        Err(error) => {
-            return print(
-                ControlReply::error("failed", format!("couldn't read Hex's settings: {error:#}")),
-                Output::default(),
-            );
-        }
-    };
-    if let Err(reply) = prepare(&settings) {
-        return print(reply, Output::default());
-    }
     let script = script(shell, &mut top_level);
     let mut stdout = std::io::stdout().lock();
     // A reader that stops early (`hex completions bash | head`) is not a
@@ -42,22 +19,6 @@ pub(super) fn run(shell: Shell, mut top_level: Command) -> u8 {
         Err(error) if error.kind() == std::io::ErrorKind::BrokenPipe => 0,
         Err(error) => super::fail(&format!("couldn't write the completion script: {error}")),
     }
-}
-
-/// The lab's gate: saved settings, this build, and the managed lock that
-/// `hex labs on` would refuse too.
-fn prepare(settings: &AppSettings) -> std::result::Result<(), ControlReply> {
-    if !Feature::ShellCompletions.saved_on(settings) {
-        let message = match Feature::ShellCompletions.managed() {
-            Some(lock) => lock.refusal().to_owned(),
-            None => {
-                "Labs › Tab completion for hex is off; turn it on with `hex labs on shell-completions`"
-                    .to_owned()
-            }
-        };
-        return Err(ControlReply::error("disabled", message));
-    }
-    Ok(())
 }
 
 /// The completion script `shell` runs for `command`'s tree, whose binary is
@@ -91,16 +52,6 @@ mod tests {
 
     fn generated(shell: Shell) -> String {
         String::from_utf8(script(shell, &mut Top::command())).unwrap()
-    }
-
-    #[test]
-    fn the_lab_off_refuses_and_names_its_toggle() {
-        let reply = prepare(&AppSettings::default()).unwrap_err();
-        assert!(
-            matches!(reply, ControlReply::Error { ref code, ref message }
-                if code == "disabled" && message.contains("hex labs on shell-completions")),
-            "{reply:?}"
-        );
     }
 
     #[test]

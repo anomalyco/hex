@@ -39,11 +39,6 @@ pub fn playground() -> bool {
     on(PLAYGROUND)
 }
 
-/// Transcription biased toward the vocabulary (Parakeet).
-pub fn vocabulary_biasing() -> bool {
-    on(VOCABULARY_BIASING)
-}
-
 /// Names and terms visible in the focused window join one dictation's
 /// vocabulary, read once as the capture becomes real (macOS; read by the
 /// listener at its hold threshold, its control start, or the released
@@ -261,13 +256,6 @@ pub fn hide_menu_bar_icon() -> bool {
     on(HIDE_MENU_BAR_ICON) && Feature::HideMenuBarIcon.on_this_os()
 }
 
-/// ⌘Q closes the Settings window instead of quitting Hex (macOS; read each
-/// time the app menu's Quit Hex runs).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn quit_closes_window() -> bool {
-    on(QUIT_CLOSES_WINDOW) && Feature::QuitClosesWindow.on_this_os()
-}
-
 /// At either visible indicator position, the HUD grows out of the notch on
 /// a screen that has one (macOS; read each time the HUD is placed).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
@@ -373,17 +361,6 @@ pub fn caps_lock_dictation() -> bool {
     on(CAPS_LOCK_DICTATION) && Feature::CapsLockDictation.on_this_os()
 }
 
-/// `hex dictation start --print` records a dictation whose transcript goes
-/// to the command that started it, never pasted or copied, however it ends
-/// (macOS; read as each printing start arrives).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-pub fn print_start() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    PRINT_START.load(Ordering::Acquire) && Feature::PrintStart.on_this_os()
-}
-
 /// A spoken trigger phrase inside a dictation turns what follows it into a
 /// one-off instruction for the mode's OpenCode model (read as each
 /// dictation's processing starts). An organization's
@@ -459,22 +436,6 @@ pub fn api_processing() -> bool {
 /// and returns the model's own times (read where each request's route starts).
 pub fn api_timestamps() -> bool {
     on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
-}
-
-/// The browser origins the local API answers with CORS, while Labs › Browser
-/// access to the local API is on (read as each request's `Origin` is
-/// checked). Empty turns every response back to what it was, without CORS.
-pub fn api_browser_origins() -> Vec<String> {
-    // A process that never applied its settings still loads its saved
-    // switches on the first read, as `screen_vocabulary` does.
-    let _ = state();
-    if !API_BROWSER_ACCESS.load(Ordering::Acquire) || !Feature::ApiBrowserAccess.on_this_os() {
-        return Vec::new();
-    }
-    API_BROWSER_ORIGINS
-        .read()
-        .unwrap_or_else(|error| error.into_inner())
-        .clone()
 }
 
 /// Labs › Smaller model files: your own speech model imports may use Q6_K,

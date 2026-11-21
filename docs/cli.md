@@ -34,7 +34,7 @@ hex
 ├── quit [--force]                 refused while a meeting or dictation is active, or unconfirmed
 ├── restart [--force]              quit and reopen (opens Hex when it isn't running)
 ├── dictation start|stop|toggle
-│   ├── start --print              (Labs, macOS) answer with the transcript when the recording ends
+│   ├── start --print              (macOS) answer with the transcript when the recording ends
 │   ├── stop --print               print the transcript instead of pasting it (below)
 │   └── start|toggle --raw         paste the transcript as heard, skipping the Output steps
 ├── paste-last                     paste the last dictation (Option-Shift-V); refused while recording
@@ -83,7 +83,7 @@ hex
 │   └── link <feature>             macOS: print hex://labs/<feature>, the link that opens Hex's Labs page on that lab's group
 ├── check-for-updates              check for an update now
 ├── launch-at-login [on|off]       report or change Launch at Login (macOS: installed Hex.app only; Windows Run key; Linux XDG autostart)
-├── completions <shell>            Labs › Tab completion for hex: print a completion script for hex
+├── completions <shell>            print a completion script for hex
 └── logs [--process] [-n N] [-f]   tail live.ndjson (or process.log); no running Hex needed
 ```
 
@@ -111,9 +111,8 @@ falls back to pasting. `--print` with `toggle` or `cancel` is a usage error
 and `hex paste-last` reach the listener's own queue as its shortcut would;
 Linux's `hex typed-text` does too.
 
-`dictation start --print` (Labs › Dictation for a command, off by default,
-macOS) records a dictation that belongs to the command instead of the person's
-focused app: the command blocks and answers only when the recording ends,
+`dictation start --print` (macOS) records a dictation that belongs to the
+command instead of the person's focused app: the command blocks and answers only when the recording ends,
 however it ends, with the transcript (`transcript`, exit 0) instead of pasting
 or copying it. It starts exactly as `start` does and locks the recording; the
 shortcut press that finishes it, `dictation stop`, `dictation toggle`, and a
@@ -127,8 +126,8 @@ hangs. A printing `start` while anything already records is refused with
 A plain `dictation stop` of a print-only recording answers as any plain stop
 does (`done`, or `discarded` for no audio or silence) and the transcript still
 goes to the start; `stop --print` of it answers `done` too, and both commands
-wait for the one transcript. With the lab off, or on Linux
-and Windows, it answers `disabled` or `unsupported`. The text gets the same
+wait for the one transcript. On Linux and Windows it answers `unsupported`.
+The text gets the same
 processing as a paste and History keeps it as `printed`, as `stop --print`
 does; Paste Last skips it. A printing start waits at most 31 minutes; if it
 gives up, the recording stays print-only and is never pasted. `--raw` is
@@ -204,8 +203,8 @@ stderr only when it is a terminal. Ctrl-C ends the command and its service,
 printing nothing, with exit 130. It never pastes, records History, runs mode
 processing, or logs the transcript.
 
-`completions <shell>` (Labs › Tab completion for hex, off by default) prints a
-completion script for `hex` to stdout and nothing else. The script is
+`completions <shell>` prints a completion script for `hex` to stdout and
+nothing else. The script is
 generated at runtime from the same clap definitions every command parses, so
 a new command or flag is in it without anyone writing the script out again;
 `bash`, `zsh`, `fish`, `elvish`, and `powershell` are the shells.
@@ -219,12 +218,6 @@ hex completions fish > ~/.config/fish/completions/hex.fish
 For zsh, put `~/.zfunc` on `fpath` before `compinit` runs, in `~/.zshrc`:
 `fpath=(~/.zfunc $fpath)`. Elsewhere, write the script into a directory
 already on `fpath`.
-
-It is refused with `disabled` while the lab is off, and its Labs toggle is
-what turns it on: `hex labs on shell-completions`. The command stays out of
-`hex --help`; `hex labs` lists the toggle. The lab is read from
-`settings.json` (`AppSettings::read`), as `hex labs` lists it, whether or not
-Hex is running; a running Hex saves the toggle there at once.
 
 `model import`, `rename`, `repair`, and `remove` run in this process on every
 OS; `hex models` is an alias for `hex model`. An import's id is `custom-` and

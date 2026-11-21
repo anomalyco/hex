@@ -757,7 +757,7 @@ pub struct ModelInfo {
     pub selected: bool,
     pub streams: bool,
     /// How transcription takes the vocabulary: `prompt` (Whisper,
-    /// Qwen3-ASR), `bias` (Parakeet, with Labs › Vocabulary help), or
+    /// Qwen3-ASR), `bias` (Parakeet), or
     /// `none`.
     pub vocabulary: String,
     /// Deprecated: whether the model reads the vocabulary as its prompt,

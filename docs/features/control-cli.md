@@ -46,12 +46,11 @@ Agent or terminal                                  // control.cli; every OS
 │       ├── Not recording -> not-recording, exit 1
 │       ├── Failure or timeout -> exit 1, prints nothing, never pastes
 │       └── History keeps it as Printed; Paste Last skips it (also on Linux)
-│   ├── dictation start --print -> Labs › Dictation for a command (macOS, off
-│   │   by default): starts the same locked recording, but its text comes back
-│   │   here however it ends: the shortcut that finishes it, stop, or a kept
-│   │   microphone loss. Never pasted or copied. No speech -> no-speech, exit 4;
-│   │   cancel or any other end -> exit 1; already recording -> busy; lab off
-│   │   -> disabled; Linux and Windows -> unsupported
+│   ├── dictation start --print (macOS) -> starts the same locked recording,
+│   │   but its text comes back here however it ends: the shortcut that
+│   │   finishes it, stop, or a kept microphone loss. Never pasted or copied.
+│   │   No speech -> no-speech, exit 4; cancel or any other end -> exit 1;
+│   │   already recording -> busy; Linux and Windows -> unsupported
 │   └── dictation start|toggle --raw -> the dictation it starts pastes the
 │       transcript as heard (Dictate without processing); History keeps it as Raw;
 │       --raw with stop -> usage error, exit 2
@@ -84,10 +83,9 @@ Agent or terminal                                  // control.cli; every OS
 │   └── No speech in every piece -> no-speech, exit 4; nothing pasted, kept,
 │       or processed
 ├── hex completions <bash|zsh|fish|elvish|powershell>
-│   ├── Labs › Tab completion for hex off -> disabled, exit 1; nothing printed
 │   ├── Runs here: no running Hex, no /control request
-│   └── On -> the script on stdout and nothing else, generated from the same
-│       clap tree every command parses (hidden from hex --help)
+│   └── The script on stdout and nothing else, generated from the same clap
+│       tree every command parses
 ├── hex meetings record [--title] | stop | copy-last
 │   ├── Meetings off -> feature-off; recording shows in the menu bar and HUD
 │   │   exactly like a menu-bar recording
@@ -155,15 +153,11 @@ capture's words read its `audio.wav` through the same reader
 (`capture_host/words.rs`), so an hours-long capture is transcribed one piece
 at a time without holding the session.
 
-`hex completions` also never reaches `/control`: it reads its Labs switch from
-`settings.json` (`AppSettings::read`), then prints a script generated at
-runtime from the top-level `Cli` of the OS running it
+`hex completions` also never reaches `/control`: it prints a script
+generated at runtime from the top-level `Cli` of the OS running it
 (`src/main.rs` on macOS, `src/linux.rs`, `src/windows.rs`, each flattening
-`ControlCli`), so every command and flag in this tree is in the script. The
-subcommand is `hide = true`: it never shows in `hex --help`, and `hex labs`
-lists the toggle that turns it on. Off, it answers `disabled` naming `hex labs
-on shell-completions`, prints nothing, and exits 1. On, only the script goes
-to stdout.
+`ControlCli`), so every command and flag in this tree is in the script. Only
+the script goes to stdout.
 
 On Linux and Windows `control::host::answer` carries every command out through
 the OS's adapter (`linux::app::LinuxControl`, `windows::rune::WindowsControl`):
@@ -177,7 +171,7 @@ go to the meeting recorder (`meeting/runtime`) as the tray's items do;
 command to the running Hex. `hex history`, `hex meetings list|show|search`, and
 `hex mcp` read files on every OS.
 
-`dictation start --print` is macOS's, behind a Labs toggle: the listener
+`dictation start --print` is macOS's: the listener
 stores the command's reply with the recording (`recognition::Hotkeys::print_capture`)
 and reads it at every end. The shortcut's finish passes it to
 `DictationWorker::transcribe_printed`; `dictation stop` and `toggle` join it

@@ -185,13 +185,12 @@ pub(super) fn languages_label(def: &ModelDefinition) -> String {
 }
 
 /// Whether transcription reads the vocabulary: Whisper and Qwen3-ASR as
-/// their prompt, Parakeet only with Labs › Vocabulary help.
+/// their prompt, Parakeet unless Vocabulary's boost is Off.
 pub(super) fn reads_vocabulary(ui: &Ui, def: &ModelDefinition) -> bool {
     match def.vocabulary_use() {
         VocabularyUse::Prompt => true,
         VocabularyUse::Bias => {
-            let feature = crate::labs::Feature::VocabularyBiasing;
-            feature.shipped() && feature.on(&ui.settings)
+            ui.settings.vocabulary_boost != crate::dictation::vocabulary::VocabularyBoost::Off
         }
         VocabularyUse::None => false,
     }

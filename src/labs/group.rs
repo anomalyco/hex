@@ -69,7 +69,6 @@ impl Feature {
             | Self::FailureNotices
             | Self::LiveTyping
             | Self::NotchIndicator
-            | Self::VocabularyBiasing
             | Self::ScreenVocabulary
             | Self::LearnFromCorrections
             | Self::PauseBrowser
@@ -77,9 +76,7 @@ impl Feature {
             | Self::SkipPauses
             | Self::VoiceFilter
             | Self::HideMenuBarIcon
-            | Self::QuitClosesWindow
             | Self::Appearance
-            | Self::ReleaseNotesLink
             | Self::SpeakersOnly
             | Self::Playground
             | Self::StopPhrase
@@ -100,9 +97,6 @@ impl Feature {
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps
-            | Self::ApiBrowserAccess
-            | Self::PrintStart
-            | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
             | Self::VoicePrompt
@@ -138,11 +132,9 @@ impl Feature {
             | Self::PauseMenu
             | Self::HoldThroughKeys => Group::Shortcuts,
             Self::KeyboardModelSwitching
-            | Self::AppModelSwitching
             | Self::UnloadIdle
             | Self::PickerSortFilter
             | Self::BenchmarkDetails
-            | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::KQuantModels
             | Self::PickerDownloaded

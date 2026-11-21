@@ -109,8 +109,7 @@ pub(super) struct Picker {
     /// The card whose details are open (Parakeet Ultra's credit and
     /// published benchmarks).
     pub(super) details: super::model_details::DetailsState,
-    /// The model in use when the picker opened, which Labs › Model in use
-    /// first lists first; fixed until the picker closes.
+    /// The installed model in use when the picker opened, listed first; fixed until the picker closes.
     in_use_first: Option<TranscriptionModelId>,
 }
 
@@ -147,7 +146,9 @@ pub(super) fn open(ui: &mut Ui) {
     ui.picker.downloaded_only = false;
     ui.picker.view = View::Compare;
     ui.picker.others_open = false;
-    ui.picker.in_use_first = (active_first_on(ui) && ui.picker.selected_installed(&ui.settings))
+    ui.picker.in_use_first = ui
+        .picker
+        .selected_installed(&ui.settings)
         .then_some(ui.settings.transcription.model);
 }
 
@@ -212,16 +213,10 @@ fn bytes_label(bytes: u64) -> String {
     }
 }
 
-/// Whether Labs › Model in use first is on.
-fn active_first_on(ui: &Ui) -> bool {
-    let feature = crate::labs::Feature::PickerActiveFirst;
-    feature.shipped() && feature.on(&ui.settings)
-}
-
 /// The model the comparison shows first: the one in use when the picker
-/// opened, while Labs › Model in use first is on.
+/// opened.
 fn pinned(ui: &Ui) -> Option<TranscriptionModelId> {
-    ui.picker.in_use_first.filter(|_| active_first_on(ui))
+    ui.picker.in_use_first
 }
 
 /// The model the full list leads with: [`pinned`], unless Labs › Sort and
@@ -979,9 +974,8 @@ mod tests {
         assert!(benchmark_details_on(&ui));
     }
 
-    fn ui_with_active_first(on: bool) -> Ui {
-        let mut settings = AppSettings::default();
-        settings.labs.picker_active_first = on;
+    fn ui_with_installed_model() -> Ui {
+        let settings = AppSettings::default();
         let mut ui = Ui::with(settings, super::super::Service::Fixture(Vec::new()));
         ui.picker.installed = Some(vec![ui.settings.transcription.model]);
         ui
@@ -989,7 +983,7 @@ mod tests {
 
     #[test]
     fn the_model_in_use_is_fixed_while_the_picker_is_open() {
-        let mut ui = ui_with_active_first(true);
+        let mut ui = ui_with_installed_model();
         let saved = ui.settings.transcription.model;
         open(&mut ui);
         assert_eq!(pinned(&ui), Some(saved));
@@ -1011,13 +1005,8 @@ mod tests {
     }
 
     #[test]
-    fn without_model_in_use_first_nothing_is_pinned() {
-        let mut ui = ui_with_active_first(false);
-        open(&mut ui);
-        assert_eq!(pinned(&ui), None);
-        assert_eq!(list_first(&ui), None);
-        // A model that isn't installed is never pinned.
-        let mut ui = ui_with_active_first(true);
+    fn an_uninstalled_model_is_never_pinned() {
+        let mut ui = ui_with_installed_model();
         ui.picker.installed = Some(Vec::new());
         open(&mut ui);
         assert_eq!(pinned(&ui), None);

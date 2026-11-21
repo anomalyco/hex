@@ -241,9 +241,8 @@ pub fn entries() -> Vec<VocabularyEntry> {
 }
 
 /// Whether the selected dictation model would read vocabulary terms at all:
-/// Parakeet biases only with Labs › Vocabulary help on and a boost other
-/// than Off; Whisper and Qwen3-ASR read them as a prompt; Apple Speech and
-/// other models ignore them. Read as a capture becomes real, before reading
+/// Parakeet biases with a boost other than Off; Whisper and Qwen3-ASR read
+/// them as a prompt; Apple Speech and other models ignore them. Read as a capture becomes real, before reading
 /// the screen, and again before giving up its live stream.
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) fn uses_terms() -> bool {
@@ -251,19 +250,17 @@ pub(crate) fn uses_terms() -> bool {
     let definition = crate::transcription::models::definition(selection.model);
     terms_used(
         definition.vocabulary_use(),
-        crate::labs::vocabulary_biasing(),
         VocabularyBoost::from_index(BOOST.load(Ordering::Relaxed)),
     )
 }
 
 fn terms_used(
     vocabulary_use: crate::transcription::models::VocabularyUse,
-    biasing: bool,
     boost: VocabularyBoost,
 ) -> bool {
     use crate::transcription::models::VocabularyUse;
     match vocabulary_use {
-        VocabularyUse::Bias => biasing && boost != VocabularyBoost::Off,
+        VocabularyUse::Bias => boost != VocabularyBoost::Off,
         VocabularyUse::Prompt => true,
         VocabularyUse::None => false,
     }
@@ -274,10 +271,6 @@ fn terms_used(
 /// next one. `None` while the list is empty or the boost is off.
 pub(crate) fn transcription_bias()
 -> Option<(Vec<String>, transcribe_cpp::ParakeetVocabularyOptions)> {
-    // Labs › Vocabulary help: transcription takes the list only while on.
-    if !crate::labs::vocabulary_biasing() {
-        return None;
-    }
     let boost = VocabularyBoost::from_index(BOOST.load(Ordering::Relaxed));
     if boost == VocabularyBoost::Off {
         return None;
@@ -626,29 +619,12 @@ mod tests {
     }
 
     #[test]
-    fn parakeet_terms_need_the_biasing_lab_and_a_boost() {
+    fn parakeet_terms_need_a_boost() {
         use crate::transcription::models::VocabularyUse;
-        assert!(terms_used(
-            VocabularyUse::Bias,
-            true,
-            VocabularyBoost::Normal
-        ));
-        assert!(!terms_used(
-            VocabularyUse::Bias,
-            false,
-            VocabularyBoost::Normal
-        ));
-        assert!(!terms_used(VocabularyUse::Bias, true, VocabularyBoost::Off));
-        assert!(terms_used(
-            VocabularyUse::Prompt,
-            false,
-            VocabularyBoost::Off
-        ));
-        assert!(!terms_used(
-            VocabularyUse::None,
-            true,
-            VocabularyBoost::Normal
-        ));
+        assert!(terms_used(VocabularyUse::Bias, VocabularyBoost::Normal));
+        assert!(!terms_used(VocabularyUse::Bias, VocabularyBoost::Off));
+        assert!(terms_used(VocabularyUse::Prompt, VocabularyBoost::Off));
+        assert!(!terms_used(VocabularyUse::None, VocabularyBoost::Normal));
     }
 
     #[test]

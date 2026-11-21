@@ -72,8 +72,6 @@ pub struct LabsSettings {
     pub live_typing: bool,
     pub live_chapters: bool,
     pub playground: bool,
-    /// Parakeet transcription biased toward the vocabulary.
-    pub vocabulary_biasing: bool,
     /// Names and terms shown in the focused window become temporary
     /// vocabulary for each dictation (macOS).
     pub screen_vocabulary: bool,
@@ -144,8 +142,6 @@ pub struct LabsSettings {
     pub skip_pauses: bool,
     /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
     pub output_fixes: bool,
-    /// The speech model picker lists the model in use first (issue 1019).
-    pub picker_active_first: bool,
     /// The picker's "Use model file where it is…" adds a GGUF file without copying it (issue 941).
     pub model_in_place: bool,
     /// An import may use Q6_K, Q5_K, or Q4_K weights, which Metal runs and
@@ -164,11 +160,7 @@ pub struct LabsSettings {
     /// A kept recording may be copied from History and the menu bar or tray
     /// as a file on the clipboard; it stores no audio itself.
     pub copy_dictation_audio: bool,
-    /// The sidebar footer links this build's release notes.
-    pub release_notes_link: bool,
     pub hide_menu_bar_icon: bool,
-    /// ⌘Q closes the Settings window instead of quitting Hex (macOS).
-    pub quit_closes_window: bool,
     /// A Caps Lock press starts and stops dictation, and its light follows
     /// Hex's recording and processing (macOS).
     pub caps_lock_dictation: bool,
@@ -208,9 +200,6 @@ pub struct LabsSettings {
     /// for Modes rewriting and the Modes model picker ahead of a Windows one
     /// when it answers; Windows answers when WSL answers nothing (Windows).
     pub opencode_in_wsl: bool,
-    /// `hex completions <shell>` prints a completion script for bash, zsh,
-    /// fish, elvish, or PowerShell, generated from Hex's own commands.
-    pub shell_completions: bool,
     /// Press Return after pasting a shortcut dictation.
     pub yolo_mode: bool,
     /// The apps Labs › YOLO mode sends in, by the names
@@ -232,12 +221,6 @@ pub struct LabsSettings {
     /// The local API's `timestamps=segment|word` returns the speech model's
     /// own segment and word times.
     pub api_timestamps: bool,
-    /// Web pages from `api_browser_origins` may call Hex's local API from
-    /// the browser (Labs › Browser access to the local API).
-    pub api_browser_access: bool,
-    /// The origins allowed while `api_browser_access` is on, each
-    /// `scheme://host[:port]`; an entry that isn't one is ignored.
-    pub api_browser_origins: Vec<String>,
     /// "While dictating" applies only while the default output is speakers;
     /// headphones are left alone.
     pub speakers_only: bool,
@@ -255,9 +238,6 @@ pub struct LabsSettings {
     /// The menu bar offers Pause Hex, which makes every capture shortcut
     /// inert until Resume (macOS).
     pub pause_menu: bool,
-    /// `hex dictation start --print` records a dictation whose transcript
-    /// goes to the command that started it, however it ends (macOS).
-    pub print_start: bool,
     /// A spoken trigger phrase inside a dictation hands the mode's OpenCode
     /// model a one-off instruction for that dictation.
     pub voice_prompt: bool,
@@ -387,7 +367,6 @@ impl Default for LabsSettings {
             live_typing: false,
             live_chapters: false,
             playground: false,
-            vocabulary_biasing: false,
             screen_vocabulary: false,
             learn_from_corrections: false,
             cursor_context: false,
@@ -419,7 +398,6 @@ impl Default for LabsSettings {
             recent_dictations: false,
             skip_pauses: false,
             output_fixes: false,
-            picker_active_first: false,
             model_in_place: false,
             k_quant_models: false,
             picker_downloaded: false,
@@ -427,9 +405,7 @@ impl Default for LabsSettings {
             microphone_key: false,
             keep_recordings: false,
             copy_dictation_audio: false,
-            release_notes_link: false,
             hide_menu_bar_icon: false,
-            quit_closes_window: false,
             caps_lock_dictation: false,
             caps_lock_light: CapsLockLight::Steady,
             appearance: false,
@@ -439,7 +415,6 @@ impl Default for LabsSettings {
             notch_indicator: false,
             annotate_replay: false,
             opencode_in_wsl: false,
-            shell_completions: false,
             yolo_mode: false,
             yolo_mode_apps: Vec::new(),
             drop_transcribe: false,
@@ -447,14 +422,11 @@ impl Default for LabsSettings {
             vocabulary_files: false,
             api_processing: false,
             api_timestamps: false,
-            api_browser_access: false,
-            api_browser_origins: Vec::new(),
             speakers_only: false,
             app_model_switching: false,
             calendar_menu: false,
             calendar_bulk_select: false,
             pause_menu: false,
-            print_start: false,
             voice_prompt: false,
             voice_prompt_phrase: crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned(),
             stop_phrase: false,

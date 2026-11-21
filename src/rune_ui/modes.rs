@@ -22,7 +22,7 @@ use super::controls::{
 };
 use super::lists::{LIST_COLUMN_PL, list_row, remove_button, source_list};
 use super::models::{self, Target};
-use super::{Menu, Ui, speech_model};
+use super::{Menu, Ui};
 use crate::app_settings::{AppSettings, DictationMode};
 use crate::application_catalog::InstalledApplication;
 use crate::desktop::file_dialog::{Choice, Dialog, Filter, Pending, Target as DialogTarget};
@@ -870,17 +870,17 @@ fn basics(
     layer: &mut Vec<El>,
 ) -> El {
     if selection == Selection::Default {
-        let mut rows = vec![setting_row(
+        return card(
             p,
-            "global",
-            tr("Global"),
-            Some(tr("Used unless a more specific mode matches.")),
-            el().key("none"),
-        )];
-        if let Some(speech) = speech_row(ui, p, selection, current, layer) {
-            rows.push(speech);
-        }
-        return card(p, "basics-card", rows);
+            "basics-card",
+            vec![setting_row(
+                p,
+                "global",
+                tr("Global"),
+                Some(tr("Used unless a more specific mode matches.")),
+                el().key("none"),
+            )],
+        );
     }
     let name = TextInput::new(&ui.modes.editor.name)
         .placeholder(tr("Mode name"))
@@ -927,9 +927,6 @@ fn basics(
             chips,
         ),
     ];
-    if let Some(speech) = speech_row(ui, p, selection, current, layer) {
-        rows.push(speech);
-    }
     let picking = ui.modes.application_picker_open && ui.modes.picker_target == PickerTarget::Mode;
     if let Some(error) = ui.modes.application_error.as_ref().filter(|_| !picking) {
         rows.push(note("application-error", error, p.danger()));
@@ -944,48 +941,6 @@ fn basics(
         );
     }
     card(p, "basics-card", rows)
-}
-
-/// The selected mode's speech model and language, while Labs › Switch model
-/// with app is on; None leaves the Modes pane exactly as it was.
-fn speech_row(
-    ui: &Ui,
-    p: Paint,
-    selection: Selection,
-    current: &DictationMode,
-    layer: &mut Vec<El>,
-) -> Option<El> {
-    if !speech_model::enabled(ui) {
-        return None;
-    }
-    let suffix = match selection {
-        Selection::Default => "global".to_string(),
-        Selection::Custom(index) => index.to_string(),
-    };
-    let key = format!("mode-speech-{suffix}");
-    let model_key = format!("mode-speech-model-{suffix}");
-    let language_key = format!("mode-speech-language-{suffix}");
-    Some(speech_model::setting(
-        ui,
-        p,
-        speech_model::SpeechRow {
-            key: &key,
-            model_key: &model_key,
-            language_key: &language_key,
-            title: tr("Speech model"),
-            description: None,
-            choice: current.speech.clone(),
-            model_menu: Menu::ModeSpeechModel(selection),
-            language_menu: Menu::ModeSpeechLanguage(selection),
-        },
-        // A new choice starts on the model's last-used language, or the
-        // saved one when that model has no recent choice.
-        |_, fallback| fallback.to_owned(),
-        move |ui, choice| {
-            update_mode(ui, |mode| mode.speech = choice);
-        },
-        layer,
-    ))
 }
 
 /// One chosen application: its icon once the catalog lists it, its name,

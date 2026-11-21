@@ -73,19 +73,6 @@
       "title": "Live chapters"
     },
     {
-      "added": "2026-10-30",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "vocabulary-biasing",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Help Parakeet-based speech models hear your Vocabulary words. Rewriting and search use them anyway",
-      "title": "Vocabulary help"
-    },
-    {
       "added": "2026-11-12",
       "group": "dictation",
       "groupTitle": "Dictation",
@@ -130,18 +117,6 @@
       ],
       "summary": "When you switch keyboard language, Hex switches to the speech model you picked for it",
       "title": "Switch model with keyboard language"
-    },
-    {
-      "added": "2026-11-10",
-      "group": "models",
-      "groupTitle": "Models",
-      "id": "app-model-switching",
-      "oses": [
-        "macos",
-        "windows"
-      ],
-      "summary": "Each mode can pick a speech model; Hex switches to it when you change apps",
-      "title": "Switch model with app"
     },
     {
       "added": "2026-10-30",
@@ -473,19 +448,6 @@
       "added": "2026-11-02",
       "group": "models",
       "groupTitle": "Models",
-      "id": "picker-active-first",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "The speech model list shows the model you're using first",
-      "title": "Model in use first"
-    },
-    {
-      "added": "2026-11-02",
-      "group": "models",
-      "groupTitle": "Models",
       "id": "model-in-place",
       "oses": [
         "macos",
@@ -569,19 +531,6 @@
       "title": "Appearance"
     },
     {
-      "added": "2026-11-08",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "release-notes-link",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Show a link to what changed in this version at the bottom of the sidebar",
-      "title": "Release notes link"
-    },
-    {
       "added": "2026-11-02",
       "group": "dictation",
       "groupTitle": "Dictation",
@@ -660,17 +609,6 @@
     },
     {
       "added": "2026-11-07",
-      "group": "dictation",
-      "groupTitle": "Dictation",
-      "id": "quit-closes-window",
-      "oses": [
-        "macos"
-      ],
-      "summary": "⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon",
-      "title": "⌘Q closes Settings"
-    },
-    {
-      "added": "2026-11-07",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",
       "id": "caps-lock-dictation",
@@ -716,19 +654,6 @@
       ],
       "summary": "Apps that use Hex's local API can ask when each word or phrase starts and ends",
       "title": "Timestamps in API transcripts"
-    },
-    {
-      "added": "2026-11-12",
-      "group": "output",
-      "groupTitle": "Output",
-      "id": "api-browser-access",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Let web pages from the addresses you list use Hex's local API. They still need the API token",
-      "title": "Browser access to the local API"
     },
     {
       "added": "2026-11-09",
@@ -788,17 +713,6 @@
       "title": "Pause from menu bar"
     },
     {
-      "added": "2026-11-11",
-      "group": "output",
-      "groupTitle": "Output",
-      "id": "print-start",
-      "oses": [
-        "macos"
-      ],
-      "summary": "A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it",
-      "title": "Dictation for a command"
-    },
-    {
       "added": "2026-11-12",
       "group": "output",
       "groupTitle": "Output",
@@ -810,19 +724,6 @@
       ],
       "summary": "Say \"rewrite this\" and then what you want; Hex redoes the text with the mode's AI model",
       "title": "Rewrite by voice"
-    },
-    {
-      "added": "2026-11-13",
-      "group": "output",
-      "groupTitle": "Output",
-      "id": "shell-completions",
-      "oses": [
-        "macos",
-        "windows",
-        "linux"
-      ],
-      "summary": "Print a script for bash, zsh, fish, elvish, or PowerShell that completes hex commands, with hex completions <shell>",
-      "title": "Tab completion for hex"
     },
     {
       "added": "2026-11-13",

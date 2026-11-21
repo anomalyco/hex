@@ -163,6 +163,7 @@ impl Policy {
         }
         let lock = match name {
             "capture.enabled" => Lock::Annotate,
+            "labs.app_model_switching" => Lock::Labs,
             _ => return None,
         };
         self.locks(lock).then_some(lock)

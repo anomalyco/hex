@@ -16,12 +16,10 @@ impl Feature {
             Self::FailureNotices => "Failure notices",
             Self::LiveTyping => "Live typing",
             Self::LiveChapters => "Live chapters",
-            Self::VocabularyBiasing => "Vocabulary help",
             Self::ScreenVocabulary => "Words on screen",
             Self::LearnFromCorrections => "Learn from corrections",
             Self::TerminalPaste => "Terminal paste",
             Self::KeyboardModelSwitching => "Switch model with keyboard language",
-            Self::AppModelSwitching => "Switch model with app",
             Self::MouseShortcuts => "Mouse shortcuts",
             Self::PauseBrowser => "Also pause the browser",
             Self::ShareShortcut => "Share dictation shortcut with other apps",
@@ -49,7 +47,6 @@ impl Feature {
             Self::RecentDictations => "Copy recent dictations",
             Self::SkipPauses => "Skip long pauses",
             Self::OutputFixes => "Fix results in Output",
-            Self::PickerActiveFirst => "Model in use first",
             Self::ModelInPlace => "Use model files where they are",
             Self::KQuantModels => "Smaller model files",
             Self::PickerDownloaded => "Downloaded models only",
@@ -57,7 +54,6 @@ impl Feature {
             Self::MicrophoneKeyAlone => "Microphone key alone",
             Self::KeepRecordings => "Keep recordings",
             Self::Appearance => "Appearance",
-            Self::ReleaseNotesLink => "Release notes link",
             Self::HideMenuBarIcon => "Hide menu bar icon",
             Self::GnomeClipboardRestore => "Restore clipboard on GNOME",
             Self::TypedText => "Transform typed text",
@@ -68,22 +64,18 @@ impl Feature {
             Self::Screenshots => "Screenshots",
             Self::AnnotateReplay => "Annotate last 15 seconds",
             Self::MeetingImport => "Import audio",
-            Self::QuitClosesWindow => "⌘Q closes Settings",
             Self::CapsLockDictation => "Caps Lock dictation",
             Self::OpenCodeInWsl => "OpenCode in WSL",
             Self::ApiProcessing => "Process API transcripts",
             Self::ApiTimestamps => "Timestamps in API transcripts",
-            Self::ApiBrowserAccess => "Browser access to the local API",
             Self::SpeakersOnly => "Only on speakers",
             Self::MoreDictationShortcuts => "More dictation shortcuts",
             Self::PauseMenu => "Pause from menu bar",
             Self::CalendarMenu => "Upcoming meetings in menu bar",
             Self::CalendarSelectAll => "Select all calendars",
-            Self::PrintStart => "Dictation for a command",
             Self::VoicePrompt => "Rewrite by voice",
             Self::CursorContext => "Rewrite reads nearby text",
             Self::CopyCaptureZip => "Copy a capture as one file",
-            Self::ShellCompletions => "Tab completion for hex",
             Self::YoloMode => "YOLO mode",
             Self::CopyDictationAudio => "Copy dictation audio",
             Self::StopPhrase => "Stop phrase",
@@ -114,9 +106,6 @@ impl Feature {
                 "On Wayland, show your words in the text box as you speak, then Hex types the text there"
             }
             Self::LiveChapters => "Split a meeting's text into chapters while it records",
-            Self::VocabularyBiasing => {
-                "Help Parakeet-based speech models hear your Vocabulary words. Rewriting and search use them anyway"
-            }
             Self::ScreenVocabulary => {
                 "Names in the window you're dictating into help Hex spell them. Never saved"
             }
@@ -126,9 +115,6 @@ impl Feature {
             Self::TerminalPaste => "Paste with Ctrl+Shift+V so terminals accept it",
             Self::KeyboardModelSwitching => {
                 "When you switch keyboard language, Hex switches to the speech model you picked for it"
-            }
-            Self::AppModelSwitching => {
-                "Each mode can pick a speech model; Hex switches to it when you change apps"
             }
             Self::MouseShortcuts => "Use a mouse button, such as a side button, as a shortcut",
             Self::PauseBrowser => {
@@ -208,7 +194,6 @@ impl Feature {
             Self::OutputFixes => {
                 "Offer Vocabulary and Fix this beside Output's Try result, to correct a wrong result"
             }
-            Self::PickerActiveFirst => "The speech model list shows the model you're using first",
             Self::ModelInPlace => {
                 "Add a speech model file without copying it, so several accounts can share one file"
             }
@@ -228,9 +213,6 @@ impl Feature {
                 "Keep the audio of your dictations in History, so you can turn them into text again with another speech model"
             }
             Self::Appearance => "Use light or dark for the main window instead of the system's",
-            Self::ReleaseNotesLink => {
-                "Show a link to what changed in this version at the bottom of the sidebar"
-            }
             Self::HideMenuBarIcon => {
                 "Hide Hex's icon from the menu bar. Shortcuts keep working; open Hex again from Finder or Spotlight for Settings"
             }
@@ -261,9 +243,6 @@ impl Feature {
             Self::MeetingImport => {
                 "Add an audio file to Meetings and turn it into text on this Mac"
             }
-            Self::QuitClosesWindow => {
-                "⌘Q closes the Settings window instead of quitting Hex. Dictation keeps running; quit from the menu bar icon"
-            }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start dictating and again to finish. Hex keeps Caps Lock off and uses its light while it records and writes the text"
             }
@@ -275,9 +254,6 @@ impl Feature {
             }
             Self::ApiTimestamps => {
                 "Apps that use Hex's local API can ask when each word or phrase starts and ends"
-            }
-            Self::ApiBrowserAccess => {
-                "Let web pages from the addresses you list use Hex's local API. They still need the API token"
             }
             Self::SpeakersOnly => {
                 "Apply \"While dictating\" only when sound plays through speakers. Headphones are left alone."
@@ -294,9 +270,6 @@ impl Feature {
             Self::CalendarSelectAll => {
                 "Adds a button to the Calendars row to include or leave out every calendar at once."
             }
-            Self::PrintStart => {
-                "A command such as hex dictation start --print gets the text back when a dictation ends, without pasting or copying it"
-            }
             Self::VoicePrompt => {
                 "Say \"rewrite this\" and then what you want; Hex redoes the text with the mode's AI model"
             }
@@ -305,9 +278,6 @@ impl Feature {
             }
             Self::CopyCaptureZip => {
                 "A finished Annotate capture copies as one zip file, without the video or audio"
-            }
-            Self::ShellCompletions => {
-                "Print a script for bash, zsh, fish, elvish, or PowerShell that completes hex commands, with hex completions <shell>"
             }
             Self::YoloMode => {
                 "Press Return after a dictation is pasted, so the message sends itself"

@@ -20,12 +20,10 @@ impl Feature {
             | Self::FailureNotices
             | Self::LiveTyping
             | Self::LiveChapters
-            | Self::VocabularyBiasing
             | Self::ScreenVocabulary
             | Self::LearnFromCorrections
             | Self::TerminalPaste
             | Self::KeyboardModelSwitching
-            | Self::AppModelSwitching
             | Self::MouseShortcuts
             | Self::PauseBrowser
             | Self::ShareShortcut
@@ -53,7 +51,6 @@ impl Feature {
             | Self::RecentDictations
             | Self::SkipPauses
             | Self::OutputFixes
-            | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::KQuantModels
             | Self::PickerDownloaded
@@ -61,7 +58,6 @@ impl Feature {
             | Self::MicrophoneKeyAlone
             | Self::KeepRecordings
             | Self::Appearance
-            | Self::ReleaseNotesLink
             | Self::HideMenuBarIcon
             | Self::GnomeClipboardRestore
             | Self::TypedText
@@ -71,22 +67,18 @@ impl Feature {
             | Self::AnnotateReplay
             | Self::MeetingImport
             | Self::NotchIndicator
-            | Self::QuitClosesWindow
             | Self::GnomeAnnotate
             | Self::CapsLockDictation
             | Self::OpenCodeInWsl
             | Self::ApiProcessing
             | Self::ApiTimestamps
-            | Self::ApiBrowserAccess
             | Self::SpeakersOnly
             | Self::PauseMenu
             | Self::CalendarMenu
             | Self::CalendarSelectAll
-            | Self::PrintStart
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::DropTranscribe
-            | Self::ShellCompletions
             | Self::YoloMode
             | Self::CursorContext
             | Self::MoreDictationShortcuts
@@ -106,7 +98,6 @@ impl Feature {
             | Self::Playground
             | Self::LiveText
             | Self::LiveChapters
-            | Self::VocabularyBiasing
             | Self::TerminalPaste
             | Self::KeyboardModelSwitching
             | Self::MouseShortcuts
@@ -130,7 +121,6 @@ impl Feature {
             | Self::RecentDictations
             | Self::SkipPauses => 20261101,
             Self::OutputFixes
-            | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::SectionKeyAlone
@@ -139,32 +129,21 @@ impl Feature {
             Self::GnomeClipboardRestore | Self::NotchIndicator => 20261103,
             Self::GnomeMeetingCapsules | Self::Screenshots | Self::AnnotateReplay => 20261104,
             Self::MeetingImport => 20261106,
-            Self::LiveTyping
-            | Self::QuitClosesWindow
-            | Self::CapsLockDictation
-            | Self::FailureNotices
-            | Self::TypedText => 20261107,
-            Self::GnomeAnnotate
-            | Self::TerminalPasteShortcut
-            | Self::ReleaseNotesLink
-            | Self::OpenCodeInWsl => 20261108,
+            Self::LiveTyping | Self::CapsLockDictation | Self::FailureNotices | Self::TypedText => {
+                20261107
+            }
+            Self::GnomeAnnotate | Self::TerminalPasteShortcut | Self::OpenCodeInWsl => 20261108,
             Self::ApiProcessing
             | Self::Appearance
             | Self::DoubleTapModifiers
             | Self::ReturnToApp
             | Self::SpeakersOnly
             | Self::MoreDictationShortcuts => 20261109,
-            Self::AppModelSwitching | Self::ApiTimestamps | Self::PauseMenu => 20261110,
-            Self::KeepMicrophoneOpen | Self::PrintStart => 20261111,
-            Self::ScreenVocabulary
-            | Self::VoicePrompt
-            | Self::CopyCaptureZip
-            | Self::ApiBrowserAccess => 20261112,
+            Self::ApiTimestamps | Self::PauseMenu => 20261110,
+            Self::KeepMicrophoneOpen => 20261111,
+            Self::ScreenVocabulary | Self::VoicePrompt | Self::CopyCaptureZip => 20261112,
             Self::KQuantModels | Self::DropTranscribe => 20261113,
-            Self::ShellCompletions
-            | Self::YoloMode
-            | Self::CursorContext
-            | Self::CleanUpWithAppleIntelligence => 20261113,
+            Self::YoloMode | Self::CursorContext | Self::CleanUpWithAppleIntelligence => 20261113,
             Self::CalendarMenu => 20261114,
             Self::CopyDictationAudio | Self::MicrophoneKeyAlone => 20261115,
             Self::StopPhrase | Self::HoldThroughKeys => 20261116,
@@ -213,9 +192,6 @@ impl Feature {
         }
         if key == "labs.appearance_theme" {
             return Some(Self::Appearance);
-        }
-        if key == "labs.api_browser_origins" {
-            return Some(Self::ApiBrowserAccess);
         }
         if key == "capture.replay_hotkey" {
             return Some(Self::AnnotateReplay);
@@ -275,13 +251,11 @@ impl Feature {
             | Self::SidedChords
             | Self::RecentDictations
             | Self::HideMenuBarIcon
-            | Self::QuitClosesWindow
             | Self::NotchIndicator
             | Self::Screenshots
             | Self::CapsLockDictation
             | Self::DoubleTapModifiers
             | Self::PauseMenu
-            | Self::PrintStart
             | Self::ScreenVocabulary
             | Self::LearnFromCorrections
             | Self::CursorContext
@@ -295,7 +269,6 @@ impl Feature {
             Self::HoldThroughKeys => MACOS_WINDOWS,
             Self::ReturnToApp => MACOS,
             Self::TapOrHold => MACOS_LINUX,
-            Self::AppModelSwitching => MACOS_WINDOWS,
             // Only builds with the capture build option have it.
             Self::AnnotateReplay => MACOS,
             Self::Playground
@@ -304,7 +277,6 @@ impl Feature {
             | Self::FasterLiveText
             | Self::FailureNotices
             | Self::SecondDictationShortcut
-            | Self::VocabularyBiasing
             | Self::UnloadIdle
             | Self::KeepMicrophoneOpen
             | Self::KeepOnClipboard
@@ -315,21 +287,17 @@ impl Feature {
             | Self::ParakeetUltra
             | Self::HistoryStats
             | Self::OutputFixes
-            | Self::PickerActiveFirst
             | Self::ModelInPlace
             | Self::PickerDownloaded
             | Self::KeepRecordings
             | Self::Appearance
-            | Self::ReleaseNotesLink
             | Self::FillerWords
             | Self::ApiProcessing
             | Self::ApiTimestamps
-            | Self::ApiBrowserAccess
             | Self::VoicePrompt
             | Self::CopyCaptureZip
             | Self::DropTranscribe
             | Self::SpeakersOnly
-            | Self::ShellCompletions
             | Self::YoloMode
             | Self::CopyDictationAudio
             | Self::StopPhrase
@@ -349,12 +317,10 @@ impl Feature {
             Self::FailureNotices => "failure-notices",
             Self::LiveTyping => "live-typing",
             Self::LiveChapters => "live-chapters",
-            Self::VocabularyBiasing => "vocabulary-biasing",
             Self::ScreenVocabulary => "screen-vocabulary",
             Self::LearnFromCorrections => "learn-from-corrections",
             Self::TerminalPaste => "terminal-paste",
             Self::KeyboardModelSwitching => "keyboard-model-switching",
-            Self::AppModelSwitching => "app-model-switching",
             Self::MouseShortcuts => "mouse-shortcuts",
             Self::PauseBrowser => "pause-browser",
             Self::ShareShortcut => "share-shortcut",
@@ -382,7 +348,6 @@ impl Feature {
             Self::RecentDictations => "recent-dictations",
             Self::SkipPauses => "skip-pauses",
             Self::OutputFixes => "output-fixes",
-            Self::PickerActiveFirst => "picker-active-first",
             Self::ModelInPlace => "model-in-place",
             Self::KQuantModels => "k-quant-models",
             Self::PickerDownloaded => "picker-downloaded",
@@ -390,7 +355,6 @@ impl Feature {
             Self::MicrophoneKeyAlone => "microphone-key",
             Self::KeepRecordings => "keep-recordings",
             Self::Appearance => "appearance",
-            Self::ReleaseNotesLink => "release-notes-link",
             Self::HideMenuBarIcon => "hide-menu-bar-icon",
             Self::GnomeClipboardRestore => "gnome-clipboard-restore",
             Self::TypedText => "typed-text",
@@ -401,19 +365,15 @@ impl Feature {
             Self::Screenshots => "screenshots",
             Self::AnnotateReplay => "annotate-replay",
             Self::MeetingImport => "meeting-import",
-            Self::QuitClosesWindow => "quit-closes-window",
             Self::CapsLockDictation => "caps-lock-dictation",
             Self::OpenCodeInWsl => "opencode-in-wsl",
             Self::ApiProcessing => "api-processing",
             Self::ApiTimestamps => "api-timestamps",
-            Self::ApiBrowserAccess => "api-browser-access",
             Self::SpeakersOnly => "speakers-only",
             Self::PauseMenu => "pause-menu",
-            Self::PrintStart => "print-start",
             Self::VoicePrompt => "voice-prompt",
             Self::CopyCaptureZip => "copy-capture-zip",
             Self::DropTranscribe => "drop-transcribe",
-            Self::ShellCompletions => "shell-completions",
             Self::YoloMode => "yolo-mode",
             Self::CursorContext => "cursor-context",
             Self::CalendarMenu => "calendar-menu",
@@ -439,12 +399,10 @@ impl Feature {
             Self::FailureNotices => "labs.failure_notices",
             Self::LiveTyping => "labs.live_typing",
             Self::LiveChapters => "labs.live_chapters",
-            Self::VocabularyBiasing => "labs.vocabulary_biasing",
             Self::ScreenVocabulary => "labs.screen_vocabulary",
             Self::LearnFromCorrections => "labs.learn_from_corrections",
             Self::TerminalPaste => "paste_with_shift",
             Self::KeyboardModelSwitching => "keyboard_model_switching.enabled",
-            Self::AppModelSwitching => "labs.app_model_switching",
             Self::MouseShortcuts => "labs.mouse_shortcuts",
             Self::PauseBrowser => "pause_browser_media",
             Self::ShareShortcut => "share_dictation_shortcut",
@@ -472,7 +430,6 @@ impl Feature {
             Self::RecentDictations => "labs.recent_dictations",
             Self::SkipPauses => "labs.skip_pauses",
             Self::OutputFixes => "labs.output_fixes",
-            Self::PickerActiveFirst => "labs.picker_active_first",
             Self::ModelInPlace => "labs.model_in_place",
             Self::KQuantModels => "labs.k_quant_models",
             Self::PickerDownloaded => "labs.picker_downloaded",
@@ -480,7 +437,6 @@ impl Feature {
             Self::MicrophoneKeyAlone => "labs.microphone_key",
             Self::KeepRecordings => "labs.keep_recordings",
             Self::Appearance => "labs.appearance",
-            Self::ReleaseNotesLink => "labs.release_notes_link",
             Self::HideMenuBarIcon => "labs.hide_menu_bar_icon",
             Self::GnomeClipboardRestore => "labs.gnome_clipboard_restore",
             Self::TypedText => "labs.typed_text",
@@ -491,20 +447,16 @@ impl Feature {
             Self::Screenshots => "labs.screenshots",
             Self::AnnotateReplay => "labs.annotate_replay",
             Self::MeetingImport => "labs.meeting_import",
-            Self::QuitClosesWindow => "labs.quit_closes_window",
             Self::CapsLockDictation => "labs.caps_lock_dictation",
             Self::OpenCodeInWsl => "labs.opencode_in_wsl",
             Self::ApiProcessing => "labs.api_processing",
             Self::ApiTimestamps => "labs.api_timestamps",
-            Self::ApiBrowserAccess => "labs.api_browser_access",
             Self::SpeakersOnly => "labs.speakers_only",
             Self::PauseMenu => "labs.pause_menu",
-            Self::PrintStart => "labs.print_start",
             Self::VoicePrompt => "labs.voice_prompt",
             Self::CopyCaptureZip => "labs.copy_capture_zip",
             Self::DropTranscribe => "labs.drop_transcribe",
             Self::PasteLastPicker => "labs.paste_last_picker",
-            Self::ShellCompletions => "labs.shell_completions",
             Self::YoloMode => "labs.yolo_mode",
             Self::CursorContext => "labs.cursor_context",
             Self::CalendarMenu => "labs.calendar_menu",

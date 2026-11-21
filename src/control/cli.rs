@@ -74,10 +74,9 @@ pub enum ControlCli {
     Dictation {
         #[arg(value_enum)]
         action: CaptureAction,
-        /// With `start` (Labs › Dictation for a command, macOS) or `stop`:
-        /// answer with the transcript instead of pasting it. A printing start
-        /// waits for its recording to end. Exits 4, printing nothing, when no
-        /// speech was heard.
+        /// With `start` (macOS) or `stop`: answer with the transcript
+        /// instead of pasting it. A printing start waits for its recording to
+        /// end. Exits 4, printing nothing, when no speech was heard.
         #[arg(long)]
         print: bool,
         /// With `start` or `toggle`: paste the transcript as heard,
@@ -207,9 +206,8 @@ pub enum ControlCli {
         #[command(subcommand)]
         command: CaptureCommand,
     },
-    /// Print a shell completion script for `hex` (Labs › Shell
-    /// completions).
-    #[command(hide = true)]
+    /// Print a shell completion script for `hex` (bash, zsh, fish, elvish,
+    /// or PowerShell).
     Completions {
         /// The shell to print a completion script for.
         #[arg(value_enum)]
