@@ -439,7 +439,10 @@ pub(super) fn write_span(
     if let Some(parent) = out.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    match (shrink, trim) {
+    // Written beside it under a hidden name and renamed once whole, so a
+    // failed or interrupted export never leaves half a movie in the folder.
+    let partial = partial_path(out);
+    let written = match (shrink, trim) {
         (Some(how), span) => {
             let how = helper::Reencode {
                 max_edge: how.max_edge,
@@ -447,9 +450,25 @@ pub(super) fn write_span(
                 fps: how.fps,
                 span,
             };
-            helper::reencode(movie, out, how, progress).map(|_| ())
+            helper::reencode(movie, &partial, how, progress).map(|_| ())
         }
-        (None, Some([from, to])) => helper::trim(movie, out, from, to).map(|_| ()),
-        (None, None) => std::fs::copy(movie, out).map(|_| ()).map_err(Into::into),
+        (None, Some([from, to])) => helper::trim(movie, &partial, from, to).map(|_| ()),
+        (None, None) => std::fs::copy(movie, &partial)
+            .map(|_| ())
+            .map_err(Into::into),
     }
+    .and_then(|()| std::fs::rename(&partial, out).map_err(Into::into));
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written
+}
+
+/// Where `out` is written until it's whole: a hidden sibling that keeps its
+/// extension, which tells the helper the container.
+fn partial_path(out: &std::path::Path) -> std::path::PathBuf {
+    let name = out
+        .file_name()
+        .map_or_else(|| "export".into(), |name| name.to_string_lossy());
+    out.with_file_name(format!(".partial-{name}"))
 }

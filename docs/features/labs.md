@@ -331,7 +331,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        + screenshots.scale_to_1x/max_resolution/frame_rate/quality/export_size
 │                                        + screenshots.record_kind/record_microphone/record_system_audio (macOS)
 │                                        the shortcut picks an area (Space: a window); the PNG goes on the clipboard, into the folder (Desktop), and into a corner thumbnail;
-│                                        a saved record shortcut and Annotate's capture shortcuts never share a key, on or off
+│                                        while the Lab is on, the record shortcut and Annotate's capture shortcuts never share a key
 ├── Annotate last 15 seconds no labs.annotate_replay + capture.replay_hotkey (macOS 27+)
 │                                        keeps a rolling 15 s SCClipBufferingOutput screen buffer for hex capture replay and the replay shortcut;
 │                                        macOS keeps its screen-recording dot lit the whole time it is on
@@ -3095,10 +3095,12 @@ Annotate". macOS's own ⌘⇧5 (symbolic hot key 184, Keyboard Shortcuts ›
 Screenshots › "Screenshot and recording options") is matched in the window
 server first, so while it's on the drawer shows the same "macOS takes this
 shortcut first" note as for ⌘⇧4 (`system_shortcut.rs`).
-A saved record shortcut and Annotate's capture shortcuts never share a key,
-whether Annotate or the Lab is on: giving one the other's chord is refused,
-so turning either on can't leave the record shortcut dead while Annotate's
-whole-screen recording takes the chord. A file saved before that rule had its
+The record shortcut never takes Annotate's capture or replay chord. Annotate
+can't take the record shortcut's chord while the Lab is on; with the Lab off
+it can (every Mac has ⌘⇧5 saved, which mustn't hold Annotate's key), and
+turning the Lab on then clears the record shortcut rather than leave it dead
+while Annotate's whole-screen recording takes the chord. A file saved with the
+two sharing a chord has its
 record shortcut cleared when it loaded, with a warning logged: Annotate's
 capture shortcut isn't filtered the way the record one is, so the chord would
 still record the whole screen, and a record saved on the replay shortcut

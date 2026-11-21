@@ -239,6 +239,8 @@ impl Editor {
             now: self.now,
             overlay: self.overlay.take(),
             tool: self.tool,
+            // An export of the recording shown before reports to nothing.
+            generation: GENERATION.fetch_add(1, Ordering::Relaxed),
             ..Self::default()
         };
     }
@@ -569,6 +571,7 @@ impl Editor {
             self.note(tr_fill("Sending to {}…", &dest.name), tx);
         }
         let overlay = self.overlay.clone();
+        let generation = self.generation;
         let spawned = std::thread::Builder::new()
             .name("hex-recording-export".into())
             .spawn(move || {
@@ -581,6 +584,9 @@ impl Editor {
                     shown = percent;
                     if let Some(overlay) = &overlay {
                         overlay.update(move |s, tx| {
+                            if s.generation != generation {
+                                return;
+                            }
                             if let Some((_, done)) = &mut s.exporting {
                                 *done = f32::from(percent) / 100.0;
                                 tx.animated();
@@ -600,16 +606,20 @@ impl Editor {
                             Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
                         };
                         overlay.update(move |s, tx| {
-                            s.exporting = None;
-                            s.note(note, tx);
+                            if s.generation == generation {
+                                s.exporting = None;
+                                s.note(note, tx);
+                            }
                         });
                     }
                     Err(error) => {
                         tracing::warn!(error = %format!("{error:#}"), "could not export the recording");
                         let note = export_failure(&error, &out);
                         overlay.update(move |s, tx| {
-                            s.exporting = None;
-                            s.failed(note, out, tx);
+                            if s.generation == generation {
+                                s.exporting = None;
+                                s.failed(note, out, tx);
+                            }
                         });
                     }
                 }
