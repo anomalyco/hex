@@ -38,9 +38,10 @@ extension AutocorrectEngine {
         // Polish: diacritics you didn't add, however many ("zolw" -> "żółw", "maly" -> "mały"),
         // are as cheap as one missing Spanish accent, a little more for each further one. Greek
         // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
-        // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος").
-        if language == .polish || language == .greek, s.count == t.count {
-            let same = language == .polish ? samePolishLetterIgnoringDiacritics : sameGreekLetterIgnoringAccents
+        // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
+        // čárky left out ("cesky" -> "český", "prilis" -> "příliš").
+        if language == .polish || language == .greek || language == .czech, s.count == t.count {
+            let same = language == .greek ? sameGreekLetterIgnoringAccents : samePolishLetterIgnoringDiacritics
             let missed = zip(s, t).filter { $0 != $1 }
             if !missed.isEmpty, missed.allSatisfy({ same($0, $1) }) {
                 return 0.15 + 0.05 * Double(missed.count - 1)

@@ -548,6 +548,64 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(greek, "και"), "a word stays")
     }
 
+    /// Czech types with iOS's cs dictionary, and háčky and čárky left out are the cheapest fix
+    /// there is, however many ("cesky" -> "český", "prilis" -> "příliš", "kun" -> "kůň"), as
+    /// Polish diacritics are; other languages keep one edit. The fixes run against a stub
+    /// dictionary answering as an iPhone's would.
+    func testCzechRestoresMissingDiacritics() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "cesky", to: "český", language: .czech)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "prilis", to: "příliš", language: .czech)!, 0.25, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kun", to: "kůň", language: .czech)!, 0.20, accuracy: 0.001)
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "prilis", to: "příliš", language: .english), "three edits elsewhere")
+        engine.language = .czech
+        XCTAssertEqual(engine.autocorrect.language, .czech)
+        XCTAssertNil(engine.autocorrect.decoder, "no Czech typing model")
+
+        let czech = stubbed {
+            $0.valid = ["český", "příliš", "kůň", "žluťoučký", "děkuji", "jsem", "dobrý", "den", "kun", "cesta"]
+            // "cesta" is one far key from "cesky" and listed first; "český" only lacks its čárka and háček.
+            $0.guessTable = ["cesky": ["cesta", "český"], "prilis": ["příliš"], "zlutoucky": ["žluťoučký"], "dekuji": ["děkuji"]]
+        }
+        czech.setLanguage(.czech, available: ["cs", "en_US"])
+        XCTAssertEqual(fix(czech, "cesky"), "český")
+        XCTAssertEqual(fix(czech, "Cesky"), "Český")
+        XCTAssertEqual(fix(czech, "prilis"), "příliš")
+        XCTAssertEqual(fix(czech, "zlutoucky"), "žluťoučký")
+        XCTAssertEqual(fix(czech, "dekuji"), "děkuji")
+        XCTAssertNil(fix(czech, "jsem"), "a word stays")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.czech).count, 3)
+    }
+
+    /// TestFlight (build 56): "Autocomplete suggests English words in Czech too." With Czech
+    /// and English chosen, a sentence the words before show is Czech (`languageLean`) gets
+    /// Czech completions only, none of English's even where Czech has none, and an English
+    /// sentence English's only; with nothing before, both languages' in turn, as before
+    /// (#2186). Autocorrect is #2186's: an English word stays as typed in a Czech sentence.
+    func testEnglishSuggestionsStayOutOfACzechSentence() {
+        let available = ["cs", "en_US"]
+        let czech = stubbed {
+            $0.valid = ["dobrý", "den", "jsem", "doma", "dnes", "děkuji", "dobře", "a", "do"]
+            $0.completionTable = ["do": ["doma", "dobře", "dobrý"], "de": ["den", "děkuji"]]
+        }
+        czech.setLanguage(.czech, available: available)
+        let english = StubChecker()
+        english.valid = ["i", "am", "at", "home", "today", "do", "dog", "done", "door", "the", "a"]
+        english.completionTable = ["do": ["dog", "done", "door"], "de": ["deal"], "kur": ["kurtosis", "kudos"]]
+        english.guessTable = ["dorr": ["door"]]
+        czech.setPartner(.english, available: available, checker: english)
+        XCTAssertEqual(czech.partner?.language, .english)
+        func strip(_ before: String) -> [String] {
+            Array(czech.suggestions(beforeInput: before, field: .text, autocorrectionType: .default).dropFirst().map(\.replacement))
+        }
+        XCTAssertEqual(strip("dobrý den jsem do"), ["doma", "dobře"], "a Czech sentence: Czech words")
+        XCTAssertEqual(strip("dobrý den jsem kur"), [], "and no English ones where Czech has none")
+        XCTAssertEqual(strip("i am at home do"), ["dog", "done"], "an English sentence: English words")
+        XCTAssertEqual(strip("do"), ["doma", "dog"], "nothing before: both, in turn")
+        XCTAssertEqual(fix(czech, before: "i am at home dorr"), "door")
+        XCTAssertEqual(fix(czech, before: "dorr"), "door")
+        XCTAssertNil(fix(czech, before: "dobrý den jsem home"), "an English word stays as typed")
+    }
+
     /// Serbian (Latin) has no dictionary on iOS: nothing is "corrected", into English or anything else.
     func testSerbianLatinWithoutADictionaryCorrectsNothing() {
         engine.language = .serbianLatin

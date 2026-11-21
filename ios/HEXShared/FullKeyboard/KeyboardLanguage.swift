@@ -16,7 +16,9 @@ import Foundation
 /// the cedilla ş ţ), as on Apple's iPhone keyboard; Apple's Romanian layout with keys of its own
 /// for them is the iPad's. Greek matches the standard Greek layout and the system keyboard's
 /// observed long-press options, in the iPhone's rows (no ; or ς keys, the tonos key ending row
-/// 1; its typing rules are `GreekTyping`).
+/// 1; its typing rules are `GreekTyping`). Czech matches the standard Czech layout and the
+/// system keyboard's observed long-press options: QWERTZ, with the ´ and ˇ keys that accent the
+/// letter before them (`CzechTyping`) and every other Czech letter on a held key.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
     case norwegian = "nb"
@@ -28,6 +30,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case frenchSwiss = "fr-CH"
     case portuguese = "pt"
     case polish = "pl"
+    case czech = "cs"
     case romanian = "ro"
     case russian = "ru"
     case ukrainian = "uk"
@@ -47,6 +50,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .frenchSwiss: "Français (Suisse)"
         case .portuguese: "Português"
         case .polish: "Polski"
+        case .czech: "Čeština"
         case .romanian: "Română"
         case .russian: "Русский"
         case .ukrainian: "Українська"
@@ -85,6 +89,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .frenchSwiss: "fr-CH"
         case .portuguese: "pt-BR"
         case .polish: "pl-PL"
+        case .czech: "cs-CZ"
         case .romanian: "ro-RO"
         case .russian: "ru-RU"
         case .ukrainian: "uk-UA"
@@ -154,6 +159,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     func letterRows(_ letters: KeyboardLetterLayout) -> [[String]] {
         let rows: [String] = switch offered(letters) {
         case .own: ownLetterRows
+        // Apple's Czech layouts are both its own, the ´ and ˇ keys kept: QWERTY only swaps Z and Y.
+        case .qwerty where self == .czech: ["qwertyuiop", "asdfghjkl\u{00B4}", "zxcvbnm\u{02C7}"]
         case .qwerty: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         case .qwertz: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
         case .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
@@ -178,6 +185,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .frenchSwiss: [.qwertz, .azerty, .qwerty]
         case .italian, .portuguese: [.qwerty, .azerty, .qwertz]
         case .polish, .romanian: [.qwerty, .qwertz, .azerty]
+        // Apple's "QWERTZ – Czech/Slovak" (its default) and "QWERTY – Czech/Slovak", nothing else
+        // (iOS 27.2 simulator, Add New Keyboard › Czech › Layout).
+        case .czech: [.own, .qwerty]
         // Apple lists QWERTY first for Serbian (Latin) and adds it as QWERTY; Hex keeps the
         // QWERTZ it always typed on as the default.
         case .serbianLatin: [.qwertz, .qwerty, .azerty]
@@ -198,13 +208,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// own layout with letters of its own, its arrangement and the language ("QWERTZ – Deutsch").
     func layoutName(_ letters: KeyboardLetterLayout) -> String {
         switch letters {
+        case .qwerty where self == .czech: "QWERTY – \(displayName)"
         case .qwerty: "QWERTY"
         case .qwertz: "QWERTZ"
         case .azerty: "AZERTY"
         case .dvorak: "Dvorak"
         case .own:
             switch self {
-            case .german: "QWERTZ – \(displayName)"
+            case .german, .czech: "QWERTZ – \(displayName)"
             case .spanish, .norwegian: "QWERTY – \(displayName)"
             default: displayName
             }
@@ -234,6 +245,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // keys ending in the tonos key ´, over row 2's nine.
         case .greek: ["ερτυθιοπ\u{00B4}", "ασδφγηξκλ", "ζχψωβνμ"]
         case .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
+        // The standard Czech layout (QWERTZ) in the rows the iPhone's own Czech keyboard shows
+        // (iOS 27.2 simulator): the ´ key (U+00B4) ends row 2, ten keys edge to edge, and the ˇ
+        // key (U+02C7) ends row 3, so shift and delete are one letter wide.
+        case .czech: ["qwertzuiop", "asdfghjkl\u{00B4}", "yxcvbnm\u{02C7}"]
         }
     }
 
@@ -355,6 +370,26 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "z": ["z", "ż", "ź", "ž"],
                 "c": ["c", "ć", "ç", "č"],
                 "n": ["n", "ń", "ñ"],
+            ]
+        case .czech:
+            // Every Czech letter (á č ď é ě í ň ó ř š ť ú ů ý ž) and its neighbours'; the ˇ key
+            // holds the ring ˚ (ů, å), the ´ key nothing, and so does every letter not listed.
+            [
+                "e": ["e", "ě", "é", "ê", "è", "ę", "ë", "ē", "ė"],
+                "r": ["r", "ř", "ŕ"],
+                "t": ["t", "ť"],
+                "z": ["z", "ż", "ź", "ž"],
+                "u": ["u", "ú", "ů", "û", "ü", "ù", "ū"],
+                "i": ["i", "í", "î", "ï", "ì", "į", "ī"],
+                "o": ["o", "ó", "ô", "ö", "ò", "õ", "œ", "ø", "ō"],
+                "a": ["a", "á", "à", "ą", "â", "ä", "æ", "ã", "å", "ā"],
+                "s": ["s", "š", "ß", "ś"],
+                "d": ["d", "ď"],
+                "l": ["l", "ł", "ľ", "ĺ"],
+                "y": ["y", "ý", "ÿ"],
+                "c": ["c", "č", "ç", "ć"],
+                "n": ["n", "ň", "ñ", "ń"],
+                "\u{02C7}": ["\u{02C7}", "\u{02DA}"],
             ]
         case .romanian:
             // Romanian's own letters right after the base: ă and â on A, î on I, ș on S and ț on
@@ -490,6 +525,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "8": ["8", "8ª", "8º"],
                 "9": ["9", "9º", "9ª"],
             ]
+        case .czech:
+            // The system Czech keyboard's 123 and #+= pages, and every held symbol, are English's.
+            [:]
         case .polish:
             // Its currency key is € (no zł), held for € $ £ ¥ ₩ ₽; Hex's 123 page keeps $.
             [
@@ -533,6 +571,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // Brazil's spelling first, Portugal's where only it is installed.
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
         case .polish: ["pl", "pl_PL"]
+        case .czech: ["cs", "cs_CZ"]
         case .romanian: ["ro", "ro_RO"]
         case .russian: ["ru", "ru_RU"]
         case .ukrainian: ["uk", "uk_UA"]
@@ -578,7 +617,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
         case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
             []
         }
     }
@@ -607,7 +646,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "giovedi": "giovedì", "venerdi": "venerdì",
             ]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .portuguese, .polish, .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
             [:]
         }
     }
@@ -619,7 +658,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .italian: ["e": "è", "ce": "c'è"]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .portuguese, .polish, .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
             [:]
         }
     }
@@ -631,13 +670,15 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         let letters = offered(letters)
         // AZERTY's row 2 runs edge to edge, and its row 3 starts under e (W under E).
         // Ukrainian's rows 1 and 2 are both twelve keys, and its row 3 starts under ц; Greek's
-        // are both nine (row 1 ending in the tonos key), and its row 3 starts under σ.
+        // are both nine (row 1 ending in the tonos key), and its row 3 starts under σ; Czech's
+        // both ten (row 2 ending in ´), its row 3 starting under s.
         // Dvorak's row 2 runs from the edge, its row 1 ends at delete (P over U's left half) and
         // its row 3 starts after shift (Q under O's right half).
         let offsets = switch letters {
         case .azerty: [0.0, 0.0, 2.0]
         case .dvorak: [1.85, 0.0, 1.33]
-        case .own where self == .ukrainian || self == .greek: [0.0, 0.0, 1.0]
+        case .own where self == .ukrainian || self == .greek || self == .czech: [0.0, 0.0, 1.0]
+        case .qwerty where self == .czech: [0.0, 0.0, 1.0]
         default: [0.0, 0.5, 1.5]
         }
         for (row, letters) in letterRows(letters).enumerated() {
@@ -670,6 +711,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             return .french
         case "pt": return .portuguese
         case "pl": return .polish
+        case "cs": return .czech
         case "ro": return .romanian
         case "ru": return .russian
         case "uk": return .ukrainian
@@ -713,7 +755,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
 /// Apple's Keyboard Layout list offers them for it. The plain ones hold only the 26 letters, in
 /// every language (iOS 27.0 simulator: the same rows, bottom row and 123 pages as the language's
 /// own layout, which is English's QWERTY, French's AZERTY, Swiss French's and Serbian's QWERTZ);
-/// a language's other letters are then held on their base letter (`letterHolds(on:)`).
+/// a language's other letters are then held on their base letter (`letterHolds(on:)`). Czech's
+/// QWERTY is Apple's "QWERTY – Czech/Slovak": its own rows, ´ and ˇ keys kept, Z and Y swapped
+/// (iOS 27.2 simulator).
 nonisolated enum KeyboardLetterLayout: String, CaseIterable, Sendable {
     /// The language's own keys, with letters of their own (German's ü ö ä, Spanish's ñ).
     case own

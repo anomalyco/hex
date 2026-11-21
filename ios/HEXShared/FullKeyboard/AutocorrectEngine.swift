@@ -541,6 +541,7 @@ final class AutocorrectEngine {
         case .italian: ["io", "il", "la"]
         case .portuguese: ["eu", "o", "a"]
         case .polish: ["ja", "to", "nie"]
+        case .czech: ["to", "já", "ale"]
         case .romanian: ["eu", "nu", "am"]
         case .norwegian: ["jeg", "det", "vi"]
         case .russian: ["я", "это", "мы"]
@@ -563,6 +564,7 @@ final class AutocorrectEngine {
         case .italian: ["e", "ma", "che"]
         case .portuguese: ["e", "mas", "que"]
         case .polish: ["a", "ale", "że"]
+        case .czech: ["a", "ale", "že"]
         case .romanian: ["și", "dar", "că"]
         case .norwegian: ["og", "men", "jeg"]
         case .russian: ["и", "но", "что"]
@@ -582,6 +584,7 @@ final class AutocorrectEngine {
         case .italian: ["di", "e", "che", "la", "il", "a"]
         case .portuguese: ["de", "que", "e", "o", "a", "do"]
         case .polish: ["nie", "i", "w", "się", "na", "to"]
+        case .czech: ["a", "se", "je", "v", "na", "to"]
         case .romanian: ["de", "și", "în", "nu", "să", "la"]
         case .norwegian: ["og", "i", "det", "er", "på", "som"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
@@ -671,13 +674,15 @@ final class AutocorrectEngine {
             // first; spelling guesses only for a word neither knows.
             let mine = candidates(for: token, autoFix: autoFix, guesses: !partner.knowsAsTyped(token), limit: 2, model: predictionModel, corrects: isEnabled)
             let theirs = partner.candidates(for: token, autoFix: autoFix, guesses: !knowsAsTyped(token), limit: 2, model: partner.decoder?.model, corrects: isEnabled)
-            let leansPartner = languageLean(partner, token: token) > 0
-            let (first, second) = leansPartner ? (theirs, mine) : (mine, theirs)
-            for index in 0..<max(first.count, second.count) {
-                for item in [first, second].compactMap({ index < $0.count ? $0[index] : nil })
-                where pool.count < 2 && !pool.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
-                    pool.append(item)
-                }
+            // A sentence in one language (`languageLean`) gets only that language's words, even
+            // when it has none (TestFlight build 56: "autocomplete suggests English words in
+            // Czech too"); without one, both, in turn.
+            let lean = languageLean(partner, token: token)
+            let ordered = lean < 0 ? [mine] : lean > 0 ? [theirs]
+                : (0..<max(mine.count, theirs.count)).map { i in [mine, theirs].compactMap { i < $0.count ? $0[i] : nil } }
+            for item in ordered.joined()
+            where pool.count < 2 && !pool.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
+                pool.append(item)
             }
         } else {
             pool += candidates(for: token, autoFix: autoFix, guesses: true, limit: 2 - pool.count, model: predictionModel, corrects: isEnabled)

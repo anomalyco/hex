@@ -567,6 +567,26 @@ final class SpokenCleanupRulesTests: XCTestCase {
         )
     }
 
+    /// Czech as `DictationTranscriber` writes it (macOS 27.2.1, Zuzana voice: háčky and čárky
+    /// kept, no punctuation, numbers as digits): Polished capitalizes and ends it, Casual
+    /// starts each sentence lowercase, and Lowercase lowers Á Č Ď É Ě Í Ň Ó Ř Š Ť Ú Ů Ý Ž.
+    func testCzechStylesAndLowercase() {
+        let heard = "dobrý den přijdu o 10 minut později budu doma v 19:30 začněte beze mne"
+        XCTAssertEqual(
+            TranscriptFormatter.format(heard, style: .polished, language: "cs-CZ"),
+            "Dobrý den přijdu o 10 minut později budu doma v 19:30 začněte beze mne."
+        )
+        XCTAssertEqual(TranscriptFormatter.format("příliš žluťoučký kůň", style: .polished, language: "cs-CZ"), "Příliš žluťoučký kůň.")
+        XCTAssertEqual(TranscriptFormatter.format("Čau. Úterý.", style: .casual, language: "cs-CZ"), "čau. úterý")
+        XCTAssertEqual(TranscriptFormatter.format("Žluťoučký kůň.", style: .verbatim, language: "cs-CZ"), "Žluťoučký kůň.")
+        var pipeline = DictationPipeline(style: .polished, language: "cs-CZ", vocabulary: [])
+        pipeline.lowercase = true
+        XCTAssertEqual(
+            pipeline.format("ÁČĎ ÉĚÍ ŇÓŘ ŠŤÚ ŮÝŽ", language: "cs-CZ"),
+            "áčď éěí ňóř šťú ůýž."
+        )
+    }
+
     /// Greek as `DictationTranscriber` writes it (macOS 27.2, Melina voice: tonos kept, no
     /// punctuation, numbers as digits): Polished capitalizes and ends it, Casual starts each
     /// sentence lowercase, and Lowercase lowers accented capitals (Ά Έ Ή Ί Ό Ύ Ώ Ϊ Ϋ) and

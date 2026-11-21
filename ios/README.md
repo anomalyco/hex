@@ -824,11 +824,15 @@ never at a launch by itself.
   word either language knows as typed is never changed, a typo only one can fix gets that
   fix ("teh" → "the" while French types), and when both can, the language of the last words
   only one dictionary knows wins, else the clearly cheaper slip, else the keyboard's own;
-  the strip shows both languages' fixes and completions. In the simulator the English
+  the strip shows fixes and completions in the language the words before are in, never the
+  other's, even where that language has none (TestFlight build 56, Čeština and English:
+  "autocomplete suggests English words in Czech too"; the iOS 27.2 simulator's Czech
+  dictionary completes nothing, and English filled the strip), and with nothing before to
+  tell, both languages', in turn. In the simulator the English
   keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
   80 English words; with both chosen, none. Any two Latin-script languages with an iOS
   dictionary pair this way (English with Français, Deutsch, Italiano, Português, Polski,
-  Norsk, Română, Español, or two of those), whatever their order; Polski's simulator
+  Čeština, Norsk, Română, Español, or two of those), whatever their order; Polski's simulator
   dictionary takes every word, so the any-word guard (#2143) leaves it out there. The words before
   count for a language when only its dictionary knows them, or, from three letters, when
   both do but only its typing model has them among its commonest (iOS's French and German
@@ -864,8 +868,10 @@ never at a launch by itself.
   "QWERTY – Español" (with ñ), QWERTY, AZERTY, QWERTZ; Français (France) AZERTY, QWERTY,
   QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Apple's
   "– French" variants add only the ´ key Hex leaves out); Italiano and Português QWERTY,
-  AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Srpski QWERTZ (Hex's, though
-  Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский, Українська and Ελληνικά keep their
+  AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
+  "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
+  simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Srpski
+  QWERTZ (Hex's, though Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский, Українська and Ελληνικά keep their
   one layout (Apple also offers a phonetic "Russian – QWERTY", not built). The plain
   layouts are the same 26 letters in every language, with the language's bottom row and
   123 pages; only the letters move (`KeyboardLetterLayout`, `KeyboardLanguage.letterRows(_:)`).
@@ -918,7 +924,19 @@ never at a launch by itself.
   turns back into σ when another letter follows, as the system keyboard does; its 123 page
   has the ano teleia · in ;'s place and ; (the Greek question mark, which also starts the next
   sentence with a capital) in ?'s, its #+= page ? in |'s, its currency key is $ held as
-  English's, and its held " offers French's order) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  English's, and its held " offers French's order), Čeština (it matches the standard Czech
+  layout and the system keyboard's observed long-press options, in the rows the iOS 27.2
+  simulator's own Czech keyboard, "QWERTZ – Czech/Slovak", shows: `qwertzuiop`, `asdfghjkl´`,
+  `yxcvbnmˇ`, ten keys edge to edge on rows 1 and 2 and shift and delete a letter wide on row
+  3; the ´ (U+00B4) and ˇ (U+02C7) keys are no dead keys: with real touches in Messages, each
+  accents the letter right before it, ´ giving á ć é í ĺ ń ó ŕ ś ú ý ź and ˇ č ď ě ľ ň ř š ť ž
+  and ů after u, capitals too (A´ → Á, Uˇ → Ů), and after anything else, an accented letter
+  included, types itself ("aˇ", "á´"); delete then takes the accented letter whole
+  (`CzechTyping`); held, E offers ě é ê è ę ë ē ė, R ř ŕ, T ť, Z ž ź ż, U ú ů û ü ù ū, I í î ï
+  ì į ī, O ó ô ö ò õ œ ø ō, A á à ą â ä æ ã å ā, S š ß ś, D ď, L ł ľ ĺ, Y ý ÿ, C č ç ć, N ň ñ ń
+  and the ˇ key the ring ˚ (which makes ů and å), each callout laid out as the system's
+  (`AccentCatalog.arrangement`), and every other key, ´ included, nothing; its 123 and #+=
+  pages and their held keys are English's) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -941,7 +959,7 @@ never at a launch by itself.
   letter at the end under the thumb, in one row where the system wraps a long list
   (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `pl`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `pl`, `cs`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
@@ -958,7 +976,9 @@ never at a launch by itself.
   iOS 27.2 simulator lists `pl_PL` but its checker flags no word, so Polish fixes are
   checked against a stub dictionary there. Greek likewise: every tonos or diaeresis left out
   counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
-  "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. A two-letter non-word one
+  "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. Czech likewise:
+  every háček or čárka left out counts as one such fix ("cesky" → "český", "prilis" →
+  "příliš"), checked against a stub dictionary. A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
   ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
   Spanish and Italian only). Auto-capitalization is unchanged.
@@ -1298,6 +1318,10 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   Polish is too (macOS 27.2.1 lists `pl-PL` for `DictationTranscriber` only):
   `say -v Zosia` clips came back with every diacritic (ą ć ę ł ń ó ś ź ż), numbers as
   digits ("10 min", "19:30"), and no punctuation.
+  Czech is too (macOS 27.2.1 lists `cs-CZ` for `DictationTranscriber` only, a 12 s model
+  download): `say -v Zuzana` clips came back with every háček and čárka ("Příliš žluťoučký kůň
+  úpěl"), numbers and times as digits ("10 min.", "19:30", "8:15") and no punctuation. It
+  never goes to Parakeet, which is English-only.
   Greek is too (macOS 27.2 lists `el-GR` for `DictationTranscriber` only): `say -v Melina`
   clips came back with every tonos, final ς, numbers as digits ("10 λεπτά", "7:30"), and no
   punctuation. Lowercase lowers with Unicode's context-aware mapping, so a word-final Σ
