@@ -1327,6 +1327,53 @@ The cleanup tagger's model (`HEXKeyboard/CleanupTagger/HexCleanupTagger.mlpackag
 `fetch-cleanup-model.sh` downloads it and checks its SHA-256; Xcode Cloud runs it
 from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
 
+### Replaying real typing
+
+`TypingReplayTests` runs recordings of real fingers through the keyboard as it runs: the
+key plane, Swipe typing or taps with Spatial autocorrect, then the engine's spacing and
+casing. It is opt-in, one test per mode, and the datasets below are not vendored, so convert
+a recording to one of the two JSON shapes first. `xcodebuild` passes environment variables
+to the test runner only when they are prefixed with `TEST_RUNNER_`, and strips the prefix,
+so `TEST_RUNNER_HEX_SWIPE_REPLAY` becomes `HEX_SWIPE_REPLAY`:
+
+```sh
+TEST_RUNNER_HEX_SWIPE_REPLAY=/path/swipes.json xcodebuild test \
+  -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>" \
+  -only-testing:HEXMobileTests/TypingReplayTests
+```
+
+Swipe recordings are `{"sentences":[{"source":String,"session":String,"words":[String],
+"gestures":[{"x":[Double],"y":[Double],"t":[Double]}]}]}`: one gesture per word, x 0…1
+across the ten columns of the top letter row, from q's left edge to p's right edge (their
+centres at 0.05 and 0.95), y 0…1 from the top of the first letter row to the bottom of the
+third (row centres at 1/6, 1/2 and 5/6), and t milliseconds since the finger landed. Hex's
+second and third letter rows are offset half a column and one and a half columns, as the
+format assumes. Tap recordings replace `gestures` with `taps`, one `{x, y, t}` per touch,
+each array holding that touch's samples (a tap is usually one) on the sentence's clock;
+y > 1 is the space bar, x 0.25…0.75 across it.
+`TEST_RUNNER_HEX_TAP_REPLAY=/path/taps.json` does the same for taps, with Spatial
+autocorrect reading each word on its space.
+
+Both report a line per source inside `TYPING-REPLAY … TYPING-REPLAY-END`: total words,
+words outside the decoder's dictionary (and their share, counted separately), and accuracy
+among the in-dictionary words (letters only, case-insensitive). Swipes also report
+typed-or-offered in the suggestion strip, gestures not read as swipes, and decode-on-lift
+median and p90. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT` writes each
+sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
+
+Public datasets of real typing it is meant for:
+
+- [FUTO swipe dataset](https://huggingface.co/datasets/futo-org/swipe.futo.org) (MIT; train,
+  validation and test split by donor).
+- [How We Swipe](https://osf.io/sj67f) (Leiva et al., MobileHCI 2021; MIT).
+- [Noisy Typing on QWERTY Keyboards](https://zenodo.org/records/24225302) (Vertanen and
+  Kristensson, IUI 2023; CC-BY-4.0).
+- [Tap Typing with Touch Sensing Images](https://github.com/google-research-datasets/tap-typing-with-touch-sensing-images)
+  (CC-BY-4.0).
+
+See [`benchmark/typing-replay/README.md`](benchmark/typing-replay/README.md) for each
+dataset's download and its `convert.py` command.
+
 ## Simulator vs. Physical iPhone Proof Limits
 
 - **Verified in Simulator (`HEXMobileTests` + `--snap-state` scenes):** Compilation
