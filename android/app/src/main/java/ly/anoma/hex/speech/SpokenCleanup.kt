@@ -16,12 +16,13 @@ internal object SpokenCleanup {
         fun kind(word: String) = if (word.any(Char::isDigit)) kinds.size else kinds.indexOfFirst { word in it }
     }
     private val rules = mapOf(
-        "en" to Rules("you know|like", "no wait|wait no|i mean|or rather|scratch that|actually|sorry|no",
-            "i mean|or rather|scratch that|no wait|wait no",
+        "en" to Rules("you know|like", "no wait|wait no|i mean|i meant|or rather|or actually|actually no|scratch that|make that|correction|no sorry|oh sorry|actually|rather|wait|sorry|no",
+            "i mean|i meant|or rather|scratch that|make that|no wait|wait no",
             listOf("one two three four five six seven eight nine ten eleven twelve", "monday tuesday wednesday thursday friday saturday sunday",
                 "january february march april may june july august september october november december",
-                "today tomorrow yesterday tonight", "black white red yellow green blue purple orange gray grey brown"),
-            "a an the to of for with at in on from by about into onto my your his her our their its i we you he she they can could would will should shall may might must do does did is are was were be been am have has had and or but if that because than just gonna wanna want need think thinking guess get got let's i'm we're you're they're it's there's i'll we'll you'll i'd we'd i've we've really very so like isn't don't can't won't didn't this these those some any every what where when how which who also go going s"),
+                "today tomorrow yesterday tonight", "black white red yellow green blue purple orange gray grey brown",
+                "first second third fourth fifth sixth seventh eighth ninth tenth"),
+            "a an the to of for with at in on from by about into onto my your his her our their its i we you he she they can could would will should shall may might must do does did is are was were be been am have has had and or but if that because than just gonna wanna want need think thinking guess get got let's i'm we're you're they're it's there's i'll we'll you'll i'd we'd i've we've really very so like isn't don't can't won't didn't this these those some any every what where when how which who also go going then s"),
         "es" to Rules("este|o sea", "digo|perdón|perdon|no|no espera|no mejor|mejor dicho", "mejor dicho|no mejor",
             listOf("dos tres cuatro cinco seis siete ocho nueve diez once doce", "lunes martes miércoles jueves viernes sábado domingo",
                 "enero febrero marzo abril mayo junio julio agosto septiembre setiembre octubre noviembre diciembre", "hoy mañana ayer anoche"),
@@ -48,22 +49,20 @@ internal object SpokenCleanup {
     private fun matches(words: List<String>, i: Int, p: List<String>) = i+p.size <= words.size &&
         p.indices.all { n -> bare(words[i+n]) == p[n] && (n == p.lastIndex || words[i+n].last() !in close || words[i+n].endsWith(',')) }
 
+    // English markers that are corrections outright, so a repeated word or a name anchors them
+    // with only a pause before ("ask Jordan, actually ask Sam"). "sorry" and "no" also start prose.
+    private val explicit = phrases("i mean|i meant|or rather|or actually|actually no|scratch that|make that|correction|no sorry|oh sorry|actually|rather|wait|no wait|wait no")
+    // Words a speaker repeats by stumbling ("I I think", "We, we need"); "that that" and "had had" are English.
+    private val repeatable = ("i we you he she they it my your our their his her the a an to of in on at by for with from and but let's i'm it's we're you're").split(' ').toSet()
+    private val fragment = Regex("[A-Za-z]{1,3}-")
+
     fun clean(text: String, lang: String): String {
         val r = rules[lang] ?: return text
         val input = text.split(Regex("\\s+")).filter(String::isNotBlank)
         val words = input.toMutableList()
         val sound = Regex("(?i)(?:" + sounds.getValue(lang) + if (lang == "en") "|hmm+|erm|uhm|mm)" else ")")
-        var i = 0
-        while (i < words.size) {
-            val word = words[i]
-            val f = r.fillers.firstOrNull { matches(words, i, it) }
-            val n = when {
-                word.first() !in open && word.last() !in "?!" && sound.matches(bare(word)) -> 1
-                f != null && i+f.size < words.size && word.first() !in open &&
-                    (i == 0 || pause(words[i-1]) || end(words[i-1])) && words[i+f.size-1].endsWith(',') -> f.size
-                else -> 0
-            }
-            if (n == 0) { i++; continue }
+        val english = lang == "en"
+        fun remove(i: Int, n: Int) {
             val terminal = words[i+n-1].last().takeIf { it in ".?!" }
             words.subList(i, i+n).clear()
             if (i > 0) {
@@ -77,29 +76,80 @@ internal object SpokenCleanup {
             }
             if (i < words.size && (i == 0 || end(words[i-1]))) words[i] = capitalized(words[i])
         }
+        fun clause(i: Int): IntRange {
+            var low = i-1
+            while (low > 0 && i-low < 8 && !end(words[low-1])) low--
+            return low..i-1
+        }
+        // Two names, the corrected one right before the marker ("Denver, no, Dallas"; Whisper also
+        // wrote "Denver, no Dallas").
+        fun names(a: Int, b: Int) = english && b < words.size && a > 0 && !end(words[a-1]) &&
+            words[a].first().isUpperCase() && words[b].first().isUpperCase() && bare(words[b]).let { it != "i" && !it.startsWith("i'") } &&
+            r.kind(bare(words[a])) < 0 && r.kind(bare(words[b])) < 0
+        // A hesitation between pauses before a word of a kind said earlier is a correction ("third floor, uh, fourth floor").
+        fun correcting(i: Int) = english && i > 0 && i+1 < words.size && words[i].endsWith(',') && pause(words[i-1]) &&
+            r.kind(bare(words[i+1])).let { k -> k >= 0 && clause(i).any { r.kind(bare(words[it])) == k } }
+
+        var i = 0
+        while (i < words.size) {
+            val word = words[i]
+            val f = r.fillers.firstOrNull { matches(words, i, it) }
+            val n = when {
+                word.first() !in open && word.last() !in "?!" && sound.matches(bare(word)) &&
+                    !(bare(word) == "uh" && words.getOrNull(i+1)?.let(::bare) == "oh") && !correcting(i) -> 1
+                english && fragment.matches(word) && i+1 < words.size && bare(words[i+1]).startsWith(word.dropLast(1).lowercase(Locale.ROOT)) -> 1
+                f != null && i+f.size < words.size && word.first() !in open &&
+                    (i == 0 || pause(words[i-1]) || end(words[i-1])) && words[i+f.size-1].endsWith(',') -> f.size
+                else -> 0
+            }
+            if (n == 0) i++ else remove(i, n)
+        }
+
+        if (english) {
+            i = 0
+            while (i < words.size) {
+                val n = (4 downTo 1).firstOrNull { n ->
+                    i + 2*n <= words.size && (0 until n).all { bare(words[i+it]).isNotEmpty() && bare(words[i+it]) == bare(words[i+n+it]) } &&
+                        (0 until n-1).none { words[i+it].last() in close || words[i+n+it].last() in close } &&
+                        (0 until n).none { words[i+it].first() in open || words[i+n+it].first() in open } &&
+                        words[i+n-1].let { it.last() !in close || it.endsWith(',') } && (n > 1 || bare(words[i]) in repeatable)
+                }
+                if (n == null) { i++; continue }
+                // Keep the first copy, with the second's closing marks.
+                words[i+n-1] = words[i+n-1].trimEnd(',') + words[i+2*n-1].takeLastWhile { it in close }
+                words.subList(i+n, i+2*n).clear()
+            }
+        }
 
         i = 1
         while (i < words.size) {
-            val marker = r.markers.firstOrNull { p ->
+            val hesitation = correcting(i) && sound.matches(bare(words[i]))
+            val marker = if (hesitation) listOf(bare(words[i])) else r.markers.firstOrNull { p ->
                 if (!matches(words,i,p) || i+p.size >= words.size || words[i].first() in open) false
                 else {
                     val before = words[i-1]; val last = words[i+p.lastIndex]
                     ((pause(before) || end(before)) && last.endsWith(',')) ||
-                        (p in r.plain && !end(before) && !end(last) && (lang == "en" || !pause(last))) ||
-                        (lang == "en" && pause(before) && !end(last) && r.kind(bare(words[i+p.size])) >= 0)
+                        // English plain markers may also start a sentence ("20 chairs. Make that 25 chairs.").
+                        (p in r.plain && !end(last) && (english || !end(before) && !pause(last))) ||
+                        (english && pause(before) && !end(last) && (p in explicit || r.kind(bare(words[i+p.size])) >= 0 ||
+                            names(i-1, i+p.size)))
                 }
             }
             if (marker == null) { i++; continue }
             val repair = i + marker.size
             val first = bare(words[repair]); val kind = r.kind(first)
-            var low = i-1
-            while (low > 0 && i-low < 8 && !end(words[low-1])) low--
-            val candidates = (i-1 downTo low)
-            val anchor = candidates.firstOrNull { bare(words[it]) == first }
-                ?: candidates.firstOrNull { kind >= 0 && r.kind(bare(words[it])) == kind }
-                ?: (i-1).takeIf { lang == "en" && marker == listOf("i","mean") && pause(words[it]) &&
-                    words[it].first().isUpperCase() && words[repair].first().isUpperCase() }
+            val range = clause(i)
+            val candidates = range.reversed()
+            val sameKind = candidates.firstOrNull { kind >= 0 && r.kind(bare(words[it])) == kind }
+            val name = (i-1).takeIf { pause(words[it]) && (it > range.first || marker == listOf("i", "mean")) && names(it, repair) }
+            val repeated = if (hesitation) null else candidates.firstOrNull { bare(words[it]) == first }
+            val anchor = repeated ?: (if (hesitation) sameKind else sameKind ?: name)
             if (anchor == null || words.subList(anchor,i).any(::negation)) { i++; continue }
+            // A repair shorter than what it replaces would cut the sentence ("Get two coffees, make that
+            // three."); a repeated word restarts the phrase, so it may be shorter.
+            var said = repair
+            while (said < words.size - 1 && !end(words[said])) said++
+            if (repeated == null && said - repair + 1 < i - anchor) { i++; continue }
             val source = words[anchor]
             val marks = source.takeWhile { it in open }
             var target = words[repair]
@@ -113,6 +163,17 @@ internal object SpokenCleanup {
             words[repair] = target
             words.subList(anchor,repair).clear()
             i = anchor+1
+        }
+
+        // "I mean," that corrects nothing is a filler at a sentence's start or after a one-word opener
+        // ("Honestly, I mean, it could've gone worse"); after a clause it may be a kept correction.
+        if (english) {
+            i = 0
+            while (i + 2 < words.size) {
+                val opener = i == 1 && pause(words[0]) || i >= 2 && pause(words[i-1]) && end(words[i-2])
+                if (matches(words, i, listOf("i", "mean")) && words[i+1].endsWith(',') &&
+                    (i == 0 || end(words[i-1]) || opener)) remove(i, 2) else i++
+            }
         }
         return if (words == input) text else words.joinToString(" ")
     }

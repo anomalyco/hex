@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.FrenchSpacing
+import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.speech.SpokenCleanup
 import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
@@ -415,5 +416,56 @@ class InsertionTest {
         assertEquals(false, SpaceRules.separates("\nfox"))
         assertEquals(false, SpaceRules.separates("fox"))
         assertEquals(false, SpaceRules.separates(null))
+    }
+    // iOS CleanupTaggerTests' English examples and its hand-written set, met with rules (no tagger).
+    @Test fun englishCleanupRulesMeetTheTaggersExamples() {
+        for ((spoken, cleaned) in listOf(
+            "Send the follow-up to Ji-woo, no wait, to Smith-Jones." to "Send the follow-up to Smith-Jones.",
+            "Let's ship it Tuesday, no wait, Thursday." to "Let's ship it Thursday.",
+            "Can you send it to John, I mean Mike?" to "Can you send it to Mike?",
+            "Meet me at 5, no, at 6." to "Meet me at 6.",
+            "We need 20, sorry, 25 chairs." to "We need 25 chairs.",
+            "I I think we're good to go." to "I think we're good to go.",
+            "Can you, um, send me the address again?" to "Can you send me the address again?",
+            "It was, like, really long." to "It was really long.",
+            "Um, tell Hye-jin I said thanks." to "Tell Hye-jin I said thanks.",
+            "It costs 15 euros, er, 50 euros." to "It costs 50 euros.",
+            "It's on the third floor, uh, fourth floor." to "It's on the fourth floor.",
+            "We'll need about 20 chairs, make that 25 chairs." to "We'll need about 25 chairs.",
+            "We'll need about 20 chairs. Make that 25 chairs." to "We'll need about 25 chairs.",
+            "Tell Priya the deadline is the 14th, I meant the 15th." to "Tell Priya the deadline is the 15th.",
+            "I'm landing in Denver, no, Dallas around noon." to "I'm landing in Dallas around noon.",
+            "I'm landing in Denver, no Dallas around noon." to "I'm landing in Dallas around noon.",
+            "Can you ask Jordan, actually ask Sam to review the PR?" to "Can you ask Sam to review the PR?",
+            "Our standup moved to 9:15, correction, 9:45." to "Our standup moved to 9:45.",
+            "Send the invoice to Acme, or actually, send it to Globex." to "Send it to Globex.",
+            "Add olive oil to the list. Scratch that, add avocado oil." to "Add avocado oil.",
+            "My flight number is UA 512, oh sorry, UA 521." to "My flight number is UA 521.",
+            "Let's meet at Blue Bottle, wait, no, at Philz." to "Let's meet at Philz.",
+            "The kickoff is in Austin, rather, in San Antonio." to "The kickoff is in San Antonio.",
+            "I mean, the demo went fine overall." to "The demo went fine overall.",
+            "Honestly, I mean, it could've gone worse." to "Honestly, it could've gone worse.",
+            "We, we need to talk about the budget." to "We need to talk about the budget.",
+            "It's at the, at the corner of 3rd and Pine." to "It's at the corner of 3rd and Pine.",
+            "I want to, I want to go to the beach this weekend." to "I want to go to the beach this weekend.",
+            "We w- we left." to "We left.",
+            "Um, so I'll be at the, the office until 5, actually 6, and then, uh, home." to "So I'll be at the office until 6, and then home.",
+            "Hey Ana, uh, quick question, is the, is the review on Thursday, no wait, Friday?" to "Hey Ana, quick question, is the review on Friday?",
+        )) assertEquals(spoken, cleaned, SpokenCleanup.clean(spoken, "en"))
+        for (prose in listOf("I mean what I say.", "I mean it, you did a great job.", "I'd rather stay in tonight.",
+            "Uh oh, I left my wallet at home.", "Bye bye, talk soon!", "I think that that's the right call.",
+            "It was a really, really good dinner.", "No, wait for me at the entrance.", "Wait, are you serious?",
+            "I meant to call you yesterday.", "Can you make that reservation for four?", "Get two coffees, make that three.",
+            "Book a table for four at 7, actually make it five people.", "Rather than driving, let's take the train.",
+            "Actually, can you grab some ice on the way?", "It isn’t blue, I mean, it is green.", "Thanks for the gift, sorry for the delay.",
+            "Hi Ana, no problem.", "Hey Tim, sorry, I'm late.", "Okay, no, Sam is right."))
+            assertEquals(prose, SpokenCleanup.clean(prose, "en"))
+    }
+    @Test fun automaticDictationFollowsTheKeyboardLayout() {
+        assertEquals(DictationLanguage.Spanish, DictationLanguage.automatic(Spoken.Spanish, listOf("en")))
+        assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(Spoken.Norwegian, listOf("en")))
+        assertEquals(DictationLanguage.German, DictationLanguage.automatic(null, listOf("fr", "de", "en")))
+        assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
+        assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
     }
 }
