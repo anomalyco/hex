@@ -20,6 +20,24 @@ nonisolated struct DictationLowercaseSettings {
     }
 }
 
+/// Settings › Dictation › End with a period, in the shared App Group so in-keyboard dictation
+/// reads it too. On by default. Off, no line ends with a full stop, though "?" and "!" stay
+/// (`TranscriptFormatter.format(_:style:language:lists:endsWithPeriod:)`).
+nonisolated struct DictationPeriodSettings {
+    static let enabledKey = "settings.dictationEndWithPeriod"
+
+    private let defaults: UserDefaults?
+
+    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+        self.defaults = defaults
+    }
+
+    var isEnabled: Bool {
+        get { defaults?.object(forKey: Self.enabledKey) as? Bool ?? true }
+        nonmutating set { defaults?.set(newValue, forKey: Self.enabledKey) }
+    }
+}
+
 /// Experiments › Hinglish (Hindi in Latin letters), in the shared App Group so in-keyboard
 /// dictation reads it too. Off by default. While it is on, Hindi dictation is written in Latin
 /// letters (`HinglishRomanizer`) and Hindi is called Hinglish in the language menus.
@@ -86,6 +104,8 @@ nonisolated struct DictationPipeline: Sendable {
     /// Experiments › Hinglish: Hindi is written in Latin letters before every other step, so
     /// learned fixes, vocabulary and the style see the Latin words.
     var hinglish = false
+    /// Settings › Dictation › End with a period; off, no line ends with a full stop.
+    var endsWithPeriod = true
 
     /// Each step's text, for Record typing logs.
     struct Stages: Equatable, Sendable {
@@ -144,7 +164,9 @@ nonisolated struct DictationPipeline: Sendable {
     /// can lowercase a term or capitalize a sentence start: "iPhone" -> "IPhone"), then
     /// Lowercase.
     func format(_ text: String, language: String?) -> String {
-        let styled = TranscriptFormatter.format(text, style: style, language: language, lists: formatLists)
+        let styled = TranscriptFormatter.format(
+            text, style: style, language: language, lists: formatLists, endsWithPeriod: endsWithPeriod
+        )
         let spelled = VocabularySpelling.apply(vocabulary + DictationCorrections.spellings(corrections), to: styled)
         return lowercase ? spelled.lowercased() : spelled
     }

@@ -446,6 +446,39 @@ final class SpokenCleanupRulesTests: XCTestCase {
         )
     }
 
+    /// Settings › Dictation › End with a period off (a TestFlight tester, build 56): no style
+    /// but Verbatim ends a line with a full stop, whether Apple Speech or the style wrote it.
+    /// "?" and "!" stay, and so does every mark inside the sentence.
+    func testEndWithAPeriodOff() {
+        func open(_ text: String, _ style: DictationStyle = .polished, _ language: String = "en-US") -> String {
+            TranscriptFormatter.format(text, style: style, language: language, endsWithPeriod: false)
+        }
+        XCTAssertEqual(open("erm i think i'll go, it's fine"), "I think I'll go, it's fine")
+        XCTAssertEqual(open("Sounds good. See you at 5."), "Sounds good. See you at 5")
+        XCTAssertEqual(open("Can you send the deck?"), "Can you send the deck?")
+        XCTAssertEqual(open("That's great!"), "That's great!")
+        XCTAssertEqual(open("He said \"see you later.\""), "He said \"see you later\"")
+        XCTAssertEqual(open("Wait..."), "Wait...")
+        XCTAssertEqual(open("Bring eggs, milk, etc."), "Bring eggs, milk, etc.")
+        XCTAssertEqual(open("We moved to the U.S."), "We moved to the U.S.")
+        XCTAssertEqual(open("Email john@gmail.com."), "Email john@gmail.com")
+        XCTAssertEqual(open("first line\nsecond line."), "First line\nSecond line")
+        // Chinese and Japanese: "。" goes, "？" and "！" stay.
+        XCTAssertEqual(open("好的，明天见。", .polished, "zh-CN"), "好的，明天见")
+        XCTAssertEqual(open("好的，明天见", .polished, "zh-CN"), "好的，明天见")
+        XCTAssertEqual(open("你今天来吗？", .polished, "zh-CN"), "你今天来吗？")
+        XCTAssertEqual(open("太好了！", .polished, "zh-CN"), "太好了！")
+        XCTAssertEqual(open("我到了。你在哪里。", .polished, "zh-CN"), "我到了。你在哪里")
+        XCTAssertEqual(open("「わかりました。」", .polished, "ja-JP"), "「わかりました」")
+        // Casual's longer messages, which keep it while the switch is on, lose it too.
+        XCTAssertEqual(open("One. Two. Three. Four.", .casual), "one. two. three. four")
+        XCTAssertEqual(open("Hi.\nSee you.", .casual), "hi\nsee you")
+        XCTAssertEqual(open("Call the dentist tomorrow at 9.", .notes), "Call the dentist tomorrow at 9")
+        XCTAssertEqual(open("Um, so it's done.", .verbatim), "Um, so it's done.", "Verbatim keeps the model's words")
+        // On, as before.
+        XCTAssertEqual(TranscriptFormatter.format("Sounds good", style: .polished, endsWithPeriod: true), "Sounds good.")
+    }
+
     /// Ukrainian as `DictationTranscriber` writes it (macOS 27.2, Lesya voice: Cyrillic, no
     /// punctuation): Polished capitalizes and ends it, Casual starts each sentence lowercase,
     /// Lowercase lowers Ґ, Є and Ї, and English's "i" rules never touch Cyrillic "і" ("and").
@@ -785,6 +818,36 @@ final class SpokenListsTests: XCTestCase {
             "So the plan is, first, call the bank, second, pay rent. Thanks!",
             "off: as before"
         )
+    }
+
+    /// End with a period off ends no list line with a full stop; "!" stays.
+    func testListLinesWithoutAPeriod() {
+        let heard = "Um, so the plan is, first, um, call the bank, second, pay rent. Thanks!"
+        let formatted = DictationStyle.allCases.map {
+            TranscriptFormatter.format(heard, style: $0, language: "en-US", lists: true, endsWithPeriod: false)
+        }
+        XCTAssertEqual(formatted, [
+            "So the plan is:\n1. Call the bank\n2. Pay rent\nThanks!",
+            "so the plan is:\n1. Call the bank\n2. Pay rent\nthanks!",
+            "So the plan is:\n1. Call the bank\n2. Pay rent\nThanks!",
+            heard,
+        ])
+        XCTAssertEqual(
+            TranscriptFormatter.format("首先，买牛奶。其次，给妈妈打电话。", style: .polished, language: "zh-CN", lists: true, endsWithPeriod: false),
+            "首先，买牛奶。其次，给妈妈打电话",
+            "Chinese lists stay as said; the last 。 goes"
+        )
+
+        var pipeline = DictationPipeline(style: .polished, language: "en-US", formatLists: true)
+        XCTAssertEqual(pipeline.format("Groceries, bullet, eggs, bullet, milk.", language: "en-US"), "Groceries:\n- Eggs.\n- Milk.")
+        pipeline.endsWithPeriod = false
+        XCTAssertEqual(pipeline.format("Groceries, bullet, eggs, bullet, milk.", language: "en-US"), "Groceries:\n- Eggs\n- Milk")
+
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let settings = DictationPeriodSettings(defaults: defaults)
+        XCTAssertTrue(settings.isEnabled, "on by default")
+        settings.isEnabled = false
+        XCTAssertFalse(DictationPeriodSettings(defaults: defaults).isEnabled)
     }
 
     /// The pipeline formats lists only with the switch on, and Lowercase still lowercases them.
