@@ -536,6 +536,7 @@ struct ExperimentsSettingsPage: View {
     @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
     @State private var confirmingTouchReset = false
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+    @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
 
     var body: some View {
         SettingsPageScaffold(title: "Experiments") {
@@ -602,6 +603,15 @@ struct ExperimentsSettingsPage: View {
                     detail: String(localized: "Uses where you tap on the Deutsch keyboard"),
                     isOn: $germanSpatialAutocorrect
                 )
+
+                SettingsDivider()
+
+                // Off by default: one shared list of learned words and fixes, as before.
+                SettingsToggleRow(
+                    title: String(localized: "Learn each language separately"),
+                    detail: String(localized: "Keep learned words and fixes with the language you typed or dictated them in."),
+                    isOn: $learnPerLanguage
+                )
             }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
@@ -618,6 +628,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: germanSpatialAutocorrect) { _, enabled in
             FullKeyboardSettings().germanSpatialAutocorrect = enabled
         }
+        .onChange(of: learnPerLanguage) { _, enabled in
+            TypingJournalSettings().learnsPerLanguage = enabled
+        }
         .onAppear {
             hinglish = HinglishSettings().isEnabled
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
@@ -625,6 +638,7 @@ struct ExperimentsSettingsPage: View {
             adaptiveTouch = AdaptiveTouchSettings().isEnabled
             refreshAdaptiveTouchStatus()
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+            learnPerLanguage = TypingJournalSettings().learnsPerLanguage
         }
     }
 

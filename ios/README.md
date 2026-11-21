@@ -302,6 +302,19 @@ never at a launch by itself.
       Typing insights lists these fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
+    - **Per language (Settings › Experiments › Learn each language separately):**
+      Off by default (`experiments.learnPerLanguage`, App Group). Every correction and
+      dictation fix is tagged with the language it was typed or dictated in either way,
+      so turning it on needs nothing learned again; a fix made in two languages is
+      tagged with neither and counts for every one. On, the keys learn a language's typos
+      and rejections from that language's corrections and the untagged ones, and a
+      dictation applies only the fixes made in its language and the untagged ones (a fix
+      learned in en-US applies in en-GB). Learned words are one list per keyboard
+      language (`keyboard.learnedWords.<code>`), started from the shared
+      `keyboard.learnedWords` list the first time that language is used; bilingual
+      autocorrect's partner keeps its own list and its own fixes. Where fingers land and
+      Adaptive touch stay shared. Delete what Hex learned erases the shared list and every
+      language's. Off, everything is the one shared list and learning it was before.
   - **Auto-capitalization (Settings › Keyboard › Auto-capitalization):** On by default,
     as Apple's (`FullKeyboardSettings.autoCapitalization`, App Group key
     `settings.keyboardAutoCapitalization`). Off, shift never turns itself on, whatever the

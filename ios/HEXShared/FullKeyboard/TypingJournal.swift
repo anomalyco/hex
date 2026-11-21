@@ -13,6 +13,7 @@ import UIKit
 struct TypingJournalSettings {
     private enum Key {
         static let enabled = "experiments.typingJournal"
+        static let learnsPerLanguage = "experiments.learnPerLanguage"
         static let disabledDictationFixes = "typingJournal.disabledDictationFixes"
         static let erasedAt = "typingJournal.erasedAt"
     }
@@ -28,15 +29,28 @@ struct TypingJournalSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.enabled) }
     }
 
+    /// Experiment (Learn each language separately): learned words and fixes stay with the
+    /// language you typed or dictated them in. Off by default, like every experiment: one
+    /// shared list and one shared learning, exactly as before.
+    var learnsPerLanguage: Bool {
+        get { defaults?.bool(forKey: Key.learnsPerLanguage) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.learnsPerLanguage) }
+    }
+
     /// Learned dictation fixes you switched off in Typing insights (their ids).
     var disabledDictationFixes: Set<String> {
         get { Set(defaults?.stringArray(forKey: Key.disabledDictationFixes) ?? []) }
         nonmutating set { defaults?.set(newValue.sorted(), forKey: Key.disabledDictationFixes) }
     }
 
-    /// The words autocorrect learned to leave alone (`LearnedWordsStore`).
+    /// The words autocorrect learned to leave alone (`LearnedWordsStore`), the shared list
+    /// and every language's own.
     func eraseLearnedWords() {
-        defaults?.removeObject(forKey: LearnedWordsStore.defaultsKey)
+        guard let defaults else { return }
+        defaults.removeObject(forKey: LearnedWordsStore.defaultsKey)
+        for key in defaults.dictionaryRepresentation().keys where LearnedWordsStore.isScopedKey(key) {
+            defaults.removeObject(forKey: key)
+        }
     }
 
     /// When Delete what Hex learned last ran, so another process drops what it still holds.
@@ -73,6 +87,10 @@ nonisolated struct TypingJournalCorrection: Codable, Equatable, Sendable {
     var typed: String
     var final: String
     var at: TimeInterval
+    /// The keyboard language it was typed in (`KeyboardLanguage.rawValue`); nil for a
+    /// journal written before corrections carried one. It marks the language either way
+    /// (`Learn each language separately`).
+    var language: String? = nil
 }
 
 nonisolated struct TypingJournalSnapshot: Codable, Equatable, Sendable {
@@ -138,6 +156,8 @@ final class TypingJournal {
     private var loadedAt: TimeInterval
     private var fileDate: Date?
     private var learning: (revision: Int, value: TypingLearning)?
+    /// `typingLearning(for:)`, one language at a time, for Learn each language separately.
+    private var languageLearning: [String: (revision: Int, value: TypingLearning)] = [:]
     /// Bumped whenever corrections or dictation fixes change.
     private(set) var revision = 0
 
@@ -184,11 +204,14 @@ final class TypingJournal {
         settings: TypingJournalSettings = TypingJournalSettings(),
         directory: URL? = FileManager.default.containerURL(
             forSecurityApplicationGroupIdentifier: KeyboardBridge.appGroup
-        )
+        ),
+        language: String? = nil
     ) -> [DictationCorrection] {
         guard settings.isEnabled else { return [] }
-        return load(from: directory?.appendingPathComponent(fileName))
-            .dictationCorrections(disabled: settings.disabledDictationFixes)
+        return load(from: directory?.appendingPathComponent(fileName)).dictationCorrections(
+            disabled: settings.disabledDictationFixes,
+            language: settings.learnsPerLanguage ? LanguageLearning.dictationCode(language) : nil
+        )
     }
 
     /// Fields a journal may learn from: plain text that allows autocorrect, never
@@ -218,10 +241,26 @@ final class TypingJournal {
         return value
     }
 
-    /// The learned dictation fixes, minus the ones switched off in Typing insights.
-    func dictationCorrections() -> [DictationCorrection] {
+    /// Typo fixes and rejected autocorrections for `language`'s keys: with Learn each
+    /// language separately on, only the corrections typed in that language and the ones never
+    /// tagged; off, all of them.
+    func typingLearning(for language: KeyboardLanguage?) -> TypingLearning {
+        guard settings.learnsPerLanguage, let language else { return typingLearning }
         refreshFromDisk()
-        return snapshot.dictationCorrections(disabled: settings.disabledDictationFixes)
+        let code = language.rawValue
+        if let cached = languageLearning[code], cached.revision == revision { return cached.value }
+        let value = TypingLearning.derive(from: snapshot.corrections, language: code)
+        languageLearning[code] = (revision, value)
+        return value
+    }
+
+    /// The learned dictation fixes, minus the ones switched off in Typing insights.
+    func dictationCorrections(language: String? = nil) -> [DictationCorrection] {
+        refreshFromDisk()
+        return snapshot.dictationCorrections(
+            disabled: settings.disabledDictationFixes,
+            language: settings.learnsPerLanguage ? LanguageLearning.dictationCode(language) : nil
+        )
     }
 
     func recordTap(on key: KeyboardKey, at point: CGPoint) {
@@ -244,21 +283,23 @@ final class TypingJournal {
     }
 
     /// Called when a word is finished; a retyped word close to the erased one is a fix.
-    func didFinish(word: String?) {
+    func didFinish(word: String?, language: String? = nil) {
         defer { erasedWord = nil }
         guard let erased = erasedWord, let word, !word.isEmpty,
               erased.lowercased() != word.lowercased(),
               Self.distance(erased.lowercased(), word.lowercased()) <= max(2, word.count / 2)
         else { return }
-        record(.retyped, typed: erased, final: word)
+        record(.retyped, typed: erased, final: word, language: language)
     }
 
-    func record(_ kind: TypingJournalCorrection.Kind, typed: String, final: String) {
+    func record(_ kind: TypingJournalCorrection.Kind, typed: String, final: String, language: String? = nil) {
         guard !typed.isEmpty, !final.isEmpty, typed != final else { return }
         if kind != .retyped { erasedWord = nil }
         refreshFromDisk()
         snapshot.corrections.append(
-            TypingJournalCorrection(kind: kind, typed: typed, final: final, at: Date().timeIntervalSince1970)
+            TypingJournalCorrection(
+                kind: kind, typed: typed, final: final, at: Date().timeIntervalSince1970, language: language
+            )
         )
         if snapshot.corrections.count > TypingJournalSnapshot.correctionLimit {
             snapshot.corrections.removeFirst(snapshot.corrections.count - TypingJournalSnapshot.correctionLimit)
@@ -267,8 +308,9 @@ final class TypingJournal {
         save()
     }
 
-    /// Adds what happened to one dictation: its outcome, and its word pairs with counts.
-    func recordDictation(_ result: DictationEditResult) {
+    /// Adds what happened to one dictation: its outcome, and its word pairs with counts,
+    /// kept under the language it was dictated in (`LanguageLearning.dictationCode`).
+    func recordDictation(_ result: DictationEditResult, language: String? = nil) {
         refreshFromDisk()
         let now = Date().timeIntervalSince1970
         snapshot.dictationOutcomes.append(TypingJournalDictationOutcome(
@@ -282,7 +324,9 @@ final class TypingJournal {
                 snapshot.dictationOutcomes.count - TypingJournalSnapshot.dictationOutcomeLimit
             )
         }
-        snapshot.dictationFixes = TypingJournalDictationFix.merging(result, into: snapshot.dictationFixes, at: now)
+        snapshot.dictationFixes = TypingJournalDictationFix.merging(
+            result, into: snapshot.dictationFixes, at: now, language: LanguageLearning.dictationCode(language)
+        )
         revision += 1
         save()
     }

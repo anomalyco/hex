@@ -56,35 +56,6 @@ final class DocumentProxyTextTarget: KeyboardTextTarget {
 /// so tests can drive it without `UITouch`.
 @MainActor
 final class FullKeyboardEngine {
-    struct ActiveTouch: Equatable {
-        var key: KeyboardKey
-        var startPoint: CGPoint
-        var point: CGPoint
-        /// A character that already went in because another key went down after it.
-        var committed: Bool
-        /// The page a 123/ABC press came from; releasing over a character returns there.
-        var returnLayer: KeyboardLayer?
-        /// A 123, #+= or shift press slid onto this character key: it shows the key's pop-up,
-        /// and letting go types it (`slideTarget`), as on Apple's keyboard.
-        var slideKey: KeyboardKey?
-        /// True once such a press slid onto a character key, so letting go back on the page
-        /// key is a slide taken back rather than a tap.
-        var hasSlid = false
-        /// True once a spacebar press crosses `trackpadActivationDistance`.
-        var isTrackpad = false
-        /// True once a spacebar press slides before its hold (`holdSpace`) while it switches
-        /// language: letting go far enough along switches instead of typing a space.
-        var isLanguageSwipe = false
-        var trackpadAnchorX: CGFloat = 0
-        /// Characters the trackpad has moved the cursor, for Record typing logs.
-        var trackpadOffset = 0
-        /// True when the likelier next letter claimed this touch from the key under it; a
-        /// small move then keeps it rather than sliding back (`letterReach`).
-        var claimed = false
-        /// Where the finger went down, before a strip touch moved onto row 1 (Adaptive touch).
-        var downPoint: CGPoint = .zero
-    }
-
     /// Apple's callout replaces the key's pop-up about 382 ms after it appeared (iOS 27.2, 60 fps
     /// recordings); Hex's took 420 at 0.4 s, a frame later to show.
     static let accentHoldDelay: TimeInterval = 0.36
@@ -436,13 +407,14 @@ final class FullKeyboardEngine {
         if let journal = learning {
             let token = replacing
             if let token, !token.isEmpty, token != suggestion.replacement {
-                journal.record(.picked, typed: token, final: suggestion.replacement)
+                journal.record(.picked, typed: token, final: suggestion.replacement, language: autocorrect.language.rawValue)
             } else {
-                journal.didFinish(word: token)
+                journal.didFinish(word: token, language: autocorrect.language.rawValue)
                 // Tapping what you typed over the autocorrection space would apply turns it down.
                 if suggestion.kind == .keepLiteral, let token,
                    let autoFix = suggestions.first(where: \.willAutoReplace) {
-                    journal.record(.keptTyped, typed: autoFix.replacement, final: token)
+                    let language = (autocorrect.lastFixLanguage ?? autocorrect.language).rawValue
+                    journal.record(.keptTyped, typed: autoFix.replacement, final: token, language: language)
                 }
             }
         }
@@ -469,7 +441,7 @@ final class FullKeyboardEngine {
     func insertEmoji(_ text: String, source: String) {
         autocorrect.clearPendingUndo()
         adaptiveTouch?.forget()
-        learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
+        learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput), language: autocorrect.language.rawValue)
         insert(text, source: source)
     }
 
@@ -554,12 +526,6 @@ final class FullKeyboardEngine {
     private func pointOnKeys(_ point: CGPoint) -> CGPoint {
         let top = layout.touchAreaFrame.minY
         return point.y < top ? CGPoint(x: point.x, y: top) : point
-    }
-
-    private static func distance(from point: CGPoint, to rect: CGRect) -> CGFloat {
-        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
-        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
-        return (dx * dx + dy * dy).squareRoot()
     }
 
     /// The kind of key a finger going down at `point` lands on, or nil off the keys: what
@@ -859,7 +825,7 @@ final class FullKeyboardEngine {
                 ])
                 break
             }
-            learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput))
+            learning?.didFinish(word: AutocorrectEngine.currentToken(in: target.documentContextBeforeInput), language: autocorrect.language.rawValue)
             autocorrect.clearPendingUndo()
             typingLog?.edit("return", [
                 TypingLogField("inserted", .string("\n")),
@@ -899,25 +865,12 @@ final class FullKeyboardEngine {
         onChange?()
     }
 
-    /// A press that types the character key it slides onto: 123, ABC and #+= (with a page to
-    /// go back to), and shift.
-    private static func slidesToType(_ touch: ActiveTouch) -> Bool {
-        touch.returnLayer != nil || touch.key.kind == .shift
-    }
-
     /// The character key under `point` that such a press types on letting go, or nil over
     /// any other key or off the keys.
     private func slideTarget(for touch: ActiveTouch, at point: CGPoint) -> KeyboardKey? {
         guard Self.slidesToType(touch), let under = layout.hitTest(point),
               under.character != nil, under.kind != touch.key.kind else { return nil }
         return under
-    }
-
-    /// A language swipe's direction, or nil when it was too short or more up than along.
-    private static func languageSwipeStep(from start: CGPoint, to end: CGPoint) -> Int? {
-        let dx = end.x - start.x
-        guard abs(dx) >= languageSwipeDistance, abs(dx) >= abs(end.y - start.y) else { return nil }
-        return dx < 0 ? 1 : -1
     }
 
     func touchCancelled(id: Int) {
@@ -988,7 +941,7 @@ final class FullKeyboardEngine {
             target.insertText(undo.original)
             for change in undo.changes {
                 autocorrect.suppressAndKeep(change.from)
-                learning?.record(.undone, typed: change.to, final: change.from)
+                learning?.record(.undone, typed: change.to, final: change.from, language: change.language?.rawValue)
             }
             lastSpaceAt = nil
             didEdit()
@@ -1080,7 +1033,7 @@ final class FullKeyboardEngine {
         guard let last = before?.last, last.isLetter, let token = AutocorrectEngine.currentToken(in: before) else { return false }
         // "approx." and "etc." are abbreviations, not typos.
         if mark == ".", AutocorrectEngine.abbreviations.contains(token.lowercased()) { return false }
-        learning?.didFinish(word: token)
+        learning?.didFinish(word: token, language: autocorrect.language.rawValue)
         syncLearning()
         autocorrect.decoderTaps = currentTokenTaps
         guard finishWord(ending: text) else { return false }
@@ -1171,9 +1124,10 @@ final class FullKeyboardEngine {
                 TypingLogField("merged", .bool(true)),
             ])
             target.insertText(merged + ending)
-            learning?.record(.autocorrected, typed: token, final: merged)
+            learning?.record(.autocorrected, typed: token, final: merged, language: autocorrect.language.rawValue)
             autocorrect.recordAppliedCorrection(
-                original: original, insertedText: merged + ending, changes: [.init(from: token, to: merged)]
+                original: original, insertedText: merged + ending,
+                changes: [.init(from: token, to: merged, language: autocorrect.language)]
             )
             swipedWord = nil
             return true
@@ -1208,12 +1162,12 @@ final class FullKeyboardEngine {
         target.insertText(inserted)
         var changes: [AutocorrectEngine.AppliedCorrection.Change] = []
         if let revised {
-            changes.append(.init(from: revised.from, to: revised.to))
-            learning?.record(.autocorrected, typed: revised.from, final: revised.to)
+            changes.append(.init(from: revised.from, to: revised.to, language: autocorrect.language))
+            learning?.record(.autocorrected, typed: revised.from, final: revised.to, language: autocorrect.language.rawValue)
         }
         if fix != nil {
-            changes.append(.init(from: token, to: word))
-            learning?.record(.autocorrected, typed: token, final: word)
+            changes.append(.init(from: token, to: word, language: autocorrect.lastFixLanguage))
+            learning?.record(.autocorrected, typed: token, final: word, language: autocorrect.lastFixLanguage?.rawValue)
         }
         autocorrect.recordAppliedCorrection(original: original, insertedText: inserted, changes: changes)
         swipedWord = nil
@@ -1275,7 +1229,7 @@ final class FullKeyboardEngine {
         }
         let token = AutocorrectEngine.currentToken(in: target.documentContextBeforeInput)
         let taps = currentTokenTaps
-        learning?.didFinish(word: token)
+        learning?.didFinish(word: token, language: autocorrect.language.rawValue)
         syncLearning()
         autocorrect.decoderTaps = taps
         if !afterSwipe, applyTextReplacement(ending: " ") {
@@ -1348,7 +1302,10 @@ final class FullKeyboardEngine {
     /// Hands what the journal learned (typos, rejected corrections) to autocorrect;
     /// nothing while Learn how I type is off.
     private func syncLearning() {
-        autocorrect.applyLearning(journal?.typingLearning ?? TypingLearning())
+        autocorrect.applyLearning(
+            journal?.typingLearning(for: autocorrect.language) ?? TypingLearning(),
+            partner: journal?.typingLearning(for: autocorrect.partner?.language) ?? TypingLearning()
+        )
     }
 
     func didEdit() {
@@ -1415,7 +1372,7 @@ final class FullKeyboardEngine {
         let capital = swipeCapital
         let word = swipeCased(first, capital: capital)
         let inserted = (space ? " " : "") + word
-        if space { learning?.didFinish(word: AutocorrectEngine.currentToken(in: before)) }
+        if space { learning?.didFinish(word: AutocorrectEngine.currentToken(in: before), language: autocorrect.language.rawValue) }
         autocorrect.clearPendingUndo()
         tokenTaps.removeAll()
         adaptiveTouch?.forget()
@@ -1474,7 +1431,7 @@ final class FullKeyboardEngine {
         guard let swiped = swipedWord, let first = text.first, !Self.swipeJoiners.contains(first),
               let before = target.documentContextBeforeInput, before.hasSuffix(swiped.word) else { return }
         swipedWord = nil
-        learning?.didFinish(word: AutocorrectEngine.currentToken(in: before))
+        learning?.didFinish(word: AutocorrectEngine.currentToken(in: before), language: autocorrect.language.rawValue)
         typingLog?.edit("insert", [
             TypingLogField("inserted", .string(" ")),
             TypingLogField("src", .string("swipe_space")),
@@ -1530,28 +1487,5 @@ final class FullKeyboardEngine {
         autocorrect.setKeys(layout.language, letters: layout.letters)
         syncDecoderKeys()
         logState(cause)
-    }
-
-    /// The letter keys Spatial autocorrect scores taps against: this layout's, moved by
-    /// `tapOffsets`; with Adaptive touch on, by its personal centres instead (none while it
-    /// has too little evidence), with the others beside them as the baseline no correction
-    /// may go past (`AutocorrectEngine.decoderBaselineKeys`). Off the letters page the last
-    /// letters page's stay: a closing mark from the 123 page still reads the word's taps
-    /// ("ofthe." -> "of the.").
-    private func syncDecoderKeys() {
-        guard let keys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets) else { return }
-        guard let adaptive = adaptiveTouch?.offsets(for: layout),
-              let personal = TypingDecoder.Keys(layout: layout, offsets: adaptive) else {
-            autocorrect.decoderKeys = keys
-            autocorrect.decoderBaselineKeys = nil
-            return
-        }
-        autocorrect.decoderKeys = personal
-        autocorrect.decoderBaselineKeys = personal == keys ? nil : keys
-    }
-
-    /// Hands the layout and shift to typing logs, which writes a line when either changed.
-    func logState(_ cause: String) {
-        typingLog?.keyboardState(layout: layout, shift: shift, cause: cause)
     }
 }

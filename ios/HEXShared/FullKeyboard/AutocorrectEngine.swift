@@ -34,18 +34,41 @@ nonisolated struct KeyboardSuggestion: Equatable, Sendable {
 @MainActor
 final class LearnedWordsStore {
     nonisolated static let defaultsKey = "keyboard.learnedWords"
+    nonisolated static let scopedPrefix = defaultsKey + "."
     static let maxWords = 2_000
     static let maxBytes = 64 * 1024
 
     private let defaults: UserDefaults?
+    /// The language this list belongs to (`Learn each language separately`); nil is the
+    /// shared list every language uses while the experiment is off.
+    private let language: String?
     private var storage: [String] = []
     private var wordSet: Set<String> = []
     private var sessionKeepCounts: [String: Int] = [:]
     private var loadedAt = Date().timeIntervalSince1970
 
-    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup), language: String? = nil) {
         self.defaults = defaults
+        self.language = language
         load()
+    }
+
+    /// This list's words for one language, made on first use and seeded from the shared list.
+    func scoped(to language: String) -> LearnedWordsStore {
+        LearnedWordsStore(defaults: defaults, language: language)
+    }
+
+    nonisolated static func key(for language: String) -> String {
+        defaultsKey + "." + language
+    }
+
+    /// Whether `key` is a language's own list (`keyboard.learnedWords.<code>`).
+    nonisolated static func isScopedKey(_ key: String) -> Bool {
+        key.hasPrefix(scopedPrefix)
+    }
+
+    private var storageKey: String {
+        language.map { Self.key(for: $0) } ?? Self.defaultsKey
     }
 
     var words: [String] {
@@ -93,18 +116,29 @@ final class LearnedWordsStore {
     }
 
     private func load() {
-        guard let data = defaults?.data(forKey: Self.defaultsKey),
-              data.count <= Self.maxBytes,
-              let decoded = try? JSONDecoder().decode([String].self, from: data) else { return }
-        storage = Array(decoded.suffix(Self.maxWords))
-        wordSet = Set(storage)
+        if let data = defaults?.data(forKey: storageKey), data.count <= Self.maxBytes,
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            storage = Array(decoded.suffix(Self.maxWords))
+            wordSet = Set(storage)
+            return
+        }
+        guard language != nil else { return }
+        // A language's list starts with the shared words, and remembers that it was made so a
+        // later shared keep doesn't leak into it.
+        if let data = defaults?.data(forKey: Self.defaultsKey), data.count <= Self.maxBytes,
+           let decoded = try? JSONDecoder().decode([String].self, from: data) {
+            storage = Array(decoded.suffix(Self.maxWords))
+            wordSet = Set(storage)
+        }
+        save()
     }
 
     private func save() {
         guard let defaults else { return }
-        while !storage.isEmpty {
-            if let data = try? JSONEncoder().encode(storage), data.count <= Self.maxBytes {
-                defaults.set(data, forKey: Self.defaultsKey)
+        while true {
+            guard let data = try? JSONEncoder().encode(storage) else { return }
+            if data.count <= Self.maxBytes || storage.isEmpty {
+                defaults.set(data, forKey: storageKey)
                 return
             }
             let evicted = storage.removeFirst()
@@ -122,6 +156,8 @@ final class AutocorrectEngine {
         struct Change: Equatable {
             let from: String
             let to: String
+            /// The language the fix was made in, for what the keys learn from undoing it.
+            var language: KeyboardLanguage? = nil
         }
 
         let original: String
@@ -131,7 +167,17 @@ final class AutocorrectEngine {
     }
 
     let checker: TextChecking
-    let learnedWords: LearnedWordsStore
+    /// The words kept in this engine's language: the one shared list, or with Learn each
+    /// language separately on, this language's own (`learnsPerLanguage`).
+    private(set) var learnedWords: LearnedWordsStore
+    private var sharedLearnedWords: LearnedWordsStore
+    /// Experiment (Learn each language separately): each keyboard language keeps its own
+    /// words, seeded from the shared list, and the partner its own too. Off, one shared list.
+    var learnsPerLanguage = false {
+        didSet { if learnsPerLanguage != oldValue { scopeLearnedWords() } }
+    }
+    /// Each language's list once made, so switching back keeps what it holds in memory.
+    private var scopedLearnedWords: [String: LearnedWordsStore] = [:]
     /// Settings › Keyboard › Autocorrect. Off, only your text replacements still show in the
     /// strip and apply on space or a closing mark, as Apple's keyboard does with Auto-Correction
     /// off; a field that turns autocorrection off gets none, as there.
@@ -169,6 +215,9 @@ final class AutocorrectEngine {
     /// Learn how I type: typos you fixed the same way twice and words you turned down twice.
     private(set) var learning = TypingLearning()
     private(set) var lastCorrection: AppliedCorrection?
+    /// The language of the fix space would apply to the word it was asked about: the
+    /// partner's when its fix won, else this engine's; nil for a text replacement.
+    private(set) var lastFixLanguage: KeyboardLanguage?
     /// Experiment (Spatial autocorrect): reads the word's taps with a language model in place
     /// of `UITextChecker`'s one-edit guesses, for the language its model was built for. Nil
     /// while off or without a model.
@@ -236,8 +285,10 @@ final class AutocorrectEngine {
         checker: TextChecking? = nil,
         learnedWords: LearnedWordsStore? = nil
     ) {
+        let words = learnedWords ?? LearnedWordsStore()
         self.checker = checker ?? SystemTextChecker()
-        self.learnedWords = learnedWords ?? LearnedWordsStore()
+        sharedLearnedWords = words
+        self.learnedWords = words
         self.offensiveWords = .bundled(KeyboardLanguage.english.rawValue)
     }
 
@@ -330,6 +381,7 @@ final class AutocorrectEngine {
     /// Follows the keyboard layout. `available` is `UITextChecker.availableLanguages`.
     func setLanguage(_ language: KeyboardLanguage, available: [String] = UITextChecker.availableLanguages) {
         self.language = language
+        scopeLearnedWords()
         layoutLanguage = language
         acceptsAnyLetters = nil
         if partner?.language == language {
@@ -363,7 +415,8 @@ final class AutocorrectEngine {
 
     /// Bilingual autocorrect's second language (`KeyboardLanguageList.partner`), or nil. It
     /// shares your words (`learnedWords`, text replacements, Learn how I type) and types on
-    /// this engine's keys. None without a dictionary for either language. `checker` is for
+    /// this engine's keys, except with Learn each language separately: then it keeps its own
+    /// language's words. None without a dictionary for either language. `checker` is for
     /// tests.
     func setPartner(
         _ other: KeyboardLanguage?,
@@ -375,7 +428,9 @@ final class AutocorrectEngine {
             return
         }
         guard partner?.language != other else { return }
-        let engine = AutocorrectEngine(checker: checker ?? SystemTextChecker(), learnedWords: learnedWords)
+        let engine = AutocorrectEngine(
+            checker: checker ?? SystemTextChecker(), learnedWords: learnsPerLanguage ? scopedWords(other) : sharedLearnedWords
+        )
         engine.setLanguage(other, available: available)
         engine.layoutLanguage = layoutLanguage
         engine.layoutLetters = layoutLetters
@@ -390,10 +445,43 @@ final class AutocorrectEngine {
         partner = engine
     }
 
-    func applyLearning(_ learning: TypingLearning) {
+    /// Gives this engine and its partner the list for their languages while Learn each
+    /// language separately is on, or the one shared list while it is off.
+    private func scopeLearnedWords() {
+        let store = learnsPerLanguage ? scopedWords(language) : sharedLearnedWords
+        if store !== learnedWords {
+            learnedWords = store
+            userWordsRevision += 1
+        }
+        guard let partner else { return }
+        let theirs = learnsPerLanguage ? scopedWords(partner.language) : sharedLearnedWords
+        partner.sharedLearnedWords = theirs
+        if theirs !== partner.learnedWords {
+            partner.learnedWords = theirs
+            partner.userWordsRevision += 1
+        }
+    }
+
+    private func scopedWords(_ language: KeyboardLanguage) -> LearnedWordsStore {
+        if let store = scopedLearnedWords[language.rawValue] { return store }
+        let store = sharedLearnedWords.scoped(to: language.rawValue)
+        scopedLearnedWords[language.rawValue] = store
+        return store
+    }
+
+    /// Hands over what the journal learned. With Learn each language separately on, the
+    /// partner gets `partnerLearning` (its own language's) instead of these.
+    func applyLearning(_ learning: TypingLearning, partner partnerLearning: TypingLearning? = nil) {
         if self.learning != learning {
             self.learning = learning
             userWordsRevision += 1
+        }
+        if learnsPerLanguage, let partnerLearning {
+            if let partner, partner.learning != partnerLearning {
+                partner.learning = partnerLearning
+                partner.userWordsRevision += 1
+            }
+            return
         }
         partner?.applyLearning(learning)
     }
@@ -402,7 +490,7 @@ final class AutocorrectEngine {
         suppressedInSession.insert(word.lowercased())
         learnedWords.recordExplicitKeep(word)
         userWordsRevision += 1
-        // The store is shared, so the partner only drops its copy of your words.
+        // The partner never learns this keep itself; it only drops its copy of your words.
         partner?.suppressedInSession.insert(word.lowercased())
         partner?.userWordsRevision += 1
     }
@@ -727,6 +815,7 @@ final class AutocorrectEngine {
         field: KeyboardFieldKind,
         autocorrectionType: UITextAutocorrectionType?
     ) -> (original: String, replacement: String)? {
+        lastFixLanguage = nil
         guard field == .text, autocorrectionType != .no else { return nil }
         // Your own text replacement comes first, as on Apple's keyboard: before the chat
         // shorthand Hex leaves alone ("brb"), with Autocorrect off or no dictionary, and
@@ -754,15 +843,22 @@ final class AutocorrectEngine {
     /// keys, else the keyboard's own language's. Held-out English benchmark, French beside it:
     /// 7.56% WER before, 5.79% now, against 5.75% alone.
     private func cautiousReplacement(for token: String) -> String? {
-        guard let partner = workingPartner else { return ownReplacement(for: token) }
+        guard let partner = workingPartner else {
+            lastFixLanguage = language
+            return ownReplacement(for: token)
+        }
         if let shortcut = shortcut(for: token) {
+            lastFixLanguage = nil
             return shortcut
         }
         let lean = languageLean(partner, token: token)
         // One-letter words are left to the keyboard's own language: `UITextChecker` takes
         // every letter as a word, so English "i" would never become "I" beside French.
         if token.count >= 2, partner.knowsAsTyped(token), Self.hasVowel(token) {
-            if lean < 0, isSureFix(token), let own = ownReplacement(for: token) { return own }
+            if lean < 0, isSureFix(token), let own = ownReplacement(for: token) {
+                lastFixLanguage = language
+                return own
+            }
             // Spatial autocorrect may still read the taps as another word, counting the other
             // language's word as one it changes only on a clear margin, as it does its own
             // words: "tkm" (German) becomes "Tom", "merci" stays. Not a sure fix's word, which
@@ -770,15 +866,30 @@ final class AutocorrectEngine {
             guard lean <= 0, !isAllCapsOrMixed(token),
                   !(language.usesEnglishFixes && Self.unambiguousFixes[token.lowercased()] != nil),
                   let replacement = decoderDecision(for: token, partnerWord: true)?.replacement,
-                  mayOffer(replacement, replacing: token) else { return nil }
+                  mayOffer(replacement, replacing: token) else {
+                lastFixLanguage = nil
+                return nil
+            }
+            lastFixLanguage = language
             return withoutAddedCapitals(cased(replacement, typed: token), typed: token)
         }
         let own = ownReplacement(for: token)
         // A name the other dictionary guesses ("Zuri" for "Ziri") is no fix of yours.
         guard token.count >= 2, !knowsAsTyped(token), let theirs = partner.ownReplacement(for: token),
-              !partner.isName(theirs) else { return own }
-        guard let own, own.caseInsensitiveCompare(theirs) != .orderedSame else { return own ?? theirs }
-        return prefersPartner(lean, token: token, own: own, theirs: theirs) ? theirs : own
+              !partner.isName(theirs) else {
+            lastFixLanguage = own == nil ? nil : language
+            return own
+        }
+        guard let own, own.caseInsensitiveCompare(theirs) != .orderedSame else {
+            lastFixLanguage = own == nil ? partner.language : language
+            return own ?? theirs
+        }
+        if prefersPartner(lean, token: token, own: own, theirs: theirs) {
+            lastFixLanguage = partner.language
+            return theirs
+        }
+        lastFixLanguage = language
+        return own
     }
 
     /// Whether this language's dictionary knows `word` only with a capital, and German's noun

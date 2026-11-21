@@ -993,7 +993,7 @@ final class DictationControllerTests: XCTestCase {
             autoPrepareOnInit: false,
             customVocabularySettings: CustomVocabularySettings(defaults: defaults),
             typingJournalSettings: journalSettings,
-            learnedDictationCorrections: { learned }
+            learnedDictationCorrections: { _ in learned }
         )
         controller.prepareModel()
         try await settle()
@@ -1041,7 +1041,7 @@ final class DictationControllerTests: XCTestCase {
             cleanupSettings: AppleIntelligenceCleanupSettings(defaults: defaults),
             customVocabularySettings: CustomVocabularySettings(defaults: defaults),
             typingJournalSettings: TypingJournalSettings(defaults: defaults),
-            learnedDictationCorrections: { [DictationCorrection(heard: "ship", meant: "send")] }
+            learnedDictationCorrections: { _ in [DictationCorrection(heard: "ship", meant: "send")] }
         )
         controller.prepareModel()
         try await settle()

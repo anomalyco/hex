@@ -3324,6 +3324,26 @@
           }
         }
       }
+    },
+    "Learn each language separately" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分别学习每种语言"
+          }
+        }
+      }
+    },
+    "Keep learned words and fixes with the language you typed or dictated them in." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让学到的词语和修正保留在你输入或听写它们所用的语言中。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
