@@ -371,3 +371,61 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertTrue(DictationLowercaseSettings(defaults: defaults).isEnabled)
     }
 }
+
+/// Experiments › Hinglish: Hindi dictation in Latin letters, as people text it. The Devanagari
+/// inputs are what `DictationTranscriber` wrote for spoken Hinglish (macOS 27.2, Lekha voice);
+/// the Latin ones are `SpeechTranscriber`'s.
+final class HinglishRomanizerTests: XCTestCase {
+    func testDevanagariBecomesCasualLatin() {
+        let cases = [
+            "क्या कर रहे हो": "kya kar rahe ho",
+            "मेरा फ़ोन चार्ज नहीं हो रहा": "mera phone charge nahi ho raha",
+            "बच्चे स्कूल गए हैं": "bacche school gaye hain",
+            "धन्यवाद बहुत मदद हुई": "dhanyawaad bahut madad hui",
+            "कमल और प्रिया कल दिल्ली जा रहे हैं": "kamal aur priya kal Delhi ja rahe hain",
+            "ठीक है। में आ रहा हूँ": "theek hai. main aa raha hoon",
+            "घर में कौन है।": "ghar mein kaun hai.",
+        ]
+        for (devanagari, latin) in cases {
+            XCTAssertEqual(HinglishRomanizer.romanize(devanagari), latin, devanagari)
+        }
+    }
+
+    /// The inherent "a" goes where Hindi drops it, and long vowels are doubled only where
+    /// people stress them.
+    func testSpellsWordsAsTheyAreSaid() {
+        let cases = [
+            "कमल": "kamal", "करना": "karna", "समझना": "samajhna", "ज़िंदगी": "zindagi", "मित्र": "mitra",
+            "दोस्त": "dost", "नमस्ते": "namaste", "लड़की": "ladki", "अच्छा": "accha", "भूख": "bhookh",
+            "आज": "aaj", "बात": "baat", "कहाँ": "kahan", "मैंने": "maine", "चाहिए": "chahiye",
+            "जाऊँगा": "jaunga", "आएगा": "aayega", "जवाब": "jawaab", "कुछ": "kuch",
+            // Common words from the table: है hai, नहीं nahi, मैं main, हूँ hoon.
+            "है": "hai", "नहीं": "nahi", "मैं": "main", "हूँ": "hoon", "हूं": "hoon", "यह": "yeh",
+        ]
+        for (devanagari, latin) in cases {
+            XCTAssertEqual(HinglishRomanizer.romanize(devanagari), latin, devanagari)
+        }
+    }
+
+    func testEnglishWordsComeBackInEnglish() {
+        XCTAssertEqual(HinglishRomanizer.romanize("मीटिंग ऑफिस कौल"), "meeting office call")
+        XCTAssertEqual(HinglishRomanizer.romanize("मुझे 10 मिनिट्स दो"), "mujhe 10 minutes do")
+    }
+
+    func testNumbersAreDigits() {
+        XCTAssertEqual(HinglishRomanizer.romanize("मीटिंग कल ५ बजे है"), "meeting kal 5 baje hai")
+        XCTAssertEqual(HinglishRomanizer.romanize("meeting kal panch baje hai"), "meeting kal 5 baje hai")
+        XCTAssertEqual(HinglishRomanizer.romanize("hum saadhe aath baje niklenge"), "hum 8:30 baje niklenge")
+        XCTAssertEqual(HinglishRomanizer.romanize("dedh baje"), "1:30 baje")
+        XCTAssertEqual(HinglishRomanizer.romanize("pizza order kar do"), "pizza order kar do", "do is a verb here")
+    }
+
+    /// SpeechTranscriber's Latin Hindi keeps its words; only its unusual spellings and the
+    /// capitals it puts on common words mid-sentence change. Names and English stay.
+    func testAppleLatinKeepsItsWords() {
+        XCTAssertEqual(HinglishRomanizer.romanize("mei Ghar ja raha hoo"), "main ghar ja raha hoon")
+        XCTAssertEqual(HinglishRomanizer.romanize("Mei thik hoon."), "Main thik hoon.")
+        XCTAssertEqual(HinglishRomanizer.romanize("uska naam Rahul hai"), "uska naam Rahul hai")
+        XCTAssertEqual(HinglishRomanizer.romanize("Let's meet at 5, Home is fine."), "Let's meet at 5, Home is fine.")
+    }
+}
