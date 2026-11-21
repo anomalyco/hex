@@ -77,6 +77,16 @@ internal class LetterFeedback(private val host: ViewGroup) {
                 "nb" -> when (lower) {
                     'a' -> "aàáâäãā"; 'o' -> "oôöòóœōõ"; 'æ' -> "æä"; 'ø' -> "øö"; else -> accents[lower]
                 }
+                // Gboard's French and Italian long-press lists (Pixel 8 emulator, black box), most used first;
+                // the apostrophe key holds the typographic quotes Gboard offers there.
+                "fr" -> when (lower) {
+                    'a' -> "aàâæáäãåāª"; 'e' -> "eéèêëēęė"; 'i' -> "iîïìíīįĩ"; 'o' -> "oôœöòóõøōº"; 'u' -> "uùûüúūũ"
+                    'y' -> "yÿ"; 'c' -> "cçćč"; 'n' -> "nñ"; 's' -> "sß"; '\'' -> "'’‘‚‹›"; else -> null
+                }
+                "it" -> when (lower) {
+                    'a' -> "aàáâäæãåāª"; 'e' -> "eèéêëęėē"; 'i' -> "iìíîïĩīį"; 'o' -> "oòóôöõøœōº"; 'u' -> "uùúûüũū"
+                    'c' -> "cçčć"; 'n' -> "nñ"; 's' -> "sß"; else -> null
+                }
                 "de" -> when (lower) {
                     'a' -> "aàáâæãåā"; 'o' -> "oôòóœøōõ"; 'u' -> "uûùúū"; else -> accents[lower]
                 }
