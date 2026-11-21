@@ -7,9 +7,9 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
-use main::TRANSLATIONS;
 #[cfg(not(test))]
 use std::sync::atomic::{AtomicU8, Ordering};
+use strings::TRANSLATIONS;
 
 mod agents;
 mod clock;
@@ -17,7 +17,6 @@ mod failures;
 mod french;
 mod history;
 mod labs;
-mod main;
 mod meetings;
 mod menu;
 pub(crate) mod numbers;
@@ -25,6 +24,7 @@ mod onboarding;
 mod portuguese;
 mod russian;
 mod screenshots;
+mod strings;
 mod text_language;
 mod traditional_chinese;
 

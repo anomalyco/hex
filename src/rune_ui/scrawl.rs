@@ -473,8 +473,13 @@ impl Agents {
         self.selected = self
             .statuses
             .iter()
-            .map(|status| status.found && status.skill != SkillState::Current)
+            .map(|status| status.found && !status.linked && status.skill != SkillState::Current)
             .collect();
+    }
+
+    /// Whether Install has anything to write.
+    fn any_selected(&self) -> bool {
+        self.selected.iter().any(|selected| *selected)
     }
 
     fn selected_for(&self, agent: Agent) -> bool {
@@ -489,7 +494,7 @@ impl Agents {
         let Some(index) = self
             .statuses
             .iter()
-            .position(|status| status.agent == agent && status.found)
+            .position(|status| status.agent == agent && status.found && !status.linked)
         else {
             return;
         };
@@ -506,7 +511,7 @@ impl Agents {
         };
         let mut failure = None;
         for (index, status) in self.statuses.iter().enumerate() {
-            if !self.selected.get(index).copied().unwrap_or(false) {
+            if !self.selected.get(index).copied().unwrap_or(false) || status.linked {
                 continue;
             }
             if let Err(error) = agent_install::install(&paths, status.agent) {
@@ -519,10 +524,14 @@ impl Agents {
 
     #[cfg(target_os = "macos")]
     fn install_cli(&mut self) {
+        use agent_install::cli::LinkError;
         self.cli_error = None;
         match agent_install::cli::install(&agent_install::cli::Environment::current()) {
             Ok(status) => self.cli = Some(status),
-            Err(error) => self.cli_error = Some(error),
+            Err(LinkError::Translocation) => {
+                self.cli_error = Some(tr("Move Hex to Applications first").to_string());
+            }
+            Err(LinkError::Io(error)) => self.cli_error = Some(error),
         }
     }
 
@@ -537,24 +546,28 @@ impl Agents {
                     found: true,
                     skill: SkillState::Missing,
                     path: home.join(".claude/skills/hex-annotate/SKILL.md"),
+                    linked: false,
                 },
                 AgentStatus {
                     agent: Agent::Codex,
                     found: true,
                     skill: SkillState::Outdated,
-                    path: home.join(".codex/skills/hex-annotate/SKILL.md"),
+                    path: home.join(".agents/skills/hex-annotate/SKILL.md"),
+                    linked: false,
                 },
                 AgentStatus {
                     agent: Agent::OpenCode,
                     found: true,
                     skill: SkillState::Current,
                     path: home.join(".config/opencode/skills/hex-annotate/SKILL.md"),
+                    linked: false,
                 },
                 AgentStatus {
                     agent: Agent::Pi,
                     found: false,
                     skill: SkillState::Missing,
                     path: home.join(".pi/agent/skills/hex-annotate/SKILL.md"),
+                    linked: false,
                 },
             ],
             selected: vec![true, true, false, false],
@@ -569,7 +582,9 @@ impl Agents {
 }
 
 /// One agent's row: its name, whether it is found and has this Hex's skill,
-/// and a switch that checks it for Install.
+/// and a switch that checks it for Install. A not-found agent, and a skill
+/// someone else manages through a symlink, has no switch: it is read by
+/// content and never written here.
 fn agent_row(ui: &Ui, p: Paint, status: &AgentStatus) -> El {
     let label = match (status.found, status.skill) {
         (false, _) => tr("Not found"),
@@ -577,8 +592,11 @@ fn agent_row(ui: &Ui, p: Paint, status: &AgentStatus) -> El {
         (true, SkillState::Current) => tr("Installed"),
         (true, SkillState::Outdated) => tr("Update available"),
     };
-    let checked = ui.agents.selected_for(status.agent);
     let key = format!("agent-{}", status.agent.key());
+    if !status.found || status.linked {
+        return setting_row(p, &key, status.agent.name(), Some(label), row());
+    }
+    let checked = ui.agents.selected_for(status.agent);
     let row = setting_row(
         p,
         &key,
@@ -586,13 +604,9 @@ fn agent_row(ui: &Ui, p: Paint, status: &AgentStatus) -> El {
         Some(label),
         super::controls::row_switch(p, checked),
     );
-    if status.found {
-        let agent = status.agent;
-        super::controls::pressable_row(row, checked)
-            .on_press(move |ui: &mut Ui| ui.agents.toggle(agent))
-    } else {
-        row
-    }
+    let agent = status.agent;
+    super::controls::pressable_row(row, checked)
+        .on_press(move |ui: &mut Ui| ui.agents.toggle(agent))
 }
 
 /// The command people who manage skills themselves run, with its copy.
@@ -707,7 +721,7 @@ fn agents_section(ui: &Ui, p: Paint) -> El {
     if !ui.settings.labs.annotate_agent_tools {
         rows.push(note(
             "agents-tools-off",
-            tr("The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on."),
+            tr("The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on"),
             p.muted(),
         ));
     }
@@ -715,11 +729,12 @@ fn agents_section(ui: &Ui, p: Paint) -> El {
         p,
         "agents",
         tr("Agents"),
-        button(
+        super::controls::button_enabled(
             p,
             "agents-install",
             tr("Install"),
             ButtonKind::Secondary,
+            ui.agents.any_selected(),
             |ui: &mut Ui, _| ui.agents.install(),
         ),
         rows,
@@ -877,13 +892,35 @@ mod tests {
         rt
     }
 
-    /// A folder under the temp directory for one test's agents.
-    fn temp(name: &str) -> std::path::PathBuf {
-        let folder =
-            std::env::temp_dir().join(format!("hex-scrawl-agents-{}-{name}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&folder);
-        std::fs::create_dir_all(&folder).unwrap();
-        folder
+    /// A fresh folder under the temp directory, removed when the test ends,
+    /// panic or not.
+    struct TempDir {
+        path: std::path::PathBuf,
+    }
+
+    impl TempDir {
+        fn new(name: &str) -> Self {
+            use std::sync::atomic::{AtomicU32, Ordering};
+            static SEQUENCE: AtomicU32 = AtomicU32::new(0);
+            let sequence = SEQUENCE.fetch_add(1, Ordering::Relaxed);
+            let path = std::env::temp_dir().join(format!(
+                "hex-scrawl-agents-{}-{name}-{sequence}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&path);
+            std::fs::create_dir_all(&path).unwrap();
+            Self { path }
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
     }
 
     /// The Annotate pane with the Agents lab on and these agents' folders.
@@ -894,7 +931,10 @@ mod tests {
         state.settings.labs.annotate_agent_install = true;
         state.platform.scrawl = Some(ScrawlView::preview());
         state.pane = Pane::Annotate;
-        state.agents.paths = Some(agent_install::Paths::new(home.to_path_buf(), None, None));
+        state.agents.paths = Some(agent_install::Paths {
+            home: home.to_path_buf(),
+            ..agent_install::Paths::default()
+        });
         state.agents.read();
         // Tall enough that every agent row and the CLI row are on screen.
         render(state, (980.0, 1720.0))
@@ -1063,7 +1103,7 @@ mod tests {
         }
         // The skill's agent commands are their own lab, named here while off.
         assert!(shown.iter().any(|text| text
-            == "The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on."));
+            == "The skill's zoom, inspect, and frames commands need Labs › Agent tools for captures on"));
         #[cfg(target_os = "macos")]
         {
             assert!(on.find("agents-cli").is_some());
@@ -1079,10 +1119,11 @@ mod tests {
     /// and never creates one for an agent this computer doesn't have.
     #[test]
     fn installing_writes_each_checked_agents_skill() {
-        let home = temp("install");
+        let temp = TempDir::new("install");
+        let home = temp.path();
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::create_dir_all(home.join(".codex")).unwrap();
-        let mut rt = agents_pane(&home);
+        let mut rt = agents_pane(home);
         assert_eq!(
             rt.state.agents.selected,
             vec![true, true, false, false],
@@ -1094,8 +1135,9 @@ mod tests {
             agent_install::SKILL.as_bytes()
         );
         assert_eq!(
-            std::fs::read(home.join(".codex/skills/hex-annotate/SKILL.md")).unwrap(),
-            agent_install::SKILL.as_bytes()
+            std::fs::read(home.join(".agents/skills/hex-annotate/SKILL.md")).unwrap(),
+            agent_install::SKILL.as_bytes(),
+            "Codex reads the shared copy"
         );
         assert!(
             std::fs::read(home.join(".pi/agent/skills/hex-annotate/SKILL.md")).is_err(),
@@ -1107,26 +1149,65 @@ mod tests {
             "the row says Installed now"
         );
         assert_eq!(rt.state.agents.selected, vec![false; 4]);
-        let _ = std::fs::remove_dir_all(home);
+        assert!(rt.find("agents-install").is_some());
+        // Nothing is checked now, so Install can't do anything.
+        tap(&mut rt, "agents-install");
+        assert_eq!(rt.state.agents.selected, vec![false; 4]);
     }
 
     /// Clicking one agent's row checks or unchecks only that agent, and a
     /// not-found agent's row does nothing.
     #[test]
     fn an_agents_row_checks_only_that_agent() {
-        let home = temp("toggle");
+        let temp = TempDir::new("toggle");
+        let home = temp.path();
         std::fs::create_dir_all(home.join(".claude")).unwrap();
         std::fs::create_dir_all(home.join(".pi")).unwrap();
-        let mut rt = agents_pane(&home);
+        let mut rt = agents_pane(home);
         assert_eq!(rt.state.agents.selected, vec![true, false, false, true]);
         tap(&mut rt, "agent-claude-code");
         assert_eq!(rt.state.agents.selected, vec![false, false, false, true]);
         tap(&mut rt, "agent-claude-code");
         assert_eq!(rt.state.agents.selected, vec![true, false, false, true]);
-        // Pi is found, so its row toggles; OpenCode is not, so its row is not
-        // a switch at all.
+        // Pi is found, so its row toggles; OpenCode is not found, so its row
+        // has no switch and tapping it does nothing.
         tap(&mut rt, "agent-pi");
         assert_eq!(rt.state.agents.selected, vec![true, false, false, false]);
-        let _ = std::fs::remove_dir_all(home);
+        tap(&mut rt, "agent-opencode");
+        assert_eq!(rt.state.agents.selected, vec![true, false, false, false]);
+    }
+
+    /// A skill someone else manages through a symlink is read by content but
+    /// has no switch, so Install never writes through the link.
+    #[cfg(unix)]
+    #[test]
+    fn a_linked_skill_has_no_switch() {
+        let temp = TempDir::new("linked");
+        let home = temp.path().join("home");
+        let outside = temp.path().join("outside");
+        std::fs::create_dir_all(home.join(".claude/skills")).unwrap();
+        std::fs::create_dir_all(outside.join("hex-annotate")).unwrap();
+        std::fs::write(outside.join("hex-annotate/SKILL.md"), "an older skill").unwrap();
+        std::os::unix::fs::symlink(
+            outside.join("hex-annotate"),
+            home.join(".claude/skills/hex-annotate"),
+        )
+        .unwrap();
+        let mut rt = agents_pane(&home);
+        assert!(rt.state.agents.statuses[0].linked);
+        assert_eq!(rt.state.agents.statuses[0].skill, SkillState::Outdated);
+        assert_eq!(
+            rt.state.agents.selected,
+            vec![false; 4],
+            "a linked skill is never checked"
+        );
+        tap(&mut rt, "agent-claude-code");
+        assert_eq!(rt.state.agents.selected, vec![false; 4]);
+        tap(&mut rt, "agents-install");
+        assert_eq!(
+            std::fs::read_to_string(outside.join("hex-annotate/SKILL.md")).unwrap(),
+            "an older skill",
+            "nothing was written through the link"
+        );
     }
 }
