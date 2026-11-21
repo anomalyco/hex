@@ -307,9 +307,9 @@ final class HexKeyRecordingPanel: UIView {
         super.layoutSubviews()
         let innerLeft = horizontalInset + metrics.side
         let innerRight = bounds.width - horizontalInset - metrics.side
-        // The strip's pill height, inset from its top and bottom as its pills are.
+        // The strip's pill height, as far below its top as its pills are (on the words' line).
         let rowH = metrics.stripPillHeight
-        let rowY = (bounds.height - rowH) / 2
+        let rowY = metrics.stripInset
 
         doneButton.cornerRadius = rowH / 2
         cancelButton.cornerRadius = rowH / 2

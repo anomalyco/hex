@@ -38,13 +38,13 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testPortraitHeightFollowsApplesKeyPlaneAndLandscapeIs204Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 236, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 247, "width \(width)")
         }
-        // 35 pt of strip, then 4 rows: 43 pt on a 54 pt pitch with row 4 4 pt short (17, 17 Pro),
+        // 46 pt of strip, then 4 rows: 43 pt on a 54 pt pitch with row 4 4 pt short (17, 17 Pro),
         // 42 pt on 54 pt and 4 pt under (SE), 45 pt on 56 pt and 7 pt under (Air, Pro Max).
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 236)
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 243)
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .large), 255)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 247)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 254)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .large), 266)
         XCTAssertEqual(KeyboardLayout.height(for: .landscape), 204)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 375, height: 667)), .homeButton)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 402, height: 874)), .regular)
@@ -53,10 +53,10 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 956, height: 440)), .large)
     }
 
-    /// The strip is the 27 pt of Apple's predictive bar below the band iOS draws over a
-    /// third-party keyboard on every iPhone; row 1 starts 35 pt down, where Apple's keycaps start
-    /// relative to this view (35-35.5 pt, iOS 27.2). Turned there is no band: 42 pt, row 1 at
-    /// 50 pt, as Apple's. On the Duo folded and
+    /// The strip is Apple's predictive bar from its suggestion pill's top down on every iPhone
+    /// held upright: 38 pt (Apple's 44 pt bar less the 6 pt above its pill), then Apple's 8 pt to
+    /// row 1, which starts 46 pt down. Its pills are 28 pt, on the words' line. Turned: 42 pt,
+    /// row 1 at 50 pt, as Apple's. On the Duo folded and
     /// upright it is 32 pt and the same gap (row 1 at 40 pt, as Apple's); elsewhere on the Duo,
     /// Apple's whole 44 pt bar right on the keys.
     func testStripIsPinnedInEveryOrientationAndPosture() {
@@ -66,7 +66,7 @@ final class KeyboardLayoutTests: XCTestCase {
                 let m = KeyboardMetrics.for(orientation, posture: posture)
                 XCTAssertEqual(m.stripTop, 0, "\(posture) \(orientation)")
                 let cover = posture == .cover && orientation == .portrait
-                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (27, 35, 27) : (42, 50, 36)
+                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (38, 46, 28) : (42, 50, 36)
                 let expected = posture == .phone ? phone : cover ? (32, 40, 31) : (44, 44, 36)
                 XCTAssertEqual(m.stripHeight, expected.0, "\(posture) \(orientation)")
                 XCTAssertEqual(m.stripArea, expected.1, "\(posture) \(orientation)")
@@ -75,9 +75,43 @@ final class KeyboardLayoutTests: XCTestCase {
         }
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
             XCTAssertEqual(layout.stripFrame.height, layout.metrics.stripHeight, describe(layout))
-            XCTAssertTrue([27, 32, 42, 44].contains(layout.stripFrame.height), describe(layout))
+            XCTAssertTrue([38, 32, 42, 44].contains(layout.stripFrame.height), describe(layout))
             let rowOneTop = layout.keys.filter { $0.row == 0 }.map(\.frame.minY).min()
             XCTAssertEqual(rowOneTop ?? -1, layout.metrics.stripArea, accuracy: 0.001, describe(layout))
+        }
+    }
+
+    /// On an iPhone held upright nothing in the strip touches the keyboard's top edge, which is
+    /// the panel's edge whenever iOS draws nothing above the keyboard (an iPhone 17 Pro's Safari
+    /// form, iOS 27.2): the words are on Apple's line, 26 pt above row 1 and 20 pt down, the
+    /// small chip and the pills are even around that line, and the pills start 6 pt down, as
+    /// Apple's pill does below its panel's edge.
+    func testPhoneStripKeepsItsContentOffTheTopEdgeAndOnApplesLine() {
+        for size in [KeyboardPhoneSize.regular, .homeButton, .large] {
+            let m = KeyboardMetrics.phonePortrait(size)
+            XCTAssertEqual(m.stripHeight, KeyboardMetrics.stripBarHeight, "\(size)")
+            XCTAssertEqual(m.stripArea - m.stripTextCenter, 26, "\(size): the words' line above row 1")
+            XCTAssertEqual(m.stripTextCenter, 20, "\(size): the words' line below the top edge")
+            XCTAssertEqual(m.stripChipHeight, 18, "\(size)")
+            XCTAssertEqual(m.stripTextCenter - m.stripChipHeight / 2, 11, "\(size): above the chip")
+            XCTAssertEqual(m.stripInset, 6, "\(size): above a pill")
+            XCTAssertEqual(m.stripInset + m.stripPillHeight / 2, m.stripTextCenter, "\(size): pills on the line")
+            XCTAssertLessThanOrEqual(m.stripInset + m.stripPillHeight, m.stripHeight, "\(size): pills inside the strip")
+            let band = m.stripLineBand
+            XCTAssertEqual(band.top + band.height / 2, m.stripTextCenter, "\(size)")
+            XCTAssertGreaterThanOrEqual(band.top, 0, "\(size)")
+            XCTAssertLessThanOrEqual(band.top + band.height, m.stripHeight, "\(size)")
+        }
+        let layout = KeyboardLayout(width: 402)
+        let hex = layout.key(.hex)!
+        XCTAssertEqual(hex.frame.minY, 6, accuracy: 0.001)
+        XCTAssertEqual(hex.hitFrame.minY, 0, accuracy: 0.001, "the room above the mark still presses the key")
+        // Where the words centre in the strip, the band is the whole strip and nothing moved.
+        for m in [KeyboardMetrics.landscape, KeyboardMetrics.for(.portrait, posture: .cover), KeyboardMetrics.for(.portrait, posture: .unfoldedTall)] {
+            XCTAssertEqual(m.stripTextCenter, m.stripHeight / 2)
+            XCTAssertEqual(m.stripLineBand.top, 0)
+            XCTAssertEqual(m.stripLineBand.height, m.stripHeight)
+            XCTAssertEqual(m.stripInset, (m.stripHeight - m.stripPillHeight) / 2)
         }
     }
 
@@ -218,7 +252,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
-        XCTAssertEqual(q.frame.minY, 35, accuracy: 0.001)
+        XCTAssertEqual(q.frame.minY, 46, accuracy: 0.001)
         XCTAssertEqual(q.frame.height, 45)
         XCTAssertEqual(proMax.key(.character("a"))!.frame.minY - q.frame.minY, 56, accuracy: 0.001)
         XCTAssertEqual(proMax.totalHeight - proMax.key(.space)!.frame.maxY, 7, accuracy: 0.001)
@@ -444,7 +478,7 @@ final class KeyboardLayoutTests: XCTestCase {
         let hex = layout.key(.hex)!
         XCTAssertEqual(hex.row, -1)
         XCTAssertEqual(hex.frame.maxX, 402 - layout.metrics.side, accuracy: 0.001)
-        XCTAssertEqual(hex.frame.midY, layout.metrics.stripHeight / 2, accuracy: 0.001)
+        XCTAssertEqual(hex.frame.midY, layout.metrics.stripTextCenter, accuracy: 0.001)
         XCTAssertLessThanOrEqual(layout.stripFrame.maxX, hex.frame.minX)
     }
 
@@ -1583,53 +1617,75 @@ final class KeyboardLayoutTests: XCTestCase {
 
     // MARK: - Backdrop
 
-    /// The keyboard's backdrop is opaque either way, so a layout iOS leaves behind the
-    /// keyboard can't show through its translucent keys (TestFlight build 56, iOS 27.0.1).
-    func testBackdropIsOpaqueInLightAndDark() {
-        for isDark in [false, true] {
-            var alpha: CGFloat = 0
-            KeyboardBackdropView.fill(isDark: isDark).getRed(nil, green: nil, blue: nil, alpha: &alpha)
-            XCTAssertEqual(alpha, 1, "dark \(isDark)")
-        }
+    /// The backdrop is a blurred material in the keyboard's own appearance, not a fixed colour:
+    /// it follows iOS's glass panel, and a layout iOS leaves behind the keyboard has no shapes
+    /// through it (TestFlight build 56, iOS 27.0.1; iOS 27.0 and 27.2 simulators). Only the dark
+    /// one is shaded, and never opaque.
+    func testBackdropIsAThinMaterialInLightAndDark() {
+        XCTAssertEqual(KeyboardBackdropView.blurStyle(isDark: false), .systemUltraThinMaterialLight)
+        XCTAssertEqual(KeyboardBackdropView.blurStyle(isDark: true), .systemUltraThinMaterialDark)
+        XCTAssertEqual(KeyboardBackdropView.shadeAlpha(isDark: false), 0)
+        XCTAssertGreaterThan(KeyboardBackdropView.shadeAlpha(isDark: true), 0)
+        XCTAssertLessThan(KeyboardBackdropView.shadeAlpha(isDark: true), 0.5)
     }
 
-    /// Every key, the strip's Hex key included, sits on the backdrop on every iPhone width,
-    /// so nothing behind the keyboard shows through a key.
-    func testBackdropCoversEveryKey() {
+    /// Every keycap sits on the backdrop on every iPhone width, and so do the strip's Hex mark
+    /// and the middle of each suggestion slot on the words' line, so nothing behind the
+    /// keyboard shows through a key or a word.
+    func testBackdropCoversEveryKeycapAndTheStripsLine() {
         for width in portraitWidths {
             let layout = KeyboardLayout(width: width)
             let outline = KeyboardBackdropView.outline(in: CGRect(x: 0, y: 0, width: width, height: layout.totalHeight))
-            for key in layout.keys {
+            for key in layout.keys where key.row >= 0 {
                 let frame = key.frame.insetBy(dx: 0.01, dy: 0.01)
                 for corner in [CGPoint(x: frame.minX, y: frame.minY), CGPoint(x: frame.maxX, y: frame.minY),
                                CGPoint(x: frame.minX, y: frame.maxY), CGPoint(x: frame.maxX, y: frame.maxY)] {
                     XCTAssertTrue(outline.contains(corner), "width \(width) key \(key.kind) corner \(corner)")
                 }
             }
+            let line = layout.metrics.stripTop + layout.metrics.stripTextCenter
+            let hex = layout.key(.hex)!
+            XCTAssertTrue(outline.contains(CGPoint(x: hex.frame.midX - 12, y: line - 12)), "width \(width): the Hex mark")
+            XCTAssertTrue(outline.contains(CGPoint(x: hex.frame.midX + 12, y: line - 12)), "width \(width): the Hex mark")
+            for slot in layout.stripSlotFrames {
+                XCTAssertTrue(outline.contains(CGPoint(x: slot.midX, y: line - 9)), "width \(width): a chip's top")
+            }
         }
     }
 
-    /// The backdrop stays inside Apple's panel, which starts 17.5 pt above the keyboard with
-    /// 26 pt top corners (iOS 27.0 and 27.2, every iPhone measured), and inside its 1 pt rim:
-    /// it never draws over the app beside the panel's rounded corners.
+    /// The backdrop stays inside Apple's panel and its 1 pt rim: its corners are the panel's
+    /// 26 pt corners, 1 pt in, at the keyboard's own top edge, where the panel's edge is when
+    /// iOS draws nothing above the keyboard. With iOS's 17.5 pt above, the panel is wider still
+    /// at every height. It never draws over the app beside the panel's rounded corners.
     func testBackdropStaysInsideThePanelsCornersAndRim() {
         let width: CGFloat = 402
-        let outline = KeyboardBackdropView.outline(in: CGRect(x: 0, y: 0, width: width, height: 270))
-        let radius: CGFloat = 26, panelTop: CGFloat = -17.5
-        func panelInset(atY y: CGFloat) -> CGFloat {
-            let rise = radius + panelTop - y
-            return rise > 0 ? radius - sqrt(radius * radius - rise * rise) : 0
+        let outline = KeyboardBackdropView.outline(in: CGRect(x: 0, y: 0, width: width, height: 247))
+        let radius: CGFloat = 26
+        // Around each corner's centre: inside at 24.9 pt, outside at 25.1 pt (the rim's inner edge).
+        for step in 0 ... 90 {
+            let angle = CGFloat(step) * .pi / 180
+            for (center, sign) in [(CGPoint(x: radius, y: radius), CGFloat(-1)), (CGPoint(x: width - radius, y: radius), CGFloat(1))] {
+                func point(_ r: CGFloat) -> CGPoint { CGPoint(x: center.x + sign * r * cos(angle), y: center.y - r * sin(angle)) }
+                XCTAssertTrue(outline.contains(point(radius - 1.1)), "covers, \(step)° \(sign)")
+                XCTAssertFalse(outline.contains(point(radius - 0.9)), "inside the rim, \(step)° \(sign)")
+            }
         }
-        for step in 0 ..< 60 {
-            let y = CGFloat(step) * 0.25 + 0.01
-            let edge = panelInset(atY: y) + 1
-            XCTAssertFalse(outline.contains(CGPoint(x: edge - 0.05, y: y)), "left, y \(y)")
-            XCTAssertFalse(outline.contains(CGPoint(x: width - edge + 0.05, y: y)), "right, y \(y)")
-            XCTAssertTrue(outline.contains(CGPoint(x: edge + 1.5, y: y)), "covers the left, y \(y)")
-            XCTAssertTrue(outline.contains(CGPoint(x: width - edge - 1.5, y: y)), "covers the right, y \(y)")
+        // The panel's edge at each height, with and without iOS's own 17.5 pt above the keyboard.
+        for panelTop in [CGFloat(0), -17.5] {
+            func panelInset(atY y: CGFloat) -> CGFloat {
+                let rise = radius + panelTop - y
+                return rise > 0 ? radius - sqrt(radius * radius - rise * rise) : 0
+            }
+            for step in 0 ..< 120 {
+                let y = CGFloat(step) * 0.25 + 0.01
+                let edge = panelInset(atY: y)
+                XCTAssertFalse(outline.contains(CGPoint(x: edge + 0.9, y: y)), "left, y \(y), panel top \(panelTop)")
+                XCTAssertFalse(outline.contains(CGPoint(x: width - edge - 0.9, y: y)), "right, y \(y), panel top \(panelTop)")
+            }
         }
-        XCTAssertTrue(outline.contains(CGPoint(x: 1.05, y: 269.9)), "down to the bottom")
-        XCTAssertTrue(outline.contains(CGPoint(x: width / 2, y: 0.05)), "up to the top")
+        XCTAssertTrue(outline.contains(CGPoint(x: 1.05, y: 246.9)), "down to the bottom")
+        XCTAssertTrue(outline.contains(CGPoint(x: width / 2, y: 1.05)), "up to the rim at the top")
+        XCTAssertFalse(outline.contains(CGPoint(x: width / 2, y: 0.9)), "not over the top rim")
     }
 
     private func describe(_ layout: KeyboardLayout) -> String {

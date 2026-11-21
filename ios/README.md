@@ -1027,17 +1027,41 @@ never at a launch by itself.
   language's system keyboard where it differs (# holds № in Russian and Ukrainian, the
   digits º and ª in Spanish and Italian, . holds · in French, $ holds ₴ in Ukrainian and
   kr in Norwegian).
-- **Size (full keyboard):** The suggestion strip is Apple's 44 pt predictive bar in
-  every state (suggestions, Undo dictation, the Full Access hint, the recording bar,
-  the emoji panel's top row, the Logging mark) and both orientations, with 8 pt under
-  it, so row 1's keycaps start 52 pt down, as Apple's do (53 pt on the iPhone 17 Pro,
-  17 Pro Max and SE, iOS 27.2 simulator): 270 pt in portrait, 189 pt in landscape.
+- **Size (full keyboard):** On an iPhone held upright the suggestion strip is Apple's
+  predictive bar from the top of its suggestion pill down: 38 pt in every state
+  (suggestions, Undo dictation, the Full Access hint, the recording bar, the emoji
+  panel's top row, the Logging mark), with Apple's 8 pt under it, so row 1's keycaps
+  start 46 pt down and the keys stay on Apple's rows (Apple's keys overlaid on Hex's,
+  iPhone 17 Pro, iOS 27.2 simulator): 247 pt on an iPhone 17 or 17 Pro, 254 pt on an SE,
+  266 pt on an Air or Pro Max. The words are on Apple's line, 26 pt above the keys and
+  20 pt below the keyboard's top edge; an autocorrection is a small 18 pt chip around
+  its word, and the pills (the Hex key, the recording bar) are 28 pt, 6 pt down, so
+  nothing touches the top edge. iOS draws about 17 pt of its own panel above a
+  third-party keyboard in some fields and nothing in others (on an iPhone 17 Pro, iOS
+  27.2: Notes has it, a Safari form's first focus doesn't; Gboard and SwiftKey get the
+  same), and a keyboard can't tell which, so the strip carries its own room: the 27 pt
+  strip it replaces left the words 9 pt under the edge whenever iOS added nothing.
+  Turned, the strip is 42 pt and the keyboard 204 pt.
   Dictating no longer grows the keyboard. On the iPhone Duo (`KeyboardPosture`,
   model `iPhone19,4`) iOS sets third-party keyboards in an inset platter with a band
   of its own above them, so the strip has no gap there, and the keys follow Apple's
   for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
   upright, starting as far in from the screen's side as Apple's. Measured in the
   simulator; unverified on a Duo.
+- **Background (full keyboard and dictation bar):** Under its keys Hex draws a thin
+  blurred material (`KeyboardBackdropView`: the system's ultra-thin material, shaded 22%
+  in dark mode, with the panel's 26 pt top corners) instead of a fixed colour, so the
+  keyboard takes most of the colour of iOS's glass panel behind it. On an iPhone 17 Pro
+  (iOS 27.2, dark mode) the glass reads 31 of 255 over Notes and 54 over a light web
+  page; Hex's area reads 36 and 46, where the opaque 34,34,35 panel it replaces was a
+  slab 20 darker than the glass over light pages, with a hard top edge and square corners,
+  which read as a clipped top bar. It isn't clear, as SwiftKey's is, because iOS can leave
+  Apple's keyboard under a third-party one: in a field that takes focus as its screen
+  appears and has an input accessory view, switching from Hex to Apple's keyboard and back
+  keeps Apple's key plane in the app's view tree under Hex (every switch in the iOS 27.0
+  and 27.2 simulators, under a bare clear keyboard extension too; one TestFlight report,
+  build 56, iPhone 17, iOS 27.0.1; not in Notes or Safari on an iPhone 17 Pro on 27.2).
+  Through the material's blur those keys are an even, slightly lighter tone with no shapes.
 - **Split keyboard (iPhone Duo):** Unfolded and held upright (the inner screen wider than
   tall), the full keyboard splits as Apple's does there (`SplitGeometry`): each half at
   the keyboard's side with Apple's 46.3 pt keys on a 57 pt pitch, row 2 half a key in
