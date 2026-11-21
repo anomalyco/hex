@@ -254,12 +254,12 @@
         }
       }
     },
-    "Swipe the space bar to switch. Hold it, then slide, to move the cursor." : {
+    "Slide along the space bar right away to switch. Hold it first and the slide moves the cursor." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在空格键上轻扫即可切换。按住空格键再滑动可移动光标。"
+            "value" : "按下空格键后立即滑动即可切换语言。先按住再滑动则移动光标。"
           }
         }
       }

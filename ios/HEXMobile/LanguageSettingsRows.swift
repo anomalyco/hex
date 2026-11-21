@@ -269,7 +269,7 @@ struct KeyboardLanguagesPage: View {
                     .id(chosen.map(\.rawValue).joined(separator: ","))
                 } footer: {
                     if chosen.count > 1 {
-                        Text("Swipe the space bar to switch. Hold it, then slide, to move the cursor.")
+                        Text("Slide along the space bar right away to switch. Hold it first and the slide moves the cursor.")
                             .font(.system(size: 12))
                             .foregroundStyle(HexTheme.textMuted)
                     }
