@@ -88,9 +88,11 @@ pub fn focused_window_title(pid: i32) -> Option<String> {
     copy_string(&window, c"AXTitle").filter(|title| !title.is_empty())
 }
 
-/// Identity only, never the window's title, contents or selection. A capture
-/// with two paste commands must not put its summary in a different field of
-/// the same app, even when that field changed without any user input.
+/// Identity only at capture, never the window's title or selection: a
+/// capture with two paste commands must not put its summary in a different
+/// field of the same app, even when that field changed without any user
+/// input. The one content read is [`Self::field_text`], for Labs › Learn
+/// from corrections, from exactly the field this identity names.
 #[cfg(hex_capture)]
 pub(crate) struct PasteFocus {
     application: CfObject,
@@ -103,6 +105,12 @@ pub(crate) struct PasteFocus {
 // no AppKit object or thread-affine UI state is used, and it isn't Sync.
 #[cfg(hex_capture)]
 unsafe impl Send for PasteFocus {}
+
+/// Longest field text Labs › Learn from corrections reads, in UTF-16 units.
+/// A longer field is a document, not a correction, so it is skipped rather
+/// than truncated.
+#[cfg(hex_capture)]
+const MAX_FIELD_CHARS: usize = 20_000;
 
 #[cfg(hex_capture)]
 impl PasteFocus {
@@ -127,6 +135,17 @@ impl PasteFocus {
                 unsafe { CFEqual(now.0, before.0) != 0 }
             })
         })
+    }
+
+    /// The field's whole text, for Labs › Learn from corrections. `None` for
+    /// a password (the `AXSecureTextField` role or subrole is checked before
+    /// the value is read), a value that isn't a string, or one longer than
+    /// [`MAX_FIELD_CHARS`]: a long field is skipped, never truncated.
+    pub(crate) fn field_text(&self) -> Option<String> {
+        if is_secure_text_field(&self.field) {
+            return None;
+        }
+        copy_string_capped(&self.field, c"AXValue", MAX_FIELD_CHARS)
     }
 }
 

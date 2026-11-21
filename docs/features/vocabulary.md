@@ -146,16 +146,26 @@ Learn from corrections (Labs › Learn from corrections, macOS)  // vocabulary.l
 ├── Off by default; after a dictation is pasted, Hex watches only the field it
 │   pasted into, reading it about every 100 ms for up to 5 minutes
 ├── It stops on a focus change, an empty or vanished field, a newer paste, or
-│   the timeout
+│   the timeout; the lab turned off stops it too and learns nothing
+├── Only a real Paste starts a watch: a copy, a Service or Print output, a
+│   YOLO send, and Hex's own window start none
 ├── It compares the final text with what it pasted and adds up to 5 name-like
 │   corrected words to Vocabulary: capitalized mid-sentence, all caps, mixed
 │   case, letters with digits, and short phrases of those
-├── Password fields, long text (over 400 words), rewrites (over 60% of words
-│   changed), plain lowercase words, and terms already in Vocabulary are
-│   skipped
-└── Nothing leaves the Mac
+├── Password fields, fields over 20,000 characters, text over 400 words,
+│   rewrites (over 60% of words changed), plain lowercase words, and terms
+│   already in Vocabulary are skipped
+├── A learned term is saved like `hex vocabulary add` (vocabulary.add on the
+│   saved list, then one settings update that applies it, and an open window
+│   adopts it; vocabulary.cli)
+└── Nothing leaves the Mac; the one logged event holds the term count only
     // checks: learn_from_corrections_is_its_own_switch_and_macos_only in
-    // labs.rs; the reader itself is not wired yet
+    // labs.rs; a_tick_stops_in_the_order_the_watch_reads,
+    // only_the_lab_turning_off_discards_a_correction,
+    // only_a_paste_the_person_can_still_fix_is_watched,
+    // learned_terms_join_the_list_the_way_hex_vocabulary_add_does, and
+    // a_full_list_keeps_its_terms_and_takes_no_more in correction_watch.rs;
+    // not observed on a real Mac
 
 Recognition hints, folded in                // vocabulary.hints
 ├── Loading settings.json -> `recognition_hints` of the selected model and the

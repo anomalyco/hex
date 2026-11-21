@@ -13,7 +13,7 @@ use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Tr
 use crate::continuation::InputActivity;
 use crate::dictation::context::ContextSnapshot;
 use crate::dictation::processor::ProcessingObservation;
-use crate::dictation::{DictationClip, pad_for_parakeet};
+use crate::dictation::{DictationClip, correction_watch, pad_for_parakeet};
 use crate::history::{History, HistoryDraft, HistoryKind};
 use crate::meeting;
 use crate::paste::{PasteMode, Paster};
@@ -1159,6 +1159,8 @@ fn finish_output(
                             if let Some(gate) = send_gate {
                                 sent = send_unless_escaped(gate, Instant::now(), paste);
                             }
+                            #[cfg(target_os = "macos")]
+                            correction_watch::watch_paste(&completed.text, target, mode, sent);
                         }
                         TranscriptionTarget::Service
                         | TranscriptionTarget::Print
