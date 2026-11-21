@@ -2,7 +2,7 @@ package ly.anoma.hex.keyboard
 
 import org.junit.Assert.assertEquals
 import org.junit.Test
-import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.FrenchSpacing
 import ly.anoma.hex.speech.SpokenCleanup
 import ly.anoma.hex.speech.SpokenPunctuation
@@ -25,13 +25,13 @@ class InsertionTest {
 
     @Test fun stylesChangeWhatReachesTheEditor() {
         fun render(text: String, style: Style) = insertion(
-            SpokenText.format(text, SpeechOptions(style, Spoken.English, true, false)), null, null)
+            SpokenText.format(text, SpeechOptions(style, DictationLanguage.English, true, false)), null, null)
         assertEquals("Can you send it Thursday.", render("Can you, um, send it Tuesday, no wait, Thursday.", Style.Polished))
         assertEquals("see you soon", render("Um, see you soon.", Style.Casual))
         assertEquals("- Buy milk\n- Call Sam", render("bullet buy milk next bullet call Sam", Style.Notes))
         assertEquals("Um, Tuesday, sorry, Thursday.", render("Um, Tuesday, sorry, Thursday.", Style.Verbatim))
         assertEquals("Das ist eh egal.", SpokenText.format("Äh, das ist eh egal.",
-            SpeechOptions(Style.Polished, Spoken.German, false, false)))
+            SpeechOptions(Style.Polished, DictationLanguage.German, false, false)))
     }
     @Test fun removesOnlyAnchoredRepairsAndPreservesNegation() {
         assertEquals("Meet at 4pm?", SpokenCleanup.clean("Meet at 3pm, actually 4pm?", "en"))
@@ -50,7 +50,7 @@ class InsertionTest {
     // iOS TranscriptCleanupTests: the styles, End with a period and Lowercase.
     private fun styled(text: String, style: Style = Style.Polished, language: String? = null, period: Boolean = true) =
         SpokenText.style(text, style, language, period)
-    private fun pipeline(text: String, style: Style, spoken: Spoken = Spoken.English, lowercase: Boolean = false) =
+    private fun pipeline(text: String, style: Style, spoken: DictationLanguage = DictationLanguage.English, lowercase: Boolean = false) =
         SpokenText.format(text, SpeechOptions(style, spoken, false, false, lowercase))
 
     @Test fun stylesKeepAnAddressWhole() {
@@ -152,7 +152,7 @@ class InsertionTest {
         assertEquals("yeah, text john about the iphone order.", pipeline(heard, Style.Polished, lowercase = true))
         assertEquals("yeah text john about the iphone order", pipeline(heard, Style.Casual, lowercase = true))
         assertEquals("yeah, text john about the iphone order.", pipeline(heard, Style.Verbatim, lowercase = true))
-        assertEquals("der fluss", pipeline("Der Fluss", Style.Casual, Spoken.German, lowercase = true))
+        assertEquals("der fluss", pipeline("Der Fluss", Style.Casual, DictationLanguage.German, lowercase = true))
     }
     @Test fun polishedWritesOutInformalContractions() {
         assertEquals("I'm going to call you later. I want to finish this first.",
@@ -273,12 +273,12 @@ class InsertionTest {
         assertEquals("Mail it to john@gmail.com.", pipeline("mail it to John at the rate Gmail dot com", Style.Polished))
         assertEquals("testing 1, 2, 3", pipeline("Testing one two three.", Style.Casual))
         assertEquals("john at the rate gmail dot com", pipeline("john at the rate gmail dot com", Style.Verbatim))
-        assertEquals("Test 1, 2, 3.", SpokenText.format("Test one, two, three.", SpeechOptions(Style.Polished, Spoken.English, true, false)))
+        assertEquals("Test 1, 2, 3.", SpokenText.format("Test one, two, three.", SpeechOptions(Style.Polished, DictationLanguage.English, true, false)))
     }
 
     // iOS TranscriptCleanupTests: Format lists and Spoken punctuation inside the styles.
     private fun spoken(text: String, style: Style, lists: Boolean = true, punctuation: Boolean = true, period: Boolean = true,
-                       lowercase: Boolean = false, spoken: Spoken = Spoken.English) =
+                       lowercase: Boolean = false, spoken: DictationLanguage = DictationLanguage.English) =
         SpokenText.format(text, SpeechOptions(style, spoken, false, false, lowercase, period, lists, punctuation))
 
     @Test fun listsInsideTheStyles() {
@@ -301,7 +301,7 @@ class InsertionTest {
             spoken("First, gonna call Sam. Second, wanna book the hotel.", Style.Polished))
         assertEquals("Todo:\n- Got to pack.\n- Let me check the car.", spoken("Todo bullet gotta pack bullet lemme check the car", Style.Polished))
         assertEquals("Mi lista de compras.\n1. Huevos.\n2. Leche.\n3. Pan.",
-            spoken("Mi lista de compras. Primero, huevos, segundo, leche, tercero, pan.", Style.Polished, spoken = Spoken.Spanish))
+            spoken("Mi lista de compras. Primero, huevos, segundo, leche, tercero, pan.", Style.Polished, spoken = DictationLanguage.Spanish))
         assertEquals("The first time I saw it, I loved it.", spoken("The first time I saw it, I loved it.", Style.Polished))
     }
     @Test fun spokenPunctuationInsideTheStyles() {
@@ -316,9 +316,9 @@ class InsertionTest {
         assertEquals("Hi Sarah,\nThanks for the update.", spoken("Hi Sarah comma new line thanks for the update period", Style.Polished))
         assertEquals("Groceries:\n- Eggs.\n- Milk.", spoken("Groceries, dash, eggs, dash, milk.", Style.Polished))
         assertEquals("wow!", spoken("Wow exclamation point", Style.Polished, lowercase = true))
-        assertEquals("Llego mañana. Nos vemos.", spoken("Llego mañana, punto nos vemos", Style.Polished, spoken = Spoken.Spanish))
+        assertEquals("Llego mañana. Nos vemos.", spoken("Llego mañana, punto nos vemos", Style.Polished, spoken = DictationLanguage.Spanish))
         assertEquals("Hi Sarah, how are you?", SpokenPunctuation.format("Hi Sarah comma how are you question mark", "en"))
-        assertEquals("Wir sehen uns morgen, okay?", spoken("Wir sehen uns morgen Komma okay Fragezeichen", Style.Polished, spoken = Spoken.German))
+        assertEquals("Wir sehen uns morgen, okay?", spoken("Wir sehen uns morgen Komma okay Fragezeichen", Style.Polished, spoken = DictationLanguage.German))
         for (prose in listOf("A period of time passed.", "The comma is wrong.", "Use the Oxford comma.", "He has a question mark tattoo.",
             "Two comma five.", "Colon cancer is treatable.")) assertEquals(prose, SpokenPunctuation.format(prose, "en"))
     }
@@ -356,7 +356,7 @@ class InsertionTest {
     // iOS TranscriptCleanupTests and CustomVocabularyTests: vocabulary before cleanup and after the style.
     @Test fun vocabularySpellsBeforeAndAfterTheStyle() {
         fun spelled(text: String, style: Style, lowercase: Boolean = false, terms: List<String> = listOf("iPhone")) =
-            SpokenText.format(text, SpeechOptions(style, Spoken.English, false, false, lowercase, vocabulary = terms))
+            SpokenText.format(text, SpeechOptions(style, DictationLanguage.English, false, false, lowercase, vocabulary = terms))
         val heard = "Yeah, text John about the iphone order."
         assertEquals("Yeah, text John about the iPhone order.", spelled(heard, Style.Polished))
         assertEquals("yeah, text john about the iphone order.", spelled(heard, Style.Polished, lowercase = true))
@@ -389,6 +389,6 @@ class InsertionTest {
             "Écris moi@exemple.fr! ou www.exemple.fr?", "Tape \u0060a ? b : c\u0060 puis \u0060x::y\u0060", "? au début\n: en début de ligne"))
             assertEquals(text, FrenchSpacing.apply(text, "fr-FR"))
         assertEquals("Il m'a dit «${nbsp}Tu viens${thin}?${nbsp}»", FrenchSpacing.apply("Il m'a dit «Tu viens?»", "fr-FR"))
-        assertEquals("Really? Yes.", SpokenText.format("Really ? Yes", SpeechOptions(Style.Polished, Spoken.English, false, false)))
+        assertEquals("Really? Yes.", SpokenText.format("Really ? Yes", SpeechOptions(Style.Polished, DictationLanguage.English, false, false)))
     }
 }

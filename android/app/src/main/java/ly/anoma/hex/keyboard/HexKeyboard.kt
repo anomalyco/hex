@@ -12,6 +12,7 @@ import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.speech.SpeechPreferences
+import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingPreferences
@@ -23,7 +24,7 @@ class HexKeyboard : InputMethodService() {
     internal val preferences by lazy { SpeechPreferences(this) }
     internal var nextEnglish: Boolean? = null
     internal val feedback by lazy { TypingPreferences(this) }
-    internal val layoutLanguage get() = feedback.layout ?: preferences.spoken
+    internal val layoutLanguage get() = feedback.layout ?: preferences.spoken.layout ?: Spoken.English
     internal val engine by lazy {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { SpatialDecoder(TypingModel.asset(assets, it)) })
     }
