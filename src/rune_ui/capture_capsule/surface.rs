@@ -470,8 +470,10 @@ fn done_row(done: &Done, cap: f32, raw: &mut Vec<(Id, String, f32, bool)>) {
         .is_some_and(|(_, list)| !list.suggesting());
     if typing {
         // The search takes the rest of the capsule; its keys are in the
-        // list's footer.
+        // list's footer, and ✕ stays beside it so a search can always be
+        // left: a Windows capsule has no tap to fold it.
         raw.push((Id::Field, String::new(), FIELD_MIN, false));
+        raw.push((Id::Close, String::new(), CHIP_H, false));
         return;
     }
     // One action at most, the most urgent: take a send back, paste or

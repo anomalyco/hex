@@ -1,5 +1,7 @@
 pub(crate) mod app;
 pub(crate) mod audio_control;
+#[cfg(hex_capture)]
+mod capsule_keys;
 pub(crate) mod context;
 pub(crate) mod dictation;
 pub(crate) mod gpu_fallback;

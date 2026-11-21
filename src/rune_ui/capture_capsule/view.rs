@@ -517,7 +517,10 @@ pub(super) fn item(p: Paint, surface: &Surface, live: &Animated, shown: &Shown) 
                 }) => typed,
                 _ => &empty,
             };
-            field(p, base, typed)
+            // The field takes its own clicks: on Windows nothing else feeds
+            // it, and a click that reached the app beneath would land in
+            // whatever field is in front there.
+            field(p, base, typed).hit()
         }
         // Rows live in the list, never in the capsule.
         Id::Row(_) => base,

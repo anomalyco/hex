@@ -29,46 +29,14 @@ use crate::dictation::ShortcutMode;
 mod activity;
 mod disposition;
 mod modifiers;
+mod process;
 mod rearm;
 mod watchdog;
 
 pub(crate) use self::activity::foreground_window;
 use self::disposition::Handled;
 use self::modifiers::{LeftControl, ModifierState, SideDownTimes, key_down};
-
-/// The executable of the process that owns `window`.
-pub fn window_process_path(
-    window: windows_sys::Win32::Foundation::HWND,
-) -> Option<std::path::PathBuf> {
-    use windows_sys::Win32::Foundation::CloseHandle;
-    use windows_sys::Win32::System::Threading::{
-        OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
-    };
-    use windows_sys::Win32::UI::WindowsAndMessaging::GetWindowThreadProcessId;
-
-    if window.is_null() {
-        return None;
-    }
-    unsafe {
-        let mut pid = 0_u32;
-        GetWindowThreadProcessId(window, &mut pid);
-        if pid == 0 {
-            return None;
-        }
-        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
-        if process.is_null() {
-            return None;
-        }
-        let mut buffer = [0_u16; 1024];
-        let mut length = buffer.len() as u32;
-        let ok = QueryFullProcessImageNameW(process, 0, buffer.as_mut_ptr(), &mut length);
-        CloseHandle(process);
-        if ok == 0 {
-            return None;
-        }
-        Some(String::from_utf16_lossy(&buffer[..length as usize]).into())
-    }
-}
+pub use self::process::window_process_path;
 
 /// A shortcut as the keyboard hook matches it: the chord's modifier keys,
 /// each with its side, and the named key. Settings store it as a portable
@@ -242,7 +210,7 @@ impl HotkeyEvent {
     }
 }
 
-struct CallbackState {
+pub(super) struct CallbackState {
     events: SyncSender<HotkeyEvent>,
     errors: mpsc::Sender<String>,
     /// The user's own input since the listener started, which ends a paste
@@ -414,6 +382,26 @@ impl CallbackState {
     fn holds_any_required(&self, binding: &WindowsHotkey) -> bool {
         self.modifiers
             .holds_any_required(binding, &self.raw_modifiers)
+    }
+
+    /// Whether one of Hex's own shortcuts is `vk`: the chord's own key, with
+    /// the chord's modifiers down. The capture capsule never takes one
+    /// (`windows/capsule_keys.rs`), as macOS's tap never takes a shortcut's key
+    /// from its list.
+    pub(super) fn shortcut_owns(&self, vk: u32) -> bool {
+        [
+            (Some(&self.binding), self.trigger_vk),
+            (self.paste_last.as_ref(), self.paste_trigger_vk),
+            (self.raw.as_ref(), self.raw_trigger_vk),
+            (self.terminal_paste.as_ref(), self.terminal_paste_trigger_vk),
+            (self.second.as_ref(), self.second_trigger_vk),
+            (self.annotate.as_ref(), self.annotate_trigger_vk),
+            (self.cancel.as_ref(), self.cancel_vk),
+        ]
+        .into_iter()
+        .any(|(binding, trigger)| {
+            trigger == Some(vk) && binding.is_some_and(|binding| self.holds(binding))
+        })
     }
 
     /// Dictate without processing, Labs › Terminal paste, and Labs › Second
@@ -770,6 +758,15 @@ unsafe extern "system" fn keyboard_hook(code: i32, wparam: WPARAM, lparam: LPARA
     // and both must know what AltGr sent.
     modifiers::note_left_control(left_control, is_down);
     let vk = track_numpad(event, is_down).unwrap_or(event.vkCode);
+    // The capture capsule's list has no window of its own to take keys with:
+    // the hook hands it its keys, as macOS's session tap does
+    // (`windows/capsule_keys.rs`), and swallows only what the capsule takes.
+    #[cfg(hex_capture)]
+    if !CAPTURE_INHIBIT.load(Ordering::Relaxed)
+        && super::capsule_keys::takes(&CALLBACK_STATE, event.vkCode, is_down, event.scanCode)
+    {
+        return 1;
+    }
     // Injected keys carry whatever time their sender gave them, so they
     // are stamped with the time the hook sees them.
     let time = if event.flags & LLKHF_INJECTED != 0 {
@@ -864,6 +861,14 @@ unsafe extern "system" fn mouse_hook(code: i32, wparam: WPARAM, lparam: LPARAM) 
             report_pointer(wparam as u32, event);
         }
         if let Some((vk, down)) = mouse_message(wparam as u32, event.mouseData) {
+            // A press anywhere while the capsule's list or suggestions show
+            // may fold them, as macOS's tap reports it; the click still
+            // reaches the app beneath, and a press on the capsule itself keeps
+            // its list (the overlay reports the pointer there).
+            #[cfg(hex_capture)]
+            if down && (crate::capture_host::list_open() || crate::capture_host::suggesting()) {
+                crate::capture_host::capsule_key(crate::capture_host::CapsuleKey::Press);
+            }
             // A mouse event settles stale Left Ctrl bits too: a release can
             // land on another desktop and never reach the keyboard hook.
             modifiers::note_left_control(LeftControl::Other, down);

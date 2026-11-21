@@ -416,7 +416,7 @@ fn every_state_draws_its_pieces() {
         ("shift", &["shift-hint"]),
         (
             "list-guess",
-            &["done", "field", "list", "row-SEER", "footer"],
+            &["done", "field", "close", "list", "row-SEER", "footer"],
         ),
         ("sent", &["done", "undo", "close"]),
         // Taken back, the suggestions again, the wrong one last.
@@ -779,6 +779,42 @@ fn the_capsule_draws_keycaps_only_on_search_and_hints() {
                 e.path
             );
         }
+    }
+}
+
+/// The search is never a trap: it keeps ✕ beside its field, and the field
+/// itself takes clicks, so a click on it lands on the capsule rather than the
+/// app beneath. Windows has no tap feeding the field's keys, so its ✕ and its
+/// clicks are the only way out of a search there.
+#[test]
+fn the_search_keeps_close_beside_a_field_that_takes_clicks() {
+    let pres = stills()
+        .into_iter()
+        .find(|(name, _)| *name == "list-typed")
+        .map(|(_, pres)| pres)
+        .expect("list-typed");
+    let rt = runtime(pres, false);
+    let drawn = |key: &str| {
+        rt.elements()
+            .iter()
+            .find(|e| !e.exiting && e.key.as_deref().and_then(|k| k.split('#').next()) == Some(key))
+            .unwrap_or_else(|| panic!("no {key}"))
+            .rect
+    };
+    let (field, close) = (drawn("field"), drawn("close"));
+    assert!(
+        close[0] >= field[0] + field[2],
+        "✕ {close:?} is not after the field {field:?}"
+    );
+    for (key, [x, y, w, h]) in [("field", field), ("✕", close)] {
+        let (cx, cy) = (x + w * 0.5, y + h * 0.5);
+        assert!(
+            rt.hit_regions()
+                .iter()
+                .any(|r| cx >= r[0] && cx <= r[2] && cy >= r[1] && cy <= r[3]),
+            "{key} at ({cx}, {cy}) is outside the overlay's hit regions {:?}",
+            rt.hit_regions()
+        );
     }
 }
 

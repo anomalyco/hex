@@ -256,6 +256,12 @@ On Windows                               // capture.windows
 │   records every pointer move, click, wheel turn, and modifier change
 │   (capture_host::report_input, as the macOS tap): Shift alone inks, the
 │   laser follows the pointer, clicks are logged. Injected events are skipped
+├── The capsule's list -> the same hook hands it the keys no window of its
+│   own could take (windows/capsule_keys.rs): typing filters the search, plus
+│   ⌫ ↑↓ ⏎ ⇥ and Esc, and Shift for the row under the pointer; a mouse-down
+│   while the list or suggestions show folds them, as macOS's tap does, and
+│   the click still reaches the app beneath. Hex's shortcuts and
+│   Ctrl/Alt/Windows chords go on untouched
 ├── While it records, dictation starts nothing
 ├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
@@ -603,6 +609,13 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   │   │   events, not native); every key, digits and Esc included, goes on
 │   │   │   to the app. Shift's presses and releases (flagsChanged) reach the
 │   │   │   capsule too (`CapsuleKey::Shift`) and still go on to the app
+│   │   ├── Windows -> the keyboard hook builds the same keys from virtual keys
+│   │   │   (`windows/capsule_keys.rs`): text in the foreground window's layout
+│   │   │   through `ToUnicodeEx`, ⌫, ↑↓, ⏎, ⇥, Esc, and Shift for the row under
+│   │   │   the pointer. A key is swallowed only when the grab takes it, so
+│   │   │   Hex's own shortcuts, Ctrl/Alt/Windows chords, and the locks still go
+│   │   │   on; a mouse-down while the list or suggestions show reports the
+│   │   │   same `CapsuleKey::Press` the tap does, the click still reaching the app
 │   │   └── List open -> the session tap takes every key press without ⌘ or ⌃
 │   │       that isn't a Hex shortcut: text in the active layout, ⌫, ↑↓, ⏎,
 │   │       ⇧⏎ (always), Esc; their releases too. Digits are typed (session
@@ -613,8 +626,11 @@ The capsule                              // capture.capsule (rune_ui/capture_cap
 │   ├── `offer` (a rule offer) -> not drawn; Scrawl's capsule doesn't draw it
 │   ├── The ready capsule shows a labeled Paste button, both folded and above
 │   │   the suggestions. A rule waiting to send shows Undo instead. Sending,
-│   │   sent and queued results do not offer Paste. The search field replaces
-│   │   the buttons while typing. Neither Paste nor Inspect binds a key.
+│   │   sent and queued results do not offer Paste. The search field takes the
+│   │   buttons' place while typing, and ✕ stays beside it, so a search can
+│   │   always be left (a Windows capsule has no tap to fold it). The field is
+│   │   a hit region of its own: a click on it lands on the capsule, never on
+│   │   the app beneath. Neither Paste nor Inspect binds a key.
 │   │   The list hangs
 │   │   under the capsule, which is never narrower than LIST_W; the capsule
 │   │   widens with it. The capsule is a rounded rect with the list's 14 pt
