@@ -420,6 +420,13 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
 
     func syncSettings() {
         syncLanguage()
+        // Learn each language separately: each keyboard language's own learned words, and the
+        // partner's own; Learn how I type's journal filters its fixes the same way.
+        let learnsPerLanguage = TypingJournalSettings().learnsPerLanguage
+        if engine.autocorrect.learnsPerLanguage != learnsPerLanguage {
+            engine.autocorrect.learnsPerLanguage = learnsPerLanguage
+            engine.refreshSuggestions()
+        }
         let journal = TypingJournal.sharedIfEnabled()
         if engine.journal !== journal {
             engine.journal = journal

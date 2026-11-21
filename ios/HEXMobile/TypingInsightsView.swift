@@ -84,9 +84,13 @@ struct TypingInsightsView: View {
             : String(localized: "\(taps) taps, \(fixes) typing fixes and \(dictations) dictations learned")
     }
 
-    /// Learned fixes, most used first; each can be switched off.
+    /// Learned fixes, most used first; each can be switched off. With Learn each language
+    /// separately on, every language's are listed, so a fix only one language learned shows too.
     private var dictationFixes: [DictationLearnedFix] {
-        Array(snapshot.learnedDictationFixes
+        let learned = TypingJournalSettings().learnsPerLanguage
+            ? snapshot.learnedDictationFixesByLanguage()
+            : snapshot.learnedDictationFixes
+        return Array(learned
             .sorted { $0.count == $1.count ? $0.id < $1.id : $0.count > $1.count }
             .prefix(12))
     }

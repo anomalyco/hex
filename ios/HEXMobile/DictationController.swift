@@ -84,7 +84,7 @@ final class DictationController {
     private let periodSettings: DictationPeriodSettings
     private let hinglishSettings: HinglishSettings
     private let typingJournalSettings: TypingJournalSettings
-    private let learnedDictationCorrections: @MainActor () -> [DictationCorrection]
+    private let learnedDictationCorrections: @MainActor (String?) -> [DictationCorrection]
     private let audio: any AudioManaging
     let keyboardBridge: KeyboardBridge
     private let fileManager: FileManager
@@ -212,7 +212,7 @@ final class DictationController {
         periodSettings: DictationPeriodSettings = DictationPeriodSettings(),
         hinglishSettings: HinglishSettings = HinglishSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
-        learnedDictationCorrections: (@MainActor () -> [DictationCorrection])? = nil,
+        learnedDictationCorrections: (@MainActor (String?) -> [DictationCorrection])? = nil,
         languageSettings: LanguageSettings = LanguageSettings()
     ) {
         let resolvedBridge = keyboardBridge ?? KeyboardBridge()
@@ -231,8 +231,8 @@ final class DictationController {
         self.periodSettings = periodSettings
         self.hinglishSettings = hinglishSettings
         self.typingJournalSettings = typingJournalSettings
-        self.learnedDictationCorrections = learnedDictationCorrections ?? {
-            TypingJournal.storedDictationCorrections(settings: typingJournalSettings)
+        self.learnedDictationCorrections = learnedDictationCorrections ?? { language in
+            TypingJournal.storedDictationCorrections(settings: typingJournalSettings, language: language)
         }
         self.fileManager = fileManager
         self.now = now
@@ -782,7 +782,7 @@ final class DictationController {
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
         let vocabularyTerms = customVocabularySettings.activeTerms
-        let personalCorrections = learnedDictationCorrections()
+        let personalCorrections = learnedDictationCorrections(language)
         let recognitionHints = DictationCorrections.recognitionHints(
             vocabulary: vocabularyTerms,
             corrections: personalCorrections

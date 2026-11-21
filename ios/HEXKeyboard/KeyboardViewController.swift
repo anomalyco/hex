@@ -443,13 +443,15 @@ final class KeyboardViewController: UIInputViewController {
 
         viewModel.inputViewController = self
         dictationEdits.onResult = { result in
-            TypingJournal.sharedIfEnabled()?.recordDictation(result)
+            let language = LanguageLearning.dictationCode(LanguageSettings().effectiveDictationLanguage)
+            TypingJournal.sharedIfEnabled()?.recordDictation(result, language: language)
         }
         logDictationEdits.onResult = { [weak self] result in
             self?.typingLog?.dictationOutcome(result)
         }
         localDictation.corrections = {
-            TypingJournal.sharedIfEnabled()?.dictationCorrections() ?? []
+            let language = LanguageLearning.dictationCode(LanguageSettings().effectiveDictationLanguage)
+            return TypingJournal.sharedIfEnabled()?.dictationCorrections(language: language) ?? []
         }
         localDictation.currentDocument = { [weak self] in self?.currentDocument }
         viewModel.onPasteDictation = { [weak self] in self?.pasteOfferedDictation() }

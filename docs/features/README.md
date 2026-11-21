@@ -2865,7 +2865,7 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 └── Not yet: custom caption
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
-│   Hinglish, Adaptive touch, German spatial autocorrect
+│   Hinglish, Adaptive touch, German spatial autocorrect, Learn each language separately
 ├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
 │   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
 │   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file
@@ -2882,6 +2882,17 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Abend"), and Auto-capitalization off adds none.
 │   Off, German keeps the dictionary engine and has no word list, so no letter odds,
 │   model completions or bilingual partner model
+├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
+│   every typing correction and dictation fix is tagged with the language it was typed
+│   or dictated in; on, the keys learn a language's typos and rejections from that
+│   language's corrections and the untagged ones, and a dictation applies only the fixes
+│   made in its own language and the untagged ones (a fix learned in en-US applies in
+│   en-GB); learned words are one list per keyboard language
+│   (`keyboard.learnedWords.<code>`, seeded from the shared `keyboard.learnedWords`
+│   list), with bilingual autocorrect's partner keeping its own list and fixes; Delete
+│   what Hex learned erases the shared list and every language's; off, everything is the
+│   one shared list and learning it was before. Unit tests only: no CI compiles the iOS
+│   targets, and no physical iPhone run checks it
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after
 │   formatting

@@ -17,6 +17,9 @@ nonisolated struct TypingJournalDictationFix: Codable, Equatable, Sendable {
     var before: String?
     var after: String?
     var lastAt: TimeInterval
+    /// The language it was dictated in (`LanguageLearning.dictationCode`); nil for a journal
+    /// written before fixes carried one, and for a fix made in more than one language.
+    var language: String? = nil
 
     var isSubstitution: Bool { kind == .substituted || kind == .redictated }
 
@@ -25,7 +28,8 @@ nonisolated struct TypingJournalDictationFix: Codable, Equatable, Sendable {
     static func merging(
         _ result: DictationEditResult,
         into records: [TypingJournalDictationFix],
-        at now: TimeInterval
+        at now: TimeInterval,
+        language: String? = nil
     ) -> [TypingJournalDictationFix] {
         var records = records
         for pair in result.pairs {
@@ -46,10 +50,13 @@ nonisolated struct TypingJournalDictationFix: Codable, Equatable, Sendable {
                 records[index].lastAt = now
                 records[index].before = pair.before
                 records[index].after = pair.after
+                // Fixed in two languages: it belongs to every one of them.
+                if records[index].language != language { records[index].language = nil }
             } else {
                 records.append(TypingJournalDictationFix(
                     kind: pair.kind, heard: pair.heard, inserted: pair.inserted, meant: pair.meant,
-                    count: 1, contradictions: 0, before: pair.before, after: pair.after, lastAt: now
+                    count: 1, contradictions: 0, before: pair.before, after: pair.after, lastAt: now,
+                    language: language
                 ))
             }
         }
@@ -108,8 +115,33 @@ extension TypingJournalSnapshot {
         DictationLearningRule.learned(from: dictationFixes)
     }
 
-    func dictationCorrections(disabled: Set<String>) -> [DictationCorrection] {
-        learnedDictationFixes.filter { !disabled.contains($0.id) }.map(\.correction)
+    /// Every language's learned fixes, one per id: with Learn each language separately on, a
+    /// fix made only in one language is listed too, and one made in two is listed once. A
+    /// journal with no tagged fixes is the shared list.
+    func learnedDictationFixesByLanguage() -> [DictationLearnedFix] {
+        let languages = Set(dictationFixes.compactMap(\.language))
+        guard !languages.isEmpty else { return learnedDictationFixes }
+        var fixes: [DictationLearnedFix] = []
+        var seen: Set<String> = []
+        for language in languages.sorted() {
+            for fix in DictationLearningRule.learned(
+                from: dictationFixes.filter { $0.language == nil || $0.language == language }
+            ) where seen.insert(fix.id).inserted {
+                fixes.append(fix)
+            }
+        }
+        return fixes
+    }
+
+    /// `language` keeps a dictation's fixes to those made in it and the ones never tagged
+    /// (`Learn each language separately`); nil keeps every language's.
+    func dictationCorrections(disabled: Set<String>, language: String? = nil) -> [DictationCorrection] {
+        let fixes = if let language {
+            DictationLearningRule.learned(from: dictationFixes.filter { $0.language == nil || $0.language == language })
+        } else {
+            learnedDictationFixes
+        }
+        return fixes.filter { !disabled.contains($0.id) }.map(\.correction)
     }
 
     func count(of outcome: DictationOutcome) -> Int {
