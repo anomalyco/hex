@@ -212,12 +212,10 @@ final class KeyboardKeyPlaneView: UIView {
                 drawSymbol("globe", in: labelFrame, color: palette.textBase, pointSize: isLandscape ? 16 : 19, yOffset: isLandscape ? 0 : -1)
             case .emoji:
                 let lit = pressed.contains(.emoji)
-                context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
+                let fill = lit ? palette.functionHeldFill : palette.keyFill
+                context.fillKeycap(frame, fill: fill, radius: radius)
                 guard showGlyphs() else { continue }
-                drawSymbol(
-                    "face.smiling", in: labelFrame, color: palette.textBase,
-                    pointSize: isLandscape ? 17.5 : 18.5, weight: .semibold, yOffset: -0.67
-                )
+                drawEmojiFace(in: labelFrame, diameter: isLandscape ? 18 : 19, context: context, keyFill: fill)
             }
         }
     }
@@ -273,6 +271,64 @@ final class KeyboardKeyPlaneView: UIView {
         )
     }
 
+
+    /// Apple's emoji key shows a grinning face that no public SF Symbol has (iOS 27.2: an open
+    /// mouth with a band of teeth; Hex drew face.smiling, a closed smile, at 16 pt turned).
+    /// Drawn to measurements of its 3x screenshots on every iPhone, in pt for a 19 pt face
+    /// (18 turned): centred 0.67 above the key's middle; a 1.58 ring (a solid face in dark, its
+    /// features cut out); 2 x 2.67 eyes 2.78 either side and 2.13 above the centre; a mouth 12.33
+    /// wide, its top 0.5 below the centre at the corners and 1.5 in the middle, its bottom an arc
+    /// 6.5 down; teeth a 1 pt band 1 under its top, always the light colour.
+    private func drawEmojiFace(in frame: CGRect, diameter: CGFloat, context: CGContext, keyFill: UIColor) {
+        let ink = palette.textBase.cgColor
+        context.saveGState()
+        context.translateBy(x: frame.midX, y: frame.midY - 0.67)
+        let k = diameter / 19
+        context.scaleBy(x: k, y: k)
+        let eyes = [CGRect(x: -3.78, y: -3.465, width: 2, height: 2.67), CGRect(x: 1.78, y: -3.465, width: 2, height: 2.67)]
+        let w: CGFloat = 6.17
+        let kappa: CGFloat = 0.5523
+        let mouth = CGMutablePath()
+        mouth.move(to: CGPoint(x: -w, y: 0.5))
+        mouth.addQuadCurve(to: CGPoint(x: w, y: 0.5), control: CGPoint(x: 0, y: 2.5))
+        mouth.addCurve(to: CGPoint(x: 0, y: 6.5), control1: CGPoint(x: w, y: 0.5 + 6 * kappa), control2: CGPoint(x: w * kappa, y: 6.5))
+        mouth.addCurve(to: CGPoint(x: -w, y: 0.5), control1: CGPoint(x: -w * kappa, y: 6.5), control2: CGPoint(x: -w, y: 0.5 + 6 * kappa))
+        mouth.closeSubpath()
+        if palette.isDark {
+            // A solid face, its eyes and mouth cut through to the keycap.
+            let face = CGMutablePath()
+            face.addEllipse(in: CGRect(x: -9.5, y: -9.5, width: 19, height: 19))
+            eyes.forEach { face.addEllipse(in: $0) }
+            face.addPath(mouth)
+            context.addPath(face)
+            context.setFillColor(ink)
+            context.fillPath(using: .evenOdd)
+        } else {
+            context.setStrokeColor(ink)
+            context.setLineWidth(1.58)
+            context.strokeEllipse(in: CGRect(x: -8.71, y: -8.71, width: 17.42, height: 17.42))
+            context.setFillColor(ink)
+            eyes.forEach { context.fillEllipse(in: $0) }
+            context.addPath(mouth)
+            context.fillPath()
+        }
+        // The teeth: a band under the mouth's top, short of its edge, in the light colour.
+        let band = CGMutablePath()
+        band.move(to: CGPoint(x: -w, y: 1.5))
+        band.addQuadCurve(to: CGPoint(x: w, y: 1.5), control: CGPoint(x: 0, y: 3.5))
+        band.addLine(to: CGPoint(x: w, y: 2.5))
+        band.addQuadCurve(to: CGPoint(x: -w, y: 2.5), control: CGPoint(x: 0, y: 4.5))
+        band.closeSubpath()
+        context.addPath(mouth)
+        context.clip()
+        context.addPath(mouth)
+        context.addPath(mouth.copy(strokingWithWidth: 1.8, lineCap: .butt, lineJoin: .round, miterLimit: 10))
+        context.clip(using: .evenOdd)
+        context.setFillColor(palette.isDark ? ink : keyFill.cgColor)
+        context.addPath(band)
+        context.fillPath()
+        context.restoreGState()
+    }
 
     private func drawSymbol(
         _ name: String,
