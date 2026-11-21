@@ -36,14 +36,18 @@ nonisolated enum TranscriptFormatter {
     /// English-only rules ("I", Casual's interjections, Notes' connectives); nil is English.
     /// - Verbatim: as the speech model wrote it.
     /// - Polished: full sentences: fillers trimmed, each sentence capitalized ("I" too) and
-    ///   ended.
+    ///   ended, and English "gonna", "wanna", "gotta", "kinda" and "lemme" written out.
     /// - Casual: texting: fillers trimmed, sentences may start lowercase (never an acronym
     ///   or a name with inner capitals), English "i", no comma after an opening "yeah" or
     ///   "ok", and no final period on a short message (one line, up to three sentences).
     /// - Notes: concise lines: spoken "bullet" and "new line" markers, else several
     ///   sentences become a list (and a list after a colon becomes bullets), with no
     ///   opening "so", "yeah" or "and then" and no final periods.
-    static func format(_ raw: String, style: DictationStyle, language: String? = nil) -> String {
+    ///
+    /// `lists` (Settings › Dictation › Format lists) writes spoken lists and line breaks as
+    /// lines (`SpokenLists`) after the fillers and before the style's punctuation, in every
+    /// style but Verbatim, which keeps the model's exact words.
+    static func format(_ raw: String, style: DictationStyle, language: String? = nil, lists: Bool = false) -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return "" }
         let fillers = fillerPattern(for: language)
@@ -54,17 +58,21 @@ nonisolated enum TranscriptFormatter {
             return collapseHorizontalSpaces(in: trimmed)
 
         case .polished:
-            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            let cleaned = listed(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, language)
             return polishSentences(cleaned, english: english)
 
         case .casual:
-            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            let cleaned = listed(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, language)
             return casualMessage(cleaned, english: english)
 
         case .notes:
-            let cleaned = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            let cleaned = listed(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, language)
             return formatNotes(cleaned, english: english)
         }
+    }
+
+    private static func listed(_ text: String, _ lists: Bool, _ language: String?) -> String {
+        lists ? SpokenLists.format(text, language: language) : text
     }
 
     /// Joins dictated text cleanly with existing text around the insertion cursor: one space
@@ -183,6 +191,9 @@ nonisolated enum TranscriptFormatter {
     private static func polishSentences(_ text: String, english: Bool) -> String {
         guard !text.isEmpty else { return "" }
         var normalized = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
+        if english {
+            normalized = expandingInformalContractions(in: normalized)
+        }
         normalized = capitalizeSentenceStarts(in: normalized)
         if english {
             normalized = capitalizingPronounI(in: normalized)
@@ -223,6 +234,63 @@ nonisolated enum TranscriptFormatter {
             || (0x3400...0x4DBF).contains(scalar) // extension A
             || (0x3040...0x30FF).contains(scalar) // hiragana and katakana
             || (0xF900...0xFAFF).contains(scalar) // compatibility ideographs
+    }
+
+    /// What iOS 27's speech models write for casual speech, and what Polished writes instead.
+    private static let informalContractions: [String: String] = [
+        "gonna": "going to", "wanna": "want to", "gotta": "got to", "kinda": "kind of", "lemme": "let me",
+    ]
+
+    /// "I'm gonna call" -> "I'm going to call", "Gonna rain." -> "Going to rain.". Never inside
+    /// quotes (he said “gonna win”) or on a capitalized word mid-sentence, which is a name or
+    /// a title ("Gonna Fly Now"); a capitalized one starting a sentence keeps its capital.
+    private static func expandingInformalContractions(in text: String) -> String {
+        let lowered = text.lowercased()
+        guard informalContractions.keys.contains(where: lowered.contains) else { return text }
+        var output = ""
+        var word = ""
+        var inStraightQuote = false
+        var curlyQuotes = 0
+        func flush() {
+            defer { word = "" }
+            let lower = word.lowercased()
+            guard let expansion = informalContractions[lower], !inStraightQuote, curlyQuotes == 0 else {
+                output += word
+                return
+            }
+            if word == lower {
+                output += expansion
+            } else if word == lower.prefix(1).uppercased() + lower.dropFirst(), startsSentenceOrItem(after: output) {
+                output += expansion.prefix(1).uppercased() + expansion.dropFirst()
+            } else {
+                output += word
+            }
+        }
+        for character in text {
+            if character.isLetter || character.isNumber || character == "'" || character == "’" {
+                word.append(character)
+                continue
+            }
+            flush()
+            if character == "\"" {
+                inStraightQuote.toggle()
+            } else if character == "“" {
+                curlyQuotes += 1
+            } else if character == "”" {
+                curlyQuotes = max(0, curlyQuotes - 1)
+            }
+            output.append(character)
+        }
+        flush()
+        return output
+    }
+
+    /// Whether the next word starts a sentence, or a bulleted item ("- ").
+    private static func startsSentenceOrItem(after text: String) -> Bool {
+        if startsSentence(after: text) { return true }
+        let line = text.split(separator: "\n", omittingEmptySubsequences: false).last ?? ""
+        let marker = line.trimmingCharacters(in: .whitespaces)
+        return marker == "-" || marker == "•"
     }
 
     /// English "i", "i'm", "i'll", "i've", "i'd" as "I", "I'm", ...; never "i.e." or an address.
@@ -290,6 +358,12 @@ nonisolated enum TranscriptFormatter {
         var atStart = true
         var index = 0
         while index < chars.count {
+            // A list item ("1. Eggs", "- Eggs") keeps its capital.
+            if index == 0 || chars[index - 1].isNewline, let marker = listMarkerLength(chars, at: index) {
+                index += marker
+                atStart = false
+                continue
+            }
             let ch = chars[index]
             if atStart, ch.isLetter {
                 var end = index
@@ -314,6 +388,15 @@ nonisolated enum TranscriptFormatter {
             index += 1
         }
         return String(chars)
+    }
+
+    /// The length of a list marker ("1. ", "- ") at `index`, if one starts there.
+    private static func listMarkerLength(_ chars: [Character], at index: Int) -> Int? {
+        if index + 1 < chars.count, chars[index] == "-" || chars[index] == "•", chars[index + 1] == " " { return 2 }
+        var end = index
+        while end < chars.count, end - index < 2, chars[end].isASCII, chars[end].isNumber { end += 1 }
+        guard end > index, end + 1 < chars.count, chars[end] == ".", chars[end + 1] == " " else { return nil }
+        return end + 2 - index
     }
 
     private static func keepsCapital(_ word: String) -> Bool {
