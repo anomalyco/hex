@@ -77,7 +77,22 @@ static RESTORABLE: AtomicBool = AtomicBool::new(false);
 static CARDS: OnceLock<OverlayHandle<Cards>> = OnceLock::new();
 /// The card open in the editor and where it rests now, for the editor to
 /// fly back to; none once it's gone.
+#[cfg(not(test))]
 static HOME: Mutex<Option<(u64, [f32; 4])>> = Mutex::new(None);
+#[cfg(test)]
+thread_local! {
+    // Each test's cards and editor run on its own thread.
+    static HOME: Mutex<Option<(u64, [f32; 4])>> = const { Mutex::new(None) };
+}
+
+/// [`HOME`], locked.
+fn with_home<R>(f: impl FnOnce(&mut Option<(u64, [f32; 4])>) -> R) -> R {
+    let lock = |home: &Mutex<_>| f(&mut home.lock().unwrap_or_else(|e| e.into_inner()));
+    #[cfg(not(test))]
+    return lock(&HOME);
+    #[cfg(test)]
+    return HOME.with(lock);
+}
 
 /// Whether Restore Last Capture has a card to bring back. Safe from any
 /// thread.
@@ -331,10 +346,11 @@ impl Cards {
         if self.hovered == Some(id) {
             self.hover(None);
         }
-        let mut home = HOME.lock().unwrap_or_else(|e| e.into_inner());
-        if home.is_some_and(|(lent, _)| lent == id) {
-            *home = None;
-        }
+        with_home(|home| {
+            if home.is_some_and(|(lent, _)| lent == id) {
+                *home = None;
+            }
+        });
         Some(self.cards.remove(at))
     }
 
@@ -422,7 +438,8 @@ impl Cards {
             rect: card.flight.rect(),
             reduced,
         };
-        *HOME.lock().unwrap_or_else(|e| e.into_inner()) = Some((id, card.flight.target()));
+        let target = card.flight.target();
+        with_home(|home| *home = Some((id, target)));
         if self.hovered == Some(id) {
             self.hover(None);
         }
@@ -434,10 +451,11 @@ impl Cards {
         if let Some(card) = self.cards.iter_mut().find(|card| card.id == id) {
             card.lent = lent;
             if lent == Lent::No {
-                let mut home = HOME.lock().unwrap_or_else(|e| e.into_inner());
-                if home.is_some_and(|(at, _)| at == id) {
-                    *home = None;
-                }
+                with_home(|home| {
+                    if home.is_some_and(|(at, _)| at == id) {
+                        *home = None;
+                    }
+                });
             }
             if self.reduced.get() {
                 tx.animated();
@@ -448,15 +466,16 @@ impl Cards {
 
     /// Where the card open in the editor rests now, for the editor.
     fn publish_home(&self) {
-        let mut home = HOME.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some((id, _)) = *home {
-            *home = self
-                .cards
-                .iter()
-                .zip(self.slots())
-                .find(|(card, _)| card.id == id && card.lent != Lent::No)
-                .map(|(_, slot)| slot);
-        }
+        with_home(|home| {
+            if let Some((id, _)) = *home {
+                *home = self
+                    .cards
+                    .iter()
+                    .zip(self.slots())
+                    .find(|(card, _)| card.id == id && card.lent != Lent::No)
+                    .map(|(_, slot)| slot);
+            }
+        });
     }
 }
 
@@ -472,10 +491,7 @@ fn lend(id: u64, lent: Lent) {
 
 /// Where card `id`, open in the editor, rests now; none once it's gone.
 fn home(id: u64) -> Option<[f32; 4]> {
-    HOME.lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .filter(|(at, _)| *at == id)
-        .map(|(_, rect)| rect)
+    with_home(|home| home.filter(|(at, _)| *at == id).map(|(_, rect)| rect))
 }
 
 /// A card's size: its shot fitted into [`CARD_MAX`].

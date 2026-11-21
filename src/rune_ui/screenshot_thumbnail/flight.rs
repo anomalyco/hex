@@ -51,23 +51,6 @@ impl Flight {
         self.rect.map(|s| s.target)
     }
 
-    /// How much of the way from `from` to its target it has come, by its
-    /// size and place together: 0 at `from`, 1 there.
-    pub(crate) fn progress(&self, from: [f32; 4]) -> f32 {
-        let to = self.target();
-        let now = self.rect();
-        let (mut gone, mut whole) = (0.0, 0.0);
-        for i in 0..4 {
-            gone += (now[i] - from[i]) * (to[i] - from[i]);
-            whole += (to[i] - from[i]).powi(2);
-        }
-        if whole <= f32::EPSILON {
-            1.0
-        } else {
-            (gone / whole).clamp(0.0, 1.0)
-        }
-    }
-
     /// Moves `dt` seconds toward `to`, `lift` off the screen; true while
     /// it's still moving.
     pub(crate) fn step(&mut self, to: [f32; 4], lift: f32, dt: f64) -> bool {
@@ -199,7 +182,7 @@ mod tests {
         for _ in 0..18 {
             flight.step(to, 1.0, 1.0 / 120.0);
         }
-        let size = flight.progress(from);
+        let size = (from[2] - flight.rect()[2]) / (from[2] - to[2]);
         assert!(flight.lift() > size, "lift {} size {size}", flight.lift());
     }
 

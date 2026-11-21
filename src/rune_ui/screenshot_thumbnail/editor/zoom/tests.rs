@@ -8,7 +8,7 @@ use std::sync::Arc;
 use rune::Tx;
 
 use super::super::super::tests::LENT;
-use super::super::super::{Cards, HOME, Lent, Shot as CardShot, home, poll as cards_poll};
+use super::super::super::{Cards, Lent, Shot as CardShot, home, poll as cards_poll};
 use super::super::{Editor, Shot, poll as editor_poll};
 use super::*;
 
@@ -60,7 +60,7 @@ fn backdrop(w: u32, h: u32) -> Vec<u8> {
                             .then_some(c)
                     };
                     dot(16.0, [255, 95, 87])
-                        .or(dot(32.0, [254, 188, 46]).filter(|_| true))
+                        .or(dot(32.0, [254, 188, 46]))
                         .or(dot(48.0, [40, 200, 64]))
                         .map_or([236, 236, 240, 255], |c| [c[0], c[1], c[2], 255])
                 } else {
@@ -68,7 +68,7 @@ fn backdrop(w: u32, h: u32) -> Vec<u8> {
                     let within = (ly - 28.0 * s) % (18.0 * s) > 6.0 * s;
                     let len = fw * (0.35 + 0.5 * (((line * 37) % 11) as f32 / 11.0));
                     if within && lx > 20.0 * s && lx < len && line < 11 {
-                        if line % 4 == 0 {
+                        if line.is_multiple_of(4) {
                             [60, 110, 230, 255]
                         } else {
                             [190, 192, 200, 255]
@@ -421,7 +421,7 @@ fn the_shot_never_jumps_between_the_card_and_the_editor() {
     // The panel came in only once the shot had landed in it.
     let chrome = rows.iter().position(|row| row.chrome).unwrap();
     assert!(chrome > away);
-    assert!(HOME.lock().unwrap().is_none());
+    assert!(super::super::super::with_home(|home| home.is_none()));
 }
 
 #[test]
@@ -625,7 +625,12 @@ fn render(gpu: &rune::render::Gpu, out: &std::path::Path, hz: u32) {
 
 /// `top`, premultiplied, over `under`.
 fn over(under: &mut [u8], top: &[u8]) {
-    for (u, t) in under.chunks_exact_mut(4).zip(top.chunks_exact(4)) {
+    for (u, t) in under
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(top.as_chunks::<4>().0)
+    {
         let keep = 255 - u32::from(t[3]);
         for i in 0..3 {
             u[i] = (u32::from(t[i]) + (u32::from(u[i]) * keep + 127) / 255).min(255) as u8;

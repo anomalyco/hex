@@ -28,9 +28,12 @@ const CHROME_S: f64 = 0.45;
 /// How near its place in the panel, in points, the shot is when the panel
 /// starts to come in: the eye reads it as landed well before it rests.
 const ARRIVED: f32 = 2.0;
-/// How long the card shows under the shot that landed on it, before the
-/// editor hides.
-const HAND_BACK_S: f64 = 0.05;
+/// The shot that landed on its card dissolving into it. The card draws a
+/// smaller copy of the picture, so a cut between them would flicker at
+/// every edge.
+const HAND_BACK: Spring = Spring::new(0.12, 0.0);
+/// How long [`HAND_BACK`] takes, before the editor hides.
+const HAND_BACK_S: f64 = 0.14;
 /// How small a shot whose card has gone shrinks as it fades.
 const GONE_SCALE: f32 = 0.92;
 /// Its fade.
@@ -92,6 +95,11 @@ impl Zoom {
     }
 
     /// Whether the flying shot shows, over the panel's own.
+    /// Whether it has landed back on its card, which shows under it.
+    fn handed_back(&self) -> bool {
+        self.way == Way::Out && self.landed.is_some()
+    }
+
     fn flies(&self, now: f64) -> bool {
         !self.reduced
             && match self.way {
@@ -298,8 +306,12 @@ pub(super) fn flying(p: Paint, s: &Editor) -> Option<El> {
                     .radius(radius)
                     .border(p.hair, k.c.border_weak),
             )
-            .opacity(if zoom.gone { 0.0 } else { 1.0 })
-            .opacity_motion(Anim::from(GONE))
+            .opacity(if zoom.gone || zoom.handed_back() {
+                0.0
+            } else {
+                1.0
+            })
+            .opacity_motion(Anim::from(if zoom.gone { GONE } else { HAND_BACK }))
             .motion(Spring::NONE)
             .transition(Transition::none()),
     )
