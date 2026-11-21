@@ -75,6 +75,7 @@ final class DotSwipeCueHostView: UIView {
             metalLayer.framebufferOnly = true
             metalLayer.presentsWithTransaction = false
             metalLayer.allowsNextDrawableTimeout = false
+            metalLayer.hidesDeveloperHUD()
             metalLayer.maximumDrawableCount = 3
             metalLayer.colorspace = CGColorSpace(name: CGColorSpace.sRGB)
         }
