@@ -1,6 +1,6 @@
 ---
 name: hex-annotate
-description: Read Hex Annotate screen captures, where someone recorded their screen while talking, clicking, and drawing red marks on it. Use whenever a message names or attaches a .scrawl bundle, a capture’s summary.md, contact-sheet.png, or frames/, when the user says "look at my capture" or refers to something they just recorded or drew, or when you need `hex annotate` to inspect a capture, list its marks, zoom into a moment, or pull frames.
+description: Read Hex Annotate screen captures, where someone recorded their screen while talking, clicking, and drawing red marks on it. Use whenever a message names or attaches a .scrawl bundle, a capture’s summary.md, contact-sheet.png, or frames/, when the user says "look at my capture" or refers to something they just recorded or drew, or when you need `hex annotate` to inspect a capture, list its marks, zoom into a moment, or pull frames. It also applies when a message starts with a `[hex-annotate …]` header, or the older `[scrawl …]` header from earlier versions.
 license: MIT
 ---
 

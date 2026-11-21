@@ -1632,7 +1632,7 @@ mod host_transport {
 
     /// The real host's summary header names the capture folder on this machine.
     fn summary_with_windows_path(_bundle: &ScrawlBundle, directory: &Path) -> String {
-        format!("[scrawl · captured · {}]", directory.display())
+        format!("[hex-annotate · captured · {}]", directory.display())
     }
 
     /// A host transport whose answer and directory mapping a test sets.

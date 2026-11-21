@@ -956,7 +956,7 @@ fn prompt_text(item: &Item) -> String {
         return item.text.trim().to_owned();
     }
     let mut head = match item.kind() {
-        "capture" => "[scrawl capture".to_owned(),
+        "capture" => "[hex-annotate capture".to_owned(),
         _ => "[voice via Hex".to_owned(),
     };
     if let Some(app) = item.app_name() {
