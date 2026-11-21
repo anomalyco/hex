@@ -880,6 +880,29 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertNil(partner([.english], .english))
     }
 
+    /// English and Spanish chosen together are Apple's bilingual English & Spanish keyboard:
+    /// both type on the first one's keys (QWERTY with ñ on a held n when English leads, the ñ
+    /// key when Spanish does), whichever the space bar switched to; Spanish alone keeps its
+    /// ñ key, and a third language its own letters (TestFlight build 56: English and Spanish
+    /// showed the ñ key "stuck" right of L).
+    func testEnglishAndSpanishTypeOnTheFirstOnesKeys() {
+        func layout(_ chosen: [KeyboardLanguage], _ current: KeyboardLanguage) -> KeyboardLanguage {
+            KeyboardLanguageList.resolve(chosen: chosen, stored: current, automatic: .english).layout
+        }
+        XCTAssertEqual(layout([.english, .spanish], .english), .english)
+        XCTAssertEqual(layout([.english, .spanish], .spanish), .english, "Español on English's keys")
+        XCTAssertEqual(layout([.spanish, .english], .english), .spanish, "English on Spanish's keys")
+        XCTAssertEqual(layout([.spanish, .english], .spanish), .spanish)
+        XCTAssertEqual(layout([.spanish], .spanish), .spanish)
+        XCTAssertEqual(layout([.english, .spanish, .french], .french), .french)
+        XCTAssertEqual(layout([.french, .spanish, .english], .english), .spanish, "the first of the two")
+        XCTAssertEqual(layout([.french, .spanish], .spanish), .spanish, "no English beside it")
+        XCTAssertEqual(layout([.english, .french], .french), .french)
+        XCTAssertFalse(KeyboardLanguage.english.letterRows[1].contains("ñ"))
+        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: false, language: .english), ["n", "ñ", "ń", "ņ", "ň"])
+        XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: false, language: .spanish), ["n", "ń"])
+    }
+
     /// While the keyboard switches between two or more languages, Automatic dictates in the
     /// one it shows (TestFlight build 56: Spanish dictation came out "incomprehensible"),
     /// in the iPhone's region; a language picked by hand, one keyboard language, or an iPhone

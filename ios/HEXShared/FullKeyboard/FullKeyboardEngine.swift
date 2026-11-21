@@ -202,6 +202,10 @@ final class FullKeyboardEngine {
             refreshSuggestions()
         }
     }
+    /// The letters and long presses on the keys when not `language`'s (`KeyboardLanguageList.layout`).
+    var layoutLanguage: KeyboardLanguage? {
+        didSet { if layoutLanguage != oldValue { cancelAllTouches(); rebuildLayout(cause: "language") } }
+    }
     /// Bilingual autocorrect's second language on these keys (`KeyboardLanguageList.partner`),
     /// or nil.
     var partnerLanguage: KeyboardLanguage? {
@@ -591,7 +595,7 @@ final class FullKeyboardEngine {
         let dx = touch.point.x - touch.startPoint.x
         let dy = touch.point.y - touch.startPoint.y
         guard (dx * dx + dy * dy).squareRoot() <= Self.accentSlop else { return false }
-        guard let options = AccentCatalog.options(for: base, uppercase: isUppercase, language: language),
+        guard let options = AccentCatalog.options(for: base, uppercase: isUppercase, language: layoutLanguage ?? language),
               options.count > 1 else { return false }
         activeAccentMenu = AccentMenu.build(
             for: touch.key.frame,
@@ -1396,7 +1400,7 @@ final class FullKeyboardEngine {
             showsGlobe: showsGlobe,
             showsEmoji: showsEmoji,
             horizontalInset: horizontalInset,
-            language: language,
+            language: layoutLanguage ?? language,
             posture: posture,
             windowInset: windowInset,
             hexPlacement: hexPlacement

@@ -338,6 +338,7 @@ final class FullKeyboardView: UIView, UIInputViewAudioFeedback {
         guard list != languages || engine.language != list.current else { return }
         languages = list
         engine.switchesLanguage = list.switches
+        engine.layoutLanguage = list.layout == list.current ? nil : list.layout
         engine.language = list.current
         engine.partnerLanguage = list.partner(available: Self.spellCheckLanguages)
         syncSpatialAutocorrect()

@@ -587,7 +587,13 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   it, and unticking the last goes back to Automatic. With two or more, the space bar names
   the current one ("Français", with the region only beside another French layout) and a
   quick swipe along it switches (left the next, right the one before): letters, accents
-  and autocorrect. Apple and Gboard switch with a long press on the globe, but a Face ID
+  and autocorrect. English and Español chosen together are Apple's bilingual "English &
+  Spanish" keyboard (`KeyboardLanguageList.layout`): both type on the first one's keys and
+  long presses, so English first is QWERTY with ñ on a held n in both, Español first keeps
+  its ñ key in both, and the swipe switches the language they autocorrect and dictate in
+  (black box, iOS 27.2 simulator: Spanish added to Apple's English keyboard has no ñ key and
+  English's long presses; English added to its Spanish keyboard keeps the ñ key and
+  Spanish's). Apple and Gboard switch with a long press on the globe, but a Face ID
   iPhone shows no globe in a third-party keyboard and Hex's space-bar slide is its cursor
   trackpad, so this follows SwiftKey: with two or more languages the cursor slides once the
   space bar was held still for 0.4 s (the hold that starts Apple's trackpad, below), a slide
@@ -620,7 +626,8 @@ doesn't use, and `SpeechAnalyzer` runs without it in the app and the keyboard al
   keyboard alone changed 34 of 77 common French words and the French keyboard alone 27 of
   80 English words; with both chosen, none.
 - **Keyboard layouts (each language's letters):** English,
-  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2),
+  Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2; beside English, the
+  first of the two's keys, above),
   Deutsch (QWERTZ with `ü`, `ö ä`), Italiano and Português on the English letters
   (Apple's keyboards for them are QWERTY), Français (France) on Apple's AZERTY (rows of
   10, 10 and 6 letters, W to N under E to I with a gap beside shift and delete, as on
@@ -949,9 +956,9 @@ from `ci_scripts/ci_post_clone.sh`. A new model gets a new release tag and hash.
   ever moves again, the reservation limit on a full iPhone, and Parakeet's
   memory on 4 GB iPhones are unverified on hardware.
 - **Keyboard languages:** `KeyboardLayoutTests` cover the list (resolution, switching,
-  space-bar label, pairing, migration, the dictation pick, dictation following the
-  keyboard), `FullKeyboardEngineTests` the swipe against the hold-then-slide trackpad and
-  switching in a `FullKeyboardView`, and
+  space-bar label, pairing, migration, the dictation pick, English & Spanish's keys,
+  dictation following the keyboard), `FullKeyboardEngineTests` the swipe against the
+  hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too), and
   `AutocorrectEngineTests` bilingual autocorrect on stub dictionaries and iOS's own
   (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
