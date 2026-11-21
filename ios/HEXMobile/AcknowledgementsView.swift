@@ -40,8 +40,8 @@ struct AcknowledgementsView: View {
     }
 
     /// Spatial autocorrect's word lists (`scripts/build-typing-model.py`), the keyboard's
-    /// never-suggest list (`OffensiveWords`), and the model Experiments › Multilingual model
-    /// downloads (`ParakeetUltraModel`); keep in step with ios/README.md.
+    /// never-suggest list (`OffensiveWords`), and the speech models Hex downloads (Parakeet V2,
+    /// and Parakeet Ultra for Experiments › Multilingual model); keep in step with ios/README.md.
     static let entries: [Entry] = [
         Entry(
             title: "Google Books Ngram data",
@@ -93,6 +93,17 @@ struct AcknowledgementsView: View {
             (creativecommons.org/licenses/by/4.0). Hex lowercased and classified the entries, \
             omitted ordinary, medical and search-only terms, and added common slurs, \
             inflections and spelling variants.
+            """
+        ),
+        Entry(
+            title: "Parakeet V2",
+            body: """
+            Hex dictates English with NVIDIA's Parakeet TDT 0.6B v2 \
+            (huggingface.co/nvidia/parakeet-tdt-0.6b-v2), licensed under Creative Commons \
+            Attribution 4.0 International (creativecommons.org/licenses/by/4.0), downloaded as \
+            FluidInference's Core ML conversion (huggingface.co/FluidInference/\
+            parakeet-tdt-0.6b-v2-coreml, CC BY 4.0), which stores the encoder's weights at \
+            reduced precision; Hex uses its files unchanged.
             """
         ),
         Entry(

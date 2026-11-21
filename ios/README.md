@@ -1140,6 +1140,12 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/).
   Hex lowercased and classified the entries, omitted ordinary, medical and search-only
   terms, and added common slurs, inflections and spelling variants.
+- **Parakeet V2:** Hex dictates English with NVIDIA's
+  [Parakeet TDT 0.6B v2](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v2), licensed under
+  [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/),
+  downloaded as FluidInference's
+  [Core ML conversion](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
+  (CC BY 4.0, encoder weights at reduced precision), used unchanged.
 - **Parakeet Ultra:** Experiments › Multilingual model downloads
   [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) by Moondream, a
   post-training of NVIDIA's
