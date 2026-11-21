@@ -13,7 +13,7 @@ use super::clip::{Clip, Grip, duration_label, position_label, size_label};
 use super::marks::{self, Mark, Tool};
 use super::{
     Editor, Layout, Listen, Out, PAD, Pressed, SendList, Sessions, Shot, Talk, clamp_panel,
-    matching, talk,
+    matching, talk, zoom,
 };
 use crate::app_settings::ExportSize;
 use crate::desktop::i18n::tr;
@@ -77,7 +77,7 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
         .w_full()
         .h_full()
         .hover_motion_within(Anim::INSTANT, Anim::INSTANT);
-    let Some(shot) = s.picture().filter(|_| s.on) else {
+    let Some(shot) = s.picture().filter(|_| s.on || s.zooming_out()) else {
         return root;
     };
     let k = p.k;
@@ -108,7 +108,7 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
             ))
             .springs(SpringPair::new(ENTER, LEAVE))
     };
-    let mut panel = panel
+    let mut panel = zoom::chrome(s, panel)
         .hit()
         .on_drag(|s: &mut Editor, d: &mut Drag, tx: &mut Tx| {
             match d.phase {
@@ -147,7 +147,7 @@ pub(crate) fn view(s: &Editor, cx: &mut Cx<Editor>) -> El {
     if let Some(list) = &s.send {
         panel = panel.child(send_list(p, list).absolute(w - PAD - LIST_W, PAD + CHIP_H + 4.0));
     }
-    root.child(panel)
+    root.child(panel).children(zoom::flying(p, s))
 }
 
 /// The shot, its marks, and the crop, taking the drags that draw.
@@ -161,7 +161,7 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
     } else {
         Cursor::Crosshair
     };
-    let mut image = el()
+    let image = el()
         .key("shot")
         .absolute(ix, iy)
         .size(iw, ih)
@@ -170,6 +170,7 @@ fn canvas_el(p: Paint, s: &Editor, shot: &Shot, layout: Layout) -> El {
         .pixels_fit(shot.image.pixels(), rune::SurfaceFit::Fit)
         .clip_rounded(INNER_RADIUS)
         .instant_changes();
+    let mut image = zoom::panel_shot(s, image);
     if let Some(player) = s
         .clip
         .as_ref()
