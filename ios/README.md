@@ -839,7 +839,7 @@ never at a launch by itself.
   Spanish's). Apple and Gboard switch with a long press on the globe, but a Face ID
   iPhone shows no globe in a third-party keyboard and Hex's space-bar slide is its cursor
   trackpad, so this follows SwiftKey: with two or more languages the cursor slides once the
-  space bar was held still for 0.4 s (the hold that starts Apple's trackpad, below), a slide
+  space bar was held still for 0.35 s (the hold that starts Apple's trackpad, below), a slide
   before that is a swipe, and one shorter than 24 pt types a space
   (`FullKeyboardEngine.trackpadHoldDelay`, `languageSwipeDistance`).
   The globe key is unchanged. The keyboard comes back in the language it was left in, in
@@ -1125,7 +1125,7 @@ never at a launch by itself.
 - **Spaces (full keyboard):** A suggestion (a word, what you typed, or an emoji)
   types its own space, so a space pressed right after it is swallowed, as on Apple's
   keyboard; it still counts towards double-space for a period. Holding the space bar
-  still for 0.4 s starts the trackpad, as Apple's does, and letting go then types no
+  still for 0.35 s starts the trackpad, as Apple's does, and letting go then types no
   space (`FullKeyboardEngine.trackpadHoldDelay`). A tap that slides before then is still a
   space, however far it goes, as on Apple's (black box, iOS 27.2: taps of 60 to 150 ms
   sliding 8 to 24 pt, and slides of 40 pt in 150 ms, all typed one); a slide of 10 pt used
