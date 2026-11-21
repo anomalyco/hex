@@ -417,7 +417,6 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-keep-on-clipboard",
         "lab-copy-only",
         "lab-return-to-app",
-        "lab-print-start",
         "lab-spoken-formatting",
         "lab-filler-words",
         "lab-clean-up",
