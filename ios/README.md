@@ -1150,7 +1150,13 @@ never at a launch by itself.
   panel's top row, the Logging mark), with Apple's 8 pt under it, so row 1's keycaps
   start 46 pt down and the keys stay on Apple's rows (Apple's keys overlaid on Hex's,
   iPhone 17 Pro, iOS 27.2 simulator): 247 pt on an iPhone 17 or 17 Pro, 254 pt on an SE,
-  266 pt on an Air or Pro Max. The words are on Apple's line, 26 pt above the keys and
+  266 pt on an Air or Pro Max. Apple's keyboard draws other rows before iOS 27 (iOS 26.2 and
+  26.5 simulators, iPhone 12, 16, 17 Pro, Air and 17 Pro Max, beside Hex in the same field):
+  the same keycaps, but upright its panel is 7 pt taller under the keys on an 844 to 874 pt
+  iPhone and 2 pt shorter on a 900 pt or taller one, so on iOS 26 Hex's rows sit 7 pt higher
+  (row 4 whole, 254 pt) or 2 pt lower (264 pt) to stay on Apple's (`KeyboardMetrics.appleRowsAreIOS26`);
+  the SE is the same on both. iOS 18 is unmeasured (the Studio has no iOS 18 simulator) and
+  keeps the iOS 27 rows Hex drew there before. The words are on Apple's line, 26 pt above the keys and
   20 pt below the keyboard's top edge; an autocorrection is a small 18 pt chip around
   its word, and the pills (the Hex key, the recording bar) are 28 pt, 6 pt down, so
   nothing touches the top edge. iOS draws about 17 pt of its own panel above a
@@ -1158,7 +1164,10 @@ never at a launch by itself.
   27.2: Notes has it, a Safari form's first focus doesn't; Gboard and SwiftKey get the
   same), and a keyboard can't tell which, so the strip carries its own room: the 27 pt
   strip it replaces left the words 9 pt under the edge whenever iOS added nothing.
-  Turned, the strip is 42 pt and the keyboard 204 pt.
+  Turned, the strip is 42 pt and the keyboard 204 pt (32 pt keycaps on a 40 pt pitch); on iOS
+  26 Apple's turned keycaps are 27.33 pt on a 35.33 pt pitch ending 4 pt above the bottom, and
+  Hex's are too, 187.33 pt in all (iOS 18, unmeasured, keeps 204 pt) (the SE keeps iOS 27's turned keys for now: Apple's turned SE
+  on iOS 26 is its upright keyboard across the whole screen).
   Where iOS gives the keyboard a shorter view than it asks for (Spotlight on an iPhone
   17 Pro Max, iOS 27.3, TestFlight: about 20 pt short), the rows fit the height it has:
   the strip keeps its size and the keycaps and the gaps between rows shrink alike

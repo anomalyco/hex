@@ -975,6 +975,88 @@ final class KeyboardLayoutTests: XCTestCase {
     /// 11, 11 and 9 keys, every letter the two share on Russian's key, shift and delete one
     /// letter wide, ї on a held і, ґ on a held г and ʼ only on the 123 and #+= pages. From iOS 27
     /// it is the twelve-key rows (`testUkrainiansTwelveKeyRowsMatchApples`).
+    /// Before iOS 27 Apple's iPhone keyboard draws other rows (iOS 26.5 simulators, beside Hex in
+    /// the same field, black box): upright on an 844 to 874 pt iPhone every row is 7 pt higher
+    /// with row 4 whole (254 pt), on a 900 pt or taller one 2 pt lower (264 pt), and turned its
+    /// keycaps are 27.33 pt on a 35.33 pt pitch (187.33 pt). The keys' columns, the strip, the SE,
+    /// the Duo and the iPad are the same as from iOS 27. iOS 18 (unmeasured) keeps the iOS 27 rows,
+    /// so any version but 26 draws the same keys.
+    func testIOS26RowsAreApplesIOS26Rows() {
+        let running = KeyboardLanguage.systemMajorVersion
+        defer { KeyboardLanguage.systemMajorVersion = running }
+        func layouts() -> [String: KeyboardLayout] {
+            [
+                "17 Pro": KeyboardLayout(width: 402),
+                "12": KeyboardLayout(width: 390),
+                "Pro Max": KeyboardLayout(width: 440, phoneSize: .large),
+                "SE": KeyboardLayout(width: 375, phoneSize: .homeButton),
+                "17 Pro turned": KeyboardLayout(width: 874, orientation: .landscape, horizontalInset: 62),
+                "Pro Max turned": KeyboardLayout(width: 956, orientation: .landscape, horizontalInset: 62, phoneSize: .large),
+                "SE turned": KeyboardLayout(width: 667, orientation: .landscape, phoneSize: .homeButton),
+                "cover": KeyboardLayout(width: 452, posture: .cover, windowInset: 7),
+                "cover turned": KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75),
+                "iPad mini": KeyboardLayout(width: 744, pad: .docked(.mini)),
+            ]
+        }
+        KeyboardLanguage.systemMajorVersion = 27
+        let today = layouts()
+        KeyboardLanguage.systemMajorVersion = 25
+        let older = layouts()
+        KeyboardLanguage.systemMajorVersion = 18
+        let ios18 = layouts()
+        KeyboardLanguage.systemMajorVersion = 26
+        let ios26 = layouts()
+        for (name, layout) in today {
+            XCTAssertEqual(older[name]!.keys, layout.keys, "\(name): 25 draws 27's keys")
+            XCTAssertEqual(ios18[name]!.keys, layout.keys, "\(name): 18 draws 27's keys")
+            XCTAssertEqual(older[name]!.totalHeight, layout.totalHeight, name)
+        }
+        for name in ["17 Pro", "Pro Max", "17 Pro turned"] {
+            XCTAssertNotEqual(ios26[name]!.keys, today[name]!.keys, "\(name): 26 differs")
+        }
+        let heights: [String: (CGFloat, CGFloat)] = [
+            "17 Pro": (247, 254), "12": (247, 254), "Pro Max": (266, 264), "SE": (254, 254),
+            "17 Pro turned": (204, 187.33), "Pro Max turned": (204, 187.33), "SE turned": (206, 206),
+        ]
+        for (name, (before, after)) in heights {
+            XCTAssertEqual(today[name]!.totalHeight, before, accuracy: 0.01, name)
+            XCTAssertEqual(ios26[name]!.totalHeight, after, accuracy: 0.01, name)
+            XCTAssertEqual(ios26[name]!.stripFrame, today[name]!.stripFrame, "\(name): the strip stays")
+            XCTAssertEqual(ios26[name]!.keys.map(\.frame.minX), today[name]!.keys.map(\.frame.minX), "\(name): the same columns")
+            XCTAssertEqual(ios26[name]!.keys.map(\.frame.width), today[name]!.keys.map(\.frame.width), "\(name): the same widths")
+        }
+        for name in ["cover", "cover turned", "iPad mini", "SE", "SE turned"] {
+            XCTAssertEqual(ios26[name]!.keys, today[name]!.keys, "\(name) keeps today's keys")
+            XCTAssertEqual(ios26[name]!.totalHeight, today[name]!.totalHeight, name)
+        }
+        // Rows from the view's bottom, as Apple's sit above where iOS ends a third-party keyboard.
+        func rows(_ layout: KeyboardLayout) -> [(CGFloat, CGFloat)] {
+            (0..<4).map { row in
+                let frames = layout.keys.filter { $0.row == row }.map(\.frame)
+                return (layout.totalHeight - frames.map(\.minY).min()!, layout.totalHeight - frames.map(\.maxY).max()!)
+            }
+        }
+        let pro = rows(ios26["17 Pro"]!)
+        XCTAssertEqual(pro.map(\.0), [208, 154, 100, 46], "7 pt higher than today's 201, 147, 93, 39")
+        XCTAssertEqual(pro.map(\.1), [165, 111, 57, 3], "row 4 whole, 3 pt above the bottom")
+        XCTAssertEqual(rows(today["17 Pro"]!).map(\.0), [201, 147, 93, 39])
+        XCTAssertEqual(rows(ios26["Pro Max"]!).map(\.0), [218, 162, 106, 50], "2 pt lower than today's 220")
+        let turned = rows(ios26["17 Pro turned"]!)
+        for (row, expected) in [(0, 137.33), (1, 102.0), (2, 66.67), (3, 31.33)] {
+            XCTAssertEqual(turned[row].0, expected, accuracy: 0.01, "turned row \(row + 1)")
+        }
+        XCTAssertEqual(turned[3].1, 4, accuracy: 0.01)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape), 82.0 / 3 * 4 + 24 + 4 + 50, accuracy: 0.01)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: true) - KeyboardLayout.height(for: .portrait), 54 * KeyboardMetrics.numberRowPitchRatio, accuracy: 0.01, "the number row sits on top")
+        // A view iOS makes 20 pt shorter than asked (Spotlight, #2280) still holds every row.
+        for (width, orientation, size) in [(402.0, KeyboardOrientation.portrait, KeyboardPhoneSize.regular), (440, .portrait, .large), (874, .landscape, .regular)] {
+            let full = KeyboardLayout(width: width, orientation: orientation, phoneSize: size)
+            let short = KeyboardLayout(width: width, orientation: orientation, phoneSize: size, availableHeight: full.totalHeight - 20)
+            XCTAssertLessThanOrEqual(short.keys.map(\.frame.maxY).max()!, full.totalHeight - 20 + 0.01, "\(width)")
+            XCTAssertEqual(Set(short.keys.map(\.row)), Set(full.keys.map(\.row)), "\(width)")
+        }
+    }
+
     func testUkrainianBeforeIOS27IsRussiansRows() {
         let running = KeyboardLanguage.systemMajorVersion
         defer { KeyboardLanguage.systemMajorVersion = running }
