@@ -158,7 +158,8 @@ struct AcknowledgementsView: View {
         Entry(
             title: "ParlaMint",
             body: """
-            Which Polish spellings are missing their marks is checked against the Polish part of \
+            Which Polish spellings are missing their marks, and which words are names, is checked \
+            against the Polish part of \
             ParlaMint 5.0, the Sejm and Senate transcripts 2015-2022 (Erjavec et al., \
             Multilingual comparable corpora of parliamentary debates ParlaMint 5.0, CLARIN.SI, \
             hdl.handle.net/11356/2004), licensed under Creative Commons Attribution 4.0 \

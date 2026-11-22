@@ -4,6 +4,12 @@
 
     python3 build-capitals.py en MODEL.hextm WORKDIR OUTPUT.capitals scowl-2020.12.07.tar.gz
     python3 build-capitals.py {es|fr|it} MODEL.hextm WORKDIR OUTPUT.capitals
+    python3 build-capitals.py pl MODEL.hextm WORKDIR OUTPUT.capitals ParlaMint-PL.tgz polimorf.tab.gz
+
+Polish has no Google Books counts: its counts come from ParlaMint 5.0's Polish transcripts (CC BY
+4.0, the corpus build-typing-model.py pl checks marks against), which keep case, leaving out each
+sentence's first word, which any word can start. A word PoliMorf (BSD 2-Clause) lists in lowercase
+is an ordinary word, held at 94% as SCOWL's are in English ("tom" is a volume, "Tom" a name).
 
 Every shard is streamed (curl | gzip -dc, never stored) and its 1980-2019 counts of all-lowercase
 tokens and of tokens with only the first letter capitalised are cached in WORKDIR, so a rerun
@@ -42,6 +48,11 @@ ALWAYS, HELD = 95, 94
 JOINED = 10
 MODEL_ALWAYS = {"en": 95, "es": 98, "fr": 98, "it": 98}
 SCOWL_SHA256 = "5587667caa20c4891390c2d42dbb4d5c4c3f41bee77af1457ece3ba23fb859cc"
+# build-typing-model.py's POLISH_INPUTS.
+PARLAMINT_PL_SHA256 = "66739847c4454e21d524755cea17e41dd923c78cdefe03b6775e9f10720ba957"
+POLIMORF_SHA256 = "2b1f07224c434c8710def382d497cf8221d5764e8d683d2ad34242810ab72746"
+LETTERS["pl"] = "a-ząćęłńóśźż"
+MODEL_ALWAYS["pl"] = 98
 
 
 def scowl_lowercase(path):
@@ -127,11 +138,60 @@ def count_shard(job):
     return out
 
 
+def sha256(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for block in iter(lambda: f.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def polimorf_lowercase(path):
+    """The forms PoliMorf lists in lowercase."""
+    import gzip
+    assert sha256(path) == POLIMORF_SHA256, path
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        return {form for form in (line.split("\t", 1)[0] for line in f if "\t" in line)
+                if form == form.lower()}
+
+
+def parlamint_counts(path):
+    """ParlaMint-PL's lowercase and capitalised counts per lowercase spelling, each sentence's first
+    word left out."""
+    import tarfile as tf
+    assert sha256(path) == PARLAMINT_PL_SHA256, path
+    seg = re.compile(r"<seg\b[^>]*>(.*?)</seg>", re.S)
+    sentence = re.compile(r"(?<=[.!?…])\s+")
+    word = re.compile(f"[{LETTERS['pl'].upper()}{LETTERS['pl']}]+")
+    low, cap = {}, {}
+    with tf.open(path) as t:
+        for m in t:
+            if not (m.isfile() and re.search(r"/\d{4}/ParlaMint-PL_[^/]+\.xml$", m.name)):
+                continue
+            text = t.extractfile(m).read().decode("utf-8")
+            for body in seg.findall(text):
+                body = unicodedata.normalize("NFC", re.sub(r"<[^>]+>", " ", body).replace("&amp;", "&"))
+                for s in sentence.split(body):
+                    for token in word.findall(s)[1:]:
+                        key = token.lower()
+                        if token == key:
+                            low[key] = low.get(key, 0) + 1
+                        elif token[0].isupper() and token[1:] == key[1:]:
+                            cap[key] = cap.get(key, 0) + 1
+    return low, cap
+
+
 def merged_counts(lang, work):
     """WORK/counts.tsv: each lowercase spelling with its 1980-2019 lowercase and capitalised counts,
     counted once from the language's 1-gram shards. build-valid-words.py reads it too."""
     os.makedirs(work, exist_ok=True)
     merged = os.path.join(work, "counts.tsv")
+    if not os.path.exists(merged) and lang == "pl":
+        low, cap = parlamint_counts(sys.argv[5])
+        with open(merged + ".part", "w", encoding="utf-8") as f:
+            for key in sorted(set(low) | set(cap)):
+                f.write(f"{key}\t{low.get(key, 0)}\t{cap.get(key, 0)}\n")
+        os.replace(merged + ".part", merged)
     if not os.path.exists(merged):
         code, n = FILES[lang]
         jobs = [(lang, i, f"{BASE}/{code}/1-{i:05d}-of-{n:05d}.gz", work) for i in range(n)]
@@ -154,7 +214,7 @@ def merged_counts(lang, work):
 
 def main():
     lang, model, work, output = sys.argv[1:5]
-    lowercase = scowl_lowercase(sys.argv[5]) if lang == "en" else set()
+    lowercase = scowl_lowercase(sys.argv[5]) if lang == "en" else polimorf_lowercase(sys.argv[6]) if lang == "pl" else set()
     if lang == "en":
         # Hex's own chat and tech words (en-extra-words.tsv, which build-typing-model.py adds to the
         # model) are lowercase words: "plz" and "okie", capitalised in books, are held too.

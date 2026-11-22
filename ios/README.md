@@ -718,8 +718,12 @@ never at a launch by itself.
     use without Apple's word data (it takes any letters for a word), and the list replaces it. On
     the held-out Polish replay (`scripts/typing-gate.py run … pl`): 85.98% fewer word errors than
     the raw taps, 0.22% of correctly typed words changed, 95.46% of the marks
-    restored where the plain spelling is no word, 5/5 critical cases. Polish has no capitals list
-    yet: a name typed in lowercase ("warszawa") keeps its lowercase.
+    restored where the plain spelling is no word, 5/5 critical cases. `pl.capitals`
+    (`android/benchmark/typing/build-capitals.py pl`, case counted in ParlaMint) gives names
+    their capital: of the names typed all lowercase, 10.65% come out capitalised (0% with the
+    phone's dictionary on the simulator, which has no Polish word data, and 0% without the list).
+    With English as the second language, Polish makes 85.0% fewer errors (86.4% alone: English
+    takes "cos", "troche", "beda" as its words) and English is unchanged.
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
     Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
     Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
@@ -1902,16 +1906,16 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Mozilla Public License 1.1](https://www.mozilla.org/en-US/MPL/1.1/)
   (<https://github.com/sbosio/rla-es>).
 
-Polish's three entries show only once the keyboard bundles `pl.hextm` (none does yet;
-`AcknowledgementsView.polishEntries`):
+Polish's three entries show while the keyboard bundles `pl.hextm`
+(`AcknowledgementsView.polishEntries`):
 
 - **National Corpus of Polish n-grams:** Polish word and word-pair frequencies come from
   the n-grams of NKJP's balanced subcorpus (Institute of Computer Science, Polish Academy
   of Sciences; <http://zil.ipipan.waw.pl/NKJPNGrams>), made available under a
   [Creative Commons Attribution](https://creativecommons.org/licenses/by/) licence (the page
   names no version).
-- **ParlaMint:** which Polish spellings are missing their marks is checked against the Polish
-  part of ParlaMint 5.0 (Erjavec et al., CLARIN.SI, <http://hdl.handle.net/11356/2004>),
+- **ParlaMint:** which Polish spellings are missing their marks, and which words are names, is
+  checked against the Polish part of ParlaMint 5.0 (Erjavec et al., CLARIN.SI, <http://hdl.handle.net/11356/2004>),
   licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
 - **PoliMorf:** Polish words are checked against PoliMorf 2018-07-23
   (<http://hdl.handle.net/11321/577>), under the 2-clause BSD licence whose notice the app
