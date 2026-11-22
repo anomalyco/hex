@@ -635,7 +635,8 @@ never at a launch by itself.
     types, a light trail (a shape layer, the last 0.45 s of the path) follows the finger,
     and the strip shows what the path reads as so far, decoded off the main thread at most
     every 70 ms. Lifting types the best reading after a space, unless the text before
-    ends in a space, a line break or opening punctuation (`( [ { « “ ‘ ¿ ¡ @ # /`, or a
+    ends in a space, a line break, an attachment (U+FFFC: a shared link's card in Messages,
+    a picture in the text) or opening punctuation (`( [ { « “ ‘ ¿ ¡ @ # /`, or a
     straight quote after a space), as Apple's QuickPath does; shift capitalises its first
     letter (caps lock all of it), the space it adds can start a sentence ("Hi." then a
     swipe types " There"), and a name the dictionary only knows capitalised is

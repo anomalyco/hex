@@ -2831,7 +2831,7 @@ final class FullKeyboardEngineTests: XCTestCase {
     }
 
     func testASwipedWordFollowsSpacingAndPunctuationAsApplesDoes() {
-        for (before, after) in [("Hi.", "Hi. "), ("(", "("), ("¿", "¿"), ("say \"", "say \""), ("3", "3 "), ("x\n", "x\n")] {
+        for (before, after) in [("Hi.", "Hi. "), ("(", "("), ("¿", "¿"), ("say \"", "say \""), ("3", "3 "), ("x\n", "x\n"), ("Look \u{FFFC}", "Look \u{FFFC}")] {
             XCTAssertEqual(SwipeTyping.needsSpace(before: before), after != before, before)
         }
         XCTAssertFalse(SwipeTyping.needsSpace(before: ""))
