@@ -488,6 +488,7 @@ final class DictationController {
     func copyTranscript() {
         guard !transcript.isEmpty else { return }
         UIPasteboard.general.string = transcript
+        KeyboardClipboardTracker().markOwnedCopy()
         copied = true
     }
 
@@ -574,7 +575,7 @@ final class DictationController {
         }
 
         switch request {
-        case .setup, .translationSettings:
+        case .setup, .translationSettings, .pasteSettings:
             break
 
         case .startSession:
@@ -932,6 +933,7 @@ final class DictationController {
                 self.transcript = formatted
                 if session.copyToPasteboard && !formatted.isEmpty {
                     UIPasteboard.general.string = formatted
+                    KeyboardClipboardTracker().markOwnedCopy()
                     self.copied = true
                     self.liveActivity.finishCopied()
                 } else {

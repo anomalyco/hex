@@ -296,6 +296,9 @@ private enum HexKeySide: CaseIterable {
 struct KeyboardSettingsPage: View {
     /// `KeyboardSetupMonitor.fullAccessOn`.
     let fullAccessOn: Bool
+    var needsAllowPasteSetting = false
+    var onDismissAllowPasteSetting: () -> Void = {}
+    @Environment(\.openURL) private var openURL
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
     @State private var autoCapitalization = FullKeyboardSettings().autoCapitalization
@@ -321,6 +324,17 @@ struct KeyboardSettingsPage: View {
 
     var body: some View {
         SettingsPageScaffold(title: "Keyboard") {
+            if needsAllowPasteSetting {
+                AllowPasteBanner(
+                    openSettings: {
+                        if let url = URL(string: UIApplication.openSettingsURLString) {
+                            openURL(url)
+                        }
+                    },
+                    dismiss: onDismissAllowPasteSetting
+                )
+            }
+
             SettingsCard {
                 HStack(spacing: 12) {
                     SettingsRowLabel(

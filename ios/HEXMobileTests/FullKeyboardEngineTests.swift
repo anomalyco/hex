@@ -3493,15 +3493,61 @@ final class KeyboardClipboardTests: XCTestCase {
 
     func testAPasteThatAskedPointsToTheSettingAFewTimes() {
         let tracker = KeyboardClipboardTracker(defaults: defaults)
+        XCTAssertFalse(tracker.needsAllowPasteSetting)
         XCTAssertFalse(tracker.shouldPointToAllowPaste(readDuration: 0.01, refused: false), "Allow: iOS didn't ask")
+        XCTAssertFalse(tracker.needsAllowPasteSetting)
         for _ in 0..<KeyboardClipboardTracker.allowPasteHintLimit {
             XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 1.2, refused: false))
+            XCTAssertTrue(tracker.needsAllowPasteSetting)
         }
         XCTAssertFalse(
             KeyboardClipboardTracker(defaults: defaults).shouldPointToAllowPaste(readDuration: 1.2, refused: false),
             "after a few, Ask is left alone: someone may want it"
         )
+        XCTAssertTrue(tracker.needsAllowPasteSetting, "Hex's app page still remembers iOS prompted")
         XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 0.01, refused: true), "refused: the chip did nothing, always say why")
+    }
+
+    func testSilentCrossAppPasteClearsAllowPasteSettingButOwnCopyDoesNot() {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        let tracker = KeyboardClipboardTracker(defaults: defaults)
+
+        XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 1.1, refused: false))
+        XCTAssertTrue(tracker.needsAllowPasteSetting)
+
+        // Hex's own copy never prompts iOS, so pasting it fast doesn't prove Allow is on.
+        pasteboard.string = "from hex"
+        tracker.markOwnedCopy(pasteboard: pasteboard)
+        tracker.recordSilentPaste(pasteboard: pasteboard)
+        XCTAssertTrue(tracker.needsAllowPasteSetting)
+
+        // A copy from another app pasted without prompting proves Paste from Other Apps is Allow.
+        pasteboard.string = "from opencode"
+        tracker.recordSilentPaste(pasteboard: pasteboard)
+        XCTAssertFalse(tracker.needsAllowPasteSetting)
+
+        // Dismissing hides the app banner until iOS prompts again.
+        XCTAssertTrue(tracker.shouldPointToAllowPaste(readDuration: 0.01, refused: true))
+        XCTAssertTrue(tracker.needsAllowPasteSetting)
+        tracker.dismissAllowPasteSetting()
+        XCTAssertFalse(tracker.needsAllowPasteSetting)
+    }
+
+    @MainActor
+    func testAllowPasteStripNoticeOpensPasteSettings() {
+        let model = KeyboardViewModel()
+        var opened: [URL] = []
+        model.onOpenURL = { opened.append($0) }
+        let view = FullKeyboardView(model: model, target: FixtureTextTarget())
+
+        XCTAssertNil(view.allowPasteNotice)
+        view.showAllowPasteHint()
+        XCTAssertEqual(view.allowPasteNotice, KeyboardClipboardTracker.allowPasteNotice)
+
+        view.stripView.onOpenNotice?()
+        XCTAssertNil(view.allowPasteNotice, "tapping Settings clears the strip notice")
+        XCTAssertEqual(opened, [KeyboardLaunchRequest.pasteSettings.url])
     }
 
     func testCodeFromMessagesNeedsApplesKeyboard() {

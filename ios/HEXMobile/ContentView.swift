@@ -227,6 +227,18 @@ struct ContentView: View {
                     turnOff: { dictation.turnOffMultilingualParakeet() }
                 )
 
+                if setupMonitor.needsAllowPasteSetting {
+                    AllowPasteBanner(
+                        openSettings: {
+                            if let url = URL(string: UIApplication.openSettingsURLString) {
+                                openURL(url)
+                            }
+                        },
+                        dismiss: { setupMonitor.dismissAllowPasteSetting() }
+                    )
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+                }
+
                 SettingsCard {
                     ForEach(Array(SettingsPage.allCases.enumerated()), id: \.element) { index, page in
                         if index > 0 {
@@ -302,6 +314,7 @@ struct ContentView: View {
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: dictation.keyboardSessionEnabled)
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: hasTranscript)
             .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: setupStepsLeft)
+            .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: setupMonitor.needsAllowPasteSetting)
         }
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)
@@ -314,7 +327,11 @@ struct ContentView: View {
         case .dictation:
             DictationSettingsPage(dictation: dictation)
         case .keyboard:
-            KeyboardSettingsPage(fullAccessOn: setupMonitor.fullAccessOn)
+            KeyboardSettingsPage(
+                fullAccessOn: setupMonitor.fullAccessOn,
+                needsAllowPasteSetting: setupMonitor.needsAllowPasteSetting,
+                onDismissAllowPasteSetting: { setupMonitor.dismissAllowPasteSetting() }
+            )
         case .privacy:
             PrivacySettingsPage()
         case .experiments:

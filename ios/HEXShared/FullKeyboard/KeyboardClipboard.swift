@@ -92,6 +92,16 @@ struct KeyboardClipboardTracker {
         String(localized: "Settings › Apps › Hex › Paste from Other Apps › Allow")
     }
 
+    /// The two-line tappable strip notice after iOS asks Allow Paste or refuses a read:
+    /// names the exact row in Settings and offers a button that jumps straight there.
+    static var allowPasteNotice: KeyboardStripNotice {
+        KeyboardStripNotice(
+            title: String(localized: "Paste without asking"),
+            detail: String(localized: "Paste from Other Apps › Allow"),
+            button: String(localized: "Settings")
+        )
+    }
+
     static var allowPasteHintAnnouncement: String {
         String(localized: "To paste without being asked, go to Settings, Apps, Hex, Paste from Other Apps, and choose Allow.")
     }
@@ -100,7 +110,9 @@ struct KeyboardClipboardTracker {
         static let seenChange = "keyboard.clipboard.seenChange"
         static let seenAt = "keyboard.clipboard.seenAt"
         static let usedChange = "keyboard.clipboard.usedChange"
+        static let ownedChange = "keyboard.clipboard.ownedChange"
         static let allowPasteHints = "keyboard.clipboard.allowPasteHints"
+        static let allowPastePrompted = "keyboard.clipboard.allowPastePrompted"
     }
 
     private let defaults: UserDefaults?
@@ -170,18 +182,50 @@ struct KeyboardClipboardTracker {
         return nil
     }
 
-    /// After the chip's read: whether to point to Settings › Apps › Hex › Paste from Other
-    /// Apps. A refused read (the clipboard has text but none came back: Don't Allow, or the
-    /// setting is Deny) always does, since the chip did nothing; one that waited
-    /// `askedReadDuration` for Allow Paste does the first `allowPasteHintLimit` times, then
-    /// iOS's prompt is left alone.
+    /// Whether the keyboard has seen iOS prompt or refuse a cross-app paste and has not yet
+    /// seen a fast cross-app paste since (or been dismissed in Hex). Because iOS creates the
+    /// Paste from Other Apps row only after a cross-app read, true also means the row exists.
+    var needsAllowPasteSetting: Bool {
+        defaults?.bool(forKey: Key.allowPastePrompted) ?? false
+    }
+
+    /// After the chip's read: whether to show the strip's Settings notice. A refused read
+    /// (Don't Allow, or Deny) always shows it, since the chip did nothing; one that waited
+    /// `askedReadDuration` for Allow Paste shows it the first `allowPasteHintLimit` times,
+    /// then leaves the strip alone while keeping `needsAllowPasteSetting` true for Hex.
     func shouldPointToAllowPaste(readDuration: TimeInterval, refused: Bool) -> Bool {
-        if refused { return true }
+        if refused {
+            defaults?.set(true, forKey: Key.allowPastePrompted)
+            return true
+        }
         guard readDuration >= Self.askedReadDuration else { return false }
+        defaults?.set(true, forKey: Key.allowPastePrompted)
         let shown = defaults?.integer(forKey: Key.allowPasteHints) ?? 0
         guard shown < Self.allowPasteHintLimit else { return false }
         defaults?.set(shown + 1, forKey: Key.allowPasteHints)
         return true
+    }
+
+    /// Records a copy written by Hex itself (keyboard Copy/Cut or the app's transcript copy)
+    /// so a later fast paste of our own text does not clear `needsAllowPasteSetting`.
+    func markOwnedCopy(pasteboard: UIPasteboard = .general) {
+        defaults?.set(pasteboard.changeCount, forKey: Key.ownedChange)
+    }
+
+    /// A paste that returned immediately without prompting: if the clipboard came from another
+    /// app, Paste from Other Apps is Allow, so clear the app-side banner and reset the counter.
+    func recordSilentPaste(pasteboard: UIPasteboard = .general) {
+        guard let defaults else { return }
+        if let owned = defaults.object(forKey: Key.ownedChange) as? Int, owned == pasteboard.changeCount {
+            return
+        }
+        defaults.set(false, forKey: Key.allowPastePrompted)
+        defaults.set(0, forKey: Key.allowPasteHints)
+    }
+
+    /// Dismisses the app-side banner until iOS prompts again.
+    func dismissAllowPasteSetting() {
+        defaults?.set(false, forKey: Key.allowPastePrompted)
     }
 
     func markPasted(pasteboard: UIPasteboard = .general) {

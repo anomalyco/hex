@@ -16,6 +16,9 @@ final class KeyboardSetupMonitor {
     private(set) var keyboardAdded: Bool?
     private(set) var fullAccess = KeyboardFullAccess.unconfirmed
     private(set) var microphone = AVAudioApplication.shared.recordPermission
+    /// True once the keyboard has seen iOS ask Allow Paste (or refuse a read), and false
+    /// again once a cross-app paste succeeds silently or the user dismisses the card.
+    private(set) var needsAllowPasteSetting = false
     /// When Hex last came to the foreground (KeyboardFullAccess.resolve).
     private(set) var activeSince: TimeInterval
 
@@ -69,10 +72,16 @@ final class KeyboardSetupMonitor {
                 keyboardAdded = elapsed >= OnboardingFixture.Tour.keyboardAdded
                 fullAccess = elapsed >= OnboardingFixture.Tour.fullAccess ? .on : .unconfirmed
                 microphone = elapsed >= OnboardingFixture.Tour.microphoneAllowed ? .granted : .undetermined
+            case "paste-setting":
+                keyboardAdded = true
+                fullAccess = .on
+                microphone = .granted
+                needsAllowPasteSetting = true
             default:
                 keyboardAdded = true
                 fullAccess = .on
                 microphone = .granted
+                needsAllowPasteSetting = false
             }
             return
         }
@@ -86,6 +95,13 @@ final class KeyboardSetupMonitor {
         }
         microphone = AVAudioApplication.shared.recordPermission
         bridge.appMicrophoneAllowed = microphone == .granted
+        let needsPaste = KeyboardClipboardTracker().needsAllowPasteSetting
+        if needsAllowPasteSetting != needsPaste { needsAllowPasteSetting = needsPaste }
+    }
+
+    func dismissAllowPasteSetting() {
+        KeyboardClipboardTracker().dismissAllowPasteSetting()
+        needsAllowPasteSetting = false
     }
 
     func requestMicrophone(then done: (@MainActor () -> Void)? = nil) {
@@ -298,6 +314,15 @@ struct SetupSheet: View {
                         }
                     }
                 }
+                if monitor.needsAllowPasteSetting {
+                    SettingsDivider(leading: 42)
+                    row(
+                        title: "Paste from Other Apps",
+                        status: String(localized: "Ask"),
+                        icon: .todo,
+                        note: String(localized: "Choose Allow in Settings so Paste doesn't ask every time.")
+                    )
+                }
             }
             .background(
                 HexTheme.bgBase,
@@ -328,7 +353,7 @@ struct SetupSheet: View {
                 }
             }
 
-            if !monitor.keyboardReady || monitor.microphone == .denied {
+            if !monitor.keyboardReady || monitor.microphone == .denied || monitor.needsAllowPasteSetting {
                 Button {
                     if let url = URL(string: UIApplication.openSettingsURLString) {
                         openURL(url)
@@ -473,5 +498,67 @@ struct SetupSheet: View {
             .frame(height: 28)
             .background(Color.white.opacity(0.09), in: Capsule())
             .buttonStyle(.plain)
+    }
+}
+
+/// Shown on Home and Settings › Keyboard only after the keyboard has seen iOS ask Allow
+/// Paste (or refuse a read), which guarantees the Paste from Other Apps row exists in
+/// Settings › Apps › Hex. Clears automatically on the next silent cross-app paste, or when
+/// dismissed.
+struct AllowPasteBanner: View {
+    let openSettings: () -> Void
+    let dismiss: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "doc.on.clipboard")
+                    .font(.system(size: 15))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Paste without asking")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(HexTheme.textBase)
+                    Text("In Settings, choose Paste from Other Apps › Allow.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .frame(width: 28, height: 28)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Dismiss")
+            }
+
+            Button(action: openSettings) {
+                HStack(spacing: 5) {
+                    Text("Open Settings")
+                    Image(systemName: "arrow.up.right")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(HexTheme.textBase)
+                .padding(.horizontal, 12)
+                .frame(height: 30)
+                .background(Color.white.opacity(0.09), in: Capsule())
+            }
+            .buttonStyle(.plain)
+            .padding(.leading, 25)
+            .accessibilityIdentifier("allow-paste-open-settings")
+        }
+        .padding(14)
+        .background(
+            Color.white.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("allow-paste-banner")
     }
 }

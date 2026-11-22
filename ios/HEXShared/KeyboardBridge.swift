@@ -79,6 +79,9 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
     /// Opens Settings › Dictation, where Translate what I say downloads its languages: the
     /// keyboard's note after a dictation went in as spoken.
     case translationSettings
+    /// Jumps through Hex to iOS Settings › Apps › Hex so Paste from Other Apps can be set to
+    /// Allow without hunting through Settings.
+    case pasteSettings
     case startSession(requestedAt: TimeInterval?)
     case startRecording(
         jobID: String,
@@ -106,6 +109,8 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
             self = .setup
         case "/translation":
             self = .translationSettings
+        case "/paste-settings":
+            self = .pasteSettings
         case "/start":
             self = .startSession(requestedAt: requestedAt)
         case "/record":
@@ -123,14 +128,14 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
     /// Opens a page of Hex, starting no session.
     var opensPage: Bool {
         switch self {
-        case .setup, .translationSettings: true
+        case .setup, .translationSettings, .pasteSettings: true
         case .startSession, .startRecording: false
         }
     }
 
     var requestedAt: TimeInterval? {
         switch self {
-        case .setup, .translationSettings:
+        case .setup, .translationSettings, .pasteSettings:
             nil
         case .startSession(let ts), .startRecording(_, let ts, _):
             ts
@@ -154,6 +159,9 @@ nonisolated enum KeyboardLaunchRequest: Equatable, Sendable {
 
         case .translationSettings:
             components.path = "/translation"
+
+        case .pasteSettings:
+            components.path = "/paste-settings"
 
         case .startSession(let requestedAt):
             components.path = "/start"
