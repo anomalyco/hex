@@ -571,25 +571,28 @@ mod tests {
 
     /// The playground's own keys still win while a story that takes keys
     /// is open: ↓ moves down the list and ⇧⌘D closes it.
+    ///
+    /// Two steps, to the third story, so the list's move shows in state no
+    /// fixture shares: Settings, Left Option shortcut, then Toggle cancel.
     #[test]
     fn the_playgrounds_keys_work_with_a_story_open() {
         let app = attach(App::new(spec(super::super::spec())));
         let mut rt = app.headless_runtime(WINDOW_SIZE, rune::Env::new(false, 1.0));
         rt.frame(0.0);
         rt.open_playground("Window/General/Settings", None);
-        let settings = rt
-            .playground_state::<Ui>()
-            .map(|ui| ui.settings.dictation_hotkey.clone());
-        rt.key(rune::KeyEvent {
-            key: rune::Key::Down,
-            mods: rune::Mods::default(),
-        });
-        rt.frame(1.0 / 60.0);
-        let next = rt
-            .playground_state::<Ui>()
-            .map(|ui| ui.settings.dictation_hotkey.clone());
-        assert!(next.is_some());
-        assert_ne!(next, settings, "↓ opened Left Option shortcut");
+        for _ in 0..2 {
+            rt.key(rune::KeyEvent {
+                key: rune::Key::Down,
+                mods: rune::Mods::default(),
+            });
+            rt.frame(1.0 / 60.0);
+        }
+        assert_eq!(
+            rt.playground_state::<Ui>()
+                .map(|ui| ui.settings.shortcut_mode),
+            Some(crate::dictation::ShortcutMode::Toggle),
+            "↓↓ reached Toggle cancel shortcut"
+        );
         rt.key(rune::KeyEvent {
             key: rune::Key::Command('d'),
             mods: rune::Mods {

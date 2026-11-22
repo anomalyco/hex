@@ -1121,7 +1121,10 @@ mod tests {
     /// way Swift joins them.
     fn swift_instructions() -> String {
         const SWIFT: &str = include_str!("../../ios/HEXMobile/TranscriptCleanup.swift");
-        let literal = SWIFT
+        // A Windows checkout writes the file with CRLF; Swift's literal is
+        // the same text either way.
+        let swift = SWIFT.replace("\r\n", "\n");
+        let literal = swift
             .split("static let instructions = \"\"\"")
             .nth(1)
             .expect("the iOS cleaner keeps its instructions");
