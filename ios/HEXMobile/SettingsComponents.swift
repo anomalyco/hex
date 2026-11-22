@@ -218,6 +218,8 @@ struct SettingsSegments<Item: Hashable>: View {
 /// - `settings-home`: home, everything ready. `setup`: home, keyboard added but Full Access
 ///   not confirmed yet. `setup-sheet`: the same, with the setup sheet open;
 ///   `setup-sheet-microphone`: the sheet before iOS has asked for the microphone.
+///   A scene with `-noaccess` (`setup-sheet-noaccess`, `settings-keyboard-noaccess`) has the
+///   keyboard report Full Access off.
 /// - `settings-<page>` opens a page (`dictation`, `keyboard`, `privacy`, `experiments`) with
 ///   every switch at its default; `-on` turns the switches on, `-end` starts scrolled to the end.
 ///   `settings-keyboard-languages[-on]` opens Keyboard › Languages.

@@ -517,12 +517,12 @@
     "A" : {
       "shouldTranslate" : false
     },
-    "A light tap as you press Hex's keys" : {
+    "A tap as you press Hex's keys. Needs Full Access" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按下 Hex 的按键时会有轻微触感"
+            "value" : "按下 Hex 的按键时会有触感，需开启完全访问"
           }
         }
       }
@@ -1894,6 +1894,16 @@
         }
       }
     },
+    "Needs Full Access, which isn't on yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需开启完全访问，目前尚未开启"
+          }
+        }
+      }
+    },
     "Needs the full keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3063,6 +3073,16 @@
         }
       }
     },
+    "The dictation bar needs Full Access" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写栏需开启完全访问"
+          }
+        }
+      }
+    },
     "With Hex" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3383,12 +3403,12 @@
         }
       }
     },
-    "Turn on Allow Full Access in Settings." : {
+    "Turn on Allow Full Access in Settings for dictation, haptics and copy and paste in the keyboard." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置”中打开“允许完全访问”。"
+            "value" : "请在“设置”中打开“允许完全访问”，以便在键盘中使用听写、触感反馈和拷贝粘贴。"
           }
         }
       }

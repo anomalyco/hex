@@ -287,7 +287,7 @@ struct ContentView: View {
         case .dictation:
             DictationSettingsPage(dictation: dictation)
         case .keyboard:
-            KeyboardSettingsPage()
+            KeyboardSettingsPage(fullAccessOn: setupMonitor.fullAccessOn)
         case .privacy:
             PrivacySettingsPage()
         case .experiments:
