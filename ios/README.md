@@ -588,7 +588,12 @@ never at a launch by itself.
     is a word from the model and that list alone, not from `UITextChecker` (`HexWordList`,
     memory-mapped and searched in place; `SystemTextChecker.ownWords`), and a missing system
     dictionary no longer turns its model off (`AutocorrectEngine.hasWords`). `UITextChecker`
-    still gives guesses and completions while it is in that language. With `fr.valid` French
+    still gives guesses and completions while it is in that language. Beside the list, the
+    language's `<code>.capitals` (Android's `build-capitals.py` output, read in place the same way)
+    says which words are names: one the books write with a capital at least 95% of the time is no
+    word typed all lowercase, so it takes its capital as `UITextChecker` gives one ("paris" ->
+    "Paris", "jean" -> "Jean"; "marie", 94%, stays), and a listed name outside the model is a word.
+    German's `de.capitals` is read in place through the same reader (`GermanCapitals`). With `fr.valid` French
     restores 86.1% of the accents the gate counts (81.1% with `UITextChecker`). English, Spanish
     and German keep `UITextChecker`: their own lists moved a gate number the wrong way.
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**

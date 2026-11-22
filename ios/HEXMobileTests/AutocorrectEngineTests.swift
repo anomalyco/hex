@@ -1356,6 +1356,12 @@ final class AutocorrectEngineTests: XCTestCase {
             XCTAssertTrue(checker.isWordValid(word), word)
         }
         XCTAssertFalse(checker.isWordValid("qzxjvkq"), "only Hex's words count")
+        // fr.capitals, read in place too: a name the books nearly always capitalise is no word
+        // typed lowercase, and is one with its capital.
+        XCTAssertEqual(HexWordList.bundled("fr", "capitals")?.value(of: "paris"), 100)
+        XCTAssertFalse(checker.isWordValid("paris"))
+        XCTAssertTrue(checker.isWordValid("Paris"))
+        XCTAssertTrue(checker.isWordValid("marie"), "94%: also an ordinary word")
         XCTAssertEqual(checker.guesses(for: "maisn"), [], "no English guesses for French words")
         autocorrect.decoder = TypingDecoder(model: try XCTUnwrap(TypingDecoderModel.bundled("en")))
         XCTAssertNil(checker.ownWords, "English ships no list")
@@ -1387,8 +1393,8 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(settings.typingModel(for: .french)?.language, "fr")
         XCTAssertNil(settings.typingModel(for: .frenchCanadian), "no fr-CA model yet")
         try useDecoder(.french)
-        for word in ["le", "cafe", "il", "a", "faim", "merxi"] { typeTaps(word) }
-        XCTAssertEqual(target.text, "le café il a faim merci ")
+        for word in ["le", "cafe", "il", "a", "faim", "merxi", "vers", "paris"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "le café il a faim merci vers Paris ", "a name takes its capital from fr.capitals")
     }
 
     func testSpatialAutocorrectAddsSpanishAccents() throws {

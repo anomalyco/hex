@@ -1,10 +1,11 @@
 import Darwin
 import Foundation
 
-/// Hex's own list of real words outside a language's typing model (`HEXKeyboard/TypingModel/
-/// <code>.valid`, the same file Android ships: `android/benchmark/typing/build-valid-words.py`).
-/// One lowercase NFC spelling per line, alone or followed by a tab and its cost, sorted by its
-/// UTF-8 bytes, newline-terminated. The file is memory-mapped read-only, like the `.hextm` models,
+/// One of Hex's own sorted word lists beside a language's typing model, the same files Android
+/// ships: `<code>.valid`, the real words outside the model (`build-valid-words.py`), and
+/// `<code>.capitals`, how often the books write a word with a capital (`build-capitals.py`).
+/// One lowercase NFC spelling per line, alone or followed by a tab and a number (a cost, a
+/// percent), sorted by its UTF-8 bytes, newline-terminated. The file is memory-mapped read-only, like the `.hextm` models,
 /// and searched in place by bisection: no copy and no set, so a 5 MB list costs only the clean
 /// pages its lookups touch, which iOS can drop under pressure.
 nonisolated final class HexWordList: @unchecked Sendable {
@@ -32,9 +33,27 @@ nonisolated final class HexWordList: @unchecked Sendable {
     /// Whether the list has `word` (lowercase NFC, as the builder writes them): one bisection over
     /// the mapped bytes, nothing allocated for a native string.
     func contains(_ word: String) -> Bool {
+        line(of: word) != nil
+    }
+
+    /// The number after `word`'s tab (a `.capitals` percent, a `.valid` cost), or nil when the
+    /// list lacks the word or its line has none.
+    func value(of word: String) -> Int? {
+        guard let (end, next) = line(of: word), end < next else { return nil }
+        var value = 0
+        for i in (end + 1)..<next {
+            let digit = Int(base[i]) - 48
+            guard (0...9).contains(digit) else { return nil }
+            value = value * 10 + digit
+        }
+        return value
+    }
+
+    /// Where `word`'s line ends (its tab or newline) and where its newline is.
+    private func line(of word: String) -> (end: Int, next: Int)? {
         var word = word
-        return word.withUTF8 { key in
-            guard !key.isEmpty else { return false }
+        return word.withUTF8 { key -> (Int, Int)? in
+            guard !key.isEmpty else { return nil }
             var lo = 0, hi = byteCount
             while lo < hi {
                 // The line holding the middle byte: back to its start, on to its tab or newline.
@@ -51,24 +70,25 @@ nonisolated final class HexWordList: @unchecked Sendable {
                     k += 1
                 }
                 if order == 0 { order = (end - start) - key.count }
-                if order == 0 { return true }
+                if order == 0 { return (end, next) }
                 if order < 0 { lo = next + 1 } else { hi = start }
             }
-            return false
+            return nil
         }
     }
 
-    /// The list for a language in the keyboard's bundle, mapped once per process; nil when the
-    /// build has none, as `TypingDecoderModel.bundled` finds the model.
-    @MainActor static func bundled(_ language: String) -> HexWordList? {
-        if let cached = loaded[language] { return cached }
-        var url = Bundle.main.url(forResource: language, withExtension: "valid")
+    /// A language's list in the keyboard's bundle (`kind` "valid" or "capitals"), mapped once per
+    /// process; nil when the build has none, as `TypingDecoderModel.bundled` finds the model.
+    @MainActor static func bundled(_ language: String, _ kind: String = "valid") -> HexWordList? {
+        let name = language + "." + kind
+        if let cached = loaded[name] { return cached }
+        var url = Bundle.main.url(forResource: language, withExtension: kind)
         if url == nil, let plugins = Bundle.main.builtInPlugInsURL,
            let keyboard = Bundle(url: plugins.appendingPathComponent("HEXKeyboard.appex")) {
-            url = keyboard.url(forResource: language, withExtension: "valid")
+            url = keyboard.url(forResource: language, withExtension: kind)
         }
         let list = url.flatMap { HexWordList(url: $0) }
-        loaded[language] = list
+        loaded[name] = list
         return list
     }
 
@@ -79,17 +99,37 @@ nonisolated final class HexWordList: @unchecked Sendable {
 /// alone say whether a spelling is a word, not the phone's dictionary, which iOS may not have
 /// for the language or may have take any letters for one (iOS 27.2 simulator: `nb_NO`, `pl_PL`).
 nonisolated struct HexOwnWords: Sendable {
+    /// A word the books write with a capital this often is a name: typed all lowercase it is no
+    /// word, so autocorrect gives it its capital ("paris" -> "Paris", "jean" -> "Jean"), as
+    /// `UITextChecker` does with a word it knows only capitalised (Android's `TypingWord`: 95).
+    static let nameShare = 95
+
     let language: String
     let model: TypingDecoderModel
     let list: HexWordList
+    /// `<code>.capitals`, when the keyboard ships one: names and other words the books write with
+    /// a capital, with how often they do (50–100).
+    var capitals: HexWordList?
 
-    /// Whether `word` is one, case-folded ("Żółw" is "żółw"; names are listed lowercase) and with ’
-    /// read as '. The list lookup allocates nothing; folding a word with a capital or a ’ copies it.
+    /// Whether `word` is one, case-folded ("Żółw" is "żółw"; lists are lowercase) and with ’ read
+    /// as '; a name typed all lowercase isn't ("paris"), its capitalised form is ("Paris"). The
+    /// list lookups allocate nothing; folding a word with a capital or a ’ copies it.
     func knows(_ word: String) -> Bool {
         guard !word.isEmpty else { return true }
-        var lower = word.contains(where: \.isUppercase) ? word.lowercased() : word
+        let typedLower = !word.contains(where: \.isUppercase)
+        var lower = typedLower ? word : word.lowercased()
         if lower.contains("\u{2019}") { lower = lower.replacingOccurrences(of: "\u{2019}", with: "'") }
-        return model.index(of: lower) != nil || list.contains(lower)
+        let share = capitals?.value(of: lower)
+        if typedLower, lower.count >= 2, let share, share >= Self.nameShare { return false }
+        return model.index(of: lower) != nil || list.contains(lower) || share != nil
+    }
+
+    /// Whether `word`, typed all lowercase, is one the books capitalise only part of the time
+    /// (50–94%: "tom", "mary", also ordinary words or capped as such): the phone's dictionary,
+    /// where it works, decides whether it is a name (`SystemTextChecker.isWordValid`).
+    func mayBeName(_ word: String) -> Bool {
+        guard word.count >= 2, !word.contains(where: \.isUppercase), let share = capitals?.value(of: word) else { return false }
+        return share < Self.nameShare
     }
 }
 
@@ -99,7 +139,11 @@ extension AutocorrectEngine {
     /// keyboard ships a list for it, or takes them away. Called whenever `decoder` changes.
     func useOwnWords(_ model: TypingDecoderModel?) {
         guard let system = checker as? SystemTextChecker else { return }
-        system.ownWords = model.flatMap { model in HexWordList.bundled(model.language).map { HexOwnWords(language: model.language, model: model, list: $0) } }
+        system.ownWords = model.flatMap { model in
+            HexWordList.bundled(model.language).map {
+                HexOwnWords(language: model.language, model: model, list: $0, capitals: HexWordList.bundled(model.language, "capitals"))
+            }
+        }
     }
 
     /// Whether this language has words to correct with: the phone's dictionary, or Hex's own

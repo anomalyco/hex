@@ -16,10 +16,12 @@ nonisolated struct GermanCapitals: Sendable {
     /// shares the spelling elsewhere ("zu leben", "ich frage").
     static let sometimesShare = 50
 
-    private let percentages: [String: UInt8]
+    /// The share for a lowercase word: from the mapped list (`HexWordList`, read in place), or the
+    /// table tests give.
+    private let share: @Sendable (String) -> UInt8?
 
     init(percentages: [String: UInt8]) {
-        self.percentages = percentages
+        share = { percentages[$0] }
     }
 
     /// The sidecar beside the German model (`HEXKeyboard/TypingModel/de.capitals`), read once
@@ -40,24 +42,21 @@ nonisolated struct GermanCapitals: Sendable {
     @MainActor private static var loaded: GermanCapitals?
     @MainActor private static var didRead = false
 
+    /// The list memory-mapped and searched in place (`HexWordList`), as every language's
+    /// `.capitals` is: no table of its 55,000 words in memory.
     init?(url: URL) {
-        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
-        var percentages: [String: UInt8] = [:]
-        for line in text.split(separator: "\n") {
-            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
-            guard fields.count == 2, let percent = UInt8(fields[1]),
-                  (Self.sometimesShare...100).contains(Int(percent)) else { continue }
+        guard let list = HexWordList(url: url) else { return nil }
+        share = { word in
             // The builder writes every word lowercase, from a lowercase-only model.
-            percentages[String(fields[0])] = percent
+            guard let percent = list.value(of: word), (Self.sometimesShare...100).contains(percent) else { return nil }
+            return UInt8(percent)
         }
-        guard !percentages.isEmpty else { return nil }
-        self.percentages = percentages
     }
 
     /// The share of the word's corpus occurrences written with a capital (50–100), or nil when
     /// the list doesn't know the word.
     func percent(of word: String) -> UInt8? {
-        percentages[word.lowercased()]
+        share(word.lowercased())
     }
 
     /// Whether `word`, all lowercase, takes a capital: a noun written with one at least
