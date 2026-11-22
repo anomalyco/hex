@@ -1,9 +1,16 @@
 package ly.anoma.hex.keyboard
 
 import android.content.Context
+import android.graphics.Rect
+import android.os.Build
+import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowInsets
+import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.LinearLayout
+import androidx.core.view.children
+import androidx.core.view.doOnPreDraw
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.typing.Suggestion
@@ -14,6 +21,9 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     private val strip = StripView(context, ime, this)
     private val keys = KeyPlaneView(context, ime, this, feedback)
     private val menu: SpeechMenu
+    private var phase = SpeechPhase.Idle
+    /** Where the key held for More characters was, so TalkBack's focus can go back to it. */
+    private var heldAt: IntArray? = null
 
     init {
         orientation = VERTICAL
@@ -62,26 +72,51 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         strip.choosing = true; strip.menuOpened(); menu.home(); strip.update()
     }
     fun openLanguageMenu() { openMenu(); menu.language() }
-    fun openAccents(accents: List<String>) {
-        openMenu(); menu.accents(accents) { accent -> closeMenu(); ime.engine.type(accent) }
+    fun openAccents(accents: List<String>, from: View) {
+        openMenu(); if (menu.visibility != VISIBLE) return
+        heldAt = IntArray(2).also(from::getLocationInWindow).let { intArrayOf(it[0] + from.width / 2, it[1] + from.height / 2) }
+        menu.accents(accents) { accent -> closeMenu(); ime.engine.type(accent) }
     }
     fun backInMenu() { if (menu.visibility == VISIBLE) menu.back() }
     fun closeMenu() {
         if (menu.visibility != VISIBLE) return
         menu.visibility = GONE; keys.visibility = VISIBLE
         strip.choosing = false; strip.menuClosed(); keys.refreshSpace(); ime.engine.configureTyping(keepWord = true); strip.update()
+        // TalkBack's focus goes back to the key that was held, as on Gboard, not to the first suggestion.
+        // By place: typing on a symbol page draws its keys again.
+        val at = heldAt ?: return
+        heldAt = null
+        keys.doOnPreDraw {
+            fun find(v: View): View? = if (v is KeyCap && v.isShown && Rect().also { v.getGlobalVisibleRect(it) }.contains(at[0], at[1])) v
+                else (v as? ViewGroup)?.children?.firstNotNullOfOrNull(::find)
+            find(keys)?.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
+        }
     }
     fun status(phase: SpeechPhase, hint: String) {
+        cue(this.phase, phase); this.phase = phase
         val idle = phase == SpeechPhase.Idle
         strip.prepare(phase, hint)
-        if (!idle) closeMenu()
+        if (!idle) { heldAt = null; closeMenu() }
         strip.status(phase, hint, menu.visibility == VISIBLE)
         // Keep the snapshotted paste language visible until this dictation has finished.
         if (idle) keys.refreshSpace()
         strip.update()
     }
+    /** iPhone Hex's light tap as dictation starts; as the microphone closes (done, cancelled or failed), a
+     * lighter tick that iPhone Hex doesn't have, so someone using TalkBack, which is quiet while Hex records,
+     * feels both ends. Android's own pair for a gesture's start and end (a click and a tick). */
+    private fun cue(from: SpeechPhase, to: SpeechPhase) {
+        fun recording(p: SpeechPhase) = p == SpeechPhase.Opening || p == SpeechPhase.Listening
+        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE
+        val effect = when {
+            !recording(from) && recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_START else HapticFeedbackConstants.CONFIRM
+            recording(from) && !recording(to) -> if (modern) HapticFeedbackConstants.GESTURE_END else HapticFeedbackConstants.CONTEXT_CLICK
+            else -> return
+        }
+        if (vibrates(context, ime.feedback.haptics)) performHapticFeedback(effect)
+    }
     fun setLevel(value: Float) = strip.setLevel(value)
     fun cancelGestures() { strip.cancelGestures(); keys.cancelGestures() }
     /** The editor went away: the next one starts on the letters. */
-    fun reset() { closeMenu(); closeEmoji() }
+    fun reset() { heldAt = null; closeMenu(); closeEmoji() }
 }
