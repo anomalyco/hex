@@ -42,8 +42,13 @@ final class KeyboardLocalDictation {
         }
     }
 
-    private var phase: Phase = .idle
+    private var phase: Phase = .idle {
+        didSet { if case .idle = phase { liveText?.end() } else if case .failed = phase { liveText?.end() } }
+    }
     private var job: Job?
+    /// The words so far while recording (`KeyboardLiveDictation`), for the keyboard to show.
+    var liveText: LiveDictationText?
+    private var live: KeyboardLiveDictation?
     /// When the job last showed progress: its start, its capture's last audio, or the start of
     /// its transcription (`KeyboardJobWatchdog`).
     private var lastProgressAt: TimeInterval = 0
@@ -232,6 +237,8 @@ final class KeyboardLocalDictation {
     }
 
     private func noteCaptureStopped() {
+        live?.stop()
+        live = nil
         if capture === Self.sharedCapture {
             Self.ownership.endCapture(by: ownerID)
         }
@@ -265,6 +272,7 @@ final class KeyboardLocalDictation {
     }
 
     func handleMemoryWarning() {
+        live?.memoryWarning()
         KeyboardParakeet.shared.handleMemoryWarning()
         guard !isActive else { return }
         let current = capture
@@ -532,6 +540,7 @@ final class KeyboardLocalDictation {
             do {
                 let url = FileManager.default.temporaryDirectory.appendingPathComponent("keyboard-\(jobID).wav")
                 pcmFile = try KeyboardPCMFile(url: url, sampleRate: sampleRate)
+                live = KeyboardLiveDictation.start(sampleRate: sampleRate, text: liveText)
             } catch {
                 capture?.stop()
                 fail(UserFacingError.Context.microphone.fallback, detail: "Could not create audio file: \(Self.describe(error))")
@@ -542,6 +551,7 @@ final class KeyboardLocalDictation {
                 timeline = nil
             }
             pcmFile?.append(data)
+            live?.append(data)
             lastProgressAt = Date().timeIntervalSince1970
             loudness = peak > 0 ? max(-62, 20 * log10(peak)) : -62
         case .stopped:

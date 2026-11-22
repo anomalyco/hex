@@ -309,6 +309,8 @@ enum SettingsSnapshotFixture {
         CustomVocabularySettings().isEnabled = on
         CustomVocabularySettings().terms = on ? ["OpenCode", "SwiftUI", "TestFlight"] : []
         DictationTranslationSettings().isEnabled = on
+        LiveDictationSettings().showsPreview = true
+        LiveDictationSettings().typesIntoField = on
         DictationTranslationSettings().targetLanguage = "ja"
         TypingJournalSettings().isEnabled = on
         TypingJournalSettings().learnsPerLanguage = on

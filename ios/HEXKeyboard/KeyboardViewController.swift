@@ -54,6 +54,8 @@ final class KeyboardViewController: UIInputViewController {
     /// Learn how I type: what becomes of each dictation Hex inserts.
     private let dictationEdits = DictationEditTracker()
     private lazy var documentTarget = DocumentProxyTextTarget { [weak self] in self?.textDocumentProxy }
+    /// Type as I speak: the live words in the field while recording.
+    private lazy var liveTyping = KeyboardLiveTyping(target: documentTarget)
     /// Record typing logs: the process's logger while the experiment is on.
     private var typingLog: TypingLogger?
     /// The field the current typing log session is for.
@@ -256,6 +258,7 @@ final class KeyboardViewController: UIInputViewController {
         fullKeyboard?.engine.commitHangulComposition()
         closeBarEmojiPanel()
         // A dictation under way finishes without the keyboard, and the next one delivers it.
+        liveTyping.keyboardWillHide()
         localDictation.keyboardWillHide()
         endTypingLogSession(reason: "disappear", settleDictation: editContext)
         pollTimer?.invalidate()
@@ -620,6 +623,7 @@ final class KeyboardViewController: UIInputViewController {
         isRetired = true
         launchWork.forEach { $0.cancel() }
         launchWork = []
+        liveTyping.keyboardWillHide()
         localDictation.keyboardWillHide()
         endTypingLogSession(reason: "superseded", settleDictation: nil)
         pollTimer?.invalidate()
@@ -663,6 +667,13 @@ final class KeyboardViewController: UIInputViewController {
             return TypingJournal.sharedIfEnabled()?.dictationCorrections(language: language) ?? []
         }
         localDictation.currentDocument = { [weak self] in self?.currentDocument }
+        localDictation.liveText = viewModel.liveText
+        liveTyping.attach(viewModel.liveText)
+        liveTyping.mayType = { [weak self] in self?.fullKeyboard?.engine.hasPendingSelectionDictation != true }
+        liveTyping.didEdit = { [weak self] in
+            self?.fullKeyboard?.engine.forgetTextAroundKeys()
+            self?.fullKeyboard?.engine.textDidChange()
+        }
         viewModel.onPasteDictation = { [weak self] in self?.pasteOfferedDictation() }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
         viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressed(at: at) }
@@ -1073,7 +1084,8 @@ final class KeyboardViewController: UIInputViewController {
         // it; either way, the context below is read after that, so spacing sees the result.
         fullKeyboard?.engine.commitHangulComposition()
         fullKeyboard?.applyPendingSelectionDictation()
-        let context = editContext
+        // Type as I speak's words come out first: the text goes in where and as it would without them.
+        let context = liveTyping.handOver() ?? editContext
         let insertion = TranscriptFormatter.insertionText(
             for: transcript,
             beforeContext: context.before,

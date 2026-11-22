@@ -507,3 +507,120 @@ final class TypingJournalLearningTests: XCTestCase {
         XCTAssertEqual(target.text, "teh hex the ", "nothing learned applies while Learn how I type is off")
     }
 }
+
+/// Show what I say and Type as I speak: the live words as the recogniser sends them, and the
+/// field kept exactly as it would be without them.
+@MainActor
+final class LiveDictationTests: XCTestCase {
+    func testVolatileResultsReplaceTheTailAndFinalOnesSettle() {
+        var words = LiveTranscriptAccumulator()
+        words.apply("Hey", isFinal: false)
+        XCTAssertEqual(words.apply("Hey, I am running", isFinal: false), LiveTranscript(settled: "", tentative: "Hey, I am running"))
+        XCTAssertEqual(words.apply("Hey, I am running late.", isFinal: true), LiveTranscript(settled: "Hey, I am running late.", tentative: ""))
+        let next = words.apply(" Can you", isFinal: false)
+        XCTAssertEqual(next.tentative, "Can you")
+        XCTAssertEqual(next.text, "Hey, I am running late. Can you", "one space between the settled words and the tail")
+        words.apply(" Can you grab a table?", isFinal: true)
+        XCTAssertEqual(words.transcript.settled, "Hey, I am running late. Can you grab a table?")
+        XCTAssertTrue(words.transcript.tentative.isEmpty)
+    }
+
+    func testChineseAndMarksJoinWithoutASpace() {
+        XCTAssertEqual(LiveTranscript(settled: "我到了。", tentative: "你在哪里").text, "我到了。你在哪里")
+        XCTAssertEqual(LiveTranscript(settled: "Ten minutes late", tentative: ".").text, "Ten minutes late.")
+        XCTAssertTrue(LiveTranscript(settled: " ", tentative: "").isEmpty)
+    }
+
+    func testTheLongestDictationShowsOnlyItsEndFromAWordsStart() {
+        let short = LiveTranscript(settled: "Hey, I am late.", tentative: "Can you")
+        XCTAssertTrue(LiveDictationPreviewView.tail(of: short, characters: 200) == ("Hey, I am late.", " Can you"))
+        let long = LiveTranscript(settled: "one two three four five six", tentative: "seven eight")
+        let end = LiveDictationPreviewView.tail(of: long, characters: 20)
+        XCTAssertEqual(end.settled, "five six", "no word shows cut")
+        XCTAssertEqual(end.tentative, " seven eight")
+        let tentativeOnly = LiveDictationPreviewView.tail(of: LiveTranscript(settled: "", tentative: "alpha beta gamma delta"), characters: 12)
+        XCTAssertEqual(tentativeOnly.settled, "")
+        XCTAssertEqual(tentativeOnly.tentative, "gamma delta")
+    }
+
+    func testTheSwitchesDefaultToShowingButNotTyping() throws {
+        let suite = "anomaly.hex.tests.live-dictation"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults.removePersistentDomain(forName: suite)
+        let settings = LiveDictationSettings(defaults: defaults)
+        XCTAssertTrue(settings.showsPreview)
+        XCTAssertFalse(settings.typesIntoField)
+        settings.showsPreview = false
+        XCTAssertFalse(settings.wantsLiveWords)
+        settings.typesIntoField = true
+        XCTAssertTrue(LiveDictationSettings(defaults: defaults).wantsLiveWords)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    func testTypesTheWordsRevisesOnlyTheTailAndHandsTheFieldBack() throws {
+        let field = FixtureTextTarget(text: "Running 10 min late,")
+        let typing = try XCTUnwrap(LiveFieldTyping(target: field))
+        typing.show("I am running")
+        XCTAssertEqual(field.text, "Running 10 min late, I am running", "a space before the words, as a dictation gets")
+        typing.show("I am running about 730.")
+        typing.show("I am running about 7.30. Can")
+        XCTAssertEqual(field.text, "Running 10 min late, I am running about 7.30. Can")
+        XCTAssertEqual(typing.typed, " I am running about 7.30. Can")
+        XCTAssertTrue(typing.takeBack())
+        XCTAssertEqual(field.text, "Running 10 min late,", "the dictation's own text goes in as without Type as I speak")
+        XCTAssertEqual(typing.base, "Running 10 min late,")
+    }
+
+    func testStopsAndLeavesTheFieldOnceItNoLongerEndsWithTheWords() throws {
+        let field = FixtureTextTarget(text: "")
+        let typing = try XCTUnwrap(LiveFieldTyping(target: field))
+        typing.show("See you at")
+        field.insertText("!")
+        typing.show("See you at ten")
+        XCTAssertTrue(typing.stopped)
+        XCTAssertEqual(field.text, "See you at!")
+        XCTAssertFalse(typing.takeBack(), "never deletes what someone else typed")
+        XCTAssertEqual(field.text, "See you at!")
+
+        let moved = FixtureTextTarget(text: "Hi ")
+        let second = try XCTUnwrap(LiveFieldTyping(target: moved))
+        second.show("there")
+        moved.adjustTextPosition(byCharacterOffset: -2)
+        XCTAssertFalse(second.takeBack(), "the cursor moved: the words stay")
+        XCTAssertEqual(moved.text, "Hi there")
+    }
+
+    func testWordsLeftByAHiddenKeyboardAreReplacedOnlyWhereTheFieldStillEndsWithThem() throws {
+        let field = FixtureTextTarget(text: "Note: Hey, I'm running")
+        let resumed = try XCTUnwrap(LiveFieldTyping(resuming: " Hey, I'm running", in: field))
+        XCTAssertEqual(resumed.base, "Note:")
+        XCTAssertTrue(resumed.takeBack())
+        XCTAssertEqual(field.text, "Note:", "the held text then goes in as if they were never typed")
+
+        XCTAssertNil(LiveFieldTyping(resuming: " Hey, I'm running", in: FixtureTextTarget(text: "Hey, I'm running late")))
+        let quoted = FixtureTextTarget(text: "I\u{2019}m late")
+        XCTAssertNotNil(LiveFieldTyping(resuming: "I'm late", in: quoted), "a host's smart apostrophe is still the word typed")
+    }
+
+    func testAHostThatReportsNothingIsNeverRevised() throws {
+        let field = LaggingField(text: "Hello")
+        field.lag = .nothing
+        XCTAssertNil(LiveFieldTyping(target: field), "a field with text whose app reports none can't be checked")
+
+        let empty = LaggingField(text: "")
+        empty.lag = .nothing
+        let typing = try XCTUnwrap(LiveFieldTyping(target: empty))
+        typing.show("One")
+        typing.show("One two")
+        XCTAssertTrue(typing.stopped)
+        XCTAssertEqual(empty.text, "One", "stops instead of deleting what it can't see")
+    }
+
+    func testNeverTypesInPrivateFieldsOrOverASelection() {
+        XCTAssertFalse(LiveFieldTyping.mayType(secure: true, content: nil, selected: nil))
+        XCTAssertFalse(LiveFieldTyping.mayType(secure: nil, content: .password, selected: nil))
+        XCTAssertFalse(LiveFieldTyping.mayType(secure: nil, content: .oneTimeCode, selected: nil))
+        XCTAssertFalse(LiveFieldTyping.mayType(secure: nil, content: nil, selected: "late"))
+        XCTAssertTrue(LiveFieldTyping.mayType(secure: false, content: .emailAddress, selected: ""))
+    }
+}
