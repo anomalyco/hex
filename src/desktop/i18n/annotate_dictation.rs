@@ -7,14 +7,14 @@
 pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Dictate while annotating", ["Dyktuj podczas adnotacji", "标注时听写", "注釈中の音声入力", "Diktieren beim Annotieren", "Dictar mientras anotas", "Диктувати під час анотації"]),
     (
-        "Dictate while a capture records: hold the shortcut and the text pastes as usual, while the capture keeps going",
+        "Dictate while a capture records: the text pastes as usual, and the capture keeps going",
         [
-            "Dyktuj, gdy trwa nagranie: przytrzymaj skrót, a tekst wklei się jak zwykle, a nagranie trwa dalej",
-            "在录制期间听写：按住快捷键，文字照常粘贴，录制继续进行",
-            "キャプチャの収録中にも音声入力できます。ショートカットを押している間、テキストはいつもどおり貼り付き、収録は続きます",
-            "Diktiere, während eine Aufnahme läuft: Halte das Kürzel, der Text wird wie gewohnt eingefügt, und die Aufnahme läuft weiter",
-            "Dicta mientras hay una captura: mantén el atajo y el texto se pega como siempre, mientras la captura sigue",
-            "Диктуйте, коли триває запис: утримуйте комбінацію, і текст вставиться як завжди, а запис триватиме",
+            "Dyktuj, gdy trwa nagranie: tekst wklei się jak zwykle, a nagranie trwa dalej",
+            "在录制期间听写：文字照常粘贴，录制继续进行",
+            "キャプチャの収録中にも音声入力できます。テキストはいつもどおり貼り付き、収録は続きます",
+            "Diktiere, während eine Aufnahme läuft: Der Text wird wie gewohnt eingefügt, und die Aufnahme läuft weiter",
+            "Dicta mientras hay una captura: el texto se pega como siempre y la captura sigue",
+            "Диктуйте, коли триває запис: текст вставиться як завжди, а запис триватиме",
         ],
     ),
 ];
@@ -23,8 +23,8 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
 pub(super) const FRENCH: &[(&str, &str)] = &[
     ("Dictate while annotating", "Dicter pendant une annotation"),
     (
-        "Dictate while a capture records: hold the shortcut and the text pastes as usual, while the capture keeps going",
-        "Dictez pendant qu’une capture s’enregistre : maintenez le raccourci et le texte se colle comme d’habitude, pendant que la capture continue",
+        "Dictate while a capture records: the text pastes as usual, and the capture keeps going",
+        "Dictez pendant qu’une capture s’enregistre : le texte se colle comme d’habitude et la capture continue",
     ),
 ];
 
@@ -32,8 +32,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
 pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("Dictate while annotating", "Ditar enquanto anota"),
     (
-        "Dictate while a capture records: hold the shortcut and the text pastes as usual, while the capture keeps going",
-        "Dite enquanto uma captura grava: mantenha o atalho e o texto é colado como sempre, enquanto a captura continua",
+        "Dictate while a capture records: the text pastes as usual, and the capture keeps going",
+        "Dite enquanto uma captura grava: o texto é colado como sempre e a captura continua",
     ),
 ];
 
@@ -41,7 +41,7 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
 pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Dictate while annotating", "Диктовка во время аннотации"),
     (
-        "Dictate while a capture records: hold the shortcut and the text pastes as usual, while the capture keeps going",
-        "Диктуйте, пока идёт запись: удерживайте сочетание, и текст вставится как обычно, а запись продолжится",
+        "Dictate while a capture records: the text pastes as usual, and the capture keeps going",
+        "Диктуйте, пока идёт запись: текст вставится как обычно, а запись продолжится",
     ),
 ];
