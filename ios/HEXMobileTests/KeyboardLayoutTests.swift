@@ -1942,6 +1942,8 @@ final class KeyboardLayoutTests: XCTestCase {
             for (width, posture, inset) in [(452.0, KeyboardPosture.cover, 7.0), (655, .unfoldedTall, 7), (801, .unfoldedWide, 75)] {
                 pair(layer) { KeyboardLayout(width: width, layer: $1, showsGlobe: true, posture: posture, windowInset: inset, numberRow: $0) }
             }
+            // The unfolded keyboard joined (Settings › Experiments): its rows never split.
+            pair(layer) { KeyboardLayout(width: 801, layer: $1, showsGlobe: true, posture: .unfoldedWide, windowInset: 75, numberRow: $0, joinsUnfoldedKeyboard: true) }
         }
         return pairs
     }
@@ -2127,7 +2129,8 @@ final class KeyboardLayoutTests: XCTestCase {
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75))
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, showsGlobe: true, posture: .cover, windowInset: 75))
         // The unfolded keyboard joined (Settings › Experiments), its rows' heights kept: every
-        // language, the globe and emoji on and off, the number row, and the Hex key either side.
+        // language, the globe and emoji on and off, and the Hex key either side. The number row
+        // has its own layouts (`numberRowLayouts`), since these suites assume none.
         for language in KeyboardLanguage.allCases {
             layouts.append(KeyboardLayout(
                 width: 801, showsGlobe: true, language: language, posture: .unfoldedWide,
@@ -2140,10 +2143,6 @@ final class KeyboardLayoutTests: XCTestCase {
                 windowInset: 75, joinsUnfoldedKeyboard: true
             ))
         }
-        layouts.append(KeyboardLayout(
-            width: 801, showsGlobe: true, showsEmoji: true, posture: .unfoldedWide,
-            windowInset: 75, numberRow: true, joinsUnfoldedKeyboard: true
-        ))
         for placement in [HexKeyPlacement.leftOfSpace, .rightOfSpace] {
             layouts.append(KeyboardLayout(
                 width: 801, showsGlobe: true, showsEmoji: true, posture: .unfoldedWide,
