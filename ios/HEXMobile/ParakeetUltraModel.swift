@@ -10,11 +10,7 @@ import Foundation
 /// FluidAudio's own loader is never pointed at it: on a failed load it deletes the folder and
 /// downloads v3 from its own repository in its place.
 nonisolated enum ParakeetUltraModel {
-    struct File: Sendable, Equatable {
-        let path: String
-        let size: Int64
-        let sha256: String
-    }
+    typealias File = PinnedModelFile
 
     enum DownloadError: Error, Equatable {
         case badStatus(Int)

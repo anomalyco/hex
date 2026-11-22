@@ -241,8 +241,8 @@ extension DictationController {
         multilingualDownload.appMovedToBackground()
     }
 
-    /// Picks up a download that iOS cut off while Hex was in the background; FluidAudio
-    /// resumes each file from the bytes it has.
+    /// Picks up a download that iOS cut off while Hex was in the background; each file
+    /// resumes from the bytes it has (`ParakeetTranscriber.downloadModel`).
     func appBecameActive() {
         isInBackground = false
         refreshWarmDuration()

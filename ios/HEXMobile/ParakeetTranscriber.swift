@@ -78,15 +78,21 @@ actor ParakeetTranscriber: LocalTranscribing {
     nonisolated let displayName = "Parakeet V2"
     let languageName = "English"
 
-    /// In the App Group (`SpeechModelStore`), so Experiments › Speech model in keyboard can load
+    /// In the App Group (`SpeechModelStore`), so Settings › Dictation › Speech model in keyboard can load
     /// it too; FluidAudio finds it by its repo's folder name.
     nonisolated static var cacheDirectory: URL {
         SpeechModelStore.root.appendingPathComponent(Repo.parakeetV2.folderName, isDirectory: true)
     }
 
+    /// Marked complete, or every pinned file at its full size (a download from before the
+    /// marker); a folder of `.partial` files isn't.
     nonisolated static var hasCachedModel: Bool {
-        AsrModels.modelsExist(at: cacheDirectory, version: .v2)
+        SpeechModelStore.isComplete(cacheDirectory) || ParakeetV2Files.isDownloaded(in: cacheDirectory)
     }
+
+    /// How often a download tries, after a dropped connection, a busy server or a damaged file,
+    /// before it says it didn't download: 4 times, 1, 2 and 4 s apart, as FluidAudio's did.
+    static let downloadAttempts = 4
 
     func prepare(
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
@@ -144,49 +150,59 @@ actor ParakeetTranscriber: LocalTranscribing {
         progress.update { $0.finish() }
     }
 
-    /// FluidAudio's repo download alone, which resumes each file from its `.partial`.
+    /// The pinned download alone, which resumes each file from its `.partial`.
     private func download(_ progress: ParakeetProgressFeed) async throws {
         try await Self.downloadModel { fraction in
             progress.update { $0.download(fraction) }
         }
     }
 
-    /// The download, for the app's engine and for Experiments › Speech model in keyboard;
-    /// `progress` gets the share downloaded. Marks the folder complete once every file is there.
+    /// The download, for the app's engine and for Settings › Dictation › Speech model in keyboard;
+    /// `progress` gets the share downloaded. The pinned files (`ParakeetV2Files`), each resumed
+    /// from its `.partial` (a partial an earlier FluidAudio download left, too) and checked
+    /// against its size and SHA-256 before it gets its name; marks the folder complete once
+    /// every file is there.
     nonisolated static func downloadModel(progress: @escaping @Sendable (Double) -> Void) async throws {
         let fraction = ProgressReading()
+        // While Hex downloads it, the keyboard doesn't start its own (`SpeechModelBackgroundDownload`).
+        SpeechModelDownloadClaim().claim(.app)
+        defer { SpeechModelDownloadClaim().end(.app) }
         SpeechModelStore.prepareRoot()
-        let directory = cacheDirectory.deletingLastPathComponent()
+        let total = Double(ParakeetV2Files.totalBytes)
         do {
             try await StallWatch.run(
                 limit: downloadStallLimit,
                 progress: { fraction.value },
                 operation: {
-                    // FluidAudio's download reports 0–50%, leaving the rest for a compile.
-                    try await ModelHub.download(.parakeetV2, to: directory, progressHandler: { event in
-                        fraction.value = event.fractionCompleted
-                        progress(min(1, event.fractionCompleted * 2))
-                    })
-                    let vocabulary = Self.cacheDirectory.appendingPathComponent(ModelNames.ASR.vocabularyFile)
-                    if !FileManager.default.fileExists(atPath: vocabulary.path) {
-                        // The repo's listing brings it; this is for one that didn't.
-                        let data = try await ModelHub.fetchFile(
-                            from: ModelRegistry.resolveModel(Repo.parakeetV2.remotePath, ModelNames.ASR.vocabularyFile),
-                            description: ModelNames.ASR.vocabularyFile
-                        )
-                        try data.write(to: vocabulary, options: .atomic)
+                    var attempt = 1
+                    while true {
+                        do {
+                            try await ParakeetUltraModel.download(
+                                to: cacheDirectory,
+                                files: ParakeetV2Files.files,
+                                base: ParakeetV2Files.baseURL,
+                                session: ParakeetUltraDownload.makeSession()
+                            ) { bytes in
+                                let share = min(1, Double(bytes) / total)
+                                fraction.value = share
+                                progress(share)
+                                SpeechModelDownloadClaim().refresh(.app, bytes: bytes)
+                            }
+                            break
+                        } catch {
+                            guard attempt < downloadAttempts, ParakeetUltraDownload.triesAgain(after: error),
+                                  !(error is StallWatch.Stalled) else { throw error }
+                            try await Task.sleep(for: .seconds(1 << (attempt - 1)))
+                            attempt += 1
+                        }
                     }
                 }
             )
-            SpeechModelStore.markComplete(cacheDirectory)
-        } catch let error as DownloadError {
-            // FluidAudio's descriptions carry Hugging Face paths and HTML; say it plainly.
-            switch error {
-            case .invalidResponse, .rateLimited, .downloadFailed, .htmlErrorResponse, .invalidArtifact:
-                throw TranscriberError.downloadFailed
-            default:
-                throw error
-            }
+            ParakeetV2Files.removeLeftovers(in: cacheDirectory)
+        } catch is ParakeetUltraModel.DownloadError {
+            throw TranscriberError.downloadFailed
+        } catch let error as URLError where error.code != .cancelled {
+            throw TranscriberError.downloadFailed
         }
     }
 

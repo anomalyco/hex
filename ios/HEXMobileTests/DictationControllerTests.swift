@@ -1847,6 +1847,101 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
+    func testParakeetV2IsPinnedToOneRevisionWithEveryFileItsLoaderReads() {
+        XCTAssertEqual(ParakeetV2Files.files.count, 21)
+        XCTAssertEqual(ParakeetV2Files.totalBytes, 464_413_247)
+        let paths = Set(ParakeetV2Files.files.map(\.path))
+        XCTAssertEqual(paths.count, 21, "no file twice")
+        for model in ["Preprocessor.mlmodelc", "Encoder.mlmodelc", "Decoder.mlmodelc", "JointDecision.mlmodelc"] {
+            for part in ["coremldata.bin", "analytics/coremldata.bin", "metadata.json", "model.mil", "weights/weight.bin"] {
+                XCTAssertTrue(paths.contains("\(model)/\(part)"), "\(model)/\(part)")
+            }
+        }
+        XCTAssertTrue(paths.contains("parakeet_vocab.json"))
+        XCTAssertTrue(ParakeetV2Files.files.allSatisfy { $0.sha256.count == 64 && $0.size > 0 })
+        XCTAssertEqual(
+            ParakeetV2Files.url(for: ParakeetV2Files.files[0]).absoluteString,
+            "https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml/resolve/\(ParakeetV2Files.revision)/Preprocessor.mlmodelc/analytics/coremldata.bin"
+        )
+    }
+
+    func testParakeetV2CountsAsDownloadedOnlyWithEveryPinnedFileAtItsSize() throws {
+        let files = FileManager.default
+        let folder = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? files.removeItem(at: folder) }
+        for file in ParakeetV2Files.files {
+            let url = folder.appendingPathComponent(file.path)
+            try files.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            XCTAssertTrue(files.createFile(atPath: url.path, contents: nil))
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.truncate(atOffset: UInt64(file.size))
+            try handle.close()
+        }
+        XCTAssertTrue(ParakeetV2Files.isDownloaded(in: folder))
+        XCTAssertEqual(ParakeetV2Files.placedBytes(in: folder), ParakeetV2Files.totalBytes)
+
+        let encoder = folder.appendingPathComponent("Encoder.mlmodelc/weights/weight.bin")
+        try files.moveItem(at: encoder, to: encoder.appendingPathExtension("partial"))
+        XCTAssertFalse(ParakeetV2Files.isDownloaded(in: folder), "a folder with a partial file isn't a download")
+        XCTAssertEqual(ParakeetV2Files.placedBytes(in: folder), ParakeetV2Files.totalBytes - 445_187_200)
+        ParakeetV2Files.removeLeftovers(in: folder)
+        XCTAssertFalse(files.fileExists(atPath: encoder.appendingPathExtension("partial").path))
+    }
+
+    func testAFileTheKeyboardDownloadedGetsItsNameOnlyOnceItsDigestMatches() throws {
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        try files.createDirectory(at: root, withIntermediateDirectories: true)
+        let body = Data("weights".utf8)
+        let good = root.appendingPathComponent("good")
+        try body.write(to: good)
+        let file = PinnedModelFile(
+            path: "Encoder.mlmodelc/weights/weight.bin",
+            size: Int64(body.count),
+            sha256: try PinnedModelFile.sha256(of: good)
+        )
+        let folder = root.appendingPathComponent("model")
+        let destination = folder.appendingPathComponent(file.path)
+        try files.createDirectory(at: destination.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("partial".utf8).write(to: destination.appendingPathExtension("partial"))
+
+        let damaged = root.appendingPathComponent("damaged")
+        try Data("weightz".utf8).write(to: damaged)
+        XCTAssertFalse(SpeechModelBackgroundDownload.place(damaged, as: file, in: folder))
+        XCTAssertFalse(files.fileExists(atPath: destination.path))
+        XCTAssertFalse(files.fileExists(atPath: destination.appendingPathExtension("download").path), "nothing left of it")
+
+        XCTAssertTrue(SpeechModelBackgroundDownload.place(good, as: file, in: folder))
+        XCTAssertEqual(try Data(contentsOf: destination), body)
+        XCTAssertFalse(files.fileExists(atPath: destination.appendingPathExtension("partial").path), "Hex's own partial copy goes")
+    }
+
+    func testTheAppAndTheKeyboardNeverDownloadTheSpeechModelAtOnce() {
+        let claim = SpeechModelDownloadClaim(defaults: defaults)
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        XCTAssertFalse(claim.isLive(.keyboard, now: start))
+        XCTAssertFalse(claim.isLive(.app, now: start))
+
+        claim.claim(.keyboard, now: start)
+        XCTAssertTrue(claim.isLive(.keyboard, now: start.addingTimeInterval(6 * 60 * 60)), "its transfer runs without the keyboard")
+        XCTAssertFalse(claim.isLive(.keyboard, now: start.addingTimeInterval(SpeechModelDownloadClaim.keyboardLife)), "until its tasks time out")
+        claim.refresh(.keyboard, bytes: 1_000, now: start.addingTimeInterval(5))
+        XCTAssertEqual(claim.freshBytes(now: start.addingTimeInterval(8)), 1_000)
+        XCTAssertNil(claim.freshBytes(now: start.addingTimeInterval(30)), "an old count isn't shown")
+        claim.end(.app, now: start.addingTimeInterval(10))
+        XCTAssertTrue(claim.isLive(.keyboard, now: start.addingTimeInterval(10)), "the app ends only its own")
+        claim.end(.keyboard, now: start.addingTimeInterval(10))
+        XCTAssertFalse(claim.isLive(.keyboard, now: start.addingTimeInterval(10)))
+
+        claim.claim(.app, now: start)
+        XCTAssertTrue(claim.isLive(.app, now: start.addingTimeInterval(20)))
+        XCTAssertFalse(claim.isLive(.app, now: start.addingTimeInterval(40)), "Hex stopped saying so: suspended or gone")
+        claim.refresh(.app, bytes: 5, now: start.addingTimeInterval(40))
+        XCTAssertTrue(claim.isLive(.app, now: start.addingTimeInterval(60)))
+        XCTAssertFalse(claim.isLive(.keyboard, now: start.addingTimeInterval(60)))
+    }
+
     func testTheKeyboardsSpeechModelDownloadsByItselfOnlyWhereTheKeyboardWouldUseIt() {
         let mb = KeyboardParakeetBudget.megabyte
         func hold(

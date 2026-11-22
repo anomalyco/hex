@@ -457,7 +457,7 @@ never at a launch by itself.
     with v3's download). It is chosen only with 1.5 GB left to load it
     (`os_proc_available_memory`), and never again after a load that ended Hex
     (`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
-    turned off and on. Unless Experiments › Speech model in keyboard has it loaded in the
+    turned off and on. Unless Settings › Dictation › Speech model in keyboard has it loaded in the
     keyboard (below), the keyboard doesn't use it, so once Hex has it ready
     (`MultilingualParakeetSettings.isModelReady`, set after a load, cleared while it's
     missing, set aside or off) and it takes the dictation language, Dictate and the Hex
@@ -466,8 +466,8 @@ never at a launch by itself.
     mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
     pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
     on an iPhone are unmeasured.
-  - **Speech model in keyboard (Settings › Experiments › Speech model in keyboard, iOS
-    26+):** On unless the person turns it off, and disabled (shown off) on iPhones under
+  - **Speech model in keyboard (Settings › Dictation › Speech model in keyboard, iOS
+    26+; under Experiments until it became the default):** On unless the person turns it off, and disabled (shown off) on iPhones under
     6 GB (`KeyboardParakeetSettings`, in the App Group; a value stored by hand wins, so a
     switch turned off stays off). Off, nothing of it loads and the keyboard dictates exactly
     as before. On, Hex downloads Parakeet V2 (464 MB, about 700 MB with the keyboard's
@@ -484,7 +484,26 @@ never at a launch by itself.
     the builds where it was off by default) it downloads at once on any connection. Until
     then the row says what it waits for: "Downloads after you first use the Hex keyboard",
     "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
-    dictation". The keyboard's own dictation transcribes with Parakeet in
+    dictation". The keyboard starts the same download itself, so the model arrives without
+    anyone opening Hex (`SpeechModelBackgroundDownload`): after its first frame and launch
+    work, off the main thread, with the same conditions (`KeyboardParakeetDownloadPolicy`), it
+    starts a background `URLSession` (Wi-Fi only: no cellular, expensive or constrained
+    network; not discretionary; tasks time out after 24 h) with the App Group as its shared
+    container, one download task per file of the pinned list (`ParakeetV2Files`: revision
+    `ee09c569` of FluidInference's repository, 21 files, each with its size and SHA-256).
+    The transfers run in iOS's own process and go on after the keyboard closes. A finished
+    file lands beside its name as `.download` and gets its name only once its size and
+    SHA-256 match; a failed task leaves its resume data (`.resume`) for the next try; the
+    folder is marked complete once all 21 are there. When a transfer ends while the keyboard
+    isn't running, iOS wakes Hex (`.backgroundTask(.urlSession)`), which takes the file in
+    the same way. `SpeechModelDownloadClaim` (App Group) keeps the two from downloading at
+    once: Hex's own download claims it while it runs and says so every few seconds; the
+    keyboard's claim lasts until its download ends or its tasks time out, and the keyboard
+    picks its own download up (a file iOS dropped gets a new task) each time it opens, or
+    cancels it once the switch is off. Hex doesn't start its own automatic download while
+    the keyboard's runs (turned on by hand, it does), and its row says "Downloading the
+    speech model" meanwhile, with a bar only while the keyboard says its bytes. The keyboard's
+    own dictation transcribes with Parakeet in
     the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
     V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
     dictates once its files are there, in which case Dictate and the Hex key stop opening
@@ -524,7 +543,10 @@ never at a launch by itself.
     model, a new process reloaded it in 0.3 s, and Ultra peaked at 66 MB (607 MB on the
     Neural Engine). A probe keyboard (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`)
     put 60 s of audio at 0.25–0.5 s; on the CPU, four chunks at once passed the limit
-    there, so the keyboard never runs that. Linking FluidAudio into the keyboard grows its binary from
+    there, so the keyboard never runs that. The keyboard's memory lines also give its
+    resident (`internal`) and compressed memory, at each recording's start and stop, for the
+    one-time step of about 15 MB that came with the model loaded at the ninth of twenty
+    dictations. Linking FluidAudio into the keyboard grows its binary from
     5.9 to 12.6 MB and, with the experiment off, its footprint at launch by about 0.2 MB
     (writable data dyld fixes up), with no change to its first frame.
   - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by
@@ -1904,7 +1926,9 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/),
   downloaded as FluidInference's
   [Core ML conversion](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
-  (CC BY 4.0, encoder weights at reduced precision), used unchanged.
+  (CC BY 4.0, encoder weights at reduced precision; revision `ee09c569`, each of its 21 files
+  checked against its size and SHA-256 in `ParakeetV2Files`, resumed from its `.partial`
+  and tried 4 times, 1, 2 and 4 s apart, as FluidAudio's download did), used unchanged.
 - **Parakeet Ultra:** Experiments › Multilingual model downloads
   [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) by Moondream, a
   post-training of NVIDIA's

@@ -1323,6 +1323,12 @@ final class KeyboardProbeLog: @unchecked Sendable {
         // The highest footprint this keyboard process has reached, for what iOS's limit saw.
         let peak = result == KERN_SUCCESS ? Double(info.ledger_phys_footprint_peak) / 1_048_576 : -1
         let available = Double(os_proc_available_memory()) / 1_048_576
-        return String(format: "[footprint %.1f MB, peak %.1f MB, headroom %.1f MB]", footprint, peak, available)
+        // What of the footprint is resident and what compressed, for steps between dictations.
+        let resident = result == KERN_SUCCESS ? Double(info.internal) / 1_048_576 : -1
+        let compressed = result == KERN_SUCCESS ? Double(info.compressed) / 1_048_576 : -1
+        return String(
+            format: "[footprint %.1f MB, peak %.1f MB, headroom %.1f MB, internal %.1f MB, compressed %.1f MB]",
+            footprint, peak, available, resident, compressed
+        )
     }
 }

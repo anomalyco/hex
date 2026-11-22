@@ -74,11 +74,16 @@ struct HEXMobileApp: App {
                     } else if phase == .active {
                         dictation.endStaleLiveActivities()
                         dictation.appBecameActive()
-                        // Experiments › Speech model in keyboard: picks its download up.
+                        // Settings › Dictation › Speech model in keyboard: picks its download up.
                         dictation.startKeyboardParakeetDownloadIfWanted()
                     }
                 }
             }
+        }
+        // Speech model in keyboard's download, started by the keyboard: iOS wakes Hex to take
+        // in files that finished while the keyboard wasn't running.
+        .backgroundTask(.urlSession(SpeechModelBackgroundDownload.identifier)) {
+            await SpeechModelBackgroundDownload.shared.handleEvents()
         }
     }
 }

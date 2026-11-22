@@ -1,7 +1,7 @@
 import Foundation
 
 /// Where Hex keeps Parakeet's Core ML files: in the App Group, so the keyboard can load them too
-/// (Experiments › Speech model in keyboard). Before, they were in the app's own Application
+/// (Settings › Dictation › Speech model in keyboard). Before, they were in the app's own Application
 /// Support, which the keyboard can't read; the app moves them here (`moveLegacyDownloads`),
 /// never downloading them again. Each folder is marked complete once every file is on disk,
 /// and the keyboard loads only a marked folder.
