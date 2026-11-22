@@ -797,6 +797,13 @@ final class KeyboardBridgeTests: XCTestCase {
         )
         record.clearHandedToHex()
         XCTAssertNil(record.handedToHex)
+        record.recordOpenedHex(at: now)
+        XCTAssertEqual(record.handedToHex?.reason, .openedHex)
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "Hex was opened for a dictation")
+        record.recordHandedToHex(.memory, at: now)
+        record.recordOpenedHex(at: now.addingTimeInterval(60))
+        XCTAssertEqual(record.handedToHex?.reason, .memory, "Hex keeps the keyboard's reason")
+        record.clearHandedToHex()
         XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "the keyboard dictated by itself again")
 
         let languages = LanguageSettings(defaults: defaults)

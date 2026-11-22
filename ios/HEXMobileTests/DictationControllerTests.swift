@@ -450,9 +450,6 @@ final class DictationControllerTests: XCTestCase {
         )
         controller.prepareModel()
         try await settle()
-        // With a duration: Off where the keyboard dictates by itself warms nothing
-        // (testKeepMicWarmFollowsWhetherTheKeyboardDictatesItself).
-        controller.setWarmDuration(.fifteenMinutes)
 
         // 1. Expired (>10s) handoff warms session without surprise-recording.
         controller.handleKeyboardLaunch(
@@ -600,10 +597,12 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertFalse(audio.isKeepaliveRunning)
     }
 
-    /// Where the keyboard dictates by itself Keep mic warm reads Off and hides: a Dictate that
-    /// opened Hex too late to record warms nothing, one the keyboard handed over for lack of
-    /// memory brings back the 15-minute default and its row, and the keyboard dictating by
-    /// itself again takes them away. (iOS 18 to 25: `KeyboardBridgeTests`.)
+    /// Where the keyboard dictates by itself Keep mic warm reads Off and hides. TestFlight build
+    /// 129: a keyboard that opened Hex anyway, for a reason it left no record of, got a one
+    /// shot every time and no warm session, so every tap opened Hex. Any dictation the keyboard
+    /// hands to Hex now brings back the 15-minute default and its row from that moment (a late
+    /// one warms as before 129), and a dictation the keyboard finishes by itself takes them
+    /// away. (iOS 18 to 25: `KeyboardBridgeTests`.)
     func testKeepMicWarmFollowsWhetherTheKeyboardDictatesItself() async throws {
         try XCTSkipUnless(ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26)
         let now = 9_000.0
@@ -622,18 +621,21 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.warmDuration, .off)
         XCTAssertFalse(controller.showsKeepMicWarm)
 
+        let record = KeyboardSelfDictation(defaults: defaults)
+        XCTAssertNil(record.handedToHex)
         controller.handleKeyboardLaunch(.startRecording(jobID: "late", requestedAt: now - 30, style: .polished))
         try await settle()
         XCTAssertEqual(controller.handoffNotice, String(localized: "Timed out"))
-        XCTAssertFalse(controller.keyboardSessionEnabled)
-        XCTAssertFalse(audio.isKeepaliveRunning)
-
-        KeyboardSelfDictation(defaults: defaults).recordHandedToHex(.memory)
-        controller.handleKeyboardLaunch(.startSession(requestedAt: now))
-        try await settle()
+        XCTAssertEqual(record.handedToHex?.reason, .openedHex, "no record from the keyboard: Hex writes one")
         XCTAssertEqual(controller.warmDuration, .fifteenMinutes)
         XCTAssertTrue(controller.showsKeepMicWarm)
-        XCTAssertTrue(controller.keyboardSessionEnabled)
+        XCTAssertTrue(controller.keyboardSessionEnabled, "a late handoff warms, as before 129")
+        XCTAssertTrue(audio.isKeepaliveRunning)
+
+        record.recordHandedToHex(.memory)
+        controller.handleKeyboardLaunch(.startSession(requestedAt: now))
+        try await settle()
+        XCTAssertEqual(record.handedToHex?.reason, .memory, "the keyboard's reason stays")
 
         KeyboardSelfDictation(defaults: defaults).clearHandedToHex()
         controller.refreshWarmDuration()
@@ -3473,6 +3475,9 @@ private final class FakeAudioSession: AudioSessionControlling {
 
     var calls: [Call] = []
     var isOtherAudioPlaying = false
+    private(set) var category = AVAudioSession.Category.soloAmbient
+    private(set) var mode = AVAudioSession.Mode.default
+    private(set) var categoryOptions: AVAudioSession.CategoryOptions = []
     /// What iOS offers: Bluetooth hands-free inputs only in a category that allows them.
     var connected: [Microphone] = []
     private var allowsBluetooth = false
@@ -3487,6 +3492,9 @@ private final class FakeAudioSession: AudioSessionControlling {
         options: AVAudioSession.CategoryOptions
     ) throws {
         calls.append(.category(category, mode, options))
+        self.category = category
+        self.mode = mode
+        categoryOptions = options
         allowsBluetooth = options.contains(.allowBluetoothHFP)
     }
 
@@ -3507,6 +3515,21 @@ private let wiredHeadset = Microphone(uid: "Wired Headset Microphone", name: "He
 
 @MainActor
 final class AudioSessionSetupTests: XCTestCase {
+    /// TestFlight build 129 (iOS 27.3): a warm session's dictation began in the background
+    /// with the category set again, unchanged, and iOS 27 refused it ("Another app is using
+    /// audio"). The category is set only when it changes; a choice that needs another one
+    /// (Bluetooth) still sets it.
+    func testTheCategoryIsSetOnlyWhenItChanges() throws {
+        let session = FakeAudioSession()
+        let audio = SystemAudioManager(session: session)
+        try audio.configureAudioSession(recordingFrom: nil)
+        try audio.configureAudioSession(recordingFrom: .automatic)
+        let categoryCalls = session.calls.filter { if case .category = $0 { true } else { false } }
+        XCTAssertEqual(categoryCalls.count, 1, "the keepalive's category serves the dictation")
+        try audio.configureAudioSession(recordingFrom: .bluetooth)
+        XCTAssertEqual(session.calls.filter { if case .category = $0 { true } else { false } }.count, 2)
+    }
+
     func testRecordingMixesWithOtherAppsAudioWhateverTheMicrophone() throws {
         let choices: [MicrophoneChoice?] = [nil] + MicrophoneChoice.allCases.map { $0 }
         for choice in choices {

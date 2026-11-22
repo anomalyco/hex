@@ -142,15 +142,17 @@ never at a launch by itself.
     subsequent taps on **Dictate** record directly inside the keyboard with zero
     app switches; picking `Off` or tapping the header timer ends it. Unless
     chosen, it is `Off`, with the row hidden, where the keyboard dictates by
-    itself (`KeyboardSelfDictation`: iOS 26, and Dictate hasn't opened Hex for
-    lack of memory, a missing speech model or the Multilingual model in the last
-    7 days, a record the keyboard writes as it opens Hex and clears when it next
-    dictates itself), and `15m` elsewhere; worked out on each read, never
+    itself (`KeyboardSelfDictation`: iOS 26, and the keyboard hasn't opened Hex
+    for a dictation in the last 7 days, for any reason: the keyboard records its
+    own (memory, a missing speech model, the Multilingual model) and Hex records
+    every keyboard launch, since TestFlight build 129 showed keyboards that opened
+    Hex for reasons they left no record of; a dictation the keyboard finishes by
+    itself clears it), and `15m` elsewhere; worked out on each read, never
     stored. The row shows whenever a duration is in effect, and stays on the
     page once picked. Once on iOS 26, a stored `15m` (which tapping the old
     default to warm the mic also stored) was taken for not chosen where the
-    keyboard dictates by itself. There, a Dictate that opens Hex records one
-    shot, and one that missed its recording (Timed out) warms nothing.
+    keyboard dictates by itself. A Dictate that opens Hex there brings the `15m`
+    default back from that launch, so it warms as before 129.
   - **Styles (`TranscriptFormatter`, run by `DictationPipeline` wherever Hex
     dictates: the app, the keyboard's warm session and cold start, the Action
     Button, Control Center and in-keyboard dictation):** `Polished` (full

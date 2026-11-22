@@ -3,6 +3,9 @@ import AVFAudio
 /// The `AVAudioSession` calls Hex makes, so tests can check how it records and lets go.
 protocol AudioSessionControlling: AnyObject {
     var isOtherAudioPlaying: Bool { get }
+    var category: AVAudioSession.Category { get }
+    var mode: AVAudioSession.Mode { get }
+    var categoryOptions: AVAudioSession.CategoryOptions { get }
     /// The inputs the current category offers.
     var microphones: [Microphone] { get }
     func setCategory(
