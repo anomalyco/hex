@@ -154,6 +154,12 @@ final class FullKeyboardEngine {
     var dvorakPunctuation = false {
         didSet { if dvorakPunctuation != oldValue { rebuildLayout(cause: "dvorak_punctuation") } }
     }
+    /// Settings › Experiments › Comma and period keys (off by default): a comma left of the
+    /// space bar and a period right of it on an iPhone's letters page in a text field, unless
+    /// Dvorak punctuation already puts them on row 1.
+    var commaPeriodKeys = false {
+        didSet { if commaPeriodKeys != oldValue { rebuildLayout(cause: "comma_period_keys") } }
+    }
     /// Whether the keys have the number row's band: its switch is on and this is an iPhone (the
     /// iPad keeps Apple's rows; `KeyboardMetrics.for`).
     var hasNumberRow: Bool { showsNumberRow && pad == nil }
@@ -1446,6 +1452,7 @@ final class FullKeyboardEngine {
             numberRow: hasNumberRow,
             joinsUnfoldedKeyboard: joinsUnfoldedKeyboard,
             dvorakPunctuation: dvorakPunctuation,
+            commaPeriodKeys: commaPeriodKeys,
             availableHeight: availableHeight
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)

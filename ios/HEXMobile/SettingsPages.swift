@@ -613,6 +613,7 @@ struct ExperimentsSettingsPage: View {
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var koreanKeyboard = FullKeyboardSettings().koreanKeyboard
     @State private var dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
+    @State private var commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
     @State private var keyboardTheme = FullKeyboardSettings().keyboardTheme
@@ -689,6 +690,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: dvorakPunctuation) { _, enabled in
                 FullKeyboardSettings().dvorakPunctuation = enabled
+            }
+            .onChange(of: commaPeriodKeys) { _, enabled in
+                FullKeyboardSettings().commaPeriodKeys = enabled
             }
             .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
                 FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
@@ -808,6 +812,15 @@ struct ExperimentsSettingsPage: View {
             title: String(localized: "Dvorak punctuation keys"),
             detail: String(localized: "Adds comma, period and semicolon keys to the English Dvorak keyboard."),
             isOn: $dvorakPunctuation
+        )
+
+        SettingsDivider()
+
+        // Off by default: the space bar keeps Apple's width until this is on.
+        SettingsToggleRow(
+            title: String(localized: "Comma and period keys"),
+            detail: String(localized: "Puts comma and period keys beside the space bar on the letters keyboard."),
+            isOn: $commaPeriodKeys
         )
 
         SettingsDivider()
@@ -933,6 +946,7 @@ struct ExperimentsSettingsPage: View {
         germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
         koreanKeyboard = FullKeyboardSettings().koreanKeyboard
         dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
+        commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
         emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
         keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
         keyboardTheme = FullKeyboardSettings().keyboardTheme

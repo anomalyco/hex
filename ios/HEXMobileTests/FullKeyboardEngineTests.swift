@@ -235,6 +235,68 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, ",ok. ,<:")
     }
 
+    /// Settings › Experiments › Comma and period keys: the flag rebuilds the layout with a comma
+    /// just left of the space bar and a period just right of it, which type themselves (shift
+    /// leaves them as they are), and only on an iPhone's letters page in a text field.
+    func testCommaAndPeriodKeysTypeByTheSpaceBar() throws {
+        engine.width = 402
+        XCTAssertFalse(engine.layout.commaPeriodKeys)
+        XCTAssertNil(engine.layout.key(.character(",")))
+        XCTAssertNil(engine.layout.key(.character(".")))
+        engine.commaPeriodKeys = true
+        XCTAssertTrue(engine.layout.commaPeriodKeys)
+        let comma = try XCTUnwrap(engine.layout.key(.character(",")))
+        let period = try XCTUnwrap(engine.layout.key(.character(".")))
+        let space = try XCTUnwrap(engine.layout.key(.space))
+        XCTAssertEqual(comma.row, 3)
+        XCTAssertEqual(period.row, 3)
+        XCTAssertNil(comma.shifted)
+        XCTAssertNil(period.shifted)
+        let gap = engine.layout.metrics.gap
+        XCTAssertEqual(comma.frame.maxX + gap, space.frame.minX, accuracy: 0.001)
+        XCTAssertEqual(space.frame.maxX + gap, period.frame.minX, accuracy: 0.001)
+        XCTAssertEqual(engine.keycapLabel(for: comma), ",")
+        XCTAssertEqual(engine.displayLabel(for: period), ".")
+        tap(.character(","))
+        XCTAssertEqual(target.text, ",")
+        tap(.character("."))
+        XCTAssertEqual(target.text, ",.")
+        tap(.shift)
+        XCTAssertEqual(engine.keycapLabel(for: comma), ",", "no shifted symbols")
+        XCTAssertEqual(engine.displayLabel(for: period), ".")
+        tap(.character(","))
+        tap(.character("."))
+        XCTAssertEqual(target.text, ",.,.")
+        XCTAssertEqual(engine.shift.state, .off, "one-shot, as after any character")
+
+        // The 123 page keeps its own punctuation row, so neither key sits on its bottom row.
+        tap(.layerSwitch(.numbers))
+        XCTAssertNil(engine.layout.keys.first { $0.row == 3 && $0.kind == .character(",") })
+        XCTAssertNil(engine.layout.keys.first { $0.row == 3 && $0.kind == .character(".") })
+        tap(.layerSwitch(.letters))
+        for keyboardType in [UIKeyboardType.URL, .emailAddress] {
+            target.keyboardType = keyboardType
+            engine.configureForField()
+            XCTAssertNotEqual(engine.layout.field, .text, "\(keyboardType.rawValue)")
+            XCTAssertNil(engine.layout.key(.character(",")), "no comma key")
+            XCTAssertEqual(engine.layout.keys.filter { $0.kind == .character(".") }.count, 1, "the field's own .")
+            XCTAssertEqual(engine.layout.key(.character("."))?.row, 3)
+        }
+        target.keyboardType = .default
+        engine.configureForField()
+        engine.pad = .docked(.mini)
+        XCTAssertFalse(engine.layout.commaPeriodKeys)
+        XCTAssertNil(engine.layout.keys.first { $0.row == 3 && $0.kind == .character(",") }, "an iPad keeps Apple's bottom row")
+        XCTAssertNil(engine.layout.keys.first { $0.row == 3 && $0.kind == .character(".") })
+        XCTAssertEqual(engine.layout.key(.character(","))?.row, 2, "the docked iPad's own pair")
+        engine.pad = nil
+        engine.letterLayout = .dvorak
+        engine.dvorakPunctuation = true
+        XCTAssertFalse(engine.layout.commaPeriodKeys, "Dvorak punctuation already has both on row 1")
+        XCTAssertEqual(engine.layout.key(.character(","))?.row, 0)
+        XCTAssertEqual(engine.layout.key(.character(";"))?.row, 3)
+    }
+
     func testHoldNumbersSlideToADigitAndLetGo() {
         down(1, .layerSwitch(.numbers))
         XCTAssertEqual(engine.layout.layer, .numbers)

@@ -616,6 +616,12 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// and period on row 1 and a semicolon by the space bar. False on every other arrangement,
     /// and on a docked iPad, so those layouts are the same with the experiment on or off.
     let dvorakPunctuation: Bool
+    /// Settings › Experiments › Comma and period keys: a comma just left of the space bar and a
+    /// period just right of it on an iPhone's letters page in a text field. False where the
+    /// experiment never draws them (other pages and fields, an iPad, and the Dvorak letters with
+    /// Dvorak punctuation, which already puts them on row 1). True even where the space bar has
+    /// no room and they are skipped, so a bar too narrow is key for key the same either way.
+    let commaPeriodKeys: Bool
     /// Where the Hex key sits: Settings › Keyboard › Hex key picks the strip's trailing
     /// (Right) or leading (Left) end.
     let hexPlacement: HexKeyPlacement
@@ -645,6 +651,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         numberRow: Bool = false,
         joinsUnfoldedKeyboard: Bool = false,
         dvorakPunctuation: Bool = false,
+        commaPeriodKeys: Bool = false,
         availableHeight: CGFloat? = nil
     ) {
         self.width = width
@@ -666,6 +673,10 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.joinsUnfoldedKeyboard = joinsUnfoldedKeyboard
         // Apple's own keys stand in for these on every other arrangement, and docked on an iPad.
         self.dvorakPunctuation = dvorakPunctuation && pad?.isDocked != true && letters == .dvorak
+        // An iPhone's letters page in a text field only, and not where Dvorak punctuation
+        // already puts comma and period on row 1.
+        self.commaPeriodKeys = commaPeriodKeys && pad == nil && layer == .letters && field == .text
+            && !self.dvorakPunctuation
         let innerWidth = width - 2 * self.horizontalInset
         var metrics = KeyboardMetrics.for(
             orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad,
@@ -695,7 +706,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 language: language,
                 letters: letters,
                 hexPlacement: hexPlacement,
-                dvorakPunctuation: self.dvorakPunctuation
+                dvorakPunctuation: self.dvorakPunctuation,
+                commaPeriodKeys: self.commaPeriodKeys
             )
             self.keys = built.keys
             self.split = built.split
@@ -712,7 +724,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 letters: letters,
                 hexPlacement: hexPlacement,
                 joinedUnfoldedWide: joinsUnfoldedKeyboard && posture == .unfoldedWide && orientation == .portrait,
-                dvorakPunctuation: self.dvorakPunctuation
+                dvorakPunctuation: self.dvorakPunctuation,
+                commaPeriodKeys: self.commaPeriodKeys
             )
             self.split = nil
         }
@@ -937,7 +950,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// `joinedUnfoldedWide` is the Duo unfolded upright with Settings › Experiments › Join the
     /// keyboard when unfolded on: its rows keep the split keyboard's 39 pt keycaps, under the
     /// portrait bottom row's columns. `dvorakPunctuation` is the experiment of that name: comma
-    /// and period on row 1 and a semicolon by the space bar.
+    /// and period on row 1 and a semicolon by the space bar. `commaPeriodKeys` is the other
+    /// experiment's, already narrowed to the letters page in a text field on an iPhone.
     private static func buildKeys(
         width: CGFloat,
         metrics m: KeyboardMetrics,
@@ -950,7 +964,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         letters: KeyboardLetterLayout,
         hexPlacement placement: HexKeyPlacement,
         joinedUnfoldedWide: Bool,
-        dvorakPunctuation: Bool
+        dvorakPunctuation: Bool,
+        commaPeriodKeys: Bool
     ) -> [KeyboardKey] {
         let innerWidth = width - 2 * inset
         let rows = characterRows(for: layer, language: language, letters: letters)
@@ -1196,6 +1211,11 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             }
         }
 
+        // Settings › Experiments › Comma and period keys: a comma just left of the space bar and
+        // a period just right of it, taking their width from it, where the bar still holds a
+        // letter-wide key and a space besides both.
+        if commaPeriodKeys { Self.addCommaPeriodKeys(to: &drawn, keyWidth: referenceW, gap: m.gap) }
+
         // Touch targets: split every gap down the middle; outer keys reach the edges, and row 1
         // the gap under the strip (or the strip's bottom band).
         let top = m.stripArea - max(m.stripBottom, stripTouchBand)
@@ -1304,7 +1324,8 @@ extension KeyboardLayout {
         language: KeyboardLanguage,
         letters: KeyboardLetterLayout = .own,
         hexPlacement placement: HexKeyPlacement,
-        dvorakPunctuation: Bool = false
+        dvorakPunctuation: Bool = false,
+        commaPeriodKeys: Bool = false
     ) -> (keys: [KeyboardKey], split: SplitGeometry) {
         typealias G = SplitGeometry
         // Dvorak splits like the other layouts, delete ending row 3 (Apple's split Dvorak unobserved).
@@ -1429,6 +1450,11 @@ extension KeyboardLayout {
             add(kind, row: 3, x: x, w: w, label: label, rightHalf: true)
             x += w + G.gap
         }
+
+        // Settings › Experiments › Comma and period keys: a comma just left of the left half's
+        // space bar and a period just right of the right half's, taking their width from the
+        // bars, where each still holds a letter-wide key and a space besides it.
+        if commaPeriodKeys { Self.addSplitCommaPeriodKeys(to: &drawn, keyWidth: G.keyWidth, gap: G.gap) }
 
         // Touch targets: each half tiles from its side to half a gap past its inner key; the
         // middle between the halves is no key's.
