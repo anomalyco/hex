@@ -69,6 +69,9 @@ struct FullKeyboardSettings {
     /// Simulator scenes pass `--experiment-comma-period-keys` for Settings › Experiments ›
     /// Comma and period keys.
     static let commaPeriodKeysLaunchArgument = "--experiment-comma-period-keys"
+    /// Simulator scenes pass `--experiment-quick-accents` for Settings › Experiments ›
+    /// Quick accents.
+    static let quickAccentsLaunchArgument = "--experiment-quick-accents"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
@@ -95,6 +98,7 @@ struct FullKeyboardSettings {
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
         static let commaPeriodKeys = "experiments.commaPeriodKeys"
+        static let quickAccents = "experiments.quickAccents"
     }
 
     private let defaults: UserDefaults?
@@ -326,6 +330,16 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.commaPeriodKeys) }
     }
 
+    /// Settings › Experiments › Quick accents: a held letter's callout opens on its language's
+    /// preferred accent (Spanish "o" → "ó"), or the first variant after the key's own where the
+    /// language has none, so letting go types it. Sliding still picks another, and the 123 and
+    /// #+= pages' held symbols are unchanged. Off by default, like every experiment. Stored as
+    /// `experiments.quickAccents`.
+    var quickAccents: Bool {
+        get { defaults?.bool(forKey: Key.quickAccents) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.quickAccents) }
+    }
+
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.
     /// When switching by default.
     var dictationBarAutoStart: DictationBarAutoStart {
@@ -349,8 +363,9 @@ struct FullKeyboardSettings {
     /// the theme it draws,
     /// `--hex-key left|right` for the Hex key's side, `--number-row on|off` for the number row,
     /// `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded,
-    /// `--experiment-dvorak-punctuation` for the Dvorak punctuation keys, and
-    /// `--experiment-comma-period-keys` for the comma and period keys.
+    /// `--experiment-dvorak-punctuation` for the Dvorak punctuation keys,
+    /// `--experiment-comma-period-keys` for the comma and period keys, and
+    /// `--experiment-quick-accents` for the quick accents.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -373,6 +388,9 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.commaPeriodKeysLaunchArgument) {
             commaPeriodKeys = true
+        }
+        if arguments.contains(Self.quickAccentsLaunchArgument) {
+            quickAccents = true
         }
         if arguments.contains(Self.keyboardThemesLaunchArgument) {
             keyboardThemesEnabled = true

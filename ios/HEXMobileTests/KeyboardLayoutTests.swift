@@ -3388,4 +3388,18 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertTrue(settings.commaPeriodKeys)
         XCTAssertEqual(defaults.object(forKey: "experiments.commaPeriodKeys") as? Bool, true)
     }
+
+    /// Settings › Experiments › Quick accents is off by default, keeps its App Group key
+    /// (`experiments.quickAccents`), and `--experiment-quick-accents` turns it on.
+    func testQuickAccentsIsOffByDefault() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertFalse(settings.quickAccents)
+        XCTAssertFalse(FullKeyboardSettings(defaults: nil).quickAccents, "without the App Group")
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.quickAccentsLaunchArgument])
+        XCTAssertTrue(settings.quickAccents)
+        XCTAssertEqual(defaults.object(forKey: "experiments.quickAccents") as? Bool, true)
+    }
 }

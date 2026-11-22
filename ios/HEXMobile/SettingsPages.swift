@@ -614,6 +614,7 @@ struct ExperimentsSettingsPage: View {
     @State private var koreanKeyboard = FullKeyboardSettings().koreanKeyboard
     @State private var dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
     @State private var commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
+    @State private var quickAccents = FullKeyboardSettings().quickAccents
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
     @State private var keyboardTheme = FullKeyboardSettings().keyboardTheme
@@ -693,6 +694,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: commaPeriodKeys) { _, enabled in
                 FullKeyboardSettings().commaPeriodKeys = enabled
+            }
+            .onChange(of: quickAccents) { _, enabled in
+                FullKeyboardSettings().quickAccents = enabled
             }
             .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
                 FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
@@ -825,6 +829,15 @@ struct ExperimentsSettingsPage: View {
 
         SettingsDivider()
 
+        // Off by default: the callout opens on the key's own letter, as before.
+        SettingsToggleRow(
+            title: String(localized: "Quick accents"),
+            detail: String(localized: "Holding a letter selects its main accent, so letting go types it. Slide to pick another."),
+            isOn: $quickAccents
+        )
+
+        SettingsDivider()
+
         // Off by default: the emoji panel's ABC stays where it always was.
         SettingsToggleRow(
             title: String(localized: "ABC under the emoji key"),
@@ -948,6 +961,7 @@ struct ExperimentsSettingsPage: View {
         koreanKeyboard = FullKeyboardSettings().koreanKeyboard
         dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
         commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
+        quickAccents = FullKeyboardSettings().quickAccents
         emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
         keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
         keyboardTheme = FullKeyboardSettings().keyboardTheme
