@@ -1,8 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <!-- The keyboard's own strings, apart from the app's so each can change without the other. -->
+    <!-- The keyboard's own strings, apart from the app's so each can change without the other. Translated into
+         Simplified Chinese (values-zh-rCN); see strings.xml for the other languages. -->
     <string name="keyboard_hint_hold">Hold Hex to talk</string>
     <string name="keyboard_hint_password">Dictation off in password fields</string>
     <string name="keyboard_hint_microphone">Allow the microphone in Hex</string>
+    <!-- Dictation's notes, the same sentences MicCapture sends (HexKeyboard.speechNote). -->
+    <string name="keyboard_note_microphone">Microphone unavailable. Try again.</string>
+    <string name="keyboard_note_transcribe">Couldn’t transcribe. Try again.</string>
+    <string name="keyboard_note_no_speech">No speech heard</string>
+    <string name="keyboard_note_model">Speech model unavailable</string>
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>
@@ -14,30 +20,30 @@
     <string name="keyboard_space_language_action">Dictation language, %1$s</string>
     <string name="keyboard_transcribing">Transcribing</string>
     <string name="keyboard_recording">Recording</string>
-    <string name="keyboard_literal">“%1$s”</string>
+    <string name="keyboard_literal" translatable="false">“%1$s”</string>
     <string name="keyboard_keep">Keep %1$s</string>
     <string name="keyboard_suggest">Suggest %1$s</string>
     <string name="keyboard_menu">Hex menu</string>
     <string name="keyboard_menu_open">"Hex menu  ›"</string>
     <string name="keyboard_menu_done">Done</string>
     <string name="keyboard_menu_more" translatable="false">⋯</string>
-    <string name="keyboard_numbers_label">\?123</string>
+    <string name="keyboard_numbers_label" translatable="false">\?123</string>
     <string name="keyboard_numbers">Numbers and symbols</string>
-    <string name="keyboard_letters_label">ABC</string>
+    <string name="keyboard_letters_label" translatable="false">ABC</string>
     <string name="keyboard_letters">Letters</string>
     <string name="keyboard_emoji">Emoji</string>
     <string name="keyboard_next">Next keyboard</string>
     <string name="keyboard_hex">Hex dictation</string>
     <string name="keyboard_space">Space</string>
-    <string name="keyboard_space_translate">%1$s → English</string>
+    <string name="keyboard_space_translate" translatable="false">%1$s → English</string>
     <string name="keyboard_period">Period</string>
     <string name="keyboard_comma">Comma</string>
     <string name="keyboard_at">At sign</string>
     <string name="keyboard_slash">Slash</string>
     <string name="keyboard_correction">Correction %1$s</string>
     <string name="keyboard_return">Return</string>
-    <string name="keyboard_page_numbers">123</string>
-    <string name="keyboard_page_symbols">=\\&lt;</string>
+    <string name="keyboard_page_numbers" translatable="false">123</string>
+    <string name="keyboard_page_symbols" translatable="false">=\\&lt;</string>
     <string name="keyboard_more_symbols">More symbols</string>
     <string name="keyboard_pad_symbols" translatable="false">!?#</string>
     <string name="keyboard_pad">Number pad</string>
@@ -72,7 +78,7 @@
     <string name="keyboard_off">Off</string>
     <string name="keyboard_menu_chosen" translatable="false">✓</string>
     <string name="keyboard_menu_arrow" translatable="false">›</string>
-    <string name="keyboard_menu_more_value">"%1$s  ›"</string>
+    <string name="keyboard_menu_more_value" translatable="false">"%1$s  ›"</string>
     <!-- Hex's settings › Keyboard. -->
     <string name="settings_auto_capitalisation">Auto-capitalisation</string>
     <string name="settings_auto_capitalisation_detail">Capitalises the start of sentences</string>

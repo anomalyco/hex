@@ -40,6 +40,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.delay
+import ly.anoma.hex.keyboard.speechNote
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
 
@@ -70,7 +71,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         capture = MicCapture(LocalSpeech(applicationContext),
-            update = { next, reason -> phase = next; notice = reason },
+            update = { next, reason -> phase = next; notice = speechNote(reason) },
             meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))

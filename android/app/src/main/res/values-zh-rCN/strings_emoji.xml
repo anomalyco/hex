@@ -1,0 +1,14 @@
+<resources xmlns:tools="http://schemas.android.com/tools">
+    <!-- The emoji picker's section titles: its own Simplified Chinese translations (Chinese has no capitals
+         to take out), listed so lint sees every title translated. -->
+    <string name="emoji_category_recent" tools:override="true">最近使用过</string>
+    <string name="emoji_category_emotions" tools:override="true">表情符号</string>
+    <string name="emoji_category_people" tools:override="true">人物</string>
+    <string name="emoji_category_animals_nature" tools:override="true">动物和自然</string>
+    <string name="emoji_category_food_drink" tools:override="true">食品和饮料</string>
+    <string name="emoji_category_travel_places" tools:override="true">旅游和地点</string>
+    <string name="emoji_category_activity" tools:override="true">活动和庆典</string>
+    <string name="emoji_category_objects" tools:override="true">物体</string>
+    <string name="emoji_category_symbols" tools:override="true">符号</string>
+    <string name="emoji_category_flags" tools:override="true">旗帜</string>
+</resources>

@@ -1,6 +1,8 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <!-- Hex's interface is English on every phone; only the emoji picker's titles have translations. -->
-    <string name="app_name">Hex</string>
+    <!-- Hex's interface is in English and Simplified Chinese (values-zh-rCN), as iPhone Hex's is. German, Spanish,
+         French, Italian and Norwegian have only the emoji picker's titles, so lint is told not to expect the rest
+         there (MissingTranslation); every string here has a Chinese one. -->
+    <string name="app_name" translatable="false">Hex</string>
     <string name="full_keyboard">Full keyboard</string>
     <string name="back">Back</string>
 

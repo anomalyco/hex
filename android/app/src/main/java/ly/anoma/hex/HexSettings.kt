@@ -52,7 +52,8 @@ private enum class Page(val title: Int) {
     }
 }
 
-private val Style.label get() = when (this) {
+/** A dictation style's name, in the app and the keyboard's menu. */
+internal val Style.label get() = when (this) {
     Style.Polished -> R.string.style_polished
     Style.Casual -> R.string.style_casual
     Style.Notes -> R.string.style_notes

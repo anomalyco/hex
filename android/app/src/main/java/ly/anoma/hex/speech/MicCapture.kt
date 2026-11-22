@@ -13,6 +13,8 @@ import kotlin.math.sqrt
 
 internal enum class SpeechPhase { Idle, Opening, Listening, Transcribing }
 
+private const val LOG_TAG = "HexSpeech"
+
 // The IME calls start/finish/cancel on the main thread. One worker records, another transcribes,
 // so a dictation can start while the one before is still transcribing (as desktop Hex queues
 // them); results are inserted in the order they were spoken. Every posted result belongs to its
@@ -184,7 +186,7 @@ internal class MicCapture(
             } finally { record.release() }
         }
         // Only with "setprop log.tag.HexSpeech DEBUG": how much audio arrived, never the audio or its words.
-        if (Log.isLoggable("HexSpeech", Log.DEBUG)) Log.d("HexSpeech", "captured $count samples, $voiced voiced")
+        if (Log.isLoggable(LOG_TAG, Log.DEBUG)) Log.d(LOG_TAG, "captured $count samples, $voiced voiced")
         if (ticket.cancelled) return
         if (voiced < rate / 10 || count < rate / 4) {
             complete(ticket, "No speech heard")
