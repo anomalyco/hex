@@ -621,8 +621,10 @@ never at a launch by itself.
     that lifts on the key it went down on, never more than 1.6 key pitches from it, is a
     tap that slid: its letter goes in as a tap's would ("a" dragged a little too far and
     back), unless it read as a word that starts and ends on that key ("lol").
-    `SwipeDecoder` is a shape-matching decoder after SHARK2: the path is resampled to 32
-    points in key pitches; words come from the language's typing model by the keys the
+    The decoder (`SwipeDecoder`, a wrapper of the keyboard's Rust core: it lives in
+    `crates/keyboard/core/src/swipe` and is tuned there) is a shape-matching decoder
+    after SHARK2: the path is resampled to 32 points in key pitches; words come from the
+    language's typing model by the keys the
     path starts and ends near (each start letter is one range of the sorted word list,
     read in place from the memory-mapped model, so nothing is built or kept between
     swipes), kept when every key lies near the path and their ideal path (the polyline
@@ -1599,7 +1601,11 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
 
 ## Build & Test
 
-Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46.0+.
+Prerequisites: Xcode 26+, [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46.0+, and
+[rustup](https://rustup.rs) for the keyboard's Rust core (`crates/keyboard`), which
+HEXKeyboard's first build phase builds: rustup installs the toolchain and iOS targets
+`crates/keyboard/rust-toolchain.toml` pins. The core is built for arm64 only, so Intel
+(x86_64) simulators are unsupported.
 
 ```sh
 cd ios
