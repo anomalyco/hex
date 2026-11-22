@@ -623,7 +623,7 @@ struct ExperimentsSettingsPage: View {
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
-    @State private var keyboardParakeet = KeyboardParakeetSettings().isEnabled
+    @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
     private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
 
     var body: some View {
@@ -903,12 +903,13 @@ struct ExperimentsSettingsPage: View {
 
         SettingsDivider()
 
-        // Off by default: the keyboard's own dictation keeps Apple's speech recognition. On, it
-        // transcribes with Parakeet in the keyboard once downloaded and compiled there.
+        // On unless turned off: the keyboard's own English dictation transcribes with Parakeet in
+        // the keyboard once downloaded (by itself on Wi-Fi) and compiled there; off, it keeps
+        // Apple's speech recognition.
         SettingsToggleRow(
             title: String(localized: "Speech model in keyboard"),
             detail: keyboardParakeetFits
-                ? String(localized: "\(KeyboardParakeetDownload.size) download. Until it's ready, the keyboard uses Apple's speech recognition.")
+                ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
                 : String(localized: "Needs an iPhone with 6 GB of memory or more"),
             isOn: $keyboardParakeet
         )
@@ -942,7 +943,7 @@ struct ExperimentsSettingsPage: View {
         joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
         learnPerLanguage = TypingJournalSettings().learnsPerLanguage
         multilingualParakeet = MultilingualParakeetSettings().isEnabled
-        keyboardParakeet = KeyboardParakeetSettings().isEnabled
+        keyboardParakeet = KeyboardParakeetSettings().isOn
     }
 
     private static var multilingualParakeetSize: String {

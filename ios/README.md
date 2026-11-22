@@ -359,11 +359,24 @@ never at a launch by itself.
     pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
     on an iPhone are unmeasured.
   - **Speech model in keyboard (Settings › Experiments › Speech model in keyboard, iOS
-    26+):** Off by default, and disabled on iPhones under 6 GB
-    (`KeyboardParakeetSettings`, in the App Group). Off, nothing of it loads and the
-    keyboard dictates exactly as before. On, Hex downloads Parakeet V2 (464 MB) into the
-    App Group (`KeyboardParakeetDownload`; turning it off stops and deletes it unless Hex
-    itself dictates with V2), and the keyboard's own dictation transcribes with Parakeet in
+    26+):** On unless the person turns it off, and disabled (shown off) on iPhones under
+    6 GB (`KeyboardParakeetSettings`, in the App Group; a value stored by hand wins, so a
+    switch turned off stays off). Off, nothing of it loads and the keyboard dictates exactly
+    as before. On, Hex downloads Parakeet V2 (464 MB, about 700 MB with the keyboard's
+    compiled copy) into the App Group (`KeyboardParakeetDownload`; turning it off stops and
+    deletes it unless Hex itself dictates with V2). By itself it downloads only where the
+    keyboard would use it (`KeyboardParakeetDownload.hold`): English dictation without
+    Two-language dictation or the Multilingual model, the keyboard's own memory limit
+    measured on this iPhone (the keyboard writes footprint plus `os_proc_available_memory`
+    to the App Group at each launch and tells Hex with a Darwin notification) and at least
+    `KeyboardParakeetBudget.requiredLimit`, a connection that isn't expensive or constrained
+    (`NWPathMonitor`: not cellular, a personal hotspot or Low Data Mode), and 2 GB free.
+    It checks at launch, whenever Hex comes to the front, when such a connection returns and
+    when the keyboard reports its limit. Turned on by hand (a stored true, including from
+    the builds where it was off by default) it downloads at once on any connection. Until
+    then the row says what it waits for: "Downloads after you first use the Hex keyboard",
+    "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
+    dictation". The keyboard's own dictation transcribes with Parakeet in
     the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
     V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
     dictates once its files are there, in which case Dictate and the Hex key stop opening
@@ -379,9 +392,14 @@ never at a launch by itself.
     that, and uses Apple's speech recognition exactly as with the experiment off whenever
     the model isn't loaded, isn't on the Neural Engine (the keyboard's Neural Engine memory,
     else Core ML's compute plan before iOS 27), another transcription runs, the keyboard's
-    memory limit (footprint plus `os_proc_available_memory`) is under 96 MB (V2) or 115 MB
-    (Ultra), too little is left, it hears nothing, or it fails (`KeyboardParakeetBudget`
-    has the measured numbers). The Experiments row says what it's doing: downloading,
+    memory limit (footprint plus `os_proc_available_memory`) is under 96 MB (V2 and Ultra
+    alike: Ultra's transcription rose 9 MB in Hex's keyboard, V2's 16 MB), too little is
+    left, it hears nothing, or it fails (`KeyboardParakeetBudget` has the measured
+    numbers). Core ML keys what it compiled to the files themselves: a model downloaded
+    again, or moved, compiles again, so the log calls a load "cold" by its time (5 s or
+    more), and moving a legacy folder forgets the app's compile record for it
+    (`ParakeetCompileRecord.forget`), so V2 says it's optimizing for this iPhone and Ultra
+    gets ready beside the engine that dictates. The Experiments row says what it's doing: downloading,
     downloaded, getting ready in the keyboard, ready, or that the keyboard can't use it now
     (`KeyboardParakeetSettings.keyboardState`, written by the keyboard). Each dictation logs
     its engine, the keyboard's limit, footprint before and at peak, load and transcription
@@ -389,10 +407,12 @@ never at a launch by itself.
     (iOS 27.2, keyboard limit 177 MB) with the app force-quit: V2's first load 15.4 s, the
     keyboard recording at 56 MB and peaking at 72 MB while V2 transcribed 9.4 s of audio in
     0.28 s (Apple's speech recognition, same clip: 0.34 s), with 468 MB on the Neural Engine
-    outside the footprint. A probe keyboard
-    (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`) put Ultra 19 MB above V2 and
-    60 s of audio at 0.25–0.5 s; on the CPU, four chunks at once passed the limit there, so
-    the keyboard never runs that. Linking FluidAudio into the keyboard grows its binary from
+    outside the footprint. Twenty dictations in one keyboard process stayed on V2 with a
+    peak of 96 MB, ten hide-and-show cycles and a five-minute hide kept the process and the
+    model, a new process reloaded it in 0.3 s, and Ultra peaked at 66 MB (607 MB on the
+    Neural Engine). A probe keyboard (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`)
+    put 60 s of audio at 0.25–0.5 s; on the CPU, four chunks at once passed the limit
+    there, so the keyboard never runs that. Linking FluidAudio into the keyboard grows its binary from
     5.9 to 12.6 MB and, with the experiment off, its footprint at launch by about 0.2 MB
     (writable data dyld fixes up), with no change to its first frame.
   - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by

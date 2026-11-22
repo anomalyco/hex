@@ -368,6 +368,11 @@ nonisolated struct ParakeetCompileRecord {
     func markCurrent() {
         defaults.set(system, forKey: key)
     }
+
+    /// Core ML compiles again for files that moved: the next load says so and takes its time.
+    func forget() {
+        defaults.removeObject(forKey: key)
+    }
 }
 
 /// Notes a Parakeet load that ended with Hex itself. iOS ends an app that passes its memory
