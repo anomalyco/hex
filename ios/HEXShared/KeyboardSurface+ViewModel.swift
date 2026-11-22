@@ -30,6 +30,8 @@ final class KeyboardViewModel: ObservableObject {
     static let commandAckTimeout: TimeInterval = 1.6
 
     let clock = KeyboardClockModel()
+    /// The words so far while the keyboard records with live words on (`LiveDictationPreviewHost`).
+    let liveText = LiveDictationText()
 
     @Published var hasFullAccess = true
     @Published var needsGlobeKey = true

@@ -4360,6 +4360,16 @@
           }
         }
       }
+    },
+    "Listening…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在聆听…"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
