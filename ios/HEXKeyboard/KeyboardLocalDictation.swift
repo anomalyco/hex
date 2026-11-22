@@ -1040,8 +1040,8 @@ private enum KeyboardSpeech {
 
         var errorDescription: String? {
             switch self {
-            case .noLocale: "Apple Speech doesn't have your language on this iPhone."
-            case .empty: "No speech detected"
+            case .noLocale: String(localized: "Apple's speech recognition can't dictate this language on this iPhone.")
+            case .empty: String(localized: "No speech heard.")
             }
         }
 

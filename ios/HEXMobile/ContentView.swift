@@ -345,7 +345,7 @@ struct ContentView: View {
                     .background(Color.white.opacity(0.07), in: Capsule())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel("End warm microphone session")
+                .accessibilityLabel("Turn off warm mic")
                 .hexTrayReveal(showWarmPill, reduceMotion: reduceMotion, offsetY: 2)
             }
         }

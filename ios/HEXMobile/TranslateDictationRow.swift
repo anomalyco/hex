@@ -72,14 +72,14 @@ struct TranslateDictationRow: View {
                 if Locale.Language(identifier: target).languageCode == source.languageCode {
                     // You dictate in the target already: switch the dictation language from the
                     // keyboard's Hex key to speak another one and paste in this one.
-                    Text("Switch the language from the Hex key to speak another one.")
+                    Text("Change the spoken language from the Hex key.")
                         .font(.system(size: 12))
                         .foregroundStyle(HexTheme.textMuted)
                 } else {
                 switch status {
                 case .installed where lastFailure?.reason == .needsHexOpen:
                     // Before iOS 26 the session lives in Hex's window (TranslationSessionHost).
-                    Text("iOS 18 couldn't translate the last dictation while Hex was in the background. Dictations you finish in Hex translate.")
+                    Text("On iOS 18, dictations translate only with Hex open.")
                         .font(.system(size: 12))
                         .foregroundStyle(HexTheme.textMuted)
                 case .installed where lastFailure?.reason == .failed:

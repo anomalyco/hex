@@ -127,7 +127,7 @@ extension DictationController {
             } else {
                 // Too little memory left to load it now: said, with Try again.
                 multilingualDownload.fail(
-                    String(localized: "Parakeet Ultra needs more memory than Hex has here. Hex uses its usual speech model instead.")
+                    String(localized: "Not enough memory for the multilingual model. Hex is using its usual model.")
                 )
             }
         }
@@ -281,10 +281,10 @@ extension DictationController {
             return UserFacingError.message(for: unavailable, context: .model)
         }
         if (error as? ParakeetTranscriber.TranscriberError) == .notEnoughMemory {
-            return String(localized: "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead.")
+            return String(localized: "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition.")
         }
         if (error as? ParakeetUltraTranscriber.TranscriberError) == .notEnoughMemory {
-            return String(localized: "Parakeet Ultra needs more memory than Hex has here. Hex uses its usual speech model instead.")
+            return String(localized: "Not enough memory for the multilingual model. Hex is using its usual model.")
         }
         return nil
     }

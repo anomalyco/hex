@@ -290,15 +290,15 @@ final class ParakeetUltraDownload {
             return String(localized: "The multilingual model needs \(ParakeetUltraTranscriber.downloadSize) of free space. Free some up, then try again.")
         }
         if error is StallWatch.Stalled || error is URLError {
-            return String(localized: "The multilingual model's download stopped. Check your connection. It picks up where it left off.")
+            return String(localized: "The multilingual model's download stopped. Check your connection and try again.")
         }
         switch error as? ParakeetUltraModel.DownloadError {
         case .badStatus(429):
             return String(localized: "Hugging Face is limiting downloads right now. Try again in a few minutes.")
         case .badStatus(let status):
-            return String(localized: "Hugging Face didn't send the multilingual model (error \(status)). Try again later.")
+            return String(localized: "The multilingual model didn't download (error \(status)). Try again later.")
         case .corrupt:
-            return String(localized: "A file of the multilingual model arrived damaged. Try again to download it again.")
+            return String(localized: "Part of the multilingual model arrived damaged. Try again.")
         case nil:
             return String(localized: "The multilingual model didn't download. Try again.")
         }
@@ -314,7 +314,7 @@ final class ParakeetUltraDownload {
         case .waiting(_, let seconds?):
             String(localized: "The multilingual model's download stopped. Trying again in \(seconds) s.")
         case .waiting(_, nil):
-            String(localized: "The multilingual model's download is paused. It carries on when you open Hex.")
+            String(localized: "The multilingual model's download resumes when you open Hex.")
         case .loading:
             String(localized: "Getting the multilingual model ready")
         case .failed(let message):
@@ -380,7 +380,7 @@ struct MultilingualModelStatus: View {
                             .monospacedDigit()
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("multilingual-model-status")
-                        Text("Hex dictates with its usual model meanwhile.")
+                        Text("Until then, Hex uses its usual model.")
                             .font(.system(size: 12))
                             .foregroundStyle(HexTheme.textMuted)
                             .fixedSize(horizontal: false, vertical: true)

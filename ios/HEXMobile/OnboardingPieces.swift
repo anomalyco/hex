@@ -203,7 +203,7 @@ struct OnboardingFailure: View {
 /// The lock line under Setting up Hex and the permissions.
 struct OnboardingPrivacyLine: View {
     var body: some View {
-        Label("Hex hears you on this iPhone. Your voice never leaves it.", systemImage: "lock")
+        Label("Your voice never leaves this iPhone.", systemImage: "lock")
             .font(.system(size: 13))
             .foregroundStyle(HexTheme.textMuted)
             .multilineTextAlignment(.center)

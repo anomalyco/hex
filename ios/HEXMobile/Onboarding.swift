@@ -13,7 +13,7 @@ struct OnboardingModel: Equatable {
     var stage: Stage
     /// The language it's for, in Hex's interface language ("English").
     var language: String
-    /// What Hex's own model is doing ("Optimizing for this iPhone… about a minute"), while it
+    /// What Hex's own model is doing ("Optimizing for this iPhone, about a minute"), while it
     /// prepares.
     var detail: String?
     /// Whether Hex downloads a model for it: not for Apple's on-device recognizer before iOS 26,
@@ -497,7 +497,7 @@ private struct OnboardingPermissionsPage: View {
                 OnboardingPermissionRow(
                     icon: "mic",
                     title: "Microphone",
-                    detail: "So Hex can hear you",
+                    detail: "For dictation",
                     done: microphoneDone,
                     // iOS asks right after this tap, so the pill says Continue, never Allow.
                     actionTitle: monitor.microphone == .denied ? "Open Settings" : "Continue"
@@ -511,7 +511,7 @@ private struct OnboardingPermissionsPage: View {
                 Rectangle().fill(HexTheme.borderWeak).frame(height: 0.5)
                 OnboardingPermissionRow(
                     icon: "keyboard",
-                    title: "Hex keyboard",
+                    title: "Hex Keyboard",
                     detail: "With Full Access",
                     done: keyboardDone,
                     actionTitle: "Open Settings"
@@ -604,7 +604,7 @@ struct OnboardingModelWait: View {
     var body: some View {
         VStack(spacing: 14) {
             OnboardingTitle("Almost ready")
-            Text("Finishing the speech model so Hex can hear you.")
+            Text("Getting the speech model ready.")
                 .font(.system(size: 15))
                 .foregroundStyle(HexTheme.textMuted)
                 .multilineTextAlignment(.center)
@@ -748,18 +748,18 @@ private struct OnboardingPracticePage: View {
                         .onboardingStagger(3)
 
                     if heardNothing && !complete {
-                        practiceNote(icon: "waveform", Text("Hex didn't hear any words. Try again a little louder."))
+                        practiceNote(icon: "waveform", Text("Hex didn't hear any words. Try speaking louder."))
                     }
 
                     if otherInput && !complete && monitor.fullAccessOn {
                         practiceNote(
                             icon: "hand.raised",
-                            Text("That came from iOS dictation or another keyboard, not Hex. Tap the Hex key on Hex's keyboard.")
+                            Text("That wasn't Hex. Tap the Hex key on the Hex keyboard.")
                         )
                     } else if hexKeyboardMissing && !complete {
                         practiceNote(
                             icon: "keyboard",
-                            Text("Don't see the Hex key? Tap \(Image(systemName: "globe")) until Hex's keyboard comes up.")
+                            Text("Don't see the Hex key? Tap \(Image(systemName: "globe")) until the Hex keyboard appears.")
                         )
                     }
 
@@ -1003,7 +1003,7 @@ private struct OnboardingReadyPage: View {
     private var subtitle: some View {
         switch left {
         case .nothing, .model: Text("Tap the Hex key in any app to talk.")
-        case .microphone: Text("Turn on the microphone in Settings so Hex can hear you.")
+        case .microphone: Text("Allow the microphone in Settings.")
         case .keyboard: Text("Add the Hex keyboard in Settings.")
         case .fullAccess: Text("Use the Hex keyboard once to finish.")
         }

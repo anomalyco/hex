@@ -38,9 +38,9 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Hex turns what you say into text on this iPhone. Audio never leaves your iPhone and is deleted once it's transcribed.</string>
+	<string>Hex turns what you say into text on this iPhone. Audio never leaves it and is deleted once it's transcribed.</string>
 	<key>NSSpeechRecognitionUsageDescription</key>
-	<string>Hex turns your recordings into text with Apple's on-device speech recognition. Nothing you say is sent to a server.</string>
+	<string>Hex uses Apple's on-device speech recognition to turn what you say into text. Nothing you say is sent to a server.</string>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>UIBackgroundModes</key>

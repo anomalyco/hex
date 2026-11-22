@@ -82,7 +82,7 @@ struct DictationLanguageRow: View {
             .padding(.horizontal, 16)
             .frame(minHeight: 48)
             if listsOnDeviceLanguages {
-                Text("The languages Apple's on-device speech has on this iPhone. One shows here once its keyboard and dictation are on in Settings › General › Keyboard.")
+                Text("To add a language, turn on its keyboard and dictation in Settings › General › Keyboard.")
                     .font(.system(size: 12))
                     .foregroundStyle(HexTheme.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
@@ -183,7 +183,7 @@ struct KeyboardLanguagesRow: View {
 
     private var summary: String {
         guard !chosen.isEmpty else {
-            return String(localized: "\(automaticKeyboardLanguage().displayName), like your dictation language")
+            return String(localized: "\(automaticKeyboardLanguage().displayName), same as dictation")
         }
         return chosen.map(\.displayName).joined(separator: ", ")
     }
@@ -248,7 +248,7 @@ struct KeyboardLanguagesPage: View {
             Section {
                 LanguageChoiceRow(
                     title: String(localized: "Automatic"),
-                    detail: String(localized: "\(automatic.displayName), like your dictation language"),
+                    detail: String(localized: "\(automatic.displayName), same as dictation"),
                     isChosen: chosen.isEmpty
                 ) {
                     choose([])
@@ -269,7 +269,7 @@ struct KeyboardLanguagesPage: View {
                     .id(chosen.map(\.rawValue).joined(separator: ","))
                 } footer: {
                     if chosen.count > 1 {
-                        Text("Slide along the space bar right away to switch. Hold it first and the slide moves the cursor.")
+                        Text("Slide the space bar to switch. Hold it first to move the cursor.")
                             .font(.system(size: 12))
                             .foregroundStyle(HexTheme.textMuted)
                     }
@@ -284,7 +284,7 @@ struct KeyboardLanguagesPage: View {
                 } header: {
                     LanguageSectionHeader(title: "Layout")
                 } footer: {
-                    Text("Moves the letters. Accents and autocorrect stay the language's.")
+                    Text("Accents and autocorrect still follow the language.")
                         .font(.system(size: 12))
                         .foregroundStyle(HexTheme.textMuted)
                 }

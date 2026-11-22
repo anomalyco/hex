@@ -14,7 +14,7 @@ struct TypingLogsView: View {
             List {
                 Section {
                     if days.isEmpty {
-                        Text("Type with Hex's keyboard and each day's log shows up here.")
+                        Text("No logs yet")
                             .foregroundStyle(.secondary)
                     }
                     ForEach(days) { day in
@@ -22,7 +22,7 @@ struct TypingLogsView: View {
                             .task(id: countKey(day)) { await count(day) }
                     }
                 } footer: {
-                    Text("One file per day, kept 14 days, one event per line. Password, code and card fields are never logged.")
+                    Text("One file per day, kept for 14 days. Password, code and card fields are never logged.")
                 }
 
                 if !days.isEmpty {
@@ -52,7 +52,7 @@ struct TypingLogsView: View {
                     reload()
                 }
             } message: {
-                Text("Every day's log is removed from this iPhone.")
+                Text("All logs are deleted from this iPhone.")
             }
             .refreshable { reload() }
         }

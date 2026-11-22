@@ -1283,7 +1283,7 @@ final class DictationControllerTests: XCTestCase {
         // A described error keeps its sentence.
         XCTAssertEqual(
             UserFacingError.message(for: ParakeetTranscriber.TranscriberError.notPrepared, context: .transcription),
-            "Parakeet V2 is not ready."
+            "The speech model isn't ready."
         )
         for message in [plain, UserFacingError.message(for: cannotInterrupt, context: .transcription)] {
             XCTAssertFalse(message.contains("OSStatus"))
@@ -1306,7 +1306,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(UserFacingError.message(for: offline, context: .model), UserFacingError.offline)
         XCTAssertEqual(
             UserFacingError.message(for: ParakeetTranscriber.TranscriberError.downloadFailed, context: .model),
-            "Parakeet V2 didn't download. Check your connection and try again."
+            "The speech model didn't download. Check your connection and try again."
         )
 
         // Hex's own language messages, short enough for the keyboard's strip.
@@ -1418,7 +1418,7 @@ final class DictationControllerTests: XCTestCase {
             XCTAssertLessThan(snapshot.fractionCompleted, 0.99)
             last = snapshot.fractionCompleted
         }
-        XCTAssertEqual(progress.snapshot(at: 120).detail, "Optimizing for this iPhone… about a minute")
+        XCTAssertEqual(progress.snapshot(at: 120).detail, "Optimizing for this iPhone, about a minute")
         XCTAssertEqual(
             progress.snapshot(at: 100 + progress.expectedLoadSeconds * 2 + 1).detail,
             "Still optimizing. The first time can take a few minutes."
@@ -1669,7 +1669,7 @@ final class DictationControllerTests: XCTestCase {
         download.start()
         try await waitUntil { download.isFailed }
         XCTAssertEqual(UltraStubProtocol.requested.count, ParakeetUltraDownload.automaticTries)
-        XCTAssertEqual(download.status, "Hugging Face didn't send the multilingual model (error 503). Try again later.")
+        XCTAssertEqual(download.status, "The multilingual model didn't download (error 503). Try again later.")
 
         UltraStubProtocol.script([.status(404)])
         download.restart()
@@ -1678,7 +1678,7 @@ final class DictationControllerTests: XCTestCase {
 
         XCTAssertEqual(
             ParakeetUltraDownload.message(for: URLError(.notConnectedToInternet)),
-            "The multilingual model's download stopped. Check your connection. It picks up where it left off."
+            "The multilingual model's download stopped. Check your connection and try again."
         )
         XCTAssertTrue(ParakeetUltraDownload.message(for: CocoaError(.fileWriteOutOfSpace)).contains("free space"))
         XCTAssertEqual(ParakeetUltraDownload.backoff(1), 2)
@@ -1831,8 +1831,8 @@ final class DictationControllerTests: XCTestCase {
         try await settle()
         controller.finishRecording()
         try await settle()
-        XCTAssertEqual(controller.phase, .failed("Parakeet V2 is not ready."))
-        XCTAssertEqual(bridge.snapshot().message, "Parakeet V2 is not ready.")
+        XCTAssertEqual(controller.phase, .failed("The speech model isn't ready."))
+        XCTAssertEqual(bridge.snapshot().message, "The speech model isn't ready.")
     }
 
     /// The keyboard opened Hex to dictate (its speech model was missing) and the microphone
@@ -2135,7 +2135,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(choice.engine(for: "en-US", appleSpeechPicks: false), .onDeviceRecognizer)
         XCTAssertEqual(
             choice.notice(for: "en-US"),
-            "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead."
+            "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition."
         )
         let transcriber = DictationController.transcriberBeforeAppleSpeech(choice: choice, suite: suiteName, resolve: { _ in "en-US" })
         XCTAssertTrue(transcriber is OnDeviceSpeechTranscriber)
@@ -2170,7 +2170,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.phase, .ready)
         XCTAssertEqual(
             controller.languageNotice,
-            "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead."
+            "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition."
         )
     }
 
@@ -2198,7 +2198,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(access.requests, 1)
         XCTAssertEqual(
             details.values,
-            ["Checking Apple's on-device speech", "Allow Speech Recognition. It stays on this iPhone."],
+            ["Checking on-device speech recognition", "Allow Speech Recognition. It stays on this iPhone."],
             "says it stays on the iPhone before iOS asks"
         )
         let languageID = await transcriber.languageIdentifier
@@ -2661,7 +2661,7 @@ final class SpeechLanguagePickerTests: XCTestCase {
     func testAnEnglishOnlyIPhoneStillDictatesEnglishAfterItsModelFailedOnce() async {
         // TestFlight build 31, iPhone SE (3rd generation), iOS 26.6.1: English's model didn't
         // install once, so it was set aside, and with no other language to move to Automatic
-        // picked nothing: "Apple Speech doesn't have your language on this iPhone." It tries
+        // picked nothing: "Apple's speech recognition can't dictate this language on this iPhone." It tries
         // English again instead.
         let english = await pick(preferred: ["en-US"], setAside: ["en-US"])
         XCTAssertEqual(english?.identifier, "en-US")

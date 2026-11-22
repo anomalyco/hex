@@ -95,9 +95,9 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         var errorDescription: String? {
             switch self {
             case .emptyTranscript:
-                String(localized: "Apple Speech did not detect any speech.")
+                String(localized: "No speech heard.")
             case .unavailable:
-                String(localized: "Apple Speech can't transcribe this language on this iPhone.")
+                String(localized: "Apple's speech recognition can't dictate this language on this iPhone.")
             }
         }
     }

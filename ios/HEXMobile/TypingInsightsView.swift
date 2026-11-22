@@ -47,7 +47,7 @@ struct TypingInsightsView: View {
             }
 
             if !missedKeys.isEmpty {
-                section("Where you tap off-centre") {
+                section("Where you tap off-center") {
                     ForEach(missedKeys, id: \.key) { item in
                         row(item.key.uppercased(), detail: item.direction)
                     }
@@ -61,7 +61,7 @@ struct TypingInsightsView: View {
                     .font(.system(size: 13, weight: .medium))
             }
             .disabled(snapshot.isEmpty && disabledFixes.isEmpty)
-            .confirmationDialog("Delete what Hex learned about your typing and dictation?", isPresented: $confirmingDelete) {
+            .confirmationDialog("Delete what Hex learned?", isPresented: $confirmingDelete) {
                 Button("Delete", role: .destructive) {
                     TypingJournal.delete()
                     AdaptiveTouchSettings().requestReset()
@@ -74,7 +74,7 @@ struct TypingInsightsView: View {
 
     private var summary: String {
         if snapshot.isEmpty {
-            return String(localized: "Fills in as you type and dictate with Hex")
+            return String(localized: "Nothing learned yet")
         }
         let taps = snapshot.tapCount
         let fixes = snapshot.corrections.count

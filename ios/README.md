@@ -563,7 +563,7 @@ never at a launch by itself.
       update, fixed spread. No letters, words, times or sequences: 23,588 bytes, in a file
       in the keyboard's own container with Full Access (protected, excluded from backup,
       never in the App Group or its exports, written in batches off the main thread), in
-      memory only without it. Settings shows Session only, Learning (n of 400 taps) or
+      memory only without it. Settings shows that it resets without Full Access, Learning (n of 400 taps) or
       Active from counts the keyboard reports; Reset touch learning, and Delete what Hex
       learned, bump a reset generation that drops it from memory and disk (the file is
       the keyboard's, so it goes the next time the keyboard runs) and that a write
@@ -691,8 +691,7 @@ never at a launch by itself.
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
     the dictation bar, so testers who turned that experiment off keep the bar;
-    an iPad follows the same choice, and there, while Full is chosen, the row says "The full
-    keyboard works on iPad too", since until build 117 an iPad always showed the bar), Auto-start (Never, On
+    an iPad follows the same choice, where until build 117 it always showed the bar), Auto-start (Never, On
     switch by default, or Always) while the dictation bar is chosen, then Languages, Number row (off by default), Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words, Vocabulary (Hex's custom vocabulary list, how many words it
     holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
@@ -759,7 +758,7 @@ never at a launch by itself.
   iPhone yet. Using English."); a language picked by hand says so and offers that
   one ("Try English", with **Use English** in the app). With nothing else to move
   to (an English-only iPhone), Automatic tries the set-aside language again
-  rather than none, so "Apple Speech doesn't have your language" means neither
+  rather than none, so "Apple's speech recognition can't dictate this language" means neither
   module lists any of the iPhone's languages. Offline or stalled, it
   says the download failed and tries again next time. In the keyboard, a model it
   can't get itself (each process holds its own reservation, and one released or
