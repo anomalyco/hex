@@ -222,17 +222,21 @@ nonisolated struct HangulComposer {
 nonisolated struct KoreanKeyboardState {
     var isEnabled = KoreanKeyboardExperiment.isEnabled
     var composer = HangulComposer()
-    /// The field's text after the cursor and the field itself when the run was last shown:
-    /// a cursor move to text that ends alike still has to commit the run.
+    /// The last 32 characters before the run, the field's text after the cursor, and the
+    /// field itself when the run was last written: a cursor move to text that ends alike
+    /// still has to commit the run.
+    var beforeTail = ""
     var afterText: String? = nil
     var documentIdentifier: UUID? = nil
-    /// True while the field's text is being replaced, so its own change notifications don't
-    /// look like a move somewhere else.
+    /// True while `replaceHangul` writes the field. Host notifications arrive asynchronously,
+    /// so the recorded text comparison is the real protection; this only fences a callback
+    /// that lands during the write.
     var isUpdating = false
 
     /// The run is in the field: forget it and what the host looked like around it.
     mutating func reset() {
         composer.reset()
+        beforeTail = ""
         afterText = nil
         documentIdentifier = nil
     }

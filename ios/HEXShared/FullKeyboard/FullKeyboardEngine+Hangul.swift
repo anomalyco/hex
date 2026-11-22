@@ -70,9 +70,9 @@ extension FullKeyboardEngine {
     }
 
     /// Whether the run is still the field's at the cursor: no selection, the same field and
-    /// text after the cursor as when it was last shown, and its own text right before it. The
-    /// text after the cursor is what tells a move to another place whose text before it ends
-    /// alike from no move at all.
+    /// text after the cursor as when it was last written, and the same tail of text before the
+    /// run. The tail is what tells a move to another place whose text before it ends alike from
+    /// no move at all, even when the host reports no text after the cursor.
     private func hangulRunIsBeforeCursor() -> Bool {
         guard !korean.composer.isEmpty else { return false }
         guard (target.selectedText ?? "").isEmpty else { return false }
@@ -81,9 +81,10 @@ extension FullKeyboardEngine {
            document != current {
             return false
         }
-        guard target.documentContextAfterInput == korean.afterText else { return false }
-        let run = korean.composer.text
-        return (textBefore ?? "").hasSuffix(run) || (typingContext ?? "").hasSuffix(run)
+        guard (target.documentContextAfterInput ?? "") == (korean.afterText ?? "") else { return false }
+        let expected = korean.beforeTail + korean.composer.text
+        if (textBefore ?? "").hasSuffix(expected) { return true }
+        return (typingContext ?? "").hasSuffix(expected)
     }
 
     /// Replaces the run's text in the field: only what changed since `old` is deleted, then
@@ -103,9 +104,6 @@ extension FullKeyboardEngine {
             korean.reset()
             return
         }
-        // Composing only edits before the cursor, so the text after it is the run's to keep.
-        let after = target.documentContextAfterInput
-        let document = target.documentIdentifier
         forgetTextAroundKeys()
         tokenTaps.removeAll()
         lastSpaceAt = nil
@@ -119,7 +117,11 @@ extension FullKeyboardEngine {
         let deleted = oldCharacters.count - common
         let inserted = String(newCharacters[common...])
         let kept = String(oldCharacters[..<common])
-        rememberTypingContext(before: String(before.dropLast(oldCharacters.count)) + kept, inserted: inserted)
+        // The text before the run, and a tail of it because a host can trim the front of its
+        // window; the run keeps only what the composer still shows.
+        let beforeRun = String(before.dropLast(oldCharacters.count))
+        let tail = String(beforeRun.suffix(32))
+        rememberTypingContext(before: beforeRun + kept, inserted: inserted)
         korean.isUpdating = true
         defer { korean.isUpdating = false }
         for _ in 0..<deleted {
@@ -129,11 +131,15 @@ extension FullKeyboardEngine {
             target.insertText(inserted)
         }
         if korean.composer.isEmpty {
+            korean.beforeTail = ""
             korean.afterText = nil
             korean.documentIdentifier = nil
         } else {
-            korean.afterText = after
-            korean.documentIdentifier = document
+            // Read back after the write: a jamo that replaced a selection must not keep the
+            // selection's old text after the cursor.
+            korean.beforeTail = tail
+            korean.afterText = target.documentContextAfterInput
+            korean.documentIdentifier = target.documentIdentifier
         }
         typingLog?.edit("insert", [
             TypingLogField("deleted", .string(String(oldCharacters[common...]))),

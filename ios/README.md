@@ -956,13 +956,16 @@ never at a launch by itself.
   한 + ㅏ → 하나), the keyboard replacing only the run's changed characters through
   `deleteBackward`/`insertText` (no marked text). Space, return, punctuation, a page or
   language switch, emoji, dictation, paste, undo, a selection action, the delete-word swipe, a
-  cursor move or hiding the keyboard commits the run. The cursor check records the text after
-  the cursor and the field with the run and compares them, plus the host's selected text, so a
-  move to another place whose text before it ends alike commits too; a host that reports
-  neither is best-effort. Korean has no accent holds, spelling dictionary, autocorrect, word
-  suggestions or typing model, and with the experiment off the language isn't listed,
-  Automatic never picks it, and a stored "ko" is ignored. Unit tests only (`HangulComposerTests`); no CI compiles the
-  iOS targets and no device run checks it.
+  cursor move or hiding the keyboard commits the run. The cursor check records the last 32
+  characters before the run, the text after the cursor and the field, plus the host's selected
+  text, so a move to another place whose text before it ends alike commits too while a host
+  that trims the front of its window still matches; a host that trims more than the tail or
+  reports no selection is best-effort. A field whose text after the cursor changes while you
+  type (inline autocomplete) commits each jamo, so syllables don't join there. Korean has no
+  accent holds, spelling dictionary, autocorrect, word suggestions or typing model, and with
+  the experiment off the language isn't listed, Automatic never picks it, and a stored "ko" is
+  ignored. Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,
+  `KoreanKeyboardGatingTests`): no CI compiles the iOS targets and no device run checks it.
 - **Layout per language (Settings › Keyboard › Languages › Layout):** each language the keys
   show (every chosen one, Automatic's while none is, and only the first of English and
   Español together) gets a menu of the layouts Apple's Keyboard Layout list offers for it

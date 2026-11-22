@@ -2911,13 +2911,17 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   deleting only the part of the run that changed and inserting what it became; space,
 │   return, punctuation, a page or language switch, emoji, dictation, paste, undo, a selection
 │   action, the delete-word swipe, a cursor move or the keyboard hiding commits the run. A
-│   cursor move is recognized by the text after it and the field recorded with the run, and by
-│   a reported selection, so moving to another place whose text before it ends alike still
-│   commits; a host that reports neither the text after the cursor nor selections is
-│   best-effort. Korean has no accent holds, spelling dictionary, autocorrect, word
-│   suggestions or typing model, and while the experiment is off it is not listed, Automatic
-│   never picks it, and a stored "ko" is ignored.
-│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
+│   cursor move is recognized by the text before the run (a 32-character tail, so a host that
+│   trims the front of its window still matches), the text after the cursor, the field, and a
+│   reported selection; a host that trims more than the tail or reports no selection is
+│   best-effort. A field whose text after the cursor changes while you type (inline
+│   autocomplete) commits each jamo, so syllables don't join there. Korean has no accent
+│   holds, spelling dictionary, autocorrect, word suggestions or typing model, and while the
+│   experiment is off it is not listed, Automatic never picks it, and a stored "ko" is
+│   ignored.
+│   Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,
+│   `KoreanKeyboardGatingTests`): no CI compiles the iOS targets, and no physical iPhone run
+│   checks it
 ├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
 │   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
 │   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file

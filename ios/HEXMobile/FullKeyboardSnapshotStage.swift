@@ -597,6 +597,8 @@ class FixtureTextTarget: KeyboardTextTarget {
     var smartDashesType: UITextSmartDashesType?
     var selectedText: String?
     var documentIdentifier: UUID?
+    /// Simulates a host whose window reports no text after the cursor.
+    var hidesAfterText = false
 
     init(text: String = "", appearance: UIKeyboardAppearance? = nil) {
         self.text = text
@@ -611,7 +613,7 @@ class FixtureTextTarget: KeyboardTextTarget {
     }
 
     var documentContextAfterInput: String? {
-        String(text.dropFirst(max(0, min(text.count, cursorIndex))))
+        hidesAfterText ? nil : String(text.dropFirst(max(0, min(text.count, cursorIndex))))
     }
 
     var hasText: Bool { !text.isEmpty }

@@ -120,7 +120,11 @@ final class HangulKeyboardTests: XCTestCase {
 
     /// A field with `text` before the cursor (at its end) and the Korean keyboard on it.
     private func configure(text: String = "") {
-        target = FixtureTextTarget(text: text)
+        configure(FixtureTextTarget(text: text))
+    }
+
+    private func configure(_ field: FixtureTextTarget) {
+        target = field
         target.autocapitalizationType = UITextAutocapitalizationType.none
         engine = FullKeyboardEngine(target: target)
         engine.width = 393
@@ -216,6 +220,54 @@ final class HangulKeyboardTests: XCTestCase {
         target.selectedText = "이"
         engine.deleteBackward()
         XCTAssertEqual(target.text, "", "the host's delete, not deleteHangulBackward's stepping")
+    }
+
+    /// A host with no text after the cursor still tells two lines ending alike apart from the
+    /// tail before the run: delete at the second line's end takes its last character, not the
+    /// run at the first line's end.
+    func testANilAfterTextHostStillCommitsOnACursorMove() {
+        let field = FixtureTextTarget(text: "같이\n같이")
+        field.hidesAfterText = true
+        configure(field)
+        engine.target.adjustTextPosition(byCharacterOffset: -3)
+        tap("ㅇ")
+        tap("ㅣ")
+        XCTAssertEqual(target.text, "같이이\n같이")
+        engine.target.adjustTextPosition(byCharacterOffset: 3)
+        engine.deleteBackward()
+        XCTAssertEqual(target.text, "같이이\n같", "the first line stays; the second loses its last character")
+    }
+
+    /// The same host still composes normally: the tail of an empty field is empty.
+    func testANilAfterTextHostComposes() {
+        let field = FixtureTextTarget()
+        field.hidesAfterText = true
+        configure(field)
+        tap("ㅎ")
+        tap("ㅏ")
+        tap("ㄴ")
+        XCTAssertEqual(target.text, "한")
+        engine.deleteBackward()
+        XCTAssertEqual(target.text, "하")
+    }
+
+    /// A delete key's jitter is not a word delete: the run survives it, so the next delete
+    /// steps back one jamo rather than removing the syllable.
+    func testDeleteKeyJitterDoesNotCommitTheRun() {
+        tap("ㅎ")
+        tap("ㅏ")
+        tap("ㄴ")
+        XCTAssertEqual(target.text, "한")
+        let plane = KeyboardKeyPlaneView(engine: engine)
+        guard let delete = engine.layout.key(.delete) else { return XCTFail("no delete key") }
+        let start = CGPoint(x: delete.frame.midX, y: delete.frame.midY)
+        plane.began(id: 50, sample: TypingLogTouchSample(point: start, timestamp: 0))
+        XCTAssertEqual(target.text, "하", "the press steps the run back")
+        let jitter = TypingLogTouchSample(point: CGPoint(x: start.x - 1, y: start.y), timestamp: 0.01)
+        plane.moved(id: 50, sample: jitter)
+        plane.ended(id: 50, sample: TypingLogTouchSample(point: jitter.point, timestamp: 0.02))
+        tap(.delete)
+        XCTAssertEqual(target.text, "ㅎ", "the run survived the jitter")
     }
 
     /// A jamo ends the space pair: space, a jamo, delete, space types two spaces, not ". ".
