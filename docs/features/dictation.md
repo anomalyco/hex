@@ -1802,7 +1802,8 @@ Model advertises streaming, GPU device             // dictate.streaming
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
        ├── ≥ 300 ms of speech it heard > 400 ms before the text (1.2 s for a
-       │   buffered Parakeet stream), outside the pre-roll and start tone
+       │   buffered Parakeet stream, which also refuses speech starting more
+       │   than ~1.5 s before the text), outside the pre-roll and start tone
        │   -> Transcribe the whole clip offline (source=fallback)  // lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
@@ -2109,8 +2110,9 @@ check, which summed them, likely rejected streams that had lost nothing — see
 `hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening`), but that is
 not measured on a device, and the false-positive rate of this check on real
 speech (fillers, coughs, clicks outside the press window) is still unmeasured.
-A measured false positive did turn up on November 22: Unified English's late
-first-word timestamps refused streams that had lost nothing (below).
+An offline CPU measurement on November 22 did find a false positive: Unified
+English's late first-word timestamps refused streams whose opening words
+matched the whole-clip text (below).
 Because it counts every counted frame, a lost opening is caught however it is
 broken up, including one followed by a pause longer than the opening slack
 (`a_lost_opening_after_a_long_pause_still_falls_back_to_the_whole_clip`).
@@ -2154,7 +2156,9 @@ measured on a real model or microphone.
 check used the trailing check's 400 ms slack, but Unified English's first-word
 timestamp lags its audio: the first word's `t0` landed about 100–1,000 ms after
 its detected speech onset (most 440–1,000 ms), and the whole-clip run reported
-the same value within one 80 ms frame. A capture with no pre-roll head, as
+the same value within one 80 ms frame. Production refusals from the same
+period report 820–1,420 ms from the first detected speech to the text, mostly
+beyond that CPU measurement. A capture with no pre-roll head, as
 duck/mute/pause behaviors and "Release microphone while idle" cold opens
 leave, therefore produced refusals consistent with a stream that lost nothing,
 such as "text starts at 1280 ms but 560 ms of speech precedes it, from 220 to
@@ -2162,20 +2166,26 @@ such as "text starts at 1280 ms but 560 ms of speech precedes it, from 220 to
 the stream's text. A stream whose model runs Parakeet's buffered chunk menus
 (Unified English, and an import with the same menus) now gets 1.2 s of opening
 slack, which refused none of the 20 measured runs where 400 ms refused 6.
-Every other streaming model, including
-Nemotron 3.5's cache-aware stream, keeps 400 ms. The trailing check is
-unchanged. Measured offline on the real Unified English Q8_0 model through
-transcribe.cpp on the CPU, over clean 16 kHz WAVs, in 20 runs with speech
-starting at 0, 450 ms, and 1 s: the stream's opening words matched the
-whole-clip text in every run, including speech starting at sample 0. The
-stream's chunk and lookahead geometry was not varied. What it gives up: a lost
-opening of up to about 1.5 s of speech before the text's start now goes
-undetected, about 0.8 s more than the 400 ms slack let through. Still open:
-when the speaker waits about a second before talking, some streams still start
-their text about 3 s after the speech began and fall back to the whole clip,
-so the pasted text stays complete. That is not explained by the measured
-timestamp lag, which was measured only on the CPU. Checks:
+Every other streaming model, including Nemotron 3.5's cache-aware stream,
+keeps 400 ms. The trailing check is unchanged. Measured offline on the real
+Unified English Q8_0 model through transcribe.cpp on the CPU, over clean
+16 kHz WAVs, in 20 runs with speech starting at 0, 450 ms, and 1 s: the
+stream's opening words matched the whole-clip text in every run, including
+speech starting at sample 0. The stream's chunk and lookahead geometry was not
+varied. What the slack excuses: detected speech within 1.2 s before the text's
+start. With the span rule, a buffered stream whose detected speech starts more
+than about 1.5 s before its text is still refused, even when the frames it
+counted there are too sparse to reach 300 ms. Still open: the waited-first
+refusals still fall back to the whole clip, now caught by the span rule once
+100 ms or more of the opening is detected before its 1.2 s edge
+(`parakeets_sparse_opening_spanning_1800_ms_is_refused` and
+`parakeets_sparse_opening_spanning_3080_ms_is_refused`); whether those streams
+actually lost their opening is unknown, as the production logs do not record
+the stream's text and the lag was measured only on the CPU. Checks:
 `parakeets_late_first_word_time_is_not_a_lost_opening`,
+`parakeets_measured_lags_are_not_lost_openings`,
+`parakeets_sparse_opening_spanning_1800_ms_is_refused`,
+`parakeets_sparse_opening_spanning_3080_ms_is_refused`,
 `parakeets_opening_slack_still_refuses_a_lost_opening`, and
 `parakeets_opening_slack_edge_is_one_frame` (synthetic tones, a fake stream).
 Not measured on a microphone or a device.
