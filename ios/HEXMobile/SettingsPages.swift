@@ -750,11 +750,21 @@ struct ExperimentsSettingsPage: View {
                 SettingsToggleRow(
                     title: String(localized: "Multilingual model (Parakeet)"),
                     detail: multilingualParakeetFits
-                        ? String(localized: "25 languages, even mixed in a sentence. \(Self.multilingualParakeetSize) download. Keyboard dictation opens Hex.")
+                        ? String(localized: "25 languages, even mixed in a sentence. \(Self.multilingualParakeetSize) download, Wi-Fi recommended. Once it's ready, keyboard dictation opens Hex.")
                         : String(localized: "Needs an iPhone with 6 GB of memory or more"),
                     isOn: $multilingualParakeet
                 )
                 .disabled(!multilingualParakeetFits)
+
+                if multilingualParakeet {
+                    MultilingualModelStatus(
+                        download: DictationController.shared.multilingualDownload,
+                        retry: { DictationController.shared.retryMultilingualParakeet() },
+                        turnOff: { multilingualParakeet = false }
+                    )
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
+                }
             }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
@@ -789,12 +799,7 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: multilingualParakeet) { _, enabled in
             guard enabled != MultilingualParakeetSettings().isEnabled else { return }
             MultilingualParakeetSettings().isEnabled = enabled
-            if enabled {
-                // Turning it on is the way to try again after a load that ended Hex.
-                ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).forget()
-            } else {
-                ParakeetUltraModel.remove()
-            }
+            // On: downloads beside the engine that dictates; off: stops and deletes it.
             DictationController.shared.multilingualParakeetChanged()
         }
         .onAppear {

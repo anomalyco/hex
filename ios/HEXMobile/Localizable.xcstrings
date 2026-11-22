@@ -3553,42 +3553,12 @@
         }
       }
     },
-    "Parakeet Ultra didn't download. Check your connection and try again." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Parakeet Ultra 未能下载。请检查网络连接后重试。"
-          }
-        }
-      }
-    },
-    "Downloading %@ · Wi-Fi recommended" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下载 %@ · 建议使用 Wi-Fi"
-          }
-        }
-      }
-    },
     "Multilingual model (Parakeet)" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "多语言模型（Parakeet）"
-          }
-        }
-      }
-    },
-    "25 languages, even mixed in a sentence. %@ download. Keyboard dictation opens Hex." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@。键盘听写会打开 Hex。"
           }
         }
       }
@@ -3859,6 +3829,156 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在全键盘上，按键上方的栏不再建议词语。自动改正仍会在你输入时修正词语，Hex 键和粘贴保持原样。"
+          }
+        }
+      }
+    },
+    "Parakeet Ultra isn't downloaded yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parakeet Ultra 尚未下载。"
+          }
+        }
+      }
+    },
+    "Hex closed while getting the multilingual model ready, likely short of memory." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 在准备多语言模型时关闭了，可能是内存不足。"
+          }
+        }
+      }
+    },
+    "The multilingual model needs %@ of free space. Free some up, then try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型需要 %@ 的可用空间。请先释放一些空间，然后重试。"
+          }
+        }
+      }
+    },
+    "The multilingual model's download stopped. Check your connection. It picks up where it left off." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型的下载已停止。请检查网络连接。下载会从中断处继续。"
+          }
+        }
+      }
+    },
+    "Hugging Face is limiting downloads right now. Try again in a few minutes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hugging Face 目前限制了下载。请过几分钟再试。"
+          }
+        }
+      }
+    },
+    "Hugging Face didn't send the multilingual model (error %lld). Try again later." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hugging Face 没有发送多语言模型（错误 %lld）。请稍后再试。"
+          }
+        }
+      }
+    },
+    "A file of the multilingual model arrived damaged. Try again to download it again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型的一个文件下载后已损坏。请重试以重新下载。"
+          }
+        }
+      }
+    },
+    "The multilingual model didn't download. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型未能下载。请重试。"
+          }
+        }
+      }
+    },
+    "Downloading the multilingual model: %@ of %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在下载多语言模型：已下载 %1$@，共 %2$@"
+          }
+        }
+      }
+    },
+    "The multilingual model's download stopped. Trying again in %lld s." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型的下载已停止。%lld 秒后重试。"
+          }
+        }
+      }
+    },
+    "The multilingual model's download is paused. It carries on when you open Hex." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "多语言模型的下载已暂停。打开 Hex 后会继续。"
+          }
+        }
+      }
+    },
+    "Getting the multilingual model ready" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备多语言模型"
+          }
+        }
+      }
+    },
+    "Turn off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "25 languages, even mixed in a sentence. %@ download, Wi-Fi recommended. Once it's ready, keyboard dictation opens Hex." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@，建议使用 Wi-Fi。准备好后，键盘听写会打开 Hex。"
+          }
+        }
+      }
+    },
+    "Hex dictates with its usual model meanwhile." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此期间，Hex 会用平时的模型听写。"
           }
         }
       }

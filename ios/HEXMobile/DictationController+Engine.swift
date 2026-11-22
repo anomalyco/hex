@@ -37,18 +37,145 @@ extension DictationController {
     }
 
     /// Experiments › Multilingual model (Parakeet) at launch: true when Parakeet Ultra takes
-    /// the dictation language and is getting ready. With the experiment off, it only deletes a
-    /// download turning it off left mid-way.
+    /// the dictation language and loads now, downloaded and compiled for this iOS (seconds).
+    /// Otherwise Hex gets ready with the engine it uses without it, and the download or a
+    /// first load runs beside it (`syncMultilingualParakeet`). With the experiment turned
+    /// off, it only deletes a download turning it off left mid-way.
     private func prepareMultilingualParakeetAtLaunch() -> Bool {
-        ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).noteLaunch()
-        guard MultilingualParakeetSettings().isEnabled else {
-            ParakeetUltraModel.remove()
+        let loads = ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel)
+        loads.noteLaunch()
+        let settings = MultilingualParakeetSettings()
+        guard settings.isEnabled else {
+            if settings.isTurnedOff {
+                ParakeetUltraModel.remove()
+            }
             return false
         }
-        guard ParakeetUltraTranscriber.chosenLanguage() != nil else { return false }
+        if !ParakeetUltraModel.isDownloaded() {
+            settings.isModelReady = false
+        }
+        if loads.lastLoadWasInterrupted, settings.language() != nil {
+            settings.isModelReady = false
+            multilingualDownload.fail(ParakeetUltraTranscriber.setAsideMessage)
+        }
+        guard Self.multilingualStep(
+            language: ParakeetUltraTranscriber.chosenLanguage(),
+            downloaded: ParakeetUltraModel.isDownloaded(),
+            compiled: ParakeetUltraTranscriber.isCompiled
+        ) == .dictate else {
+            // A first load waits for the engine Hex gets ready meanwhile (its end syncs).
+            startMultilingualDownloadIfWanted()
+            return false
+        }
         engineName = ParakeetUltraTranscriber.name
         prepareModel()
         return true
+    }
+
+    /// What Hex does about Parakeet Ultra: nothing (off, a language it doesn't take, set
+    /// aside), download it, load it beside the engine that dictates meanwhile (a first load
+    /// compiles for a minute or more), or dictate with it.
+    enum MultilingualStep: Equatable {
+        case none
+        case download
+        case loadBeside
+        case dictate
+    }
+
+    nonisolated static func multilingualStep(language: String?, downloaded: Bool, compiled: Bool) -> MultilingualStep {
+        guard language != nil else { return .none }
+        guard downloaded else { return .download }
+        return compiled ? .dictate : .loadBeside
+    }
+
+    /// Starts Parakeet Ultra's download when the experiment wants it and it isn't on the
+    /// iPhone, whatever engine is getting ready meanwhile.
+    func startMultilingualDownloadIfWanted() {
+        // Memory left only matters for a load, not a download.
+        guard ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0) != nil,
+              !ParakeetUltraModel.isDownloaded() else { return }
+        MultilingualParakeetSettings().isModelReady = false
+        multilingualDownload.start()
+    }
+
+    /// Once an engine is ready, and once the download finishes: downloads Parakeet Ultra, or
+    /// loads it beside the engine that dictates, when the experiment wants it and it isn't the
+    /// one dictating already.
+    func syncMultilingualParakeet() {
+        guard MultilingualParakeetSettings().isEnabled else {
+            multilingualDownload.settle()
+            return
+        }
+        let language = ParakeetUltraTranscriber.chosenLanguage()
+        let wanted = ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0)
+        switch Self.multilingualStep(
+            language: wanted,
+            downloaded: ParakeetUltraModel.isDownloaded(),
+            compiled: true
+        ) {
+        case .none:
+            if !multilingualDownload.isFailed { multilingualDownload.settle() }
+        case .download:
+            startMultilingualDownloadIfWanted()
+        case .loadBeside, .dictate:
+            if engineName == ParakeetUltraTranscriber.name, isModelReady {
+                multilingualDownload.settle()
+            } else if let language {
+                loadMultilingualParakeetBeside(language: language)
+            } else if let wanted, replaceParakeetWithMultilingual(language: wanted) {
+                multilingualDownload.loading()
+            } else {
+                // Too little memory left to load it now: said, with Try again.
+                multilingualDownload.fail(
+                    String(localized: "Parakeet Ultra needs more memory than Hex has here. Hex uses its usual speech model instead.")
+                )
+            }
+        }
+    }
+
+    /// Parakeet Ultra loaded: the keyboard opens Hex for its languages from now on.
+    func multilingualParakeetLoaded() {
+        MultilingualParakeetSettings().isModelReady = true
+        multilingualDownload.settle()
+    }
+
+    /// Parakeet Ultra didn't load. Missing files download again; anything else sets it aside
+    /// (`ParakeetLoadGuard`) until Try again, so Hex doesn't try at every launch.
+    func multilingualParakeetFailedToLoad(_ error: Error) {
+        let settings = MultilingualParakeetSettings()
+        settings.isModelReady = false
+        guard settings.isEnabled, !(error is CancellationError) else {
+            multilingualDownload.settle()
+            return
+        }
+        if (error as? ParakeetUltraTranscriber.TranscriberError) == .notDownloaded {
+            multilingualDownload.settle()
+            startMultilingualDownloadIfWanted()
+            return
+        }
+        ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).setAside()
+        multilingualDownload.fail(
+            Self.switchNotice(for: error) ?? UserFacingError.message(for: error, context: .model)
+        )
+    }
+
+    /// Try again beside the multilingual model's status: lets a set-aside load try again, and
+    /// picks up the download from what's on disk.
+    func retryMultilingualParakeet() {
+        ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).forget()
+        multilingualDownload.settle()
+        if ParakeetUltraModel.isDownloaded() {
+            syncMultilingualParakeet()
+        } else if ParakeetUltraTranscriber.chosenLanguage(availableMemory: 0) != nil {
+            MultilingualParakeetSettings().isModelReady = false
+            multilingualDownload.restart()
+        }
+    }
+
+    /// Turn off beside the multilingual model's status, as the switch in Experiments does.
+    func turnOffMultilingualParakeet() {
+        MultilingualParakeetSettings().isEnabled = false
+        multilingualParakeetChanged()
     }
 
     /// Before iOS 26: Parakeet loads at launch once downloaded, as before. The recognizer gets
@@ -86,8 +213,14 @@ extension DictationController {
     }
 
     static func defaultTranscriber() async -> any LocalTranscribing {
-        // Experiments › Multilingual model (Parakeet), for its languages; off, nothing changes.
-        if let language = ParakeetUltraTranscriber.chosenLanguage() {
+        // Experiments › Multilingual model (Parakeet), for its languages once it's downloaded and
+        // compiled; until then (and off) the engine Hex uses without it.
+        if let language = ParakeetUltraTranscriber.chosenLanguage(),
+           multilingualStep(
+               language: language,
+               downloaded: ParakeetUltraModel.isDownloaded(),
+               compiled: ParakeetUltraTranscriber.isCompiled
+           ) == .dictate {
             return ParakeetUltraTranscriber(language: language)
         }
         let choice = SpeechEngineChoice.current
