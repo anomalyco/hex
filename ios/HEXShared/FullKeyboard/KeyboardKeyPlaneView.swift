@@ -125,6 +125,14 @@ final class KeyboardKeyPlaneView: UIView {
                 let fill = pressed.contains(key.kind) ? palette.keyHeldFill : palette.keyFill
                 context.fillKeycap(frame, fill: fill, radius: radius)
                 guard showGlyphs() else { continue }
+                if let upper = key.shifted, let lower = key.character {
+                    // The docked iPad's two-symbol keys: the shifted one over the one typed, as Apple's.
+                    let font = UIFont.systemFont(ofSize: 18, weight: .regular)
+                    let half = labelFrame.height / 2
+                    drawText(upper, in: CGRect(x: labelFrame.minX, y: labelFrame.minY + 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
+                    drawText(lower, in: CGRect(x: labelFrame.minX, y: labelFrame.midY - 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
+                    continue
+                }
                 var label = Self.keycapLabel(engine.keycapLabel(for: key))
                 let isUpperLetter = layout.layer == .letters && engine.keycapsUppercase && label.first?.isUppercase == true
                 let style = isLandscape

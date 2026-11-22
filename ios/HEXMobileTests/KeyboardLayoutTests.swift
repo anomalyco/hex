@@ -1667,7 +1667,7 @@ final class KeyboardLayoutTests: XCTestCase {
             let q = layout.key(.character("q"))!.frame, w = layout.key(.character("w"))!.frame
             XCTAssertEqual(q.minX, side, accuracy: 0.001, label)
             XCTAssertEqual(w.minX - q.maxX, gap, accuracy: 0.001, label)
-            XCTAssertEqual(layout.key(.character("p"))!.frame.maxX, screen.width - side, accuracy: 0.001, label)
+            XCTAssertEqual(layout.key(.delete)!.frame.maxX, screen.width - side, accuracy: 0.001, label)
             // The strip, Apple's 44 pt bar, under 44 pt kept clear for iPadOS's shortcut bar.
             XCTAssertEqual(layout.metrics.stripTop, 44, label)
             XCTAssertEqual(layout.stripFrame.height, 44, label)
@@ -1680,6 +1680,86 @@ final class KeyboardLayoutTests: XCTestCase {
     /// Apple's floating keyboard (the same 320 pt on every iPad): 26 pt keycaps on a 54.3 pt
     /// pitch, 4 pt in, shift and delete 35.5 pt, 123 and return 73.5 pt with space 153 pt
     /// between, all in 271 pt under its 44 pt bar; Hex's strip takes the bar's place.
+    /// The docked iPad's own rows against Apple's iPad mini keyboard (iPadOS 27.2 simulator,
+    /// screenshots): every key's width and where each row starts, English, German and French,
+    /// upright and turned. Hex's bottom row is Apple's with the Hex key where its dictation key
+    /// is and emoji (when on) where its second 123 is.
+    func testPadMiniRowsMatchApples() {
+        struct Apple { let language: KeyboardLanguage; let orientation: KeyboardOrientation; let width: CGFloat
+            let letter: CGFloat; let delete: CGFloat; let rowTwoX: CGFloat; let returnW: CGFloat; let shift: CGFloat; let rightShift: CGFloat; let bottom: [CGFloat] }
+        let apple = [
+            Apple(language: .english, orientation: .portrait, width: 744, letter: 54.5, delete: 67.5, rowTwoX: 32.5, returnW: 107.5, shift: 54.5, rightShift: 67.5, bottom: [57, 57, 57, 318, 91.5, 91.5]),
+            Apple(language: .german, orientation: .portrait, width: 744, letter: 54.5, delete: 67.5, rowTwoX: 32.5, returnW: 107.5, shift: 54.5, rightShift: 67.5, bottom: [57, 57, 57, 318, 91.5, 91.5]),
+            Apple(language: .french, orientation: .portrait, width: 744, letter: 53.25, delete: 79.5, rowTwoX: 19, returnW: 66.5, shift: 56.5, rightShift: 76, bottom: [57, 57, 57, 318, 91.5, 91.5]),
+            Apple(language: .english, orientation: .landscape, width: 1133, letter: 87.1, delete: 107.5, rowTwoX: 47.5, returnW: 168, shift: 87.1, rightShift: 107.5, bottom: [89, 89, 88.5, 502, 140, 140.5]),
+            Apple(language: .german, orientation: .landscape, width: 1133, letter: 87.1, delete: 107.5, rowTwoX: 47.5, returnW: 168, shift: 87.1, rightShift: 107.5, bottom: [89, 89, 88.5, 502, 140, 140.5]),
+            Apple(language: .french, orientation: .landscape, width: 1133, letter: 85.4, delete: 125, rowTwoX: 27, returnW: 105.5, shift: 90.5, rightShift: 120, bottom: [89, 89, 88.5, 502, 140, 140.5]),
+        ]
+        for a in apple {
+            let layout = KeyboardLayout(width: a.width, orientation: a.orientation, showsGlobe: true, showsEmoji: true, language: a.language, pad: .docked(.mini))
+            let label = "\(a.language) \(a.orientation)"
+            let rows = (0..<4).map { r in layout.keys.filter { $0.row == r }.sorted { $0.frame.minX < $1.frame.minX } }
+            XCTAssertEqual(layout.letterWidth, a.letter, accuracy: 0.5, label)
+            XCTAssertEqual(rows[0].last?.kind, .delete, label)
+            XCTAssertEqual(rows[0].last!.frame.width, a.delete, accuracy: 1, label)
+            XCTAssertEqual(rows[1].first!.frame.minX, a.rowTwoX, accuracy: 0.75, label)
+            XCTAssertEqual(rows[1].last?.kind, .returnKey, label)
+            XCTAssertEqual(rows[1].last!.frame.width, a.returnW, accuracy: 1, label)
+            XCTAssertEqual(rows[2].first?.kind, .shift, label)
+            XCTAssertEqual(rows[2].last?.kind, .shift, label)
+            XCTAssertEqual(rows[2].first!.frame.width, a.shift, accuracy: 0.75, label)
+            XCTAssertEqual(rows[2].last!.frame.width, a.rightShift, accuracy: 1, label)
+            XCTAssertEqual(rows[2].count, 11, label)
+            XCTAssertEqual(rows[3].map(\.kind), [.globe, .layerSwitch(.numbers), .hex, .space, .emoji, .dismiss], label)
+            for (key, width) in zip(rows[3], a.bottom) { XCTAssertEqual(key.frame.width, width, accuracy: 1, "\(label) \(key.label)") }
+            XCTAssertNil(layout.key(.hex).flatMap { $0.row < 0 ? $0 : nil }, "no Hex key in the strip: \(label)")
+            XCTAssertEqual(layout.stripFrame.width, layout.stripBarFrame.width, label)
+        }
+        // German on an iPad is QWERTZ without ü ö ä, held on u o a; French ends row 3 in , . and '.
+        let german = KeyboardLayout(width: 744, language: .german, pad: .docked(.mini))
+        XCTAssertEqual(german.letters, .qwertz)
+        XCTAssertNil(german.key(.character("ü")))
+        XCTAssertEqual(german.keys.filter { $0.row == 2 }.compactMap(\.character), ["y", "x", "c", "v", "b", "n", "m", ",", "."])
+        XCTAssertEqual(AccentCatalog.options(for: "u", uppercase: false, language: .german, letters: german.letters)?.dropFirst().first, "ü")
+        let french = KeyboardLayout(width: 744, language: .french, pad: .docked(.mini))
+        XCTAssertEqual(french.keys.filter { $0.row == 2 }.compactMap { key in key.shifted.map { "\(key.character!)\($0)" } }, [",?", ".!", "':"])
+        let english = KeyboardLayout(width: 744, pad: .docked(.mini))
+        XCTAssertEqual(english.key(.character(","))?.shifted, "!")
+        XCTAssertEqual(english.key(.character("."))?.shifted, "?")
+        // The 123 and #+= pages: digits and delete, Apple's nine symbols and return, a page key
+        // either side of row 3; ABC where 123 was.
+        let numbers = KeyboardLayout(width: 744, layer: .numbers, showsGlobe: true, pad: .docked(.mini))
+        XCTAssertEqual(numbers.keys.filter { $0.row == 1 }.compactMap(\.character), ["@", "#", "$", "&", "*", "(", ")", "'", "\""])
+        XCTAssertEqual(numbers.keys.filter { $0.row == 2 && $0.kind == .layerSwitch(.symbols) }.count, 2)
+        let symbols = KeyboardLayout(width: 744, layer: .symbols, showsGlobe: true, pad: .docked(.mini))
+        XCTAssertEqual(symbols.keys.filter { $0.row == 1 }.compactMap(\.character), ["€", "£", "¥", "_", "^", "[", "]", "{", "}"])
+        XCTAssertEqual(symbols.keys.filter { $0.row == 3 && $0.kind == .layerSwitch(.letters) }.count, 2)
+        // Settings › Keyboard › Number row is iPhone only: on an iPad, docked or floating, nothing changes.
+        for (width, orientation, pad) in [(744.0, KeyboardOrientation.portrait, KeyboardPadPlacement.docked(.mini)), (1376, .landscape, .docked(.large)), (320, .portrait, .floating)] {
+            XCTAssertEqual(
+                KeyboardLayout(width: width, orientation: orientation, showsGlobe: true, pad: pad, numberRow: true),
+                KeyboardLayout(width: width, orientation: orientation, showsGlobe: true, pad: pad),
+                "\(pad)"
+            )
+        }
+        // Every language's rows fit the mini, upright and turned, and the 11- and 13-inch use them.
+        for language in KeyboardLanguage.allCases {
+            for letters in language.letterLayouts {
+                for (width, orientation, pad) in [(744.0, KeyboardOrientation.portrait, KeyboardPadPlacement.docked(.mini)), (1133, .landscape, .docked(.mini)), (834, .portrait, .docked(.medium)), (1376, .landscape, .docked(.large))] {
+                    let layout = KeyboardLayout(width: width, orientation: orientation, showsGlobe: true, language: language, letters: letters, pad: pad)
+                    let label = "\(language) \(letters) \(width)"
+                    for row in 0..<4 {
+                        let keys = layout.keys.filter { $0.row == row }.sorted { $0.frame.minX < $1.frame.minX }
+                        XCTAssertEqual(keys.last!.frame.maxX, width - layout.metrics.side, accuracy: 0.01, "\(label) row \(row)")
+                        XCTAssertGreaterThanOrEqual(keys.first!.frame.minX, layout.metrics.side - 0.01, "\(label) row \(row)")
+                        for (l, r) in zip(keys, keys.dropFirst()) { XCTAssertEqual(r.frame.minX - l.frame.maxX, layout.metrics.gap, accuracy: 0.01, "\(label) row \(row)") }
+                        XCTAssertTrue(keys.allSatisfy { $0.frame.width >= layout.letterWidth - 0.01 }, "\(label) row \(row)")
+                    }
+                }
+            }
+        }
+    }
+
     /// Docked on an iPad a held key's accents sit in Apple's cells (30 to 46.5 pt, 53 pt tall),
     /// two rows once there are more than five, the key's own option nearest the key and first
     /// picked, every menu inside the keyboard; floating and on an iPhone, cells stay key-wide.
@@ -1748,7 +1828,7 @@ final class KeyboardLayoutTests: XCTestCase {
                 continue
             }
             XCTAssertEqual(key.maxX, layout.width - layout.metrics.side, accuracy: 0.001, describe(layout))
-            XCTAssertEqual(key.width, KeyboardLayout.letterWidth(innerWidth: layout.width, metrics: layout.metrics), accuracy: 0.001, describe(layout))
+            XCTAssertEqual(key.width, (layout.orientation == .landscape ? 1.61 : 1.679) * (layout.width - 2 * layout.metrics.side - 10 * layout.metrics.gap) / 11.236, accuracy: 0.001, describe(layout))
             XCTAssertEqual(layout.keys.filter { $0.row == 3 }.max { $0.frame.maxX < $1.frame.maxX }?.kind, .dismiss, describe(layout))
         }
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {

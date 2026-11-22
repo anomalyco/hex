@@ -1068,6 +1068,9 @@ final class FullKeyboardEngineTests: XCTestCase {
         for _ in 0..<3 { usage.record("🦦") }
         usage.record("🍕")
         view.makeEmojiUsage = { usage }
+        // Upright whatever the simulator: turned (an iPad simulator left in landscape) the grid
+        // has three rows, and the panel filled under one orientation was read under the other.
+        view.orientationOverride = .portrait
         view.frame = CGRect(x: 0, y: 0, width: 402, height: 306)
         view.layoutIfNeeded()
         view.debugOpenEmoji()
