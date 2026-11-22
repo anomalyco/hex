@@ -2127,6 +2127,26 @@
         }
       }
     },
+    "New speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新的语音模型"
+          }
+        }
+      }
+    },
+    "Downloads in Hex on Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Hex 中通过 Wi-Fi 下载"
+          }
+        }
+      }
+    },
     "Open Hex to download %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4557,26 +4577,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停下前文字可能会变"
-          }
-        }
-      }
-    },
-    "New speech model" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "新的语音模型"
-          }
-        }
-      }
-    },
-    "Downloads in Hex on Wi-Fi" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Hex 中通过 Wi-Fi 下载"
           }
         }
       }
