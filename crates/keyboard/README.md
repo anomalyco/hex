@@ -19,11 +19,22 @@ Pieces move here one at a time from the Swift keyboard (`ios/HEXShared/FullKeybo
 proven identical to the Swift it replaces before iOS switches to it. Today: the typing
 model reader and Swipe typing's decoder. Tune those here, not in Swift.
 
+## Setup
+
+Install [rustup](https://rustup.rs): in this folder it uses the toolchain, components and
+targets `rust-toolchain.toml` pins (`rustup toolchain install` fetches them ahead). iOS's
+build (`ios/scripts/build-keyboard-core.sh`, HEXKeyboard's first build phase) and Android's
+debug build find rustup's cargo in `CARGO_HOME` (by default `~/.cargo`); Android also needs
+`cargo install cargo-ndk`.
+
 ```sh
 cd crates/keyboard
-cargo test
-cargo clippy --all-targets -- -D warnings
+cargo test --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 ```
+
+`--all-features` includes the `jni` feature, so the Android entry points (`ffi/src/jni.rs`)
+are checked too.
 
 Tune Swipe typing here, in `core/src/swipe`: iOS's `SwipeDecoder` is a wrapper of it. The
 decoder was ported from the Swift one it replaced, and proven to read every swipe as it did
