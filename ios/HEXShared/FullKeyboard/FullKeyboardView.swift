@@ -230,6 +230,7 @@ final class FullKeyboardView: UIView {
             self?.onReturnKey?()
         }
         engine.onEmojiKey = { [weak self] in self?.emojiKeyTapped() }
+        engine.onDismissKey = { [weak self] in self?.hostController?.dismissKeyboard() }
         engine.onLanguageSwipe = { [weak self] step in self?.switchLanguage(by: step) }
         routedTarget.onSearchReturn = { [weak self] in self?.endEmojiSearch() }
 
@@ -299,11 +300,14 @@ final class FullKeyboardView: UIView {
     }
 
     var orientation: KeyboardOrientation {
-        orientationOverride ?? Self.orientation(for: traitCollection)
+        orientationOverride ?? padOrientation ?? Self.orientation(for: traitCollection)
     }
 
+    /// On an iPad, which way up its screen is (`KeyboardPadPlacement.orientation`); nil on an iPhone.
+    private var padOrientation: KeyboardOrientation?
+
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize) + lift
+        KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize, pad: engine.pad) + lift
     }
 
     /// Room above the strip for the emoji search results. The strip itself keeps its height in
@@ -315,7 +319,7 @@ final class FullKeyboardView: UIView {
 
     /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
     private var appliedLift: CGFloat {
-        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize)))
+        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize, pad: engine.pad)))
     }
 
     /// Reads which device and posture the keyboard is on, and how far iOS set it in from the
@@ -327,12 +331,30 @@ final class FullKeyboardView: UIView {
         let posture = KeyboardPosture.current(screenSize: size, isFoldable: Self.isFoldable)
         let inset = posture == .phone ? 0 : max(0, (size.width - bounds.width) / 2)
         let phoneSize = KeyboardPhoneSize.current(screenSize: size)
+        let pad = Self.isPad ? KeyboardPadPlacement.current(screenSize: size, keyboardWidth: bounds.width) : nil
+        let padOrientation = pad.map { KeyboardPadPlacement.orientation(screenSize: size, placement: $0, keyboardWidth: bounds.width) }
         let heightChanges = posture != engine.posture || phoneSize != engine.phoneSize
+            || pad != engine.pad || padOrientation != self.padOrientation
         engine.posture = posture
         engine.phoneSize = phoneSize
         engine.windowInset = inset
+        engine.pad = pad
+        self.padOrientation = padOrientation
+        syncGlobe()
         if heightChanges { onPreferredHeightChange?() }
     }
+
+    /// Hex's globe key where iOS asks for one, except floating on an iPad: iPadOS draws its own
+    /// globe in the band under a floating keyboard.
+    private func syncGlobe() {
+        let globe = model.needsGlobeKey && engine.pad != .floating
+        guard engine.showsGlobe != globe else { return }
+        engine.showsGlobe = globe
+        setNeedsLayout()
+    }
+
+    /// An iPad (the keyboard runs as an iPad keyboard even though the app is iPhone-only).
+    static let isPad = UIDevice.current.userInterfaceIdiom == .pad
 
     /// The iPhone Duo (`KeyboardPosture.foldableModels`), read once per process.
     static let isFoldable: Bool = {
@@ -685,12 +707,12 @@ final class FullKeyboardView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        syncPosture()
         let isLandscape = orientation == .landscape
         engine.typingLog?.viewGeometry(size: bounds.size, safeArea: safeAreaInsets)
         engine.orientation = orientation
         engine.horizontalInset = isLandscape ? max(safeAreaInsets.left, safeAreaInsets.right) : 0
         engine.width = bounds.width
-        syncPosture()
         let lift = appliedLift
         engine.availableHeight = bounds.height - lift
         engine.typingLog?.commitGeometry()
@@ -775,10 +797,7 @@ final class FullKeyboardView: UIView {
     private func refreshFromModel() {
         hexKey.isWarm = model.dictatesThroughHex
         hexKey.translatingTo = model.translatingTo
-        if engine.showsGlobe != model.needsGlobeKey {
-            engine.showsGlobe = model.needsGlobeKey
-            setNeedsLayout()
-        }
+        syncGlobe()
         let recording = model.stagePhase == .recording || model.stagePhase == .transcribing
         if recording != showsRecording {
             setRecording(recording)

@@ -191,6 +191,8 @@ final class FullKeyboardEngine {
     var phoneSize: KeyboardPhoneSize = .regular { didSet { if phoneSize != oldValue { rebuildLayout() } } }
     /// How far iOS set the keyboard in from each side of the screen (the Duo).
     var windowInset: CGFloat = 0 { didSet { if windowInset != oldValue { rebuildLayout() } } }
+    /// The iPad keyboard to draw, docked or floating (`KeyboardPadPlacement`); nil on an iPhone.
+    var pad: KeyboardPadPlacement? { didSet { if pad != oldValue { rebuildLayout() } } }
     /// The height the keys really have; the rows fit it where iOS gives less than asked for.
     var availableHeight: CGFloat? { didSet { if availableHeight != oldValue { rebuildLayout() } } }
     /// Settings › Keyboard › Hex key: the strip's trailing (Right) or leading (Left) end.
@@ -243,6 +245,8 @@ final class FullKeyboardEngine {
     var onReturn: (() -> Void)?
     /// Called when the emoji key is let go.
     var onEmojiKey: (() -> Void)?
+    /// The iPad's hide-keyboard key was let go on.
+    var onDismissKey: (() -> Void)?
     /// Called when a swipe along the space bar switches language: 1 for the next (a swipe
     /// to the left), -1 for the one before.
     var onLanguageSwipe: ((Int) -> Void)?
@@ -546,7 +550,7 @@ final class FullKeyboardEngine {
             if next == .letters { shift.reset() }
             rebuildLayout(cause: "layer_key")
             if next == .letters { refreshAutoCapitalization() }
-        case .character, .space, .returnKey, .hex, .globe, .emoji:
+        case .character, .space, .returnKey, .hex, .globe, .emoji, .dismiss:
             break
         }
         touches[id] = touch
@@ -791,6 +795,8 @@ final class FullKeyboardEngine {
             }
         case .emoji:
             onEmojiKey?()
+        case .dismiss:
+            onDismissKey?()
         case .delete, .hex, .globe:
             break
         }
@@ -1444,6 +1450,7 @@ final class FullKeyboardEngine {
             windowInset: windowInset,
             hexPlacement: hexPlacement,
             phoneSize: phoneSize,
+            pad: pad,
             availableHeight: availableHeight
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)

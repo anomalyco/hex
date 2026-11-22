@@ -239,8 +239,8 @@ private enum HexKeySide: CaseIterable {
     }
 }
 
-/// Settings › Keyboard: Full or Dictation bar (with Auto-start under the bar, On switch by
-/// default, and always on iPad, which shows the bar), the full keyboard's rows (only while it's
+/// Settings › Keyboard: Full or Dictation bar, on an iPhone and an iPad alike (with Auto-start
+/// under the bar, On switch by default), the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
 /// default, as Apple's keyboard never offers them, then Vocabulary, Hex's list of your own
 /// words; Hex key, Right by default, under Languages),
@@ -267,9 +267,11 @@ struct KeyboardSettingsPage: View {
     @State private var autoStart = FullKeyboardSettings().dictationBarAutoStart
     @State private var practiceText = ""
 
-    /// The full keyboard is iPhone only: on an iPad the keyboard shows the dictation bar, whichever
-    /// is chosen. Hex runs there as an iPhone app, whose interface idiom says phone, so this reads
-    /// the hardware model (the simulated one in the simulator).
+    /// On an iPad, while Full is chosen, the row says the full keyboard is there too: it shows
+    /// the dictation bar only when that is chosen, as on an iPhone (until build 117 an iPad
+    /// always showed the bar).
+    /// Hex runs there as an iPhone app, whose interface idiom says phone, so this reads the
+    /// hardware model (the simulated one in the simulator).
     private static let runsOnPad: Bool = {
         if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
             return simulated.hasPrefix("iPad")
@@ -294,9 +296,9 @@ struct KeyboardSettingsPage: View {
                 HStack(spacing: 12) {
                     SettingsRowLabel(
                         title: String(localized: "Keyboard"),
-                        detail: Self.runsOnPad
-                            ? String(localized: "On iPad, Hex shows the dictation bar")
-                            : fullKeyboard ? nil : fullAccessNeed(String(localized: "The dictation bar needs Full Access"))
+                        detail: fullKeyboard
+                            ? (Self.runsOnPad ? String(localized: "The full keyboard works on iPad too") : nil)
+                            : fullAccessNeed(String(localized: "The dictation bar needs Full Access"))
                     )
                     Spacer(minLength: 8)
                     SettingsSegments(
@@ -312,7 +314,7 @@ struct KeyboardSettingsPage: View {
                 .padding(.vertical, 10)
                 .frame(minHeight: 50)
 
-                if !fullKeyboard || Self.runsOnPad {
+                if !fullKeyboard {
                     SettingsDivider()
 
                     HStack(spacing: 12) {

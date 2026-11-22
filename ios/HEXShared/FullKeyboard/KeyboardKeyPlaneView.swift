@@ -92,7 +92,8 @@ final class KeyboardKeyPlaneView: UIView {
     override func draw(_ rect: CGRect) {
         guard let context = UIGraphicsGetCurrentContext() else { return }
         let layout = engine.layout
-        let isLandscape = layout.orientation == .landscape
+        // An iPad's keys are as large turned as upright, so they keep the portrait labels.
+        let isLandscape = layout.orientation == .landscape && layout.metrics.pad == nil
         let radius = layout.metrics.cornerRadius
         var pressed = engine.pressedKinds
         if let lingeringKind { pressed.insert(lingeringKind) }
@@ -222,6 +223,11 @@ final class KeyboardKeyPlaneView: UIView {
                 context.fillKeycap(frame, fill: fill, radius: radius)
                 guard showGlyphs() else { continue }
                 drawEmojiFace(in: labelFrame, diameter: isLandscape ? 18 : 19, context: context, keyFill: fill)
+            case .dismiss:
+                let lit = pressed.contains(.dismiss)
+                context.fillKeycap(frame, fill: lit ? palette.functionHeldFill : palette.keyFill, radius: radius)
+                guard showGlyphs() else { continue }
+                drawSymbol("keyboard.chevron.compact.down", in: labelFrame, color: palette.textBase, pointSize: 19, yOffset: 0)
             }
         }
     }
@@ -568,7 +574,7 @@ final class KeyboardKeyPlaneView: UIView {
         case .delete:
             let repeated = CACurrentMediaTime() - deleteStartedAt >= FullKeyboardEngine.repeatDelay
             return repeated || deleteSwipe?.touchID == id && deleteSwipe?.isActive == true ? nil : .delete
-        case .space, .returnKey, .globe, .emoji:
+        case .space, .returnKey, .globe, .emoji, .dismiss:
             return touch.key.kind
         default:
             return nil
