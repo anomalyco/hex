@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /// Bumped whenever a signature or struct below changes.
-#define HK_ABI_VERSION 1
+#define HK_ABI_VERSION 2
 
 uint32_t hk_abi_version(void);
 
@@ -141,6 +141,97 @@ int32_t hk_swipe_read(const HkSwipeDecoder *decoder, const double *points, size_
                       const double *times, const HkKeys *keys, const char *previous, size_t limit,
                       HkSwipeReading *out);
 void hk_swipe_reading_free(HkSwipeReading *reading);
+
+// MARK: - What a swipe types
+
+/// Whether the host's dictionary knows `word` (iOS: UITextChecker): nonzero when it does.
+/// `context` is the caller's, passed back as given. Called only during the call it's passed to.
+typedef uint8_t (*HkIsWordValid)(void *context, const char *word);
+
+/// A text replacement: its shortcut (lowercased) and what it puts in.
+typedef struct {
+    const char *shortcut;
+    const char *replacement;
+} HkTextReplacement;
+
+/// Your text replacements and words, as autocorrect has them. Immutable: make a new one
+/// whenever one of them changes.
+typedef struct HkSwipeWords HkSwipeWords;
+
+/// `language` is the layout's ("en", "de"…); `has_dictionary` nonzero when the host has one for
+/// it. `own` are your other own spellings (lexicon terms, words you kept, fixes Hex learned),
+/// `vocabulary` your vocabulary's words as you added them. NULL when an argument is malformed.
+HkSwipeWords *hk_swipe_words_new(const char *language, uint8_t has_dictionary,
+                                 const HkTextReplacement *replacements, size_t replacement_count,
+                                 const char *const *own, size_t own_count,
+                                 const char *const *vocabulary, size_t vocabulary_count);
+void hk_swipe_words_free(HkSwipeWords *words);
+
+/// The order of a reading's candidates (`texts` and `costs`, `count` of each, best first) once
+/// a rare name or abbreviation costs 4 more: fills `order` with `count` indices. Returns 0, else
+/// nonzero with `order` untouched.
+int32_t hk_swipe_rank(const HkSwipeDecoder *decoder, const HkSwipeWords *words,
+                      const char *const *texts, const double *costs, size_t count,
+                      HkIsWordValid is_word_valid, void *context, size_t *order);
+
+/// Shift as the keys show it.
+enum { HK_SHIFT_OFF = 0, HK_SHIFT_ON = 1, HK_SHIFT_LOCKED = 2 };
+/// The field's auto-capitalisation; NONE also when Settings › Auto-capitalization is off.
+enum {
+    HK_AUTOCAPITALIZATION_NONE = 0,
+    HK_AUTOCAPITALIZATION_WORDS = 1,
+    HK_AUTOCAPITALIZATION_SENTENCES = 2,
+    HK_AUTOCAPITALIZATION_ALL_CHARACTERS = 3,
+};
+
+/// The state a swipe is typed in.
+typedef struct {
+    /// The text before the cursor as Hex expects it, or NULL when the host reports none.
+    const char *before;
+    uint8_t shift;
+    uint8_t shift_held;
+    uint8_t auto_capitalization;
+    /// Settings › Auto-capitalization.
+    uint8_t auto_capitalizes;
+    /// Nonzero when the field allows autocorrection (text replacements show only then).
+    uint8_t autocorrection;
+} HkSwipeContext;
+
+/// What a finished swipe types.
+typedef struct {
+    /// Nonzero when a space goes in before the word.
+    uint8_t space;
+    char *word;
+    /// The strip's other readings, cased as the word is, best first (at most three).
+    char **alternatives;
+    size_t alternative_count;
+} HkSwipeTyped;
+
+/// What a swipe whose readings are `readings` (`reading_count` ≥ 1, best first, those that may
+/// be offered) types in `context`. Returns 0 and fills `out` (release it with
+/// hk_swipe_typed_free), else nonzero with `out` empty.
+int32_t hk_swipe_typed(const HkSwipeWords *words, const char *const *readings, size_t reading_count,
+                       const HkSwipeContext *context, HkIsWordValid is_word_valid, void *callback_context,
+                       HkSwipeTyped *out);
+void hk_swipe_typed_free(HkSwipeTyped *typed);
+
+/// Nonzero when a swiped word needs a space before it after `before` (NULL: none reported).
+uint8_t hk_swipe_needs_space(const char *before);
+
+/// Nonzero when a swipe through `points` (`point_count` (x, y) pairs, interleaved, in points)
+/// was a tap that slid: it never went more than 1.6 × `pitch` from where it went down, it
+/// lifted on the key it went down on (`key`, that key's character; NULL when it lifted
+/// elsewhere), and `first_reading` (its best reading, or NULL) doesn't start and end on that key.
+uint8_t hk_swipe_is_slid_tap(const double *points, size_t point_count, double pitch,
+                             const char *key, const char *first_reading);
+
+/// Nonzero when `word` (a reading, as the model spells it) is one the dictionary knows only
+/// with a capital: a name, day or place ("monday").
+uint8_t hk_swipe_reads_as_name(const HkSwipeWords *words, const char *word,
+                               HkIsWordValid is_word_valid, void *context);
+/// Nonzero when `word` begins and ends on `letter`'s key ("lol" on "l"): its first and last
+/// letters, lowercased, without their accents.
+uint8_t hk_swipe_starts_and_ends_with(const char *word, const char *letter);
 
 #ifdef __cplusplus
 }

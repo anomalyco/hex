@@ -197,7 +197,7 @@ final class AutocorrectEngine {
     /// partner's primary's, in `layoutLetters`'s arrangement (`setKeys`).
     private(set) var layoutLanguage: KeyboardLanguage = .english
     private(set) var layoutLetters: KeyboardLetterLayout?
-    private var lexiconShortcuts: [String: String] = [:]
+    private(set) var lexiconShortcuts: [String: String] = [:]
     /// Your `UILexicon` terms, then your vocabulary's words (`AutocorrectEngine+Vocabulary`).
     private(set) var lexiconTerms: [String] = []
     private var systemLexiconTerms: [String] = []

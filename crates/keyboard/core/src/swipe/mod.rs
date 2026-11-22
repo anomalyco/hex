@@ -36,10 +36,12 @@
 // too, and the loops index as Swift's do.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::needless_range_loop)]
 
+mod characters;
 mod geometry;
 mod gesture;
 #[cfg(test)]
 mod tests;
+pub mod typing;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;

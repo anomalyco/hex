@@ -48,13 +48,6 @@ final class SwipeTyping {
 
     /// How long the last swipe's decode took, for Record typing logs and probes.
     private(set) var lastDecodeTime: TimeInterval?
-    /// Nats more a rare reading the dictionary knows only with a capital costs, unless it is
-    /// one of your own words: the model's lowercase list holds names and abbreviations ("gs",
-    /// "ut", "kent") that a loose swipe of a common word could read as, and they would go in
-    /// capitalised mid-sentence. Common ones ("john", "york", "english") cost nothing more.
-    var nameCost = 4.0
-    /// The model's cost (-ln p) past which such a word counts as rare: about its 2,500th word.
-    static let commonNameCost = 10.0
 
     var clock: () -> TimeInterval = { CACurrentMediaTime() }
 
@@ -182,8 +175,8 @@ final class SwipeTyping {
         let words = ranked(candidates)
         let elapsed = clock() - started
         lastDecodeTime = elapsed
-        if let letter = slidTapLetter(stroke), let start = stroke.points.first,
-           words.first.map({ !Self.word($0, startsAndEndsWith: letter) }) ?? true {
+        if let start = stroke.points.first,
+           SwipeDecoder.isSlidTap(stroke.points, pitch: threshold, key: slidTapKey(stroke), firstReading: words.first) {
             // A tap that slid: its letter goes in as a tap's would, after the space a swiped
             // word before it keeps pending and with the capital shift gives it.
             engine.endSwipe(typing: [], points: stroke.points.count, decodeTime: elapsed)
@@ -194,44 +187,31 @@ final class SwipeTyping {
         engine.endSwipe(typing: words, points: stroke.points.count, decodeTime: elapsed)
     }
 
-    /// How far (key pitches) a swipe may go from where it went down and still be a tap
-    /// that slid, when it lifts on the key it started on.
-    static let slidTapReach: CGFloat = 1.6
-
-    /// The letter of a swipe that came back to the key it went down on without going more
-    /// than `slidTapReach` pitches from it ("a" dragged a little too far and back): the
-    /// decoder reads no word of one letter, so it read "as". Nil for any other swipe.
-    private func slidTapLetter(_ stroke: Stroke) -> String? {
+    /// The character of the key a swipe went down and lifted on, for the core's slid-tap
+    /// rule (`SwipeDecoder.isSlidTap`: a swipe that came back to its key without going more
+    /// than 1.6 key pitches from it, "a" dragged a little too far and back, is a tap unless
+    /// it read a word that starts and ends on that key); nil when it lifted on another.
+    private func slidTapKey(_ stroke: Stroke) -> String? {
         guard let first = stroke.points.first, let last = stroke.points.last else { return nil }
-        let reach = threshold * Self.slidTapReach
-        guard stroke.points.allSatisfy({ hypot($0.x - first.x, $0.y - first.y) <= reach }) else { return nil }
         let layout = engine.layout
-        guard let down = layout.hitTest(first), down == layout.hitTest(last),
-              let letter = down.character, letter.count == 1 else { return nil }
-        return letter.lowercased()
+        guard let down = layout.hitTest(first), down == layout.hitTest(last) else { return nil }
+        return down.character
     }
 
     /// Whether `word` begins and ends on `letter`'s key ("lol" on l, "pop" on p): a word a
     /// swipe that comes back to its key can mean.
     static func word(_ word: String, startsAndEndsWith letter: String) -> Bool {
-        func base(_ character: Character?) -> String? {
-            character.map { String($0).lowercased().decomposedStringWithCanonicalMapping.unicodeScalars.first.map(String.init) ?? "" }
-        }
-        return word.count > 1 && base(word.first) == letter && base(word.last) == letter
+        SwipeDecoder.word(word, startsAndEndsWith: letter)
     }
 
-    /// The readings best first once a rare name or abbreviation costs `nameCost` more.
+    /// The readings best first once a rare name or abbreviation costs more: the model's
+    /// lowercase list holds names and abbreviations ("gs", "ut", "kent") that a loose swipe of
+    /// a common word could read as, and they would go in capitalised mid-sentence (the core's
+    /// `SwipeDecoder.ranked`).
     func ranked(_ candidates: [SwipeDecoder.Candidate]) -> [String] {
-        let model = decoder.model
-        func rareName(_ text: String) -> Bool {
-            guard engine.swipeReadsAsName(text) else { return false }
-            return model.index(of: text).map { model.unigramCost($0) > Self.commonNameCost } ?? true
-        }
-        return candidates
-            .map { ($0.text, $0.cost + (rareName($0.text) ? nameCost : 0)) }
-            .enumerated()
-            .sorted { $0.element.1 != $1.element.1 ? $0.element.1 < $1.element.1 : $0.offset < $1.offset }
-            .map(\.element.0)
+        guard let words = engine.autocorrect.swipeWords else { return candidates.map(\.text) }
+        let checker = engine.autocorrect.checker
+        return decoder.ranked(candidates, words: words) { checker.isWordValid($0) }.map { candidates[$0].text }
     }
 
     // MARK: - The word so far
@@ -263,19 +243,10 @@ final class SwipeTyping {
 
     /// Whether a swiped word needs a space before it, as Apple's keyboard adds one: unless
     /// the text before the cursor is empty or ends in a space, a line break or opening
-    /// punctuation (a bracket, an opening quote, ¿ or ¡, or a mark that starts a word such
-    /// as @ # /). A straight quote opens when nothing or a space comes before it.
+    /// punctuation (the core's `SwipeDecoder.needsSpace`).
     static func needsSpace(before: String?) -> Bool {
-        guard let before, let last = before.last else { return false }
-        if last.isWhitespace || last.isNewline || opening.contains(last) { return false }
-        if last == "\"" || last == "'" {
-            let previous = before.dropLast().last
-            return !(previous == nil || previous!.isWhitespace || previous!.isNewline || opening.contains(previous!))
-        }
-        return true
+        SwipeDecoder.needsSpace(before: before)
     }
-
-    private static let opening: Set<Character> = ["(", "[", "{", "<", "«", "‹", "“", "‘", "„", "¿", "¡", "@", "#", "/"]
 }
 
 extension KeyboardLanguage {

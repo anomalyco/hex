@@ -173,6 +173,9 @@ targets:
       # SwipeFixtureTests' golden readings, which crates/keyboard/core/tests/swipe_parity.rs reads too.
       - path: ../crates/keyboard/core/tests/fixtures/swipe-parity.jsonl
         buildPhase: resources
+      # SwipeRulesFixtureTests' golden swipe-rules cases, which crates/keyboard/core/tests/swipe_rules.rs reads too.
+      - path: ../crates/keyboard/core/tests/fixtures/swipe-rules.jsonl
+        buildPhase: resources
     dependencies:
       - target: HEXMobile
     settings:

@@ -138,7 +138,7 @@ pub struct HkKeys {
 }
 
 pub struct HkSwipeDecoder {
-    decoder: SwipeDecoder,
+    pub(crate) decoder: SwipeDecoder,
 }
 
 #[repr(C)]

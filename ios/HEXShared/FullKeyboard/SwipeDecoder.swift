@@ -334,6 +334,153 @@ nonisolated struct SwipeDecoder: Sendable {
     }
 }
 
+// MARK: - What a swipe types
+
+extension SwipeDecoder {
+    /// Your text replacements and words as the core types a swipe with them
+    /// (`hk_swipe_words_new`): made again whenever one of them changes.
+    final class Words: @unchecked Sendable {
+        let pointer: OpaquePointer
+
+        /// `replacements` by shortcut (lowercased); `own` your other own spellings (lexicon
+        /// terms, words you kept, fixes Hex learned); `vocabulary` your vocabulary's words.
+        init?(language: String, hasDictionary: Bool, replacements: [String: String], own: [String], vocabulary: [String]) {
+            let pairs = Array(replacements)
+            let shortcuts = pairs.map { strdup($0.key) }, outputs = pairs.map { strdup($0.value) }
+            let owned = own.map { strdup($0) }, terms = vocabulary.map { strdup($0) }
+            defer { (shortcuts + outputs + owned + terms).forEach { free($0) } }
+            let entries = zip(shortcuts, outputs).map { HkTextReplacement(shortcut: $0.map { UnsafePointer($0) }, replacement: $1.map { UnsafePointer($0) }) }
+            let ownPointers = owned.map { $0.map { UnsafePointer($0) } }, termPointers = terms.map { $0.map { UnsafePointer($0) } }
+            guard let pointer = hk_swipe_words_new(
+                language, hasDictionary ? 1 : 0, entries, entries.count, ownPointers, ownPointers.count, termPointers, termPointers.count
+            ) else { return nil }
+            self.pointer = pointer
+        }
+
+        deinit {
+            hk_swipe_words_free(pointer)
+        }
+    }
+
+    /// The state a swipe is typed in: the text before the cursor, shift, the field's
+    /// auto-capitalization (`.none` also with Settings › Auto-capitalization off), the setting,
+    /// and whether the field allows autocorrection (text replacements show only then).
+    struct TypingState: Equatable, Sendable {
+        var before: String?
+        var shift: ShiftState
+        var shiftHeld: Bool
+        var autoCapitalization: AutoCapitalization.Mode
+        var autoCapitalizes: Bool
+        var autocorrection: Bool
+    }
+
+    /// What a finished swipe types: a space first or not, the word, the strip's other readings.
+    struct Typed: Equatable, Sendable {
+        var space: Bool
+        var word: String
+        var alternatives: [String]
+    }
+
+    /// What a swipe whose readings are `readings` (best first, those that may be offered)
+    /// types in `state` (`hk_swipe_typed`); nil when there are none.
+    static func typed(_ readings: [String], in state: TypingState, words: Words, isWordValid: (String) -> Bool) -> Typed? {
+        guard !readings.isEmpty else { return nil }
+        let texts = readings.map { strdup($0) }
+        defer { texts.forEach { free($0) } }
+        let pointers = texts.map { $0.map { UnsafePointer($0) } }
+        var typed = HkSwipeTyped()
+        let status = withOptionalCString(state.before) { before in
+            var context = HkSwipeContext(
+                before: before,
+                shift: state.shift == .locked ? UInt8(HK_SHIFT_LOCKED) : state.shift == .on ? UInt8(HK_SHIFT_ON) : UInt8(HK_SHIFT_OFF),
+                shift_held: state.shiftHeld ? 1 : 0,
+                auto_capitalization: state.autoCapitalization.core,
+                auto_capitalizes: state.autoCapitalizes ? 1 : 0,
+                autocorrection: state.autocorrection ? 1 : 0
+            )
+            return withWordCheck(isWordValid) { check, check_context in
+                hk_swipe_typed(words.pointer, pointers, pointers.count, &context, check, check_context, &typed)
+            }
+        }
+        defer { hk_swipe_typed_free(&typed) }
+        guard status == 0 else { return nil }
+        let alternatives = (0..<typed.alternative_count).map { String(cString: typed.alternatives[$0]!) }
+        return Typed(space: typed.space != 0, word: String(cString: typed.word), alternatives: alternatives)
+    }
+
+    /// The order of `candidates` (a reading's, best first) once a rare name or abbreviation
+    /// costs more (`hk_swipe_rank`); as they are without the core's model.
+    func ranked(_ candidates: [Candidate], words: Words, isWordValid: (String) -> Bool) -> [Int] {
+        guard let decoder = core.decoder(self), !candidates.isEmpty else { return Array(candidates.indices) }
+        let texts = candidates.map { strdup($0.text) }
+        defer { texts.forEach { free($0) } }
+        let pointers = texts.map { $0.map { UnsafePointer($0) } }
+        var order = [Int](repeating: 0, count: candidates.count)
+        let status = withWordCheck(isWordValid) { check, context in
+            hk_swipe_rank(decoder, words.pointer, pointers, candidates.map(\.cost), candidates.count, check, context, &order)
+        }
+        return status == 0 ? order : Array(candidates.indices)
+    }
+
+    /// Whether `word` (a reading, as the model spells it) is one the dictionary knows only
+    /// with a capital: a name, day or place ("monday") (`hk_swipe_reads_as_name`).
+    static func readsAsName(_ word: String, words: Words, isWordValid: (String) -> Bool) -> Bool {
+        withWordCheck(isWordValid) { check, context in hk_swipe_reads_as_name(words.pointer, word, check, context) != 0 }
+    }
+
+    /// Whether a swiped word needs a space before it after `before` (`hk_swipe_needs_space`).
+    static func needsSpace(before: String?) -> Bool {
+        withOptionalCString(before) { hk_swipe_needs_space($0) != 0 }
+    }
+
+    /// Whether a swipe through `points` was a tap that slid (`hk_swipe_is_slid_tap`): it never
+    /// went far from where it went down, it lifted on the key it went down on (`key`, that
+    /// key's character), and its best reading doesn't start and end on that key.
+    static func isSlidTap(_ points: [CGPoint], pitch: CGFloat, key: String?, firstReading: String?) -> Bool {
+        let flat = points.flatMap { [Double($0.x), Double($0.y)] }
+        return withOptionalCString(key) { key in
+            withOptionalCString(firstReading) { first in hk_swipe_is_slid_tap(flat, points.count, Double(pitch), key, first) != 0 }
+        }
+    }
+
+    /// Whether `word` begins and ends on `letter`'s key ("lol" on l) (`hk_swipe_starts_and_ends_with`).
+    static func word(_ word: String, startsAndEndsWith letter: String) -> Bool {
+        hk_swipe_starts_and_ends_with(word, letter) != 0
+    }
+}
+
+private extension AutoCapitalization.Mode {
+    var core: UInt8 {
+        switch self {
+        case .none: UInt8(HK_AUTOCAPITALIZATION_NONE)
+        case .words: UInt8(HK_AUTOCAPITALIZATION_WORDS)
+        case .sentences: UInt8(HK_AUTOCAPITALIZATION_SENTENCES)
+        case .allCharacters: UInt8(HK_AUTOCAPITALIZATION_ALL_CHARACTERS)
+        }
+    }
+}
+
+/// `isWordValid` for the core to ask during `body`, as an `HkIsWordValid` and its context.
+nonisolated private func withWordCheck<R>(_ isWordValid: (String) -> Bool, _ body: (HkIsWordValid, UnsafeMutableRawPointer) -> R) -> R {
+    withoutActuallyEscaping(isWordValid) { isWordValid in
+        let box = WordCheck(isWordValid)
+        return withExtendedLifetime(box) {
+            body({ context, word in
+                guard let context, let word else { return 0 }
+                return Unmanaged<WordCheck>.fromOpaque(context).takeUnretainedValue().isWordValid(String(cString: word)) ? 1 : 0
+            }, Unmanaged.passUnretained(box).toOpaque())
+        }
+    }
+}
+
+nonisolated private final class WordCheck {
+    let isWordValid: (String) -> Bool
+
+    init(_ isWordValid: @escaping (String) -> Bool) {
+        self.isWordValid = isWordValid
+    }
+}
+
 /// `body` with `values`' storage, or NULL.
 nonisolated private func withOptionalBuffer<R>(_ values: [Double]?, _ body: (UnsafePointer<Double>?) -> R) -> R {
     guard let values else { return body(nil) }

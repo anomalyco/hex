@@ -10,6 +10,8 @@ name = "hex_keyboard_core"
 
 [dependencies]
 unicode-normalization = "0.1"
+# Swift's Character (an extended grapheme cluster), for the swipe rules (swipe/characters.rs).
+unicode-segmentation = "1"
 
 [dev-dependencies]
 # The swipe parity test's fixture (tests/swipe_parity.rs): JSON Lines, and the models' SHA-256.
