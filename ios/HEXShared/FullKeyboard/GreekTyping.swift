@@ -43,6 +43,7 @@ extension FullKeyboardEngine {
     func typeGreek(_ text: inout String) -> Bool {
         let before = target.documentContextBeforeInput
         if let vowel = GreekTyping.accenting(text, after: before) {
+            rememberTypingContext(before: textBefore.map { String($0.dropLast(1)) }, inserted: vowel)
             target.deleteBackward()
             target.insertText(vowel)
             didEdit()
@@ -50,6 +51,7 @@ extension FullKeyboardEngine {
             return true
         }
         if GreekTyping.reopensFinalSigma(typing: text, after: before) {
+            rememberTypingContext(before: textBefore.map { String($0.dropLast(1)) }, inserted: "σ")
             target.deleteBackward()
             target.insertText("σ")
         }

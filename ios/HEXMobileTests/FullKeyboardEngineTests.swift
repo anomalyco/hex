@@ -2042,9 +2042,12 @@ final class FullKeyboardEngineTests: XCTestCase {
 
     // MARK: - Swipe typing
 
-    /// A 390 pt keyboard with Swipe typing on: its key plane, typing into a field holding `text`.
-    private func swipeKeyboard(_ text: String = "", language: KeyboardLanguage = .english) throws -> (FixtureTextTarget, KeyboardKeyPlaneView) {
-        let field = FixtureTextTarget(text: text)
+    /// A 390 pt keyboard with Swipe typing on: its key plane, typing into a field holding
+    /// `text` (or the given one, for a host that does something particular).
+    private func swipeKeyboard(
+        _ text: String = "", language: KeyboardLanguage = .english, target: FixtureTextTarget? = nil
+    ) throws -> (FixtureTextTarget, KeyboardKeyPlaneView) {
+        let field = target ?? FixtureTextTarget(text: text)
         field.autocapitalizationType = UITextAutocapitalizationType.none
         let keys = FullKeyboardEngine(
             target: field,
@@ -2176,6 +2179,174 @@ final class FullKeyboardEngineTests: XCTestCase {
         // A word a swipe back to its first key can mean ("lol" on l) still reads as itself.
         XCTAssertTrue(SwipeTyping.word("lol", startsAndEndsWith: "l"))
         XCTAssertFalse(SwipeTyping.word("as", startsAndEndsWith: "a"))
+    }
+
+    // MARK: - The host's update after Hex's own insert
+
+    /// A host reports `textDidChange` for the keys' own edits, on the next runloop in
+    /// some apps: the echo leaves the swipe's pending space and its word alone.
+    func testAHostEchoAfterASwipeKeepsItsPendingSpace() throws {
+        let (field, plane) = try swipeKeyboard()
+        field.autocapitalizationType = .sentences
+        plane.engine.refreshAutoCapitalization()
+        swipe("this", on: plane)
+        plane.engine.textDidChange()
+        swipe("is", on: plane)
+        plane.engine.textDidChange()
+        tap(.character("a"), on: plane)
+        swipe("test", on: plane)
+        XCTAssertEqual(field.text, "This is a test")
+    }
+
+    /// A host whose proxy lags `insertText` sends `textDidChange` while still
+    /// reporting the text from before it, nothing, or an empty string: word boundaries and
+    /// casing read what Hex typed, so the space and the lowercase stay right.
+    func testALaggingHostKeepsThePendingSpaceAndAddsNoStrayCapital() throws {
+        for lag in LaggingField.Lag.allCases {
+            let field = LaggingField()
+            field.lag = lag
+            let (_, plane) = try swipeKeyboard(target: field)
+            field.autocapitalizationType = .sentences
+            plane.engine.refreshAutoCapitalization()
+            swipe("this", on: plane)
+            plane.engine.textDidChange()
+            swipe("is", on: plane)
+            plane.engine.textDidChange()
+            tap(.character("a"), on: plane)
+            swipe("test", on: plane)
+            XCTAssertEqual(field.text, "This is a test", "\(lag)")
+        }
+    }
+
+    /// A host that stays behind longer than the keys believe one (`typingContextLifetime`)
+    /// is read as it reports, so the swipe's pending space is no longer trusted.
+    func testAHostStillBehindAfterTheLifetimeIsNoLongerBelieved() throws {
+        let field = LaggingField()
+        field.lag = .nothing
+        let (_, plane) = try swipeKeyboard(target: field)
+        plane.engine.clock = { [unowned self] in self.now }
+        swipe("hello", on: plane)
+        now += FullKeyboardEngine.typingContextLifetime + 1
+        plane.engine.textDidChange()
+        tap(.character("w"), on: plane)
+        XCTAssertEqual(field.text, "hellow", "read as the host reports")
+    }
+
+    /// Text changed elsewhere, or a cursor move, is not Hex's echo: it still takes the
+    /// swipe's pending space, and casing reads where the cursor now is.
+    func testAChangeFromElsewhereOrACursorMoveDropsThePendingSpace() throws {
+        for change in ["host edit", "cursor move"] {
+            let (field, plane) = try swipeKeyboard()
+            field.autocapitalizationType = .sentences
+            plane.engine.refreshAutoCapitalization()
+            swipe("hello", on: plane)
+            XCTAssertEqual(field.text, "Hello")
+            if change == "host edit" {
+                field.insertText("x")
+            } else {
+                field.adjustTextPosition(byCharacterOffset: -field.cursorIndex)
+            }
+            plane.engine.textDidChange()
+            XCTAssertEqual(plane.engine.isUppercase, change == "cursor move", "a cursor at the field's start")
+            tap(.character("w"), on: plane)
+            XCTAssertEqual(field.text, change == "host edit" ? "Helloxw" : "WHello", change)
+        }
+    }
+
+    /// A delete slide right after a swipe (inside the short window a lagging host is believed)
+    /// takes the swiped word's pending space with it: the next tap starts a new word.
+    func testADeleteSlideRightAfterASwipeTakesItsPendingSpace() throws {
+        let (field, plane) = try swipeKeyboard()
+        field.autocapitalizationType = .sentences
+        plane.engine.refreshAutoCapitalization()
+        swipe("this", on: plane)
+        swipe("test", on: plane)
+        XCTAssertEqual(field.text, "This test")
+
+        let step = plane.engine.layout.letterWidth
+        let slide = DeleteWordSwipe(engine: plane.engine, touchID: 1, startX: 0)
+        slide.move(to: -step * 1.2)
+        XCTAssertEqual(field.text, "This ")
+        tap(.character("a"), on: plane)
+        XCTAssertEqual(field.text, "This a", "one space, not two")
+    }
+
+    /// An autocorrection on space, with a host that still reports the text from before it: the
+    /// next swipe reads the corrected text, so it adds no second space.
+    func testAnAutocorrectionOnSpaceBehindAHostThenASwipeAddsNoSecondSpace() throws {
+        let field = StaleField()
+        let (_, plane) = try swipeKeyboard(target: field)
+        for letter in "teh" { tap(.character(String(letter)), on: plane) }
+        tap(.space, on: plane)
+        XCTAssertEqual(field.text, "the ", "autocorrected on space")
+        field.stale = "teh"
+        plane.engine.textDidChange()
+        swipe("world", on: plane)
+        XCTAssertEqual(field.text, "the world", "no second space")
+    }
+
+    /// A field cleared from somewhere else (a send) takes the swipe's pending space with it:
+    /// the next tap starts an empty field, capital and all.
+    func testAFieldClearedAfterASwipeTakesThePendingSpaceWithIt() throws {
+        let (field, plane) = try swipeKeyboard()
+        field.autocapitalizationType = .sentences
+        plane.engine.refreshAutoCapitalization()
+        swipe("hello", on: plane)
+        XCTAssertEqual(field.text, "Hello")
+        while !field.text.isEmpty { field.deleteBackward() }
+        plane.engine.textDidChange()
+        XCTAssertTrue(plane.engine.isUppercase, "an empty field starts a sentence")
+        tap(.character("a"), on: plane)
+        XCTAssertEqual(field.text, "A", "no space and a capital")
+    }
+
+    /// A swipe whose word carries an apostrophe goes in with a smart quote, while the keys read
+    /// the host's straight one: the echo still matches, so the pending space stays.
+    func testASmartQuoteSwipeKeepsItsPendingSpaceAcrossAnEcho() throws {
+        let (field, plane) = try swipeKeyboard()
+        field.smartQuotesType = .yes
+        let key = try XCTUnwrap(plane.engine.layout.key(.character("t")))
+        plane.engine.touchBegan(id: 90, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+        plane.engine.beginSwipe(touchID: 90)
+        plane.engine.endSwipe(typing: ["don't"], points: 12, decodeTime: 0.001)
+        XCTAssertEqual(field.text, "don\u{2019}t", "smart quotes curled it")
+        plane.engine.textDidChange()
+        tap(.character("w"), on: plane)
+        XCTAssertEqual(field.text, "don\u{2019}t w")
+    }
+
+    /// A delete right after a pick, with a host still reporting the word before it: the held
+    /// space goes, not a letter.
+    func testADeleteAfterAPickBehindAHostTakesTheHeldSpaceNotALetter() throws {
+        let field = StaleField(text: "teh world")
+        let (_, plane) = try swipeKeyboard(target: field)
+        field.adjustTextPosition(byCharacterOffset: -6)
+        plane.engine.textDidChange()
+        let pick = try XCTUnwrap(plane.engine.suggestions.first { $0.replacement == "the" })
+        plane.engine.acceptSuggestion(pick)
+        XCTAssertEqual(field.text, "the world")
+        field.stale = ""
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "the world", "the held space goes, not a letter")
+    }
+
+    /// Another of the swipe's readings picked from the strip, with a host still reporting the
+    /// old word: the new word keeps its pending space.
+    func testAPickedSwipeReadingBehindAHostKeepsItsPendingSpace() throws {
+        let field = StaleField()
+        let (_, plane) = try swipeKeyboard(target: field)
+        let key = try XCTUnwrap(plane.engine.layout.key(.character("h")))
+        plane.engine.touchBegan(id: 91, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+        plane.engine.beginSwipe(touchID: 91)
+        plane.engine.endSwipe(typing: ["hello", "hullo"], points: 12, decodeTime: 0.001)
+        XCTAssertEqual(field.text, "hello")
+        field.stale = "hello"
+        let reading = try XCTUnwrap(plane.engine.suggestions.first { $0.replacement == "hullo" })
+        plane.engine.acceptSuggestion(reading)
+        XCTAssertEqual(field.text, "hullo")
+        plane.engine.textDidChange()
+        tap(.character("a"), on: plane)
+        XCTAssertEqual(field.text, "hullo a")
     }
 
     /// The plane hands the decoder each touch's time, so a pause on a letter the stroke runs
@@ -2779,6 +2950,45 @@ private final class TraitField: KeyboardTextTarget {
     var hasText: Bool { !text.isEmpty }
     func insertText(_ inserted: String) { text += inserted }
     func deleteBackward() { if !text.isEmpty { text.removeLast() } }
+}
+
+/// A host whose proxy lags `insertText`: `documentContextBeforeInput` keeps returning what it
+/// had before the last insert (`behind`), nothing (`nothing`) or an empty string
+/// (`empty`), as web views and some composers do, while the text takes every insert.
+@MainActor
+private final class LaggingField: FixtureTextTarget {
+    enum Lag: CaseIterable {
+        case behind, nothing, empty
+    }
+
+    var lag: Lag = .behind
+    private var reported: String?
+
+    override var documentContextBeforeInput: String? {
+        switch lag {
+        case .behind: return reported
+        case .nothing: return nil
+        case .empty: return ""
+        }
+    }
+
+    override func insertText(_ inserted: String) {
+        // What the host reports before this insert is what it keeps reporting after it,
+        // except that one that is a single insert behind reports the text before this one.
+        reported = lag == .behind ? super.documentContextBeforeInput : documentContextBeforeInput
+        super.insertText(inserted)
+    }
+}
+
+/// A host whose proxy keeps reporting `stale` until it is cleared, as one that has not caught
+/// up to the keys' last insert yet.
+@MainActor
+private final class StaleField: FixtureTextTarget {
+    var stale: String?
+
+    override var documentContextBeforeInput: String? {
+        stale ?? super.documentContextBeforeInput
+    }
 }
 
 extension FullKeyboardEngineTests {

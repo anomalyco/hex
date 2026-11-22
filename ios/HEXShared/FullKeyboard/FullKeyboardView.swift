@@ -621,6 +621,7 @@ final class FullKeyboardView: UIView {
         let work = DispatchWorkItem { [weak self] in self?.hideUndo() }
         undoHideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 12, execute: work)
+        engine.forgetTextAroundKeys()
         engine.textDidChange()
         refreshReturnKey()
     }
@@ -882,6 +883,7 @@ final class FullKeyboardView: UIView {
         keyFeedback()
         clipboard.markPasted()
         typingLog?.edit("paste", [TypingLogField("inserted", .string(text))])
+        engine.forgetTextAroundKeys()
         engine.target.insertText(text)
         engine.textDidChange()
         typingLog?.context("paste")
@@ -1373,6 +1375,7 @@ final class FullKeyboardView: UIView {
             typingLog?.ui("undo_dictation", [TypingLogField("applied", .bool(false))])
         }
         hideUndo()
+        engine.forgetTextAroundKeys()
         engine.textDidChange()
         typingLog?.context("undo_dictation")
         refreshReturnKey()

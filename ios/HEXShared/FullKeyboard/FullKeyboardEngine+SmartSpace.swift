@@ -42,7 +42,7 @@ extension FullKeyboardEngine {
     /// Whether a held space waits for the next key: nothing has changed since it was held.
     var spacePending: Bool {
         guard let held = suggestionSpaceBefore, held.last?.isWhitespace == false else { return false }
-        return held == textBefore && textAfterSeparates
+        return held == typingContext && textAfterSeparates
     }
 
     /// The text before the cursor as the strip reads it: with a held space, as after a typed
@@ -54,7 +54,7 @@ extension FullKeyboardEngine {
     /// Holds the space after the word just finished, until the next key. The space bar's
     /// counts as a space for the keys' page too: 123 goes back to ABC.
     func holdSpaceAfterWord(spaceBar: Bool = false) {
-        suggestionSpaceBefore = textBefore
+        suggestionSpaceBefore = typingContext
         if spaceBar {
             layerState.didInsert(" ")
             rebuildLayoutIfNeeded()
@@ -71,6 +71,7 @@ extension FullKeyboardEngine {
             TypingLogField("inserted", .string(" ")),
             TypingLogField("src", .string("held_space")),
         ])
+        rememberTypingContext(before: typingContext, inserted: " ")
         target.insertText(" ")
     }
 
@@ -82,7 +83,7 @@ extension FullKeyboardEngine {
         if holds {
             holdSpaceAfterWord()
         } else {
-            suggestionSpaceBefore = textBefore
+            suggestionSpaceBefore = typingContext
         }
         typingLog?.context("suggestion")
     }
@@ -98,6 +99,7 @@ extension FullKeyboardEngine {
             TypingLogField("inserted", .string(" ")),
             TypingLogField("src", .string("held_space")),
         ])
+        rememberTypingContext(before: typingContext, inserted: " ")
         target.insertText(" ")
         if shift.state == .off { refreshAutoCapitalization() }
     }

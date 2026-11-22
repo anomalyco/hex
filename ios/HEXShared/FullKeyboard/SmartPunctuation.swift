@@ -162,6 +162,7 @@ extension FullKeyboardEngine {
         guard text.count == 1, let mark = text.first, Self.suggestionJoiners.contains(mark),
               let spaced = suggestionSpaceBefore, spaced.last == " ", spaced == textBefore else { return false }
         typingLog?.edit("delete", [TypingLogField("deleted", .string(" ")), TypingLogField("src", .string("suggestion_space"))])
+        forgetTypingContext()
         target.deleteBackward()
         return true
     }
@@ -173,6 +174,7 @@ extension FullKeyboardEngine {
         guard source == "key" || source == "slide" || source == nil else { return target.insertText(text) }
         if text == "-", smartDashes, target.documentContextBeforeInput?.last == "-" {
             typingLog?.edit("smart_dash", [TypingLogField("deleted", .string("-")), TypingLogField("inserted", .string(SmartPunctuation.emDash))])
+            rememberTypingContext(before: textBefore.map { String($0.dropLast(1)) }, inserted: SmartPunctuation.emDash)
             target.deleteBackward()
             return target.insertText(SmartPunctuation.emDash)
         }
