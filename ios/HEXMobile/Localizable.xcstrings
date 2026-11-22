@@ -3010,12 +3010,12 @@
         }
       }
     },
-    "English, Spanish and French only" : {
+    "English, Spanish, French and Polish only" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "仅限英语、西班牙语和法语"
+            "value" : "仅限英语、西班牙语、法语和波兰语"
           }
         }
       }

@@ -46,11 +46,12 @@ IOS = Path(__file__).resolve().parents[1]
 BENCH = IOS.parent / 'android/benchmark/typing'
 MODELS = IOS / 'HEXKeyboard/TypingModel'
 ANDROID_MODELS = IOS.parent / 'android/app/src/main/assets/typing'
-LANGUAGES = ['en', 'es', 'de', 'fr', 'it', 'nb']
+LANGUAGES = ['en', 'es', 'de', 'fr', 'it', 'nb', 'pl']
 ROW_Y, SPACE = [66.5, 122.5, 178.5], [64.76, 212.0, 238.34, 45.0]
 ROWS = {'en': ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'], 'es': ['qwertyuiop', 'asdfghjklñ', 'zxcvbnm'],
         'de': ['qwertzuiopü', 'asdfghjklöä', 'yxcvbnm'], 'nb': ['qwertyuiopå', 'asdfghjkløæ', 'zxcvbnm'],
-        'fr': ['azertyuiop', 'qsdfghjklm', "wxcvbn'"], 'it': ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']}
+        'fr': ['azertyuiop', 'qsdfghjklm', "wxcvbn'"], 'it': ['qwertyuiop', 'asdfghjkl', 'zxcvbnm'],
+        'pl': ['qwertyuiop', 'asdfghjkl', 'zxcvbnm']}
 
 
 def config(name):

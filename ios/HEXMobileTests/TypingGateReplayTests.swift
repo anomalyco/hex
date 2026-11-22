@@ -99,7 +99,7 @@ final class TypingGateReplayTests: XCTestCase {
             if tap == [-1, -1] {
                 // A letter without a key of its own, picked from its key's long-press menu.
                 let base = String(lower.decomposedStringWithCanonicalMapping.unicodeScalars.first.map(Character.init) ?? Character(lower))
-                let point = try centre(.character(lower == "ß" ? "s" : base))
+                let point = try centre(.character(lower == "ß" ? "s" : lower == "ł" ? "l" : base))
                 engine.touchBegan(id: i, at: point)
                 engine.openAccentMenuIfEligible(forTouch: i)
                 let menu = try XCTUnwrap(engine.activeAccentMenu, "no accent menu for \(ch) in \(item.id)")

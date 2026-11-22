@@ -179,7 +179,8 @@ def score(lang, mapping, cases, limits, tmp, command):
 def main():
     maps, cases, limits = map(config, ['accent-keys.json', 'critical-cases.json', 'thresholds.json'])
     languages = sorted(p.stem for p in MODELS.glob('*.hextm') if (HERE/'held-out'/(p.stem+'.tsv.gz')).is_file())
-    if set(languages) != set(maps) or set(languages) != set(cases):
+    # A language may be configured before Android has its model (Polish: iOS's typing-gate.py).
+    if not set(languages) <= set(maps) & set(cases):
         raise ValueError('Model/set coverage does not match the configured gate languages')
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('language', nargs='?', default='all', choices=['all'] + languages)

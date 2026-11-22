@@ -711,6 +711,15 @@ never at a launch by itself.
     German's `de.capitals` is read in place through the same reader (`GermanCapitals`). With `fr.valid` French
     restores 86.1% of the accents the gate counts (81.1% with `UITextChecker`). English, Spanish
     and German keep `UITextChecker`: their own lists moved a gate number the wrong way.
+    Polish reads `pl.hextm` (150,000 words, 184,327 pairs, 3.60 MB) and `pl.valid` (525,084 words,
+    8.29 MB), both built by `scripts/build-typing-model.py pl` from NKJP's n-grams, ParlaMint and
+    PoliMorf (Settings › Acknowledgements). Its letters are held on their base keys, so the model
+    puts them back ("zolw" -> "żółw", "wiem ze" -> "wiem że"). iOS's own Polish dictionary is no
+    use without Apple's word data (it takes any letters for a word), and the list replaces it. On
+    the held-out Polish replay (`scripts/typing-gate.py run … pl`): 85.98% fewer word errors than
+    the raw taps, 0.22% of correctly typed words changed, 95.46% of the marks
+    restored where the plain spelling is no word, 5/5 critical cases. Polish has no capitals list
+    yet: a name typed in lowercase ("warszawa") keeps its lowercase.
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
     Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
     Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
