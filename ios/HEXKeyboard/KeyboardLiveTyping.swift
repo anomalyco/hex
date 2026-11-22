@@ -18,6 +18,23 @@ final class KeyboardLiveTyping {
     var mayType: () -> Bool = { true }
     /// The field changed under the keys: they read it afresh.
     var didEdit: () -> Void = {}
+    /// The words that went out with a send, as heard and as typed, after the field before them.
+    struct Sent {
+        let heard: String
+        let typed: String
+        let before: String?
+    }
+
+    /// The field just read empty with the words in it: hold the audio from here.
+    var willSend: () -> Void = {}
+    /// `sendConfirmation` later: still empty, a send (start afresh from the held audio), or nil
+    /// when the field shows the words again (a host reporting late; the audio goes on as before).
+    var didSettleSend: (Sent?) -> Void = { _ in }
+    /// How long the field must stay empty to be a send: a host that reports late shows the
+    /// words again well within it.
+    static let sendConfirmation: TimeInterval = 0.3
+    private var heard = ""
+    private var confirming = false
 
     init(target: KeyboardTextTarget) {
         self.target = target
@@ -46,11 +63,37 @@ final class KeyboardLiveTyping {
             }
             typing = started
         }
-        guard let typing, !typing.stopped else { return }
+        guard let typing, !typing.stopped, !confirming, !checkSent() else { return }
+        heard = transcript.text
         typing.show(transcript.text)
         if typing.stopped {
             KeyboardProbeLog.shared.write("live: the field changed, stopped typing")
         }
+        didEdit()
+    }
+
+    /// The app changed the field: emptied while it ended with the words, they were sent. They
+    /// stay sent (nothing is taken back or inserted again) and the dictation starts afresh from
+    /// the audio after the moment the field first read empty.
+    @discardableResult
+    func checkSent() -> Bool {
+        guard !confirming, let typing, typing.wasSent else { return false }
+        confirming = true
+        willSend()
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.sendConfirmation) { [weak self] in self?.settleSend() }
+        return true
+    }
+
+    private func settleSend() {
+        guard confirming else { return }
+        confirming = false
+        guard let typing, typing.wasSent else {
+            didSettleSend(nil)
+            return
+        }
+        self.typing = nil
+        KeyboardProbeLog.shared.write("live: the field was emptied with the words in it (a send): starting afresh")
+        didSettleSend(Sent(heard: heard, typed: typing.typed, before: typing.base))
         didEdit()
     }
 

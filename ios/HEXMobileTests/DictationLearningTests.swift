@@ -667,6 +667,74 @@ final class LiveDictationTests: XCTestCase {
         return nil
     }
 
+    /// AJ dictates into Slack with Type as I speak and taps Send without stopping. The app
+    /// emptying the field while it ends with the words is a send: the sent words are never typed
+    /// or taken back again, and a fresh typing types the next words from the first into the
+    /// empty field, three sends in a row, so ✓ inserts only the last dictation's text.
+    func testAFieldTheAppEmptiedWithTheWordsInItWasSent() throws {
+        let field = FixtureTextTarget(text: "")
+        var typing = try XCTUnwrap(LiveFieldTyping(target: field))
+        for message in ["See you at ten", "Bring the slides", "And the notes"] {
+            typing.show(message)
+            XCTAssertEqual(field.text, message)
+            XCTAssertFalse(typing.wasSent)
+            while field.hasText { field.deleteBackward() }
+            XCTAssertTrue(typing.wasSent, "the app emptied the field: a send")
+            typing.show(message + " please")
+            XCTAssertEqual(field.text, "", "the sent dictation types nothing more")
+            typing = try XCTUnwrap(LiveFieldTyping(target: field), "the fresh dictation")
+            XCTAssertEqual(typing.base, "")
+        }
+        typing.show("Thanks")
+        XCTAssertEqual(field.text, "Thanks", "typed from its first word")
+        XCTAssertTrue(typing.takeBack())
+        XCTAssertEqual(field.text, "", "✓'s text goes into the empty field, the sent words nowhere")
+    }
+
+    /// An app that changes the words without emptying the field (an edit, a mention) didn't
+    /// send them: typing stops for that dictation, as before.
+    func testAnEditThatLeavesTextIsNotASend() throws {
+        let field = FixtureTextTarget(text: "")
+        let typing = try XCTUnwrap(LiveFieldTyping(target: field))
+        typing.show("Ask the team")
+        for _ in 0 ..< 4 { field.deleteBackward() }
+        field.insertText("@team")
+        XCTAssertFalse(typing.wasSent)
+        typing.show("Ask the team about it")
+        XCTAssertTrue(typing.stopped)
+        XCTAssertEqual(field.text, "Ask the @team", "hands off")
+        XCTAssertFalse(typing.wasSent, "stopped: a later send of the edited text isn't this dictation's")
+    }
+
+    /// After a send the keyboard forgets Undo for the text that left the field, and Undo after
+    /// the next dictation takes back only that one.
+    @MainActor
+    func testUndoAfterASendReachesOnlyTheNewDictation() throws {
+        let field = FixtureTextTarget(text: "")
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: field)
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        func undo() -> UIButton? { visibleButton(in: view, titled: "Undo dictation") }
+        field.insertText("Earlier words.")
+        view.didInsertDictation("Earlier words.", before: "", after: "")
+        XCTAssertNotNil(undo())
+        while field.hasText { field.deleteBackward() }
+        view.hideUndo()
+        XCTAssertNil(undo(), "nothing to undo: the text left with the send")
+        field.insertText("Next words.")
+        view.didInsertDictation("Next words.", before: "", after: "")
+        try XCTUnwrap(undo()).sendActions(for: .touchUpInside)
+        XCTAssertEqual(field.text, "")
+    }
+
+    private func visibleButton(in view: UIView, titled title: String) -> UIButton? {
+        for sub in view.subviews where !sub.isHidden && sub.alpha > 0 {
+            if let button = sub as? UIButton, button.configuration?.title == title { return button }
+            if let found = visibleButton(in: sub, titled: title) { return found }
+        }
+        return nil
+    }
+
     func testTheSwitchesDefaultToShowingButNotTyping() throws {
         let suite = "anomaly.hex.tests.live-dictation"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

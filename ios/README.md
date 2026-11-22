@@ -354,7 +354,15 @@ never at a launch by itself.
     itself or with Paste dictation, replaces them where the field still ends with them.
     Once the field changes under it (a key, a cursor move, a selection, or an app that
     reports no text), it stops and leaves its words, and the text goes in at the cursor as
-    without it. Never in secure, password, one-time code or card number fields, over a
+    without it. One change is a send instead: the app emptying the field while it ends with
+    the words (a chat's Send, or select all and delete; `LiveFieldTyping.wasSent`) and still
+    empty 0.3 s later. Those words went out as typed: they count as a kept dictation for
+    `DictationEditTracker` (as a host clearing the field always has), Undo forgets them, and
+    the dictation so far ends there, its audio deleted. The microphone stays on: the audio from
+    the moment the field first read empty (held meanwhile, every chunk in exactly one
+    dictation) starts a new dictation with its own file, live words from the first, final text
+    at ✓, length and memory checks, so talk, Send, talk, Send works hands-free. An app that
+    changes the words without emptying the field (an edit, a mention) still stops the typing. Never in secure, password, one-time code or card number fields, over a
     selection or a two-thumb Dictate's range, or with Translate what I say on. Neither runs
     before iOS 26, for dictations recorded through Hex (Keep mic warm), when less than 32 MB
     is left once the capture runs (`KeyboardLiveDictation`: the recogniser's share in the
@@ -2126,8 +2134,8 @@ dataset's download and its `convert.py` command.
   which Hex can't change), and compare.
 - **Show what I say and Type as I speak:** `LiveDictationTests` cover how results become the
   words shown, the switches' defaults, the end of a long dictation, and Type as I speak's
-  typing, revising, taking back, stopping when the field changes or an app reports no text, and
-  private fields. The simulator has no speech models, so there the preview and typing ran on a
+  typing, revising, taking back, stopping when the field changes or an app reports no text,
+  private fields, and an app's Send (three in a row, Undo after one, an edit that isn't one). The simulator has no speech models, so there the preview and typing ran on a
   replay of Apple's results recorded on a Mac (`LiveTranscriptReplay`), in a host app, light and
   dark, upright and turned, on an iPhone SE's globe key and with no model at all (no preview).
   On an iPhone 17 Pro (iOS 27.2): the preview, Type as I speak, a 60 s dictation, memory with

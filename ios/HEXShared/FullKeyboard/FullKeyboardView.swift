@@ -1442,7 +1442,7 @@ final class FullKeyboardView: UIView {
         refreshReturnKey()
     }
 
-    private func hideUndo() {
+    func hideUndo() {
         undoHideWork?.cancel()
         undoHideWork = nil
         if lastDictation != nil {
