@@ -3150,51 +3150,37 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
 }
 
 /// The Sounds row opens the sheet. A set's play button plays its dictation
-/// without choosing it, and pressing it again stops it; a chip plays one
-/// sound; picking a set saves it and plays it; Escape closes the sheet.
+/// without choosing it, and pressing it again stops it; picking a set saves
+/// it and plays it; Escape closes the sheet.
 #[test]
 fn the_sound_sets_sheet_plays_and_chooses_sets() {
-    use crate::feedback::{Audition, Cue, SoundSet};
+    use crate::feedback::SoundSet;
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     rt.state.settings.sound_effects = false;
     rt.state.settings.sound_effect_volume = 0.23;
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
     open_advanced(&mut rt, Pane::General);
+    assert!(texts(&rt).iter().any(|text| text == "Off"));
     tap(&mut rt, "sound-set-control");
     assert!(rt.state.sound_sets.open);
     let playing = |rt: &Runtime<Ui>| rt.state.sound_sets.playing();
 
-    tap(&mut rt, "set-click/top/play");
-    assert_eq!(playing(&rt), Some((SoundSet::Click, Audition::Dictation)));
+    tap(&mut rt, "set-click/lines/top/play");
+    assert_eq!(playing(&rt), Some(SoundSet::Click));
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Classic);
-    tap(&mut rt, "set-click/top/play");
+    tap(&mut rt, "set-click/lines/top/play");
     assert_eq!(playing(&rt), None);
-
-    // A single sound plays for under a second, so look before settling.
-    let (x, y) = rt.find("stage/cues/Stop").unwrap();
-    rt.pointer_down(x, y);
-    rt.pointer_up(x, y);
-    rt.frame(1.0 / 60.0);
-    assert_eq!(
-        playing(&rt),
-        Some((SoundSet::Classic, Audition::Cue(Cue::Stop)))
-    );
 
     tap(&mut rt, "set-wood");
     assert_eq!(rt.state.settings.sound_theme, SoundSet::Wood);
-    assert_eq!(playing(&rt), Some((SoundSet::Wood, Audition::Dictation)));
-    // The stage holds the HUD's window as the start sound plays.
-    for _ in 0..6 {
-        rt.frame(1.0 / 60.0);
-    }
-    let (window, _) = rt.presented("sound-sets-hud").expect("the HUD's window");
-    assert!(window[2] > 0.0 && window[3] > 0.0);
+    assert_eq!(playing(&rt), Some(SoundSet::Wood));
+    assert!(rt.find("set-wood/check/mark").is_some());
+    assert!(rt.find("set-classic/check/mark").is_none());
 
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
     assert!(!rt.state.sound_sets.open);
     assert_eq!(playing(&rt), None);
-    assert!(texts(&rt).iter().any(|text| text == "Wood"));
     assert!(!rt.state.settings.sound_effects);
     assert_eq!(rt.state.settings.sound_effect_volume, 0.23);
 }

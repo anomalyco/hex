@@ -147,7 +147,7 @@ pub(super) fn entries(ui: &Ui) -> Vec<Entry> {
     if caps.dock_icon {
         add(g, "dock-icon", true, tr("Show Dock icon"), "");
     }
-    add(g, "sound-volume", true, tr("Sound volume"), "");
+    add(g, "sound-set", true, tr("Sound volume"), "");
     add(
         g,
         "sound-set",

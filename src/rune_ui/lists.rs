@@ -123,10 +123,13 @@ pub(super) fn select_at_once(row: El, selected: bool, select: impl Fn(&mut Ui) +
     })
 }
 
-/// A selectable list row: title (with trailing pieces) over a meta line.
+/// A selectable list row: title (with trailing pieces) over a meta line,
+/// after `leading` (a check column) when given.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn list_row(
     p: Paint,
     key: &str,
+    leading: Option<El>,
     title: &str,
     trailing: Vec<El>,
     meta: &str,
@@ -134,18 +137,8 @@ pub(super) fn list_row(
     select: impl Fn(&mut Ui) + 'static,
 ) -> El {
     let c = &p.k.c;
-    // Named by its title and described by its meta line; the texts that
-    // show them stay out of the tree.
-    let mut item = col()
-        .key(key)
-        .role("listitem")
-        .label(title)
-        .description(meta)
-        .px(LIST_ROW_PX)
-        .py(8.0)
+    let lines = col()
         .gap(2.0)
-        .radius(p.k.radius.md)
-        .hover(c.hover)
         .child(
             row()
                 .key("top")
@@ -171,6 +164,25 @@ pub(super) fn list_row(
                 .truncate()
                 .a11y_hidden(),
         );
+    let item = match leading {
+        Some(leading) => row()
+            .gap(8.0)
+            .center_y()
+            .child(leading)
+            .child(lines.key("lines").grow(1.0).shrink()),
+        None => lines,
+    };
+    // Named by its title and described by its meta line; the texts that
+    // show them stay out of the tree.
+    let mut item = item
+        .key(key)
+        .role("listitem")
+        .label(title)
+        .description(meta)
+        .px(LIST_ROW_PX)
+        .py(8.0)
+        .radius(p.k.radius.md)
+        .hover(c.hover);
     if selected {
         item = item.fill(c.layer_02);
     }

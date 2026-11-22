@@ -220,15 +220,6 @@ line_icon!(
     ]
 );
 line_icon!(
-    MUSIC,
-    "hex-row-music",
-    [
-        "M9 18V5l12-2v13",
-        "M3 18a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
-        "M15 16a3 3 0 1 0 6 0a3 3 0 1 0-6 0",
-    ]
-);
-line_icon!(
     GLOBE,
     "hex-row-globe",
     [

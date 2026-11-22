@@ -18,7 +18,7 @@ use super::controls::{
     quiet_button, row_switch, value_button, value_font,
 };
 use super::icons::*;
-use super::lists::{PermissionControl, inline_slider, permission_control, slider};
+use super::lists::{PermissionControl, permission_control, slider};
 use super::platform::PlatformRequest;
 use super::settings::{self as s, Capture, Face};
 use super::{Menu, Pane, Request, ShortcutTarget, Ui};
@@ -955,61 +955,27 @@ pub(super) fn application(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<CardRow
             .into(),
         );
     }
-    let volume = ui
-        .sound_volume_drag
-        .unwrap_or_else(|| s::sound_volume(settings));
-    rows.push(
-        icon_row(
-            p,
-            "sound-volume",
-            &VOLUME,
-            tr("Sound volume"),
-            None,
-            inline_slider(
-                p,
-                "sound-volume-slider",
-                tr("Sound volume"),
-                volume,
-                if volume > 0.0 {
-                    format!("{:.0}%", volume * 100.0)
-                } else {
-                    tr("Off").to_owned()
-                },
-                160.0,
-                |ui, value, done| {
-                    let volume = (value * 100.0).round() / 100.0;
-                    ui.sound_volume_drag = if done { None } else { Some(volume) };
-                    if !done {
-                        return;
-                    }
-                    // Zero turns tones off and keeps the last level, as
-                    // `hex settings set sound_effect_volume 0` does.
-                    let saved = ui.update(|settings| {
-                        settings.sound_effects = volume > 0.0;
-                        if volume > 0.0 {
-                            settings.sound_effect_volume = volume;
-                        }
-                    });
-                    if saved && volume > 0.0 && ui.live() {
-                        crate::feedback::play(crate::feedback::Tone::DictationStart);
-                    }
-                },
-            ),
+    let sounds = if settings.sound_effects {
+        format!(
+            "{} · {:.0}%",
+            tr(settings.sound_theme.name()),
+            s::sound_volume(settings) * 100.0
         )
-        .into(),
-    );
+    } else {
+        tr("Off").to_owned()
+    };
     rows.push(
         icon_row(
             p,
             "sound-set",
-            &MUSIC,
+            &VOLUME,
             tr("Sounds"),
             None,
             value_button(
                 p,
                 "sound-set-control",
                 tr("Sounds"),
-                tr(settings.sound_theme.name()),
+                &sounds,
                 &rune_theme_opencode::icons::CHEVRON_RIGHT,
                 super::sound_sets::open,
             ),
