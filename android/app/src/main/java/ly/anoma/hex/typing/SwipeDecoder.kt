@@ -36,7 +36,14 @@ internal class SwipeDecoder(private val model: Long, val words: TypingModel, pri
         }
         val own = personal?.let { p -> List(p.size) { p.text(it) } }.orEmpty()
         val shortcuts = personal?.shortcuts.orEmpty()
-        val decoder = KeyboardCore.swipeNew(model, never.toIntArray(), pairs.toIntArray(), emptyArray(), DoubleArray(0), BooleanArray(0))
+        // Read beside the model's words, as iOS's SwipeTyping.syncWords: English's contractions, then your own
+        // words (your personal dictionary's, and the one-word outputs of your text replacements).
+        val contractions = if (words.language == "en") englishContractions else emptyList()
+        val yours = own + shortcuts.values.filter { ' ' !in it }
+        val extra = contractions.map { it.first } + yours
+        val costs = contractions.map { it.second } + yours.map { ownWordCost }
+        val decoder = KeyboardCore.swipeNew(model, never.toIntArray(), pairs.toIntArray(), extra.toTypedArray(), costs.toDoubleArray(),
+            BooleanArray(extra.size) { it < contractions.size })
         // Android has no vocabulary list of its own yet.
         val typing = KeyboardCore.swipeWordsNew(words.language, true, shortcuts.keys.toTypedArray(), shortcuts.values.toTypedArray(),
             own.toTypedArray(), emptyArray())
@@ -74,6 +81,9 @@ internal class SwipeDecoder(private val model: Long, val words: TypingModel, pri
 
     companion object {
         private const val NAME_PERCENT = 50
+        /** The core's English contractions, each with its cost. */
+        private val englishContractions by lazy { KeyboardCore.swipeEnglishContractions().map { it to KeyboardCore.swipeCostOfContraction(it) } }
+        private val ownWordCost by lazy { KeyboardCore.swipeOwnWordCost() }
 
         /** The language's decoder, its model opened from the APK's uncompressed asset; null when it can't. */
         fun open(assets: AssetManager, words: TypingModel): SwipeDecoder? {

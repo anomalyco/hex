@@ -81,10 +81,7 @@ internal object SwipeParity {
                             unpack(ticks).map { tick += it; base + tick * 0.001 }.toDoubleArray()
                         }
                         check(inputs(points, times) == v["inputs"]) { "case ${v["id"]}: the path and times rebuilt aren't the fixture's" }
-                        // Times that don't run in step with the path are read as none, as iOS's SwipeDecoder and the
-                        // core drop them (the JNI entry point refuses them instead).
-                        val reading = KeyboardCore.swipeRead(decoders.getValue(v["context"] as Long), points,
-                            times?.takeIf { it.size == points.size / 2 }, layout.letters,
+                        val reading = KeyboardCore.swipeRead(decoders.getValue(v["context"] as Long), points, times, layout.letters,
                             layout.xs, layout.ys, layout.pitch.first, layout.pitch.second, v["previous"] as String?, (v["limit"] as Long).toInt())
                         cases++
                         val expected = (v["out"] as List<*>).map { (it as List<*>)[0] as String to it[1] as String }
