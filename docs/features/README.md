@@ -3020,8 +3020,9 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   either reading dictates as before; a primary reading that finished silent reports empty
 │   so the caller throws its no-speech error without transcribing again; off, the path is
 │   unchanged.
-│   The iOS targets built and `TwoLanguageMergeTests` passed once on a macOS 26 GitHub
-│   runner (run 45003210405); nothing is measured on an iPhone.
+│   The app, keyboard, widgets, and tests built on a macOS 26 GitHub runner with 33 tests
+│   passing (run 45005571072, the latest observed verification); nothing is measured on an
+│   iPhone.
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after
 │   formatting

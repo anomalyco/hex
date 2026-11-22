@@ -42,14 +42,14 @@ nonisolated enum AppleSpeechTwoLanguage {
         // locale by the same rule the keyboard-follow language uses. One whose model
         // wouldn't install lately is set aside, as Automatic sets it aside.
         for keyboard in settings.keyboardLanguages where keyboard.baseLanguage != primaryCode {
-            guard let identifier = settings.dictationLanguage(for: keyboard) else { return nil }
+            guard let identifier = settings.dictationLanguage(for: keyboard) else { continue }
             let wanted = Locale(identifier: identifier)
             guard !settings.speechModuleFailed(wanted.identifier(.bcp47)) else { continue }
             guard let secondary = await SpeechTranscriber.supportedLocale(equivalentTo: wanted),
                   (secondary.language.languageCode?.identifier ?? "") != primaryCode else {
-                return nil
+                continue
             }
-            guard await isInstalled(secondary) else { return nil }
+            guard await isInstalled(secondary) else { continue }
             return Pair(primary: primary, secondary: secondary)
         }
         return nil
@@ -84,8 +84,8 @@ nonisolated enum AppleSpeechTwoLanguage {
             return nil
         }
 
-        // Prewarm both the way the app's prepared analyzer is warmed. A second language that
-        // can't prepare leaves the primary reading alone.
+        // Prepare both before starting, as the app prepares its analyzer. A second language
+        // that can't prepare leaves the primary reading alone.
         do {
             try await primaryAnalyzer.prepareToAnalyze(in: nil)
         } catch {
@@ -158,8 +158,9 @@ nonisolated enum AppleSpeechTwoLanguage {
 
     /// The words of one Apple Speech result: one per timed run, with the run's raw characters
     /// (its leading whitespace included) and its audio time range and transcription
-    /// confidence. A run with no letters or numbers, and any run without a time range, keeps
-    /// its characters on the word before it; such a run before the first word waits for it.
+    /// confidence. A run with no letters or numbers, and any run without a usable time range,
+    /// keeps its characters on the word before it; such a run before the first word waits
+    /// for it.
     static func words(in text: AttributedString) -> [TwoLanguageTimedWord] {
         var words: [TwoLanguageTimedWord] = []
         var prefix = ""
@@ -170,27 +171,32 @@ nonisolated enum AppleSpeechTwoLanguage {
             if let range = run.audioTimeRange {
                 let start = range.start.seconds
                 let end = range.end.seconds
-                guard start.isFinite, end.isFinite, end >= start else { continue }
-                let confidence = min(1, max(0, run.transcriptionConfidence ?? 0.5))
-                if hasLetterOrNumber {
-                    words.append(
-                        TwoLanguageTimedWord(
-                            text: prefix + characters,
-                            start: max(0, start),
-                            end: max(0, end),
-                            confidence: confidence
+                if start.isFinite, end.isFinite, end >= start {
+                    let confidence = min(1, max(0, run.transcriptionConfidence ?? 0.5))
+                    if hasLetterOrNumber {
+                        words.append(
+                            TwoLanguageTimedWord(
+                                text: prefix + characters,
+                                start: max(0, start),
+                                end: max(0, end),
+                                confidence: confidence
+                            )
                         )
-                    )
-                    prefix = ""
-                } else if !words.isEmpty {
-                    words[words.count - 1] = words[words.count - 1].appending(
-                        characters,
-                        endingAt: max(0, end)
-                    )
-                } else {
-                    prefix += characters
+                        prefix = ""
+                    } else if !words.isEmpty {
+                        words[words.count - 1] = words[words.count - 1].appending(
+                            characters,
+                            endingAt: max(0, end)
+                        )
+                    } else {
+                        prefix += characters
+                    }
+                    continue
                 }
-            } else if !words.isEmpty {
+            }
+            // No time range, or one that can't be placed: keep the characters on the word
+            // before it, or wait for the first one.
+            if !words.isEmpty {
                 words[words.count - 1] = words[words.count - 1].appending(characters, endingAt: nil)
             } else {
                 prefix += characters

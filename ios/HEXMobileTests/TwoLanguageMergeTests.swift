@@ -33,7 +33,7 @@ final class TwoLanguageMergeTests: XCTestCase {
 
         for secondary in [equal, quieter] {
             let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-            XCTAssertEqual(merged.text, " hello world")
+            XCTAssertEqual(merged.text, "hello world")
             XCTAssertEqual(merged.winner, .primary)
             XCTAssertFalse(merged.usedSecondary)
         }
@@ -55,7 +55,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         ]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-        XCTAssertEqual(merged.text, " ich bin hello world")
+        XCTAssertEqual(merged.text, "ich bin hello world")
         XCTAssertEqual(merged.winner, .secondary)
         XCTAssertTrue(merged.usedSecondary)
     }
@@ -75,7 +75,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         ]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-        XCTAssertEqual(merged.text, " a b c")
+        XCTAssertEqual(merged.text, "a b c")
         XCTAssertEqual(merged.winner, .primary)
         XCTAssertFalse(merged.usedSecondary)
     }
@@ -99,7 +99,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         ]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-        XCTAssertEqual(merged.text, " eins zwei Shared weiter end")
+        XCTAssertEqual(merged.text, "eins zwei Shared weiter end")
         XCTAssertEqual(merged.winner, .primary)
         XCTAssertTrue(merged.usedSecondary)
     }
@@ -121,7 +121,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         ]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-        XCTAssertEqual(merged.text, " eins zwei Shared Shared end")
+        XCTAssertEqual(merged.text, "eins zwei Shared Shared end")
         XCTAssertEqual(merged.winner, .primary)
         XCTAssertTrue(merged.usedSecondary)
     }
@@ -133,7 +133,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         ]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: [])
-        XCTAssertEqual(merged.text, " hello world")
+        XCTAssertEqual(merged.text, "hello world")
         XCTAssertEqual(merged.winner, .primary)
         XCTAssertFalse(merged.usedSecondary)
 
@@ -172,7 +172,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         ]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-        XCTAssertEqual(merged.text, " hallo world!")
+        XCTAssertEqual(merged.text, "hallo world!")
         XCTAssertTrue(merged.usedSecondary)
     }
 
@@ -183,7 +183,7 @@ final class TwoLanguageMergeTests: XCTestCase {
         let secondary = [word(" hello there", 0, 1.0, 0.8)]
 
         let merged = TwoLanguageMerger.merge(primary: primary, secondary: secondary)
-        XCTAssertEqual(merged.text, " hello there")
+        XCTAssertEqual(merged.text, "hello there")
         XCTAssertEqual(merged.winner, .secondary)
         XCTAssertTrue(merged.usedSecondary)
     }

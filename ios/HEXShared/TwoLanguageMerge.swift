@@ -40,8 +40,8 @@ nonisolated enum TwoLanguageWinner: String, Equatable, Sendable {
 }
 
 nonisolated struct TwoLanguageMerged: Equatable, Sendable {
-    /// The chosen text: the primary's own characters, with a second reading's words where
-    /// that reading won, its runs' spacing and punctuation kept.
+    /// The chosen text, trimmed of outer whitespace: the primary's own characters, with a
+    /// second reading's words where that reading won, its runs' spacing and punctuation kept.
     let text: String
     /// Which reading held the most audio, for the log only.
     let winner: TwoLanguageWinner
@@ -168,7 +168,7 @@ nonisolated enum TwoLanguageMerger {
             duration[chosen[index]] += segment.duration
         }
         return TwoLanguageMerged(
-            text: text,
+            text: text.trimmingCharacters(in: .whitespacesAndNewlines),
             winner: duration[0] >= duration[1] ? .primary : .secondary,
             usedSecondary: usedSecondary
         )

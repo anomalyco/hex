@@ -790,8 +790,8 @@ never at a launch by itself.
   resolve to `SpeechTranscriber`, and the second language's model must already be installed
   (`AssetInventory.status`): dictation never downloads for it, and a language whose
   `SpeechTranscriber` model was set aside as failing is skipped. Two `SpeechAnalyzer`s
-  read the same WAV, each with its own `AVAudioFile`, prewarmed with
-  `prepareToAnalyze(in: nil)`, and a `SpeechTranscriber(locale:`,
+  read the same WAV, each with its own `AVAudioFile`, prepared with
+  `prepareToAnalyze(in: nil)` before starting, and a `SpeechTranscriber(locale:`,
   `transcriptionOptions: [], reportingOptions: [],`
   `attributeOptions: [.audioTimeRange, .transcriptionConfidence])`; both get custom
   vocabulary's contextual strings. Each final result's timed runs give the merge its words
@@ -811,9 +811,10 @@ never at a launch by itself.
   or no timed words in either reading dictates exactly as before; a primary reading that
   finished without hearing anything reports empty so its caller throws its own no-speech
   error without transcribing again; with the switch off no two-language work starts.
-  `TwoLanguageMergeTests` cover the merge and the run extraction. The iOS targets built
-  and these tests passed once on a macOS 26 GitHub runner (run 45003210405); nothing here
-  has been measured on an iPhone, and the simulator can't transcribe.
+  `TwoLanguageMergeTests` cover the merge and the run extraction. The app, keyboard,
+  widgets, and tests built on a macOS 26 GitHub runner with 33 tests passing (run
+  45005571072, the latest observed verification); nothing here has been measured on an
+  iPhone, and the simulator can't transcribe.
 - **Switching the dictation language in the keyboard (iOS 26+, Full Access):**
   the dictation bar shows the language beside the style ("Norsk ⌄") and opens a
   tray of chips; the full keyboard's Hex key menu has a Language row with its
