@@ -494,6 +494,12 @@ class NeverSuggestTest {
         val it = layout("it")
         assertEquals("non è esagerato ", word("it").typed(it, "non e esagerato "))
         assertEquals("il vostro indirizzo è cambiato ", word("it").typed(it, "il vostro indirizzo e cambiato "))
+        // At a sentence's start, its capital and all, once the next word says so.
+        val e = word("it"); e.reset("")
+        val p = it.centres.getValue('e'); e.letter("E", p.x, p.y, it)
+        e.finish(' ', KeyPoint(183.93, 234.5), it)
+        e.reset("E "); for (c in "andato") e.tap(it, c)
+        assertEquals(Correction("E andato", "È andato"), e.finish(' ', KeyPoint(183.93, 234.5), it))
         assertEquals("pane e burro ", word("it").typed(it, "pane e burro "))
     }
 
@@ -533,5 +539,46 @@ class NeverSuggestTest {
         es.reset("")
         for (c in "volvere") es.tap(layout("es"), c)
         assertEquals("volveré", es.replacement())
+    }
+
+    // iOS: Auto-capitalisation off (Settings › Keyboard), autocorrect adds no capital you didn't type;
+    // your own words and a capital you typed keep theirs.
+    @Test fun autoCapitalisationOffAddsNoCapitals() {
+        val g = layout("en")
+        val on = word()
+        val off = word().also { it.addsCapitals = false }
+        for ((typed, capitalised, plain) in listOf(Triple("i", "I", null), Triple("im", "I'm", "i'm"), Triple("monday", "Monday", null))) {
+            for ((w, expected) in listOf(on to capitalised, off to plain)) {
+                w.reset("so "); for (c in typed) w.tap(g, c)
+                assertEquals(typed, expected, w.replacement())
+            }
+        }
+        assertEquals("I think I'd help ", on.typed(g, "i think id help "))
+        assertEquals("i think i'd help ", off.typed(g, "i think id help "))
+        assertEquals(listOf("I", "The", "I'm"), on.predictions(""))
+        assertTrue(off.predictions("").toString(), off.predictions("").none { it != it.lowercase() })
+        off.reset(""); for (c in "mon") off.tap(g, c)
+        assertTrue(off.strip().toString(), off.strip().none { it.text != it.text.lowercase() })
+        off.reset("so "); off.letter("M", g.centres.getValue('m').x, g.centres.getValue('m').y, g); for (c in "onday") off.tap(g, c)
+        assertNull("a capital you typed stays", off.replacement())
+        personal(off, listOf("GitHub"))
+        off.reset("so "); for (c in "github") off.tap(g, c)
+        assertEquals("GitHub", off.replacement())
+        val de = layout("de")
+        for ((w, expected) in listOf(word("de") to "Haus", word("de").also { it.addsCapitals = false } to null)) {
+            w.reset("das "); for (c in "haus") w.tap(de, c)
+            assertEquals(expected, w.replacement())
+        }
+    }
+
+    // Every language has words for the strip between words: at a sentence's start, after a comma and
+    // after a word the pairs don't know (0.2.0's French and Italian showed nothing there).
+    @Test fun everyLanguageOffersWordsBetweenWords() {
+        for (lang in listOf("en", "es", "de", "nb", "fr", "it")) {
+            val w = word(lang)
+            for (before in listOf("", "zzqx, ", "zzqx ")) assertEquals("$lang [$before]", 3, w.predictions(before).size)
+        }
+        assertEquals(listOf("Je", "Le", "La"), word("fr").predictions(""))
+        assertEquals(listOf("e", "ma", "che"), word("it").predictions("ciao, "))
     }
 }

@@ -27,6 +27,8 @@ French and Italian have their own 2,000-sentence sets the same way (French on AZ
 | Accents the words around decide ("a"/"à", "e"/"è") | 947 (6.93%) | 789 (6.56%) |
 | A missed space with a slip after it, or words run together | 939 (6.87%) | 763 (6.35%) |
 | Real words the books use outside the models | 935 (6.84%) | 753 (6.26%) |
+| French's apostrophe key read as the keyboard reads it (replay only) | 883 (6.46%) | |
+| The apostrophe key likeliest right after an elided "l", "d", "qu" | 864 (6.32%) | 753 (6.26%) |
 
 French has 13,661 reference words, Italian 12,025.
 
@@ -42,7 +44,11 @@ The replay also counts what the suggestion strip offers, as iOS's harness does: 
 | … and the validity lists | 13,219 / 2,350 / 4,685 | 12,401 / 2,113 / 3,566 | 12,949 / 1,678 / 6,019 | 11,994 / 2,166 / 5,150 |
 | iOS at fc867484, with #2244 | 13,253 / 2,289 / 3,234 | 12,364 / 2,076 / 2,901 | — | — |
 
-French and Italian strip hits (word / next / after two letters): 11,939 / 2,188 / 4,230 of 13,661 / 11,430 / 9,950, and 11,028 / 1,663 / 3,638 of 12,025 / 9,788 / 8,981.
+French and Italian strip hits (word / next / after two letters): 11,979 / 2,272 / 4,248 of 13,661 / 11,430 / 9,950, and 11,028 / 1,712 / 3,638 of 12,025 / 9,788 / 8,981, with their own words for the strip between words (iPhone Hex's lists). A word typed with its elision ("l'homme") can't be a strip hit once its apostrophe is typed: the strip then reads "homme".
+
+The replay types French's apostrophe as the keyboard does: the AZERTY key sits on the letter rows, so a touch on it goes to the likelier neighbour as a letter's does ("u'e" -> "une"), and a touch near it can type it ("jnetais" -> "j'étais"). Right after an elided article or pronoun the apostrophe counts as the likeliest key (`TypingWord.likelierKey`): the books split "l'" and "d'" off, so the word list alone would send "l'" to "ln".
+
+**End-to-end check.** The same taps typed through the installed keyboard into a real text field (API 35 emulator, an outside test app, touches injected at the benchmark's points scaled onto the keyboard's own keys) land where the replay says, once the replay is given the keyboard's measured key centres and touch cells (`Replay MODEL SET LANG OUT GEOMETRY.json`). Of 300 English, 300 Spanish, 300 German, 200 Bokmål, 200 French and 200 Italian sentences, the differences are the keyboard's double space putting in ". " (the synthetic typist sometimes taps space twice), twice a sentence's first or second tap lost (not seen again on retyping), and French: the keyboard measures AZERTY's pitches from q, w and a, which sit on other rows there (160 × −155 px instead of 107 × 155). Given those same pitches, the replay matches 198 of 200 French sentences.
 
 Out of 13,870 / 11,639 / 10,874 (English), 13,301 / 11,058 / 9,383 (Spanish), 13,550 / 11,326 / 12,413 (German) and 12,492 / 10,297 / 9,789 (Bokmål).
 
