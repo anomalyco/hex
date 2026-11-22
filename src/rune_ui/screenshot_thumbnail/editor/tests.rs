@@ -189,7 +189,12 @@ fn a_shot_without_a_file_is_offered_a_new_screenshot_name() {
     let file_dialog::Target::Save { filters, file_name } = editor.save_dialog().target else {
         panic!("a save panel");
     };
-    assert!(file_name.starts_with("Hex Screenshot "), "{file_name}");
+    assert!(file_name.starts_with("Hex Screenshot"), "{file_name}");
+    #[cfg(target_os = "macos")]
+    assert!(
+        file_name.starts_with("Hex Screenshot "),
+        "dated: {file_name}"
+    );
     assert!(file_name.ends_with(".png"), "{file_name}");
     assert_eq!(filters[0].extensions, ["png"]);
 }
