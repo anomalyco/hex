@@ -116,7 +116,8 @@ extension FullKeyboardView {
         return KeyboardStripNotice(
             title: String(localized: "New speech model"),
             detail: String(localized: "Downloads in Hex on Wi-Fi"),
-            button: String(localized: "Open Hex")
+            button: String(localized: "Open Hex"),
+            dismissible: true
         )
     }
 
@@ -140,6 +141,12 @@ extension FullKeyboardView {
         KeyboardParakeetNotice().recordOpened()
         hideModelNotice()
         model.onOpenURL?(KeyboardParakeetNotice.opensHex)
+    }
+
+    /// The notice's ✕: gone at once and never shown again on this iPhone.
+    func dismissModelNotice() {
+        KeyboardParakeetNotice().recordDismissed()
+        hideModelNotice()
     }
 
     /// Typing or dictating takes the strip back.

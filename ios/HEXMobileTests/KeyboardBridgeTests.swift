@@ -937,7 +937,7 @@ final class KeyboardBridgeTests: XCTestCase {
     @MainActor
     func testTheModelNoticeOpensHexAndNeverShowsInAPasswordField() throws {
         let group = try XCTUnwrap(UserDefaults(suiteName: KeyboardBridge.appGroup))
-        let keys = [KeyboardParakeetNotice.shownKey, KeyboardParakeetNotice.dayKey, KeyboardParakeetNotice.openedKey]
+        let keys = [KeyboardParakeetNotice.shownKey, KeyboardParakeetNotice.dayKey, KeyboardParakeetNotice.openedKey, KeyboardParakeetNotice.dismissedKey]
         keys.forEach { group.removeObject(forKey: $0) }
         defer { keys.forEach { group.removeObject(forKey: $0) } }
         let model = KeyboardViewModel()
@@ -960,12 +960,66 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(group.integer(forKey: KeyboardParakeetNotice.shownKey), 0, "not counted where it didn't show")
 
         let view = keyboard(FixtureTextTarget(text: ""))
-        XCTAssertEqual(view.modelNotice, KeyboardStripNotice(title: "New speech model", detail: "Downloads in Hex on Wi-Fi", button: "Open Hex"))
+        XCTAssertEqual(view.modelNotice, KeyboardStripNotice(title: "New speech model", detail: "Downloads in Hex on Wi-Fi", button: "Open Hex", dismissible: true))
         view.stripView.onOpenNotice?()
         XCTAssertEqual(opened, [KeyboardParakeetNotice.opensHex])
         XCTAssertNil(KeyboardLaunchRequest(url: KeyboardParakeetNotice.opensHex), "Hex opens as it is: no page, no session")
         XCTAssertNil(view.modelNotice, "gone once tapped")
         XCTAssertFalse(KeyboardParakeetNotice().mayShow(now: Date().addingTimeInterval(7 * 86_400)), "and never again")
+    }
+
+    /// Ryan: "make sure that ... the notice bar is able to be turned off." Its ✕ puts it away at
+    /// once and for good on this iPhone, whatever the counts; it opens nothing and isn't Open Hex.
+    @MainActor
+    func testTheModelNoticesDismissPutsItAwayForGood() throws {
+        let group = try XCTUnwrap(UserDefaults(suiteName: KeyboardBridge.appGroup))
+        let keys = [KeyboardParakeetNotice.shownKey, KeyboardParakeetNotice.dayKey, KeyboardParakeetNotice.openedKey, KeyboardParakeetNotice.dismissedKey]
+        keys.forEach { group.removeObject(forKey: $0) }
+        defer { keys.forEach { group.removeObject(forKey: $0) } }
+        let model = KeyboardViewModel()
+        model.configureFixture(snapshot: .offline, now: 10_000)
+        var opened: [URL] = []
+        model.onOpenURL = { opened.append($0) }
+        let view = FullKeyboardView(model: model, target: FixtureTextTarget(text: ""))
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.offerModelNotice(awaitsDownload: true)
+        XCTAssertEqual(view.modelNotice?.dismissible, true)
+        view.layoutIfNeeded()
+        let dismiss = try XCTUnwrap(dismissControl(in: view.stripView), "the notice's ✕")
+        XCTAssertGreaterThanOrEqual(dismiss.bounds.width, 34)
+        XCTAssertGreaterThanOrEqual(dismiss.bounds.height, 28, "a real touch target")
+        let open = try XCTUnwrap(control(in: view.stripView, titled: "Open Hex"))
+        XCTAssertFalse(dismiss.convert(dismiss.bounds, to: view).intersects(open.convert(open.bounds, to: view)), "a miss on ✕ never hits Open Hex")
+        dismiss.sendActions(for: .touchUpInside)
+        XCTAssertNil(view.modelNotice, "gone at once")
+        XCTAssertEqual(opened, [], "opens nothing")
+        XCTAssertFalse(group.bool(forKey: KeyboardParakeetNotice.openedKey), "not Open Hex")
+        XCTAssertEqual(group.integer(forKey: KeyboardParakeetNotice.shownKey), 1, "under three showings")
+        let notice = KeyboardParakeetNotice()
+        XCTAssertFalse(notice.mayShow(now: Date().addingTimeInterval(86_400)), "not the next day")
+        XCTAssertFalse(notice.mayShow(now: Date().addingTimeInterval(30 * 86_400)), "nor ever")
+        view.offerModelNotice(awaitsDownload: true)
+        XCTAssertNil(view.modelNotice, "nor when the keyboard appears again")
+        let again = FullKeyboardView(model: model, target: FixtureTextTarget(text: ""))
+        again.offerModelNotice(now: Date().addingTimeInterval(2 * 86_400), awaitsDownload: true)
+        XCTAssertNil(again.modelNotice, "nor in a new keyboard on a new day")
+    }
+
+    private func dismissControl(in view: UIView) -> UIButton? {
+        for sub in view.subviews {
+            if let button = sub as? UIButton, !button.isHidden, button.accessibilityLabel == "Dismiss" { return button }
+            if let found = dismissControl(in: sub) { return found }
+        }
+        return nil
+    }
+
+    private func control(in view: UIView, titled title: String) -> UIButton? {
+        for sub in view.subviews {
+            if let button = sub as? UIButton, !button.isHidden, button.configuration?.title == title { return button }
+            if let found = control(in: sub, titled: title) { return found }
+        }
+        return nil
     }
 }
 
