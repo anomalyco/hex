@@ -23,6 +23,21 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
     private let pairWordsAt: Int
     private let pairCostsAt: Int
     private let blobAt: Int
+    /// The file it maps.
+    let url: URL
+    private let coreLock = NSLock()
+    private var coreModel: KeyboardCoreModel??
+
+    /// The Rust core's model on the same file, opened on first use (from any thread); nil when
+    /// the core can't open it.
+    var core: KeyboardCoreModel? {
+        coreLock.withLock {
+            if let opened = coreModel { return opened }
+            let opened = KeyboardCoreModel(url: url)
+            coreModel = .some(opened)
+            return opened
+        }
+    }
 
     init?(url: URL) {
         let fd = open(url.path, O_RDONLY)
@@ -75,6 +90,7 @@ nonisolated final class TypingDecoderModel: @unchecked Sendable {
         self.pairWordsAt = pairWordsAt
         self.pairCostsAt = pairCostsAt
         self.blobAt = blobAt
+        self.url = url
     }
 
     deinit {
