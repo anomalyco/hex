@@ -940,7 +940,7 @@ final class FullKeyboardEngine {
     private func commitCharacter(_ key: KeyboardKey, at point: CGPoint, down: CGPoint? = nil) {
         guard let character = key.character else { return }
         spaceBeforeNextWord(character)
-        var text = layerState.layer == .letters && shift.isUppercase ? character.uppercased() : character
+        var text = layerState.layer == .letters && shift.isUppercase ? key.shifted ?? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
         }

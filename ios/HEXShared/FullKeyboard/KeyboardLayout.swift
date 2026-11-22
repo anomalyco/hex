@@ -44,6 +44,9 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
     /// The touch target. Hit frames tile the whole key area with no gaps.
     var hitFrame: CGRect
     let label: String
+    /// What the key types with shift instead of its character: the docked iPad's two-symbol
+    /// keys (, and !, . and ?), which show both (`KeyboardLayout.padPairs`).
+    var shifted: String?
 
     var character: String? {
         if case .character(let text) = kind { return text }
@@ -592,6 +595,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// The two halves' inner edges while the keyboard is split (the Duo unfolded upright, as
     /// Apple's is there); nil otherwise.
     let split: SplitGeometry?
+    /// Docked on an iPad, its letter keys' width (`padLetterWidth(innerWidth:...)`); nil elsewhere.
+    let padLetterWidth: CGFloat?
 
     init(
         width: CGFloat,
@@ -612,9 +617,13 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         availableHeight: CGFloat? = nil
     ) {
         self.width = width
-        let letters = language.offered(letters)
+        // Apple's docked iPad German is QWERTZ without ü, ö and ä, which it holds on u, o and a
+        // (iPad mini, iPadOS 27.2), as Hex's plain QWERTZ does.
+        let offered = language.offered(letters)
+        let letters = pad?.isDocked == true && language == .german && offered == .own ? .qwertz : offered
         self.letters = letters
-        self.hexPlacement = hexPlacement
+        // Docked on an iPad the Hex key is on the bottom row, where Apple's dictation key is.
+        self.hexPlacement = pad?.isDocked == true ? .leftOfSpace : hexPlacement
         self.orientation = orientation
         self.layer = layer
         self.field = field
@@ -630,6 +639,16 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         )
         if let availableHeight { metrics = metrics.fitted(toHeight: availableHeight) }
         self.metrics = metrics
+        if metrics.pad?.isDocked == true {
+            padLetterWidth = Self.padLetterWidth(innerWidth: innerWidth, metrics: metrics, layer: layer, language: language, letters: letters)
+            self.keys = Self.buildPadKeys(
+                width: width, metrics: metrics, orientation: orientation, layer: layer, field: field,
+                showsGlobe: showsGlobe, showsEmoji: showsEmoji, inset: self.horizontalInset, language: language, letters: letters
+            )
+            self.split = nil
+            return
+        }
+        padLetterWidth = nil
         if posture.splitsKeyboard, orientation == .portrait {
             let built = Self.buildSplitKeys(
                 width: width,
@@ -760,6 +779,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// from it in every language, as Apple's are.
     var letterWidth: CGFloat {
         if isSplit { return SplitGeometry.keyWidth }
+        if let padLetterWidth { return padLetterWidth }
         return Self.letterWidth(innerWidth: width - 2 * horizontalInset, metrics: metrics)
     }
 
@@ -774,6 +794,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// holds 11 keys (Norwegian letters).
     var characterWidth: CGFloat {
         if isSplit { return SplitGeometry.keyWidth }
+        if let padLetterWidth { return padLetterWidth }
         if layer == .letters, letters == .dvorak {
             return Self.dvorakLetterWidth(innerWidth: width - 2 * horizontalInset, metrics: metrics)
         }

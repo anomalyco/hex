@@ -1146,9 +1146,28 @@ never at a launch by itself.
   27.2 simulator has Apple's off until `KeyboardShouldSplitInDefaultContext` is set).
 - **iPad:** The app is iPhone-only (`TARGETED_DEVICE_FAMILY` 1), but iPadOS runs its keyboard
   extension as an iPad keyboard across the screen, so the full keyboard shows there too
-  (Settings › Keyboard picks it or the dictation bar, as on an iPhone). It keeps the
-  iPhone's rows and takes Apple's iPad key sizes (`KeyboardPadSize`, `KeyboardPadPlacement`,
-  `KeyboardMetrics.pad`), measured beside Apple's keyboard in the iPadOS 27.2 simulator:
+  (Settings › Keyboard picks it or the dictation bar, as on an iPhone). Docked, it has
+  Apple's iPad mini rows on every iPad (`KeyboardPadRows.swift`; the 11- and 13-inch's own,
+  with tab, caps lock and the 13-inch's number row, are a later step): delete ends row 1 and
+  return row 2, a shift key opens and closes row 3, after the letters Apple's two-symbol keys
+  (, and ! then . and ?; AZERTY , and ?, . and !, ' and :), the shifted symbol drawn over the
+  one a tap types and typed with shift (`KeyboardKey.shifted`), and the bottom row the globe,
+  123, the Hex key where Apple's dictation key is (whatever Settings › Hex key says: the strip
+  is all suggestions), the space bar, emoji (or 123 when Emoji is off) where Apple's second
+  123 is, and the hide-keyboard key. The letter keys are as wide as the longest row allows
+  with its delete or return at least 1.236 and 1.24 letters wide (English 54.5 pt, French
+  53.25 pt on the mini upright), row 2 is set in 0.4 of a key pitch (0.2 where it holds as
+  many letters as row 1, as AZERTY's does), the left shift is a letter wide (1.061 on AZERTY),
+  and delete, return and the right shift take what's left; the bottom row's keys are the same
+  in every language. The 123 and #+= pages follow Apple's: digits and delete, @ # $ & * ( ) '
+  " (€ £ ¥ _ ^ [ ] { } on #+=) and return, a page key either side of % - + = / ; : and the two
+  two-symbol keys (§ | ~ … \ < > ! ? on #+=), and row 4 as the letters' with ABC; Hex has no
+  undo or redo key there, so ABC takes the room of Apple's undo and second ABC.
+  German is QWERTZ without ü, ö and ä as Apple's iPad German is, holding them on u, o and a.
+  Measured against Apple's iPad mini in English, German and French (every key within a point);
+  the other languages' rows follow the same rule unmeasured. Docked, a held key's accents open
+  in Apple's iPad cells (below). The sizes are Apple's iPad key sizes (`KeyboardPadSize`,
+  `KeyboardPadPlacement`, `KeyboardMetrics.pad`), measured beside Apple's keyboard in the iPadOS 27.2 simulator:
   docked, Apple's key heights, row pitch, gaps and side inset for the iPad mini (under 800 pt
   across), 11-inch and 13-inch (1,000 pt and up), upright or turned, so its four rows sit
   exactly on Apple's bottom four (letters and the bottom row; the 13-inch's number row and
@@ -1160,8 +1179,8 @@ never at a launch by itself.
   iPadOS always adds its own 55 pt bar above a docked keyboard (undo, redo, paste; empty in
   Windowed Apps), and in some apps it draws that bar over the keyboard's top instead (Notes on
   an iPad mini, iPadOS 26.6, TestFlight). So Hex is taller than Apple's (353 against 282 pt
-  on the mini and 11-inch upright). Docked, the bottom row ends in Apple's hide-keyboard key,
-  the labels keep their upright sizes turned, and keys show no balloons, as Apple's don't.
+  on the mini and 11-inch upright). Docked, the labels keep their upright sizes turned, and
+  keys show no balloons, as Apple's don't.
   Floating (iPadOS makes every keyboard 320 pt wide, with no bar above and its own globe and
   dictation band below), Hex is Apple's floating keyboard: 26 × 38.25 pt keys on a 54.3 pt
   pitch, 35.5 pt shift and delete, 123, space and return on row 3's columns, and the strip
