@@ -230,98 +230,6 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// words on Apple's line and a pending word in Apple's cell-wide bubble.
     var appleBar = false
 
-    /// The suggestion strip is Apple's predictive bar from the top of its suggestion pill down.
-    /// Apple's bar is 44 pt from its panel's edge, the pill around a suggested word starts 6 pt
-    /// down, and row 1's keycaps start about 8 pt under the bar (51.7 pt down, iPhone 17 Pro,
-    /// iOS 27.2). So the strip is 38 pt, then the same 8 pt gap, and row 1 starts 46 pt down.
-    /// iOS 26 and later draw about 17 pt of their own panel above a third-party keyboard in some
-    /// presentations and nothing in others (Hex, Gboard and SwiftKey alike on an iPhone 17 Pro,
-    /// iOS 27.2: Notes has it, a Safari form's first focus doesn't), and a keyboard can't tell
-    /// which, so the strip carries its own room above the words. It was 27 pt, the part of
-    /// Apple's bar below that band: without the band the words sat 9 pt under the keyboard's top
-    /// edge and a chip touched it. Everything the strip shows (suggestions, Undo dictation, the
-    /// Full Access hint, the recording bar, the emoji panel's top row, the Logging mark) lives in
-    /// those 38 pt, centred on the words' line (`stripTextCenter`).
-    static let stripBarHeight: CGFloat = 38
-    static let stripGap: CGFloat = 8
-    /// On the iPhone Duo iOS sets the keyboard in a platter with its own band above, and the
-    /// strip is Apple's whole 44 pt bar, right on the keys.
-    static let insetStripHeight: CGFloat = 44
-    /// The Duo folded and upright: iOS's band there is 8.7 pt and Apple's keycaps start 48.7 pt
-    /// below the panel's edge (iOS 27.2), so the strip is 32 pt with the iPhone's 8 pt gap.
-    static let coverStripHeight: CGFloat = 32
-
-    /// How far below the strip's top its pills (the Hex key, the recording bar) start: they
-    /// centre on the words' line, 6 pt down in the phone's portrait strip, in the Duo's 44 pt
-    /// bar 4 pt.
-    var stripInset: CGFloat { stripTextCenter - stripPillHeight / 2 }
-    /// Apple's pill starts 6 pt below its panel's edge (iOS 27.2, iPhone 17 Pro); Hex's pills
-    /// start as far below the keyboard's own top edge, which is the panel's edge whenever iOS
-    /// draws nothing above the keyboard.
-    static let barPillTop: CGFloat = 6
-    /// The pills' height. In the phone's portrait strip, even above and below the words' line
-    /// from `barPillTop` down (28 pt), inside the strip. Elsewhere it's the strip less half a
-    /// point above and below, at most 36 pt.
-    var stripPillHeight: CGFloat {
-        if appleBar { return min(Self.appleBubbleHeight, 2 * min(stripTextCenter, stripHeight - stripTextCenter)) }
-        guard stripHeight == Self.stripBarHeight else { return min(stripHeight - 1, 36) }
-        return 2 * min(stripTextCenter - Self.barPillTop, stripHeight - stripTextCenter)
-    }
-
-    /// Where the strip's words, dividers, chips and Hex mark centre. Apple's words sit midway
-    /// between the panel's edge and row 1's keycaps (25.3 pt down, keycaps at 52 pt, iPhone 17
-    /// Pro, iOS 27.2), so in the phone's portrait strip they're 26 pt above row 1, 20 pt below
-    /// the keyboard's top edge. Elsewhere the strip is Apple's bar and they centre in it.
-    static let barTextAboveKeys: CGFloat = 26
-    var stripTextCenter: CGFloat {
-        if appleBar { return stripHeight - Self.appleBarTextAboveBottom }
-        return stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
-    }
-    /// A suggestion's chip (an autocorrection, a pressed word, a revert) and the dividers: in
-    /// the phone's portrait strip a small chip around the word, 18 pt, even above and below the
-    /// words' line (not Apple's slot-wide 38 pt pill). Elsewhere the pill height.
-    static let barChipHeight: CGFloat = 18
-    var stripChipHeight: CGFloat {
-        !appleBar && stripHeight == Self.stripBarHeight ? Self.barChipHeight : stripPillHeight
-    }
-
-    /// Apple's prediction bar, measured beside Hex on iOS 26.5 and 27.2 (iPhone 17 Pro, Air, 17 Pro
-    /// Max and SE, upright and turned, light and dark, black box): 44 pt from the keyboard's top
-    /// edge on every iPhone, row 1's keycaps 8 pt under it upright and 6 pt turned. Its words, its
-    /// dividers and the bubble behind a pending autocorrection all centre 25 pt down (19 pt above
-    /// the bar's bottom); the bubble fills its cell from 6 pt down to the bar's bottom, a 38 pt
-    /// capsule, and the dividers are 1 × 24 pt, hidden beside the bubble.
-    static let appleBarHeight: CGFloat = 44
-    static let appleBarTurnedGap: CGFloat = 6
-    static let appleBarTextAboveBottom: CGFloat = 19
-    static let appleBubbleHeight: CGFloat = 38
-    /// Apple's bar leads with a 59 pt cell for its writing tools icon, then a divider, then three
-    /// equal cells (iPhone 17 Pro Max, iOS 27.2.1, a TestFlight tester's screenshot; the simulator
-    /// shows no icon). Hex's key takes that cell at its own end of the bar.
-    static let appleIconCellWidth: CGFloat = 59
-    /// Hex's key in Apple's bar keeps the 44 × 28 pt mark it had in the 38 pt strip.
-    static let barHexKeyHeight: CGFloat = 28
-    /// Apple's bar was measured on iOS 26 and 27 (`KeyboardLanguage.systemMajorVersion`); iOS 18
-    /// is unmeasured (no simulator runtime) and keeps the 38 pt strip it always had.
-    static var appleBarIsMeasured: Bool { KeyboardLanguage.systemMajorVersion >= 26 }
-
-    /// These metrics with Apple's prediction bar for a strip: 44 pt, then 8 pt to row 1 upright or
-    /// 6 pt turned. Upright the keyboard grows 6 pt upward (rows stay put) and its top edge is
-    /// Apple's; turned it was already Apple's height (42 + 8 pt), and only the strip changes.
-    func withAppleBar(turned: Bool) -> KeyboardMetrics {
-        var m = rebuilt(stripHeight: Self.appleBarHeight, stripBottom: turned ? Self.appleBarTurnedGap : Self.stripGap)
-        m.appleBar = true
-        return m
-    }
-    /// The tallest band of the strip that is even above and below the words' line, from the
-    /// strip's top: what fills the strip (the Full Access hint, the emoji panel's top row, the
-    /// emoji search field) centres in it, so it sits on the line too. The whole strip where the
-    /// words centre in it.
-    var stripLineBand: (top: CGFloat, height: CGFloat) {
-        let half = min(stripTextCenter, stripHeight - stripTextCenter)
-        return (stripTextCenter - half, 2 * half)
-    }
-
     /// Apple's keycap corners (iOS 27.2: the same on every iPhone, measured from screenshots
     /// against keys Hex drew at known radii).
     static let keyCornerRadius: CGFloat = 7.9
@@ -604,7 +512,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     private func with(side: CGFloat) -> KeyboardMetrics { rebuilt(side: side) }
 
     /// These metrics with a field or two changed and the rest kept.
-    private func rebuilt(side: CGFloat? = nil, stripHeight: CGFloat? = nil, stripBottom: CGFloat? = nil) -> KeyboardMetrics {
+    func rebuilt(side: CGFloat? = nil, stripHeight: CGFloat? = nil, stripBottom: CGFloat? = nil) -> KeyboardMetrics {
         var m = KeyboardMetrics(
             side: side ?? self.side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
             stripTop: stripTop, stripHeight: stripHeight ?? self.stripHeight, stripBottom: stripBottom ?? self.stripBottom,
