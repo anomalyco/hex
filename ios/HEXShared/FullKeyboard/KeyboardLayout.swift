@@ -43,8 +43,7 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
     let frame: CGRect
     /// The touch target. Hit frames (with `gapHitFrame`) tile the whole key area with no gaps.
     var hitFrame: CGRect
-    /// The space bar's band of the gap above it, under row 3's keys over it
-    /// (`KeyboardLayout.buildKeys`); nil for every other key.
+    /// The space bar's band of the gap above it, under row 3's keys over it (`buildKeys`).
     var gapHitFrame: CGRect?
     let label: String
     /// What the key types with shift instead of its character: the docked iPad's two-symbol
@@ -59,7 +58,6 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
 
     /// One of Settings › Keyboard › Number row's digits (`KeyboardLayout.numberRowIndex`).
     var isNumberRow: Bool { row == KeyboardLayout.numberRowIndex }
-
     /// Whether a touch at `point` is this key's.
     func takes(_ point: CGPoint) -> Bool { hitFrame.contains(point) || gapHitFrame?.contains(point) == true }
 }
@@ -1227,13 +1225,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         let top = m.stripArea - max(m.stripBottom, stripTouchBand)
         let bottom = m.totalHeight
         var keys: [KeyboardKey] = []
-        // The gap between rows 3 and 4 is the space bar's across its width, as Apple's is (iOS 27.2:
-        // its space bar takes taps up to 2.5 pt into row 3's keycaps): row 3's keys whose middle is
-        // over the space bar end at their keycaps, and the band under them is the space bar's
-        // (`KeyboardKey.gapHitFrame`). Elsewhere every gap splits, so a low m or delete over return
-        // stays m or delete (Ryan's logged taps: a low m sent return).
+        // The gap above the space bar is the space bar's, as Apple's (iOS 27.2) is: row 3's keys over it
+        // end at their keycaps. Elsewhere gaps split, so a low m over return stays m (Ryan's taps).
         let spaceKeycap = m.pad == nil ? drawn.first { $0.kind == .space && $0.row == 3 }?.frame : nil
-        let midGap = rowY(3) - m.rowGap / 2
         var spaceBand: (CGFloat, CGFloat)?
         for row in (numberRow ? [numberRowIndex] : []) + Array(0..<4) {
             let rowKeys = drawn.filter { $0.row == row }.sorted { $0.frame.minX < $1.frame.minX }
@@ -1253,17 +1247,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                     // a finger aimed at 123 or space that lands near it doesn't switch keyboards.
                     hit = CGRect(x: item.frame.minX + 6, y: item.frame.minY + 7.5, width: item.frame.width - 12, height: y1 - item.frame.minY - 7.5)
                 }
-                var key = KeyboardKey(
-                    kind: item.kind,
-                    row: row,
-                    frame: item.frame,
-                    hitFrame: hit,
-                    label: item.label,
-                    shifted: item.shifted
-                )
+                var key = KeyboardKey(kind: item.kind, row: row, frame: item.frame, hitFrame: hit, label: item.label, shifted: item.shifted)
                 if item.kind == .space, row == 3, let band = spaceBand {
-                    let gapTop = rowY(3) - m.rowGap
-                    key.gapHitFrame = CGRect(x: band.0, y: gapTop, width: band.1 - band.0, height: midGap - gapTop)
+                    key.gapHitFrame = CGRect(x: band.0, y: rowY(3) - m.rowGap, width: band.1 - band.0, height: m.rowGap / 2)
                 }
                 keys.append(key)
             }
