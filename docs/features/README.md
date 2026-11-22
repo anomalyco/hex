@@ -2897,9 +2897,9 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Two-language dictation, Adaptive touch, German spatial autocorrect,
-│   Korean keyboard (두벌식), ABC under the emoji key, Two-thumb selection, Delete
-│   swiped words letter by letter, Hide word suggestions, Join the keyboard when
-│   unfolded, Learn each language separately
+│   Korean keyboard (두벌식), ABC under the emoji key, Keyboard themes (Black, White,
+│   Navy, Forest, Ember), Two-thumb selection, Delete swiped words letter by letter,
+│   Hide word suggestions, Join the keyboard when unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing

@@ -606,6 +606,8 @@ struct ExperimentsSettingsPage: View {
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var koreanKeyboard = FullKeyboardSettings().koreanKeyboard
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
+    @State private var keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
+    @State private var keyboardTheme = FullKeyboardSettings().keyboardTheme
     @State private var twoThumbSelection = FullKeyboardSettings().twoThumbSelection
     @State private var deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
     @State private var hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
@@ -616,167 +618,10 @@ struct ExperimentsSettingsPage: View {
 
     var body: some View {
         SettingsPageScaffold(title: "Experiments") {
-            SettingsCard {
-                SettingsToggleRow(
-                    title: String(localized: "Hinglish (Hindi in Latin letters)"),
-                    detail: String(localized: "Adds Hinglish to dictation languages"),
-                    isOn: $hinglish
-                )
-
-                SettingsDivider()
-
-                // Off by default: dictation keeps the one language it resolved.
-                SettingsToggleRow(
-                    title: String(localized: "Two-language dictation"),
-                    detail: String(localized: "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase."),
-                    isOn: $twoLanguageDictation
-                )
-
-                SettingsDivider()
-
-                SettingsToggleRow(
-                    title: String(localized: "Clean up with Apple Intelligence"),
-                    detail: cleanupAvailability.reason ?? String(localized: "Fixes misheard words on device"),
-                    isOn: $appleIntelligenceCleanup
-                )
-                .disabled(!cleanupAvailability.isAvailable)
-
-                SettingsDivider()
-
-                SettingsToggleRow(
-                    title: String(localized: "Adaptive touch"),
-                    detail: String(localized: "Learns on this iPhone where you tap each key. Stores no text."),
-                    isOn: $adaptiveTouch
-                )
-
-                if adaptiveTouch {
-                    Text(adaptiveTouchStatusText)
-                        .font(.system(size: 12))
-                        .foregroundStyle(HexTheme.textMuted)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 10)
-                        .accessibilityIdentifier("adaptive-touch-status")
-
-                    SettingsDivider()
-
-                    Button {
-                        confirmingTouchReset = true
-                    } label: {
-                        Text("Reset touch learning")
-                            .font(.system(size: 15, weight: .regular))
-                            .foregroundStyle(HexTheme.textBase)
-                            .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
-                            .padding(.horizontal, 16)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .confirmationDialog("Reset touch learning?", isPresented: $confirmingTouchReset, titleVisibility: .visible) {
-                        Button("Reset touch learning", role: .destructive) {
-                            AdaptiveTouchSettings().requestReset()
-                            refreshAdaptiveTouchStatus()
-                        }
-                    }
-                }
-
-                SettingsDivider()
-
-                // Off by default: German keeps the dictionary engine until this is on, and
-                // then only while Spatial autocorrect is on too (Settings › Keyboard).
-                SettingsToggleRow(
-                    title: String(localized: "German spatial autocorrect"),
-                    detail: String(localized: "Needs Spatial autocorrect"),
-                    isOn: $germanSpatialAutocorrect
-                )
-
-                SettingsDivider()
-
-                // Off by default: 한국어 isn't offered in Languages and a stored "ko" is ignored.
-                SettingsToggleRow(
-                    title: String(localized: "Korean keyboard (두벌식)"),
-                    detail: String(localized: "Adds 한국어, composing syllables as you type"),
-                    isOn: $koreanKeyboard
-                )
-
-                SettingsDivider()
-
-                // Off by default: the emoji panel's ABC stays where it always was.
-                SettingsToggleRow(
-                    title: String(localized: "ABC under the emoji key"),
-                    detail: String(localized: "In the emoji panel, ABC takes the emoji key's place"),
-                    isOn: $emojiLettersUnderEmojiKey
-                )
-
-                SettingsDivider()
-
-                // Off by default: a second finger on the trackpad is ignored, as before.
-                SettingsToggleRow(
-                    title: String(localized: "Two-thumb selection"),
-                    detail: String(localized: "On the space bar trackpad, a second thumb selects text"),
-                    isOn: $twoThumbSelection
-                )
-
-                SettingsDivider()
-
-                // Off by default: delete right after a swipe takes one letter, as anywhere else.
-                SettingsToggleRow(
-                    title: String(localized: "Delete swiped words letter by letter"),
-                    detail: String(localized: "Instead of the whole word at once"),
-                    isOn: $deletesSwipedWordsLetterByLetter
-                )
-
-                SettingsDivider()
-
-                // Off by default: the strip above the keys hides its words, not itself.
-                SettingsToggleRow(
-                    title: String(localized: "Hide word suggestions"),
-                    detail: String(localized: "Autocorrect still works"),
-                    isOn: $hideWordSuggestions
-                )
-
-                SettingsDivider()
-
-                // Off by default: the Duo unfolded still splits as Apple's does there.
-                SettingsToggleRow(
-                    title: String(localized: "Join the keyboard when unfolded"),
-                    detail: String(localized: "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them."),
-                    isOn: $joinsKeyboardWhenUnfolded
-                )
-
-                SettingsDivider()
-
-                // Off by default: one shared list of learned words and fixes, as before.
-                SettingsToggleRow(
-                    title: String(localized: "Learn each language separately"),
-                    detail: String(localized: "Learned words and fixes stay with their language"),
-                    isOn: $learnPerLanguage
-                )
-
-                SettingsDivider()
-
-                // Off by default: Parakeet Ultra (ParakeetUltraTranscriber) for its 25 languages,
-                // downloaded when turned on and deleted when turned off.
-                SettingsToggleRow(
-                    title: String(localized: "Multilingual model (Parakeet)"),
-                    detail: multilingualParakeetFits
-                        ? String(localized: "25 languages, even mixed in one sentence. \(Self.multilingualParakeetSize) download. Once ready, keyboard dictation opens Hex.")
-                        : String(localized: "Needs an iPhone with 6 GB of memory or more"),
-                    isOn: $multilingualParakeet
-                )
-                .disabled(!multilingualParakeetFits)
-
-                if multilingualParakeet {
-                    MultilingualModelStatus(
-                        download: DictationController.shared.multilingualDownload,
-                        retry: { DictationController.shared.retryMultilingualParakeet() },
-                        turnOff: { multilingualParakeet = false }
-                    )
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
-                }
-            }
+            SettingsCard { rows }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: keyboardThemes)
         .onChange(of: appleIntelligenceCleanup) { _, enabled in
             AppleIntelligenceCleanupSettings().isEnabled = enabled
         }
@@ -799,6 +644,12 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
             FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
         }
+        .onChange(of: keyboardThemes) { _, enabled in
+            FullKeyboardSettings().keyboardThemesEnabled = enabled
+        }
+        .onChange(of: keyboardTheme) { _, theme in
+            FullKeyboardSettings().keyboardTheme = theme
+        }
         .onChange(of: twoThumbSelection) { _, enabled in
             FullKeyboardSettings().twoThumbSelection = enabled
         }
@@ -820,23 +671,204 @@ struct ExperimentsSettingsPage: View {
             // On: downloads beside the engine that dictates; off: stops and deletes it.
             DictationController.shared.multilingualParakeetChanged()
         }
-        .onAppear {
-            hinglish = HinglishSettings().isEnabled
-            twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
-            appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
-            cleanupAvailability = AppleIntelligenceCleanupAvailability.current
-            adaptiveTouch = AdaptiveTouchSettings().isEnabled
-            refreshAdaptiveTouchStatus()
-            germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
-            koreanKeyboard = FullKeyboardSettings().koreanKeyboard
-            emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
-            twoThumbSelection = FullKeyboardSettings().twoThumbSelection
-            deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
-            hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
-            joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
-            learnPerLanguage = TypingJournalSettings().learnsPerLanguage
-            multilingualParakeet = MultilingualParakeetSettings().isEnabled
+        .onAppear { loadSettings() }
+    }
+
+    /// The experiment switches, in the card's order.
+    @ViewBuilder
+    private var rows: some View {
+        SettingsToggleRow(
+            title: String(localized: "Hinglish (Hindi in Latin letters)"),
+            detail: String(localized: "Adds Hinglish to dictation languages"),
+            isOn: $hinglish
+        )
+
+        SettingsDivider()
+
+        // Off by default: dictation keeps the one language it resolved.
+        SettingsToggleRow(
+            title: String(localized: "Two-language dictation"),
+            detail: String(localized: "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase."),
+            isOn: $twoLanguageDictation
+        )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+            title: String(localized: "Clean up with Apple Intelligence"),
+            detail: cleanupAvailability.reason ?? String(localized: "Fixes misheard words on device"),
+            isOn: $appleIntelligenceCleanup
+        )
+        .disabled(!cleanupAvailability.isAvailable)
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+            title: String(localized: "Adaptive touch"),
+            detail: String(localized: "Learns on this iPhone where you tap each key. Stores no text."),
+            isOn: $adaptiveTouch
+        )
+
+        if adaptiveTouch {
+            Text(adaptiveTouchStatusText)
+                .font(.system(size: 12))
+                .foregroundStyle(HexTheme.textMuted)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.bottom, 10)
+                .accessibilityIdentifier("adaptive-touch-status")
+
+            SettingsDivider()
+
+            Button {
+                confirmingTouchReset = true
+            } label: {
+                Text("Reset touch learning")
+                    .font(.system(size: 15, weight: .regular))
+                    .foregroundStyle(HexTheme.textBase)
+                    .frame(maxWidth: .infinity, minHeight: 50, alignment: .leading)
+                    .padding(.horizontal, 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .confirmationDialog("Reset touch learning?", isPresented: $confirmingTouchReset, titleVisibility: .visible) {
+                Button("Reset touch learning", role: .destructive) {
+                    AdaptiveTouchSettings().requestReset()
+                    refreshAdaptiveTouchStatus()
+                }
+            }
         }
+
+        SettingsDivider()
+
+        // Off by default: German keeps the dictionary engine until this is on, and
+        // then only while Spatial autocorrect is on too (Settings › Keyboard).
+        SettingsToggleRow(
+            title: String(localized: "German spatial autocorrect"),
+            detail: String(localized: "Needs Spatial autocorrect"),
+            isOn: $germanSpatialAutocorrect
+        )
+
+        SettingsDivider()
+
+        // Off by default: 한국어 isn't offered in Languages and a stored "ko" is ignored.
+        SettingsToggleRow(
+            title: String(localized: "Korean keyboard (두벌식)"),
+            detail: String(localized: "Adds 한국어, composing syllables as you type"),
+            isOn: $koreanKeyboard
+        )
+
+        SettingsDivider()
+
+        // Off by default: the emoji panel's ABC stays where it always was.
+        SettingsToggleRow(
+            title: String(localized: "ABC under the emoji key"),
+            detail: String(localized: "In the emoji panel, ABC takes the emoji key's place"),
+            isOn: $emojiLettersUnderEmojiKey
+        )
+
+        SettingsDivider()
+
+        // Off by default: the full keyboard keeps iOS's glass.
+        SettingsToggleRow(
+            title: String(localized: "Keyboard themes"),
+            detail: String(localized: "Choose a color for the full keyboard"),
+            isOn: $keyboardThemes
+        )
+
+        if keyboardThemes {
+            SettingsDivider()
+            KeyboardThemeRow(theme: $keyboardTheme)
+        }
+
+        SettingsDivider()
+
+        // Off by default: a second finger on the trackpad is ignored, as before.
+        SettingsToggleRow(
+            title: String(localized: "Two-thumb selection"),
+            detail: String(localized: "On the space bar trackpad, a second thumb selects text"),
+            isOn: $twoThumbSelection
+        )
+
+        SettingsDivider()
+
+        // Off by default: delete right after a swipe takes one letter, as anywhere else.
+        SettingsToggleRow(
+            title: String(localized: "Delete swiped words letter by letter"),
+            detail: String(localized: "Instead of the whole word at once"),
+            isOn: $deletesSwipedWordsLetterByLetter
+        )
+
+        SettingsDivider()
+
+        // Off by default: the strip above the keys hides its words, not itself.
+        SettingsToggleRow(
+            title: String(localized: "Hide word suggestions"),
+            detail: String(localized: "Autocorrect still works"),
+            isOn: $hideWordSuggestions
+        )
+
+        SettingsDivider()
+
+        // Off by default: the Duo unfolded still splits as Apple's does there.
+        SettingsToggleRow(
+            title: String(localized: "Join the keyboard when unfolded"),
+            detail: String(localized: "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them."),
+            isOn: $joinsKeyboardWhenUnfolded
+        )
+
+        SettingsDivider()
+
+        // Off by default: one shared list of learned words and fixes, as before.
+        SettingsToggleRow(
+            title: String(localized: "Learn each language separately"),
+            detail: String(localized: "Learned words and fixes stay with their language"),
+            isOn: $learnPerLanguage
+        )
+
+        SettingsDivider()
+
+        // Off by default: Parakeet Ultra (ParakeetUltraTranscriber) for its 25 languages,
+        // downloaded when turned on and deleted when turned off.
+        SettingsToggleRow(
+            title: String(localized: "Multilingual model (Parakeet)"),
+            detail: multilingualParakeetFits
+                ? String(localized: "25 languages, even mixed in one sentence. \(Self.multilingualParakeetSize) download. Once ready, keyboard dictation opens Hex.")
+                : String(localized: "Needs an iPhone with 6 GB of memory or more"),
+            isOn: $multilingualParakeet
+        )
+        .disabled(!multilingualParakeetFits)
+
+        if multilingualParakeet {
+            MultilingualModelStatus(
+                download: DictationController.shared.multilingualDownload,
+                retry: { DictationController.shared.retryMultilingualParakeet() },
+                turnOff: { multilingualParakeet = false }
+            )
+            .padding(.horizontal, 12)
+            .padding(.bottom, 12)
+        }
+    }
+
+    /// Reads every switch back from its setting, when the page appears.
+    private func loadSettings() {
+        hinglish = HinglishSettings().isEnabled
+        twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
+        appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
+        cleanupAvailability = AppleIntelligenceCleanupAvailability.current
+        adaptiveTouch = AdaptiveTouchSettings().isEnabled
+        refreshAdaptiveTouchStatus()
+        germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+        koreanKeyboard = FullKeyboardSettings().koreanKeyboard
+        emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
+        keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
+        keyboardTheme = FullKeyboardSettings().keyboardTheme
+        twoThumbSelection = FullKeyboardSettings().twoThumbSelection
+        deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
+        hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
+        joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
+        learnPerLanguage = TypingJournalSettings().learnsPerLanguage
+        multilingualParakeet = MultilingualParakeetSettings().isEnabled
     }
 
     private static var multilingualParakeetSize: String {
@@ -857,6 +889,35 @@ struct ExperimentsSettingsPage: View {
     private func refreshAdaptiveTouchStatus() {
         adaptiveTouchStatus = SettingsSnapshotFixture.adaptiveTouchStatus
             ?? AdaptiveTouchStatus.current(fullAccessConfirmed: KeyboardBridge().fullAccessSeenAt != nil)
+    }
+}
+
+/// Experiments › Keyboard themes: the theme the full keyboard draws while it's on.
+private struct KeyboardThemeRow: View {
+    @Binding var theme: KeyboardTheme
+
+    var body: some View {
+        HStack(spacing: 12) {
+            SettingsRowLabel(title: String(localized: "Theme"))
+            Spacer(minLength: 8)
+            Menu {
+                ForEach(KeyboardTheme.allCases, id: \.self) { option in
+                    Button {
+                        theme = option
+                    } label: {
+                        if theme == option {
+                            Label(option.name, systemImage: "checkmark")
+                        } else {
+                            Text(option.name)
+                        }
+                    }
+                }
+            } label: {
+                SettingsMenuValue(value: theme.name)
+            }
+        }
+        .padding(.horizontal, 16)
+        .frame(minHeight: 50)
     }
 }
 

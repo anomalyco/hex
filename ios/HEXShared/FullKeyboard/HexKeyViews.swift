@@ -144,6 +144,7 @@ final class HexKeyControl: UIControl {
             context.fillKeycap(
                 cap,
                 fill: isHighlighted ? palette.keyPressedFill : palette.keyFill,
+                shadow: palette.keyShadow,
                 radius: cornerRadius
             )
         } else if isHighlighted {

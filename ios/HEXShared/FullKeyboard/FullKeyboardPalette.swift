@@ -9,6 +9,22 @@ import UIKit
 /// could still say light in dark mode (TestFlight build 29).
 struct FullKeyboardPalette: Equatable {
     let isDark: Bool
+    /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass, every other
+    /// theme supplies its own opaque colours.
+    let theme: KeyboardTheme
+
+    init(isDark: Bool, theme: KeyboardTheme = .automatic) {
+        self.theme = theme
+        // A theme decides light or dark for itself: White is light whatever the field asked
+        // for, and every dark theme is dark.
+        self.isDark = theme.colors?.isDark ?? isDark
+    }
+
+    /// The theme's colours, nil for Automatic.
+    private var colors: KeyboardThemeColors? { theme.colors }
+
+    /// The keyboard draws an opaque panel behind its keys instead of showing iOS's glass.
+    var drawsOwnBackground: Bool { theme.colors != nil }
 
     static func isDark(traits: UITraitCollection) -> Bool {
         traits.userInterfaceStyle == .dark
@@ -23,36 +39,37 @@ struct FullKeyboardPalette: Equatable {
         )
     }
 
-    /// Stand-in for the system Liquid Glass platter, used only in standalone snapshot scenes.
-    var backdrop: UIColor { isDark ? Self.rgb(0x17181A) : Self.rgb(0xDFE1E6) }
+    /// The panel behind the keys: a stand-in for the system Liquid Glass platter in standalone
+    /// snapshot scenes, or a theme's own opaque background.
+    var backdrop: UIColor { colors?.background ?? (isDark ? Self.rgb(0x17181A) : Self.rgb(0xDFE1E6)) }
 
     var textBase: UIColor { isDark ? .white : .black }
     var textMuted: UIColor { isDark ? UIColor(white: 1, alpha: 0.56) : Self.rgb(0x525763) }
 
     /// Unified iOS 26 Liquid Glass keycap fill across letters and modifiers:
     /// `white @ 0.16` composites to `(61,61,63)` on dark `(23,24,26)` and `(94,94,96)` on dark-field `(64,64,66)`.
-    var keyFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.16) : .white }
-    var keyPressedFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.28) : Self.rgb(0xD8DCE4) }
+    var keyFill: UIColor { colors?.keyFill ?? (isDark ? UIColor(white: 1, alpha: 0.16) : .white) }
+    var keyPressedFill: UIColor { colors?.keyPressedFill ?? (isDark ? UIColor(white: 1, alpha: 0.28) : Self.rgb(0xD8DCE4)) }
     /// A held key on the key plane, under its pop-up: Apple's grey (222 on white keys; 105 on
     /// dark ones, iOS 27.2).
-    var keyHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE) }
+    var keyHeldFill: UIColor { colors?.keyHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.32) : Self.rgb(0xDEDEDE)) }
     /// A held shift, delete, globe, emoji or return key: Apple's darker grey (197, 197, 201;
     /// 131 on dark keys).
-    var functionHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.44) : Self.rgb(0xC5C5C9) }
+    var functionHeldFill: UIColor { colors?.functionHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.44) : Self.rgb(0xC5C5C9)) }
     /// A held space bar: only a shade darker (242, 242, 247; 56 on dark keys).
-    var spaceHeldFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.1) : Self.rgb(0xF2F2F7) }
+    var spaceHeldFill: UIColor { colors?.spaceHeldFill ?? (isDark ? UIColor(white: 1, alpha: 0.1) : Self.rgb(0xF2F2F7)) }
     /// Secondary fill for non-key chips and the recording panel's cancel pill.
     var functionFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.09) : UIColor(white: 0, alpha: 0.065) }
-    var keyShadow: UIColor { .clear }
+    var keyShadow: UIColor { colors?.keyShadow ?? .clear }
 
     /// Opaque so balloons and menus float cleanly over the strip and neighbouring keys.
-    var popupFill: UIColor { isDark ? Self.rgb(0x4E5056) : .white }
+    var popupFill: UIColor { colors?.popupFill ?? (isDark ? Self.rgb(0x4E5056) : .white) }
     /// The key pop-up's and the accent callout's bubble: white, or in dark Apple's neutral grey
     /// (63 at its top, lightening downward).
-    var bubbleFill: UIColor { isDark ? Self.rgb(0x3F3F41) : .white }
+    var bubbleFill: UIColor { colors?.bubbleFill ?? (isDark ? Self.rgb(0x3F3F41) : .white) }
     var bubbleShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.3 : 0.1) }
     /// The accent callout's selected option: a grey square behind it (227, 227, 230; 87 in dark).
-    var accentSelectFill: UIColor { isDark ? Self.rgb(0x57575A) : Self.rgb(0xE3E3E6) }
+    var accentSelectFill: UIColor { colors?.accentSelectFill ?? (isDark ? Self.rgb(0x57575A) : Self.rgb(0xE3E3E6)) }
     var popupBorder: UIColor { isDark ? UIColor(white: 1, alpha: 0.14) : UIColor(white: 0, alpha: 0.08) }
     var popupShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.42 : 0.18) }
 
@@ -68,14 +85,18 @@ struct FullKeyboardPalette: Equatable {
     /// (235,237,240) under (44,46,49).
     var stripText: UIColor { isDark ? UIColor(white: 1, alpha: 0.58) : UIColor(white: 0, alpha: 0.67) }
     var stripDivider: UIColor { isDark ? UIColor(white: 1, alpha: 0.075) : UIColor(white: 0, alpha: 0.066) }
-    var stripPillFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.37) : UIColor(white: 1, alpha: 0.33) }
+    /// A pending autocorrection's or pressed word's capsule. White's own light grey comes from
+    /// the theme, since Automatic's translucent white would vanish on its white bar.
+    var stripPillFill: UIColor {
+        colors?.stripPillFill ?? (isDark ? UIColor(white: 1, alpha: 0.37) : UIColor(white: 1, alpha: 0.33))
+    }
     /// A pressed word gets the same capsule (measured the same on Apple's bar).
     var stripPillPressedFill: UIColor { stripPillFill }
     var stripPillText: UIColor { isDark ? .white : UIColor(white: 0, alpha: 0.81) }
 
     /// Apple system keyboard action blue (`#007AFF`).
-    var actionFill: UIColor { Self.rgb(0x007AFF) }
-    var actionPressedFill: UIColor { Self.rgb(0x0062CC) }
+    var actionFill: UIColor { colors?.actionFill ?? Self.rgb(0x007AFF) }
+    var actionPressedFill: UIColor { colors?.actionPressedFill ?? Self.rgb(0x0062CC) }
     /// A send, go or search key that's off while the field is empty: Apple's grey (191, 192, 197;
     /// 121 on dark, iOS 27.2).
     var actionDisabledFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.39) : Self.rgb(0xBFC0C5) }

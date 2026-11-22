@@ -41,6 +41,11 @@ final class FullKeyboardView: UIView {
     let callout = KeyCalloutView()
     let accentCallout = AccentCalloutView()
     let hexKey = HexKeyControl()
+    /// A theme's own opaque panel behind every key and the strip, at the glass panel's own
+    /// frame and top corners (`KeyboardThemePanelView`): this view's own background stays
+    /// clear, since filling its whole rect would draw square corners over the app. Hidden
+    /// under Automatic, which leaves iOS's glass exactly as it was.
+    let themePanel = KeyboardThemePanelView()
     let globeButton = UIButton(type: .custom)
     /// The capsule that grows from the Hex mark across the strip into the recording bar.
     private let morph = UIView()
@@ -111,6 +116,10 @@ final class FullKeyboardView: UIView {
     /// Settings › Experiments › Hide word suggestions: the strip keeps its height, chips,
     /// status and notices but shows no words (`refreshStrip`).
     private var hidesWordSuggestions = false
+    /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass; another theme
+    /// paints the keyboard's own colours. Read again by `syncSettings`, which rebuilds the
+    /// palette when it changes.
+    private var keyboardTheme = FullKeyboardSettings().effectiveKeyboardTheme
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     var showsAllowPasteHint = false
     var allowPasteHintHideWork: DispatchWorkItem?
@@ -148,6 +157,9 @@ final class FullKeyboardView: UIView {
         super.init(frame: .zero)
         backgroundColor = .clear
 
+        // Under the glass panel's rim, under every key: the keys' pop-ups overflow this
+        // view, which must never clip them, so the panel is a subview, not this view's fill.
+        insertSubview(themePanel, at: 0)
         addSubview(stripView)
         morph.isUserInteractionEnabled = false
         morph.isHidden = true
@@ -546,6 +558,11 @@ final class FullKeyboardView: UIView {
             hidesWordSuggestions = hidesSuggestions
             refreshStrip()
         }
+        let theme = FullKeyboardSettings().effectiveKeyboardTheme
+        if theme != keyboardTheme {
+            keyboardTheme = theme
+            applyAppearance()
+        }
         hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
         syncNumberRow()
@@ -702,6 +719,8 @@ final class FullKeyboardView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
+        // A theme's panel keeps the glass panel's corners, 1 pt inside its rim.
+        themePanel.place(in: bounds)
         syncPosture()
         let isLandscape = orientation == .landscape
         engine.typingLog?.viewGeometry(size: bounds.size, safeArea: safeAreaInsets)
@@ -761,8 +780,13 @@ final class FullKeyboardView: UIView {
     private func applyAppearance() {
         let isDark = appearanceOverride
             ?? FullKeyboardPalette.isDark(traits: traitCollection)
-        let next = FullKeyboardPalette(isDark: isDark)
+        let next = FullKeyboardPalette(isDark: isDark, theme: keyboardTheme)
+        // A theme paints its own opaque panel, so the system glass behind the keys never
+        // shows through. The panel, not this view, keeps the glass panel's corners;
+        // Automatic leaves both clear as before.
         backgroundColor = drawsBackdrop ? next.backdrop : .clear
+        themePanel.isHidden = !next.drawsOwnBackground
+        themePanel.backgroundColor = next.drawsOwnBackground ? next.backdrop : .clear
         stripView.inSystemPlatter = !drawsBackdrop
         guard next != palette || !didApplyPalette else { return }
         didApplyPalette = true

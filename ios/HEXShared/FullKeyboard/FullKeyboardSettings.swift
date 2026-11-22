@@ -46,6 +46,12 @@ struct FullKeyboardSettings {
     static let launchArgument = "--experiment-full-keyboard"
     static let emojiLaunchArgument = "--experiment-emoji"
     static let emojiLettersLaunchArgument = "--experiment-emoji-letters"
+    /// Simulator scenes pass `--experiment-keyboard-themes` for Settings › Experiments ›
+    /// Keyboard themes.
+    static let keyboardThemesLaunchArgument = "--experiment-keyboard-themes"
+    /// Simulator scenes pass `--keyboard-theme <automatic|black|white|navy|forest|ember>` for
+    /// the full keyboard's theme (with the experiment on).
+    static let keyboardThemeLaunchArgument = "--keyboard-theme"
     static let swipeLaunchArgument = "--experiment-swipe"
     static let twoThumbSelectionLaunchArgument = "--experiment-two-thumb-selection"
     /// Simulator scenes pass `--hex-key left` (or `right`) for Settings › Keyboard › Hex key.
@@ -71,6 +77,8 @@ struct FullKeyboardSettings {
         static let suggestSwearWords = "settings.keyboardSuggestSwearWords"
         static let emoji = "experiments.emoji"
         static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
+        static let keyboardThemes = "experiments.keyboardThemes"
+        static let keyboardTheme = "settings.keyboardTheme"
         static let swipeTyping = "experiments.swipeTyping"
         static let swipeDeleteLetterByLetter = "experiments.swipeDeleteLetterByLetter"
         static let twoThumbSelection = "experiments.twoThumbSelection"
@@ -200,6 +208,31 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.emojiLettersUnderEmojiKey) }
     }
 
+    /// Settings › Experiments › Keyboard themes: the full keyboard draws its own opaque
+    /// colours (black, white, navy, forest or ember) instead of translucent keycaps over
+    /// iOS's glass. Off by default, so the keyboard keeps the system look; the dictation bar
+    /// and iOS's own strip above the keyboard keep it either way. Stored as
+    /// `experiments.keyboardThemes`.
+    var keyboardThemesEnabled: Bool {
+        get { defaults?.object(forKey: Key.keyboardThemes) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.keyboardThemes) }
+    }
+
+    /// Settings › Experiments › Keyboard themes: the theme the full keyboard draws with.
+    /// Automatic when unset, unknown, or without the App Group.
+    var keyboardTheme: KeyboardTheme {
+        get {
+            defaults?.string(forKey: Key.keyboardTheme).flatMap(KeyboardTheme.init(rawValue:)) ?? .automatic
+        }
+        nonmutating set { defaults?.set(newValue.rawValue, forKey: Key.keyboardTheme) }
+    }
+
+    /// The theme the full keyboard actually draws with: Automatic until the experiment is
+    /// turned on, whatever theme is stored.
+    var effectiveKeyboardTheme: KeyboardTheme {
+        keyboardThemesEnabled ? keyboardTheme : .automatic
+    }
+
     /// Settings › Experiments › Two-thumb selection: while the space bar is the trackpad, a
     /// second thumb selects — each thumb moves one end, shown in the strip, with Delete, Cut,
     /// Copy, Dictate and Cancel once both lift. Off by default. Stored as
@@ -287,6 +320,8 @@ struct FullKeyboardSettings {
     /// to pick the keyboard, `--experiment-emoji` to turn Emoji on, `--experiment-swipe` for
     /// Swipe typing (both on by default; the arguments override a stored off),
     /// `--experiment-emoji-letters` for ABC under the emoji key,
+    /// `--experiment-keyboard-themes` for Keyboard themes and `--keyboard-theme <raw>` for
+    /// the theme it draws,
     /// `--hex-key left|right` for the Hex key's side, `--number-row on|off` for the number row,
     /// and `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
@@ -305,6 +340,13 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.emojiLettersLaunchArgument) {
             emojiLettersUnderEmojiKey = true
+        }
+        if arguments.contains(Self.keyboardThemesLaunchArgument) {
+            keyboardThemesEnabled = true
+        }
+        if let index = arguments.firstIndex(of: Self.keyboardThemeLaunchArgument), index + 1 < arguments.count,
+           let theme = KeyboardTheme(rawValue: arguments[index + 1]) {
+            keyboardTheme = theme
         }
         if arguments.contains(Self.swipeLaunchArgument) {
             swipeTyping = true
