@@ -181,9 +181,9 @@ final class LiveDictationPreviewHost {
         guard let preview, let keyboard else { return }
         self.preview = nil
         preview.isUserInteractionEnabled = false
-        let frames = preview.words.takeFrameStats()
-        if frames.frames > 0 {
-            Self.log.notice("live: preview moved for \(frames.frames, privacy: .public) frames, \(frames.late, privacy: .public) late")
+        let cost = preview.words.takeCost()
+        if cost.updates > 0 {
+            Self.log.notice("live: preview drew \(cost.updates, privacy: .public) updates, \(String(format: "%.2f", cost.averageMS), privacy: .public) ms on average, \(String(format: "%.2f", cost.slowestMS), privacy: .public) at most")
         }
         guard keyboard.window != nil else {
             keyboard.plane.alpha = 1

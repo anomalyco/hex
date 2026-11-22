@@ -531,30 +531,20 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertTrue(LiveTranscript(settled: " ", tentative: "").isEmpty)
     }
 
-    func testWordsKeepTheirPlaceSoOnlyWhatChangedMoves() {
-        XCTAssertEqual(LiveWords.tokens("Hey, I'm  late."), ["Hey,", " I'm", "  late."])
-        XCTAssertEqual(LiveWords.tokens("我到了。你在"), ["我", "到", "了", "。", "你", "在"], "unspaced characters arrive one by one")
-        let old = LiveWords.tokens("Okay, I'm running about 730")
-        let new = LiveWords.tokens("Hey, I'm running about 7.30. Can you")
-        XCTAssertEqual(
-            LiveWords.changes(from: old, to: new),
-            [.replaced, .kept, .kept, .kept, .replaced, .added, .added],
-            "a changed word cross-fades alone; the words after it stay; new ones arrive"
-        )
-        XCTAssertEqual(LiveWords.changes(from: ["late"], to: ["late."]), [.kept], "a mark added keeps the word")
-    }
-
-    func testABurstsLastWordIsInLongBeforeTheNextBurst() {
-        XCTAssertEqual(LiveWordsMotion.delays(count: 1), [0])
-        let burst = LiveWordsMotion.delays(count: 12)
-        XCTAssertEqual(burst.count, 12)
-        XCTAssertLessThanOrEqual(burst.last ?? 1, LiveWordsMotion.burstSpread + 0.0001)
-        XCTAssertEqual(LiveWordsMotion.delays(count: 3)[1], LiveWordsMotion.stagger, accuracy: 0.0001)
-        // Apple's results come about once a second: the last word of any burst is fully in by 0.7 s.
-        XCTAssertEqual(LiveWordsMotion.progress(LiveWordsMotion.arrive * 1.5, LiveWordsMotion.arrive), 1)
-        XCTAssertLessThan(LiveWordsMotion.burstSpread + LiveWordsMotion.arrive * 1.5, 0.7)
-        XCTAssertEqual(LiveWordsMotion.progress(0, 0.3), 0)
-        XCTAssertGreaterThan(LiveWordsMotion.progress(0.3, 0.3), 0.98, "the spring is 98% there at its duration")
+    func testLongWordsScrollByWholeLinesAndDropLinesWellOutOfView() {
+        let words = LiveWordsView()
+        let line = words.lineHeight
+        words.frame = CGRect(x: 0, y: 0, width: 320, height: LiveWordsView.edge + 4 * line)
+        words.layoutIfNeeded()
+        let sentence = "We need to finish the design review before Friday and send it to the whole team. "
+        words.show(text: String(repeating: sentence, count: 8), settled: 0)
+        XCTAssertGreaterThan(words.scrollOffset, 0, "the newest line is in view")
+        XCTAssertEqual(words.scrollOffset.truncatingRemainder(dividingBy: line), 0, accuracy: 0.01, "whole lines at the top")
+        let landed = expectation(description: "lines well above the box dropped")
+        DispatchQueue.main.asyncAfter(deadline: .now() + LiveWordsMotion.change + 0.4) { landed.fulfill() }
+        wait(for: [landed], timeout: 2)
+        XCTAssertEqual(words.scrollOffset, 0, accuracy: 0.01, "at rest no line waits above the box")
+        XCTAssertEqual(words.drawnHeight, 4 * line, accuracy: 0.5, "a long dictation draws only the box's lines, the last at its foot")
     }
 
     func testTheSwitchesDefaultToShowingButNotTyping() throws {

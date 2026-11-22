@@ -321,8 +321,19 @@ never at a launch by itself.
     whole lines above it. It takes every touch where the keys were, so nothing types while
     it shows; the recording bar's ✕ and ✓ work as before, and an iPhone with a Home button
     keeps its globe key where it was. VoiceOver reads it as one element, never announced as
-    words change. When the dictation goes in, the preview fades with the words it had while
-    the keys come back; the field gets the dictation's own text, with its style, clean-up,
+    words change. Its motion is one spring family with no bounce (`LiveWordsMotion`,
+    `LiveDictationPreviewHost.Motion`, and the recording bar's morph and fades): the keys fade
+    (0.2 s) as the words fade in rising 6 pt (0.3 s); each new word fades in rising 4 pt
+    (0.3 s), a burst's words 40 ms apart and all within 0.24 s, so the last is in long before
+    the next burst; a settled word eases from the muted tone to the ink (0.3 s); a new line
+    moves the block up (0.3 s, carrying on from where it is) while the line leaving the top
+    fades through a 14 pt band; a word the recogniser changed fades out where it was (0.15 s)
+    as the new one fades in (0.2 s), and the words after it stay. With Reduce Motion, fades
+    only (0.2 s). One view draws all of it (`LiveWordsView`: TextKit 1, laid out in the ink
+    and in the muted tone, runs of words in the same state in one call, off the main thread)
+    from a display link that runs only while something moves. When the dictation goes in, the
+    preview's words fade drifting 6 pt up (0.15 s) as the keys come back (0.3 s), and they
+    stop taking touches at once; the field gets the dictation's own text, with its style, clean-up,
     punctuation, held results and Undo dictation as before, so it can differ from the
     preview: with the speech model in keyboard (Parakeet, English's default) the preview's
     words are Apple's and the text Parakeet's ("10" can go in as "ten"). **Type as I speak**
