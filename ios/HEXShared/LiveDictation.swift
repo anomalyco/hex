@@ -85,19 +85,22 @@ protocol LiveTranscriptSource: AnyObject {
 }
 
 /// What the keyboard shows while it records: nil while no live source runs (the keys stay as
-/// they are), else the words so far. The preview reads it; changing it never refreshes the
-/// rest of the keyboard.
+/// they are), else the words so far. The preview and Type as I speak read it; changing it
+/// never refreshes the rest of the keyboard.
 @MainActor
 final class LiveDictationText: ObservableObject {
     @Published private(set) var transcript: LiveTranscript?
-    /// Settings › Dictation › Show words as you speak, as the dictation started.
+    /// Settings › Dictation's two switches as this dictation started.
     private(set) var showsPreview = true
-    private(set) var look: LiveDictationSettings.Look = .dim
+    private(set) var typesIntoField = false
+    /// Counts dictations, so what follows the words can tell a new one from the last.
+    private(set) var dictation = 0
 
     /// A source started: the preview shows, empty until the first words.
-    func begin(showsPreview: Bool, look: LiveDictationSettings.Look) {
+    func begin(showsPreview: Bool, typesIntoField: Bool) {
         self.showsPreview = showsPreview
-        self.look = look
+        self.typesIntoField = typesIntoField
+        dictation += 1
         transcript = LiveTranscript()
     }
 
@@ -106,32 +109,17 @@ final class LiveDictationText: ObservableObject {
         transcript = next
     }
 
-    /// The source stopped and kept its words (they show until the dictation goes in).
-    func settle() {
-        guard let current = transcript, !current.tentative.isEmpty else { return }
-        transcript = LiveTranscript(settled: current.text, tentative: "")
-    }
-
     func end() {
         if transcript != nil { transcript = nil }
     }
 }
 
 /// Settings › Dictation's two switches for what happens while you speak, in the App Group so
-/// the keyboard reads them: words over the keys (on by default) and words typed into the
-/// field (off by default).
+/// the keyboard reads them: Show what I say (the words over the keys, on by default) and
+/// Type as I speak (the words typed into the field, off by default).
 nonisolated struct LiveDictationSettings {
     static let previewKey = "settings.liveDictationPreview"
     static let typingKey = "settings.liveDictationTyping"
-    /// Which look the preview takes, while Ryan chooses (`dim` or `hide`).
-    static let lookKey = "debug.liveDictationLook"
-
-    enum Look: String {
-        /// The keys stay, faint, with the words over them.
-        case dim
-        /// The keys go and the words have their space.
-        case hide
-    }
 
     private let defaults: UserDefaults?
 
@@ -147,11 +135,6 @@ nonisolated struct LiveDictationSettings {
     var typesIntoField: Bool {
         get { defaults?.object(forKey: Self.typingKey) as? Bool ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Self.typingKey) }
-    }
-
-    var look: Look {
-        get { defaults?.string(forKey: Self.lookKey).flatMap(Look.init(rawValue:)) ?? .dim }
-        nonmutating set { defaults?.set(newValue.rawValue, forKey: Self.lookKey) }
     }
 
     /// Either switch needs live words while recording.

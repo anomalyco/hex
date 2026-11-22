@@ -1,15 +1,14 @@
 import Combine
 import UIKit
 
-/// The words so far over the full keyboard's keys while it records (Settings › Dictation ›
-/// Show words as you speak): the keys go faint (`dim`) or away (`hide`) under them, the
-/// settled words in the keys' ink and the tentative tail muted, the newest line always in view.
-/// It takes every touch on the keys, so nothing types while it shows; the recording bar above
-/// and the globe stay as they are.
+/// The words so far in place of the full keyboard's keys while it records (Settings ›
+/// Dictation › Show what I say): the keys go and the words have their space, the settled
+/// words in the keys' ink and the tentative tail muted, the newest line always in view with
+/// whole lines above it. It takes every touch where the keys were, so nothing types while it
+/// shows; the recording bar above and the globe stay as they are.
 @MainActor
 final class LiveDictationPreviewView: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { render() } } }
-    var look: LiveDictationSettings.Look = .dim { didSet { if look != oldValue { render() } } }
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { render() } } }
     /// Where the words sit inside this view: the keys' own edges.
     var textInsets: UIEdgeInsets = .zero { didSet { if textInsets != oldValue { setNeedsLayout() } } }
@@ -85,8 +84,7 @@ final class LiveDictationPreviewView: UIView {
     }
 
     private var font: UIFont {
-        let size: CGFloat = orientation == .landscape ? 19 : (look == .hide ? 23 : 21)
-        return .systemFont(ofSize: size, weight: look == .dim ? .medium : .regular)
+        .systemFont(ofSize: orientation == .landscape ? 19 : 23, weight: .regular)
     }
 
     private func render() {
@@ -128,7 +126,7 @@ final class LiveDictationPreviewView: UIView {
     }
 }
 
-/// The globe key as the key plane draws it, for the preview to keep over the words.
+/// The globe key as the key plane draws it, for the preview to keep where it was.
 @MainActor
 private final class GlobeKeycapView: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { setNeedsDisplay() } } }
@@ -164,16 +162,15 @@ private final class ScrollWatcher: NSObject, UITextViewDelegate {
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { onDrag?() }
 }
 
-/// Puts `LiveDictationPreviewView` over a full keyboard's keys while it records and there are
+/// Puts `LiveDictationPreviewView` in place of a full keyboard's keys while it records with
 /// live words (`KeyboardViewModel.liveText`), and takes it away, with the keys back, once
-/// the dictation is in.
+/// the dictation is in: the preview fades with the words it had while the keys and the
+/// dictation's own text come in, so different words never flash in it.
 @MainActor
 final class LiveDictationPreviewHost {
     private weak var keyboard: FullKeyboardView?
     private var preview: LiveDictationPreviewView?
     private var subscription: AnyCancellable?
-    /// The keys' opacity under the words in the dim look.
-    static let dimmedKeys: CGFloat = 0.1
     static let fade: TimeInterval = 0.18
 
     func attach(to keyboard: FullKeyboardView) {
@@ -199,23 +196,21 @@ final class LiveDictationPreviewHost {
             hide()
             return
         }
-        let preview = self.preview ?? show(in: keyboard, look: live.look)
+        let preview = self.preview ?? show(in: keyboard)
         preview.show(transcript)
     }
 
-    private func show(in keyboard: FullKeyboardView, look: LiveDictationSettings.Look) -> LiveDictationPreviewView {
+    private func show(in keyboard: FullKeyboardView) -> LiveDictationPreviewView {
         let preview = LiveDictationPreviewView()
         preview.palette = keyboard.palette
-        preview.look = look
         preview.alpha = 0
         keyboard.insertSubview(preview, aboveSubview: keyboard.plane)
         self.preview = preview
         layout()
-        let keys = look == .dim ? Self.dimmedKeys : 0
         let duration = keyboard.window == nil ? 0 : Self.fade
         UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
             preview.alpha = 1
-            keyboard.plane.alpha = keys
+            keyboard.plane.alpha = 0
         }
         return preview
     }
@@ -232,7 +227,7 @@ final class LiveDictationPreviewHost {
         }
     }
 
-    /// The keys' area, under the recording bar to the keyboard's bottom.
+    /// Where the keys were, under the recording bar to the keyboard's bottom.
     func layout() {
         guard let preview, let keyboard else { return }
         let layout = keyboard.engine.layout

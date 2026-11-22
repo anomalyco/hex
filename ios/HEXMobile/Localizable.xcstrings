@@ -4370,6 +4370,36 @@
           }
         }
       }
+    },
+    "Show what I say" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示我说的话"
+          }
+        }
+      }
+    },
+    "Type as I speak" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "边说边输入"
+          }
+        }
+      }
+    },
+    "Words can change until you stop" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停下前文字可能会变"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

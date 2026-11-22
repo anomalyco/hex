@@ -2,7 +2,8 @@ import Foundation
 import os
 import Speech
 
-/// One in-keyboard dictation's live words (Settings › Dictation › Show words as you speak):
+/// One in-keyboard dictation's live words (Settings › Dictation › Show what I say and Type as
+/// I speak):
 /// started with the capture's first audio when a switch wants them, fed every chunk the page
 /// sends, and stopped when the capture stops, keeping its words on screen until the
 /// dictation goes in. It never changes the dictation itself: whenever it can't run (a switch
@@ -30,9 +31,12 @@ final class KeyboardLiveDictation {
     private var peakFootprint = 0
 
     /// Memory the keyboard must still have once its capture runs: the live recogniser's own
-    /// share in the keyboard (about 2 MB measured, its model runs in Apple's speech service),
-    /// with room left for the dictation's transcription after it.
-    static let headroomNeeded = 24 * 1_048_576
+    /// share in the keyboard (about 2 MB measured, its model runs in Apple's speech service)
+    /// with margin, and the speech model's transcription after it
+    /// (`KeyboardParakeetBudget.transcribeHeadroom`, 24 MB).
+    static let headroomNeeded = 32 * 1_048_576
+    /// Below this while recording, the recogniser goes and the dictation goes on without it.
+    static let floor = 24 * 1_048_576
     /// Audio held while the language is looked up; past it the live words give up.
     static let maximumHeldSeconds: Double = 4
 
@@ -134,9 +138,13 @@ final class KeyboardLiveDictation {
     }
 
     /// The preview shows from here (empty until the first words), never while the language is
-    /// still looked up, so a dictation without live words never flashes it.
+    /// still looked up, so a dictation without live words never flashes it. Type as I speak
+    /// never types a dictation Translate what I say turns into another language.
     private func attach(_ source: LiveTranscriptSource) {
-        text.begin(showsPreview: settings.showsPreview, look: settings.look)
+        text.begin(
+            showsPreview: settings.showsPreview,
+            typesIntoField: settings.typesIntoField && !DictationTranslationSettings().isEnabled
+        )
         source.onUpdate = { [weak self] transcript in self?.received(transcript) }
         source.onFailure = { [weak self] reason in self?.giveUp(reason) }
         self.source = source
@@ -148,6 +156,12 @@ final class KeyboardLiveDictation {
 
     private func received(_ transcript: LiveTranscript) {
         guard !stopped else { return }
+        let available = os_proc_available_memory()
+        if available > 0, available < Self.floor {
+            KeyboardProbeLog.shared.write("live: stopped, short of memory \(KeyboardProbeLog.memory())")
+            stop()
+            return
+        }
         if firstWordsAt == nil, !transcript.isEmpty { firstWordsAt = Date() }
         latest = transcript
         peakFootprint = max(peakFootprint, KeyboardParakeet.memory().footprint)

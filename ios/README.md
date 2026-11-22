@@ -275,6 +275,48 @@ never at a launch by itself.
     more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves
     the menu open for taps (`HexKeyGesture`). VoiceOver activation dictates,
     and the **Dictation styles** action opens the menu.
+  - **While the keyboard records: Show what I say and Type as I speak (Settings ›
+    Dictation, iOS 26+):** While the keyboard records by itself (in-keyboard dictation),
+    the capture's chunks also go to Apple's `SpeechAnalyzer` as they arrive
+    (`AppleLiveTranscriber`: `SpeechTranscriber` with volatile and fast results, or
+    `DictationTranscriber`'s progressive long dictation for its languages), only when the
+    language's model is already on the iPhone: it never downloads one. **Show what I say**
+    (on by default): the full keyboard's keys go and the words so far take their place
+    under the recording bar (`LiveDictationPreviewView`), the settled words in the keys'
+    ink and the tail the recogniser may still change muted, the newest line in view with
+    whole lines above it. It takes every touch where the keys were, so nothing types while
+    it shows; the recording bar's ✕ and ✓ work as before, and an iPhone with a Home button
+    keeps its globe key where it was. VoiceOver reads it as one element, never announced as
+    words change. When the dictation goes in, the preview fades with the words it had while
+    the keys come back; the field gets the dictation's own text, with its style, clean-up,
+    punctuation, held results and Undo dictation as before, so it can differ from the
+    preview: with the speech model in keyboard (Parakeet, English's default) the preview's
+    words are Apple's and the text Parakeet's ("10" can go in as "ten"). **Type as I speak**
+    (off by default): the words are typed into the field as they come
+    (`LiveFieldTyping`), only the changed tail retyped. It keeps exactly what it typed and
+    edits only while the text before the cursor still ends with it; when the dictation's
+    text goes in, its words come out first, so the text goes in where and as it would without
+    them, in one step. ✕, a failure or nothing heard take them out; the keyboard hiding
+    mid-dictation takes them out and the held text goes in at the next keyboard as before.
+    Once the field changes under it (a key, a cursor move, a selection, or an app that
+    reports no text), it stops and leaves its words, and the text goes in at the cursor as
+    without it. Never in secure, password, one-time code or card number fields, over a
+    selection or a two-thumb Dictate's range, or with Translate what I say on. Neither runs
+    before iOS 26, for dictations recorded through Hex (Keep mic warm), when less than 32 MB
+    is left once the capture runs (`KeyboardLiveDictation`: the recogniser's share in the
+    keyboard with margin, and the speech model's transcription after it), on an error, or
+    when the recogniser isn't running 4–6 s into the audio; under 24 MB, or on a memory warning, the recogniser goes
+    and the dictation goes on. The dictation bar shows no preview (Type as I speak works
+    there, unverified on an iPhone). Measured on the Mac Studio (macOS 27.2.1) with the
+    keyboard's own code fed a clip in the page's 4,096-sample chunks in real time: first
+    words 0.5–1.0 s after the first word ends, then 0.6–0.8 s behind (90% within 1.2 s), in
+    bursts about once a second; 2% of words shown were rewritten (7 of 336, "730." to "7.30.");
+    words settle only at a pause. Without fast results words came 2.7–3.5 s late, and
+    `DictationTranscriber` rewrote 15% of them. The simulator has no speech models: in
+    simulator builds only, `LiveTranscriptReplay` plays a recorded run (`live-replay.json` in
+    the App Group, or the keyboard's own Library for an unsigned build) from the first audio.
+    `ParakeetLiveTranscriber` (the audio so far again about once a second, a 20 s window) is
+    written for when the speech model's own words should show, and not used yet.
   - **Auto-start:** Settings › Keyboard › Auto-start (`FullKeyboardSettings.dictationBarAutoStart`)
     lets the dictation bar start dictating by itself as it shows, as a tap on **Dictate**
     would, 0.8 s after it appears (after the first frame and the launch's optional work),
@@ -758,7 +800,8 @@ never at a launch by itself.
   `https://dev.anoma.ly/hex` until the production site serves
   `anoma.ly/hex/privacy`). Each row has a one-line description at most. The pages:
   - **Dictation:** Style, Lowercase, Format lists, Spoken punctuation, End with a
-    period, Dictation language, Translate what I say, Clean up what I say,
+    period, Dictation language, Show what I say and Type as I speak (iOS 26 and later),
+    Translate what I say, Clean up what I say,
     Custom vocabulary (its list below the switch), Keep mic warm,
     and Microphone.
   - **Keyboard:** Keyboard, **Full** (the default) or **Dictation bar** (stored
