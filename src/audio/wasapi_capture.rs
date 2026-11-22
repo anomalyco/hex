@@ -28,6 +28,8 @@ use windows::Win32::System::Com::{
     COINIT_MULTITHREADED, CoCreateInstance, CoGetApartmentType, CoInitializeEx, CoTaskMemFree,
     StringFromIID,
 };
+
+use super::stream::StreamError;
 use windows::Win32::System::Threading::{CreateEventW, WaitForSingleObject};
 use windows::core::{HRESULT, HSTRING, IUnknown, Interface, PCWSTR, Ref, implement};
 
@@ -202,7 +204,7 @@ pub(super) fn start(device: &Device, device_name: &str) -> Result<StartedStream>
 
 struct Streams {
     chunks: Sender<(Vec<f32>, CaptureInstant)>,
-    errors: SyncSender<String>,
+    errors: SyncSender<StreamError>,
 }
 
 /// An initialized, started client and how to wait for its packets.
@@ -236,7 +238,7 @@ fn run(id: &str, name: &str, stop: &AtomicBool, ready: &SyncSender<Ready>, strea
         return;
     }
     if let Err(error) = capture(&opened, stop, &mut feed, &streams.chunks) {
-        let _ = streams.errors.try_send(error);
+        let _ = streams.errors.try_send(StreamError::Failed(error));
     }
     let _ = unsafe { opened.client.Stop() };
 }

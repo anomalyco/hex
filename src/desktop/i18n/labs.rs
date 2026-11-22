@@ -227,4 +227,6 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("{} pt", ["{} pkt", "{} pt", "{} pt", "{} pt", "{} pt", "{} пт"]),
     ("Lower", ["Niżej", "降低", "下げる", "Tiefer", "Bajar", "Нижче"]),
     ("Raise", ["Wyżej", "升高", "上げる", "Höher", "Subir", "Вище"]),
+    ("Voice isolation", ["Izolacja głosu", "语音隔离", "ボイスアイソレーション", "Stimmenisolation", "Aislamiento de voz", "Ізоляція голосу"]),
+    ("Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise.", ["Nagrywaj dyktowanie przez przetwarzanie głosu Apple, aby Tryb mikrofonu mógł włączyć Izolację głosu i wyciszyć szumy w tle.", "通过 Apple 的语音处理录制听写，让“麦克风模式”可以开启“语音隔离”并减少背景噪音。", "Apple のボイスプロセッシングで音声入力を録音し、マイクモードでボイスアイソレーションをオンにして背景ノイズを抑えられるようにします。", "Diktiere über Apples Stimmverarbeitung, damit der Mikrofonmodus die Stimmenisolation einschalten und Hintergrundgeräusche dämpfen kann.", "Graba el dictado con el procesamiento de voz de Apple para que el Modo de micrófono pueda activar Aislamiento de voz y reducir el ruido de fondo.", "Записуйте диктування через обробку голосу Apple, щоб режим мікрофона міг увімкнути Ізоляцію голосу та зменшити фоновий шум."]),
 ];

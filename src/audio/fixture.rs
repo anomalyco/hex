@@ -116,6 +116,8 @@ pub(super) fn open(path: &Path) -> Result<AudioInput> {
         device_name: NAME.into(),
         uid: None,
         selection: Selection::InUse,
+        voice_isolation: false,
+        voice_processing_active: false,
         stream_errors,
         watch_service_restarts: false,
         restart_generation: super::audio_service_restart_generation(),

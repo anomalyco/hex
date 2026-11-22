@@ -229,6 +229,10 @@ pub struct LabsSettings {
     /// The gap in points above the Dock while `hud_height` is on; a saved
     /// value above [`HUD_BOTTOM_GAP_MAX`] is clamped at placement.
     pub hud_bottom_gap: u16,
+    /// Dictation's microphone opens through Apple's voice processing, so
+    /// Control Center's Mic Mode can offer Voice Isolation (macOS, Labs ›
+    /// Voice isolation).
+    pub voice_isolation: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
     /// Annotate's capsule and ink float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux).
@@ -509,6 +513,7 @@ impl Default for LabsSettings {
             notch_indicator: false,
             hud_height: false,
             hud_bottom_gap: HUD_BOTTOM_GAP_DEFAULT,
+            voice_isolation: false,
             annotate_replay: false,
             opencode_in_wsl: false,
             yolo_mode: false,

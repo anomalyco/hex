@@ -30,6 +30,7 @@ mod strings;
 mod style;
 mod text_language;
 mod traditional_chinese;
+mod voice_isolation;
 
 pub(crate) use clock::{clock_time, twelve_hour_clock};
 

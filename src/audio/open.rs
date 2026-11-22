@@ -33,6 +33,14 @@ pub(super) struct OpenRequest {
     /// Whether the open makes the device renegotiate its sample rate first: a
     /// silence recovery's device can stay on a stale clock (#1575).
     pub(super) renegotiate_rate: bool,
+    /// Whether the open goes through Apple's voice processing (Labs › Voice
+    /// isolation): dictation's listener alone asks, and only while the lab is
+    /// on. Meetings, captures, the level meter, and other OSes keep the raw
+    /// stream.
+    pub(super) voice_processing: bool,
+    /// A remembered voice-processing failure for this microphone: open the
+    /// raw stream even though the lab is on (Labs › Voice isolation).
+    pub(super) voice_processing_fallback: bool,
 }
 
 impl OpenRequest {
@@ -253,7 +261,13 @@ pub(super) fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
                 selection: Selection::InUse,
             });
         }
-        return Ok(Opened::Input(Box::new(fixture::open(path)?)));
+        let mut input = Box::new(fixture::open(path)?);
+        // The fixture stands in for whichever capture path was asked for, so
+        // the listener does not keep reopening it looking for the other one.
+        input.voice_isolation = request.voice_processing;
+        input.voice_processing_active =
+            request.voice_processing && !request.voice_processing_fallback;
+        return Ok(Opened::Input(input));
     }
     let host = cpal::default_host();
     let (devices, names) = input_devices_of(&host)?;
@@ -313,8 +327,14 @@ pub(super) fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
                 "the saved microphone is off while the lid is closed; using the system default"
             ),
         }
-        let mut input =
-            AudioInput::open_device(device, name, follows_default, request.renegotiate_rate)?;
+        let mut input = AudioInput::open_device(
+            device,
+            name,
+            follows_default,
+            request.renegotiate_rate,
+            request.voice_processing,
+            request.voice_processing_fallback,
+        )?;
         input.selection = plan.selection;
         // The ALSA default cannot name another PipeWire source, so Linux
         // moves the opened stream off a Bluetooth default instead.
@@ -373,6 +393,8 @@ pub fn open_named_input(device: &str) -> Result<AudioInput> {
         avoids_bluetooth: false,
         call_input: None,
         renegotiate_rate: false,
+        voice_processing: false,
+        voice_processing_fallback: false,
     })?;
     match opened {
         Opened::Input(input) if input.device_name == device => Ok(*input),
@@ -397,6 +419,8 @@ pub fn open_dictation_input(selected_device: Option<&str>) -> Result<AudioInput>
         avoids_bluetooth: true,
         call_input: None,
         renegotiate_rate: false,
+        voice_processing: false,
+        voice_processing_fallback: false,
     })? {
         Opened::Input(input) => Ok(*input),
         Opened::Unchanged { .. } => Err(eyre!("nothing was open to keep")),
@@ -422,6 +446,8 @@ pub fn open_meeting_input(
         avoids_bluetooth: false,
         call_input: call_input.map(str::to_owned),
         renegotiate_rate,
+        voice_processing: false,
+        voice_processing_fallback: false,
     })
 }
 

@@ -16,6 +16,7 @@ struct HEXMobileApp: App {
         HinglishSettings().applyLaunchArguments()
         GreeklishSettings().applyLaunchArguments()
         TwoLanguageDictationSettings().applyLaunchArguments()
+        VoiceIsolationSettings().applyLaunchArguments()
         MultilingualParakeetSettings().applyLaunchArguments()
         KeyboardParakeetSettings().applyLaunchArguments()
         SettingsSnapshotFixture.applyDefaults()

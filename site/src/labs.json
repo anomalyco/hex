@@ -862,6 +862,17 @@
       ],
       "summary": "Choose how high the dictation HUD sits above the Dock when it's at the bottom",
       "title": "HUD height"
+    },
+    {
+      "added": "2026-11-22",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "voice-isolation",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise.",
+      "title": "Voice isolation"
     }
   ]
 }
