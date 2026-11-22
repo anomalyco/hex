@@ -744,6 +744,8 @@ final class FullKeyboardView: UIView {
         stripView.pillInset = layout.metrics.stripInset
         stripView.textCenterY = layout.metrics.stripTextCenter
         stripView.chipHeight = layout.metrics.stripChipHeight
+        stripView.appleBar = layout.metrics.appleBar
+        stripView.dividerBesideHex = layout.metrics.appleBar && layout.key(.hex).map { $0.row < 0 } == true
         stripView.hexOnLeading = layout.hexOnLeading
         stripView.barMidX = layout.stripBarFrame.midX - layout.stripFrame.minX
 

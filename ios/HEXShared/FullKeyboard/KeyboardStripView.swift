@@ -3,10 +3,11 @@ import UIKit
 /// The 3-slot top bar above the keys, drawn as Apple's iOS 26 predictive bar is (measured in
 /// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
 /// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
-/// capsule with the divider beside it hidden. On an iPhone held upright the strip is Apple's
-/// bar from its pill's top down (38 pt), with the words and dividers on Apple's line, 20 pt
-/// below the keyboard's top edge (`KeyboardMetrics.stripTextCenter`), and a small chip around
-/// a word instead of the capsule. The centred
+/// capsule with the dividers beside it hidden. On an iPhone the strip is Apple's whole 44 pt
+/// bar (`KeyboardMetrics.appleBar`): words, dividers and the cell-wide 38 pt bubble on Apple's
+/// line, 25 pt below the keyboard's top edge (`KeyboardMetrics.stripTextCenter`). Before it was
+/// measured (iOS 18) it is the bar from its pill's top down (38 pt), with a small chip around a
+/// word instead of the capsule. The centred
 /// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {
@@ -41,6 +42,18 @@ final class KeyboardStripView: UIView {
             setNeedsDisplay()
         }
     }
+    /// The strip is Apple's bar (`KeyboardMetrics.appleBar`): a pending word gets Apple's bubble,
+    /// its cell's width, and the dividers beside it hide, as Apple's do.
+    var appleBar = false {
+        didSet {
+            guard appleBar != oldValue else { return }
+            for button in slotButtons { button.fillsCell = appleBar }
+            setNeedsDisplay()
+        }
+    }
+    /// The Hex key has a cell of its own at the strip's end (Apple's bar): a divider stands
+    /// between it and the slot beside it, as between Apple's icon and its first cell.
+    var dividerBesideHex = false { didSet { if dividerBesideHex != oldValue { setNeedsDisplay() } } }
     /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
     var pillInset: CGFloat = 0.5 {
         didSet {
@@ -426,10 +439,18 @@ final class KeyboardStripView: UIView {
         palette.stripDivider.setFill()
         // Only between two filled slots: nothing to show, no dividers (as Apple's bar in a
         // field it offers nothing for).
-        let filled = Set(Self.slots(for: currentSuggestions))
+        let slots = Self.slots(for: currentSuggestions)
+        let filled = Set(slots)
+        // Apple's bar hides both dividers beside its bubble (a pending autocorrection or a revert).
+        let bubbled: Set<Int> = appleBar ? Set(zip(currentSuggestions, slots).filter { $0.0.willAutoReplace || $0.0.kind == .revert }.map(\.1)) : []
         for (index, slot) in currentSlotFrames.prefix(2).enumerated()
-        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) && !(reverting && index == 0) {
+        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) && !(reverting && index == 0)
+            && !bubbled.contains(index) && !bubbled.contains(index + 1) {
             UIRectFill(CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH))
+        }
+        let besideHex = hexOnLeading ? 0 : 2
+        if dividerBesideHex, filled.contains(besideHex), !bubbled.contains(besideHex) {
+            UIRectFill(CGRect(x: hexOnLeading ? 0 : bounds.width - 1, y: y, width: 1, height: lineH))
         }
     }
 
@@ -457,6 +478,8 @@ final class KeyboardStripView: UIView {
         var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
         var textCenterY: CGFloat? { didSet { if textCenterY != oldValue { setNeedsDisplay() } } }
         var chipHeight: CGFloat? { didSet { if chipHeight != oldValue { setNeedsDisplay() } } }
+        /// Apple's bar: the bubble fills the slot across, from `pillInset` down `chipHeight`.
+        var fillsCell = false { didSet { if fillsCell != oldValue { setNeedsDisplay() } } }
         /// Room the Logging mark takes at the slot's outer end: the word centres in the rest.
         var leadingRoom: CGFloat = 0 { didSet { if leadingRoom != oldValue { setNeedsDisplay() } } }
         var trailingRoom: CGFloat = 0 { didSet { if trailingRoom != oldValue { setNeedsDisplay() } } }
@@ -624,7 +647,8 @@ final class KeyboardStripView: UIView {
                 let chipH = chipHeight ?? max(22, bounds.height - 2 * pillInset)
                 let chipW = min(bounds.width, textW + arrowRoom + 2 * Self.chipPadding)
                 let midY = textCenterY ?? bounds.height * 0.5
-                let chip = CGRect(
+                // Apple's bubble (iOS 26.5 and 27.2): the whole cell across, a capsule on the line.
+                let chip = fillsCell ? CGRect(x: 0, y: midY - chipH / 2, width: bounds.width, height: chipH) : CGRect(
                     x: max(0, min(bounds.width - chipW, incoming.origin.x - (chipW - textW - arrowRoom) / 2)),
                     y: midY - chipH / 2,
                     width: chipW,

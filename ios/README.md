@@ -1183,33 +1183,38 @@ never at a launch by itself.
   language's system keyboard where it differs (# holds № in Russian and Ukrainian, the
   digits º and ª in Spanish and Italian, . holds · in French, $ holds ₴ in Ukrainian and
   kr in Norwegian).
-- **Size (full keyboard):** On an iPhone held upright the suggestion strip is Apple's
-  predictive bar from the top of its suggestion pill down: 38 pt in every state
-  (suggestions, Undo dictation, the Full Access hint, the recording bar, the emoji
-  panel's top row, the Logging mark), with Apple's 8 pt under it, so row 1's keycaps
-  start 46 pt down and the keys stay on Apple's rows (Apple's keys overlaid on Hex's,
-  iPhone 17 Pro, iOS 27.2 simulator): 247 pt on an iPhone 17 or 17 Pro, 254 pt on an SE,
-  266 pt on an Air or Pro Max. Apple's keyboard draws other rows before iOS 27 (iOS 26.2 and
+- **Size (full keyboard):** On an iPhone the suggestion strip is Apple's prediction bar,
+  as thick as Apple's (iOS 26.5 and 27.2 simulators, iPhone 17 Pro, Air, 17 Pro Max and SE,
+  upright and turned, light and dark, beside Hex in the same field): 44 pt from the
+  keyboard's top edge in every state (suggestions, Undo dictation, Paste, the Full Access
+  hint, the recording bar, the emoji panel's top row, the Logging mark), with Apple's 8 pt
+  under it upright (6 pt turned), so row 1's keycaps start 52 pt down (50 turned), the keys
+  stay on Apple's rows, and where iOS adds nothing above the keyboard Hex is exactly as tall
+  as Apple's keyboard: 253 pt on an iPhone 17 or 17 Pro, 260 pt on an SE, 272 pt on an Air or
+  Pro Max (`KeyboardMetrics.withAppleBar`). The 17 pt band iOS adds above a third-party
+  keyboard in some fields (Notes, Spotlight, a re-tapped Safari field; on iOS 26 even a plain
+  first-focused text view) is an exception Hex doesn't design for: there Hex is 17 pt taller
+  than Apple's. Inside the bar Hex draws what Apple's does: the words, SF 17 pt, centred 25 pt
+  down; a pending autocorrection in Apple's bubble, its whole cell across and a 38 pt capsule
+  from 6 pt down to the bar's bottom; 1 × 24 pt dividers between filled cells, hidden beside the
+  bubble; and the Hex key in a 59 pt cell of its own at its end of the bar, as Apple's writing
+  tools icon has at the other (a TestFlight screenshot, iPhone 17 Pro Max, iOS 27.2.1), with a
+  divider between it and the word beside it; the three cells share the rest. iOS 18 is
+  unmeasured and keeps the 38 pt strip it had (247, 254 and 266 pt). Apple's keyboard draws other rows before iOS 27 (iOS 26.2 and
   26.5 simulators, iPhone 12, 16, 17 Pro, Air and 17 Pro Max, beside Hex in the same field):
   the same keycaps, but upright its panel is 7 pt taller under the keys on an 844 to 874 pt
   iPhone and 2 pt shorter on a 900 pt or taller one, so on iOS 26 Hex's rows sit 7 pt higher
-  (row 4 whole, 254 pt) or 2 pt lower (264 pt) to stay on Apple's (`KeyboardMetrics.appleRowsAreIOS26`);
+  (row 4 whole, 260 pt) or 2 pt lower (270 pt) to stay on Apple's (`KeyboardMetrics.appleRowsAreIOS26`);
   the SE is the same on both. iOS 18 is unmeasured (the Studio has no iOS 18 simulator) and
-  keeps the iOS 27 rows Hex drew there before. The words are on Apple's line, 26 pt above the keys and
-  20 pt below the keyboard's top edge; an autocorrection is a small 18 pt chip around
-  its word, and the pills (the Hex key, the recording bar) are 28 pt, 6 pt down, so
-  nothing touches the top edge. iOS draws about 17 pt of its own panel above a
-  third-party keyboard in some fields and nothing in others (on an iPhone 17 Pro, iOS
-  27.2: Notes has it, a Safari form's first focus doesn't; Gboard and SwiftKey get the
-  same), and a keyboard can't tell which, so the strip carries its own room: the 27 pt
-  strip it replaces left the words 9 pt under the edge whenever iOS added nothing.
-  Turned, the strip is 42 pt and the keyboard 204 pt (32 pt keycaps on a 40 pt pitch); on iOS
+  keeps the iOS 27 rows Hex drew there before.
+  Turned, the bar is 44 pt with 6 pt to row 1 and the keyboard 204 pt (32 pt keycaps on a 40 pt pitch); on iOS
   26 Apple's turned keycaps are 27.33 pt on a 35.33 pt pitch ending 4 pt above the bottom, and
   Hex's are too, 187.33 pt in all (iOS 18, unmeasured, keeps 204 pt) (the SE keeps iOS 27's turned keys for now: Apple's turned SE
   on iOS 26 is its upright keyboard across the whole screen).
   Where iOS gives the keyboard a shorter view than it asks for (Spotlight on an iPhone
   17 Pro Max, iOS 27.3, TestFlight: about 20 pt short), the rows fit the height it has:
-  the strip keeps its size and the keycaps and the gaps between rows shrink alike
+  Apple's bar gives up its 6 pt over the old 38 pt strip first, so a view up to 6 pt short
+  keeps every key whole and in place, and beyond that the keycaps and the gaps between rows shrink alike
   (`KeyboardMetrics.fitted`), instead of row 4 falling under iOS's globe band.
   Dictating no longer grows the keyboard. On the iPhone Duo (`KeyboardPosture`,
   model `iPhone19,4`) iOS sets third-party keyboards in an inset platter with a band

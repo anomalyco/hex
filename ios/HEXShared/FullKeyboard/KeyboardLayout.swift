@@ -226,6 +226,9 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// Settings › Keyboard › Number row: the keycap height of the row of 1 to 0 above row 1
     /// (`withNumberRow()`), with a row gap under it; 0 without it.
     var numberRowHeight: CGFloat = 0
+    /// The strip is Apple's prediction bar (`withAppleBar(turned:)`): as thick as Apple's, its
+    /// words on Apple's line and a pending word in Apple's cell-wide bubble.
+    var appleBar = false
 
     /// The suggestion strip is Apple's predictive bar from the top of its suggestion pill down.
     /// Apple's bar is 44 pt from its panel's edge, the pill around a suggested word starts 6 pt
@@ -260,6 +263,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// from `barPillTop` down (28 pt), inside the strip. Elsewhere it's the strip less half a
     /// point above and below, at most 36 pt.
     var stripPillHeight: CGFloat {
+        if appleBar { return min(Self.appleBubbleHeight, 2 * min(stripTextCenter, stripHeight - stripTextCenter)) }
         guard stripHeight == Self.stripBarHeight else { return min(stripHeight - 1, 36) }
         return 2 * min(stripTextCenter - Self.barPillTop, stripHeight - stripTextCenter)
     }
@@ -270,14 +274,44 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// the keyboard's top edge. Elsewhere the strip is Apple's bar and they centre in it.
     static let barTextAboveKeys: CGFloat = 26
     var stripTextCenter: CGFloat {
-        stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
+        if appleBar { return stripHeight - Self.appleBarTextAboveBottom }
+        return stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
     }
     /// A suggestion's chip (an autocorrection, a pressed word, a revert) and the dividers: in
     /// the phone's portrait strip a small chip around the word, 18 pt, even above and below the
     /// words' line (not Apple's slot-wide 38 pt pill). Elsewhere the pill height.
     static let barChipHeight: CGFloat = 18
     var stripChipHeight: CGFloat {
-        stripHeight == Self.stripBarHeight ? Self.barChipHeight : stripPillHeight
+        !appleBar && stripHeight == Self.stripBarHeight ? Self.barChipHeight : stripPillHeight
+    }
+
+    /// Apple's prediction bar, measured beside Hex on iOS 26.5 and 27.2 (iPhone 17 Pro, Air, 17 Pro
+    /// Max and SE, upright and turned, light and dark, black box): 44 pt from the keyboard's top
+    /// edge on every iPhone, row 1's keycaps 8 pt under it upright and 6 pt turned. Its words, its
+    /// dividers and the bubble behind a pending autocorrection all centre 25 pt down (19 pt above
+    /// the bar's bottom); the bubble fills its cell from 6 pt down to the bar's bottom, a 38 pt
+    /// capsule, and the dividers are 1 × 24 pt, hidden beside the bubble.
+    static let appleBarHeight: CGFloat = 44
+    static let appleBarTurnedGap: CGFloat = 6
+    static let appleBarTextAboveBottom: CGFloat = 19
+    static let appleBubbleHeight: CGFloat = 38
+    /// Apple's bar leads with a 59 pt cell for its writing tools icon, then a divider, then three
+    /// equal cells (iPhone 17 Pro Max, iOS 27.2.1, a TestFlight tester's screenshot; the simulator
+    /// shows no icon). Hex's key takes that cell at its own end of the bar.
+    static let appleIconCellWidth: CGFloat = 59
+    /// Hex's key in Apple's bar keeps the 44 × 28 pt mark it had in the 38 pt strip.
+    static let barHexKeyHeight: CGFloat = 28
+    /// Apple's bar was measured on iOS 26 and 27 (`KeyboardLanguage.systemMajorVersion`); iOS 18
+    /// is unmeasured (no simulator runtime) and keeps the 38 pt strip it always had.
+    static var appleBarIsMeasured: Bool { KeyboardLanguage.systemMajorVersion >= 26 }
+
+    /// These metrics with Apple's prediction bar for a strip: 44 pt, then 8 pt to row 1 upright or
+    /// 6 pt turned. Upright the keyboard grows 6 pt upward (rows stay put) and its top edge is
+    /// Apple's; turned it was already Apple's height (42 + 8 pt), and only the strip changes.
+    func withAppleBar(turned: Bool) -> KeyboardMetrics {
+        var m = rebuilt(stripHeight: Self.appleBarHeight, stripBottom: turned ? Self.appleBarTurnedGap : Self.stripGap)
+        m.appleBar = true
+        return m
     }
     /// The tallest band of the strip that is even above and below the words' line, from the
     /// strip's top: what fills the strip (the Full Access hint, the emoji panel's top row, the
@@ -511,7 +545,9 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         } else {
             base = .portrait
         }
-        guard posture != .phone else { return base }
+        guard posture != .phone else {
+            return Self.appleBarIsMeasured ? base.withAppleBar(turned: orientation == .landscape) : base
+        }
 
         // The Duo: Apple's row pitch for each screen (56 pt folded, 59.7 pt unfolded and turned,
         // 51.7 pt unfolded upright), keycaps starting where Apple's do, and no gap under the strip.
@@ -565,16 +601,21 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         )
     }
 
-    private func with(side: CGFloat) -> KeyboardMetrics {
-        KeyboardMetrics(
-            side: side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
-            stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
+    private func with(side: CGFloat) -> KeyboardMetrics { rebuilt(side: side) }
+
+    /// These metrics with a field or two changed and the rest kept.
+    private func rebuilt(side: CGFloat? = nil, stripHeight: CGFloat? = nil, stripBottom: CGFloat? = nil) -> KeyboardMetrics {
+        var m = KeyboardMetrics(
+            side: side ?? self.side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
+            stripTop: stripTop, stripHeight: stripHeight ?? self.stripHeight, stripBottom: stripBottom ?? self.stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
             bottomRowLeadColumn: bottomRowLeadColumn,
             modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth,
             numberRowHeight: numberRowHeight
         )
+        m.appleBar = appleBar
+        return m
     }
 
     /// These metrics with the keys fitted into a view `height` tall, where iOS gives the keyboard
@@ -584,10 +625,16 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// Unchanged at full height, and while the room for the keys is under half theirs (no
     /// height yet, or a passing one).
     func fitted(toHeight height: CGFloat) -> KeyboardMetrics {
+        // Apple's bar gives up its room over the 38 pt strip first, so the keys stay whole.
+        if appleBar, height < totalHeight - 0.5, stripHeight > Self.stripBarHeight,
+           height - stripArea + stripHeight - Self.stripBarHeight >= keysArea / 2 {
+            let give = min(stripHeight - Self.stripBarHeight, totalHeight - height)
+            return rebuilt(stripHeight: stripHeight - give).fitted(toHeight: height)
+        }
         let keys = height - stripArea
         guard height < totalHeight - 0.5, keys >= keysArea / 2 else { return self }
         let scale = (keys - keysTop - keysBottom + bottomRowTrim) / (4 * keyHeight + 3 * rowGap + numberRowPitch)
-        return KeyboardMetrics(
+        var fitted = KeyboardMetrics(
             side: side, gap: gap, rowGap: rowGap * scale, keyHeight: keyHeight * scale,
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
@@ -596,6 +643,8 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth,
             numberRowHeight: numberRowHeight * scale
         )
+        fitted.appleBar = appleBar
+        return fitted
     }
 
     var stripArea: CGFloat { stripTop + stripHeight + stripBottom }
@@ -826,7 +875,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     var stripFrame: CGRect {
         let full = stripBarFrame
         guard let hex = key(.hex), hex.row < 0 else { return full }
-        let reserved = hex.frame.width + metrics.side + metrics.gap
+        let reserved = metrics.appleBar ? KeyboardMetrics.appleIconCellWidth : hex.frame.width + metrics.side + metrics.gap
         return hexOnLeading
             ? CGRect(x: full.minX + reserved, y: full.minY, width: full.width - reserved, height: full.height)
             : CGRect(x: full.minX, y: full.minY, width: full.width - reserved, height: full.height)
@@ -834,10 +883,11 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
 
     /// The three suggestion slots, in keyboard coordinates: thirds of the bar, as Apple's are
     /// (its dividers sit at a third and two thirds of the keyboard), with the Hex key's room
-    /// taken from the slot beside it.
+    /// taken from the slot beside it. In Apple's bar, thirds of what the Hex key's cell leaves,
+    /// as Apple's three cells share what its icon's cell leaves.
     var stripSlotFrames: [CGRect] {
-        let bar = stripBarFrame
         let strip = stripFrame
+        let bar = metrics.appleBar ? strip : stripBarFrame
         let third = bar.width / 3
         return (0..<3).map { index in
             let minX = max(strip.minX, bar.minX + CGFloat(index) * third)
@@ -1267,12 +1317,20 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             }
         }
         if placement.isInStrip {
-            // A bare mark in a target wider than tall, inset like the suggestion pills.
-            let height = m.stripPillHeight
-            let width: CGFloat = 44
-            let x = placement == .stripLeading ? left : right - width
-            let frame = CGRect(x: x, y: m.stripTop + m.stripInset, width: width, height: height)
-            let target = frame.insetBy(dx: -4, dy: -4)
+            // A bare mark in a target wider than tall, inset like the suggestion pills; in Apple's
+            // bar the same mark, centred in its cell on the words' line.
+            let height = m.appleBar ? KeyboardMetrics.barHexKeyHeight : m.stripPillHeight
+            let hexWidth: CGFloat = 44
+            let cell = KeyboardMetrics.appleIconCellWidth
+            let x = m.appleBar
+                ? (placement == .stripLeading ? inset + (cell - hexWidth) / 2 : width - inset - (cell + hexWidth) / 2)
+                : (placement == .stripLeading ? left : right - hexWidth)
+            let y = m.appleBar ? m.stripTop + m.stripTextCenter - height / 2 : m.stripTop + m.stripInset
+            let frame = CGRect(x: x, y: y, width: hexWidth, height: height)
+            // In Apple's bar the key takes its whole cell across, up to the slot beside it.
+            let target = m.appleBar
+                ? CGRect(x: x - (cell - hexWidth) / 2, y: frame.minY - 4, width: cell, height: frame.height + 8)
+                : frame.insetBy(dx: -4, dy: -4)
             // Up to the strip's top at least: the room above the pill belongs to the key too.
             let targetTop = min(target.minY, m.stripTop)
             let hitFrame = CGRect(x: target.minX, y: targetTop, width: target.width, height: top - targetTop)
