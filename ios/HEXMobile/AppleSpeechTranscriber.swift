@@ -169,7 +169,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             reservedLocale = locale
         }
         do {
-            let detail = "Downloading Apple \(Self.displayName(for: locale)) speech"
+            let detail = String(localized: "Downloading the speech model")
             // `SpeechTranscriber`'s model, else the same language's on `DictationTranscriber`;
             // a download that stops moving ends instead of holding the progress bar forever.
             language = try await AppleSpeechAssets.install(language, progress: { fraction in
@@ -181,7 +181,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             progressHandler(
                 ModelPreparationProgress(
                     fractionCompleted: 0.9,
-                    detail: "Preheating Apple Speech"
+                    detail: String(localized: "Loading the speech model")
                 )
             )
 
@@ -194,7 +194,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
             progressHandler(
                 ModelPreparationProgress(
                     fractionCompleted: 1,
-                    detail: "Apple Speech ready"
+                    detail: String(localized: "Ready")
                 )
             )
         } catch {
