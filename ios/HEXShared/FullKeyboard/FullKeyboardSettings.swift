@@ -36,6 +36,9 @@ struct FullKeyboardSettings {
     static let keyboardLaunchArgument = "--keyboard"
     /// Simulator scenes pass `--number-row on` (or `off`) for Settings › Keyboard › Number row.
     static let numberRowLaunchArgument = "--number-row"
+    /// Simulator scenes pass `--join-unfolded-keyboard on` (or `off`) for Settings ›
+    /// Experiments › Join the keyboard when unfolded.
+    static let joinUnfoldedKeyboardLaunchArgument = "--join-unfolded-keyboard"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
@@ -56,6 +59,7 @@ struct FullKeyboardSettings {
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
         static let numberRow = "settings.keyboardNumberRow"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
+        static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
     }
 
     private let defaults: UserDefaults?
@@ -226,6 +230,16 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.numberRow) }
     }
 
+    /// Settings › Experiments › Join the keyboard when unfolded: on the Duo unfolded and held
+    /// upright, Hex normally splits its keyboard as Apple's does there, since an extension
+    /// can't read Apple's Split Keyboard preference. On, it draws the joined keyboard instead,
+    /// at the same row heights and unfoldedTall's side inset. Off by default. Stored as
+    /// `experiments.joinKeyboardWhenUnfolded`.
+    var joinsKeyboardWhenUnfolded: Bool {
+        get { defaults?.bool(forKey: Key.joinKeyboardWhenUnfolded) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.joinKeyboardWhenUnfolded) }
+    }
+
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.
     /// When switching by default.
     var dictationBarAutoStart: DictationBarAutoStart {
@@ -245,7 +259,8 @@ struct FullKeyboardSettings {
     /// to pick the keyboard, `--experiment-emoji` to turn Emoji on, `--experiment-swipe` for
     /// Swipe typing (both on by default; the arguments override a stored off),
     /// `--experiment-emoji-letters` for ABC under the emoji key,
-    /// `--hex-key left|right` for the Hex key's side, and `--number-row on|off` for the number row.
+    /// `--hex-key left|right` for the Hex key's side, `--number-row on|off` for the number row,
+    /// and `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -280,6 +295,13 @@ struct FullKeyboardSettings {
             switch arguments[index + 1] {
             case "on": numberRow = true
             case "off": numberRow = false
+            default: break
+            }
+        }
+        if let index = arguments.firstIndex(of: Self.joinUnfoldedKeyboardLaunchArgument), index + 1 < arguments.count {
+            switch arguments[index + 1] {
+            case "on": joinsKeyboardWhenUnfolded = true
+            case "off": joinsKeyboardWhenUnfolded = false
             default: break
             }
         }

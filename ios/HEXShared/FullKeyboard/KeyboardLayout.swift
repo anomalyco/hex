@@ -166,7 +166,8 @@ nonisolated enum KeyboardPosture: Equatable, Sendable {
     }
 
     /// Apple splits its keyboard on the Duo unfolded and held upright (the inner screen wider
-    /// than tall); Hex does too, automatically, as there's no setting a keyboard can read.
+    /// than tall); Hex does too, unless Settings › Experiments › Join the keyboard when
+    /// unfolded asks for the joined one. Apple's Split Keyboard preference can't be read.
     var splitsKeyboard: Bool { self == .unfoldedWide }
 
     /// iOS draws a band of its own above a third-party keyboard here, so the strip needs no gap
@@ -415,6 +416,8 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// `windowInset` is how far iOS set the keyboard in from each side of the screen (the Duo).
     /// `pad` is the iPad keyboard to draw, nil on an iPhone. `numberRow` adds Settings ›
     /// Keyboard › Number row's band above row 1, on an iPhone only (the iPad keeps Apple's rows).
+    /// `joinsUnfoldedKeyboard` is Settings › Experiments › Join the keyboard when unfolded: the
+    /// Duo unfolded upright draws its joined rows rather than the split keyboard's.
     static func `for`(
         _ orientation: KeyboardOrientation,
         innerWidth: CGFloat? = nil,
@@ -422,9 +425,13 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         windowInset: CGFloat = 0,
         phoneSize: KeyboardPhoneSize = .regular,
         pad: KeyboardPadPlacement? = nil,
-        numberRow: Bool = false
+        numberRow: Bool = false,
+        joinsUnfoldedKeyboard: Bool = false
     ) -> KeyboardMetrics {
-        let rows = letterRows(orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad)
+        let rows = letterRows(
+            orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset,
+            phoneSize: phoneSize, pad: pad, joinsUnfoldedKeyboard: joinsUnfoldedKeyboard
+        )
         return numberRow && pad == nil ? rows.withNumberRow() : rows
     }
 
@@ -453,7 +460,8 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         posture: KeyboardPosture,
         windowInset: CGFloat,
         phoneSize: KeyboardPhoneSize,
-        pad: KeyboardPadPlacement?
+        pad: KeyboardPadPlacement?,
+        joinsUnfoldedKeyboard: Bool
     ) -> KeyboardMetrics {
         if let pad { return .pad(pad, orientation: orientation) }
         let base: KeyboardMetrics
@@ -488,9 +496,19 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
                 break
             }
         }
-        let side = orientation == .portrait
-            ? max(0, (posture.appleKeyInset ?? base.side) - windowInset)
-            : base.side
+        // Joined on the Duo unfolded upright, the keys start 19 pt in from the keyboard view's
+        // own side, as unfoldedTall's do from its screen's. The split keyboard's 86 pt are
+        // measured from the screen's edge and include the platter's 75 pt window inset, so
+        // they leave 11 pt inside the view.
+        let joinedWide = posture == .unfoldedWide && joinsUnfoldedKeyboard
+        let side: CGFloat
+        if orientation == .landscape {
+            side = base.side
+        } else if joinedWide {
+            side = KeyboardPosture.unfoldedTall.appleKeyInset ?? base.side
+        } else {
+            side = max(0, (posture.appleKeyInset ?? base.side) - windowInset)
+        }
         // Measured folded and upright only; unfolded, and folded in landscape, the strip is still
         // Apple's whole bar right on the keys. Folded and upright (iOS 27.2 simulator, beside
         // Apple's keyboard) Apple's row 4 ends 7 pt above the keyboard's bottom and its keycaps
@@ -597,6 +615,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// unless it offers the one asked for.
     let letters: KeyboardLetterLayout
     let posture: KeyboardPosture
+    /// Settings › Experiments › Join the keyboard when unfolded: the Duo unfolded upright
+    /// draws one keyboard rather than Apple's split one.
+    let joinsUnfoldedKeyboard: Bool
     /// Where the Hex key sits: Settings › Keyboard › Hex key picks the strip's trailing
     /// (Right) or leading (Left) end.
     let hexPlacement: HexKeyPlacement
@@ -624,6 +645,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         phoneSize: KeyboardPhoneSize = .regular,
         pad: KeyboardPadPlacement? = nil,
         numberRow: Bool = false,
+        joinsUnfoldedKeyboard: Bool = false,
         availableHeight: CGFloat? = nil
     ) {
         self.width = width
@@ -642,10 +664,11 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.horizontalInset = max(0, horizontalInset)
         self.language = language
         self.posture = posture
+        self.joinsUnfoldedKeyboard = joinsUnfoldedKeyboard
         let innerWidth = width - 2 * self.horizontalInset
         var metrics = KeyboardMetrics.for(
             orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad,
-            numberRow: numberRow
+            numberRow: numberRow, joinsUnfoldedKeyboard: joinsUnfoldedKeyboard
         )
         if let availableHeight { metrics = metrics.fitted(toHeight: availableHeight) }
         self.metrics = metrics
@@ -659,7 +682,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             return
         }
         padLetterWidth = nil
-        if posture.splitsKeyboard, orientation == .portrait {
+        if posture.splitsKeyboard, orientation == .portrait, !joinsUnfoldedKeyboard {
             let built = Self.buildSplitKeys(
                 width: width,
                 metrics: metrics,
@@ -685,7 +708,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 inset: self.horizontalInset,
                 language: language,
                 letters: letters,
-                hexPlacement: hexPlacement
+                hexPlacement: hexPlacement,
+                joinedUnfoldedWide: joinsUnfoldedKeyboard && posture == .unfoldedWide && orientation == .portrait
             )
             self.split = nil
         }
@@ -894,6 +918,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         }
     }
 
+    /// `joinedUnfoldedWide` is the Duo unfolded upright with Settings › Experiments › Join the
+    /// keyboard when unfolded on: its rows keep the split keyboard's 39 pt keycaps, under the
+    /// portrait bottom row's columns.
     private static func buildKeys(
         width: CGFloat,
         metrics m: KeyboardMetrics,
@@ -904,7 +931,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         inset: CGFloat,
         language: KeyboardLanguage,
         letters: KeyboardLetterLayout,
-        hexPlacement placement: HexKeyPlacement
+        hexPlacement placement: HexKeyPlacement,
+        joinedUnfoldedWide: Bool
     ) -> [KeyboardKey] {
         let innerWidth = width - 2 * inset
         let rows = characterRows(for: layer, language: language, letters: letters)
@@ -1064,7 +1092,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             }
             add(.space, row: 3, x: spaceStart, w: max(lw, spaceEnd - spaceStart), label: "space")
             add(.returnKey, row: 3, x: returnStart, w: right - returnStart, label: "return")
-        } else if field == .text, m.keyHeight >= 40 || m.pad == .floating {
+        } else if field == .text, m.keyHeight >= 40 || m.pad == .floating || joinedUnfoldedWide {
             // Apple's portrait bottom row stands on row 3's letter columns: 123 (and emoji, or
             // the globe on a Home-button iPhone) share the width from the edge to z's right edge,
             // the space bar runs from x to n, and return from m to the edge. With no emoji key

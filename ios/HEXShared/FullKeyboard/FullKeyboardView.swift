@@ -256,6 +256,7 @@ final class FullKeyboardView: UIView {
         hidesWordSuggestions = FullKeyboardSettings().hideWordSuggestions
         syncHexPlacement()
         syncNumberRow()
+        syncJoinsUnfoldedKeyboard()
         refreshEmojiKey()
         syncSpatialAutocorrect()
         refreshLanguageSignals()
@@ -536,6 +537,7 @@ final class FullKeyboardView: UIView {
         hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
         syncNumberRow()
+        syncJoinsUnfoldedKeyboard()
         refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
@@ -558,30 +560,6 @@ final class FullKeyboardView: UIView {
 
     /// Fixtures pin where the Hex key sits; otherwise Settings › Keyboard › Hex key.
     var hexPlacementOverride: HexKeyPlacement? { didSet { syncHexPlacement() } }
-
-    /// Settings › Keyboard › Hex key: Right (the strip's trailing end) or Left (its leading
-    /// end), kept in `HexKeyPlacement.current` too for typing logs.
-    private func syncHexPlacement() {
-        let placement = hexPlacementOverride ?? FullKeyboardSettings().hexKeyPlacement
-        HexKeyPlacement.current = placement
-        guard engine.hexPlacement != placement else { return }
-        plane.cancelAllTouches()
-        dismissStyleMenu()
-        engine.hexPlacement = placement
-        setNeedsLayout()
-    }
-
-    /// Settings › Keyboard › Number row: the keyboard grows by the row, so the host is asked
-    /// for the new height.
-    private func syncNumberRow() {
-        let shows = FullKeyboardSettings().numberRow
-        guard engine.showsNumberRow != shows else { return }
-        plane.cancelAllTouches()
-        dismissStyleMenu()
-        engine.showsNumberRow = shows
-        setNeedsLayout()
-        onPreferredHeightChange?()
-    }
 
     /// Fixtures and tests turn Swipe typing on or off; otherwise its switch in Settings › Keyboard.
     var swipeOverride: Bool? { didSet { syncSwipeTyping() } }

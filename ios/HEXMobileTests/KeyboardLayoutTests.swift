@@ -164,6 +164,43 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(land.totalHeight, 198)
     }
 
+    /// Settings › Experiments › Join the keyboard when unfolded: off, the unfolded Duo splits as
+    /// before; on, one joined keyboard with unfoldedTall's side inset and unfoldedWide's rows.
+    func testJoiningTheUnfoldedDuoDrawsOneKeyboard() {
+        let split = KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75)
+        XCTAssertTrue(split.isSplit)
+        XCTAssertEqual(split.metrics.side, 11, accuracy: 0.001)
+        for layer in layers {
+            for field in fields {
+                let joined = KeyboardLayout(
+                    width: 801, layer: layer, field: field, showsGlobe: true, showsEmoji: true,
+                    posture: .unfoldedWide, windowInset: 75, joinsUnfoldedKeyboard: true
+                )
+                XCTAssertFalse(joined.isSplit, describe(joined))
+                XCTAssertEqual(joined.metrics.side, 19, accuracy: 0.001, describe(joined))
+                XCTAssertEqual(joined.metrics.keyHeight, 39, accuracy: 0.001, describe(joined))
+                XCTAssertEqual(joined.metrics.rowGap, 12.7, accuracy: 0.001, describe(joined))
+                XCTAssertEqual(joined.totalHeight, split.totalHeight, accuracy: 0.001, describe(joined))
+                for row in 0..<4 {
+                    let keys = joined.keys.filter { $0.row == row }.sorted { $0.hitFrame.minX < $1.hitFrame.minX }
+                    XCTAssertEqual(keys.first?.hitFrame.minX ?? -1, 0, describe(joined))
+                    XCTAssertEqual(keys.last?.hitFrame.maxX ?? -1, 801, describe(joined))
+                    for (a, b) in zip(keys, keys.dropFirst()) {
+                        XCTAssertEqual(a.hitFrame.maxX, b.hitFrame.minX, accuracy: 0.0001, describe(joined))
+                    }
+                }
+                guard layer == .letters else { continue }
+                XCTAssertEqual(joined.key(.character("q"))!.frame.minX, 19, accuracy: 0.001, describe(joined))
+                XCTAssertEqual(joined.key(.character("p"))!.frame.maxX, 782, accuracy: 0.001, describe(joined))
+                XCTAssertEqual(letters(joined, row: 0).joined(), "qwertyuiop", describe(joined))
+            }
+        }
+        XCTAssertFalse(
+            KeyboardLayout(width: 655, posture: .unfoldedTall, windowInset: 7, joinsUnfoldedKeyboard: true).isSplit,
+            "only the unfolded wide posture ever splits"
+        )
+    }
+
     /// Apple's split keyboard on the Duo unfolded upright (iOS 27.2 simulator, keyboard at
     /// x = 75 pt on the 951 pt screen): each half's keys, G and V on both, and the keys'
     /// positions and widths.
@@ -1905,6 +1942,8 @@ final class KeyboardLayoutTests: XCTestCase {
             for (width, posture, inset) in [(452.0, KeyboardPosture.cover, 7.0), (655, .unfoldedTall, 7), (801, .unfoldedWide, 75)] {
                 pair(layer) { KeyboardLayout(width: width, layer: $1, showsGlobe: true, posture: posture, windowInset: inset, numberRow: $0) }
             }
+            // The unfolded keyboard joined (Settings › Experiments): its rows never split.
+            pair(layer) { KeyboardLayout(width: 801, layer: $1, showsGlobe: true, posture: .unfoldedWide, windowInset: 75, numberRow: $0, joinsUnfoldedKeyboard: true) }
         }
         return pairs
     }
@@ -2089,6 +2128,35 @@ final class KeyboardLayoutTests: XCTestCase {
         }
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75))
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, showsGlobe: true, posture: .cover, windowInset: 75))
+        // The unfolded keyboard joined (Settings › Experiments), its rows' heights kept: every
+        // language, the globe and emoji on and off, and the Hex key either side. The number row
+        // has its own layouts (`numberRowLayouts`), since these suites assume none.
+        for language in KeyboardLanguage.allCases {
+            layouts.append(KeyboardLayout(
+                width: 801, showsGlobe: true, language: language, posture: .unfoldedWide,
+                windowInset: 75, joinsUnfoldedKeyboard: true
+            ))
+        }
+        for (globe, emoji) in [(true, false), (false, true), (false, false)] {
+            layouts.append(KeyboardLayout(
+                width: 801, showsGlobe: globe, showsEmoji: emoji, posture: .unfoldedWide,
+                windowInset: 75, joinsUnfoldedKeyboard: true
+            ))
+        }
+        for placement in [HexKeyPlacement.leftOfSpace, .rightOfSpace] {
+            layouts.append(KeyboardLayout(
+                width: 801, showsGlobe: true, showsEmoji: true, posture: .unfoldedWide,
+                windowInset: 75, hexPlacement: placement, joinsUnfoldedKeyboard: true
+            ))
+        }
+        for layer in layers {
+            for field in fields {
+                layouts.append(KeyboardLayout(
+                    width: 801, layer: layer, field: field, showsGlobe: true, showsEmoji: true,
+                    posture: .unfoldedWide, windowInset: 75, joinsUnfoldedKeyboard: true
+                ))
+            }
+        }
         return layouts
     }
 
@@ -2380,5 +2448,21 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "settings.keyboardNumberRow") as? Bool, true)
         settings.applyLaunchArguments(["HEX", FullKeyboardSettings.numberRowLaunchArgument, "off"])
         XCTAssertFalse(settings.numberRow)
+    }
+
+    /// Settings › Experiments › Join the keyboard when unfolded is off by default, keeps its
+    /// App Group key, and `--join-unfolded-keyboard on|off` sets it.
+    func testJoinUnfoldedKeyboardIsOffByDefault() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertFalse(settings.joinsKeyboardWhenUnfolded)
+        XCTAssertFalse(FullKeyboardSettings(defaults: nil).joinsKeyboardWhenUnfolded, "without the App Group")
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.joinUnfoldedKeyboardLaunchArgument, "on"])
+        XCTAssertTrue(settings.joinsKeyboardWhenUnfolded)
+        XCTAssertEqual(defaults.object(forKey: "experiments.joinKeyboardWhenUnfolded") as? Bool, true)
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.joinUnfoldedKeyboardLaunchArgument, "off"])
+        XCTAssertFalse(settings.joinsKeyboardWhenUnfolded)
     }
 }
