@@ -3084,8 +3084,8 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   The setting is in the App Group, and without Full Access it reads off. Only names the
 │   index weighs as names or aliases complete: ":heart:", ":joy:" and ":tada:" are keywords
 │   in the data and stay text, and ":smile:" completes to 😊, its first alias, not 😄; adding
-│   them needs more aliases and a regenerated index, and scripts/build-emoji-data.py can only
-│   make one online (Unicode's emoji-test.txt 18.0 and CLDR 49 are not in the repo).
+│   them needs more aliases and a regenerated index, which scripts/build-emoji-data.py can't
+│   make from the repo alone (Unicode's emoji-test.txt 18.0 and CLDR 49 are not in the repo).
 │   Unit tests only (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical
 │   iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
