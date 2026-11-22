@@ -71,8 +71,8 @@ final class FullKeyboardView: UIView {
     var vocabularyOffer: String?
     private var undoHideWork: DispatchWorkItem?
     /// The Hex key was tapped without Full Access: the strip says what dictation needs.
-    private(set) var showsFullAccessHint = false
-    private var fullAccessHintHideWork: DispatchWorkItem?
+    var showsFullAccessHint = false
+    var fullAccessHintHideWork: DispatchWorkItem?
     /// How long the Full Access hint stays unless a key or the strip is used first.
     static let fullAccessHintDuration: TimeInterval = 8
     private let haptics = UIImpactFeedbackGenerator(style: .light)
@@ -103,15 +103,15 @@ final class FullKeyboardView: UIView {
         }
     }
     private let selectionHaptics = UISelectionFeedbackGenerator()
-    private let clipboard = KeyboardClipboardTracker()
+    let clipboard = KeyboardClipboardTracker()
     /// What the strip's Paste chip offers now.
-    private var stripOffer: KeyboardClipboardOffer?
+    var stripOffer: KeyboardClipboardOffer?
     /// Settings › Experiments › Hide word suggestions: the strip keeps its height, chips,
     /// status and notices but shows no words (`refreshStrip`).
     private var hidesWordSuggestions = false
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
-    private var showsAllowPasteHint = false
-    private var allowPasteHintHideWork: DispatchWorkItem?
+    var showsAllowPasteHint = false
+    var allowPasteHintHideWork: DispatchWorkItem?
     static let allowPasteHintDuration: TimeInterval = 8
 
     // MARK: Emoji (Settings › Keyboard › Emoji; FullKeyboardView+Emoji.swift)
@@ -926,92 +926,6 @@ final class FullKeyboardView: UIView {
     private var translationNotice: KeyboardStripNotice? {
         guard model.hasFullAccess, let note = model.translationNote else { return nil }
         return KeyboardStripNotice(title: TranslationFailure.note, detail: note.fix, button: String(localized: "Open Hex"))
-    }
-
-    // MARK: - Without Full Access
-
-    /// The Hex key without Full Access: the keys keep typing, and the strip says, for a few
-    /// seconds, that dictation needs Allow Full Access and where to turn it on. Only its
-    /// Open Hex chip opens Hex; nothing opens it by itself.
-    func showFullAccessHint() {
-        dismissStyleMenu()
-        showsFullAccessHint = true
-        refreshStrip()
-        UIAccessibility.post(
-            notification: .announcement,
-            argument: "\(FullAccessHintView.title). Settings, Apps, Hex, Keyboards."
-        )
-        fullAccessHintHideWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.hideFullAccessHint() }
-        fullAccessHintHideWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.fullAccessHintDuration, execute: work)
-    }
-
-    private func hideFullAccessHint() {
-        fullAccessHintHideWork?.cancel()
-        fullAccessHintHideWork = nil
-        guard showsFullAccessHint else { return }
-        showsFullAccessHint = false
-        refreshStrip()
-    }
-
-    private func openSetupFromHint() {
-        keyFeedback()
-        hideFullAccessHint()
-        model.onOpenURL?(KeyboardLaunchRequest.setup.url)
-    }
-
-    private func pasteFromClipboard() {
-        if stripOffer == .dictation {
-            keyFeedback()
-            typingLog?.ui("paste_dictation")
-            model.onPasteDictation?()
-            refreshStrip()
-            return
-        }
-        let pasteboard = UIPasteboard.general
-        // The read blocks while iOS asks Allow Paste, so its length tells whether it asked.
-        let start = ProcessInfo.processInfo.systemUptime
-        let read = KeyboardClipboardTracker.read(pasteboard)
-        let readDuration = ProcessInfo.processInfo.systemUptime - start
-        let text = read.flatMap { $0.isEmpty ? nil : $0 }
-        let refused = text == nil && (pasteboard.hasStrings || pasteboard.hasURLs)
-        let pointsToSetting = clipboard.shouldPointToAllowPaste(readDuration: readDuration, refused: refused)
-        guard let text else {
-            if pointsToSetting { showAllowPasteHint() }
-            return
-        }
-        keyFeedback()
-        clipboard.markPasted()
-        typingLog?.edit("paste", [TypingLogField("inserted", .string(text))])
-        engine.forgetTextAroundKeys()
-        engine.target.insertText(text)
-        engine.textDidChange()
-        typingLog?.context("paste")
-        if pointsToSetting { showAllowPasteHint() }
-        refreshStrip()
-        onTextEdit?()
-    }
-
-    /// For a few seconds after a paste iOS asked about (or refused), the strip says where
-    /// to stop it asking: Settings › Apps › Hex › Paste from Other Apps › Allow.
-    private func showAllowPasteHint() {
-        showsAllowPasteHint = true
-        refreshStrip()
-        UIAccessibility.post(notification: .announcement, argument: KeyboardClipboardTracker.allowPasteHintAnnouncement)
-        allowPasteHintHideWork?.cancel()
-        let work = DispatchWorkItem { [weak self] in self?.hideAllowPasteHint() }
-        allowPasteHintHideWork = work
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.allowPasteHintDuration, execute: work)
-    }
-
-    /// Typing takes the strip back before the hint's time is up.
-    private func hideAllowPasteHint() {
-        allowPasteHintHideWork?.cancel()
-        allowPasteHintHideWork = nil
-        guard showsAllowPasteHint else { return }
-        showsAllowPasteHint = false
-        refreshStrip()
     }
 
     private func refreshRecordingPanel() {
