@@ -2419,6 +2419,26 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "kubectl")
     }
 
+    /// Record typing logs: a word of someone's own in capitals took a swiped word's place.
+    /// "HELO" from Contacts outranks the model's "hello" (rarer in its books than your own words
+    /// cost), and "THE" takes the place of "the"; the swipe types "hello" and "the", the strip
+    /// offers "HELO", and caps lock still swipes it.
+    func testASwipeTypesTheOrdinaryWordAndOffersYourWordInCapitals() throws {
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.autocorrect.loadLexiconEntries([("HELO", "HELO"), ("THE", "THE")])
+        swipe("hello", on: plane)
+        XCTAssertEqual(field.text, "hello")
+        XCTAssertTrue(plane.engine.suggestions.contains { $0.replacement == "HELO" }, "offered in the strip")
+        swipe("the", on: plane)
+        XCTAssertEqual(field.text, "hello the")
+        let (locked, capsKeys) = try swipeKeyboard()
+        capsKeys.engine.autocorrect.loadLexiconEntries([("HELO", "HELO")])
+        tap(.shift, on: capsKeys)
+        tap(.shift, on: capsKeys)
+        swipe("hello", on: capsKeys)
+        XCTAssertEqual(locked.text, "HELO", "caps lock")
+    }
+
     private func sample(_ point: CGPoint) -> TypingLogTouchSample {
         TypingLogTouchSample(point: point, timestamp: 0)
     }

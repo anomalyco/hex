@@ -200,4 +200,20 @@ extension AutocorrectEngine {
         guard fixedHead != head || fixedTail != tail else { return nil }
         return fixedHead + "'" + fixedTail
     }
+
+    /// "i'm", "i'll", "i've" and "i'd" typed with their apostrophe, at the end of `before`, take
+    /// the capital "i", "im" and "ive" take (`unambiguousFixes`): (what was typed, its fix), or nil.
+    /// Smart quotes type ’ there, which ends a token (`currentToken`), so the text is read whole.
+    func pronounCapital(before: String?) -> (typed: String, replacement: String)? {
+        guard isEnabled, hasDictionary, addsCapitals, language.usesEnglishFixes, let before else { return nil }
+        for end in ["m", "ll", "ve", "d"] {
+            for mark in ["'", "\u{2019}"] where before.hasSuffix("i" + mark + end) {
+                let typed = "i" + mark + end, previous = before.dropLast(typed.count).last
+                guard !(previous.map { $0.isLetter || $0.isNumber || $0 == "'" || $0 == "\u{2019}" } ?? false),
+                      !suppressedInSession.contains(typed), !learning.rejected.contains(typed) else { return nil }
+                return (typed, "I" + mark + end)
+            }
+        }
+        return nil
+    }
 }

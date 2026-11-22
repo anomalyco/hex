@@ -1050,7 +1050,7 @@ final class FullKeyboardEngine {
         }
         guard fix != nil || revised != nil else { return false }
         adaptiveLearning?.finish(token: token, corrected: fix?.replacement, previousRevised: revised != nil, before: before)
-        let original = (revised.map { $0.from + " " } ?? "") + token
+        let original = (revised.map { $0.from + " " } ?? "") + (fix?.original ?? token)
         let inserted = (revised.map { $0.to + " " } ?? "") + word + ending
         rememberTypingContext(before: String(before.dropLast(original.count)), inserted: inserted)
         for _ in 0..<original.count {
@@ -1058,7 +1058,7 @@ final class FullKeyboardEngine {
         }
         tokenTaps.removeAll()
         var fields = [
-            TypingLogField("from", .string(token)),
+            TypingLogField("from", .string(fix?.original ?? token)),
             TypingLogField("to", .string(word)),
             TypingLogField("deleted", .string(original)),
             TypingLogField("inserted", .string(inserted)),
@@ -1073,9 +1073,9 @@ final class FullKeyboardEngine {
             changes.append(.init(from: revised.from, to: revised.to, language: language))
             learning?.record(.autocorrected, typed: revised.from, final: revised.to, language: language.rawValue)
         }
-        if fix != nil {
-            changes.append(.init(from: token, to: word, language: fixLanguage))
-            learning?.record(.autocorrected, typed: token, final: word, language: fixLanguage?.rawValue)
+        if let fix {
+            changes.append(.init(from: fix.original, to: word, language: fixLanguage))
+            learning?.record(.autocorrected, typed: fix.original, final: word, language: fixLanguage?.rawValue)
         }
         recordCorrection(original: original, corrected: String(inserted.dropLast(ending.count)), ending: ending, changes: changes)
         swipedWord = nil
