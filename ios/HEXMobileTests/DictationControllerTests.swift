@@ -444,6 +444,9 @@ final class DictationControllerTests: XCTestCase {
         )
         controller.prepareModel()
         try await settle()
+        // With a duration: Off where the keyboard dictates by itself warms nothing
+        // (testKeepMicWarmFollowsWhetherTheKeyboardDictatesItself).
+        controller.setWarmDuration(.fifteenMinutes)
 
         // 1. Expired (>10s) handoff warms session without surprise-recording.
         controller.handleKeyboardLaunch(
@@ -589,6 +592,48 @@ final class DictationControllerTests: XCTestCase {
         controller.selectWarmDuration(.off)
         XCTAssertFalse(controller.keyboardSessionEnabled)
         XCTAssertFalse(audio.isKeepaliveRunning)
+    }
+
+    /// Where the keyboard dictates by itself Keep mic warm reads Off and hides: a Dictate that
+    /// opened Hex too late to record warms nothing, one the keyboard handed over for lack of
+    /// memory brings back the 15-minute default and its row, and the keyboard dictating by
+    /// itself again takes them away. (iOS 18 to 25: `KeyboardBridgeTests`.)
+    func testKeepMicWarmFollowsWhetherTheKeyboardDictatesItself() async throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 26)
+        let now = 9_000.0
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { now },
+            autoPrepareOnInit: false
+        )
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(controller.warmDuration, .off)
+        XCTAssertFalse(controller.showsKeepMicWarm)
+
+        controller.handleKeyboardLaunch(.startRecording(jobID: "late", requestedAt: now - 30, style: .polished))
+        try await settle()
+        XCTAssertEqual(controller.handoffNotice, String(localized: "Timed out"))
+        XCTAssertFalse(controller.keyboardSessionEnabled)
+        XCTAssertFalse(audio.isKeepaliveRunning)
+
+        KeyboardSelfDictation(defaults: defaults).recordHandedToHex(.memory)
+        controller.handleKeyboardLaunch(.startSession(requestedAt: now))
+        try await settle()
+        XCTAssertEqual(controller.warmDuration, .fifteenMinutes)
+        XCTAssertTrue(controller.showsKeepMicWarm)
+        XCTAssertTrue(controller.keyboardSessionEnabled)
+
+        KeyboardSelfDictation(defaults: defaults).clearHandedToHex()
+        controller.refreshWarmDuration()
+        XCTAssertEqual(controller.warmDuration, .off)
+        XCTAssertFalse(controller.keyboardSessionEnabled, "an idle warm session ends")
+        XCTAssertFalse(controller.showsKeepMicWarm)
     }
 
     func testMeterRecoversAfterCaptureStartsTemporarilyNotRecording() async throws {

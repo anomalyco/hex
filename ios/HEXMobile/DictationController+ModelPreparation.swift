@@ -221,6 +221,7 @@ extension DictationController {
     /// resumes each file from the bytes it has.
     func appBecameActive() {
         isInBackground = false
+        refreshWarmDuration()
         multilingualDownload.appBecameActive()
         guard preparationFailedInBackground else { return }
         preparationFailedInBackground = false

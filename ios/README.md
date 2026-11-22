@@ -138,10 +138,19 @@ never at a launch by itself.
     same capture; it resumes app levels and keyboard snapshots when the recorder
     is ready again. Capture completion, interruption, and Stop end polling.
   - **Warm session (`Off`, `5m`, `15m`, `1h`):** Picking a duration on **Keep
-    mic warm** starts an `AVAudioEngine` input session immediately (default
-    `15m`) so subsequent taps on **Dictate** record directly inside the
-    keyboard with zero app switches; picking `Off` or tapping the header timer
-    ends it.
+    mic warm** starts an `AVAudioEngine` input session immediately so
+    subsequent taps on **Dictate** record directly inside the keyboard with zero
+    app switches; picking `Off` or tapping the header timer ends it. Unless
+    chosen, it is `Off`, with the row hidden, where the keyboard dictates by
+    itself (`KeyboardSelfDictation`: iOS 26, and Dictate hasn't opened Hex for
+    lack of memory, a missing speech model or the Multilingual model in the last
+    7 days, a record the keyboard writes as it opens Hex and clears when it next
+    dictates itself), and `15m` elsewhere; worked out on each read, never
+    stored. The row shows whenever a duration is in effect, and stays on the
+    page once picked. Once on iOS 26, a stored `15m` (which tapping the old
+    default to warm the mic also stored) was taken for not chosen where the
+    keyboard dictates by itself. There, a Dictate that opens Hex records one
+    shot, and one that missed its recording (Timed out) warms nothing.
   - **Styles (`TranscriptFormatter`, run by `DictationPipeline` wherever Hex
     dictates: the app, the keyboard's warm session and cold start, the Action
     Button, Control Center and in-keyboard dictation):** `Polished` (full

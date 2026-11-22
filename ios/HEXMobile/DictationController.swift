@@ -272,6 +272,7 @@ final class DictationController {
         self.languageSettings = languageSettings
         self.dictationLanguage = languageSettings.dictationLanguage
         self.followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
+        resolvedBridge.reviewWarmDurationForKeyboardDictation()
         self.warmDuration = resolvedBridge.warmDuration
         self.style = resolvedBridge.style
         self.microphone = resolvedBridge.microphone
@@ -530,6 +531,7 @@ final class DictationController {
         if request.opensPage {
             return
         }
+        refreshWarmDuration()
         // A language picked in the keyboard: prepare it before the handoff records.
         followDictationLanguageSetting()
         handoffNotice = nil
@@ -627,6 +629,8 @@ final class DictationController {
             }
             return
         }
+        // Off where the keyboard dictates by itself: a launch that missed its recording warms nothing.
+        if warmDuration == .off, keyboardBridge.keyboardDictatesItself() { return }
 
         if keyboardSessionEnabled, audio.isKeepaliveRunning {
             refreshWarmExpiry()
