@@ -178,4 +178,15 @@ final class ShiftStateMachineTests: XCTestCase {
         XCTAssertEqual(KeyboardFieldRouting.route(for: .decimalPad), .handOff)
         XCTAssertEqual(KeyboardFieldRouting.route(for: .asciiCapableNumberPad), .handOff)
     }
+
+    /// A number pad goes to the next keyboard where iOS asks for a globe, but not where Apple's
+    /// keyboard is split (the Duo unfolded and upright): that switch can end the host app there
+    /// (TestFlight build 121), so Hex stays on its 123 page.
+    func testNumberPadsStayOnHexWhereApplesKeyboardSplits() {
+        XCTAssertTrue(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .phone))
+        XCTAssertFalse(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: false, posture: .phone), "iOS's own globe")
+        XCTAssertTrue(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .cover))
+        XCTAssertTrue(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .unfoldedTall))
+        XCTAssertFalse(KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: true, posture: .unfoldedWide))
+    }
 }
