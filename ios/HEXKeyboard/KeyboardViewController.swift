@@ -1081,7 +1081,8 @@ final class KeyboardViewController: UIInputViewController {
     /// English."): Hex downloads it, and the keyboard dictates again once it installs.
     /// Without Full Access it is nil too, and the Hex key says dictation needs Full Access.
     /// The same while Experiments › Multilingual model (Parakeet) dictates the language: only
-    /// Hex can load that model, so Dictate and the Hex key open Hex.
+    /// Hex can load that model, so Dictate and the Hex key open Hex, once Hex has it ready.
+    /// Until then the keyboard dictates as it would with the experiment off.
     private func syncLocalDictationAvailability(access: Bool) {
         guard KeyboardLocalDictation.isSupported else { return }
         guard access || localDictation.isActive else {
@@ -1090,7 +1091,7 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         let multilingual = MultilingualParakeetSettings()
-        let multilingualOpensHex = multilingual.isEnabled && multilingual.language() != nil
+        let multilingualOpensHex = multilingual.keyboardOpensHex(language: multilingual.language())
         let needsHex = !localDictation.isActive && (LanguageSettings().keyboardNeedsHex() || multilingualOpensHex)
         let available = localDictation.isActive || (!needsHex && localDictation.hasMemoryToStart)
         guard available != localDictationAvailable else { return }

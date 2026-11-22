@@ -200,6 +200,13 @@ struct ContentView: View {
                         .transition(.opacity.combined(with: .scale(scale: 0.98)))
                 }
 
+                // Experiments › Multilingual model: its download or load, beside dictation.
+                MultilingualModelStatus(
+                    download: dictation.multilingualDownload,
+                    retry: { dictation.retryMultilingualParakeet() },
+                    turnOff: { dictation.turnOffMultilingualParakeet() }
+                )
+
                 SettingsCard {
                     ForEach(Array(SettingsPage.allCases.enumerated()), id: \.element) { index, page in
                         if index > 0 {

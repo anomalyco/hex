@@ -310,20 +310,35 @@ never at a launch by itself.
     0.6B v3) with it, which hears them mixed within a sentence (Dutch with English
     words, a TestFlight request); any other dictation language keeps the engine Hex
     picks without it. The language Ultra takes is the one set, else the one Automatic
-    follows on the keyboard, else the iPhone's first. Turning it on downloads
+    follows on the keyboard, else the iPhone's first. The experiment never takes
+    dictation away: until Ultra is ready, Hex and the keyboard dictate as they would
+    with it off, and Hex switches to Ultra once it has loaded (a dictation in flight
+    isn't interrupted). Turning it on downloads
     FluidInference's Core ML build (632 MB, pinned to revision `95eaa59`, each file
     checked against its SHA-256 and resumed from its `.partial`) into Application
-    Support, out of backups, through the usual preparation bar ("Downloading 632.2 MB ·
-    Wi-Fi recommended", then Core ML's compile); turning it off deletes it, as does a
-    launch that finds a download left with it off. FluidAudio 0.15.5 has no
+    Support, out of backups, beside that engine (`ParakeetUltraDownload`): home and the
+    switch say "Downloading the multilingual model: 123.4 MB of 632.2 MB" with a bar. A
+    dropped connection, or bytes that stop for 20 s, tries again by itself after 2, 4, 8,
+    16, then 30 s, starting over whenever it got further; in the background it waits for
+    Hex to come back to the front, which picks it up at once (and starts a fresh
+    connection after 25 s away). After six tries in a row that got nothing further, or a
+    refused request or a full iPhone, it says what happened in plain words with Try again
+    and Turn off. Once downloaded, Ultra's first load (Core ML's compile, a minute or
+    more) runs beside the usual engine too, except where Parakeet V2 dictates and leaves
+    no room for it (English before iOS 26), where Ultra takes V2's place for that load;
+    later launches load it directly when Core ML has compiled it for this iOS. Turning it off stops the download, then deletes it;
+    a launch deletes a leftover only when the switch reads off as stored, never when the
+    App Group can't be read (a launch before the first unlock). FluidAudio 0.15.5 has no
     `.ultra`, so `ParakeetUltraModel` loads the four models itself and hands
     FluidAudio v3 `AsrModels` (its own loader would replace a folder it can't load
     with v3's download). It is chosen only with 1.5 GB left to load it
     (`os_proc_available_memory`), and never again after a load that ended Hex
-    (`ParakeetLoadGuard`, its own keys) until the switch is turned off and on. The
-    keyboard can't load it, so while it takes the dictation language, Dictate and the
-    Hex key open Hex, as before iOS 26 (a warm session still dictates without
-    leaving the app). Measured on a Mac (`~/dev/experiments/2026-11-21-hex-multilingual-parakeet`):
+    (`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
+    turned off and on. The keyboard can't load it, so once Hex has it ready
+    (`MultilingualParakeetSettings.isModelReady`, set after a load, cleared while it's
+    missing, set aside or off) and it takes the dictation language, Dictate and the Hex
+    key open Hex, as before iOS 26 (a warm session still dictates without leaving the
+    app); until then the keyboard dictates itself. Measured on a Mac (`~/dev/experiments/2026-11-21-hex-multilingual-parakeet`):
     mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
     pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
     on an iPhone are unmeasured.

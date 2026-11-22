@@ -21,6 +21,17 @@ nonisolated enum ParakeetUltraModel {
         case corrupt(String)
     }
 
+    /// The stand-in server simulator runs download from (`HEX_ULTRA_MODEL_BASE`), in debug
+    /// builds only: it serves the same files at the same paths.
+    static var baseURL: String {
+        #if DEBUG
+        if let base = ProcessInfo.processInfo.environment["HEX_ULTRA_MODEL_BASE"], !base.isEmpty {
+            return base
+        }
+        #endif
+        return "https://huggingface.co/\(repository)/resolve/\(revision)"
+    }
+
     static let repository = "FluidInference/parakeet-ultra-coreml"
     static let revision = "95eaa59a39d4394f047a4dc5cce480388a60d1b6"
 
@@ -76,20 +87,32 @@ nonisolated enum ParakeetUltraModel {
     }
 
     /// Every file at its full size; each was checked against its digest before it got its name.
-    static func isDownloaded(in directory: URL = directory) -> Bool {
+    static func isDownloaded(in directory: URL = directory, files: [File] = files) -> Bool {
         files.allSatisfy { size(of: directory.appendingPathComponent($0.path)) == $0.size }
     }
 
-    static func url(for file: File) -> URL {
-        URL(string: "https://huggingface.co/\(repository)/resolve/\(revision)/\(file.path)")!
+    /// What's on disk so far, finished files and `.partial` ones: where a download resumes.
+    static func bytesOnDisk(in directory: URL = directory, files: [File] = files) -> Int64 {
+        files.reduce(0) { total, file in
+            let destination = directory.appendingPathComponent(file.path)
+            if let size = size(of: destination), size == file.size { return total + size }
+            let partial = size(of: destination.appendingPathExtension("partial")) ?? 0
+            return total + min(partial, file.size)
+        }
+    }
+
+    static func url(for file: File, base: String = baseURL) -> URL {
+        URL(string: "\(base)/\(file.path)")!
     }
 
     /// Downloads what's missing, resuming a file from its `.partial`. `progress` gets the
-    /// fraction of `totalBytes` on disk.
+    /// bytes on disk, first what an earlier download left.
     static func download(
         to directory: URL = directory,
+        files: [File] = files,
+        base: String = baseURL,
         session: URLSession = .shared,
-        progress: @escaping @Sendable (Double) -> Void
+        progress: @escaping @Sendable (Int64) -> Void
     ) async throws {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory
@@ -97,19 +120,21 @@ nonisolated enum ParakeetUltraModel {
         values.isExcludedFromBackup = true
         try? folder.setResourceValues(values)
 
+        progress(bytesOnDisk(in: directory, files: files))
         var done: Int64 = 0
         for file in files {
+            try Task.checkCancellation()
             let destination = directory.appendingPathComponent(file.path)
             if size(of: destination) == file.size {
                 done += file.size
-                progress(Double(done) / Double(totalBytes))
                 continue
             }
             let before = done
-            try await fetch(file, to: destination, session: session) { written in
-                progress(Double(before + written) / Double(totalBytes))
+            try await fetch(file, to: destination, base: base, session: session) { written in
+                progress(before + written)
             }
             done += file.size
+            progress(done)
         }
     }
 
@@ -167,6 +192,7 @@ nonisolated enum ParakeetUltraModel {
     private static func fetch(
         _ file: File,
         to destination: URL,
+        base: String,
         session: URLSession,
         onBytes: @escaping @Sendable (Int64) -> Void
     ) async throws {
@@ -179,7 +205,7 @@ nonisolated enum ParakeetUltraModel {
             offset = 0
         }
         if offset < file.size {
-            var request = URLRequest(url: url(for: file))
+            var request = URLRequest(url: url(for: file, base: base))
             if offset > 0 {
                 request.setValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
             }

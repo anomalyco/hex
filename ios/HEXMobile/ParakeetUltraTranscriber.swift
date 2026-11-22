@@ -10,8 +10,9 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
     enum TranscriberError: HexDescribedError {
         case notPrepared
         case emptyTranscript
-        case downloadFailed
         case notEnoughMemory
+        /// Not on the iPhone yet: `ParakeetUltraDownload` gets it beside the usual engine.
+        case notDownloaded
 
         var errorDescription: String? {
             switch self {
@@ -19,15 +20,19 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
                 String(localized: "Parakeet Ultra is not ready.")
             case .emptyTranscript:
                 String(localized: "Parakeet did not detect any speech.")
-            case .downloadFailed:
-                String(localized: "Parakeet Ultra didn't download. Check your connection and try again.")
             case .notEnoughMemory:
                 String(localized: "Parakeet Ultra needs more memory than Hex has here.")
+            case .notDownloaded:
+                String(localized: "Parakeet Ultra isn't downloaded yet.")
             }
         }
     }
 
     static let name = "Parakeet Ultra"
+    /// After a load that ended Hex (`ParakeetLoadGuard`), beside Try again.
+    nonisolated static var setAsideMessage: String {
+        String(localized: "Hex closed while getting the multilingual model ready, likely short of memory.")
+    }
     /// `ParakeetLoadGuard`'s and `ParakeetCompileRecord`'s keys, apart from V2's.
     static let loadGuardModel = "parakeetUltra"
     static let compileRecordKey = "parakeetUltra.compiledForSystem"
@@ -74,46 +79,32 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
             .replacingOccurrences(of: " ", with: "\u{00A0}")
     }
 
-    /// What the bar says while it downloads: the size, and that Wi-Fi is better for it.
-    nonisolated static var downloadDetail: String {
-        String(localized: "Downloading \(downloadSize) · Wi-Fi recommended")
+    /// Whether Core ML compiled it for this iOS already, so loading it takes seconds rather
+    /// than the minute or more of a first load.
+    nonisolated static var isCompiled: Bool {
+        ParakeetCompileRecord(key: compileRecordKey).isCurrent
     }
 
+    /// Loads the downloaded model; the download itself is `ParakeetUltraDownload`'s, beside
+    /// the engine Hex dictates with meanwhile.
     func prepare(
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
     ) async throws {
         guard manager == nil else { return }
+        guard ParakeetUltraModel.isDownloaded() else { throw TranscriberError.notDownloaded }
 
         let compiled = ParakeetCompileRecord(key: Self.compileRecordKey)
-        let downloads = !ParakeetUltraModel.isDownloaded()
         let progress = ParakeetProgressFeed(
-            ParakeetPreparationProgress(
-                downloads: downloads,
-                compiledBefore: compiled.isCurrent,
-                downloadDetail: Self.downloadDetail
-            ),
+            ParakeetPreparationProgress(downloads: false, compiledBefore: compiled.isCurrent),
             emit: progressHandler
         )
-        let download: Task<Void, Error>? = downloads ? Task { try await Self.download(progress) } : nil
         let ticker = Task {
             while !Task.isCancelled {
                 progress.tick()
-                // Turned off mid-download: stop rather than finish a download it then deletes.
-                if download != nil, !MultilingualParakeetSettings().isEnabled {
-                    download?.cancel()
-                }
                 try? await Task.sleep(for: .milliseconds(250))
             }
         }
         defer { ticker.cancel() }
-
-        if let download {
-            try await withTaskCancellationHandler {
-                try await download.value
-            } onCancel: {
-                download.cancel()
-            }
-        }
 
         // As V2: only the load, where iOS can end Hex short of memory, counts for the guard,
         // and too little left to load it sets it aside for the engine Hex uses without it.
@@ -136,26 +127,6 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
         loaded = true
         compiled.markCurrent()
         progress.update { $0.finish() }
-    }
-
-    /// Resumes each file from its `.partial`; a download that stops moving for
-    /// `ParakeetTranscriber.downloadStallLimit` ends, as V2's does.
-    private static func download(_ progress: ParakeetProgressFeed) async throws {
-        let fraction = ProgressReading()
-        do {
-            try await StallWatch.run(
-                limit: ParakeetTranscriber.downloadStallLimit,
-                progress: { fraction.value },
-                operation: {
-                    try await ParakeetUltraModel.download { value in
-                        fraction.value = value
-                        progress.update { $0.download(value) }
-                    }
-                }
-            )
-        } catch is ParakeetUltraModel.DownloadError {
-            throw TranscriberError.downloadFailed
-        }
     }
 
     func transcribe(_ audioURL: URL) async throws -> String {
