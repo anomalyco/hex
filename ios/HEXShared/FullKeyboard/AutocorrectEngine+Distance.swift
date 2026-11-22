@@ -81,9 +81,18 @@ extension AutocorrectEngine {
         // are as cheap as one missing Spanish accent, a little more for each further one. Greek
         // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
         // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
-        // čárky left out ("cesky" -> "český", "prilis" -> "příliš").
-        if language == .polish || language == .greek || language == .czech, s.count == t.count {
-            let same = language == .greek ? sameGreekLetterIgnoringAccents : samePolishLetterIgnoringDiacritics
+        // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), and Hungarian: its accented
+        // vowels left out ("koszonom" -> "köszönöm", "kesobb" -> "később", "szivesen" ->
+        // "szívesen"), ő and ű included, as o and u with the combining double acute.
+        if language == .polish || language == .greek || language == .czech || language == .hungarian,
+           s.count == t.count {
+            func same(_ a: Character, _ b: Character) -> Bool {
+                switch language {
+                case .greek: Self.sameGreekLetterIgnoringAccents(a, b)
+                case .hungarian: Self.sameLetterIgnoringAccents(a, b)
+                default: Self.samePolishLetterIgnoringDiacritics(a, b)
+                }
+            }
             let missed = zip(s, t).filter { $0 != $1 }
             if !missed.isEmpty, missed.allSatisfy({ same($0, $1) }) {
                 return 0.15 + 0.05 * Double(missed.count - 1)

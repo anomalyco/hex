@@ -1016,7 +1016,10 @@ never at a launch by itself.
   is the plain one); Italiano and Português QWERTY,
   AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
   "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
-  simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Srpski
+  simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Magyar
+  "QWERTZ – Magyar" and "QWERTY – Magyar", the standard Hungarian QWERTZ with every accented
+  vowel on a held key, Z and Y swapped on the second (Apple's own Hungarian layout list wasn't
+  read on a simulator for this change); Srpski
   QWERTZ (Hex's, though Apple now adds it as QWERTY), QWERTY, AZERTY. Norsk, Русский, Українська and Ελληνικά keep their
   one layout (Apple also offers a phonetic "Russian – QWERTY", not built). The plain
   layouts are the same 26 letters in every language, with the language's bottom row and
@@ -1094,7 +1097,11 @@ never at a launch by itself.
   ì į ī, O ó ô ö ò õ œ ø ō, A á à ą â ä æ ã å ā, S š ß ś, D ď, L ł ľ ĺ, Y ý ÿ, C č ç ć, N ň ñ ń
   and the ˇ key the ring ˚ (which makes ů and å), each callout laid out as the system's
   (`AccentCatalog.arrangement`), and every other key, ´ included, nothing; its 123 and #+=
-  pages and their held keys are English's) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
+  pages and their held keys are English's), Magyar (the standard Hungarian QWERTZ, so
+  `qwertzuiop`, `asdfghjkl`, `yxcvbnm`, on the English keys' QWERTZ; its nine accented vowels
+  are all held, á on A, é on E, í on I, ó ö ő on O and ú ü ű on U, the base first and then the
+  neighbouring Latin accents, ő and ű the double-acute letters U+0151 and U+0171, and every
+  consonant holds nothing; QWERTY is offered too) and Srpski (Latin: Apple's QWERTZ option for it; Apple's iPhone
   Serbian Latin keyboard has no keys of its own for č ć đ š ž, they are held on c, d, s
   and z), as Apple's iOS keyboards
   lay them out (`KeyboardLanguage`: letter rows, long-press accents, spelling dictionary).
@@ -1117,7 +1124,7 @@ never at a launch by itself.
   letter at the end under the thumb, in one row where the system wraps a long list
   (English A) into two. Autocorrect and suggestions use the layout's
   `UITextChecker` dictionary (`nb`, `es`, `de`, `it`, `fr`, `pt_BR` then
-  `pt_PT`, `pl`, `cs`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
+  `pt_PT`, `pl`, `cs`, `hu`, `ro`, `ru`, `uk`, `el`; Serbian would use `sr_Latn`, which iOS 27.2 doesn't have, nor a
   Croatian one); where the iPhone has none
   they stay off except your own text replacements, and the English contractions
   and typo list (`i` → `I`) apply only to English. Neighbouring-key costs follow
@@ -1136,10 +1143,12 @@ never at a launch by itself.
   counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
   "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. Czech likewise:
   every háček or čárka left out counts as one such fix ("cesky" → "český", "prilis" →
-  "příliš"), checked against a stub dictionary. A two-letter non-word one
+  "příliš"), checked against a stub dictionary, and Hungarian too ("koszonom" → "köszönöm",
+  "kesobb" → "később"), while a word of its own keeps its spelling ("meg" and "kor" stay
+  though "még" and "kör" exist). A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
-  ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
-  Spanish and Italian only). Auto-capitalization is unchanged.
+  ("tk" → "to", Spanish "nl" → "no", Hungarian "es" → "és"; `KeyboardLanguage.commonTwoLetterWords`,
+  English, Spanish, Italian and Hungarian). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language but Greek (above); their held keys follow each
   language's system keyboard where it differs (# holds № in Russian and Ukrainian, the
   digits º and ª in Spanish and Italian, . holds · in French, $ holds ₴ in Ukrainian and
@@ -1774,7 +1783,11 @@ dataset's download and its `convert.py` command.
   hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too,
   and a picked Spanish variant surviving the swipe away and back), and
   `AutocorrectEngineTests` bilingual autocorrect on stub dictionaries and iOS's own
-  (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Checked live in
+  (`testABilingualKeyboardKeepsBothLanguagesWords` prints the break counts). Hungarian's
+  QWERTZ rows and held vowels, typing through them in a `FullKeyboardView`, and its accent
+  fixes are unit tests too (`testHungariansRowsAndHoldMatchItsLayout`,
+  `testHungarianTypesAndSwitches`, `testHungarianRestoresMissingDiacritics`); no
+  simulator or iPhone typed on its keys for this change. Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
   simulator, iOS 27.2, Full Access, three runs, `footprint` after typing a sentence): Français
   alone 28.7–28.8 MB, with English beside it 29.7–29.9 MB; English alone 28.9–29.9 MB, with

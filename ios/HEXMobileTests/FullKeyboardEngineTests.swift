@@ -9,8 +9,13 @@ final class FullKeyboardEngineTests: XCTestCase {
     private var now: TimeInterval = 100
     private var suiteName: String!
     private var defaults: UserDefaults!
+    /// The layouts are Apple's iOS 27 keyboard; CI's newest simulator runtime is iOS 26.5, so the
+    /// version these tests describe is pinned (the before-27 Ukrainian test sets 26 itself).
+    private var runningSystemMajorVersion = 0
 
     override func setUp() async throws {
+        runningSystemMajorVersion = KeyboardLanguage.systemMajorVersion
+        KeyboardLanguage.systemMajorVersion = 27
         suiteName = "FullKeyboardEngineTests-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
         target = FixtureTextTarget()
@@ -23,6 +28,7 @@ final class FullKeyboardEngineTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        KeyboardLanguage.systemMajorVersion = runningSystemMajorVersion
         defaults.removePersistentDomain(forName: suiteName)
     }
 
@@ -809,6 +815,87 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.engine.language, .english)
         XCTAssertEqual(view.plane.spaceLabel, "English")
         XCTAssertNil(view.engine.layout.key(.character("ˇ")), "English has no ˇ key")
+    }
+
+    /// Settings › Keyboard › Languages with English and Hungarian: the space bar says "Magyar",
+    /// the keys are the standard Hungarian QWERTZ (Z ends row 1, Y starts row 3), its nine
+    /// accented vowels are all on held keys (á é í ó ö ő ú ü ű, ő and ű the double-acute letters),
+    /// English is its bilingual partner, and Switch dictation too dictates hu-HU.
+    func testHungarianTypesAndSwitches() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .hungarian]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "hu-HU"]
+        let model = KeyboardViewModel()
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: model, target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        view.engine.autocorrect.isEnabled = false
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .hungarian)
+        XCTAssertEqual(view.plane.spaceLabel, "Magyar")
+        XCTAssertNil(view.engine.autocorrect.decoder, "no Hungarian typing model: the dictionary engine")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "hu-HU")
+        XCTAssertEqual(KeyboardLanguage.hungarian.letterRows[0], Array("qwertzuiop").map(String.init))
+        XCTAssertEqual(KeyboardLanguage.hungarian.letterRows[2].first, "y", "QWERTZ")
+        XCTAssertEqual(KeyboardLanguage.hungarian.letterRows(.qwerty)[2].first, "z", "the QWERTY offered too")
+        var id = 800
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func type(_ keys: String) {
+            for character in keys { tap(character == " " ? .space : .character(String(character))) }
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            // The Hungarian pill is anchored on the key's own option, so a nine-option key
+            // (e's é è ê ë ě ė ę ē) is pushed in from the edge and its cell can already sit
+            // under the finger when it opens. Sliding from the highlighted base cell to the
+            // picked one is the move that selects it; the cell under the finger is no move.
+            let base = menu.cellFrames[menu.selectedIndex]
+            view.engine.touchMoved(id: id, to: CGPoint(x: base.midX, y: base.midY))
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        tap(.shift)
+        type("k")
+        hold("o", pick: "ö")
+        type("sz")
+        hold("o", pick: "ö")
+        type("n")
+        hold("o", pick: "ö")
+        type("m sz")
+        hold("e", pick: "é")
+        type("pen tal")
+        hold("a", pick: "á")
+        type("lkozunk holnap")
+        XCTAssertEqual(field.text, "Köszönöm szépen találkozunk holnap")
+        type(" id")
+        hold("o", pick: "ő")
+        type(" f")
+        hold("u", pick: "ű")
+        XCTAssertEqual(field.text, "Köszönöm szépen találkozunk holnap idő fű")
+        XCTAssertEqual(field.text.unicodeScalars.count, field.text.count, "precomposed letters, no combining marks")
+        tap(.delete)
+        XCTAssertEqual(field.text, "Köszönöm szépen találkozunk holnap idő f", "delete takes ű whole")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertEqual(view.plane.spaceLabel, "English")
+        XCTAssertEqual(view.engine.layout.key(.character("y"))?.row, 0, "English is QWERTY again")
     }
 
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
