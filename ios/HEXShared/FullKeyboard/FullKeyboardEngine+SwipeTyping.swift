@@ -38,7 +38,7 @@ extension FullKeyboardEngine {
     /// add) come between them.
     var swipePreviousWord: String? {
         let before = textBefore ?? ""
-        return AutocorrectEngine.previousWord(SwipeTyping.needsSpace(before: before) ? before + " " : before, token: "")
+        return AutocorrectEngine.previousWord(SwipeDecoder.needsSpace(before: before) ? before + " " : before, token: "")
     }
 
     /// The strip while swiping (the word so far) and right after (the other readings, the
@@ -59,68 +59,75 @@ extension FullKeyboardEngine {
         return words.filter { autocorrect.mayOffer($0, after: previous) && seen.insert($0.lowercased()).inserted }
     }
 
-    /// Whether a swiped word starts with a capital: shift (one-shot, held, caps lock, or
-    /// automatic), or the automatic capital the space the swipe adds brings ("Hi." then a
-    /// swipe types " There").
-    var swipeCapital: Bool {
-        if shift.isUppercase { return true }
-        guard shift.state == .off, !shift.isHeld else { return false }
-        let before = typingContext
-        guard SwipeTyping.needsSpace(before: before) else { return false }
-        return AutoCapitalization.shouldCapitalize(
-            mode: autoCapitalizationMode,
-            before: (before ?? "") + " ",
-            hasText: true
+    /// The state a swipe is typed in: the text before the cursor, shift, auto-capitalization,
+    /// and whether the field takes text replacements.
+    var swipeTypingState: SwipeDecoder.TypingState {
+        SwipeDecoder.TypingState(
+            before: typingContext, shift: shift.state, shiftHeld: shift.isHeld, autoCapitalization: autoCapitalizationMode,
+            autoCapitalizes: autoCapitalizes, autocorrection: target.autocorrectionType != .no
         )
     }
 
-    /// A reading as it's typed: all capitals with caps lock, a capital first letter with
-    /// `capital`, else a name the dictionary only knows capitalised ("monday" -> "Monday").
-    /// One of your own words with a capital that is also a common word (a Contacts name such
-    /// as "Bell" or "Will") is written as the sentence needs it, as Apple's keyboard swipes
-    /// "the bell rang" beside a contact Kate Bell (`AutocorrectEngine.withoutStrayCapital`).
-    /// With Auto-capitalization off, no capital you didn't ask for ("i'm", "monday"), but
-    /// your own spellings keep theirs.
-    func swipeCased(_ word: String, capital: Bool) -> String {
-        if shift.state == .locked { return word.uppercased() }
-        guard let first = word.first else { return word }
-        if capital { return first.uppercased() + word.dropFirst() }
-        if !autoCapitalizes {
-            return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
-        }
-        if swipeReadsAsName(word) { return first.uppercased() + word.dropFirst() }
-        return autocorrect.withoutStrayCapital(word, typed: "")
+    /// What a swipe whose readings are `readings` (best first, those that may be offered)
+    /// types: a space when the text before needs one, the first cased as the sentence and your
+    /// words need, and the strip's others. The keyboard core decides (`SwipeDecoder.typed`),
+    /// asking the dictionary.
+    func swipeTyped(_ readings: [String], in state: SwipeDecoder.TypingState? = nil) -> SwipeDecoder.Typed? {
+        guard let words = autocorrect.swipeWords else { return nil }
+        let checker = autocorrect.checker
+        return SwipeDecoder.typed(readings, in: state ?? swipeTypingState, words: words) { checker.isWordValid($0) }
     }
 
-    /// The strip's other readings after a swipe, cased as its word is (`readings` best first,
-    /// the first the one typed). A reading that is a text replacement's shortcut shows as its
-    /// replacement ("home" as "at my house"), the swiped word's first, as Apple's keyboard
-    /// offers one after a swipe (black box, iOS 27.2); space never puts it in.
-    func swipeAlternatives(_ readings: [String], capital: Bool) -> [String] {
-        func replacement(_ reading: String) -> String? {
-            guard target.autocorrectionType != .no else { return nil }
-            let typed = capital ? reading.prefix(1).uppercased() + reading.dropFirst() : reading
-            guard let replaced = autocorrect.textReplacement(before: typed), replaced.typed.count == typed.count else { return nil }
-            return replaced.replacement
-        }
-        var out: [String] = []
-        if let first = readings.first, let phrase = replacement(first) { out.append(phrase) }
-        for reading in readings.dropFirst() {
-            let item = replacement(reading) ?? swipeCased(reading, capital: capital)
-            if !out.contains(item) { out.append(item) }
-        }
-        return Array(out.prefix(3))
+    /// A reading as it's typed, with a capital first letter when `capital` (all capitals with
+    /// caps lock): `swipeTyped` with no text before, so the only capital is shift's.
+    func swipeCased(_ word: String, capital: Bool) -> String {
+        var state = swipeTypingState
+        state.before = nil
+        state.shiftHeld = false
+        state.shift = shift.state == .locked ? .locked : capital ? .on : .off
+        return swipeTyped([word], in: state)?.word ?? word
     }
 
     /// Whether a swipe's reading, as the model spells it (lowercase), is a word the dictionary
     /// knows only with a capital: a name, day or place ("monday"), or an abbreviation.
     func swipeReadsAsName(_ word: String) -> Bool {
-        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2, let first = word.first else { return false }
-        return autocorrect.checker.isWordValid(first.uppercased() + word.dropFirst()) && !autocorrect.checker.isWordValid(word)
+        guard let words = autocorrect.swipeWords else { return false }
+        let checker = autocorrect.checker
+        return SwipeDecoder.readsAsName(word, words: words) { checker.isWordValid($0) }
     }
 
     /// What goes against a swiped word, as on Apple's keyboard: closing punctuation and
     /// brackets, an apostrophe, a hyphen and a slash. Anything else tapped right after a swipe
     /// (a straight quote and opening brackets included) starts the next word.
     static let swipeJoiners: Set<Character> = [",", ".", "!", "?", ";", ":", ")", "]", "}", "'", "’", "-", "/"]
+}
+
+@MainActor
+extension AutocorrectEngine {
+    /// Your text replacements and words as the keyboard core types a swipe with them: made
+    /// again whenever one of them differs from the last made (not only when the revision
+    /// moves: `learnedWords` can change under it), as these were read live.
+    var swipeWords: SwipeDecoder.Words? {
+        let key = SwipeWordsKey(
+            language: language.rawValue, hasDictionary: hasDictionary, replacements: lexiconShortcuts,
+            own: lexiconTerms + Array(learning.typos.values) + learnedWords.words,
+            vocabulary: vocabulary.isEmpty ? [] : Self.vocabularyWords(vocabulary)
+        )
+        if let made = Self.swipeWordsMade, made.key == key { return made.words }
+        let words = SwipeDecoder.Words(
+            language: key.language, hasDictionary: key.hasDictionary, replacements: key.replacements, own: key.own, vocabulary: key.vocabulary
+        )
+        Self.swipeWordsMade = (key, words)
+        return words
+    }
+
+    private static var swipeWordsMade: (key: SwipeWordsKey, words: SwipeDecoder.Words?)?
+}
+
+private struct SwipeWordsKey: Equatable {
+    var language: String
+    var hasDictionary: Bool
+    var replacements: [String: String]
+    var own: [String]
+    var vocabulary: [String]
 }
