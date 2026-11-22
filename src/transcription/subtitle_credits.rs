@@ -2,15 +2,17 @@
 //! Models trained on subtitled video (Whisper, Cohere Transcribe) learned
 //! that broadcast audio ends with a credit line, and on a trailing pause or
 //! breath they can append one nobody said. Whisper in Turkish adds a thanks
-//! for watching, or the subtitle editor's credit (#1770). Only a credit at
-//! the very end is removed; the same words anywhere else are kept. The thanks
-//! is a real sentence too, so a dictation that genuinely ends with it loses
-//! it.
+//! for watching, or the subtitle editor's credit (#1770), and in Russian it
+//! adds "Продолжение следует" or one of the subtitle community's credits.
+//! Only a credit at the very end is removed; the same words anywhere else are
+//! kept. The thanks is a real sentence too, so a dictation that genuinely ends
+//! with it loses it.
 
 /// Credits seen appended to dictations, matched case-insensitively on their
-/// letters and digits alone, so punctuation and hyphens may differ. Turkish
-/// `İ` and `I` both fold to `i`: lowercasing leaves a combining dot that is
-/// dropped, and the dotless `ı` counts as `i`.
+/// letters and digits alone, so punctuation and hyphens may differ. Folding
+/// is Unicode-aware, so Cyrillic П and п match; Turkish `İ` and `I` both
+/// fold to `i`: lowercasing leaves a combining dot that is dropped, and the
+/// dotless `ı` counts as `i`.
 const CREDITS: &[&str] = &[
     "Sous-titrage Société Radio-Canada",
     "Sous-titrage ST' 501",
@@ -21,6 +23,12 @@ const CREDITS: &[&str] = &[
     "İzlediğiniz için teşekkür ederim",
     "Altyazı M.K.",
     "Altyazı M.",
+    "Продолжение следует",
+    "Субтитры сделал DimaTorzok",
+    "Субтитры делал DimaTorzok",
+    "Субтитры создавались сообществом Amara.org",
+    "Редактор субтитров А.Семкин Корректор А.Егорова",
+    "Редактор субтитров А.Синецкая Корректор А.Егорова",
 ];
 
 /// A combining mark such as the dot Turkish lowercasing leaves behind (`İ`
@@ -161,6 +169,63 @@ mod tests {
             strip("Toplantı yarına kaldı. İZLEDİĞİNİZ İÇİN TEŞEKKÜR EDERİM"),
             Some(("Toplantı yarına kaldı.".into(), 4))
         );
+    }
+
+    #[test]
+    fn a_russian_continues_credit_is_removed() {
+        assert_eq!(
+            strip("Встреча перенесена. Продолжение следует..."),
+            Some(("Встреча перенесена.".into(), 2))
+        );
+        // Unicode lowercasing folds Cyrillic case, with or without the dots.
+        assert_eq!(
+            strip("Встреча перенесена. ПРОДОЛЖЕНИЕ СЛЕДУЕТ!"),
+            Some(("Встреча перенесена.".into(), 2))
+        );
+        assert_eq!(
+            strip("Встреча перенесена. продолжение следует…"),
+            Some(("Встреча перенесена.".into(), 2))
+        );
+        assert_eq!(strip("Продолжение следует..."), Some((String::new(), 2)));
+    }
+
+    #[test]
+    fn a_russian_subtitle_credit_is_removed() {
+        assert_eq!(
+            strip("Отчёт готов. Субтитры сделал DimaTorzok"),
+            Some(("Отчёт готов.".into(), 3))
+        );
+        assert_eq!(
+            strip("Отчёт готов. субтитры делал dimatorzok"),
+            Some(("Отчёт готов.".into(), 3))
+        );
+        assert_eq!(
+            strip("Отчёт готов. Субтитры создавались сообществом Amara.org"),
+            Some(("Отчёт готов.".into(), 5))
+        );
+        assert_eq!(
+            strip("Отчёт готов. Редактор субтитров А.Семкин Корректор А.Егорова"),
+            Some(("Отчёт готов.".into(), 7))
+        );
+        assert_eq!(
+            strip("Отчёт готов. Редактор субтитров А.Синецкая Корректор А.Егорова"),
+            Some(("Отчёт готов.".into(), 7))
+        );
+        assert_eq!(
+            strip("Отчёт готов. СУБТИТРЫ СДЕЛАЛ DIMATORZOK"),
+            Some(("Отчёт готов.".into(), 3))
+        );
+    }
+
+    #[test]
+    fn russian_credits_later_in_the_speech_are_kept() {
+        // The same words followed by more speech are part of the dictation.
+        assert_eq!(strip("Мы решили, что продолжение следует завтра."), None);
+        assert_eq!(
+            strip("Продолжение следует после перерыва, так что не уходите."),
+            None
+        );
+        assert_eq!(strip("Субтитры сделал DimaTorzok для этого видео."), None);
     }
 
     #[test]

@@ -14,6 +14,9 @@ pub struct TextReplacement {
 struct CompiledRule {
     matcher: Regex,
     output: String,
+    /// A protection rule wins its match but writes back exactly the text it
+    /// matched, so a replacement rule cannot rewrite a term from inside it.
+    protected: bool,
 }
 
 struct Candidate {
@@ -31,23 +34,24 @@ impl ReplacementSet {
     pub(crate) fn new(rules: &[TextReplacement]) -> Self {
         let rules = rules
             .iter()
-            .filter_map(|rule| {
-                let matched_phrase = rule.matched_phrase.trim();
-                if matched_phrase.is_empty() {
-                    return None;
-                }
-                RegexBuilder::new(&regex::escape(matched_phrase))
-                    .case_insensitive(true)
-                    .unicode(true)
-                    .build()
-                    .ok()
-                    .map(|matcher| CompiledRule {
-                        matcher,
-                        output: rule.output.clone(),
-                    })
-            })
+            .filter_map(|rule| compile(&rule.matched_phrase, &rule.output, false))
             .collect();
         Self { rules }
+    }
+
+    /// Adds phrases that take part in the longest-match selection but write
+    /// back the text they matched unchanged (replace keeps the original
+    /// slice), so a replacement rule cannot rewrite a protected term or
+    /// change its casing. Protection comes before the replacement rules, so
+    /// it also wins a tie.
+    pub(crate) fn protecting(mut self, phrases: &[&str]) -> Self {
+        let mut protection = phrases
+            .iter()
+            .filter_map(|phrase| compile(phrase, "", true))
+            .collect::<Vec<_>>();
+        protection.append(&mut self.rules);
+        self.rules = protection;
+        self
     }
 
     pub(crate) fn replace(&self, text: &str) -> String {
@@ -95,7 +99,14 @@ impl ReplacementSet {
                     &mut capitalize_next,
                 );
             }
-            let replacement = &self.rules[candidate.rule].output;
+            let rule = &self.rules[candidate.rule];
+            if rule.protected {
+                output.push_str(&text[candidate.start..candidate.end]);
+                capitalize_next = false;
+                cursor = candidate.end;
+                continue;
+            }
+            let replacement = &rule.output;
             if !replacement.is_empty() {
                 push_segment(&mut output, replacement, &mut capitalize_next);
                 cursor = candidate.end;
@@ -150,6 +161,25 @@ impl ReplacementSet {
         }
         output
     }
+}
+
+/// Compiles one phrase, case-insensitively. A protection rule keeps the
+/// matched text, so its output is never written.
+fn compile(phrase: &str, output: &str, protected: bool) -> Option<CompiledRule> {
+    let phrase = phrase.trim();
+    if phrase.is_empty() {
+        return None;
+    }
+    RegexBuilder::new(&regex::escape(phrase))
+        .case_insensitive(true)
+        .unicode(true)
+        .build()
+        .ok()
+        .map(|matcher| CompiledRule {
+            matcher,
+            output: output.to_string(),
+            protected,
+        })
 }
 
 const HORIZONTAL_WHITESPACE: [char; 2] = [' ', '\t'];
@@ -364,5 +394,30 @@ mod tests {
             replacements.replace("Hello. Thank you. The build passed."),
             "Hello. The build passed."
         );
+    }
+
+    #[test]
+    fn protect_rules_keep_the_matched_text_and_still_win_the_longest_match() {
+        let replacements = ReplacementSet::new(&[rule("rost", "Rust")]).protecting(&["Rust"]);
+        assert_eq!(replacements.replace("rust on the car"), "rust on the car");
+        assert_eq!(replacements.replace("RUST on the car"), "RUST on the car");
+        assert_eq!(replacements.replace("push to rost"), "push to Rust");
+
+        let replacements = ReplacementSet::new(&[rule("next", "Next.js")]).protecting(&["Next.js"]);
+        assert_eq!(replacements.replace("next.js"), "next.js");
+        assert_eq!(replacements.replace("Next.js"), "Next.js");
+        assert_eq!(
+            replacements.replace("wait for next week"),
+            "wait for Next.js week"
+        );
+    }
+
+    #[test]
+    fn a_protect_rule_coexists_with_deletion_rules() {
+        let replacements = ReplacementSet::new(&[rule("um", "")]).protecting(&["umbrella", "Rust"]);
+        assert_eq!(replacements.replace("um umbrella"), "umbrella");
+        assert_eq!(replacements.replace("hello um Rust"), "hello Rust");
+        // The deletion semantics are unchanged where no protection matches.
+        assert_eq!(replacements.replace("I um think so."), "I think so.");
     }
 }

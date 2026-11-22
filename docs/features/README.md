@@ -412,7 +412,9 @@ Choose a supported language              // setup.language-conditioning; macOS +
 │   de, es, pt, it, ja it hears, so it is offered under Auto too (#1252)
 ├── Whisper -> Use selected language to guide decoding; accuracy is not guaranteed
 ├── Whisper (ivrit.ai's, NB-Whisper's, and KB-Whisper's too), Qwen3-ASR 0.6B, QwenCleo-ASR 1.7B -> Vocabulary ->
-│   context prompt (vocabulary.md); output that only repeats it is dropped
+│   context prompt (vocabulary.md); output that only repeats it is dropped,
+│   and its listed "sounds like" spellings are corrected whole-word after
+│   the run
 ├── Hebrew -> ivrit.ai Whisper large-v3-turbo, always with the `he` hint (it
 │   lost Whisper's language detection); stock Whisper turbo also offers it
 ├── Russian -> GigaAM v3 (Russian only, no language input); Parakeet v3 and
@@ -448,11 +450,14 @@ Checks: `prompt_echo_is_dropped`, `speech_containing_the_hints_is_kept`,
 
 Models trained on subtitled video can end a clip with a subtitle credit nobody
 said, such as "Sous-titrage Société Radio-Canada" from Cohere Transcribe in
-French after a trailing pause (#1141), or "İzlediğiniz için teşekkür ederim"
-and "Altyazı M.K." from Whisper in Turkish (#1770). Every GGUF run and live
-stream drops a known credit only when it is the very end of the text (letters
-and digits compared, case and punctuation ignored, Turkish dotted and dotless
-`i` folded together), with its segment and words, in
+French after a trailing pause (#1141), "İzlediğiniz için teşekkür ederim" and
+"Altyazı M.K." from Whisper in Turkish (#1770), or "Продолжение следует",
+"Субтитры сделал DimaTorzok" ("делал" too), and "Редактор субтитров
+А.Семкин Корректор А.Егорова" from Whisper large-v3 and large-v3-turbo in
+Russian. Every GGUF run and live stream drops a known credit only when it is
+the very end of the text (letters and digits compared, case and punctuation
+ignored, Unicode lowercasing so Cyrillic case folds and Turkish dotted and
+dotless `i` fold together), with its segment and words, in
 dictation, meetings, and the local API alike; the same words elsewhere stay.
 A credit spoken mid-chunk and followed by more speech is kept. A dictation that
 genuinely ends with a listed phrase, such as the Turkish thanks, loses it: the
@@ -463,6 +468,9 @@ precomposed one is unchanged. The list is in
 Checks: `a_trailing_subtitle_credit_is_removed`,
 `a_turkish_thanks_for_watching_is_removed`,
 `a_truncated_turkish_credit_is_removed`,
+`a_russian_continues_credit_is_removed`,
+`a_russian_subtitle_credit_is_removed`,
+`russian_credits_later_in_the_speech_are_kept`,
 `the_same_words_mid_sentence_are_kept`,
 `a_combining_mark_inside_a_word_does_not_split_it`,
 `speech_without_a_trailing_credit_is_kept`, and
