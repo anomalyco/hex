@@ -85,13 +85,17 @@ struct KeyboardClipboardTracker {
     /// something is typed the strip goes back to suggestions. `hasAppleKeyboard` is asked only
     /// where a code is expected: without Apple's keyboard the next keyboard is Emoji or another
     /// third-party one (or there is none), which gets no code, so Code from Messages would do
-    /// nothing (TestFlight build 56).
+    /// nothing (TestFlight build 56). `canSwitchKeyboard` is false where Apple's keyboard is
+    /// split (the Duo unfolded and upright, or not known yet): iOS 27.2's switch to the next
+    /// keyboard can end the app being typed in there (`FullKeyboardView.passesGlobeTouch`), so
+    /// only Paste is offered and the globe's list leads to Apple's keyboard.
     func offer(
         textContentType: UITextContentType?,
         keyboardType: UIKeyboardType?,
         autocorrectionType: UITextAutocorrectionType?,
         fieldIsEmpty: Bool,
         hasFullAccess: Bool,
+        canSwitchKeyboard: Bool = true,
         hasAppleKeyboard: () -> Bool = { KeyboardInputModes.hasAppleKeyboard() },
         pasteboard: UIPasteboard = .general,
         now: Date = Date()
@@ -99,7 +103,8 @@ struct KeyboardClipboardTracker {
         // Without Full Access a keyboard can't use the clipboard at all.
         guard hasFullAccess, fieldIsEmpty else { return nil }
         let fresh = hasFreshCopy(pasteboard: pasteboard, now: now)
-        if Self.expectsCode(textContentType: textContentType, keyboardType: keyboardType, autocorrectionType: autocorrectionType),
+        if canSwitchKeyboard,
+           Self.expectsCode(textContentType: textContentType, keyboardType: keyboardType, autocorrectionType: autocorrectionType),
            hasAppleKeyboard() {
             return .code(canPaste: fresh)
         }

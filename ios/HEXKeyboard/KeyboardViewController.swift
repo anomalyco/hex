@@ -41,6 +41,8 @@ final class KeyboardViewController: UIInputViewController {
     }()
     private var pollInterval: TimeInterval = 0
     private var didHandOffCurrentField = false
+    /// A number pad's hand-off waits for the Duo's posture (`handOffNumericPadIfNeeded`).
+    private var handOffWaitsForPosture = false
     private var didWarmLexicon = false
     /// Learn how I type: what becomes of each dictation Hex inserts.
     private let dictationEdits = DictationEditTracker()
@@ -255,6 +257,7 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             applyBarInset()
         }
+        if handOffWaitsForPosture { handOffNumericPadIfNeeded() }
     }
 
     /// The dictation bar's own height, under `barTopInset`: 4 pt top padding, the 40 pt
@@ -496,11 +499,17 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func handOffNumericPadIfNeeded() {
-        guard fullKeyboard != nil else { return }
+        guard let fullKeyboard else { return }
         if KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) == .handOff {
             guard !didHandOffCurrentField else { return }
+            // The Duo's posture needs the keyboard's window: layout asks again once it has one.
+            guard let posture = fullKeyboard.currentPosture else {
+                handOffWaitsForPosture = true
+                return
+            }
+            handOffWaitsForPosture = false
             didHandOffCurrentField = true
-            if needsInputModeSwitchKey {
+            if KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: needsInputModeSwitchKey, posture: posture) {
                 advanceToNextInputMode()
             }
         } else {

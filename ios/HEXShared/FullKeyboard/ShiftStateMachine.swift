@@ -199,4 +199,12 @@ nonisolated enum KeyboardFieldRouting {
             return .keys(.text, initialLayer: .letters)
         }
     }
+
+    /// Whether a number pad (`.handOff`) goes to the next keyboard: where iOS asks for a globe,
+    /// except where Apple's keyboard is split (the Duo unfolded and upright). There iOS 27.2's
+    /// switch to the next keyboard can end the app being typed in (TestFlight build 121,
+    /// `FullKeyboardView.passesGlobeTouch`), so Hex stays on its 123 page.
+    static func handsOffNumberPad(needsInputModeSwitchKey: Bool, posture: KeyboardPosture) -> Bool {
+        needsInputModeSwitchKey && !posture.splitsKeyboard
+    }
 }

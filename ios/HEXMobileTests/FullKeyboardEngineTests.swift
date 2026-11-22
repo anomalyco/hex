@@ -3019,6 +3019,26 @@ final class KeyboardClipboardTests: XCTestCase {
         )
     }
 
+    /// Where Apple's keyboard is split (the Duo unfolded and upright) Code from Messages isn't
+    /// offered: its switch to the next keyboard can end the host app there (TestFlight build 121).
+    func testNoCodeFromMessagesWhereApplesKeyboardSplits() {
+        let pasteboard = UIPasteboard.withUniqueName()
+        defer { UIPasteboard.remove(withName: pasteboard.name) }
+        let tracker = KeyboardClipboardTracker(defaults: defaults)
+        func offer(canSwitch: Bool) -> KeyboardClipboardOffer? {
+            tracker.offer(
+                textContentType: .oneTimeCode, keyboardType: .numberPad, autocorrectionType: .default, fieldIsEmpty: true,
+                hasFullAccess: true, canSwitchKeyboard: canSwitch, hasAppleKeyboard: { true }, pasteboard: pasteboard
+            )
+        }
+        XCTAssertEqual(offer(canSwitch: true), .code(canPaste: false))
+        XCTAssertNil(offer(canSwitch: false))
+        pasteboard.string = "482913"
+        XCTAssertEqual(offer(canSwitch: true), .code(canPaste: true))
+        XCTAssertEqual(offer(canSwitch: false), .paste, "a copied code still pastes")
+        XCTAssertEqual(FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget()).currentPosture, .phone, "an iPhone knows at once")
+    }
+
     /// TestFlight build 56: ChatGPT's and Capy's message boxes kept Paste and Code from Messages
     /// in place of suggestions. A `.oneTimeCode` box with letters and default autocorrection is
     /// a chat box; Paste shows only while the field is empty, as Apple's keyboard offers a copy.

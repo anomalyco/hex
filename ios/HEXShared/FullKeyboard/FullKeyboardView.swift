@@ -182,8 +182,10 @@ final class FullKeyboardView: UIView {
             self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
         stripView.onNextKeyboard = { [weak self] in
-            self?.typingLog?.ui("next_keyboard")
-            self?.hostController?.advanceToNextInputMode()
+            // Never where Apple's keyboard is split, where the strip doesn't offer it either.
+            guard let self, self.currentPosture?.splitsKeyboard == false else { return }
+            self.typingLog?.ui("next_keyboard")
+            self.hostController?.advanceToNextInputMode()
         }
         selectionStrip.onAction = { [weak self] action in self?.selectionAction(action) }
 
@@ -344,7 +346,8 @@ final class FullKeyboardView: UIView {
         let phoneSize = KeyboardPhoneSize.current(screenSize: size)
         let pad = Self.isPad ? KeyboardPadPlacement.current(screenSize: size, keyboardWidth: bounds.width) : nil
         let padOrientation = pad.map { KeyboardPadPlacement.orientation(screenSize: size, placement: $0, keyboardWidth: bounds.width) }
-        let heightChanges = posture != engine.posture || phoneSize != engine.phoneSize
+        let postureChanges = posture != engine.posture
+        let heightChanges = postureChanges || phoneSize != engine.phoneSize
             || pad != engine.pad || padOrientation != self.padOrientation
         engine.posture = posture
         engine.phoneSize = phoneSize
@@ -352,7 +355,15 @@ final class FullKeyboardView: UIView {
         engine.pad = pad
         self.padOrientation = padOrientation
         syncGlobe()
+        if postureChanges { refreshStrip() }
         if heightChanges { onPreferredHeightChange?() }
+    }
+
+    /// The posture as the keyboard's window shows it now; nil on the Duo before it has one.
+    var currentPosture: KeyboardPosture? {
+        guard Self.isFoldable else { return .phone }
+        guard let screen = window?.windowScene?.screen ?? window?.screen else { return nil }
+        return KeyboardPosture.current(screenSize: screen.bounds.size, isFoldable: true)
     }
 
     /// Hex's globe key where iOS asks for one, except floating on an iPad: iPadOS draws its own
@@ -880,7 +891,8 @@ final class FullKeyboardView: UIView {
             keyboardType: engine.target.keyboardType,
             autocorrectionType: engine.target.autocorrectionType,
             fieldIsEmpty: !engine.target.hasText,
-            hasFullAccess: model.hasFullAccess
+            hasFullAccess: model.hasFullAccess,
+            canSwitchKeyboard: currentPosture.map { !$0.splitsKeyboard } ?? false
         )
         // A dictation that didn't go in by itself comes before a copy, but not in a code field.
         if model.hasFullAccess, model.offeredDictation != nil {
