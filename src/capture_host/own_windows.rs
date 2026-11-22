@@ -56,6 +56,7 @@ pub enum OwnWindow {
     Picker,
     /// A Screenshots recording's dim over display `n`: click-through, so a
     /// click on it is a click on what it dims.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Dim(usize),
 }
 

@@ -86,10 +86,12 @@ mod timeline;
 mod wav_file;
 mod words;
 
-pub use own_windows::{
-    DIM_WINDOWS, OwnWindow, exclude_window, own_windows_recorded, record_own_windows,
-};
-use own_windows::{OWN_WINDOWS, OwnWindowIds, own_windows_of};
+#[cfg(target_os = "macos")]
+pub use own_windows::DIM_WINDOWS;
+#[cfg(target_os = "macos")]
+use own_windows::OwnWindowIds;
+use own_windows::{OWN_WINDOWS, own_windows_of};
+pub use own_windows::{OwnWindow, exclude_window, own_windows_recorded, record_own_windows};
 
 pub use library::{
     explain as explain_capture, list as list_captures, send as send_capture, show as show_capture,
@@ -3873,9 +3875,9 @@ mod tests {
             window(dim, own, [0.0, 0.0, 1728.0, 1117.0], 26),
             window(app, own + 1, [0.0, 0.0, 1728.0, 1117.0], 0),
         ];
-        let mut dims = [None; DIM_WINDOWS];
+        let mut dims = [None; own_windows::DIM_WINDOWS];
         dims[0] = Some(dim);
-        let roles = OwnWindowIds {
+        let roles = own_windows::OwnWindowIds {
             capsule: Some(capsule),
             ink: Some(ink),
             picker: None,
