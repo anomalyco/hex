@@ -19,7 +19,8 @@ final class ACStubDictionary {
     let nameByLower: [String: (Int, String)]
     let alphabet: [Character]
     let byFirst: [Character: [(Int, String)]]
-    var guessMemo: [String: [String]] = [:]
+    /// By the word's bytes: a `String` key would answer "café" with what "cafe\u{301}" got.
+    var guessMemo: [[UInt8]: [String]] = [:]
 
     init(ranked words: [String], names nameList: [String]) {
         var rank: [String: Int] = [:]
@@ -61,7 +62,7 @@ final class ACStubDictionary {
 
     func guesses(for word: String) -> [String] {
         let lower = word.lowercased()
-        if let memo = guessMemo[lower] { return memo }
+        if let memo = guessMemo[Array(lower.utf8)] { return memo }
         let chars = Array(lower)
         let n = chars.count
         guard n > 0 else { return [] }
@@ -88,7 +89,7 @@ final class ACStubDictionary {
         }
         if n == 2 { out.append("\(chars[0]).\(chars[1]).") }
         let result = Array(out.prefix(10))
-        guessMemo[lower] = result
+        guessMemo[Array(lower.utf8)] = result
         return result
     }
 

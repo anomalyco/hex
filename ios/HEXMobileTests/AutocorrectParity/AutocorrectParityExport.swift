@@ -28,6 +28,8 @@ final class AutocorrectParityExport: XCTestCase {
         }
         let count = environment["HEX_AUTOCORRECT_PARITY_COUNT"].flatMap(Int.init) ?? 200
         let literalStride = environment["HEX_AUTOCORRECT_PARITY_LITERALS"].flatMap(Int.init) ?? 1
+        // `HEX_AUTOCORRECT_PARITY_ONLY=12,40`: only these cases (made as always), to look into them.
+        let only = environment["HEX_AUTOCORRECT_PARITY_ONLY"].map { Set($0.split(separator: ",").compactMap { Int($0) }) }
         let keepCalls = environment["HEX_AUTOCORRECT_PARITY_CALLS"] != nil
         let repo = environment["HEX_AUTOCORRECT_PARITY_REPO"]
             ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -54,58 +56,58 @@ final class AutocorrectParityExport: XCTestCase {
         var totals: [String: Int] = [:]
         let languages: [KeyboardLanguage] = [.english, .spanish, .german, .french, .frenchCanadian, .frenchSwiss, .italian,
                                              .portuguese, .polish, .czech, .romanian, .norwegian, .russian, .ukrainian, .greek, .serbianLatin]
-        var batches: [(KeyboardLanguage, [ACParityGenerator.Case])] = []
+        // Cases are made, run and written one at a time; a case's keys are written before it.
+        func emit(_ c: ACParityGenerator.Case, _ language: KeyboardLanguage, _ generator: inout ACParityGenerator) throws {
+            for line in generator.keysetLines { try writer.write(line) }
+            generator.keysetLines.removeAll()
+            keysets = generator.keysets
+            keysetsByID = generator.keysetsByID
+            nextID = generator.nextKeysetID
+            let runner = ACParityRunner(dictionaries: dictionaries, models: models, keysets: keysetsByID)
+            var line: [String: Any] = ["kind": "case", "id": caseID, "lang": language.rawValue, "learned": c.learned, "ops": c.ops]
+            caseID += 1
+            if let only, !only.contains(caseID - 1) { return }
+            let fixed = Self.run(runner, c, order: .byKey, tie: .ascending, shared: false, keepCalls: keepCalls)
+            line["out"] = fixed.outputs
+            line["calls"] = String(fixed.hash, radix: 16)
+            line["ncalls"] = fixed.calls
+            if let lines = fixed.lines { line["log"] = lines }
+            let today = Self.run(runner, c, order: .dictionary, tie: .ascending, shared: false)
+            if !Self.same(today.outputs, fixed.outputs) {
+                line["today"] = today.outputs
+                totals["order", default: 0] += 1
+            }
+            let swiftTies = Self.run(runner, c, order: .byKey, tie: .dictionary, shared: false)
+            if !Self.same(swiftTies.outputs, fixed.outputs) {
+                line["tie"] = true
+                totals["tie", default: 0] += 1
+            }
+            let shared = Self.run(runner, c, order: .byKey, tie: .ascending, shared: true)
+            if !Self.same(shared.outputs, fixed.outputs) {
+                line["shared"] = shared.outputs
+                totals["shared", default: 0] += 1
+            }
+            if shared.hash != fixed.hash { line["sharedCalls"] = String(shared.hash, radix: 16) }
+            totals[language.rawValue, default: 0] += 1
+            try writer.write(line)
+        }
         for (n, language) in languages.enumerated() {
             var generator = ACParityGenerator(
                 language: language, dictionaries: dictionaries, models: models, rng: SplitMix64(state: 0xAC_0C0E_0000 &+ UInt64(n)),
                 keysets: keysets, keysetsByID: keysetsByID, nextKeysetID: nextID
             )
             let main = [KeyboardLanguage.english, .spanish, .german].contains(language)
-            let cases = (0..<(main ? count : max(1, count / 4))).map { _ in generator.makeCase() }
-            for line in generator.keysetLines { try writer.write(line) }
-            keysets = generator.keysets
-            keysetsByID = generator.keysetsByID
-            nextID = generator.nextKeysetID
-            batches.append((language, cases))
+            for _ in 0..<(main ? count : max(1, count / 4)) {
+                let c = generator.makeCase()
+                try emit(c, language, &generator)
+            }
         }
         var literalGenerator = ACParityGenerator(
             language: .english, dictionaries: dictionaries, models: models, rng: SplitMix64(state: 0xAC_7E57),
             keysets: keysets, keysetsByID: keysetsByID, nextKeysetID: nextID
         )
-        let literalCases = ACParityLiterals.cases(repo: repo, generator: &literalGenerator, stride: literalStride)
-        for line in literalGenerator.keysetLines { try writer.write(line) }
-        keysetsByID = literalGenerator.keysetsByID
-        batches.append((.english, literalCases))
-
-        let runner = ACParityRunner(dictionaries: dictionaries, models: models, keysets: keysetsByID)
-        for (language, cases) in batches {
-            for c in cases {
-                var line: [String: Any] = ["kind": "case", "id": caseID, "lang": language.rawValue, "learned": c.learned, "ops": c.ops]
-                caseID += 1
-                let fixed = Self.run(runner, c, order: .byKey, tie: .ascending, shared: false, keepCalls: keepCalls)
-                line["out"] = fixed.outputs
-                line["calls"] = String(fixed.hash, radix: 16)
-                line["ncalls"] = fixed.calls
-                if let lines = fixed.lines { line["log"] = lines }
-                let today = Self.run(runner, c, order: .dictionary, tie: .ascending, shared: false)
-                if !Self.same(today.outputs, fixed.outputs) {
-                    line["today"] = today.outputs
-                    totals["order", default: 0] += 1
-                }
-                let swiftTies = Self.run(runner, c, order: .byKey, tie: .dictionary, shared: false)
-                if !Self.same(swiftTies.outputs, fixed.outputs) {
-                    line["tie"] = true
-                    totals["tie", default: 0] += 1
-                }
-                let shared = Self.run(runner, c, order: .byKey, tie: .ascending, shared: true)
-                if !Self.same(shared.outputs, fixed.outputs) {
-                    line["shared"] = shared.outputs
-                    totals["shared", default: 0] += 1
-                }
-                if shared.hash != fixed.hash { line["sharedCalls"] = String(shared.hash, radix: 16) }
-                totals[language.rawValue, default: 0] += 1
-                try writer.write(line)
-            }
+        for c in ACParityLiterals.cases(repo: repo, generator: &literalGenerator, stride: literalStride) {
+            try emit(c, .english, &literalGenerator)
         }
         try writer.flush()
         print("AUTOCORRECT-PARITY cases=\(caseID) " + totals.keys.sorted().map { "\($0)=\(totals[$0]!)" }.joined(separator: " "))
@@ -185,7 +187,17 @@ enum ACParityChars {
              tricky.map { s.caseInsensitiveCompare($0) == .orderedSame ? "1" : "0" }.joined(),
              s.trimmingCharacters(in: .whitespacesAndNewlines), s.replacingOccurrences(of: "'", with: "")]
         }
-        return ["kind": "chars", "rows": rows, "strings": strings]
+        // `caseInsensitiveCompare` both ways on pairs where Foundation's folding is its own: a
+        // receiver's ß against an umlaut before s, Greek's iota subscript.
+        let pairs: [(String, String)] = [
+            ("wußte", "wüste"), ("Maß", "mäs"), ("groß", "grös"), ("Straße", "Sträse"), ("aß", "äs"), ("aß", "a\u{308}s"),
+            ("Aß", "ÄS"), ("aßb", "a\u{301}sb"), ("aß", "ass"), ("ẞ", "ss"), ("ﬃ", "ffi"), ("ŉ", "ʼn"), ("ǰ", "j\u{30C}"),
+            ("İ", "i\u{307}"), ("İ", "i"), ("\u{345}", "ι"), ("ᾳ", "αι"), ("ᾼ", "ᾳ"), ("ΑΙ", "ᾳ"), ("ἈΙ", "ᾀ"),
+        ]
+        let pairRows: [[Any]] = pairs.flatMap { a, b in
+            [[a, b, a.caseInsensitiveCompare(b) == .orderedSame], [b, a, b.caseInsensitiveCompare(a) == .orderedSame]]
+        }
+        return ["kind": "chars", "rows": rows, "strings": strings, "pairs": pairRows]
     }
 }
 

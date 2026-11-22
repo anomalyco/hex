@@ -25,7 +25,7 @@ mod ops;
 mod stub;
 
 use std::collections::{BTreeMap, HashMap};
-use std::io::{BufRead, BufReader};
+use std::io::{BufRead, BufReader, Write};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -137,6 +137,21 @@ struct Tally {
     shared_examples: Vec<String>,
 }
 
+/// JSON with everything past ASCII escaped, so composed and decomposed letters show.
+fn escaped(v: &Value) -> String {
+    serde_json::to_string(v)
+        .unwrap()
+        .chars()
+        .map(|c| {
+            if c.is_ascii() {
+                c.to_string()
+            } else {
+                c.escape_unicode().to_string()
+            }
+        })
+        .collect()
+}
+
 /// The first answer the port's order of your own words changes.
 fn order_example(case: &Value, today: &Value, out: &[Value]) -> String {
     let ops = case["ops"].as_array().unwrap();
@@ -181,12 +196,33 @@ fn compare(
         *tally.by_kind.entry(at.clone()).or_default() += 1;
         if tally.examples.len() < 12 {
             let detail = match first {
-                Some(i) => format!(
-                    "op {i} {}\n    rust  {}\n    swift {}",
-                    ops[i],
-                    serde_json::to_string(&run.outputs[i]).unwrap(),
-                    serde_json::to_string(&expected[i]).unwrap()
-                ),
+                Some(i) => {
+                    let swift = strings(&case["log"]);
+                    let calls = if swift.is_empty() {
+                        String::new()
+                    } else {
+                        let lines = world
+                            .run(tsv, ops, expected, &learned, true)
+                            .lines
+                            .unwrap_or_default();
+                        let at = lines
+                            .iter()
+                            .zip(&swift)
+                            .position(|(a, b)| a != b)
+                            .unwrap_or(0);
+                        format!(
+                            "\n    first differing call {at}: rust {:?} swift {:?}",
+                            lines.get(at),
+                            swift.get(at)
+                        )
+                    };
+                    format!(
+                        "op {i} {}\n    rust  {}\n    swift {}{calls}",
+                        ops[i],
+                        escaped(&run.outputs[i]),
+                        escaped(&expected[i])
+                    )
+                }
                 None => {
                     let lines = world
                         .run(tsv, ops, expected, &learned, true)
@@ -239,11 +275,21 @@ fn check(path: &str) {
     let mut world: Option<World> = None;
     let mut keysets = HashMap::new();
     let mut tally = Tally::default();
+    // `HEX_AUTOCORRECT_PARITY_FAILURES=/path`: the failing cases, with the lines they need, as a
+    // set of their own.
+    let mut failures_out = std::env::var_os("HEX_AUTOCORRECT_PARITY_FAILURES")
+        .map(|p| std::io::BufWriter::new(std::fs::File::create(p).expect("a failures file")));
     let mut char_failures = Vec::new();
     let mut char_known = Vec::new();
     for line in BufReader::new(file).lines() {
         let line = line.unwrap();
         let v: Value = serde_json::from_str(&line).unwrap();
+        let failed_before = tally.failures + tally.shared_failures;
+        if let Some(out) = &mut failures_out
+            && v["kind"] != "case"
+        {
+            writeln!(out, "{line}").unwrap();
+        }
         match v["kind"].as_str().unwrap() {
             "setup" => {
                 world = Some(World {
@@ -297,16 +343,23 @@ fn check(path: &str) {
                 let mut scratch = Tally::default();
                 if compare(world, &shared, &v, shared_out, shared_calls, &mut scratch) {
                     tally.shared_failures += 1;
-                    tally.examples.extend(
-                        scratch
-                            .examples
-                            .into_iter()
-                            .map(|e| format!("[shared list] {e}"))
-                            .take(2),
-                    );
+                    if tally.examples.len() < 6 {
+                        tally.examples.extend(
+                            scratch
+                                .examples
+                                .into_iter()
+                                .map(|e| format!("[shared list] {e}"))
+                                .take(1),
+                        );
+                    }
                 }
             }
             other => panic!("unknown line {other}"),
+        }
+        if let Some(out) = &mut failures_out
+            && tally.failures + tally.shared_failures > failed_before
+        {
+            writeln!(out, "{line}").unwrap();
         }
     }
     println!(

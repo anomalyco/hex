@@ -4,10 +4,13 @@
 use hex_keyboard_core::autocorrect::text;
 use serde_json::{Value, json};
 
-/// Where the port can't be Swift: `caseInsensitiveCompare` isn't symmetric for a Greek iota
-/// subscript (U+0345, and "ἈΙ" against "ᾀ" but not "ᾀ" against "ἈΙ"); the port folds it
-/// one way for both. No keyboard layout types it.
-const KNOWN: [&str; 2] = ["U+0345 ", "\"\u{1f08}\u{399}\" "];
+/// Where the port isn't Foundation: `caseInsensitiveCompare` folds its own way, and not
+/// symmetrically. A receiver's ß matches a precomposed umlaut before s ("wußte" is "wüste",
+/// "Maß" is "mäs", "Straße" is "Sträse", not the other way round), and Greek's iota subscript
+/// matches or not by case and side ("ἈΙ" is "ᾀ", "ᾀ" is not "ἈΙ"). The port folds both
+/// strings fully (Unicode case folding), keeping the iota subscript; these answers are
+/// listed, not failed, until the owner decides.
+const KNOWN: [&str; 3] = ["U+0345 ", "\"\u{1f08}\u{399}\" ", "pair "];
 
 /// The answers that differ, and those that differ as `KNOWN` says.
 pub fn check(v: &Value) -> (Vec<String>, Vec<String>) {
@@ -95,6 +98,16 @@ pub fn check(v: &Value) -> (Vec<String>, Vec<String>) {
         });
         if !same {
             failures.push(format!("{s:?} rust {got} swift {row}"));
+        }
+    }
+    for pair in v["pairs"].as_array().into_iter().flatten() {
+        let (a, b) = (pair[0].as_str().unwrap(), pair[1].as_str().unwrap());
+        let rust = text::case_insensitive_eq(a, b);
+        if json!(rust) != pair[2] {
+            failures.push(format!(
+                "pair {a:?}.caseInsensitiveCompare({b:?}): rust {rust} swift {}",
+                pair[2]
+            ));
         }
     }
     failures
