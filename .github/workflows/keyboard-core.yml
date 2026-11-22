@@ -12,7 +12,6 @@ on:
       - "crates/keyboard/**"
       - "ios/HEXKeyboard/TypingModel/**"
       - "ios/HEXShared/FullKeyboard/never-suggest.tsv"
-      - ".github/workflows/keyboard-core.yml"
   workflow_dispatch:
 
 permissions:
