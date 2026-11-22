@@ -69,9 +69,10 @@ internal class SwipeDecoder(private val model: Long, val words: TypingModel, pri
 
     /**
      * Whether the dictionary knows a word, from Android's lists, for the core's casing and name
-     * rules: a lowercase word when the model or `<lang>.valid` has it and the books don't mostly
-     * write it with a capital; any other when the books write its lowercase form with a capital
-     * at least half the time (`<lang>.capitals`, the threshold dictation's casing uses).
+     * rules: a lowercase word when the model or `<lang>.valid` has it and the books write it with
+     * a capital less than 95% of the time; any other when the books write its lowercase form with
+     * a capital at least 95% of the time (`<lang>.capitals`, the threshold the typing engine's
+     * name casing uses).
      */
     val checker = WordChecker { word ->
         val lower = word.lowercase()
@@ -80,7 +81,7 @@ internal class SwipeDecoder(private val model: Long, val words: TypingModel, pri
     }
 
     companion object {
-        private const val NAME_PERCENT = 50
+        private const val NAME_PERCENT = 95
         /** The core's English contractions, each with its cost. */
         private val englishContractions by lazy { KeyboardCore.swipeEnglishContractions().map { it to KeyboardCore.swipeCostOfContraction(it) } }
         private val ownWordCost by lazy { KeyboardCore.swipeOwnWordCost() }

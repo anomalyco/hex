@@ -1,6 +1,7 @@
 package ly.anoma.hex.typing
 
 import java.io.File
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -41,5 +42,15 @@ class SwipeDecoderTest {
         // Without them, neither of your words is read.
         val bare = decoder.sync(false, null) { it.run() }!!
         assertTrue("hexkb" !in swipe(decoder, bare, "hexkb"))
+    }
+
+    @Test
+    fun aNameIsAWordTheBooksCapitaliseAtLeast95PercentOfTheTime() {
+        val checker = SwipeDecoder(KeyboardCore.modelOpen(file.path), model, emptyList()).checker
+        // en.capitals: "monday" 100%, "march" 92%.
+        assertTrue(checker.isWordValid("Monday"))
+        assertFalse(checker.isWordValid("monday"))
+        assertTrue(checker.isWordValid("march"))
+        assertFalse(checker.isWordValid("March"))
     }
 }
