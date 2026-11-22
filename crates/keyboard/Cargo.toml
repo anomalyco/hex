@@ -1,0 +1,25 @@
+# The Hex keyboard's shared core, for iOS (HEXKeyboard) and Android (the IME).
+# Its own workspace and lock file: the desktop workspace never builds it, and its
+# dependencies never enter the root Cargo.lock.
+[workspace]
+members = ["core", "ffi"]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+license = "MIT"
+publish = false
+
+[workspace.lints.rust]
+unsafe_op_in_unsafe_fn = "deny"
+unused_must_use = "deny"
+
+[workspace.lints.clippy]
+dbg_macro = "deny"
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+# Every C and JNI entry point catches panics, so they unwind to the boundary.
+panic = "unwind"
