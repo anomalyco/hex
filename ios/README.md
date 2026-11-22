@@ -483,8 +483,10 @@ never at a launch by itself.
     Two-language dictation or the Multilingual model, the keyboard's own memory limit
     measured on this iPhone (the keyboard writes footprint plus `os_proc_available_memory`
     to the App Group at each launch and tells Hex with a Darwin notification) and at least
-    `KeyboardParakeetBudget.requiredLimit`, a connection that isn't expensive or constrained
-    (`NWPathMonitor`: not cellular, a personal hotspot or Low Data Mode), and 2 GB free.
+    `KeyboardParakeetBudget.requiredLimit`, a connection that isn't expensive, constrained or
+    cellular (`NWPathMonitor`, `KeyboardParakeetDownload.isUnmetered`: not cellular, even 5G that
+    iOS calls not expensive under "Allow More Data on 5G", a personal hotspot or Low Data Mode),
+    and 2 GB free.
     It checks at launch, whenever Hex comes to the front, when such a connection returns and
     when the keyboard reports its limit. Turned on by hand (a stored true, including from
     the builds where it was off by default) it downloads at once on any connection. Until

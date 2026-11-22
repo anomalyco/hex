@@ -90,6 +90,13 @@ final class KeyboardParakeetDownload {
         return nil
     }
 
+    /// Whether a connection lets the download start by itself: up, not expensive (a personal
+    /// hotspot, or cellular as iOS usually prices it), not Low Data Mode, and not over cellular
+    /// at all, because iOS reports 5G as not expensive under "Allow More Data on 5G".
+    nonisolated static func isUnmetered(satisfied: Bool, expensive: Bool, constrained: Bool, cellular: Bool) -> Bool {
+        satisfied && !expensive && !constrained && !cellular
+    }
+
     nonisolated static func freeBytes() -> Int64? {
         let home = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
         return try? home.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
@@ -148,7 +155,12 @@ final class KeyboardParakeetDownload {
         guard network == nil else { return }
         let monitor = NWPathMonitor()
         monitor.pathUpdateHandler = { path in
-            let unmetered = path.status == .satisfied && !path.isExpensive && !path.isConstrained
+            let unmetered = KeyboardParakeetDownload.isUnmetered(
+                satisfied: path.status == .satisfied,
+                expensive: path.isExpensive,
+                constrained: path.isConstrained,
+                cellular: path.usesInterfaceType(.cellular)
+            )
             Task { @MainActor in KeyboardParakeetDownload.shared.networkChanged(unmetered) }
         }
         monitor.start(queue: DispatchQueue.global(qos: .utility))
