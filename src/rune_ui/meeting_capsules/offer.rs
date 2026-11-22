@@ -76,19 +76,6 @@ pub(super) fn delivery(
     }
 }
 
-/// A website or app's name short enough for an answer's button, so a long
-/// host doesn't widen the capsule.
-pub(super) fn short_name(name: &str) -> String {
-    const LONGEST: usize = 24;
-    if name.chars().count() <= LONGEST {
-        return name.to_owned();
-    }
-    let mut short: String = name.chars().take(LONGEST).collect();
-    short.truncate(short.trim_end().len());
-    short.push('…');
-    short
-}
-
 /// Only the buttons of the shown offer and layout can answer it, even if
 /// an input arrives between a replacement and the next frame.
 pub(super) fn actions(
@@ -133,32 +120,21 @@ pub(super) fn actions(
         let label = candidate
             .provider()
             .map_or_else(String::new, |provider| provider.label);
-        let name = short_name(&label);
         let mut actions = vec![
             action("offer-cancel", tr("Cancel"), false, |c| {
                 c.set_more_open(false)
             }),
-            action(
-                "never-offer",
-                &tr_fill("Don't offer for {}", &name),
-                false,
-                |c| {
-                    c.choose(MeetingPolicy::NeverOffer);
-                    c.send(ControllerCommand::Dismiss);
-                    c.close();
-                },
-            ),
+            action("never-offer", tr("Don't offer"), false, |c| {
+                c.choose(MeetingPolicy::NeverOffer);
+                c.send(ControllerCommand::Dismiss);
+                c.close();
+            }),
         ];
         if candidate.can_always_record() {
-            actions.push(action(
-                "always-record",
-                &tr_fill("Always record {}", &name),
-                true,
-                |c| {
-                    c.choose(MeetingPolicy::AlwaysRecord);
-                    c.record_offer();
-                },
-            ));
+            actions.push(action("always-record", tr("Always record"), true, |c| {
+                c.choose(MeetingPolicy::AlwaysRecord);
+                c.record_offer();
+            }));
         }
         return (
             p.muted(),

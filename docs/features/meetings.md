@@ -259,16 +259,16 @@ Browser calls -> a browser holding the microphone is a browser call after 20 s
     │   included), msedge, vivaldi (vivaldi-bin, vivaldi-stable,
     │   vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's process);
     │   others are not detected (#1105)
-    ├── Linux -> offered as "Call in <browser>": no site is read yet, so a
+    ├── Linux -> offered as "<browser> call detected": no site is read yet, so a
     │   call on any website (Teams on the web, a Teams web app/PWA, Meet, ...)
     │   is a browser call, never the Microsoft Teams (or other service's)
-    │   choice; Always record <App> isn't offered for it
+    │   choice; Always record isn't offered for it
     └── Windows -> the microphone-holding browser's visible windows are read
         through UI Automation, at most six, one read in flight and 2 s for
         the whole read (a hung provider leaves their titles): a page address
         or window title naming a call (Meet, a Teams page, ...) offers that
         service with its site, and Record automatically follows it like any known
-        call; a page that names no call stays "Call in <browser>"
+        call; a page that names no call stays "<browser> call detected"
         └── the browser executable's windows, not the microphone process's:
             a Chromium audio utility process has none; each window's search
             stops at its first Document, so a page's content is not
@@ -386,8 +386,8 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │       indicator off, a "Recording automatically" capsule with Stop
      │       and ✕ (✕ only hides it; the recording goes on, in the menu bar)
      └── Ask -> Capsule below the menu bar, focus-free  // meetings.offer
-         ├── Title: the app named first, "Google Meet call detected", "Call on meet.jit.si",
-         │   "Call in Brave Browser" (site unknown), or the meeting's name
+         ├── Title: the app named first, "Google Meet call detected", "meet.jit.si call detected",
+         │   "Brave Browser call detected" (site unknown), or the meeting's name
           ├── The app's local icon, or the website's bundled service mark when
           │   known. Otherwise a neutral call icon, never the hosting browser's.
           │   The same 24 pt slot keeps the title aligned as a local icon loads.
@@ -406,9 +406,9 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          ├── … -> "<provider>" · "Change anytime in Settings" (capsule widens)
          │   │   No rule is saved and no recording starts. The choices stay
          │   │   open past the timeout, until answered or the offer is withdrawn.
-         │   ├── Don't offer for <App> -> saved, close; the app's row shows
+         │   ├── Don't offer -> saved, close; the app's row shows
          │   │   in the Calls sheet at once
-         │   ├── Always record <App> -> saved (Record automatically), records
+         │   ├── Always record -> saved (Record automatically), records
          │   │   this call too; the row shows in the Calls sheet at once
          │   │   └── not offered for a browser on an unknown page
          │   └── Cancel -> Back to Record / Not now; if the original timer
@@ -619,7 +619,7 @@ space in its own name removed) before detection reads it.
 page from what was read, by the same rule macOS uses for its Accessibility
 pages: a page address that names a call wins, and a call's tab title outranks
 another window's address. A window titled `Meet - …` names a Meet call when no
-address does; with neither, the call stays a plain "Call in <browser>". Not
+address does; with neither, the call stays a plain "<browser> call detected". Not
 observed on a real Windows Meet or Teams call.
 
 On 2026-10-21 Brave opened the microphone for 3-6 s at a time on
@@ -1438,7 +1438,7 @@ panel (2026-11-12) has not been clicked on a real Mac. Hover and the corner snap
 are checked by `the_recording_capsule_rests_compact_and_opens_under_the_pointer`,
 `dragging_the_recording_capsule_moves_it_and_snaps_to_a_corner`, and
 `a_released_capsule_snaps_to_the_corner_nearest_its_centre`; neither has been
-tried with a real pointer. A "Don't offer for <App>" or "Always record <App>" answer is saved and
+tried with a real pointer. A "Don't offer" or "Always record" answer is saved and
 also written into the window's live settings. On 2026-10-22 a signed build on a MacBook Pro
 showed the recording capsule (Open opened the meeting while it kept
 recording; Stop transcribed) and the ready capsule (Copy copied the

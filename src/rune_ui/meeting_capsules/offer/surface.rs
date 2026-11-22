@@ -131,14 +131,11 @@ impl Presentation {
             + 8.0
             + button(tr("Record"))
             + if provider.is_some() { 34.0 + 8.0 } else { 0.0 };
-        let name = provider
-            .as_ref()
-            .map_or_else(String::new, |p| super::offer::short_name(&p.label));
         let rules = button(tr("Cancel"))
             + 8.0
-            + button(&tr_fill("Don't offer for {}", &name))
+            + button(tr("Don't offer"))
             + if c.can_always_record() {
-                8.0 + button(&tr_fill("Always record {}", &name))
+                8.0 + button(tr("Always record"))
             } else {
                 0.0
             };
