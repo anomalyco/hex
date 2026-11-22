@@ -22,7 +22,7 @@ use super::super::{
     CALLBACK_STATE, CaptureState, Disposition, HotkeyAction, HotkeyEvent, WindowsHotkey,
     process_button, virtual_key,
 };
-use super::callback_state_value;
+use super::{callback_state_value, state_lock};
 use crate::app_settings::ModifierSide;
 
 /// The physical keys a test holds, as `ModifierState::read` asks for them.
@@ -157,6 +157,7 @@ impl Drop for Rig {
 /// input-language switch, so it cancels, and Alt's release is the app's.
 #[test]
 fn a_modifier_outside_the_hold_cancels_it_without_a_mask() {
+    let _state = state_lock();
     let mut rig = Rig::keyless(WindowsHotkey::default(), None, false);
     assert_eq!(rig.down(VK_LMENU), Disposition::Pass);
     assert_eq!(rig.next(), Some(HotkeyAction::Start));
@@ -179,6 +180,7 @@ fn a_modifier_outside_the_hold_cancels_it_without_a_mask() {
 /// Toggle mode must not lock the capture the joining modifier cancelled.
 #[test]
 fn a_joining_modifier_never_locks_a_toggle_capture() {
+    let _state = state_lock();
     let mut rig = Rig::keyless(WindowsHotkey::default(), None, true);
     assert_eq!(rig.down(VK_LMENU), Disposition::Pass);
     assert_eq!(rig.next(), Some(HotkeyAction::Start));
@@ -196,6 +198,7 @@ fn a_joining_modifier_never_locks_a_toggle_capture() {
 /// dictation cancels and the paste still fires.
 #[test]
 fn ctrl_after_alt_leaves_paste_last_to_fire() {
+    let _state = state_lock();
     let paste = WindowsHotkey {
         control: Some(ModifierSide::Either),
         windows: None,
@@ -230,6 +233,7 @@ fn ctrl_after_alt_leaves_paste_last_to_fire() {
 /// never cancels the hold.
 #[test]
 fn modifiers_the_chord_names_never_cancel_it() {
+    let _state = state_lock();
     let ctrl_alt = WindowsHotkey {
         control: Some(ModifierSide::Either),
         windows: None,

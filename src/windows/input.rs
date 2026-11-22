@@ -1480,6 +1480,17 @@ mod tests {
         }
     }
 
+    /// One test at a time drives the hook's process-wide [`CALLBACK_STATE`].
+    /// Nextest gives every test its own process, but plain `cargo test` runs
+    /// them as threads, and these tests install, drive, and clear the same
+    /// state.
+    static STATE_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Holds [`STATE_LOCK`] for a test that touches [`CALLBACK_STATE`].
+    pub(super) fn state_lock() -> std::sync::MutexGuard<'static, ()> {
+        STATE_LOCK.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
     /// The hook's state machine as the keyboard hook installs it, for one
     /// keyed binding; the caller drives events through
     /// [`process_button`], whose `key_held` lookup stands in for the physical
@@ -1541,6 +1552,7 @@ mod tests {
 
     #[test]
     fn a_bare_trigger_key_ends_a_paste_continuation_but_the_shortcut_does_not() {
+        let _state = state_lock();
         let space = u32::from(VK_SPACE);
         let ctrl_held = |key: u16| key == VK_LCONTROL;
 

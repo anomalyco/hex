@@ -305,7 +305,7 @@ Windows modifier-only shortcut                           // dictate.windows-lone
   │   (the key reaches the app; locked and toggle captures keep recording)
   ├── A modifier the chord doesn't name joins -> Its chord too: Cancel at once,
   │   a Toggle press locks nothing, and Alt's release is the app's (no mask,
-  │   no 0xE8 tap), so Ctrl+Alt+V still fires Paste Last (#2278)
+  │   no 0xE8 tap): Alt+Shift, Alt+Ctrl, Alt+Win (#2278)
   │   (a modifier the chord names, like Ctrl of Ctrl+Alt, is part of it, in either order)
   ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
   │   -> No menu bar or Start menu; Share shortcut skips the mask
@@ -315,10 +315,11 @@ Windows modifier-only shortcut                           // dictate.windows-lone
 ```
 
 A modifier the chord does not name is a chord like any key: it cancels the
-hold (`names_modifier`), Toggle's press then locks nothing, and the shortcut's
-Alt release is the app's, with no mask key. So Left Alt on the way to
-Ctrl+Alt+V cancels a dictation and Paste Last still fires, and Alt+Shift
-switches the keyboard language. A modifier the chord names is part of it,
+hold (`names_modifier`), Toggle's press then locks nothing, and Alt is not
+masked when that chord ends: the app sees the plain release (Alt+Shift,
+Alt+Ctrl, Alt+Win). Left Alt on the way to Ctrl+Alt+V still ends in Paste
+Last; its V is Hex's key, so that chord's Alt release does mask, as any
+swallowed key's chord does (#1254). A modifier the chord names is part of it,
 whichever order the keys go down in. Labs › Hold through other keys keeps a
 hold a second or more old, as it does for keys.
 
