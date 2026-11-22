@@ -102,6 +102,8 @@ final class DictationController {
 
     private var jobGeneration: UInt64 = 0
     var modelPrepGeneration: UInt64 = 0
+    /// The preparation now running, cancelled when a newer one replaces it.
+    @ObservationIgnored var preparationTask: Task<Void, Never>?
     private var activeCapture: ActiveCaptureSession?
     private var meterTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
@@ -213,13 +215,16 @@ final class DictationController {
     /// Whether Hex is in the background, where iOS suspends it and a download's connection
     /// drops.
     var isInBackground = false
-    /// A model download that failed while Hex was in the background, tried again on return.
+    /// A model download or preparation step that failed while Hex was in the background, tried
+    /// again on return.
     var preparationFailedInBackground = false
     /// `watchPreparation`: when the preparation last said something new, whether it has said
     /// anything yet, and how long each may last.
     @ObservationIgnored var preparationChangedAt = ContinuousClock.now
     @ObservationIgnored var preparationReported = false
     @ObservationIgnored var preparationLimits = (firstReport: Duration.seconds(30), stall: Duration.seconds(120))
+    /// Whether the preparation now running picked Parakeet Ultra, for its failure path.
+    @ObservationIgnored var preparingMultilingualParakeet = false
 
     init(
         audio: (any AudioManaging)? = nil,
