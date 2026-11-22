@@ -144,6 +144,8 @@ final class DictationController {
         didSet {
             captureFailed = false
             if case .failed = phase { failedAt = now() }
+            // Speech model in keyboard holds back while a preparation runs; it starts once that ends.
+            if oldValue == .preparingModel, phase != .preparingModel { startKeyboardParakeetDownloadIfWanted() }
             guard phase.keepsScreenAwake != oldValue.keepsScreenAwake else { return }
             // Only applies while Hex is in front; nothing else in Hex sets it, so ending a
             // dictation hands the screen back to Auto-Lock.
