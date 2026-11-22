@@ -1143,12 +1143,12 @@ never at a launch by itself.
   counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
   "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. Czech likewise:
   every háček or čárka left out counts as one such fix ("cesky" → "český", "prilis" →
-  "příliš"), checked against a stub dictionary, and Hungarian too, ő's and ű's double acute
-  included ("koszonom" → "köszönöm", "kesobb" → "később"), while a word of its own keeps its
-  spelling ("meg" and "kor" stay though "még" and "kör" exist). A two-letter non-word one
+  "příliš"), checked against a stub dictionary, and Hungarian too ("koszonom" → "köszönöm",
+  "kesobb" → "később"), while a word of its own keeps its spelling ("meg" and "kor" stay
+  though "még" and "kör" exist). A two-letter non-word one
   neighbouring key (or one swap) from a very common two-letter word is fixed too
-  ("tk" → "to", Spanish "nl" → "no"; `KeyboardLanguage.commonTwoLetterWords`, English,
-  Spanish and Italian only). Auto-capitalization is unchanged.
+  ("tk" → "to", Spanish "nl" → "no", Hungarian "es" → "és"; `KeyboardLanguage.commonTwoLetterWords`,
+  English, Spanish, Italian and Hungarian). Auto-capitalization is unchanged.
   The 123 and #+= pages are English's in every language but Greek (above); their held keys follow each
   language's system keyboard where it differs (# holds № in Russian and Ukrainian, the
   digits º and ª in Spanish and Italian, . holds · in French, $ holds ₴ in Ukrainian and

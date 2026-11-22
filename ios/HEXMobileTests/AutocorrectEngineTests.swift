@@ -651,11 +651,12 @@ final class AutocorrectEngineTests: XCTestCase {
     }
 
     /// Hungarian types with iOS's hu dictionary, and a missing accent is the cheapest fix there
-    /// is, however many a word lacks ("koszonom" -> "köszönöm", "kesobb" -> "később"): ő and ű
-    /// are the double-acute letters, which have no decomposition to o or u, so they are named as
-    /// Polish's ł is; other languages keep one edit. A word of its own is never accented ("meg",
-    /// "kor" stay though the dictionary offers "még", "kör"): the checker knows it as typed. The
-    /// fixes run against a stub dictionary answering as an iPhone's would.
+    /// is, however many a word lacks ("koszonom" -> "köszönöm", "kesobb" -> "később"); ő and ű
+    /// are o and u with the combining double acute, so each is one edit like á or é, where
+    /// another language's layout counts an edit per accent. A two-letter non-word takes its
+    /// accent too ("es" -> "és"). A word of its own is never accented ("meg", "kor" stay though
+    /// the dictionary offers "még", "kör", and "az" and "is" stay): the checker knows it as
+    /// typed. The fixes run against a stub dictionary answering as an iPhone's would.
     func testHungarianRestoresMissingDiacritics() {
         XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "szivesen", to: "szívesen", language: .hungarian)!, 0.15, accuracy: 0.001)
         XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "talalkozunk", to: "találkozunk", language: .hungarian)!, 0.15, accuracy: 0.001)
@@ -672,7 +673,7 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(AutocorrectEngine.commonWords(.hungarian).count, 6)
 
         let hungarian = stubbed {
-            $0.valid = ["köszönöm", "szívesen", "kérem", "kerek", "találkozunk", "később", "üdvözlöm", "meg", "még", "kor", "kör", "szépen"]
+            $0.valid = ["köszönöm", "szívesen", "kérem", "kerek", "találkozunk", "később", "üdvözlöm", "meg", "még", "kor", "kör", "szépen", "az", "és", "is"]
             // "kerek" is one adjacent key (m to k) from "kerem" and listed first; "kérem" only
             // lacks its accent, and wins.
             $0.guessTable = [
@@ -692,6 +693,9 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(hungarian, "meg"), "meg is a word: no accent put on it")
         XCTAssertNil(fix(hungarian, "kor"), "kor is one too")
         XCTAssertNil(fix(hungarian, "szépen"), "a word stays")
+        XCTAssertEqual(fix(hungarian, "es"), "és", "a two-letter non-word takes its accent")
+        XCTAssertNil(fix(hungarian, "az"), "az is a word: no accent put on it")
+        XCTAssertNil(fix(hungarian, "is"), "is is one too")
         hungarian.setLanguage(.spanish, available: ["hu", "es_ES"])
         XCTAssertNil(fix(hungarian, "koszonom"), "three accents are three edits on another layout")
     }

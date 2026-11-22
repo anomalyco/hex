@@ -82,14 +82,14 @@ extension AutocorrectEngine {
         // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
         // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
         // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), and Hungarian: its accented
-        // vowels left out, the double-acute ő and ű included ("koszonom" -> "köszönöm",
-        // "kesobb" -> "később", "szivesen" -> "szívesen").
+        // vowels left out ("koszonom" -> "köszönöm", "kesobb" -> "később", "szivesen" ->
+        // "szívesen"), ő and ű included, as o and u with the combining double acute.
         if language == .polish || language == .greek || language == .czech || language == .hungarian,
            s.count == t.count {
             func same(_ a: Character, _ b: Character) -> Bool {
                 switch language {
                 case .greek: Self.sameGreekLetterIgnoringAccents(a, b)
-                case .hungarian: Self.sameHungarianLetterIgnoringDiacritics(a, b)
+                case .hungarian: Self.sameLetterIgnoringAccents(a, b)
                 default: Self.samePolishLetterIgnoringDiacritics(a, b)
                 }
             }
@@ -155,13 +155,6 @@ extension AutocorrectEngine {
     /// z/ż, l/ł: ł has no decomposition, so it is named).
     static func samePolishLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
         sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
-    }
-
-    /// Whether two lowercase letters are one Hungarian letter with or without its accent
-    /// (a/á, e/é, i/í, o/ó ö ő, u/ú ü ű): ő and ű are the double-acute letters (U+0151, U+0171),
-    /// which have no decomposition to o or u, so `sameLetterIgnoringAccents` alone misses them.
-    static func sameHungarianLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
-        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["o", "ő"] || Set([a, b]) == ["u", "ű"]
     }
 
     /// Whether two lowercase letters are one Greek letter with or without its tonos or

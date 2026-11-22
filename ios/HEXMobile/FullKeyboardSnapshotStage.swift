@@ -7,7 +7,7 @@ import UIKit
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
 /// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
-/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, or `t` on Romanian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
+/// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, `t` on Romanian, or `o` on Hungarian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
 /// Settings › Keyboard › Emoji on with a seeded history; `emoji-probe` prints the panel's
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
@@ -143,7 +143,7 @@ struct FullKeyboardSnapshotStage: View {
             case "numbers": "Találkozunk 19:3"
             case "shift": "Köszönöm szépen, találkozunk holnap. "
             case "typing": "Köszönöm szépen, találkozunk holn"
-            case "accents": Self.accentKey == "a" ? "Talál" : "Köszön"
+            case "accents": Self.accentKey == "e" ? "Káv" : "Köszön"
             default: "Köszönöm szépen, találkozunk "
             }
         case .romanian:

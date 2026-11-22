@@ -445,8 +445,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .hungarian:
             // Hungarian's nine accented vowels, its own letter right after the base: á on A, é on
             // E, í on I, ó ö ő on O and ú ü ű on U, then the neighbouring Latin accents; every
-            // other letter holds nothing, as Hungarian's consonants take none. ő and ű are the
-            // double-acute letters (U+0151, U+0171), which have no decomposition to o or u.
+            // other letter holds nothing, as Hungarian's consonants take none.
             [
                 "a": ["a", "á", "à", "â", "ä", "æ", "ã", "å", "ą", "ā"],
                 "e": ["e", "é", "è", "ê", "ë", "ě", "ė", "ę", "ē"],

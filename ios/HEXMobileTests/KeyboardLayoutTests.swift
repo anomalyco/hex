@@ -1236,7 +1236,7 @@ final class KeyboardLayoutTests: XCTestCase {
         for letter in KeyboardLanguage.hungarian.letterRows.joined() where !["a", "e", "i", "o", "u"].contains(letter) {
             XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .hungarian), letter)
         }
-        XCTAssertEqual(shownHolds("o", .hungarian), ["ō", "ø", "œ", "õ", "ò", "ô", "ő", "ö", "ó"], "the double acute nearest the key")
+        XCTAssertEqual(shownHolds("o", .hungarian), ["ō", "ø", "œ", "õ", "ò", "ô", "ő", "ö", "ó"], "ó nearest the key, then ö, then ő")
         for layer in [KeyboardLayer.numbers, .symbols] {
             XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .hungarian).keys, KeyboardLayout(width: 402, layer: layer).keys)
         }
