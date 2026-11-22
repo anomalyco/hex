@@ -4560,6 +4560,26 @@
           }
         }
       }
+    },
+    "New speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新的语音模型"
+          }
+        }
+      }
+    },
+    "Downloads in Hex on Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Hex 中通过 Wi-Fi 下载"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

@@ -106,4 +106,46 @@ extension FullKeyboardView {
         showsAllowPasteHint = false
         refreshStrip()
     }
+
+    // MARK: New speech model
+
+    /// Two-line notice with an Open Hex chip while the model the keyboard would dictate with
+    /// isn't downloaded (`KeyboardParakeetNotice`).
+    var modelNotice: KeyboardStripNotice? {
+        guard showsModelNotice, !isDictating else { return nil }
+        return KeyboardStripNotice(
+            title: String(localized: "New speech model"),
+            detail: String(localized: "Downloads in Hex on Wi-Fi"),
+            button: String(localized: "Open Hex")
+        )
+    }
+
+    /// When the keyboard appears: only with Full Access (the App Group, where the model and the
+    /// counts are, and opening Hex need it), never in a password or one-time-code field, never
+    /// while dictating, and as often as `KeyboardParakeetNotice` allows.
+    func offerModelNotice(now: Date = Date(), awaitsDownload: Bool = KeyboardParakeetNotice.modelAwaitsDownload()) {
+        let notice = KeyboardParakeetNotice()
+        guard !showsModelNotice, model.hasFullAccess, !isDictating,
+              engine.target.isSecureTextEntry != true, engine.target.textContentType != .oneTimeCode,
+              awaitsDownload, notice.mayShow(now: now) else { return }
+        notice.recordShown(now: now)
+        showsModelNotice = true
+        typingLog?.ui("model_notice")
+        refreshStrip()
+    }
+
+    private var isDictating: Bool { model.stagePhase == .recording || model.stagePhase == .transcribing }
+
+    func openHexForModel() {
+        KeyboardParakeetNotice().recordOpened()
+        hideModelNotice()
+        model.onOpenURL?(KeyboardParakeetNotice.opensHex)
+    }
+
+    /// Typing or dictating takes the strip back.
+    func hideModelNotice() {
+        guard showsModelNotice else { return }
+        showsModelNotice = false
+        refreshStrip()
+    }
 }
