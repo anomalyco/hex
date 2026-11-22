@@ -70,14 +70,14 @@ final class DictationController {
         let language: String
     }
 
-    private struct PendingKeyboardHandoff {
+    struct PendingKeyboardHandoff {
         let jobID: String?
         let style: DictationStyle
         let requestedAt: TimeInterval
     }
 
-    private var transcriber: any LocalTranscribing
-    private let transcriberFactory: () async -> any LocalTranscribing
+    var transcriber: any LocalTranscribing
+    let transcriberFactory: () async -> any LocalTranscribing
     /// Experiments › Multilingual model (Parakeet): its download, beside the engine Hex
     /// dictates with until it's ready.
     @ObservationIgnored let multilingualDownload: ParakeetUltraDownload
@@ -98,7 +98,7 @@ final class DictationController {
     private let liveActivity = LiveActivityCoordinator()
 
     private var jobGeneration: UInt64 = 0
-    private var modelPrepGeneration: UInt64 = 0
+    var modelPrepGeneration: UInt64 = 0
     private var activeCapture: ActiveCaptureSession?
     private var meterTask: Task<Void, Never>?
     private var transcriptionTask: Task<Void, Never>?
@@ -118,7 +118,7 @@ final class DictationController {
     private var keyboardMessage: String? {
         didSet { keyboardMessageAt = keyboardMessage == nil ? nil : now() }
     }
-    private var pendingHandoff: PendingKeyboardHandoff?
+    var pendingHandoff: PendingKeyboardHandoff?
     var keyboardSessionExpiresAt: TimeInterval = 0
     private var suspendedWarmSessionOnInterruption = false
     /// The warm session loop's restarts of a keepalive that stopped by itself. Each one
@@ -158,7 +158,7 @@ final class DictationController {
             }
         }
     }
-    private(set) var copied = false
+    var copied = false
     var keyboardSessionEnabled = false
     @ObservationIgnored private var rawKeyboardSessionRemaining: TimeInterval = 0
     private(set) var keyboardSessionDisplayRemaining = "0:00"
@@ -196,22 +196,22 @@ final class DictationController {
     /// the new one.
     private var followedKeyboardLanguage: String?
     /// A language change made while busy, applied once the dictation in flight is done.
-    private var pendingLanguagePreparation = false
+    var pendingLanguagePreparation = false
     /// Said once Automatic moved on from a language this iPhone can't dictate yet
     /// ("Russian isn't available on this iPhone yet. Hex switched to English.").
     var languageNotice: String?
     /// The language to offer (BCP 47) when the one chosen can't be dictated here yet.
     var languageOffer: String?
     private let languageSettings: LanguageSettings
-    private(set) var modelPreparation = ModelPreparationProgress(
+    var modelPreparation = ModelPreparationProgress(
         fractionCompleted: 0,
         detail: String(localized: "Checking the speech model")
     )
     /// Whether Hex is in the background, where iOS suspends it and a download's connection
     /// drops.
-    private var isInBackground = false
+    var isInBackground = false
     /// A model download that failed while Hex was in the background, tried again on return.
-    private var preparationFailedInBackground = false
+    var preparationFailedInBackground = false
 
     init(
         audio: (any AudioManaging)? = nil,
@@ -373,42 +373,6 @@ final class DictationController {
         followedKeyboardLanguage = languageSettings.keyboardDictationLanguage()
         languageNotice = nil
         languageOffer = nil
-        switch phase {
-        case .recording, .transcribing, .requestingPermission:
-            pendingLanguagePreparation = true
-        case .modelRequired, .preparingModel, .ready, .failed:
-            prepareModel()
-        }
-    }
-
-    /// Experiments › Multilingual model (Parakeet) turned on or off. On, the engine Hex
-    /// dictates with stays while Parakeet Ultra downloads and loads beside it; a load that
-    /// ended Hex gets another try. Off, the download stops and is deleted, and Hex prepares
-    /// the engine it picks without it if Ultra was the one dictating (now, or once the
-    /// dictation in flight is done).
-    func multilingualParakeetChanged() {
-        let settings = MultilingualParakeetSettings()
-        if settings.isEnabled {
-            ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel).forget()
-            multilingualDownload.settle()
-            if isModelReady || phase == .preparingModel {
-                syncMultilingualParakeet()
-                return
-            }
-        } else {
-            settings.isModelReady = false
-            let download = multilingualDownload
-            Task {
-                // Nothing writes to the folder any more once `stop` returns.
-                await download.stop()
-                ParakeetUltraModel.remove()
-            }
-            if engineName != ParakeetUltraTranscriber.name, isModelReady, phase != .preparingModel {
-                // Ultra wasn't dictating: drop a load of it beside the engine that is.
-                modelPrepGeneration &+= 1
-                return
-            }
-        }
         switch phase {
         case .recording, .transcribing, .requestingPermission:
             pendingLanguagePreparation = true
@@ -628,7 +592,7 @@ final class DictationController {
         fulfillPendingHandoffOrPrepare()
     }
 
-    private func activateWarmSessionAndRunHandoff() {
+    func activateWarmSessionAndRunHandoff() {
         guard phase == .ready else { return }
         let handoff = pendingHandoff
         pendingHandoff = nil
@@ -728,160 +692,6 @@ final class DictationController {
         guard keyboardSessionEnabled, let seconds = warmDuration.seconds else { return }
         keyboardSessionExpiresAt = now() + seconds
         keyboardSessionRemaining = seconds
-    }
-
-    // MARK: - Model Preparation
-
-    /// `fallbacksLeft` bounds how often Automatic moves on to another language after one
-    /// whose model won't install here; each move sets a language aside, so it can't loop.
-    func prepareModel(fallbacksLeft: Int = 2, candidate preset: (any LocalTranscribing)? = nil) {
-        modelPrepGeneration &+= 1
-        let prepGen = modelPrepGeneration
-        // A load beside the engine this replaces is dropped; the end of this one decides again.
-        multilingualDownload.dropLoad()
-        startMultilingualDownloadIfWanted()
-        phase = .preparingModel
-        copied = false
-        modelPreparation = ModelPreparationProgress(
-            fractionCompleted: 0,
-            detail: String(localized: "Checking the speech model")
-        )
-        preparationFailedInBackground = false
-        // A few more seconds from iOS when Hex goes to the background mid-download or mid-compile.
-        let backgroundTime = BackgroundTime("Prepare speech model")
-
-        Task {
-            defer { backgroundTime.end() }
-            var candidateIsUltra = false
-            do {
-                let candidate: any LocalTranscribing
-                if let preset {
-                    candidate = preset
-                } else {
-                    candidate = await transcriberFactory()
-                }
-                guard self.modelPrepGeneration == prepGen else { return }
-                engineName = candidate.displayName
-                candidateIsUltra = candidate is ParakeetUltraTranscriber
-                try await candidate.prepare { [weak self] progress in
-                    Task { @MainActor [weak self] in
-                        guard let self, self.modelPrepGeneration == prepGen else { return }
-                        self.modelPreparation = progress
-                    }
-                }
-                guard self.modelPrepGeneration == prepGen else { return }
-                self.languageOffer = nil
-                self.transcriber = candidate
-                self.transcriptionLanguage = await candidate.languageName
-                self.transcriptionLanguageID = await candidate.languageIdentifier
-                self.keyboardBridge.setModelInstalled(true)
-                self.isModelReady = true
-                self.phase = .ready
-                if candidateIsUltra {
-                    self.multilingualParakeetLoaded()
-                }
-                self.publishKeyboardSnapshot()
-                if self.pendingHandoff != nil {
-                    self.activateWarmSessionAndRunHandoff()
-                }
-                self.syncMultilingualParakeet()
-            } catch {
-                guard self.modelPrepGeneration == prepGen else { return }
-                if candidateIsUltra, fallbacksLeft > 0, !(error is CancellationError) {
-                    // Parakeet Ultra didn't load: the engine Hex uses without it dictates, and
-                    // Hex says why, with Try again.
-                    self.multilingualParakeetFailedToLoad(error)
-                    self.prepareModel(fallbacksLeft: fallbacksLeft - 1)
-                    return
-                }
-                let unavailable = error as? SpeechModelUnavailable
-                if fallbacksLeft > 0, let notice = Self.switchNotice(for: error) {
-                    // Automatic set the language aside, or Parakeet had no room: prepare what
-                    // Hex picks now.
-                    self.languageNotice = notice
-                    self.prepareModel(fallbacksLeft: fallbacksLeft - 1)
-                    return
-                }
-                self.languageOffer = unavailable.flatMap { $0.automatic ? nil : $0.fallback }
-                self.preparationFailedInBackground = self.isInBackground && Self.isDownloadInterruption(error)
-                self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
-                self.pendingHandoff = nil
-                self.phase = .failed(UserFacingError.message(for: error, context: .model))
-                self.publishKeyboardSnapshot()
-                // A downloaded Parakeet Ultra can still dictate.
-                self.syncMultilingualParakeet()
-            }
-        }
-    }
-
-    /// Parakeet V2 dictates and leaves no room to load Parakeet Ultra beside it (English
-    /// before iOS 26): Ultra takes its place and loads as it would at launch, rather than
-    /// never getting its first load. False when V2 isn't the engine.
-    func replaceParakeetWithMultilingual(language: String) -> Bool {
-        guard transcriber is ParakeetTranscriber, phase != .preparingModel else { return false }
-        transcriber = ParakeetTranscriber()
-        isModelReady = false
-        prepareModel(candidate: ParakeetUltraTranscriber(language: language))
-        return true
-    }
-
-    /// Loads Parakeet Ultra while the engine Hex has keeps dictating, and switches to it once
-    /// it's loaded; a dictation in flight isn't interrupted. A failure keeps that engine and
-    /// says why. Only while no other preparation runs.
-    func loadMultilingualParakeetBeside(language: String) {
-        guard phase != .preparingModel else { return }
-        modelPrepGeneration &+= 1
-        let prepGen = modelPrepGeneration
-        multilingualDownload.loading()
-        let backgroundTime = BackgroundTime("Prepare the multilingual model")
-        Task {
-            defer { backgroundTime.end() }
-            let candidate = ParakeetUltraTranscriber(language: language)
-            do {
-                try await candidate.prepare { _ in }
-                guard self.modelPrepGeneration == prepGen else { return }
-                self.transcriber = candidate
-                self.engineName = candidate.displayName
-                self.transcriptionLanguage = await candidate.languageName
-                self.transcriptionLanguageID = await candidate.languageIdentifier
-                self.languageOffer = nil
-                self.isModelReady = true
-                self.keyboardBridge.setModelInstalled(true)
-                switch self.phase {
-                case .modelRequired, .failed:
-                    self.phase = .ready
-                default:
-                    break
-                }
-                self.multilingualParakeetLoaded()
-                self.publishKeyboardSnapshot()
-            } catch {
-                guard self.modelPrepGeneration == prepGen else { return }
-                self.multilingualParakeetFailedToLoad(error)
-            }
-        }
-    }
-
-    func appMovedToBackground() {
-        isInBackground = true
-        multilingualDownload.appMovedToBackground()
-    }
-
-    /// Picks up a download that iOS cut off while Hex was in the background; FluidAudio
-    /// resumes each file from the bytes it has.
-    func appBecameActive() {
-        isInBackground = false
-        multilingualDownload.appBecameActive()
-        guard preparationFailedInBackground else { return }
-        preparationFailedInBackground = false
-        if case .failed = phase, !isModelReady {
-            prepareModel()
-        }
-    }
-
-    nonisolated static func isDownloadInterruption(_ error: Error) -> Bool {
-        if error is StallWatch.Stalled || error is URLError { return true }
-        return (error as? ParakeetTranscriber.TranscriberError) == .downloadFailed
     }
 
     // MARK: - Capture & Generation-Scoped Transcription
@@ -1327,7 +1137,7 @@ final class DictationController {
         }
     }
 
-    private func publishKeyboardSnapshot(minInterval: TimeInterval = 0) {
+    func publishKeyboardSnapshot(minInterval: TimeInterval = 0) {
         let currentTime = now()
 
         // Past its time to go in by itself the keyboard can still offer it as Paste dictation.
