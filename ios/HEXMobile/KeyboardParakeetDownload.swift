@@ -3,7 +3,7 @@ import Network
 import Observation
 import SwiftUI
 
-/// Experiments › Speech model in keyboard: gets Parakeet V2 into the App Group for the keyboard
+/// Settings › Dictation › Speech model in keyboard: gets Parakeet V2 into the App Group for the keyboard
 /// from Hex (`ParakeetTranscriber.downloadModel`), at launch, whenever Hex comes back to the
 /// front, on Wi-Fi coming back and once the keyboard measured its memory, until every file is
 /// there. By itself only where the keyboard would use it (`hold`) and while the keyboard isn't
@@ -175,6 +175,37 @@ extension DictationController {
     func startKeyboardParakeetDownloadIfWanted() {
         guard !(transcriber is ParakeetTranscriber && phase == .preparingModel) else { return }
         KeyboardParakeetDownload.shared.startIfWanted()
+    }
+}
+
+/// Settings › Dictation › Speech model in keyboard: on unless turned off, the keyboard's own
+/// English dictation transcribes with Parakeet once it's downloaded and compiled there; off, it
+/// keeps Apple's speech recognition. Under the switch, what it's doing (`KeyboardParakeetStatus`).
+struct KeyboardParakeetRow: View {
+    @State private var isOn = KeyboardParakeetSettings().isOn
+    private let fits = KeyboardParakeetSettings.fits()
+
+    var body: some View {
+        SettingsToggleRow(
+            title: String(localized: "Speech model in keyboard"),
+            detail: fits
+                ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
+                : String(localized: "Needs an iPhone with 6 GB of memory or more"),
+            isOn: $isOn
+        )
+        .disabled(!fits)
+        .onChange(of: isOn) { _, enabled in
+            guard enabled != KeyboardParakeetSettings().isEnabled else { return }
+            KeyboardParakeetSettings().isEnabled = enabled
+            DictationController.shared.keyboardParakeetChanged()
+        }
+        .onAppear { isOn = KeyboardParakeetSettings().isOn }
+
+        if isOn {
+            KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+        }
     }
 }
 

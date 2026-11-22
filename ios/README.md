@@ -457,7 +457,7 @@ never at a launch by itself.
     with v3's download). It is chosen only with 1.5 GB left to load it
     (`os_proc_available_memory`), and never again after a load that ended Hex
     (`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
-    turned off and on. Unless Experiments › Speech model in keyboard has it loaded in the
+    turned off and on. Unless Settings › Dictation › Speech model in keyboard has it loaded in the
     keyboard (below), the keyboard doesn't use it, so once Hex has it ready
     (`MultilingualParakeetSettings.isModelReady`, set after a load, cleared while it's
     missing, set aside or off) and it takes the dictation language, Dictate and the Hex
@@ -466,8 +466,8 @@ never at a launch by itself.
     mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
     pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
     on an iPhone are unmeasured.
-  - **Speech model in keyboard (Settings › Experiments › Speech model in keyboard, iOS
-    26+):** On unless the person turns it off, and disabled (shown off) on iPhones under
+  - **Speech model in keyboard (Settings › Dictation › Speech model in keyboard, iOS
+    26+; under Experiments until it became the default):** On unless the person turns it off, and disabled (shown off) on iPhones under
     6 GB (`KeyboardParakeetSettings`, in the App Group; a value stored by hand wins, so a
     switch turned off stays off). Off, nothing of it loads and the keyboard dictates exactly
     as before. On, Hex downloads Parakeet V2 (464 MB, about 700 MB with the keyboard's
@@ -543,7 +543,10 @@ never at a launch by itself.
     model, a new process reloaded it in 0.3 s, and Ultra peaked at 66 MB (607 MB on the
     Neural Engine). A probe keyboard (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`)
     put 60 s of audio at 0.25–0.5 s; on the CPU, four chunks at once passed the limit
-    there, so the keyboard never runs that. Linking FluidAudio into the keyboard grows its binary from
+    there, so the keyboard never runs that. The keyboard's memory lines also give its
+    resident (`internal`) and compressed memory, at each recording's start and stop, for the
+    one-time step of about 15 MB that came with the model loaded at the ninth of twenty
+    dictations. Linking FluidAudio into the keyboard grows its binary from
     5.9 to 12.6 MB and, with the experiment off, its footprint at launch by about 0.2 MB
     (writable data dyld fixes up), with no change to its first frame.
   - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by

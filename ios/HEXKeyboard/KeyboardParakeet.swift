@@ -3,7 +3,7 @@ import Darwin
 import FluidAudio
 import Foundation
 
-/// Experiments › Speech model in keyboard (on unless turned off): the keyboard's own dictation
+/// Settings › Dictation › Speech model in keyboard (on unless turned off): the keyboard's own dictation
 /// transcribed with Parakeet on the Neural Engine, in the keyboard's process, so Hex needn't be
 /// open or warm.
 /// English uses Parakeet V2; a language Experiments › Multilingual model dictates uses Parakeet
