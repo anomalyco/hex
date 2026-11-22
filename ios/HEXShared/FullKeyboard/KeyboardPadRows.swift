@@ -34,7 +34,7 @@ extension KeyboardLayout {
         switch layer {
         case .letters:
             // The iPhone's French apostrophe key is the iPad's ' and : pair key (`padPairs`).
-            let rows = language.letterRows(letters).map { language == .french ? $0.filter { $0 != FrenchTyping.key } : $0 }
+            let rows = language.letterRows(letters).map { language.isFrench ? $0.filter { $0 != FrenchTyping.key } : $0 }
             return (rows[0], rows[1], padPairs(letters: rows[2], layer: .letters))
         case .numbers:
             return (digits, ["@", "#", "$", "&", "*", "(", ")", "'", "\""], padPairs(letters: [], layer: .numbers))

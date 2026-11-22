@@ -661,8 +661,8 @@ final class KeyboardLayoutTests: XCTestCase {
             .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"],
             .italian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .french: ["azertyuiop", "qsdfghjklm", "wxcvbn´"],
-            .frenchCanadian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
-            .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
+            .frenchCanadian: ["qwertyuiop", "asdfghjkl´", "zxcvbnm"],
+            .frenchSwiss: ["qwertzuiop", "asdfghjkl´", "yxcvbnm"],
             .portuguese: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .polish: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
             .romanian: ["qwertyuiop", "asdfghjkl", "zxcvbnm"],
@@ -729,8 +729,8 @@ final class KeyboardLayoutTests: XCTestCase {
             .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"],
         ]
         for language in KeyboardLanguage.allCases where language != .czech {
-            // French's own AZERTY is Apple's "AZERTY – French", with the apostrophe key.
-            for letters in language.letterLayouts where letters != .own && letters != .dvorak && !(language == .french && letters == .azerty) {
+            // Each French keyboard's own layout is Apple's "– French" one, with the apostrophe key.
+            for letters in language.letterLayouts where letters != .own && letters != .dvorak && !(language.isFrench && letters == language.defaultLetterLayout) {
                 let layout = KeyboardLayout(width: 402, language: language, letters: letters)
                 for row in 0..<3 {
                     XCTAssertEqual(self.letters(layout, row: row).joined(), plain[letters]?[row], "\(language) \(letters) row \(row + 1)")
@@ -1102,8 +1102,8 @@ final class KeyboardLayoutTests: XCTestCase {
         for layer in [KeyboardLayer.numbers, .symbols] {
             XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .french).keys, KeyboardLayout(width: 402, layer: layer).keys)
         }
-        // Only France's AZERTY has it: French on QWERTY or QWERTZ, Canadian and Swiss French,
-        // and every other language's AZERTY keep six letters on row 3.
+        // Only France's AZERTY has it after N: French on QWERTY or QWERTZ, Canadian and Swiss
+        // French on AZERTY, and every other language's AZERTY keep six letters on row 3.
         for (language, letters) in [
             (KeyboardLanguage.french, KeyboardLetterLayout.qwerty), (.french, .qwertz), (.frenchCanadian, .azerty),
             (.frenchSwiss, .azerty), (.english, .azerty), (.german, .azerty),
@@ -1142,6 +1142,54 @@ final class KeyboardLayoutTests: XCTestCase {
         // Holding it: ´ ˋ ˆ ¨, Apple's order read from the key.
         XCTAssertEqual(AccentCatalog.options(for: FrenchTyping.key, uppercase: false, language: .french), ["´", "ˋ", "ˆ", "¨"])
         XCTAssertEqual(shownHolds(FrenchTyping.key, .french), ["¨", "ˆ", "ˋ"])
+    }
+
+    /// Apple's Français (Canada) and (Suisse) own layouts, "QWERTY – French" and "QWERTZ –
+    /// French" (iOS 27.2 simulator, iPhone 17 Pro and SE, upright and turned): row 2 is A to L and
+    /// the apostrophe key, ten keys a letter wide edge to edge under row 1's, and every other row
+    /// is the plain layout's. The iPad keeps its own ' and : key instead.
+    func testCanadianAndSwissFrenchEndRowTwoInTheApostropheKey() {
+        let shapes: [(String, (KeyboardLanguage, KeyboardLetterLayout?) -> KeyboardLayout)] = [
+            ("402", { KeyboardLayout(width: 402, language: $0, letters: $1) }),
+            ("375", { KeyboardLayout(width: 375, language: $0, letters: $1, phoneSize: .homeButton) }),
+            ("landscape", { KeyboardLayout(width: 874, orientation: .landscape, language: $0, letters: $1) }),
+            ("number row", { KeyboardLayout(width: 402, language: $0, letters: $1, numberRow: true) }),
+            ("cover", { KeyboardLayout(width: 452, language: $0, letters: $1, posture: .cover, windowInset: 7) }),
+            ("unfolded tall", { KeyboardLayout(width: 655, language: $0, letters: $1, posture: .unfoldedTall, windowInset: 7) }),
+            ("unfolded split", { KeyboardLayout(width: 801, language: $0, letters: $1, posture: .unfoldedWide, windowInset: 75) }),
+            ("unfolded joined", { KeyboardLayout(width: 801, language: $0, letters: $1, posture: .unfoldedWide, windowInset: 75, joinsUnfoldedKeyboard: true) }),
+        ]
+        for (language, plain) in [(KeyboardLanguage.frenchCanadian, KeyboardLetterLayout.qwerty), (.frenchSwiss, .qwertz)] {
+            XCTAssertEqual(language.defaultLetterLayout, plain)
+            for (name, make) in shapes {
+                let layout = make(language, nil)
+                let france = make(.french, plain)
+                let label = "\(language) \(name)"
+                XCTAssertNil(france.key(.character(FrenchTyping.key)), "France's \(plain) stays plain: \(label)")
+                let row = { (l: KeyboardLayout, r: Int) in l.keys.filter { $0.row == r && $0.character != nil }.sorted { $0.frame.minX < $1.frame.minX } }
+                let row2 = row(layout, 1)
+                XCTAssertEqual(row2.compactMap(\.character), "asdfghjkl".map(String.init) + [FrenchTyping.key], label)
+                for (a, b) in zip(row2, row2.dropFirst()) { XCTAssertLessThanOrEqual(a.frame.maxX, b.frame.minX, label) }
+                for r in [0, 2] { XCTAssertEqual(row(layout, r).map(\.frame), row(france, r).map(\.frame), "row \(r + 1): \(label)") }
+                XCTAssertEqual(layout.key(.shift)?.frame, france.key(.shift)?.frame, label)
+                XCTAssertEqual(layout.key(.delete)?.frame, france.key(.delete)?.frame, label)
+                XCTAssertEqual(layout.keys.filter { $0.row == 3 }.map(\.frame), france.keys.filter { $0.row == 3 }.map(\.frame), label)
+                XCTAssertEqual(layout.keys.filter(\.isNumberRow), france.keys.filter(\.isNumberRow), label)
+                if !layout.isSplit {
+                    XCTAssertEqual(row2.map(\.frame.minX), row(layout, 0).map(\.frame.minX), "edge to edge under row 1: \(label)")
+                    XCTAssertEqual(row2.map(\.frame.width), row(layout, 0).map(\.frame.width), label)
+                }
+            }
+            // Apple's keycaps on 402 pt: row 2's A 6.67 to 40, its apostrophe key 362 to 395.67.
+            let apple = KeyboardLayout(width: 402, language: language)
+            for (kind, minX, maxX) in [(KeyKind.character("a"), 6.67, 40.0), (.character(FrenchTyping.key), 362, 395.67)] {
+                XCTAssertEqual(apple.key(kind)!.frame.minX, minX, accuracy: 0.5, "\(language) \(kind)")
+                XCTAssertEqual(apple.key(kind)!.frame.maxX, maxX, accuracy: 0.5, "\(language) \(kind)")
+            }
+            let pad = KeyboardLayout(width: 744, language: language, pad: .docked(.mini))
+            XCTAssertNil(pad.key(.character(FrenchTyping.key)), "\(language) iPad")
+            XCTAssertEqual(pad.keys.filter { $0.row == 1 }.compactMap(\.character), "asdfghjkl".map(String.init), "\(language) iPad")
+        }
     }
 
     func testSpanishKeepsTenKeysWithNOnRowTwo() {

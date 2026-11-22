@@ -1990,6 +1990,26 @@ final class FullKeyboardEngineTests: XCTestCase {
         type(" ")
         hold(pick: "ˆ")
         XCTAssertEqual(target.text, "¨d'a‘ ˆ")
+
+        // Canada's and Switzerland's own layouts end row 2 in the same key, with the same rules.
+        for language in [KeyboardLanguage.frenchCanadian, .frenchSwiss] {
+            smartField(language: language)
+            engine.autocorrect.isEnabled = false
+            let key = engine.layout.key(apostrophe)!
+            XCTAssertEqual(key.row, 1, "\(language)")
+            XCTAssertEqual(engine.keycapLabel(for: key), "´", "\(language)")
+            tap(apostrophe)
+            type("qu")
+            XCTAssertEqual(engine.keycapLabel(for: key), "’", "\(language)")
+            tap(apostrophe)
+            type("il")
+            XCTAssertEqual(target.text, "´qu’il", "\(language)")
+            id += 1
+            engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: id))
+            XCTAssertEqual(Set(engine.activeAccentMenu?.options ?? []), ["'", "’", "‘", "`"], "\(language)")
+            engine.touchCancelled(id: id)
+        }
     }
 
     /// Each of Apple's keyboards types its language's quotes (black box, iOS 27.2): „Hallo“ ‚tag‘
