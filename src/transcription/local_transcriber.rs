@@ -475,6 +475,12 @@ impl LocalTranscriber {
         requires_closing_mark(Some(self.model_id()))
     }
 
+    /// Whether this model streams with Parakeet's buffered chunk menus, whose
+    /// first-word timestamp lags its audio.
+    pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
+        self.session.streams_buffered_parakeet()
+    }
+
     /// The model this transcriber was loaded for.
     pub(crate) fn model_id(&self) -> TranscriptionModelId {
         self.selection.model

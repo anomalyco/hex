@@ -1293,6 +1293,12 @@ impl Parakeet {
         self.session.stream_options()
     }
 
+    /// Whether this model streams with Parakeet's buffered chunk menus, whose
+    /// first-word timestamp lags its audio.
+    pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
+        self.session.streams_buffered_parakeet()
+    }
+
     /// Re-probes the live stream when Labs › Faster live text or an env
     /// override changed, so a later capture streams with it. Streams decode
     /// with [`Self::stream_run_options`], as the load-time probe does.

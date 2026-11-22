@@ -183,8 +183,8 @@ pub(crate) struct OfflineGgufSession {
     /// What this model streams with, and the tuning it was probed for. Its
     /// tuning stays unset until a probe ran past this session's gates.
     streaming: StreamCache,
-    /// The Parakeet chunk menus the file carries, read when a tuning needs
-    /// them; `None` until then, and when a model has none.
+    /// The Parakeet chunk menus the file carries, read when a tuning or the
+    /// first stream needs them; `None` until then, and when a model has none.
     stream_menus: Option<StreamMenus>,
     /// Whether `stream_menus` was read, so a lab turned on later reads the
     /// header lazily instead of on every load.
@@ -334,14 +334,30 @@ impl OfflineGgufSession {
         StreamTuning::for_model(self.architecture == "parakeet", StreamTuning::current())
     }
 
-    /// Reads the model's chunk menus once, when a tuning needs them: a load
-    /// with the lab off never opens the header for them.
+    /// Reads the model's chunk menus once, when a tuning or the first stream
+    /// needs them: a load with the lab off opens the header only then.
     fn read_menus(&mut self) {
         if self.stream_menus_read {
             return;
         }
+        let Some(path) = self.stream_path.as_deref() else {
+            return;
+        };
         self.stream_menus_read = true;
-        self.stream_menus = self.stream_path.as_deref().and_then(StreamMenus::read);
+        self.stream_menus = StreamMenus::read(path);
+    }
+
+    /// Whether this model streams with Parakeet's buffered chunk menus rather
+    /// than a cache-aware window such as Nemotron's. A buffered model times its
+    /// first word later than its audio, which was measured on Unified English
+    /// and is assumed for a model with the same menus. Any other architecture,
+    /// and a file with no menus, is not buffered.
+    pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
+        if self.architecture != "parakeet" {
+            return false;
+        }
+        self.read_menus();
+        matches!(self.stream_menus, Some(StreamMenus::Buffered { .. }))
     }
 
     /// Re-probes while nothing records, when this process's tuning changed

@@ -1373,8 +1373,11 @@ impl Worker {
         };
         let trailing_silence = stream_trailing_silence(model);
         let closing_mark = stream_requires_closing_mark(model);
+        let opening_slack = stream_opening_slack(model);
         let ended = model.with_stream(&options, cancel, |stream| {
-            let mut capped = PauseCap::new(stream, trailing_silence).ignoring_head(head_ignored);
+            let mut capped = PauseCap::new(stream, trailing_silence)
+                .ignoring_head(head_ignored)
+                .opening_slack(opening_slack);
             let ended = drive_stream(
                 id,
                 &mut capped,
@@ -1654,6 +1657,18 @@ mod tests {
             .collect()
     }
 
+    /// A clip with `(start_ms, length_ms)` tone bursts in order, then the
+    /// 200 ms tail after a stop.
+    fn sparse_speech(bursts: &[(usize, usize)]) -> Vec<f32> {
+        let mut clip = Vec::new();
+        for &(start_ms, length_ms) in bursts {
+            clip.resize(start_ms * 16, 0.0);
+            clip.extend(tone(length_ms * 16));
+        }
+        clip.extend(vec![0.0; 3_200]);
+        clip
+    }
+
     #[test]
     fn a_dictation_stream_hears_only_the_ends_of_long_pauses() {
         // Quiet first, as the pre-roll is, so the noise floor starts low.
@@ -1740,12 +1755,32 @@ mod tests {
         text_start_ms: Option<u64>,
         text_end_ms: u64,
     ) -> Result<String, String> {
+        finish_with_opening_slack(
+            clip,
+            head_ignored,
+            text_start_ms,
+            text_end_ms,
+            UNTRANSCRIBED_SLACK_SAMPLES,
+        )
+    }
+
+    /// As above, with `slack` samples of speech the stream may leave before
+    /// its text starts, for a model whose first-word time lags its audio.
+    fn finish_with_opening_slack(
+        clip: &[f32],
+        head_ignored: usize,
+        text_start_ms: Option<u64>,
+        text_end_ms: u64,
+        slack: usize,
+    ) -> Result<String, String> {
         let mut fake = FakeStream {
             text_start_ms,
             text_end_ms: Some(text_end_ms),
             ..FakeStream::default()
         };
-        let mut capped = PauseCap::new(&mut fake, 0).ignoring_head(head_ignored);
+        let mut capped = PauseCap::new(&mut fake, 0)
+            .ignoring_head(head_ignored)
+            .opening_slack(slack);
         for chunk in clip.chunks(1_600) {
             capped.feed(chunk).unwrap();
         }
@@ -1834,6 +1869,234 @@ mod tests {
             finish_with_text_bounds(&clip, Some(500), 4_200),
             Ok(format!("streamed {}", clip.len()))
         );
+    }
+
+    #[test]
+    fn parakeets_late_first_word_time_is_not_a_lost_opening() {
+        // An illustrative late first-word timestamp: speech at 220-860 ms and
+        // text at 1280 ms is a 1,060 ms lag, just past the top of the measured
+        // 100-1000 ms range. With no pre-roll to exclude, this is a stream
+        // that lost nothing, as the CPU measurement suggests; the 400 ms
+        // slack refused it.
+        let mut clip = vec![0.0; 3_520]; // 220 ms
+        clip.extend(tone(10_240)); // speech, 220-860 ms
+        clip.extend(vec![0.0; 6_720]); // pause to the text, 860-1280 ms
+        clip.extend(tone(5_120)); // the text's own speech, 1280-1600 ms
+        clip.extend(vec![0.0; 3_200]);
+        assert!(
+            finish_with_text_bounds(&clip, Some(1_280), 1_600)
+                .is_err_and(|reason| reason.contains("precedes")),
+            "the tight slack is what refused this stream"
+        );
+        assert_eq!(
+            finish_with_opening_slack(&clip, 0, Some(1_280), 1_600, PARAKEET_OPENING_SLACK_SAMPLES),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn parakeets_opening_slack_still_refuses_a_lost_opening() {
+        // 3 s of speech the stream lost, then a 1 s pause, then the text at
+        // 4.5 s: more than 1.2 s of slack plus the 300 ms threshold before t0.
+        let mut clip = vec![0.0; 8_000]; // 500 ms
+        clip.extend(tone(48_000)); // the lost speech, 500-3500 ms
+        clip.extend(vec![0.0; 16_000]); // a 1 s pause
+        clip.extend(tone(16_000)); // the text's own speech, 4500-5500 ms
+        clip.extend(vec![0.0; 3_200]);
+        let result =
+            finish_with_opening_slack(&clip, 0, Some(4_500), 5_500, PARAKEET_OPENING_SLACK_SAMPLES);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("precedes")),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn parakeets_opening_slack_edge_is_one_frame() {
+        use crate::transcription::pause_segmenter::FRAME_SAMPLES;
+        // The 1.2 s slack with the 300 ms threshold: a speech frame counts
+        // only while it ends strictly before t0 - 1.2 s, and the span rule
+        // refuses speech that opens 300 ms or more before that edge once
+        // 100 ms is detected before the 400 ms edge. So 15 frames (300 ms)
+        // ending one frame before the edge are refused, while 14 (280 ms)
+        // ending at the edge are kept: the edge frame is not counted and the
+        // span stays under 300 ms.
+        let text_start_ms: u64 = 3_000;
+        let covered = text_start_ms as usize * 16 - PARAKEET_OPENING_SLACK_SAMPLES; // 28_800
+        let frame: usize = FRAME_SAMPLES;
+        let threshold = UNTRANSCRIBED_SPEECH_SAMPLES / frame; // 15 frames
+        for (speech_end, frames, refused) in [
+            (covered - frame, threshold, true), // 28_480: all 15 frames count
+            (covered, threshold - 1, false),    // 28_800: 13 count, 280 ms span
+        ] {
+            let mut clip = vec![0.0; speech_end - frames * frame];
+            clip.extend(tone(frames * frame)); // the lost opening
+            clip.extend(vec![0.0; 4_800]); // the pause to the text
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(text_start_ms),
+                text_start_ms + 300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .is_err_and(|reason| reason.contains("precedes")),
+                refused,
+                "{speech_end}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parakeets_sparse_opening_spanning_1800_ms_is_refused() {
+        // Production's waited case: text at 3.92 s with 720 ms of speech
+        // detected from 920 ms, but only 240 ms of it before the slack's edge
+        // at 2.72 s, under the 300 ms threshold. Its span alone refuses it.
+        let clip = sparse_speech(&[
+            (920, 80),
+            (1_620, 80),
+            (2_320, 80),
+            (2_920, 200),
+            (3_220, 280),
+        ]);
+        let result =
+            finish_with_opening_slack(&clip, 0, Some(3_920), 4_220, PARAKEET_OPENING_SLACK_SAMPLES);
+        assert!(
+            result.as_ref().is_err_and(
+                |reason| reason.contains("speech from 920 ms precedes it and spans 1800 ms")
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn parakeets_sparse_opening_spanning_3080_ms_is_refused() {
+        // The other waited case: text at 4.48 s with 520 ms of speech
+        // detected from 200 ms, but only 240 ms of it before the slack's edge
+        // at 3.28 s, under the 300 ms threshold. Its span alone refuses it.
+        let clip = sparse_speech(&[
+            (200, 80),
+            (900, 80),
+            (1_600, 80),
+            (3_400, 140),
+            (3_920, 140),
+        ]);
+        let result =
+            finish_with_opening_slack(&clip, 0, Some(4_480), 4_780, PARAKEET_OPENING_SLACK_SAMPLES);
+        assert!(
+            result.as_ref().is_err_and(
+                |reason| reason.contains("speech from 200 ms precedes it and spans 3080 ms")
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn parakeets_sparse_frames_cannot_hide_a_dense_lost_opening() {
+        // Four old frames (80 ms) around 1 s, then 800 ms of lost speech from
+        // 2.8 s to 3.6 s, text at 4 s. Counting only before the 1.2 s edge
+        // (2.8 s) sees 80 ms and accepts; counting before the 400 ms edge
+        // (3.6 s) sees the dense speech, so the 1.84 s span refuses it.
+        let clip = sparse_speech(&[(960, 80), (2_800, 800)]);
+        let result =
+            finish_with_opening_slack(&clip, 0, Some(4_000), 4_300, PARAKEET_OPENING_SLACK_SAMPLES);
+        assert!(
+            result.as_ref().is_err_and(
+                |reason| reason.contains("speech from 960 ms precedes it and spans 1840 ms")
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn parakeets_span_rule_needs_100_ms_before_the_old_edge() {
+        // Speech at 400 ms starts 1.4 s before the 1.2 s edge at 1.8 s. Four
+        // frames (80 ms) before the 400 ms edge are under the rule's minimum
+        // and kept; five (100 ms) are refused.
+        for (frames, refused) in [(4usize, false), (5, true)] {
+            let mut clip = vec![0.0; 400 * 16];
+            clip.extend(tone(frames * 20 * 16));
+            clip.extend(vec![0.0; 3_200]);
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(3_000),
+                3_300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            if refused {
+                assert!(
+                    result.as_ref().is_err_and(|reason| reason
+                        .contains("speech from 400 ms precedes it and spans 1400 ms")),
+                    "{frames}: {result:?}"
+                );
+            } else {
+                assert_eq!(result, Ok(format!("streamed {}", clip.len())), "{frames}");
+            }
+        }
+    }
+
+    #[test]
+    fn parakeets_span_rule_edge_is_one_frame() {
+        // Text at 3 s puts the 1.2 s edge at 1.8 s: speech starting exactly
+        // 300 ms before it is refused, one frame later (280 ms) is kept. Both
+        // have the rule's 100 ms minimum before the 400 ms edge.
+        for (speech_start_ms, refused) in [(1_500usize, true), (1_520, false)] {
+            let mut clip = vec![0.0; speech_start_ms * 16];
+            clip.extend(tone(100 * 16));
+            clip.extend(vec![0.0; 3_200]);
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(3_000),
+                3_300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            if refused {
+                assert!(
+                    result.as_ref().is_err_and(|reason| {
+                        reason.contains("speech from") && reason.contains("spans 300 ms")
+                    }),
+                    "{speech_start_ms}: {result:?}"
+                );
+            } else {
+                assert_eq!(
+                    result,
+                    Ok(format!("streamed {}", clip.len())),
+                    "{speech_start_ms}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn parakeets_measured_lags_are_not_lost_openings() {
+        // Production refused these streams. Their first detected speech came
+        // 820-1420 ms before the text, under the span rule's 1.5 s, so this
+        // fix keeps them accepted.
+        for (speech_start_ms, text_start_ms) in
+            [(220u64, 1_280u64), (300, 1_120), (220, 1_440), (340, 1_760)]
+        {
+            let mut clip = vec![0.0; speech_start_ms as usize * 16];
+            clip.extend(tone(640 * 16));
+            clip.extend(vec![0.0; 3_200]);
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(text_start_ms),
+                text_start_ms + 300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            assert_eq!(
+                result,
+                Ok(format!("streamed {}", clip.len())),
+                "{speech_start_ms} -> {text_start_ms}"
+            );
+        }
     }
 
     #[test]
