@@ -156,6 +156,19 @@ final class SwipeParityExportTests: XCTestCase {
         return decoder
     }
 
+    /// The decoder `SwipeTyping.syncWords` makes for `context`.
+    static func decoder(_ context: SwipeParity.Context, model: TypingDecoderModel) -> SwipeDecoder {
+        var decoder = SwipeDecoder(model: model)
+        decoder.neverSuggest = TypingDecoder.NeverSuggest(context.blocked, model: model)
+        var extra = SwipeDecoder.ExtraWords()
+        if model.language == KeyboardLanguage.english.rawValue {
+            extra.add(context.contractions, cost: { SwipeDecoder.costOfContraction($0) }, model: model, contractions: true)
+        }
+        extra.add(context.ownWords, cost: SwipeDecoder.ownWordCost, model: model)
+        decoder.extraWords = extra
+        return decoder
+    }
+
     /// The same words as one list, as a decoder that takes them at once gets them.
     static func extraWords(_ context: SwipeParity.Context) -> [(text: String, cost: Double, contraction: Bool)] {
         let contractions = context.language == .english ? context.contractions : []
