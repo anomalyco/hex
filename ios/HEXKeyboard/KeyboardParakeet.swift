@@ -93,6 +93,7 @@ final class KeyboardParakeet {
         if measured.available > 0 {
             KeyboardParakeetSettings().recordKeyboardLimit(measured.footprint + measured.available)
         }
+        SpeechModelBackgroundDownload.keyboardOpened()
         guard let choice = Self.choice() else { return }
         if loaded?.multilingual == choice.multilingual { return }
         guard loadTask == nil, !setAside.contains(choice.multilingual) else { return }

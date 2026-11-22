@@ -80,5 +80,10 @@ struct HEXMobileApp: App {
                 }
             }
         }
+        // Speech model in keyboard's download, started by the keyboard: iOS wakes Hex to take
+        // in files that finished while the keyboard wasn't running.
+        .backgroundTask(.urlSession(SpeechModelBackgroundDownload.identifier)) {
+            await SpeechModelBackgroundDownload.shared.handleEvents()
+        }
     }
 }

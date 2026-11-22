@@ -484,7 +484,26 @@ never at a launch by itself.
     the builds where it was off by default) it downloads at once on any connection. Until
     then the row says what it waits for: "Downloads after you first use the Hex keyboard",
     "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
-    dictation". The keyboard's own dictation transcribes with Parakeet in
+    dictation". The keyboard starts the same download itself, so the model arrives without
+    anyone opening Hex (`SpeechModelBackgroundDownload`): after its first frame and launch
+    work, off the main thread, with the same conditions (`KeyboardParakeetDownloadPolicy`), it
+    starts a background `URLSession` (Wi-Fi only: no cellular, expensive or constrained
+    network; not discretionary; tasks time out after 24 h) with the App Group as its shared
+    container, one download task per file of the pinned list (`ParakeetV2Files`: revision
+    `ee09c569` of FluidInference's repository, 21 files, each with its size and SHA-256).
+    The transfers run in iOS's own process and go on after the keyboard closes. A finished
+    file lands beside its name as `.download` and gets its name only once its size and
+    SHA-256 match; a failed task leaves its resume data (`.resume`) for the next try; the
+    folder is marked complete once all 21 are there. When a transfer ends while the keyboard
+    isn't running, iOS wakes Hex (`.backgroundTask(.urlSession)`), which takes the file in
+    the same way. `SpeechModelDownloadClaim` (App Group) keeps the two from downloading at
+    once: Hex's own download claims it while it runs and says so every few seconds; the
+    keyboard's claim lasts until its download ends or its tasks time out, and the keyboard
+    picks its own download up (a file iOS dropped gets a new task) each time it opens, or
+    cancels it once the switch is off. Hex doesn't start its own automatic download while
+    the keyboard's runs (turned on by hand, it does), and its row says "Downloading the
+    speech model" meanwhile, with a bar only while the keyboard says its bytes. The keyboard's
+    own dictation transcribes with Parakeet in
     the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
     V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
     dictates once its files are there, in which case Dictate and the Hex key stop opening

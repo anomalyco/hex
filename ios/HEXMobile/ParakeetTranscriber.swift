@@ -155,6 +155,9 @@ actor ParakeetTranscriber: LocalTranscribing {
     /// `progress` gets the share downloaded. Marks the folder complete once every file is there.
     nonisolated static func downloadModel(progress: @escaping @Sendable (Double) -> Void) async throws {
         let fraction = ProgressReading()
+        // While Hex downloads it, the keyboard doesn't start its own (`SpeechModelBackgroundDownload`).
+        SpeechModelDownloadClaim().claim(.app)
+        defer { SpeechModelDownloadClaim().end(.app) }
         SpeechModelStore.prepareRoot()
         let directory = cacheDirectory.deletingLastPathComponent()
         do {
@@ -165,7 +168,9 @@ actor ParakeetTranscriber: LocalTranscribing {
                     // FluidAudio's download reports 0–50%, leaving the rest for a compile.
                     try await ModelHub.download(.parakeetV2, to: directory, progressHandler: { event in
                         fraction.value = event.fractionCompleted
-                        progress(min(1, event.fractionCompleted * 2))
+                        let share = min(1, event.fractionCompleted * 2)
+                        progress(share)
+                        SpeechModelDownloadClaim().refresh(.app, bytes: Int64(share * Double(ParakeetV2Files.totalBytes)))
                     })
                     let vocabulary = Self.cacheDirectory.appendingPathComponent(ModelNames.ASR.vocabularyFile)
                     if !FileManager.default.fileExists(atPath: vocabulary.path) {
