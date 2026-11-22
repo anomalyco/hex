@@ -1209,7 +1209,7 @@ never at a launch by itself.
   `UIInputViewController.primaryLanguage` to the language's BCP 47 identifier
   (`KeyboardLanguage.inputModeLanguage`) as the language changes (unit-tested), meant to
   make the host spell and autocorrect in the language typing; Apple documents it as
-  superseding the extension's Info.plist en-US, but whether the host follows it (Notes's red
+  superseding the extension's Info.plist `mul`, but whether the host follows it (Notes's red
   underlines, for one) is not verified on a device. Switching from the full keyboard to the
   dictation bar leaves the last reported language in place. A field gives a third-party
   keyboard nothing else to go on: before this change `documentInputMode` was observed as nil
@@ -1419,7 +1419,13 @@ never at a launch by itself.
   languages without a layout get English; Serbian only in Latin script, `sr-Latn`);
   before any dictation language is known, the first iPhone
   keyboard, then preferred language, that has a layout. It doesn't read back the input mode
-  Hex reports (`primaryLanguage`), which is derived from this choice. Rows of 11 keys narrow
+  Hex reports (`primaryLanguage`), which is derived from this choice, and Hex's own entry
+  among the iPhone's keyboards says `mul` (the extension's Info.plist `PrimaryLanguage`),
+  so iOS lists Hex as multilingual ("multilingue", where it said "anglais") and neither
+  Automatic nor "On this iPhone" takes it for English. With `en-US` there, Hex listed above
+  Apple's French keyboard typed QWERTY on a French iPhone without Full Access, or before Hex
+  had first resolved a dictation language, and Languages offered English "On this iPhone"
+  (TestFlight build 140, iOS 27.2 simulator). Rows of 11 keys narrow
   only the letters: shift, delete and the bottom row keep their English sizes,
   and row 3's letters sit centred between shift and delete. Russian's nine-letter row 3
   wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's;

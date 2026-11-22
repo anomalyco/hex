@@ -3445,7 +3445,7 @@ final class FullKeyboardEngineTests: XCTestCase {
     }
 
     /// The input mode's language (`UIInputViewController.primaryLanguage`), which Apple
-    /// documents as superseding the Info.plist's en-US: the keyboard reports the language
+    /// documents as superseding the Info.plist's `mul`: the keyboard reports the language
     /// resolved before the controller attaches, and each space-bar switch.
     func testTheInputModeLanguageFollowsTheSpaceBar() {
         let settings = LanguageSettings(defaults: defaults)
