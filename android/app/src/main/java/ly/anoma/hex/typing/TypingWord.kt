@@ -341,12 +341,15 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         // Hex's own short lists, as iOS: a sentence's common first words, a clause's after a comma, and
         // the commonest words for next-word slots the model can't fill.
         private val sentenceStarters = mapOf("en" to listOf("I", "the", "I'm"), "es" to listOf("yo", "el", "la"),
-            "de" to listOf("ich", "das", "die"), "nb" to listOf("jeg", "det", "vi"))
+            "de" to listOf("ich", "das", "die"), "nb" to listOf("jeg", "det", "vi"), "fr" to listOf("je", "le", "la"),
+            "it" to listOf("io", "il", "la"))
         private val clauseStarters = mapOf("en" to listOf("I", "but", "and"), "es" to listOf("que", "pero", "y"),
-            "de" to listOf("und", "aber", "ich"), "nb" to listOf("og", "men", "jeg"))
+            "de" to listOf("und", "aber", "ich"), "nb" to listOf("og", "men", "jeg"), "fr" to listOf("et", "mais", "je"),
+            "it" to listOf("e", "ma", "che"))
         private val commonWords = mapOf("en" to listOf("the", "to", "and", "a", "I", "of"),
             "es" to listOf("de", "que", "y", "la", "el", "en"), "de" to listOf("und", "die", "der", "ich", "ist", "das"),
-            "nb" to listOf("og", "i", "det", "er", "på", "som"))
+            "nb" to listOf("og", "i", "det", "er", "på", "som"), "fr" to listOf("de", "la", "et", "le", "je", "à"),
+            "it" to listOf("di", "e", "che", "la", "il", "a"))
         private val midSentenceMarks = ",;:)\"'\u201D\u2019\u2014"
         /** The word right before the cursor, or null inside a handle, path, address or number. */
         fun currentToken(before: CharSequence): String? {

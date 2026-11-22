@@ -565,4 +565,14 @@ class NeverSuggestTest {
         }
     }
 
+    // Every language has words for the strip between words: at a sentence's start, after a comma and
+    // after a word the pairs don't know (0.2.0's French and Italian showed nothing there).
+    @Test fun everyLanguageOffersWordsBetweenWords() {
+        for (lang in listOf("en", "es", "de", "nb", "fr", "it")) {
+            val w = word(lang)
+            for (before in listOf("", "zzqx, ", "zzqx ")) assertEquals("$lang [$before]", 3, w.predictions(before).size)
+        }
+        assertEquals(listOf("Je", "Le", "La"), word("fr").predictions(""))
+        assertEquals(listOf("e", "ma", "che"), word("it").predictions("ciao, "))
+    }
 }
