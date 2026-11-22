@@ -1859,6 +1859,24 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Mozilla Public License 1.1](https://www.mozilla.org/en-US/MPL/1.1/)
   (<https://github.com/sbosio/rla-es>).
 
+Polish's three entries show only once the keyboard bundles `pl.hextm` (none does yet;
+`AcknowledgementsView.polishEntries`):
+
+- **National Corpus of Polish n-grams:** Polish word and word-pair frequencies come from
+  the n-grams of NKJP's balanced subcorpus (Institute of Computer Science, Polish Academy
+  of Sciences; <http://zil.ipipan.waw.pl/NKJPNGrams>), made available under a
+  [Creative Commons Attribution](https://creativecommons.org/licenses/by/) licence (the page
+  names no version).
+- **ParlaMint:** which Polish spellings are missing their marks is checked against the Polish
+  part of ParlaMint 5.0 (Erjavec et al., CLARIN.SI, <http://hdl.handle.net/11356/2004>),
+  licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
+- **PoliMorf:** Polish words are checked against PoliMorf 2018-07-23
+  (<http://hdl.handle.net/11321/577>), under the 2-clause BSD licence whose notice the app
+  reproduces in full: portions copyright © 2011 Marek Futrega, Piotr Gackiewicz, Mirosław
+  Prywata, Włodzimierz Macewicz, Marcin Miłkowski; © 2007–2018 Zygmunt Saloni, Włodzimierz
+  Gruszczyński, Marcin Woliński, Robert Wołosz, Danuta Skowrońska; © 2011–2018 Institute of
+  Computer Science, Polish Academy of Sciences.
+
 ## Build & Test
 
 Prerequisites: Xcode 26+ and [XcodeGen](https://github.com/yonaskolb/XcodeGen) 2.46.0+.
