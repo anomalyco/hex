@@ -26,9 +26,24 @@ The six `<lang>.tsv.gz` files in [held-out/](held-out/) contain **only the exist
 
 Sentences: [Tatoeba](https://tatoeba.org/), [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/) or CC0 where released as such. Punctuation is normalized as in the original generators; the clean references retain the source sentence’s case. For noisy taps, the generators’ intended word-end indices identify exactly which tap had Shift, even across an omitted separator or apostrophe. Shift changes the case of the actual letter hit, never the hit key or coordinates. All 12,000 references and noisy strings lowercase to the original fixtures. ID and contributor are from the [per-language detailed exports](https://downloads.tatoeba.org/exports/per_language/) (2026-11-21); `\N` means Tatoeba lists no owner. Each source is at `https://tatoeba.org/en/sentences/show/<ID>`. The accent replay takes the first 500 eligible references in the fixed test order. German originally excluded ß and only five Bokmål references contain é. For those two alone, [accent-de.tsv](held-out/accent-de.tsv) and [accent-nb.tsv](held-out/accent-nb.tsv) add 500 and 53 attributed references **only to the accent replay**, never the noisy/clean comparison or model input. From the same detailed export: retain 3–14 words in the benchmark alphabet (plus ß for German), require a hold-only letter and a listed contributor, normalize as the existing generator does, exclude reference text in that language's existing dev/test split, keep the first of each normalized sentence, then shuffle in export order with Python seed 2374 and take up to the remaining quota. All 53 qualifying Bokmål additions are included; its two unambiguous word occurrences skip the threshold. The two models were built from Google Books (de) and NB N-gram/Ordbank (nb), not these Tatoeba supplements.
 
-### iOS coverage
+### The same gate on iOS
 
-There is no comparable iOS quality-gate result. The checked-in `TypingReplayTests` fixes the engine language to English and maps a QWERTY recording to a simulator keyboard. The experimental `ZZDecoderBench` is outside the repository; historical en/es outputs measure noisy WER only. A comparable gate needs language-specific geometry (including QWERTZ, AZERTY and dedicated keys), explicit accent selection on the clean pass, the shipped model and controlled system-dictionary behavior, and per-sentence final outputs scored on these same inputs. JVM results are Android engine results only.
+`ios/scripts/typing-gate.py` runs these held-out inputs through the iOS engine (`FullKeyboardEngine` with the language's bundled model and the simulator's own spelling dictionary, as the keyboard runs) and scores them exactly as `quality-gate.py` does: the same alignment, the same three numbers, the same thresholds and critical cases. It reads `held-out/`, `accent-keys.json`, `critical-cases.json` and `thresholds.json` here, so the two platforms can't drift apart. From `ios/`, after `xcodegen generate` and with a booted simulator:
+
+```sh
+python3 scripts/typing-gate.py run --destination 'id=<SIM_UDID>' en es de fr it
+```
+
+It writes `ios/build/typing-gate/input.json`, then runs the opt-in `HEXMobileTests/TypingGateReplayTests` once per language (one fresh process each, so one language's dictionary state never meets another's), and prints the same table as `quality-gate.py`. `typing-quality.json` there has the counts, critical outputs and failed checks. The test skips unless `HEX_TYPING_GATE` is set, so an ordinary `xcodebuild test` doesn't run it. `prepare` and `score` run the two halves separately.
+
+- **Reduction:** the noisy taps were made on the synthetic layout above (402 pt; iOS's measured one for English and Spanish). Each tap is moved onto Hex's layout from the key it hit. Hex's rows are shorter, so a tap that would land outside Hex's letter keys or on 123, shift or delete goes to the nearest letter or space bar instead.
+- **Correct words changed:** each reference is typed at the key centres. A letter without a key of its own is picked from its key's long-press menu, and an apostrophe without a key comes from the 123 page; French's apostrophe key (#2354) is tapped.
+- **Accents restored:** each reference is typed with `accent-keys.json`'s substitutes and bucketed by `<lang>.hextm` and `<lang>.valid` as on Android. iOS ships no `.valid` lists yet, so the Android ones are read.
+- **Critical cases:** typed at the key centres.
+
+Outputs also drop the `. , ! ? ; :` and quotes the engine may add, and ’ reads as '. German reads its model as with its experiment on. Bokmål has no iOS model, so it types as the keyboard does without one. Simulator dictionaries aren't a phone's: iOS 27.2's `nb_NO` takes any letters for a word.
+
+iOS numbers quoted elsewhere in this file (`ZZDecoderBench`, "iOS today") were made before the nearest-key rule, which moved them by 1–1.6 points of word error rate.
 
 ## Against today's iOS engine
 
