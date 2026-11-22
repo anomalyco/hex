@@ -371,9 +371,10 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
             // The threshold is the trailing check's, on the speech that ends
             // before the text begins, without Hex's own sounds at the capture's
             // head. The wider Parakeet slack avoids refusing a stream over a
-            // late first-word time; the cost is that a stream that lost a short
-            // opening, up to roughly 0.8 s of speech right before its text, is
-            // no longer caught.
+            // late first-word time; the cost is that a stream that lost an
+            // opening of up to about 1.5 s of speech before its text is no
+            // longer caught, roughly 0.8 s more than the 400 ms slack let
+            // through.
             let covered = (start_ms as usize * 16).saturating_sub(self.opening_slack);
             let frame = crate::transcription::pause_segmenter::FRAME_SAMPLES;
             let (mut first, mut last, mut untranscribed) = (None, 0, 0);

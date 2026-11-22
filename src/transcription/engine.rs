@@ -1753,7 +1753,7 @@ mod tests {
     }
 
     /// As above, with `slack` samples of speech the stream may leave before
-    /// its text starts, as a model whose token times are biased late gets.
+    /// its text starts, as a model whose first-word time lags its audio gets.
     fn finish_with_opening_slack(
         clip: &[f32],
         head_ignored: usize,
@@ -1860,7 +1860,7 @@ mod tests {
     }
 
     #[test]
-    fn parakeets_emission_stamped_first_word_is_not_a_lost_opening() {
+    fn parakeets_late_first_word_time_is_not_a_lost_opening() {
         // An illustrative late first-word timestamp, 640 ms after its onset;
         // the measured lag was about 100-1000 ms. With no pre-roll to exclude,
         // speech at 220-860 ms and text at 1280 ms is a stream that lost
@@ -1908,15 +1908,16 @@ mod tests {
         // only while it ends strictly before t0 - 1.2 s. A threshold's worth
         // of speech is the shortest that can be refused, so the same 300 ms
         // of lost opening is refused when it ends one frame before that edge
-        // and kept when it ends one frame after it (the frames ending at and
-        // past the edge no longer count).
+        // and kept when it ends at the edge: its last frame ends exactly at
+        // t0 - 1.2 s, so that frame is not counted and 14 remain, under the
+        // threshold.
         let text_start_ms: u64 = 3_000;
         let covered = text_start_ms as usize * 16 - PARAKEET_OPENING_SLACK_SAMPLES; // 28_800
         let frame: usize = FRAME_SAMPLES;
         let threshold = UNTRANSCRIBED_SPEECH_SAMPLES / frame; // 15 frames
         for (speech_end, refused) in [
-            (covered - frame, true),  // 28_480: all 15 frames count
-            (covered + frame, false), // 29_120: 2 frames fall past the edge
+            (covered - frame, true), // 28_480: all 15 frames count
+            (covered, false),        // 28_800: 14 count, the last at the edge
         ] {
             let mut clip = vec![0.0; speech_end - threshold * frame];
             clip.extend(tone(threshold * frame)); // the lost opening, 300 ms

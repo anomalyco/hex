@@ -2108,11 +2108,11 @@ source of false positives on a real microphone (the first version of this
 check, which summed them, likely rejected streams that had lost nothing — see
 `hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening`), but that is
 not measured on a device, and the false-positive rate of this check on real
-speech (fillers, coughs, clicks outside the press window) was still unmeasured
-until November 22, when Unified English's late first-word timestamps were found
-to refuse streams that had lost nothing (below).
+speech (fillers, coughs, clicks outside the press window) is still unmeasured.
+A measured false positive did turn up on November 22: Unified English's late
+first-word timestamps refused streams that had lost nothing (below).
 Because it counts every counted frame, a lost opening is caught however it is
-broken up, including one followed by a pause longer than the 400 ms slack
+broken up, including one followed by a pause longer than the opening slack
 (`a_lost_opening_after_a_long_pause_still_falls_back_to_the_whole_clip`).
 This check
 cannot see an opening that was garbled rather than dropped: a garbled opening
@@ -2166,10 +2166,10 @@ unchanged. Measured offline on the real Unified English Q8_0 model through
 transcribe.cpp on the CPU, over clean 16 kHz WAVs, in 20 runs with speech
 starting at 0, 450 ms, and 1 s: the stream's opening words matched the
 whole-clip text in every run, including speech starting at sample 0. The
-stream's chunk and lookahead geometry was not varied. What it gives up: a
-short lost opening, about 0.8 s of speech or less right before the text, now
-goes undetected. Checks:
-`parakeets_emission_stamped_first_word_is_not_a_lost_opening`,
+stream's chunk and lookahead geometry was not varied. What it gives up: a lost
+opening of up to about 1.5 s of speech before the text's start now goes
+undetected, about 0.8 s more than the 400 ms slack let through. Checks:
+`parakeets_late_first_word_time_is_not_a_lost_opening`,
 `parakeets_opening_slack_still_refuses_a_lost_opening`, and
 `parakeets_opening_slack_edge_is_one_frame` (synthetic tones, a fake stream).
 Not measured on a microphone or a device.
