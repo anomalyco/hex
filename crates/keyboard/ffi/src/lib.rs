@@ -7,12 +7,20 @@
 
 #[cfg(feature = "jni")]
 mod jni;
+mod lookup;
 mod model;
 mod swipe;
+mod tap;
 
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+pub use lookup::{
+    HkAllowWord, HkModelInfo, hk_model_alphabet, hk_model_bigram_cost, hk_model_completions,
+    hk_model_continuations, hk_model_cost, hk_model_encode, hk_model_has_pair, hk_model_index,
+    hk_model_index_of_codes, hk_model_info, hk_model_narrow, hk_model_next_words,
+    hk_model_unigram_cost, hk_model_word_codes,
+};
 pub use model::{HkModel, hk_model_free, hk_model_open, hk_model_open_fd, hk_model_word_count};
 pub use swipe::{
     HkCandidate, HkExtraWord, HkKeyCentre, HkKeys, HkSwipeDecoder, HkSwipeParameters,
@@ -20,9 +28,15 @@ pub use swipe::{
     hk_swipe_default_parameters, hk_swipe_free, hk_swipe_new, hk_swipe_own_word_cost,
     hk_swipe_read, hk_swipe_reading_free,
 };
+pub use tap::{
+    HkKeyOffset, HkKeyStats, HkLayoutKey, HkRect, HkTapDecision, HkTapDecoder, HkTapKeys,
+    HkTapParameters, hk_layout_offsets, hk_layout_tap_keys, hk_string_free, hk_tap_decide,
+    hk_tap_decision_free, hk_tap_default_parameters, hk_tap_free, hk_tap_merge, hk_tap_new,
+    hk_tap_replaces, hk_tap_tuned_parameters,
+};
 
 /// `HK_ABI_VERSION` in `include/hex_keyboard.h`.
-pub const HK_ABI_VERSION: u32 = 1;
+pub const HK_ABI_VERSION: u32 = 2;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn hk_abi_version() -> u32 {
