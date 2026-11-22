@@ -797,14 +797,19 @@ final class KeyboardViewController: UIInputViewController {
         var insertedResult = false
 
         // The keyboard's own dictation, and Hex's even while one of the keyboard's is on screen.
-        if let localSnapshot, insertResult(of: localSnapshot, source: "keyboard", now: now) {
-            insertedResult = true
-        }
-        if insertResult(of: appSnapshot, source: "app", now: now) {
-            insertedResult = true
-        }
-        if isShown, insertHeldDictation(now: now) {
-            insertedResult = true
+        // Only while shown: a keyboard iOS starts afresh as you come back from Hex syncs in
+        // viewDidLoad, before its field is connected, and text inserted then never reaches the
+        // field though the proxy takes it (iPad, TestFlight build 115: nothing went in).
+        if isShown {
+            if let localSnapshot, insertResult(of: localSnapshot, source: "keyboard", now: now) {
+                insertedResult = true
+            }
+            if insertResult(of: appSnapshot, source: "app", now: now) {
+                insertedResult = true
+            }
+            if insertHeldDictation(now: now) {
+                insertedResult = true
+            }
         }
         if insertedResult {
             coldStartJobID = UUID().uuidString

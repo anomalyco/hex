@@ -113,7 +113,10 @@ never at a launch by itself.
     (`hex-dictation://keyboard/record?...`) with a 10-second
     handoff window and starts recording. Hex never opens another app: the
     handoff screen shows a quiet "Swipe bar to return" cue over the home
-    indicator, and you swipe back to the app you were typing in.
+    indicator, and you swipe back to the app you were typing in. The text goes in
+    once the keyboard is on screen there again: iOS often starts a new keyboard on
+    the way back, and one that inserted while it loaded, before its field was
+    connected, lost the text (iPad mini, iPadOS 18, TestFlight build 115).
   - **GPU Dot Scope (`HEXShared/DotScope.swift`, `DotScopeShader.metal`):**
     Both `HEXMobile` and `HEXKeyboard` render Hex's desktop menu-bar braided
     oscilloscope (`src/dot_scope.rs`, `src/rune_hud.wgsl`) at native display
@@ -1253,8 +1256,9 @@ never at a launch by itself.
     recording or transcription whose heartbeat is more than 6 s old as over
     (`KeyboardSnapshot.isOrphanedJob`): a Hex that ended, crashed or was
     suspended mid-job used to hold every keyboard in recording for good. A
-    result that missed its 30 s to go in by itself stays offered in the full
-    keyboard's strip as **Paste dictation** for 10 minutes. A failure or note
+    result that missed its 30 s to go in by itself stays offered as **Paste
+    dictation** for 10 minutes, in the full keyboard's strip and in the dictation
+    bar's top row (the only keyboard on an iPad, which offered nothing). A failure or note
     from Hex ("Another app is using the microphone. Try again.") shows for 8 s
     after Hex wrote it (`KeyboardSnapshot.messageAt`), not for as long as it
     stays in the App Group; meanwhile both keyboards dictate in the keyboard, and

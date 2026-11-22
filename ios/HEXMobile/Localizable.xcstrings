@@ -810,6 +810,16 @@
         }
       }
     },
+    "Paste dictation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴听写"
+          }
+        }
+      }
+    },
     "Capitalizes the start of sentences" : {
       "localizations" : {
         "zh-Hans" : {

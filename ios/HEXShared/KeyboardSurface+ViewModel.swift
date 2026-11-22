@@ -73,8 +73,8 @@ final class KeyboardViewModel: ObservableObject {
     /// The dictation bar's emoji key: Settings › Keyboard › Emoji, in a field that takes emoji.
     @Published var showsEmojiKey = true
     /// A finished dictation the keyboard didn't insert by itself (it missed its moment, or
-    /// the keyboard came back in another field): the full keyboard's strip offers Paste
-    /// dictation, which calls `onPasteDictation`.
+    /// the keyboard came back in another field): the full keyboard's strip and the dictation
+    /// bar's top row offer Paste dictation, which calls `onPasteDictation`.
     @Published var offeredDictation: String?
 
     // Non-published live telemetry read directly by `DotScopeHostView` / button tap handlers
