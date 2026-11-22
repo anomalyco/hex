@@ -117,7 +117,7 @@ struct KeyboardClipboardTracker {
     /// those (TestFlight build 126). It needs no Full Access, which only Paste does.
     /// `canSwitchKeyboard` is false where Apple's keyboard is
     /// split (the Duo unfolded and upright, or not known yet): iOS 27.2's switch to the next
-    /// keyboard can end the app being typed in there (`FullKeyboardView.passesGlobeTouch`), so
+    /// keyboard can end the app being typed in there (`InputModeListTouch`), so
     /// only Paste is offered and the globe's list leads to Apple's keyboard.
     func offer(
         textContentType: UITextContentType?,
