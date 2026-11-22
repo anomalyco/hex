@@ -1267,10 +1267,10 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// Settings › Experiments › Comma and period keys reaches every portrait bottom row, with the
-    /// Hex key left of space, right of space or in the strip: the comma and period are there if
-    /// and only if the space bar held three letters and two gaps, the bar they leave is still a
-    /// letter wide, every key is inside the keyboard, and its midpoint hits itself.
+    /// Settings › Experiments › Comma and period keys on the portrait bottom row, across widths,
+    /// phone sizes, globe and emoji, and every Hex key placement: the comma and period are there
+    /// if and only if the space bar held three letters and two gaps, the bar they leave is still
+    /// a letter wide, every key is inside the keyboard, and its midpoint hits itself.
     func testCommaAndPeriodKeysFitEveryPortraitBottomRow() throws {
         var cases: [(KeyboardLayout, KeyboardLayout)] = []
         for width in portraitWidths {
