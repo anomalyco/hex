@@ -599,6 +599,7 @@ struct ExperimentsSettingsPage: View {
     @State private var confirmingTouchReset = false
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
+    @State private var twoThumbSelection = FullKeyboardSettings().twoThumbSelection
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
@@ -680,6 +681,15 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsDivider()
 
+                // Off by default: a second finger on the trackpad is ignored, as before.
+                SettingsToggleRow(
+                    title: String(localized: "Two-thumb selection"),
+                    detail: String(localized: "With the space bar as a trackpad, a second thumb selects: each thumb moves one end."),
+                    isOn: $twoThumbSelection
+                )
+
+                SettingsDivider()
+
                 // Off by default: one shared list of learned words and fixes, as before.
                 SettingsToggleRow(
                     title: String(localized: "Learn each language separately"),
@@ -718,6 +728,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
             FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
         }
+        .onChange(of: twoThumbSelection) { _, enabled in
+            FullKeyboardSettings().twoThumbSelection = enabled
+        }
         .onChange(of: learnPerLanguage) { _, enabled in
             TypingJournalSettings().learnsPerLanguage = enabled
         }
@@ -740,6 +753,7 @@ struct ExperimentsSettingsPage: View {
             refreshAdaptiveTouchStatus()
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
             emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
+            twoThumbSelection = FullKeyboardSettings().twoThumbSelection
             learnPerLanguage = TypingJournalSettings().learnsPerLanguage
             multilingualParakeet = MultilingualParakeetSettings().isEnabled
         }

@@ -685,8 +685,8 @@ never at a launch by itself.
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
     Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
-    German spatial autocorrect, ABC under the emoji key, and Multilingual model
-    (Parakeet).
+    German spatial autocorrect, ABC under the emoji key, Two-thumb selection, and
+    Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1157,10 +1157,35 @@ never at a launch by itself.
   only the cursor's sentence or line and a little before it, so at that text's edge the cursor
   waits for the host to show more, and past its first or last line it steps just past it in
   one move, which the host makes only if there's text there. The keys blank to keycaps 60%
-  of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's
-  second-finger tap to select text has no counterpart: `UITextDocumentProxy` (iOS 27.2 SDK)
-  can read the selection but not make one, so a second finger does nothing. The dictation bar's
-  space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
+  of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
+  tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
+  selection but not make one. Off (the default), a second finger does nothing. Settings ›
+  Experiments › Two-thumb selection (off by default, `experiments.twoThumbSelection`, App Group)
+  gives it one: while the space bar is the trackpad, a second finger starts a selection from
+  the cursor, and the finger further left moves the start of the range, the other the end, each
+  with its own `TrackpadCursor.State` (the trackpad's gain, acceleration and rows). Settling the
+  trackpad at the start can move the host cursor once; after that, no host cursor moves. The
+  strip shows the text around the range with the selected part highlighted,
+  within the text the host shares: the range is clamped to what the field shares around the
+  cursor when the selection starts (the field shares only the cursor's sentence or line). If
+  the host's context hasn't caught up at the start the whole span is kept; either way an
+  action runs only while the host still shares the whole range, and otherwise dismisses
+  without acting. Both thumbs up shows Delete · Cut · Copy · Dictate · Cancel (Cut and
+  Copy only with Full Access, as the strip's clipboard; without it they aren't offered): Delete
+  puts the cursor at the range's end with `adjustTextPosition` and deletes its characters one by
+  one (a 👍🏽 is one); Cut copies then deletes; Copy copies and puts the cursor at the end;
+  Delete and Cut leave it at the range's start; Cancel changes nothing; and any other key
+  dismisses the actions without acting. Dictate leaves the range in place and starts the
+  keyboard's usual dictation there (the warm Hex session or in-keyboard dictation). When its
+  words are about to insert and the field still shows the range unchanged (the same field, and
+  the text around it), they replace it; otherwise they insert at the cursor as any dictation
+  would, with the range left alone. Cancelling or hearing nothing leaves the range untouched.
+  Where dictation would open Hex instead (no Full Access, or the keyboard can't dictate here),
+  tapping Dictate dismisses the actions and opens Hex (or shows the Full Access hint) with the
+  text left in place. An empty range ends like a normal
+  trackpad lift. Delete and Cut ask the host to delete once per Character: in a script whose
+  host removes one code point per call (some Devanagari and Thai clusters), the last code
+  points of a cluster can stay behind. The dictation bar's space bar is the same trackpad along the line (the same still hold or a 10 pt slide, a
   character per 7.5 pt, the keys' glyphs blanking, a selection tick per step; TestFlight
   build 56 asked for it), and a tap still types a space.
 - **Smart punctuation (full keyboard):** As on Apple's keyboard (black box, iOS 27.2), the

@@ -29,6 +29,7 @@ struct FullKeyboardSettings {
     static let emojiLaunchArgument = "--experiment-emoji"
     static let emojiLettersLaunchArgument = "--experiment-emoji-letters"
     static let swipeLaunchArgument = "--experiment-swipe"
+    static let twoThumbSelectionLaunchArgument = "--experiment-two-thumb-selection"
     /// Simulator scenes pass `--hex-key left` (or `right`) for Settings › Keyboard › Hex key.
     static let hexKeyLaunchArgument = "--hex-key"
     /// Simulator scenes pass `--keyboard dictation-bar` (or `full`) to pick the keyboard.
@@ -47,6 +48,7 @@ struct FullKeyboardSettings {
         static let emoji = "experiments.emoji"
         static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
         static let swipeTyping = "experiments.swipeTyping"
+        static let twoThumbSelection = "experiments.twoThumbSelection"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
     }
@@ -161,6 +163,15 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.emojiLettersUnderEmojiKey) }
     }
 
+    /// Settings › Experiments › Two-thumb selection: while the space bar is the trackpad, a
+    /// second thumb selects — each thumb moves one end, shown in the strip, with Delete, Cut,
+    /// Copy, Dictate and Cancel once both lift. Off by default. Stored as
+    /// `experiments.twoThumbSelection`; off, a second finger is ignored as it always was.
+    var twoThumbSelection: Bool {
+        get { defaults?.object(forKey: Key.twoThumbSelection) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.twoThumbSelection) }
+    }
+
     /// Settings › Keyboard › Swipe typing: slide through a word's letters to type it, on the
     /// English and Spanish layouts (`SwipeTyping`). On by default. Stored as
     /// `experiments.swipeTyping`, from when it was an experiment (off by default): unset or
@@ -217,6 +228,9 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.swipeLaunchArgument) {
             swipeTyping = true
+        }
+        if arguments.contains(Self.twoThumbSelectionLaunchArgument) {
+            twoThumbSelection = true
         }
         if let index = arguments.firstIndex(of: Self.hexKeyLaunchArgument), index + 1 < arguments.count {
             switch arguments[index + 1] {

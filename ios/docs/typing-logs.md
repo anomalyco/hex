@@ -179,7 +179,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 | `op` | fields |
 | --- | --- |
 | `insert` | `inserted`, `src`: `key` (a character or space), `accent` (long-press pick), `slide` (hold 123, slide, let go), `bar` (the dictation bar's space) |
-| `delete` | `deleted` (the character), `src`: `key` (on press), `repeat` (held, 75 ms), `repeat_fast` (after 0.85 s, two at a time), `bar` |
+| `delete` | `deleted` (the character), `src`: `key` (on press), `repeat` (held, 75 ms), `repeat_fast` (after 0.85 s, two at a time), `bar`, `selection` (Two-thumb selection's Delete), `selection_cut`, `selection_dictate` (its Dictate, when the dictation's words arrive and replace the range; `deletedCount` when the range is longer than 80 characters) |
 | `delete_word` | `deleted`, `src`: `repeat_word` (held past 1.4 s) |
 | `autocorrect` | `from`, `to`, `deleted` (= `from`), `inserted` (`to` + space). Applied on space. |
 | `autocorrect_undo` | `deleted` (the correction, without its space or mark), `inserted` (what was typed), `src`: `strip`. The strip's revert, offered once delete took the correction's space or mark (or the cursor came back to its end), put back what was typed. |
@@ -189,7 +189,7 @@ cursor, for every `edit` (and `dictation`) line remove `deleted` (a string;
 | `return` | `inserted`: `"\n"`, `returnKeyType`, `send` (the key said Send); `ignored: true` and no `inserted` when the key was disabled (empty field) |
 | `paste` | `inserted`: the strip's Paste chip |
 | `undo_dictation` | `deleted` (the dictation), or `deletedCount` when the host showed only its end |
-| `cursor` | `offset`: UTF-16 units the spacebar trackpad moved the cursor (negative is left) |
+| `cursor` | `offset`: UTF-16 units the cursor moved (negative is left); `src`: absent for the spacebar trackpad (including its settle when a selection starts), `selection` (Two-thumb selection's Copy, or its Delete moving to the range's end), `selection_cut` and `selection_dictate` (the same move before their delete) |
 
 ### `candidates`
 
@@ -205,7 +205,7 @@ dictation, a status, or the clipboard chips.
 The host's text around the cursor, as `documentContextBeforeInput` /
 `AfterInput` give it. `why`: `session_start`, `space`, `return`,
 `suggestion`, `delete_word`, `autocorrect_undo`, `revert`, `paste`, `trackpad`,
-`undo_dictation`, `dictation`, `session_end`, or `text_did_change` (the host
+`selection`, `undo_dictation`, `dictation`, `session_end`, or `text_did_change` (the host
 changed the text or moved the cursor: written once things settle for 0.3 s, at
 once when the field emptied). `before` (the last 200 characters), `after` (the
 first 200), `beforeLength` and `afterLength` (before capping; hosts often cut
@@ -220,7 +220,22 @@ Taps that aren't text: `action`:
 - `accent_open` (`id`, `key`, `options`), `accent_pick` (`id`, `index`, `chosen`,
   `rollover` when another key committed it), `accent_cancel`;
 - `trackpad_start` (`id`; `hold: true`, as only holding the space bar starts it;
-  older logs without it had a 10 pt slide start it), `trackpad_end` (`id`, `offset`: total UTF-16 units);
+  older logs without it had a 10 pt slide start it), `trackpad_end` (`id`, `offset`: total
+  UTF-16 units; with Two-thumb selection on, the space bar's own lift writes it even while the
+  other thumb keeps selecting), followed by a `context` (`trackpad`);
+- `selection_start` (`id`, the second finger; `thumb: second`, `anchor`: the cursor's
+  UTF-16 offset into the trackpad's known text, which is what the selection lays out),
+  `selection_end` (`id`, `empty: true` when both
+  thumbs lifted with no range and the selection ended like a trackpad lift; when `false`,
+  `start` and `end`: the range's UTF-16 offsets from that anchor), `selection_action`
+  (`action`: `delete`, `cut`, `copy`, `dictate`, `cancel`, `dismiss` (another key closed the
+  actions, or the text no longer matched: `reason` is `key`, `host_edit`, `text` or
+  `context`; no `start` or `end`); `start` and `end` as `selection_end` for the others.
+  A Dictate writes a second `action: dictate` line when its words arrive: `result` is
+  `replaced` (the range was deleted and the words go in there) or `inserted` (the field
+  changed, with a `reason`: `field`, `text` or `context`, and the words go in at the
+  cursor);
+- `selection_cancel` (`id`: the system took a finger away, nothing changed);
 - `language_swipe` (`id`, `step`: 1 the next language, -1 the one before) and
   `keyboard_language` (`language`: the layout it switched to), with two or more
   keyboard languages;

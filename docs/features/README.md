@@ -2884,7 +2884,7 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Adaptive touch, German spatial autocorrect, ABC under the emoji key,
-│   Learn each language separately
+│   Two-thumb selection, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2910,6 +2910,33 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Abend"), and Auto-capitalization off adds none.
 │   Off, German keeps the dictionary engine and has no word list, so no letter odds,
 │   model completions or bilingual partner model
+├── Two-thumb selection (off by default, `experiments.twoThumbSelection`): while
+│   the space bar is the trackpad, a second finger starts a selection from the cursor;
+│   the finger further left moves the range's start and the other its end, each with its
+│   own `TrackpadCursor.State` (the trackpad's gain, acceleration and rows). Settling the
+│   trackpad at the start can move the host cursor once; after that it doesn't move while
+│   selecting. `UITextDocumentProxy` can read a selection but
+│   not set one, so the strip shows the text around the range with the selected part
+│   highlighted, within the text the host shares (`documentContextBeforeInput`/
+│   `AfterInput`). Both thumbs up shows Delete · Cut · Copy · Dictate · Cancel: Delete
+│   moves to the range's end with `adjustTextPosition` and deletes its characters one by
+│   one (an emoji is one), Cut copies then deletes, Copy copies and puts the cursor at the
+│   end, Cancel changes nothing, and any other key dismisses them without typing. Cut and
+│   Copy appear only with Full Access (the strip's clipboard rule). The range is clamped to
+│   the text the host shares around the cursor when the selection starts; if that context
+│   hasn't caught up yet the whole span is kept. An action runs only while the host still
+│   shares the whole range (a smaller or different text dismisses it, with a reason in the
+│   log). Dictate leaves the range in place and starts the keyboard's warm or in-keyboard
+│   dictation there; when its words are about to insert and the field still shows the range
+│   unchanged (same document and surrounding text), they replace it, otherwise they insert
+│   at the cursor as any dictation would and the range stays. Cancelling or hearing nothing
+│   leaves the range untouched. Where dictation would open Hex instead (no Full Access, or
+│   the keyboard can't dictate here), tapping Dictate dismisses the actions and opens Hex or
+│   shows the Full Access hint, leaving the text. An empty range ends like a
+│   normal trackpad lift. Delete and Cut call the host's delete once per Character, so a
+│   host that removes one code point per call (some Devanagari and Thai clusters) can leave
+│   fragments. Off, a second finger is ignored exactly as before.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed
 │   or dictated in; on, the keys learn a language's typos and rejections from that
