@@ -2724,7 +2724,7 @@ controller's `ControllerCommand::JoinFromMenu`, the menu's own join path
 records that occurrence as already reminded so its reminder never pops, and
 sends `ReminderWithdrawn` when that reminder is currently showing so its
 capsule closes. A moved meeting is a new occurrence and may remind again. The
-click itself starts no recording, though a provider set to Always record may
+click itself starts no recording, though a provider set to Record automatically may
 still record once the call is detected. A row without a link is informational
 and disabled. The gate, `labs::calendar_menu()`, is read when the meeting
 controller decides to read its calendar, on the status item's 500 ms refresh,
@@ -3636,7 +3636,7 @@ export, and Movable meeting capsules graduated: they always work now
 ([meetings.md](meetings.md)), and a panel capsule thrown on release glides
 into the corner it heads for. Stop when the call ends, Expire meeting audio
 separately, Descriptive meeting file names, and Separate notes file became
-Meetings › Settings rows: Detected calls › Stop when the call ends
+Meetings › Settings rows: Calls › Stop when the call ends
 (`meetings.stop_when_call_ends`), After a meeting › Keep audio
 (`meetings.audio_retention`), and Export › Descriptive meeting file names and
 Separate notes file (`meetings.export.descriptive_filenames`,

@@ -184,6 +184,11 @@ const PATHS: &[(&str, &str)] = &[
     ("meetings-empty", "Window/Meetings/Empty"),
     ("meetings-off", "Window/Meetings/Off"),
     ("meetings-settings", "Window/Meetings/Settings"),
+    ("meetings-calls", "Window/Meetings/Calls"),
+    (
+        "meetings-calls-empty",
+        "Window/Meetings/Calls before any call",
+    ),
     ("meetings-summaries", "Window/Meetings/Summaries"),
     (
         "meetings-summaries-unavailable",

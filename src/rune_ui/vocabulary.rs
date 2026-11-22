@@ -192,6 +192,7 @@ pub(super) fn open(ui: &mut Ui) {
     super::picker::close(ui);
     super::explainer::close(ui);
     super::sound_sets::close(ui);
+    super::calls::close(ui);
     ui.open = None;
     ui.vocabulary.open = true;
     ui.vocabulary.status = None;

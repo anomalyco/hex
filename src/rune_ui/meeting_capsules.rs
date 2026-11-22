@@ -160,7 +160,7 @@ const DOCK: f32 = 24.0;
 #[derive(Clone)]
 enum Kind {
     /// A calendar meeting is about to start; `automatic` when its call
-    /// service is set to Always record.
+    /// service is set to Record automatically.
     Reminder {
         meeting: CalendarMeeting,
         automatic: bool,
@@ -302,7 +302,7 @@ impl Live {
 
 struct Capsule {
     kind: Option<Kind>,
-    /// The offer shows its Never offer / Always record choices in place of
+    /// The offer shows its Don't offer / Record automatically choices in place of
     /// its actions.
     more_open: bool,
     /// Arms another 20 s if Cancel returns to an offer whose timer already fired.
@@ -787,7 +787,7 @@ impl Pill {
 }
 
 impl MeetingCapsules {
-    /// `choose` saves a "Never offer" or "Always record" choice (the window
+    /// `choose` saves a "Don't offer" or "Record automatically" choice (the window
     /// keeps the settings it saves).
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,
@@ -1336,7 +1336,7 @@ fn starts_label(start_ms: i64, now_ms: i64) -> String {
 }
 
 /// The calendar reminder: Record, or Join & record when the invitation has
-/// a call link. With Always record set for its service, it says so and
+/// a call link. With Record automatically set for its service, it says so and
 /// offers Join and Don't record instead.
 fn reminder(
     p: Paint,

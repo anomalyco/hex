@@ -10,6 +10,7 @@
 //! design language (`rune-theme-opencode`); see `docs/design-system.md`.
 
 mod activity;
+mod calls;
 #[cfg(hex_capture)]
 pub(crate) mod capture_capsule;
 mod controls;
@@ -700,6 +701,8 @@ pub(crate) struct Ui {
     found: found::FoundState,
     explainer: explainer::Explainer,
     sound_sets: sound_sets::SoundSets,
+    /// Meetings › Settings' Calls sheet and the calls Hex has seen.
+    calls: calls::Calls,
     tour: Option<onboarding::Tour>,
     /// The new first run over the tour (Labs).
     first_run: Option<onboarding_kit::Onboard>,
@@ -830,6 +833,7 @@ impl Ui {
             found: found::FoundState::default(),
             explainer: explainer::Explainer::default(),
             sound_sets: sound_sets::SoundSets::default(),
+            calls: calls::Calls::default(),
             tour: None,
             first_run: None,
             platform: platform::PlatformState::new(platform::Capabilities::current()),
@@ -1152,6 +1156,7 @@ impl Ui {
         picker::close(self);
         explainer::close(self);
         sound_sets::close(self);
+        calls::close(self);
         vocabulary::close(self);
         history::close_stats(self);
     }
@@ -1229,6 +1234,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         && !ui.picker.open
         && !ui.explainer.open
         && !ui.sound_sets.open
+        && !ui.calls.open
         && !ui.vocabulary.open
         && !ui.history.stats_open
         && ui.tour.is_none()
@@ -1253,6 +1259,14 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         true
     } else if ui.sound_sets.open {
         sound_sets::close(ui);
+        true
+    } else if ui.calls.open {
+        // A row's open menu closes first.
+        if matches!(ui.open, Some(Menu::Call(_))) {
+            ui.open = None;
+        } else {
+            calls::close(ui);
+        }
         true
     } else if ui.vocabulary.open {
         vocabulary::close(ui);
@@ -1450,6 +1464,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     changed |= explainer::poll(ui, clock, visible, tx);
     changed |= sound_sets::poll(ui, clock, tx);
+    changed |= calls::poll(ui, clock, visible);
     changed | settings::advance_capture(ui, clock, tx)
 }
 
@@ -1553,6 +1568,9 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         layer.extend(modal);
     }
     if let Some(modal) = vocabulary::modal(ui, p) {
+        layer.extend(modal);
+    }
+    if let Some(modal) = calls::modal(ui, p) {
         layer.extend(modal);
     }
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {

@@ -2,7 +2,6 @@
 //! the transition; only the shell stretches. The controller still owns the
 //! offer, its deadlines and every consequential action.
 use super::*;
-use crate::calendar::CallProvider;
 use crate::meeting::detection::MeetingSource;
 use rune::Transition;
 
@@ -132,11 +131,14 @@ impl Presentation {
             + 8.0
             + button(tr("Record"))
             + if provider.is_some() { 34.0 + 8.0 } else { 0.0 };
+        let name = provider
+            .as_ref()
+            .map_or_else(String::new, |p| super::offer::short_name(&p.label));
         let rules = button(tr("Cancel"))
             + 8.0
-            + button(tr("Never offer"))
+            + button(&tr_fill("Don't offer for {}", &name))
             + if c.can_always_record() {
-                8.0 + button(tr("Always record"))
+                8.0 + button(&tr_fill("Always record {}", &name))
             } else {
                 0.0
             };
@@ -184,27 +186,13 @@ impl Presentation {
 }
 
 fn web(c: &MeetingCandidate) -> bool {
-    c.site.is_some()
-        || crate::microphone_activity::is_browser_id(c.application.as_deref())
-        || matches!(
-            c.source,
-            MeetingSource::BrowserCall | MeetingSource::GoogleMeet | MeetingSource::Banshee
-        )
+    c.on_web()
 }
 
 pub(super) fn native_icon(id: &str) -> Option<rune::Pixels> {
     static CACHE: std::sync::OnceLock<rune::ImageCache> = std::sync::OnceLock::new();
     let apps = crate::application_catalog::discover();
-    let entry = apps
-        .iter()
-        .find(|a| a.bundle_id.as_deref() == Some(id))
-        .or_else(|| {
-            apps.iter().find(|a| {
-                // The desktop catalogs on Windows and Linux identify apps by executable.
-                let key = a.bundle_id.as_deref().unwrap_or(&a.name);
-                crate::microphone_activity::canonical_bundle_id_for(key, None) == Some(id)
-            })
-        })?;
+    let entry = crate::application_catalog::find(&apps, id)?;
     if !entry.path.exists() {
         return None;
     }
@@ -223,13 +211,20 @@ pub(super) fn local_bundle(c: &MeetingCandidate) -> Option<&str> {
     }
 }
 
-fn fallback(c: &MeetingCandidate) -> Option<CallProvider> {
+/// The name a web call's service mark is found by: its site, or the
+/// service's name.
+fn fallback_key(c: &MeetingCandidate) -> String {
+    if c.source == MeetingSource::BrowserCall {
+        c.site.clone().unwrap_or_default()
+    } else {
+        c.source.label().to_owned()
+    }
+}
+
+#[cfg(test)]
+fn fallback(c: &MeetingCandidate) -> Option<crate::calendar::CallProvider> {
     if web(c) {
-        CallProvider::from_meeting_app(if c.source == MeetingSource::BrowserCall {
-            c.site.as_deref().unwrap_or("")
-        } else {
-            c.source.label()
-        })
+        crate::calendar::CallProvider::from_meeting_app(&fallback_key(c))
     } else {
         None
     }
@@ -277,9 +272,10 @@ fn mark(p: Paint, c: &MeetingCandidate, local: Option<&rune::Pixels>) -> El {
         slot.pixels(icon)
     } else {
         // A missing local app has no native icon. Web services have their
-        // bundled marks, never the browser's Dock icon.
-        let glyph = fallback(c).map(crate::rune_ui::platform_settings::provider_icon);
-        slot.child(rune::icon(glyph.unwrap_or(&crate::rune_ui::icons::CALL), 18.0).color(p.muted()))
+        // bundled marks, never the browser's Dock icon; other websites a
+        // globe, as Settings › Calls shows them.
+        let glyph = crate::rune_ui::calls::glyph(web(c), &fallback_key(c));
+        slot.child(rune::icon(glyph, 18.0).color(p.muted()))
     }
 }
 

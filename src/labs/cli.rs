@@ -184,7 +184,7 @@ const GRADUATED: [(&str, &str); 24] = [
     ),
     (
         "stop-when-call-ends",
-        "stop-when-call-ends moved: turn on Stop when the call ends in Meetings › Settings › Detected calls, or hex settings set meetings.stop_when_call_ends true",
+        "stop-when-call-ends moved: turn on Stop when the call ends in Meetings › Settings › Calls, or hex settings set meetings.stop_when_call_ends true",
     ),
     (
         "meeting-descriptive-filenames",

@@ -45,7 +45,7 @@ pub(crate) enum ControllerCommand {
         meeting: CalendarMeeting,
         join: bool,
     },
-    /// Open the meeting's call link without recording (Always record
+    /// Open the meeting's call link without recording (Record automatically
     /// starts once the call is detected).
     JoinMeeting(CalendarMeeting),
     /// Joined from the Labs menu: opens the call link without recording, and
@@ -64,7 +64,7 @@ pub(crate) enum ControllerEvent {
     Offer(OfferId, MeetingCandidate),
     OfferWithdrawn(OfferId),
     /// A calendar meeting is about to start. `automatic` when its call
-    /// service is set to Always record.
+    /// service is set to Record automatically.
     Reminder {
         meeting: CalendarMeeting,
         automatic: bool,
@@ -76,7 +76,7 @@ pub(crate) enum ControllerEvent {
     },
     /// The accepted offer, or None for a start that did not come from one.
     Starting(Option<OfferId>),
-    /// `automatic` when the provider is set to Always record.
+    /// `automatic` when the provider is set to Record automatically.
     RecordingStarted {
         id: String,
         title: String,
@@ -190,6 +190,7 @@ pub(crate) fn controller_loop(
     meeting_requests: Receiver<MeetingRequest>,
 ) -> Result<()> {
     let mut detector = MeetingDetector::default();
+    let mut seen_calls = crate::meeting::seen_calls::SeenCalls::default();
     let mut recording: Option<ActiveRecording> = None;
     let mut importing: Option<ImportWorker> = None;
     let mut reminders = Reminders::default();
@@ -243,7 +244,9 @@ pub(crate) fn controller_loop(
                 &mut detector,
                 &mut observed_microphone_apps,
                 &mut browser,
+                &mut seen_calls,
                 &choices,
+                crate::app_settings::meeting_default_policy(),
             ) {
                 Err(()) => {
                     thread::sleep(Duration::from_secs(2));
@@ -673,6 +676,7 @@ impl Reminders {
                 let automatic = records_automatically(
                     &meeting,
                     &crate::app_settings::meeting_provider_choices(),
+                    crate::app_settings::meeting_default_policy(),
                 );
                 tracing::info!(
                     provider = meeting.link.as_ref().map(|link| link.provider.label()),
@@ -726,21 +730,23 @@ impl Reminders {
     }
 }
 
-/// Whether the meeting's call service is set to Always record, so its call
-/// records once detected.
+/// Whether the meeting's call service records automatically, by its own
+/// answer or `default`, so its call records once detected.
 fn records_automatically(
     meeting: &CalendarMeeting,
     choices: &[crate::app_settings::MeetingProviderChoice],
+    default: crate::app_settings::MeetingPolicy,
 ) -> bool {
     meeting
         .link
         .as_ref()
         .and_then(|link| link.provider.choice_key())
         .is_some_and(|key| {
-            choices.iter().any(|choice| {
-                choice.key == key
-                    && choice.policy == crate::app_settings::MeetingPolicy::AlwaysRecord
-            })
+            choices
+                .iter()
+                .find(|choice| choice.key == key)
+                .map_or(default, |choice| choice.policy)
+                == crate::app_settings::MeetingPolicy::AlwaysRecord
         })
 }
 
@@ -1096,7 +1102,7 @@ fn withdraw_stop(
 }
 
 /// Whether a recording stops on its own once its call ends: only one Hex
-/// started automatically (Always record), and only with Stop when
+/// started automatically (Record automatically), and only with Stop when
 /// the call ends on. Manual and offered recordings never do.
 fn stops_when_call_ends(automatic: bool, lab_on: bool) -> bool {
     automatic && lab_on
@@ -1347,7 +1353,9 @@ fn detect_meeting(
     detector: &mut MeetingDetector,
     observed_microphone_apps: &mut Vec<(i32, String)>,
     browser: &mut BrowserWatch,
+    seen_calls: &mut crate::meeting::seen_calls::SeenCalls,
     choices: &[crate::app_settings::MeetingProviderChoice],
+    default: crate::app_settings::MeetingPolicy,
 ) -> Result<Option<Detection>, ()> {
     let microphone_apps = match active_microphone_applications() {
         Ok(applications) => applications,
@@ -1382,7 +1390,19 @@ fn detect_meeting(
     });
     let candidate =
         application.and_then(|application| candidate_from_microphone(&application, &context));
-    let detection = detector.detect(candidate, choices);
+    // A Don't offer call shows nothing, but Settings still lists where it was.
+    let unoffered = candidate
+        .as_ref()
+        .filter(|candidate| {
+            candidate.policy(choices, default) == crate::app_settings::MeetingPolicy::NeverOffer
+        })
+        .cloned();
+    let detection = detector.detect(candidate, choices, default);
+    if let Some(Detection::Offer(seen) | Detection::Record(seen)) = &detection {
+        seen_calls.note(seen, crate::calendar::wall_clock_ms());
+    } else if let Some(seen) = &unoffered {
+        seen_calls.note(seen, crate::calendar::wall_clock_ms());
+    }
     if let Some(Detection::Offer(candidate)) = &detection {
         tracing::info!(
             source = candidate.source.label(),
@@ -2250,7 +2270,9 @@ mod tests {
                 first = false;
             }
             let candidate = candidate_from_microphone(&brave(), &context);
-            if let Some(detection) = detector.detect(candidate, &[]) {
+            if let Some(detection) =
+                detector.detect(candidate, &[], crate::app_settings::MeetingPolicy::Ask)
+            {
                 break detection;
             }
             thread::sleep(Duration::from_millis(50));

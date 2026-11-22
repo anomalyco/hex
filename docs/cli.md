@@ -673,7 +673,7 @@ Writable keys: `release_microphone_while_idle`,
 `history_retention`, `meetings.enabled`,
 `meetings.output_folder`, `meetings.summaries`, `meetings.opencode_model`,
 `meetings.show_recording_indicator`, `meetings.recording_indicator_corner`,
-`meetings.retention`, `meetings.audio_retention`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
+`meetings.retention`, `meetings.audio_retention`, `meetings.default_policy`, `meetings.providers`, `meetings.calendar.excluded_calendars`,
 `meetings.calendar.remind`, `meetings.calendar.lead_minutes`,
 `experimental.hex_microphone`, `experimental.hex_microphone_mode`,
 `experimental.hex_microphone_comfort_noise`,
@@ -695,6 +695,14 @@ Off a Mac it is `off` or `opencode`. The retired
 `meetings.summarize_with_apple_intelligence` and
 `meetings.summarize_with_opencode` are refused with the `meetings.summaries`
 command to use instead.
+
+`meetings.default_policy` is the answer a call gets when its app or website
+has none of its own in `meetings.providers`: `ask` (Ask each time, the
+default), `always_record` (Record automatically), or `never_offer` (Don't
+offer); the window calls these the same names. Setting it changes only the
+default; the Calls sheet's radios also move every entry that matched the old
+one. The list of apps and websites Hex has seen a call in
+(`seen-calls.json`) is not a setting and has no key.
 
 A test (`control::settings::tests::every_persisted_setting_has_a_cli_key`)
 fails when a new persisted setting has no key here.

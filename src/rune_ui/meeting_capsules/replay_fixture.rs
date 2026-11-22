@@ -355,6 +355,8 @@ fn replay_levels(replay: &Replay, frame: usize) -> [f32; 2] {
 #[derive(Clone, Debug, Default)]
 struct Shot {
     phase: &'static str,
+    /// The window's width.
+    width: f32,
     /// The surface: x, y, width, height.
     pill: Option<[f32; 4]>,
     velocity: (f32, f32),
@@ -388,6 +390,14 @@ struct Shot {
     hidden: u64,
 }
 
+fn meet() -> MeetingCandidate {
+    provider_cases()
+        .into_iter()
+        .find(|(s, _)| *s == "meet")
+        .unwrap()
+        .1
+}
+
 /// Plays `replay`, handing every frame to `each` once it is laid out.
 fn play(
     replay: &Replay,
@@ -409,17 +419,17 @@ fn play(
     } else if replay.name == "auto-started" {
         auto_started()
     } else {
-        offer(
-            provider_cases()
-                .into_iter()
-                .find(|(s, _)| *s == "meet")
-                .unwrap()
-                .1,
-        )
+        offer(meet())
     };
     // The recording is dark in either appearance; the offer follows the host.
     let dark = std::env::var("HEX_HUD_THEME").as_deref() != Ok("light");
     let (mut rt, commands, _) = runtime(kind, false, dark, size);
+    // An offer's window is as wide as its answers, which name the service.
+    let size = if matches!(rt.state.kind, Some(Kind::Offer(..))) {
+        rt.state.presentation.window()
+    } else {
+        size
+    };
     rt.transparent = true;
     rt.set_system_reduced_motion(replay.reduced);
     rt.poll = Some(|c: &mut Capsule, now, tx: &mut Tx| {
@@ -475,6 +485,9 @@ fn play(
         for (_, cue) in replay.cues.iter().filter(|(at, _)| *at == frame) {
             match *cue {
                 Cue::Move(x, y) => {
+                    // Traces were taken in a 500 pt window; the offer's
+                    // keeps its right edge where theirs was.
+                    let x = x + size.0 - 500.;
                     pointer = Some((x, y));
                     rt.pointer_move(x, y);
                 }
@@ -649,6 +662,7 @@ fn play(
         let c = &rt.state;
         let rect = |key: &str| rt.presented(key).map(|(rect, _)| rect);
         let shot = Shot {
+            width: size.0,
             phase: match &c.kind {
                 None if c.surface.leaving() => "leaving",
                 None => "closed",
@@ -770,7 +784,7 @@ fn anchored(shots: &[Shot]) {
             continue;
         };
         assert!(
-            (x + w - (500. - CAPSULE_INSET)).abs() < 0.03 && (y - CAPSULE_INSET).abs() < 0.03,
+            (x + w - (shot.width - CAPSULE_INSET)).abs() < 0.03 && (y - CAPSULE_INSET).abs() < 0.03,
             "f{frame}: {:?}",
             shot.pill
         );
@@ -791,7 +805,7 @@ fn starting_keeps_its_place_and_a_quick_start_never_says_it() {
         .map(|r| (r[0] + r[2] / 2., r[1] + r[3] / 2.))
         .collect();
     assert!(seen.len() > 60, "a slow start says Starting…");
-    let rest = (500. - CAPSULE_INSET - REST_WIDTH / 2., CAPSULE_INSET + REST_HEIGHT / 2.);
+    let rest = (shots[0].width - CAPSULE_INSET - REST_WIDTH / 2., CAPSULE_INSET + REST_HEIGHT / 2.);
     assert!(
         seen.iter()
             .all(|at| (at.0 - rest.0).abs() < 0.05 && (at.1 - rest.1).abs() < 0.05),

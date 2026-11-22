@@ -69,6 +69,7 @@ mod recovery;
 mod retention;
 #[cfg(any(target_os = "linux", target_os = "windows"))]
 pub(crate) mod runtime;
+pub(crate) mod seen_calls;
 pub(crate) mod sweep;
 mod transcript;
 mod warning;
