@@ -262,12 +262,16 @@ final class SwipeTyping {
     // MARK: - Spacing
 
     /// Whether a swiped word needs a space before it, as Apple's keyboard adds one: unless
-    /// the text before the cursor is empty or ends in a space, a line break or opening
-    /// punctuation (a bracket, an opening quote, ¿ or ¡, or a mark that starts a word such
-    /// as @ # /). A straight quote opens when nothing or a space comes before it.
+    /// the text before the cursor is empty or ends in a space, a line break, an attachment
+    /// (U+FFFC: a shared link's card or a picture in the text) or opening punctuation (a
+    /// bracket, an opening quote, ¿ or ¡, or a mark that starts a word such as @ # /). A
+    /// straight quote opens when nothing or a space comes before it. Apple's keyboard swipes
+    /// "hello" right after an attachment with no space, in Messages after a link's card (which
+    /// then moves the word to its own line) and in a text view after a picture mid-line (black
+    /// box, iOS 27.2 simulator); Hex's space there began the word's line.
     static func needsSpace(before: String?) -> Bool {
         guard let before, let last = before.last else { return false }
-        if last.isWhitespace || last.isNewline || opening.contains(last) { return false }
+        if last.isWhitespace || last.isNewline || last == "\u{FFFC}" || opening.contains(last) { return false }
         if last == "\"" || last == "'" {
             let previous = before.dropLast().last
             return !(previous == nil || previous!.isWhitespace || previous!.isNewline || opening.contains(previous!))
