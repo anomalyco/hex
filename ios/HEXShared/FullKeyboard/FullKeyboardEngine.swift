@@ -1,68 +1,6 @@
 import QuartzCore
 import UIKit
 
-/// The text field the keys type into. `UITextDocumentProxy` in the keyboard; a fake in tests.
-@MainActor
-protocol KeyboardTextTarget: AnyObject {
-    var documentContextBeforeInput: String? { get }
-    var documentContextAfterInput: String? { get }
-    var hasText: Bool { get }
-    var autocapitalizationType: UITextAutocapitalizationType? { get }
-    var autocorrectionType: UITextAutocorrectionType? { get }
-    var keyboardType: UIKeyboardType? { get }
-    var returnKeyType: UIReturnKeyType? { get }
-    var enablesReturnKeyAutomatically: Bool? { get }
-    var keyboardAppearance: UIKeyboardAppearance? { get }
-    var textContentType: UITextContentType? { get }
-    var isSecureTextEntry: Bool? { get }
-    var smartQuotesType: UITextSmartQuotesType? { get }
-    var smartDashesType: UITextSmartDashesType? { get }
-    var selectedText: String? { get }
-    /// `UITextDocumentProxy.documentIdentifier`: the field, where UIKit names it.
-    var documentIdentifier: UUID? { get }
-    func insertText(_ text: String)
-    func deleteBackward()
-    func adjustTextPosition(byCharacterOffset offset: Int)
-}
-
-extension KeyboardTextTarget {
-    var autocorrectionType: UITextAutocorrectionType? { .default }
-    var enablesReturnKeyAutomatically: Bool? { false }
-    var textContentType: UITextContentType? { nil }
-    var isSecureTextEntry: Bool? { nil }
-    var selectedText: String? { nil }
-    var documentIdentifier: UUID? { nil }
-    func adjustTextPosition(byCharacterOffset offset: Int) {}
-}
-
-@MainActor
-final class DocumentProxyTextTarget: KeyboardTextTarget {
-    let proxy: () -> UITextDocumentProxy?
-
-    init(_ proxy: @escaping () -> UITextDocumentProxy?) {
-        self.proxy = proxy
-    }
-
-    var documentContextBeforeInput: String? { proxy()?.documentContextBeforeInput }
-    var hasText: Bool { proxy()?.hasText ?? false }
-    var autocapitalizationType: UITextAutocapitalizationType? { proxy()?.autocapitalizationType }
-    var autocorrectionType: UITextAutocorrectionType? { proxy()?.autocorrectionType }
-    var keyboardType: UIKeyboardType? { proxy()?.keyboardType }
-    var returnKeyType: UIReturnKeyType? { proxy()?.returnKeyType }
-    var enablesReturnKeyAutomatically: Bool? { proxy()?.enablesReturnKeyAutomatically }
-    var keyboardAppearance: UIKeyboardAppearance? { proxy()?.keyboardAppearance }
-    var textContentType: UITextContentType? { proxy()?.textContentType ?? nil }
-    var isSecureTextEntry: Bool? { proxy()?.isSecureTextEntry }
-    var selectedText: String? { proxy()?.selectedText }
-    var documentIdentifier: UUID? {
-        guard let proxy = proxy() else { return nil }
-        return TypingLogTraits.documentIdentifier(of: proxy)
-    }
-    func insertText(_ text: String) { proxy()?.insertText(text) }
-    func deleteBackward() { proxy()?.deleteBackward() }
-    func adjustTextPosition(byCharacterOffset offset: Int) { proxy()?.adjustTextPosition(byCharacterOffset: offset) }
-}
-
 /// Everything the keys do, apart from drawing: multitouch with rollover, shift, pages,
 /// long-press accents, spacebar cursor trackpad, cautious autocorrect, double-space period,
 /// auto-capitalization and accelerating delete. Touches are identified by any stable integer
