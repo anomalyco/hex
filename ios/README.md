@@ -572,7 +572,9 @@ never at a launch by itself.
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
-    Acknowledgements below); `de.hextm` is the German model Android builds and ships
+    Acknowledgements below); English's contractions count as often as the words they stand
+    for ("do not"), and it adds Hex's own chat and tech words (`scripts/en-extra-words.tsv`),
+    byte-identical to Android's `en.hextm`; `de.hextm` is the German model Android builds and ships
     (`android/benchmark/typing/build-layout-model.py`), the same v3 format and, on iOS,
     off until the experiment below is turned on.
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**

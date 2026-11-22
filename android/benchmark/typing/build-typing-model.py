@@ -4,6 +4,16 @@ Books Ngram v3 (2020-02-17, CC BY 3.0) word and word-pair counts, keeping only w
 word list knows: SCOWL (sizes up to 70) for English, RLA-ES (LibreOffice's es_ES and
 es_MX Hunspell dictionaries, used under their MPL 1.1 option) for Spanish. Counts are summed over 1980-2019.
 
+English also takes two things the books can't give it:
+- Contractions at the frequency of the words they stand for. Google Books splits "don't"
+  into "do" and "n't", so its own count of "don't" is tiny (14.4 nats in the first model,
+  as rare as a word ranked 100,000th). Each contraction in CONTRACTIONS counts as often as
+  its expansion's pair ("do not") when that is commoner, and the ones SCOWL lists only with
+  a capital ("I'm") or not at all are added in lowercase.
+- en-extra-words.tsv beside this script: chat and tech words written for Hex ("app", "lol",
+  "csv"), each at its tier's cost; a word the books have only gets commoner.
+Both join the vocabulary before pairs are counted, so their pairs are counted too.
+
     python3 -m venv /tmp/venv && /tmp/venv/bin/pip install spylls   # Spanish only
     /tmp/venv/bin/python scripts/build-typing-model.py es <workdir> HEXKeyboard/TypingModel/es.hextm
 
@@ -33,6 +43,21 @@ MAX_WORDS = {"en": 90_000, "es": 110_000}
 MAX_BYTES = 3_600_000      # the whole model
 MIN_PAIR = 2_000           # pairs rarer than this (1980-2019) can't make the cut
 LETTERS = {"en": "abcdefghijklmnopqrstuvwxyz'", "es": "abcdefghijklmnopqrstuvwxyzñáéíóúü"}
+CONTRACTIONS = {"en": {
+    "don't": "do not", "doesn't": "does not", "didn't": "did not", "can't": "can not", "won't": "will not",
+    "isn't": "is not", "aren't": "are not", "wasn't": "was not", "weren't": "were not", "haven't": "have not",
+    "hasn't": "has not", "hadn't": "had not", "wouldn't": "would not", "couldn't": "could not",
+    "shouldn't": "should not", "mustn't": "must not", "needn't": "need not",
+    "i'm": "i am", "i'll": "i will", "i've": "i have", "i'd": "i would",
+    "it's": "it is", "that's": "that is", "what's": "what is", "where's": "where is", "who's": "who is",
+    "there's": "there is", "here's": "here is", "he's": "he is", "she's": "she is", "let's": "let us",
+    "you're": "you are", "we're": "we are", "they're": "they are", "you'll": "you will", "we'll": "we will",
+    "they'll": "they will", "he'll": "he will", "she'll": "she will", "it'll": "it will",
+    "you've": "you have", "we've": "we have", "they've": "they have", "you'd": "you would",
+    "we'd": "we would", "they'd": "they would", "he'd": "he would", "she'd": "she would",
+}}
+EXTRA_WORDS = {"en": "en-extra-words.tsv"}
+TIER_COST = {"1": 10.0, "2": 12.0, "3": 13.5}  # nats: about the 2,000th word, then rarer
 
 
 def urls(lang, n):
@@ -161,6 +186,20 @@ def cost(p):
     return max(0, min(255, round(-math.log(max(p, 1e-30)) * 8)))
 
 
+def extra_words(lang, total):
+    """EXTRA_WORDS' words with the count their tier's cost stands for."""
+    if lang not in EXTRA_WORDS:
+        return {}
+    words = {}
+    for line in open(os.path.join(os.path.dirname(os.path.abspath(__file__)), EXTRA_WORDS[lang]), encoding="utf-8"):
+        if not line.strip() or line.startswith("#"):
+            continue
+        word, tier = line.rstrip("\n").split("\t")
+        assert re.fullmatch("[" + LETTERS[lang] + "]+", word), word
+        words[word] = max(words.get(word, 0), round(total * math.exp(-TIER_COST[tier])))
+    return words
+
+
 def main(lang, work, out_path):
     for d in ("raw", "uni", "bi"):
         os.makedirs(os.path.join(work, d), exist_ok=True)
@@ -189,14 +228,28 @@ def main(lang, work, out_path):
     for line in open(vocab_path, encoding="utf-8"):
         w, c = line.rstrip("\n").split("\t")
         vocab[w] = int(c)
+    for w, c in extra_words(lang, total).items():
+        vocab[w] = max(vocab.get(w, 0), counts.get(w.encode("utf-8"), 0), c)
+    for w in CONTRACTIONS.get(lang, {}):
+        vocab.setdefault(w, max(1, counts.get(w.encode("utf-8"), 0)))
+    # Pairs are counted over the vocabulary with these words (a cached bi/ from a run
+    # without them lacks their pairs).
+    pair_vocab = os.path.join(work, "vocab-pairs.tsv")
+    with open(pair_vocab, "w", encoding="utf-8") as f:
+        for w in sorted(vocab):
+            f.write(f"{w}\t{vocab[w]}\n")
 
-    with multiprocessing.Pool(workers, initializer=load_vocab, initargs=(vocab_path,)) as pool:
+    with multiprocessing.Pool(workers, initializer=load_vocab, initargs=(pair_vocab,)) as pool:
         bi_files = pool.map(count_pairs, [(lang, u, work) for u in urls(lang, 2)])
     pairs = {}
     for p in bi_files:
         for line in open(p, "rb"):
             k, c = line.rstrip(b"\n").split(b"\t")
             pairs[k] = pairs.get(k, 0) + int(c)
+    # Pairs of words no longer in the vocabulary (a bi/ cached by a run with more words) go.
+    pairs = {k: c for k, c in pairs.items() if all(w.decode("utf-8") in vocab for w in k.split(b" "))}
+    for w, expansion in CONTRACTIONS.get(lang, {}).items():
+        vocab[w] = max(vocab[w], pairs.get(expansion.encode("utf-8"), 0))
     write_model(lang, vocab, total, pairs, out_path)
 
 
