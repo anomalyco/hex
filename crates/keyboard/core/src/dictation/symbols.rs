@@ -59,10 +59,21 @@ fn core(word: &str) -> &str {
     &word[..bytes]
 }
 
-/// English `text` with "@" for its spoken names, or `text` itself.
-pub fn spoken_symbols(text: &str, language: Option<&Language>) -> String {
+/// Two addresses said back to back, the second's local part the first's domain ("a at sign
+/// b.com at sign c.com"): their edits overlap, where Swift's `spokenSymbols` traps
+/// (`text[cursor..<start]` with the cursor past the start). What to write instead is the
+/// owner's decision; until then the iOS wrapper traps as before.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub struct OverlappingAddresses;
+
+/// English `text` with "@" for its spoken names, or `text` itself; an error where the Swift
+/// original traps.
+pub fn spoken_symbols(
+    text: &str,
+    language: Option<&Language>,
+) -> Result<String, OverlappingAddresses> {
     if !is_english(language) || !t::lowercased(text).contains("at") {
-        return text.to_owned();
+        return Ok(text.to_owned());
     }
     let tokens = splitting_glued_domains(tokens(text));
     let mut edits: Vec<(usize, usize, String)> = Vec::new();
@@ -129,25 +140,23 @@ pub fn spoken_symbols(text: &str, language: Option<&Language>) -> String {
     splice(text, &edits)
 }
 
-/// The edits in order; an edit that starts inside the one before (two addresses back to back:
-/// "a at sign b.com at sign c.com") is where Swift's `text[cursor..<start]` traps.
-fn splice(text: &str, edits: &[(usize, usize, String)]) -> String {
+/// The edits in order, or an error for an edit that starts inside the one before.
+fn splice(text: &str, edits: &[(usize, usize, String)]) -> Result<String, OverlappingAddresses> {
     if edits.is_empty() {
-        return text.to_owned();
+        return Ok(text.to_owned());
     }
     let mut result = String::with_capacity(text.len());
     let mut cursor = 0;
     for (start, end, replacement) in edits {
-        assert!(
-            *start >= cursor,
-            "overlapping spoken-symbol edits, which crash the Swift original"
-        );
+        if *start < cursor {
+            return Err(OverlappingAddresses);
+        }
         result.push_str(&text[cursor..*start]);
         result.push_str(replacement);
         cursor = *end;
     }
     result.push_str(&text[cursor..]);
-    result
+    Ok(result)
 }
 
 /// Apple's `SpeechTranscriber` glues a spoken domain to the word before it ("John at the
@@ -370,7 +379,8 @@ pub fn spoken_counts(text: &str, language: Option<&Language>) -> String {
         edits.push((tokens[index].start, tokens[last].end, written.join(" ")));
         index = last + 1;
     }
-    splice(text, &edits)
+    // A count's edits never overlap: each starts after the one before ends.
+    splice(text, &edits).unwrap_or_else(|_| text.to_owned())
 }
 
 /// A count's number and the marks after it: one of `COUNT_WORDS`, or 1 to 20 in digits.

@@ -63,10 +63,12 @@ fn run(case: &Value) -> Option<Value> {
         }
         "spoken_lists" => Value::from(dictation::spoken_lists(text(case, "text"), language)),
         "cleanup_rules" => Value::from(dictation::cleanup_rules(text(case, "text"), language)),
-        "spoken_symbols" => Value::from(dictation::spoken_symbols(text(case, "text"), language)),
+        "spoken_symbols" => {
+            Value::from(dictation::spoken_symbols(text(case, "text"), language).expect("no trap"))
+        }
         "spoken_counts" => Value::from(dictation::spoken_counts(text(case, "text"), language)),
         "cleanup_chain" => {
-            let symbols = dictation::spoken_symbols(text(case, "text"), language);
+            let symbols = dictation::spoken_symbols(text(case, "text"), language).expect("no trap");
             let counted = dictation::spoken_counts(&symbols, language);
             Value::from(dictation::cleanup_rules(&counted, language))
         }

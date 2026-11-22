@@ -21,5 +21,8 @@ memmap2 = "0.9"
 libc = "0.2"
 jni = { version = "0.21", optional = true, default-features = false }
 
+[dev-dependencies]
+serde_json = "1"
+
 [lints]
 workspace = true

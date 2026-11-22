@@ -177,11 +177,11 @@ fn cleanup_rules_symbols_and_counts() {
     );
     let english = language("en-IN", "en", Some("IN"));
     assert_eq!(
-        spoken_symbols("My email is John at the rategmail.com.", Some(&english)),
+        spoken_symbols("My email is John at the rategmail.com.", Some(&english)).unwrap(),
         "My email is john@gmail.com."
     );
     assert_eq!(
-        spoken_symbols("Type the at sign, then your name", Some(&english)),
+        spoken_symbols("Type the at sign, then your name", Some(&english)).unwrap(),
         "Type the @, then your name"
     );
     assert_eq!(
@@ -257,4 +257,27 @@ fn swift_string_semantics() {
     assert_eq!(fold::fold("Schließende Ñ ﬁn"), "schliessende n fin");
     assert_eq!(fold::fold("Ꭰ ꭰ ि"), "ꭰ ꭰ ि");
     assert_eq!(words(" a\u{A0}b\n c "), ["a", "b", "c"]);
+}
+
+#[test]
+fn back_to_back_addresses_are_the_case_swift_traps_on() {
+    let english = language("en-US", "en", Some("US"));
+    for spoken in [
+        "a at sign b.com at sign c.com",
+        "mail john at the rate gmail dot com at the rate yahoo dot com",
+    ] {
+        assert_eq!(
+            spoken_symbols(spoken, Some(&english)),
+            Err(OverlappingAddresses),
+            "{spoken}"
+        );
+    }
+    assert_eq!(
+        spoken_symbols(
+            "john at sign gmail.com and mary at sign yahoo.com",
+            Some(&english)
+        )
+        .as_deref(),
+        Ok("john@gmail.com and mary@yahoo.com")
+    );
 }

@@ -96,6 +96,7 @@ dependencies = [
  "jni",
  "libc",
  "memmap2",
+ "serde_json",
 ]
 
 [[package]]

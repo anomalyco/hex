@@ -47,7 +47,7 @@ pub use french::{
 pub use lists::format as spoken_lists;
 pub use punctuation::format as spoken_punctuation;
 pub use reconstruct::reconstruct;
-pub use symbols::{spoken_counts, spoken_symbols};
+pub use symbols::{OverlappingAddresses, spoken_counts, spoken_symbols};
 
 /// A dictation style (`DictationStyle`).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
