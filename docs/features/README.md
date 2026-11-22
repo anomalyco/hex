@@ -1872,6 +1872,8 @@ Hex checks the release service            // maintain.updates
 ├── Direct install -> download (resumable) -> size + SHA-256 -> code signature -> stage
 │   ├── macOS -> unpack beside Hex.app -> Developer ID 5NZ4Q7NXJ4, anomaly.hex, notarized
 │   ├── Windows -> Authenticode valid, signer AUTHENTICODE_SIGNER -> new version directory
+│   │   └── .lnk files in Start Menu, Desktop, and taskbar pins -> retargeted in one PowerShell run
+│   │       // target is versions\<version>\hex.exe; arguments and name stay, an old-version icon is repointed
 │   ├── Linux -> SHA-256 only -> new version directory, `current` switched
 │   ├── Staged -> checks continue; Restart to update stays offered meanwhile
 │   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one

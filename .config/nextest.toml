@@ -12,6 +12,9 @@ path = "junit.xml"
 
 [test-groups]
 gpu = { max-threads = 2 }
+# The Windows updater tests each start powershell.exe, which is slow to start
+# on CI and slower on ARM; they run one at a time.
+windows-shell = { max-threads = 1 }
 
 # The first run's motion gate records 30 headless windows: a minute alone,
 # more on a busy machine.
@@ -35,6 +38,13 @@ failure-output = "immediate-final"
 filter = "test(/scene|golden|rune_ui::/) | test(driver_plugin_loopback)"
 test-group = "gpu"
 slow-timeout = { period = "90s", terminate-after = 2 }
+
+# The PowerShell updater tests get four minutes before nextest kills them, and
+# never run beside each other.
+[[profile.ci.overrides]]
+filter = "test(authenticode_requires_a_valid_signature_from_the_expected_signer) | test(shortcuts_pointing_at_an_old_version_are_retargeted)"
+test-group = "windows-shell"
+slow-timeout = { period = "120s", terminate-after = 2 }
 
 [profile.ci.junit]
 path = "junit.xml"
