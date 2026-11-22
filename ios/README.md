@@ -551,8 +551,10 @@ never at a launch by itself.
     apostrophe only matches a term that has one, several transcript words are
     joined only when the term reads as a compound, and compound terms like
     "WeChat" can also match the plain phrase ("we chat"). On iOS 26 Apple Speech
-    the list is also sent as a best-effort recognition hint; Parakeet's batch
-    path gets no hint.
+    the list is also sent as a best-effort recognition hint, in the app and in
+    in-keyboard dictation (through build 130 the keyboard sent only Learn how I
+    type's words: #2103 added the list's rewrite there but not its hint);
+    Parakeet's batch path gets no hint.
   - **Learn how I type (Settings › Privacy › Learn how I type):** On by default (an
     unset switch reads on; turning it off is saved and stays off), and
     shown whether or not the full keyboard is on. It learns only from typing and
