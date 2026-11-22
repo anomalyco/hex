@@ -35,7 +35,7 @@ extension FullKeyboardView {
         if let library = emojiLibrary, library.language == language || !EmojiLibrary.languages.contains(language) {
             return library
         }
-        emojiLibrary = EmojiLibrary.load(language: language, bundle: Bundle(for: FullKeyboardView.self))
+        emojiLibrary = EmojiLibrary.bundled(language: language, bundle: Bundle(for: FullKeyboardView.self))
         return emojiLibrary
     }
 
