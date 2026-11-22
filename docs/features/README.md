@@ -3006,16 +3006,22 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   while Apple Speech dictates with `SpeechTranscriber`, one recording is read twice, in
 │   the language dictation resolved and in the first other keyboard language
 │   (`LanguageSettings.keyboardLanguages`, mapped with `dictationLanguage(for:)`) whose
-│   `SpeechTranscriber` model is already installed; nothing downloads for it and no other
-│   language's reservation is released. Each reading keeps timed words with Apple Speech's
-│   transcription confidence, and `TwoLanguageMerger` cuts both where their word ends agree
-│   within 150 ms, chooses a reading per segment by duration-weighted confidence with a
-│   0.35 s cost per language change (ties to the primary), drops a seam word the new reading
-│   repeats, and joins the chosen words with spaces. The merged text runs through the same
-│   pipeline with the primary language. No second installed language, a failed reservation,
-│   an analyzer that throws, or no timed words from either reading dictates as before; off,
-│   the path is unchanged.
-│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
+│   `SpeechTranscriber` model is installed and not set aside as failing; nothing downloads
+│   for it. Each reading keeps its timed runs (characters, timing, transcription
+│   confidence), and `TwoLanguageMerger` cuts both at the earlier of two word ends within
+│   150 ms, scores a reading by its confidence-weighted seconds clipped to each segment, and
+│   chooses a reading per segment with a 0.35 s cost per language change (ties to the
+│   primary). A seam word is dropped only when its span overlaps the last kept word's by half
+│   the shorter one. A switch keeps the runs' own characters and adds a space only when
+│   neither side has whitespace; when the second language wins nothing, the primary's
+│   original text is used unchanged, so CJK and Thai spacing, punctuation and untimed runs
+│   stay as Apple gave them. The text runs through the same pipeline with the primary
+│   language. No installed second language, a failed second analyzer, or no timed words in
+│   either reading dictates as before; a primary reading that finished silent reports empty
+│   so the caller throws its no-speech error without transcribing again; off, the path is
+│   unchanged.
+│   The iOS targets built and `TwoLanguageMergeTests` passed once on a macOS 26 GitHub
+│   runner (run 45003210405); nothing is measured on an iPhone.
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after
 │   formatting

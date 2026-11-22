@@ -628,7 +628,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: dictation keeps the one language it resolved.
                 SettingsToggleRow(
                     title: String(localized: "Two-language dictation"),
-                    detail: String(localized: "Dictates in your first two keyboard languages at once and keeps the better one for each phrase."),
+                    detail: String(localized: "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase."),
                     isOn: $twoLanguageDictation
                 )
 

@@ -4023,12 +4023,12 @@
         }
       }
     },
-    "Dictates in your first two keyboard languages at once and keeps the better one for each phrase." : {
+    "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "同时用你前两种键盘语言听写，并为每个短语保留更准确的那一种。"
+            "value" : "当另一种键盘语言的 Apple 语音模型已下载时，也会用它听写，并为每个短语保留更准确的那一种。"
           }
         }
       }

@@ -3,8 +3,8 @@ import Foundation
 import Speech
 
 /// Experiments › Two-language dictation on Apple Speech: one recording read by two
-/// `SpeechAnalyzer`s, each in a language whose `SpeechTranscriber` model is already
-/// installed, then merged word by word by `TwoLanguageMerger`. Shared by the app
+/// `SpeechAnalyzer`s, each in a language whose `SpeechTranscriber` model is installed, then
+/// merged word by word by `TwoLanguageMerger`. Shared by the app
 /// (`AppleSpeechTranscriber`) and in-keyboard dictation (`KeyboardSpeech`), so both take
 /// the same pair and the same fallbacks.
 @available(iOS 26.0, *)
@@ -18,7 +18,8 @@ nonisolated enum AppleSpeechTwoLanguage {
 
     /// What a two-language dictation heard.
     struct Transcript: Sendable {
-        /// What Hex inserts; the primary reading's text whenever the second added nothing.
+        /// What Hex inserts; empty means the primary reading finished without hearing
+        /// anything, so the caller throws its own no-speech error.
         let text: String
         /// Which reading held most of the audio, for the log only.
         let winner: TwoLanguageWinner
@@ -26,39 +27,39 @@ nonisolated enum AppleSpeechTwoLanguage {
         let secondaryLanguage: String
     }
 
-    /// The pair to read a recording in, or nil to dictate exactly as before: the experiment
-    /// off, Apple Speech dictating with `DictationTranscriber`, no keyboard language other
-    /// than the primary, or the second language's model not installed or not reservable now.
-    /// It never downloads anything for the second language and never releases another
-    /// language's reservation to make room.
+    /// The pair to read a recording in, or nil to dictate exactly as before: Apple Speech
+    /// dictating with `DictationTranscriber`, no keyboard language other than the primary,
+    /// or the second language's `SpeechTranscriber` model not installed. It never downloads
+    /// anything for the second language.
     static func usablePair(for language: SpeechLanguage) async -> Pair? {
-        guard TwoLanguageDictationSettings().isEnabled, language.module == .speech else {
-            return nil
-        }
+        guard language.module == .speech else { return nil }
         guard let primary = await SpeechTranscriber.supportedLocale(equivalentTo: language.locale) else {
             return nil
         }
         let primaryCode = primary.language.languageCode?.identifier ?? ""
         let settings = LanguageSettings()
         // The first keyboard language that isn't the primary one, mapped to a dictation
-        // locale by the same rule the keyboard-follow language uses.
-        guard let keyboard = settings.keyboardLanguages.first(where: {
-            $0.baseLanguage != primaryCode
-        }),
-        let identifier = settings.dictationLanguage(for: keyboard)
-        else { return nil }
-        guard let secondary = await SpeechTranscriber.supportedLocale(
-            equivalentTo: Locale(identifier: identifier)
-        ),
-        (secondary.language.languageCode?.identifier ?? "") != primaryCode
-        else { return nil }
-        guard await isInstalled(secondary), await reserve(secondary) else { return nil }
-        return Pair(primary: primary, secondary: secondary)
+        // locale by the same rule the keyboard-follow language uses. One whose model
+        // wouldn't install lately is set aside, as Automatic sets it aside.
+        for keyboard in settings.keyboardLanguages where keyboard.baseLanguage != primaryCode {
+            guard let identifier = settings.dictationLanguage(for: keyboard) else { return nil }
+            let wanted = Locale(identifier: identifier)
+            guard !settings.speechModuleFailed(wanted.identifier(.bcp47)) else { continue }
+            guard let secondary = await SpeechTranscriber.supportedLocale(equivalentTo: wanted),
+                  (secondary.language.languageCode?.identifier ?? "") != primaryCode else {
+                return nil
+            }
+            guard await isInstalled(secondary) else { return nil }
+            return Pair(primary: primary, secondary: secondary)
+        }
+        return nil
     }
 
-    /// Reads `audioURL` twice and merges the readings. Nil means the primary reading
-    /// couldn't be used, so the caller takes its single-language path and reports its own
-    /// errors; a second reading that fails to start or finish leaves the primary's text.
+    /// Reads `audioURL` twice and merges the readings. Nil means the primary reading failed,
+    /// so the caller takes its single-language path and reports its own errors. Empty text
+    /// means the primary finished but heard nothing, so the caller throws its no-speech
+    /// error without running the recording again. A second reading that fails leaves the
+    /// primary's text, and so does one that never wins a piece.
     static func transcribe(
         _ audioURL: URL,
         pair: Pair,
@@ -83,10 +84,27 @@ nonisolated enum AppleSpeechTwoLanguage {
             return nil
         }
 
+        // Prewarm both the way the app's prepared analyzer is warmed. A second language that
+        // can't prepare leaves the primary reading alone.
+        do {
+            try await primaryAnalyzer.prepareToAnalyze(in: nil)
+        } catch {
+            return nil
+        }
+        var secondaryStarted = false
+        do {
+            try await secondaryAnalyzer.prepareToAnalyze(in: nil)
+            secondaryStarted = true
+        } catch {
+            secondaryStarted = false
+        }
+
         // The same recognition hints on both readings, each with its own context.
         if !vocabulary.isEmpty {
             await setContext(vocabulary, on: primaryAnalyzer)
-            await setContext(vocabulary, on: secondaryAnalyzer)
+            if secondaryStarted {
+                await setContext(vocabulary, on: secondaryAnalyzer)
+            }
         }
 
         do {
@@ -94,20 +112,31 @@ nonisolated enum AppleSpeechTwoLanguage {
         } catch {
             return nil
         }
-
-        var secondaryStarted = false
-        do {
-            try await secondaryAnalyzer.start(inputAudioFile: secondaryFile, finishAfterFile: true)
-            secondaryStarted = true
-        } catch {
-            secondaryStarted = false
+        if secondaryStarted {
+            do {
+                try await secondaryAnalyzer.start(inputAudioFile: secondaryFile, finishAfterFile: true)
+            } catch {
+                secondaryStarted = false
+            }
         }
 
         async let primaryReading = reading(of: primaryTranscriber)
         async let secondaryReading = reading(of: secondaryStarted ? secondaryTranscriber : nil)
 
-        guard let primary = try? await primaryReading, !primary.text.isEmpty else {
+        let primary: Reading
+        do {
+            primary = try await primaryReading
+        } catch {
             return nil
+        }
+        // The primary finished but heard nothing: say so instead of making the caller run
+        // the whole single-language path again.
+        guard !primary.text.isEmpty else {
+            return Transcript(
+                text: "",
+                winner: .primary,
+                secondaryLanguage: pair.secondary.identifier(.bcp47)
+            )
         }
         let secondary = (try? await secondaryReading) ?? Reading()
         let fallback = Transcript(
@@ -116,10 +145,10 @@ nonisolated enum AppleSpeechTwoLanguage {
             secondaryLanguage: pair.secondary.identifier(.bcp47)
         )
         // Nothing usable from the second or from either reading's timed words: the primary's
-        // own text, as dictation would have given it alone.
+        // own text, exactly as dictation would have given it alone.
         guard !secondary.words.isEmpty, !primary.words.isEmpty else { return fallback }
         let merged = TwoLanguageMerger.merge(primary: primary.words, secondary: secondary.words)
-        guard !merged.text.isEmpty else { return fallback }
+        guard merged.usedSecondary, !merged.text.isEmpty else { return fallback }
         return Transcript(
             text: merged.text,
             winner: merged.winner,
@@ -127,31 +156,44 @@ nonisolated enum AppleSpeechTwoLanguage {
         )
     }
 
-    /// The words of one Apple Speech result: each non-whitespace token of its runs, with its
-    /// run's audio time range and transcription confidence. With these attribute options
-    /// Apple puts one word in a run; a run that holds several still enters the merge at its
-    /// tokens' shared place, punctuation attached to its word.
+    /// The words of one Apple Speech result: one per timed run, with the run's raw characters
+    /// (its leading whitespace included) and its audio time range and transcription
+    /// confidence. A run with no letters or numbers, and any run without a time range, keeps
+    /// its characters on the word before it; such a run before the first word waits for it.
     static func words(in text: AttributedString) -> [TwoLanguageTimedWord] {
         var words: [TwoLanguageTimedWord] = []
+        var prefix = ""
         for run in text.runs {
-            guard let range = run.audioTimeRange else { continue }
-            let start = range.start.seconds
-            let end = range.end.seconds
-            guard start.isFinite, end.isFinite, end >= start else { continue }
-            // A confidence Apple left out counts as neither good nor bad.
-            let confidence = min(1, max(0, run.transcriptionConfidence ?? 0.5))
-            let piece = String(text[run.range].characters)
-            for token in piece.split(whereSeparator: { $0.isWhitespace }) {
-                let word = String(token)
-                guard word.contains(where: { $0.isLetter || $0.isNumber }) else { continue }
-                words.append(
-                    TwoLanguageTimedWord(
-                        text: word,
-                        start: max(0, start),
-                        end: max(0, end),
-                        confidence: confidence
+            let characters = String(text[run.range].characters)
+            guard !characters.isEmpty else { continue }
+            let hasLetterOrNumber = characters.contains { $0.isLetter || $0.isNumber }
+            if let range = run.audioTimeRange {
+                let start = range.start.seconds
+                let end = range.end.seconds
+                guard start.isFinite, end.isFinite, end >= start else { continue }
+                let confidence = min(1, max(0, run.transcriptionConfidence ?? 0.5))
+                if hasLetterOrNumber {
+                    words.append(
+                        TwoLanguageTimedWord(
+                            text: prefix + characters,
+                            start: max(0, start),
+                            end: max(0, end),
+                            confidence: confidence
+                        )
                     )
-                )
+                    prefix = ""
+                } else if !words.isEmpty {
+                    words[words.count - 1] = words[words.count - 1].appending(
+                        characters,
+                        endingAt: max(0, end)
+                    )
+                } else {
+                    prefix += characters
+                }
+            } else if !words.isEmpty {
+                words[words.count - 1] = words[words.count - 1].appending(characters, endingAt: nil)
+            } else {
+                prefix += characters
             }
         }
         return words
@@ -201,21 +243,6 @@ nonisolated enum AppleSpeechTwoLanguage {
     private static func isInstalled(_ locale: Locale) async -> Bool {
         let module: any SpeechModule = transcriber(for: locale)
         return await AssetInventory.status(forModules: [module]) == .installed
-    }
-
-    /// Reserves the second language's assets when Apple has room, and gives up rather than
-    /// releasing anyone else's: a language picked by hand still keeps its model.
-    private static func reserve(_ locale: Locale) async -> Bool {
-        let key = locale.identifier(.bcp47)
-        let reserved = await AssetInventory.reservedLocales
-        if reserved.contains(where: { $0.identifier(.bcp47) == key }) {
-            return true
-        }
-        do {
-            return try await AssetInventory.reserve(locale: locale)
-        } catch {
-            return false
-        }
     }
 
     private struct Reading: Sendable {

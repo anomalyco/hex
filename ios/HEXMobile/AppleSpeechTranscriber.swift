@@ -214,6 +214,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
                vocabulary: vocabulary,
                lingeringModels: true
            ) {
+            guard !merged.text.isEmpty else { throw TranscriberError.emptyTranscript }
             return merged.text
         }
 

@@ -1090,6 +1090,7 @@ private enum KeyboardSpeech {
                vocabulary: hints,
                lingeringModels: false
            ) {
+            guard !merged.text.isEmpty else { throw Failure.empty }
             log.write("two-language \(pair.secondary.identifier(.bcp47)) won=\(merged.winner.rawValue) \(KeyboardProbeLog.memory())")
             return (merged.text, language)
         }

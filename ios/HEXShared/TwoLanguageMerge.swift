@@ -20,6 +20,17 @@ nonisolated struct TwoLanguageTimedWord: Equatable, Sendable {
 
     /// How much audio it covers, so a long word counts more than a short one.
     var duration: TimeInterval { max(0, end - start) }
+
+    /// The same word with a punctuation run's characters appended, its end stretched to cover
+    /// them. A run Apple gave no time range for adds its characters and no time.
+    func appending(_ characters: String, endingAt end: TimeInterval?) -> TwoLanguageTimedWord {
+        TwoLanguageTimedWord(
+            text: text + characters,
+            start: start,
+            end: max(self.end, end ?? self.end),
+            confidence: confidence
+        )
+    }
 }
 
 /// Which reading supplied most of a merged dictation's duration. Logged, never inserted.
@@ -29,10 +40,14 @@ nonisolated enum TwoLanguageWinner: String, Equatable, Sendable {
 }
 
 nonisolated struct TwoLanguageMerged: Equatable, Sendable {
-    /// The chosen words joined with single spaces.
+    /// The chosen text: the primary's own characters, with a second reading's words where
+    /// that reading won, its runs' spacing and punctuation kept.
     let text: String
     /// Which reading held the most audio, for the log only.
     let winner: TwoLanguageWinner
+    /// Whether any word from the second reading survived into `text`. When false the caller
+    /// keeps the primary's original text, so nothing about it changes.
+    let usedSecondary: Bool
 }
 
 /// Experiments › Two-language dictation's merge: two readings of one recording, piece by
@@ -55,11 +70,11 @@ nonisolated enum TwoLanguageMerger {
     ) -> TwoLanguageMerged {
         let readings = [primary, secondary]
         guard !(primary.isEmpty && secondary.isEmpty) else {
-            return TwoLanguageMerged(text: "", winner: .primary)
+            return TwoLanguageMerged(text: "", winner: .primary, usedSecondary: false)
         }
         let cuts = cutPoints(primary: primary, secondary: secondary)
         guard cuts.count > 1 else {
-            return TwoLanguageMerged(text: "", winner: .primary)
+            return TwoLanguageMerged(text: "", winner: .primary, usedSecondary: false)
         }
         let segments = zip(cuts, cuts.dropFirst()).map {
             Segment(start: $0.0, end: $0.1)
@@ -73,10 +88,11 @@ nonisolated enum TwoLanguageMerger {
                 )
             }
         }
-        // Each reading's score in each segment, weighted by how much audio the segment holds.
+        // Each reading's confident seconds in each segment: a word's confidence times the
+        // part of it the segment holds, so covering less of the audio never wins by itself.
         let scores = segments.indices.map { index in
             readings.indices.map { state in
-                score(of: held[state][index]) * segments[index].duration
+                score(of: held[state][index], in: segments[index])
             }
         }
 
@@ -110,36 +126,57 @@ nonisolated enum TwoLanguageMerger {
             }
         }
 
-        var kept: [String] = []
-        var lastKept: TwoLanguageWinner?
+        // Keep each chosen piece's timed words until the join, so a seam duplicate can be
+        // judged on the times of the words on both sides of it.
+        var pieces: [(language: TwoLanguageWinner, words: [TwoLanguageTimedWord])] = []
+        var lastKept: TwoLanguageTimedWord?
+        var lastLanguage: TwoLanguageWinner?
         for index in segments.indices {
-            let winner: TwoLanguageWinner = chosen[index] == 0 ? .primary : .secondary
+            let language: TwoLanguageWinner = chosen[index] == 0 ? .primary : .secondary
             var piece = held[chosen[index]][index]
-            // The same word can close one reading's piece and open the other's: keep it once.
-            if winner != lastKept,
+            // The same spoken word can close one piece and open the other's; keep it once,
+            // and only when its times really are the same word (half the shorter one).
+            if language != lastLanguage,
                let first = piece.first,
-               let last = kept.last,
+               let last = lastKept,
                !normalized(first.text).isEmpty,
-               normalized(first.text) == normalized(last) {
+               normalized(first.text) == normalized(last.text),
+               overlapsAtLeastHalf(first, last) {
                 piece.removeFirst()
             }
             guard !piece.isEmpty else { continue }
-            kept.append(contentsOf: piece.map(\.text))
-            lastKept = winner
+            pieces.append((language: language, words: piece))
+            lastKept = piece.last
+            lastLanguage = language
         }
+
+        var text = ""
+        var previous: TwoLanguageWinner?
+        for piece in pieces {
+            if previous != nil, previous != piece.language,
+               !(text.last?.isWhitespace ?? true),
+               !(piece.words.first?.text.first?.isWhitespace ?? true) {
+                text += " "
+            }
+            text += piece.words.map(\.text).joined()
+            previous = piece.language
+        }
+        let usedSecondary = pieces.contains { $0.language == .secondary }
 
         var duration = [0.0, 0.0]
         for (index, segment) in segments.enumerated() {
             duration[chosen[index]] += segment.duration
         }
         return TwoLanguageMerged(
-            text: kept.joined(separator: " "),
-            winner: duration[0] >= duration[1] ? .primary : .secondary
+            text: text,
+            winner: duration[0] >= duration[1] ? .primary : .secondary,
+            usedSecondary: usedSecondary
         )
     }
 
     /// Every time the two readings agree on where a word ends, plus the start and end of the
-    /// audio. A word belongs to the segment its midpoint falls in.
+    /// audio, at the earlier of the two ends. A word belongs to the segment its midpoint
+    /// falls in.
     private static func cutPoints(
         primary: [TwoLanguageTimedWord],
         secondary: [TwoLanguageTimedWord]
@@ -147,7 +184,7 @@ nonisolated enum TwoLanguageMerger {
         var cuts: [TimeInterval] = [0]
         for left in primary {
             for right in secondary where abs(left.end - right.end) <= cutTolerance {
-                cuts.append((left.end + right.end) / 2)
+                cuts.append(min(left.end, right.end))
             }
         }
         cuts.append(max((primary + secondary).map(\.end).max() ?? 0, 0))
@@ -173,15 +210,26 @@ nonisolated enum TwoLanguageMerger {
         }
     }
 
-    /// A reading's duration-weighted mean confidence in a segment, or 0 when it heard nothing
-    /// there. Words with no length fall back to their plain mean.
-    private static func score(of words: [TwoLanguageTimedWord]) -> Double {
-        guard !words.isEmpty else { return 0 }
-        let duration = words.reduce(0) { $0 + $1.duration }
-        if duration <= 0 {
-            return words.reduce(0) { $0 + $1.confidence } / Double(words.count)
+    /// A reading's confidence-weighted seconds in a segment: each word's confidence times the
+    /// part of its span the segment holds.
+    private static func score(of words: [TwoLanguageTimedWord], in segment: Segment) -> Double {
+        words.reduce(0) { total, word in
+            let covered = max(0, min(word.end, segment.end) - max(word.start, segment.start))
+            return total + word.confidence * covered
         }
-        return words.reduce(0) { $0 + $1.confidence * $1.duration } / duration
+    }
+
+    /// Whether two readings timed the same spoken word: their spans overlap by at least half
+    /// of the shorter one. Two words that only repeat the same text apart in time are both
+    /// kept.
+    private static func overlapsAtLeastHalf(
+        _ first: TwoLanguageTimedWord,
+        _ last: TwoLanguageTimedWord
+    ) -> Bool {
+        let overlap = min(first.end, last.end) - max(first.start, last.start)
+        let shorter = min(first.duration, last.duration)
+        guard shorter > 0 else { return false }
+        return overlap >= shorter * 0.5
     }
 
     /// Case and punctuation do not matter when the same word sits on both sides of a change
