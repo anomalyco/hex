@@ -8,8 +8,8 @@ import { setGlow } from "./glow"
 type Engine = {
   renderer: string
   pressKey?(pressed: boolean, rect?: DOMRect | null): void
-  explodeKey?(rect?: DOMRect | null): void
-  start(options: { context: AudioContext | null; muted: boolean; keyRect?: DOMRect | null }): Promise<void>
+  explodeKey?(rect?: DOMRect | null, key?: string): void
+  start(options: { context: AudioContext | null; muted: boolean; keyRect?: DOMRect | null; key?: string }): Promise<void>
   setMuted(muted: boolean, context?: AudioContext | null): void
   destroy(): void
 }
@@ -92,7 +92,7 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
 
   // Must run inside the click: that gesture is what lets the browser play audio.
   const start = useCallback(
-    (el?: HTMLElement | null) => {
+    (el?: HTMLElement | null, key = "option") => {
       if (phase === "starting" || phase === "started") return
       const quiet = readMuted()
       if (!quiet) context.current ??= newContext()
@@ -101,14 +101,14 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
       setPhase("starting")
       if (live.current && !reduced.current) {
         root.current?.setAttribute("data-key-exploded", "")
-        live.current.explodeKey?.(keyRect)
+        live.current.explodeKey?.(keyRect, key)
       }
       void load().then(async (e) => {
         if (!e) return setPhase("idle")
         if (!reduced.current) root.current?.setAttribute("data-key-exploded", "")
         // A context made before the gesture is still suspended; the engine only sounds once it runs.
         if (resumed && context.current?.state !== "running") await Promise.race([resumed.catch(() => {}), new Promise((r) => setTimeout(r, 250))])
-        await e.start({ context: context.current, muted: quiet, keyRect })
+        await e.start({ context: context.current, muted: quiet, keyRect, key })
         setPhase("started")
       })
     },

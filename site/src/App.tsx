@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef, useState } from "react"
-import Download, { OS_NAMES, OS_SHORTCUTS, PLATFORM_NAMES, SHORTCUTS, osOf, type Os } from "./Download"
+import Download, { OS_KEY_LEGENDS, OS_NAMES, OS_SHORTCUTS, PLATFORM_NAMES, SHORTCUTS, osOf, type Os } from "./Download"
 import { guessPlatform, refinePlatform, type Platform } from "./platform"
 import { OptionKey, SoundToggle, useShout } from "./Shout"
 import signature from "./footer-signature.svg"
@@ -75,7 +75,7 @@ export default function App() {
           <OptionKey
             os={os}
             phase={shout.phase}
-            onStart={shout.start}
+            onStart={(el) => shout.start(el, OS_KEY_LEGENDS[os])}
             onIntent={shout.intent}
             onPress={shout.pressKey}
           />

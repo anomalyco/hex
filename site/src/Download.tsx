@@ -62,6 +62,13 @@ export const OS_NAMES: Record<Os, string> = {
   linux: "Linux",
 }
 
+// The hero keycap's legend, in the site's lowercase keycap voice.
+export const OS_KEY_LEGENDS: Record<Os, string> = {
+  mac: "option",
+  windows: "alt",
+  linux: "alt + space",
+}
+
 function useCopy(): [boolean, (text: string) => void] {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
