@@ -100,6 +100,7 @@ struct FullKeyboardSettings {
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
         static let commaPeriodKeys = "experiments.commaPeriodKeys"
         static let quickAccents = "experiments.quickAccents"
+        static let emojiShortcodes = "experiments.emojiShortcodes"
     }
 
     private let defaults: UserDefaults?
@@ -358,6 +359,17 @@ struct FullKeyboardSettings {
     var quickAccents: Bool {
         get { defaults?.bool(forKey: Key.quickAccents) ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.quickAccents) }
+    }
+
+    /// Settings › Experiments › Emoji shortcodes: the strip offers emoji for a ":name" typed
+    /// after a space or at the start of the field (":pizza"), a tap takes the whole token back
+    /// and types the emoji, and the closing ":" of a name typed in full (":pizza:") types it
+    /// instead. Off by default, so a keyboard without it types colons exactly as before; without
+    /// Full Access the App Group reads false, which is off. Stored as
+    /// `experiments.emojiShortcodes`.
+    var emojiShortcodes: Bool {
+        get { defaults?.object(forKey: Key.emojiShortcodes) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.emojiShortcodes) }
     }
 
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.

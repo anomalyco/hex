@@ -959,10 +959,10 @@ never at a launch by itself.
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Swipe typing in more languages, Korean
-    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, ABC
-    under the emoji key, Keyboard themes (its Theme menu below the switch while it's on),
-    Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Join
-    the keyboard when unfolded, and Multilingual model (Parakeet).
+    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, Emoji
+    shortcodes, ABC under the emoji key, Keyboard themes (its Theme menu below the switch
+    while it's on), Two-thumb selection, Delete swiped words letter by letter, Hide word
+    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1769,6 +1769,28 @@ never at a launch by itself.
   #+= pages' held symbols, and the mark keys ˇ and ʼ, keep the key's own selected. Off, the
   callout opens on the key's own letter. Unit tests only (`FullKeyboardEngineTests`): no CI
   compiles the iOS targets, and no physical iPhone run checks it.
+- **Emoji shortcodes (full keyboard, Settings › Experiments):** Off by default
+  (`experiments.emojiShortcodes`, App Group). In a plain text field that takes emoji, with
+  autocorrect on and secure entry off (not the emoji search), a colon and a name after
+  whitespace or at the start of the field offer up to three emoji in the strip's slots in
+  place of its words: the name's first character is a letter or digit, at least two of its
+  characters are letters or digits, and the rest may also be "_", "+" and "-"
+  (":pizza", ":thumbs_up", case-insensitive); the shapes of chat emoticons (":-D", ":+1") are
+  not tokens. An exact name or alias comes first, then the names and keywords the token
+  starts, one per family, with your emoji use breaking exact ties and moving prefix matches
+  up (`EmojiShortcode` over `EmojiLibrary`, whose words come from
+  `scripts/build-emoji-data.py`). A tap takes the whole token back and types the emoji with
+  its skin tone, counted like one from the panel; typing the closing ":" of a name typed in
+  full (":pizza:") types the emoji instead. No match, a colon inside a word ("abc:pizza"), a
+  field with autocorrect off, a secure field, the emoji search, or the experiment off leaves
+  the strip and typing as they were. Only names the index weighs as names or aliases
+  complete: `:heart:`, `:joy:` and `:tada:` are keywords in the data and stay text, and
+  `:smile:` completes to 😊, the first emoji `emoji-aliases-en.txt` lists for it, not 😄;
+  adding them needs more aliases and a regenerated index, which
+  `scripts/build-emoji-data.py` can't make from the repo alone (it downloads Unicode's
+  emoji-test.txt 18.0 and CLDR 49, and no copy is checked in). Unit tests only
+  (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical iPhone run checks
+  it.
 - **Emoji (Settings › Keyboard › Emoji, for the full keyboard):** On by default (stored as
   `experiments.emoji` from when it was an experiment off by default: unset or true is on,
   false off, so testers who turned it off keep it off). An emoji key
