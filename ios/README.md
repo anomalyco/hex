@@ -1150,7 +1150,20 @@ never at a launch by itself.
   pitch, 35.5 pt shift and delete, 123, space and return on row 3's columns, and the strip
   where Apple's bar is, 271 pt in all as Apple's; it shows no globe of its own there.
   iPadOS grants a custom keyboard any height it asks for (up to 900 pt tried); one that asks
-  for none gets 258 pt (343 turned) on the 11-inch.
+  for none gets 258 pt (343 turned) on the 11-inch. It always lays a third-party keyboard out
+  at that default first and switches to the height asked for about 15 to 20 ms after
+  `viewDidAppear`, even when the height was set before the view had a window (iPhone: 216 to
+  247 pt), and a tap while the keyboard still moves lands where the key was a frame earlier.
+  Measured with a scratch build logging every touch and layout (iPadOS 27.2 simulators, three
+  at once): taps 100, 200, 400 and 800 ms after the keyboard appeared, 100 launches each, all
+  went in on an 11-inch docked (400 of 400) and floating (399; one second tap never reached the
+  keyboard), as on an iPhone 17 Pro (399; one first tap at 100 ms typed the key above). Launched
+  into a turn, at the same moment after launch Hex takes taps sooner than Apple's keyboard
+  (1.4 s: 75 of 80 against 2 of 80; from 1.6 s both every one); earlier the keyboard is still
+  sliding in. Docked, a held key's accents show in Apple's iPad cells, half a key wide and
+  53 pt tall, two rows once there are more than five (`AccentMenu.padArrangement`,
+  `KeyboardMetrics.accentCellWidth`); floating, as on an iPhone. In the floating keyboard's
+  emoji panel the category icons shrink to fit its 18.6 pt slots (17 pt in 22 pt and wider).
 - **Touch targets (full keyboard):** Every point of the key area types a key: gaps
   split down the middle, the outer keys reach the screen's edges, and row 1 also
   takes the 8 pt gap under the strip (on the Duo, the strip's bottom 4 pt below its

@@ -569,7 +569,14 @@ final class FullKeyboardEngine {
         guard (dx * dx + dy * dy).squareRoot() <= Self.accentSlop else { return false }
         guard let options = AccentCatalog.options(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters),
               options.count > 1 else { return false }
-        if let arrangement = AccentCatalog.arrangement(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters) {
+        if let cell = layout.metrics.accentCellWidth {
+            // Docked on an iPad: Apple's iPad menu, two rows, in place of the iPhone's arrangement.
+            let arrangement = AccentMenu.padArrangement(options, opensLeft: touch.key.frame.midX > layout.width * 0.52)
+            activeAccentMenu = AccentMenu.build(
+                for: touch.key.frame, arrangement: arrangement, in: layout.width, horizontalInset: layout.horizontalInset,
+                cellWidth: cell, cellHeight: AccentMenu.padCellHeight
+            )
+        } else if let arrangement = AccentCatalog.arrangement(for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters) {
             activeAccentMenu = AccentMenu.build(
                 for: touch.key.frame,
                 arrangement: arrangement,

@@ -277,6 +277,9 @@ final class EmojiCategoryBar: UIView {
 
     private var buttons: [BarButton] = []
     private let chip = UIView()
+    /// A category's slot narrower than this shrinks its icon.
+    static let narrowSlot: CGFloat = 21
+    private var iconPointSize: CGFloat = 17
 
     init(items: [(symbol: String, title: String)]) {
         super.init(frame: .zero)
@@ -380,8 +383,16 @@ final class EmojiCategoryBar: UIView {
         super.layoutSubviews()
         guard !buttons.isEmpty else { return }
         let width = bounds.width / CGFloat(buttons.count)
+        // The icons are 17 pt in a slot of 22 pt or more (every iPhone); in a narrower one (an
+        // iPad's 320 pt floating keyboard, 18.6 pt slots) they shrink with it so they don't touch.
+        let pointSize = width < Self.narrowSlot ? max(12, (17 * width / 22 * 2).rounded(.down) / 2) : 17
+        let resize = pointSize != iconPointSize
+        iconPointSize = pointSize
         for (index, button) in buttons.enumerated() {
             button.frame = CGRect(x: CGFloat(index) * width, y: 0, width: width, height: bounds.height)
+            if resize {
+                button.setPreferredSymbolConfiguration(UIImage.SymbolConfiguration(pointSize: pointSize, weight: .medium), forImageIn: .normal)
+            }
         }
         let side = min(30, bounds.height - 4, width - 2)
         let selectedFrame = buttons[min(selected, buttons.count - 1)].frame

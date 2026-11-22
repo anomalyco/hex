@@ -1680,6 +1680,40 @@ final class KeyboardLayoutTests: XCTestCase {
     /// Apple's floating keyboard (the same 320 pt on every iPad): 26 pt keycaps on a 54.3 pt
     /// pitch, 4 pt in, shift and delete 35.5 pt, 123 and return 73.5 pt with space 153 pt
     /// between, all in 271 pt under its 44 pt bar; Hex's strip takes the bar's place.
+    /// Docked on an iPad a held key's accents sit in Apple's cells (30 to 46.5 pt, 53 pt tall),
+    /// two rows once there are more than five, the key's own option nearest the key and first
+    /// picked, every menu inside the keyboard; floating and on an iPhone, cells stay key-wide.
+    func testPadAccentMenusUseApplesCellsInsideTheKeyboard() {
+        let cells: [(CGFloat, KeyboardOrientation, KeyboardPadPlacement, CGFloat)] = [
+            (744, .portrait, .docked(.mini), 30), (1133, .landscape, .docked(.mini), 46.5),
+            (834, .portrait, .docked(.medium), 31), (1210, .landscape, .docked(.medium), 43.5),
+            (1032, .portrait, .docked(.large), 34.5), (1376, .landscape, .docked(.large), 45.5),
+        ]
+        for (width, orientation, pad, cell) in cells {
+            let layout = KeyboardLayout(width: width, orientation: orientation, pad: pad)
+            XCTAssertEqual(layout.metrics.accentCellWidth, cell, "\(pad) \(orientation)")
+            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight).insetBy(dx: -0.01, dy: -0.01)
+            for ch in ["e", "a", "i", "o", "u", "n", "c", "s", "z", "p", "q"] {
+                guard let key = layout.key(.character(ch)), let options = AccentCatalog.options(for: ch, uppercase: false) else { continue }
+                let arrangement = AccentMenu.padArrangement(options, opensLeft: key.frame.midX > width * 0.52)
+                let menu = AccentMenu.build(for: key.frame, arrangement: arrangement, in: width, cellWidth: cell, cellHeight: AccentMenu.padCellHeight)
+                let label = "\(pad) \(orientation) \(ch)"
+                XCTAssertTrue(bounds.contains(menu.bubbleFrame), "\(label): \(menu.bubbleFrame)")
+                XCTAssertEqual(menu.selectedOption, ch, label)
+                XCTAssertEqual(menu.cellFrames.first?.width ?? 0, cell, accuracy: 0.001, label)
+                XCTAssertEqual(menu.cellFrames.first?.height, AccentMenu.padCellHeight, label)
+                XCTAssertEqual(arrangement.rows.count, options.count > 5 ? 2 : 1, label)
+                XCTAssertEqual(menu.cellFrames[menu.selectedIndex].midX, key.frame.midX, accuracy: cell, label)
+            }
+        }
+        XCTAssertNil(KeyboardLayout(width: 320, pad: .floating).metrics.accentCellWidth)
+        XCTAssertNil(KeyboardLayout(width: 402).metrics.accentCellWidth)
+        XCTAssertEqual(
+            AccentMenu.padArrangement(["e", "è", "é", "ê", "ë", "ē", "ė", "ę", "ě"], opensLeft: false),
+            AccentArrangement(rows: [["ē", "ė", "ę", "ě"], ["e", "è", "é", "ê", "ë"]], baseRow: 1, baseColumn: 0)
+        )
+    }
+
     func testPadFloatingIsApplesFloatingKeyboard() {
         let layout = KeyboardLayout(width: 320, showsGlobe: false, pad: .floating)
         XCTAssertEqual(layout.totalHeight, 271, accuracy: 0.01)
