@@ -3097,8 +3097,8 @@ final class FullKeyboardEngineTests: XCTestCase {
         plane.engine.acceptSuggestion(pick)
         swipe("the", on: plane)
         swipe("bell", on: plane)
+        swipe("rang", on: plane)
         tap(.delete, on: plane)
-        swipe("bell", on: plane)
         swipe("will", on: plane)
         XCTAssertEqual(field.text, "hello \(pick.replacement) the bell will", "after a pick and a delete")
         tap(.layerSwitch(.numbers), on: plane)
@@ -3155,6 +3155,63 @@ final class FullKeyboardEngineTests: XCTestCase {
         tap(.character("s"), on: plane)
         tap(.delete, on: plane)
         XCTAssertEqual(field.text, "hell people ", "only right after the swipe; the space a tap brought stays")
+    }
+
+    /// Record typing logs: "two" swiped three times running for "yep", each deleted, while the
+    /// strip offered "yep". A word taken back right after its swipe isn't the next swipe's word
+    /// at that place: its next reading goes in, and the strip may still offer the word. Every
+    /// word taken back there counts; a letter typed in between forgets them; a swipe that reads
+    /// only as that word still types it; deleting it letter by letter takes it back too.
+    func testASwipeRightAfterItsWordWasDeletedTypesTheNextReading() throws {
+        func swipe(_ readings: [String], on plane: KeyboardKeyPlaneView) {
+            let key = plane.engine.layout.key(.character("t"))!
+            plane.engine.touchBegan(id: 93, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            plane.engine.beginSwipe(touchID: 93)
+            plane.engine.endSwipe(typing: readings, points: 12, decodeTime: 0.001)
+        }
+        let readings = ["two", "yep", "tip"]
+        let (field, plane) = try swipeKeyboard("so")
+        swipe(readings, on: plane)
+        XCTAssertEqual(field.text, "so two")
+        tap(.delete, on: plane)
+        swipe(readings, on: plane)
+        XCTAssertEqual(field.text, "so yep", "the next reading")
+        XCTAssertTrue(plane.engine.suggestions.contains { $0.replacement == "two" }, "still offered in the strip")
+        tap(.delete, on: plane)
+        swipe(readings, on: plane)
+        XCTAssertEqual(field.text, "so tip", "neither word taken back here")
+        tap(.delete, on: plane)
+        tap(.character("a"), on: plane)
+        tap(.delete, on: plane)
+        swipe(readings, on: plane)
+        XCTAssertEqual(field.text, "so two", "a letter typed in between forgets them")
+        tap(.delete, on: plane)
+        swipe(["two"], on: plane)
+        XCTAssertEqual(field.text, "so two", "the only reading still goes in")
+
+        let (letters, keys) = try swipeKeyboard("so")
+        keys.engine.deletesSwipedWordsLetterByLetter = true
+        swipe(readings, on: keys)
+        for _ in 0..<4 { tap(.delete, on: keys) }
+        XCTAssertEqual(letters.text, "so")
+        swipe(readings, on: keys)
+        XCTAssertEqual(letters.text, "so yep", "every character the swipe typed taken out")
+        for _ in 0..<3 { tap(.delete, on: keys) }
+        XCTAssertEqual(letters.text, "so ")
+        swipe(readings, on: keys)
+        XCTAssertEqual(letters.text, "so tip", "or just its letters")
+    }
+
+    /// The same through the decoder: the same path swiped again after its word was deleted
+    /// types the reading the strip offered beside it.
+    func testTheSamePathSwipedAgainAfterADeleteTypesTheStripsReading() throws {
+        let (field, plane) = try swipeKeyboard()
+        swipe("hello", on: plane)
+        XCTAssertEqual(field.text, "hello")
+        let next = try XCTUnwrap(plane.engine.swipedWord?.alternatives.first)
+        tap(.delete, on: plane)
+        swipe("hello", on: plane)
+        XCTAssertEqual(field.text, next)
     }
 
     /// Settings › Experiments › Delete swiped words letter by letter (off by default): right

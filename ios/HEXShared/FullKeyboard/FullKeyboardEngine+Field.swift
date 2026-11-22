@@ -6,6 +6,7 @@ import UIKit
 extension FullKeyboardEngine {
     func didEdit() {
         suggestionSpaceBefore = nil
+        swipeRetries.edited()
         // A key's own edit means a pending Dictate no longer has the field it picked.
         trackpadSelectionState.pendingDictation = nil
         refreshAutoCapitalization()
