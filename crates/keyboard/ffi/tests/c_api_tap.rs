@@ -93,7 +93,7 @@ fn reads_the_models_words_and_costs() {
             hk_model_encode(model, c("the").as_ptr(), codes.as_mut_ptr(), 16),
             3
         );
-        assert_eq!(hk_model_index_of_codes(model, codes.as_ptr(), 3), the);
+        assert_eq!(core.index_of_codes(&codes[..3]), Some(the as usize));
         assert_eq!(
             hk_model_encode(model, c("th3").as_ptr(), codes.as_mut_ptr(), 16),
             -1
@@ -111,10 +111,7 @@ fn reads_the_models_words_and_costs() {
             core.unigram_cost(the as usize)
         );
         assert!(hk_model_unigram_cost(model, 86_133).is_nan());
-        let of = core.index("of").unwrap();
         let mut cost = 0.0;
-        assert_eq!(hk_model_bigram_cost(model, of, the as usize, &mut cost), 1);
-        assert_eq!(Some(cost), core.bigram_cost(of, the as usize));
         assert_eq!(
             hk_model_cost(model, c("the").as_ptr(), c("of").as_ptr(), &mut cost),
             1
@@ -138,19 +135,6 @@ fn reads_the_models_words_and_costs() {
             0
         );
 
-        let (mut lo, mut hi) = (0, 0);
-        hk_model_narrow(
-            model,
-            0,
-            info.word_count,
-            0,
-            i32::from(codes[0]),
-            &mut lo,
-            &mut hi,
-        );
-        assert!(lo < hi && lo as i64 <= the && (the as usize) < hi);
-        hk_model_narrow(model, 5, 2, 0, 3, &mut lo, &mut hi);
-        assert_eq!((lo, hi), (5, 5));
         hk_model_free(model);
     }
 }

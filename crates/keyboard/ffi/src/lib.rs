@@ -16,10 +16,9 @@ use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use lookup::{
-    HkAllowWord, HkModelInfo, hk_model_alphabet, hk_model_bigram_cost, hk_model_completions,
-    hk_model_continuations, hk_model_cost, hk_model_encode, hk_model_has_pair, hk_model_index,
-    hk_model_index_of_codes, hk_model_info, hk_model_narrow, hk_model_next_words,
-    hk_model_unigram_cost, hk_model_word_codes,
+    HkAllowWord, HkModelInfo, hk_model_alphabet, hk_model_completions, hk_model_continuations,
+    hk_model_cost, hk_model_encode, hk_model_has_pair, hk_model_index, hk_model_info,
+    hk_model_next_words, hk_model_unigram_cost, hk_model_word_codes,
 };
 pub use model::{HkModel, hk_model_free, hk_model_open, hk_model_open_fd, hk_model_word_count};
 pub use swipe::{

@@ -64,15 +64,8 @@ const uint8_t *hk_model_word_codes(const HkModel *model, size_t word, size_t *le
 int64_t hk_model_encode(const HkModel *model, const char *word, uint8_t *out, size_t capacity);
 /// The word's index, or -1 when the model lacks it.
 int64_t hk_model_index(const HkModel *model, const char *word);
-int64_t hk_model_index_of_codes(const HkModel *model, const uint8_t *codes, size_t count);
-/// The words in lo..<hi (sharing their first `depth` codes) whose next code is `code`, as
-/// `*out_lo..<*out_hi`; empty when lo..<hi isn't a range of words.
-void hk_model_narrow(const HkModel *model, size_t lo, size_t hi, size_t depth, int32_t code,
-                     size_t *out_lo, size_t *out_hi);
 /// -ln P(word) in nats; NaN past the last word.
 double hk_model_unigram_cost(const HkModel *model, size_t word);
-/// Returns 1 and writes -ln P(second | first) when the model has the pair, else 0.
-int32_t hk_model_bigram_cost(const HkModel *model, size_t first, size_t second, double *out);
 /// Returns 1 and writes -ln P(word | previous) with the decoder's 0.92-nat backoff to the
 /// unigram (`previous` NULL: the unigram's), or 0 when the model lacks the word.
 int32_t hk_model_cost(const HkModel *model, const char *word, const char *previous, double *out);

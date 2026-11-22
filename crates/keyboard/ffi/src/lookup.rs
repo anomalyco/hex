@@ -163,50 +163,6 @@ pub unsafe extern "C" fn hk_model_index(model: *const HkModel, word: *const c_ch
 }
 
 /// # Safety
-/// `model` is NULL or live; `codes` is NULL or holds `count` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hk_model_index_of_codes(
-    model: *const HkModel,
-    codes: *const u8,
-    count: usize,
-) -> i64 {
-    // SAFETY: NULL or valid, as the caller promises.
-    let (Some(model), Some(codes)) = (unsafe { self::model(model) }, unsafe {
-        slice(codes, count)
-    }) else {
-        return -1;
-    };
-    guard(None, || model.index_of_codes(codes)).map_or(-1, |i| i as i64)
-}
-
-/// # Safety
-/// `model` is NULL or live; `out_lo` and `out_hi` are NULL or writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hk_model_narrow(
-    model: *const HkModel,
-    lo: usize,
-    hi: usize,
-    depth: usize,
-    code: i32,
-    out_lo: *mut usize,
-    out_hi: *mut usize,
-) {
-    if out_lo.is_null() || out_hi.is_null() {
-        return;
-    }
-    // SAFETY: NULL or live, as the caller promises.
-    let range = unsafe { self::model(model) }
-        .filter(|m| lo <= hi && hi <= m.word_count())
-        .and_then(|m| guard(None, || Some(m.narrow(lo, hi, depth, code))))
-        .unwrap_or((lo, lo));
-    // SAFETY: non-NULL and writable, as the caller promises.
-    unsafe {
-        out_lo.write(range.0);
-        out_hi.write(range.1);
-    }
-}
-
-/// # Safety
 /// `model` is NULL or live.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn hk_model_unigram_cost(model: *const HkModel, word: usize) -> f64 {
@@ -230,23 +186,6 @@ unsafe fn found(cost: Option<f64>, out: *mut f64) -> i32 {
         }
         _ => 0,
     }
-}
-
-/// # Safety
-/// `model` is NULL or live; `out` is NULL or writable.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn hk_model_bigram_cost(
-    model: *const HkModel,
-    first: usize,
-    second: usize,
-    out: *mut f64,
-) -> i32 {
-    // SAFETY: NULL or live, as the caller promises.
-    let cost = unsafe { self::model(model) }
-        .filter(|m| second < m.word_count())
-        .and_then(|m| guard(None, || m.bigram_cost(first, second)));
-    // SAFETY: `out` is NULL or writable, as the caller promises.
-    unsafe { found(cost, out) }
 }
 
 /// # Safety
