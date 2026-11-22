@@ -255,19 +255,17 @@ pub struct Updater {
 impl Updater {
     pub fn start() -> Self {
         let method = platform::method();
-        // An `HEX_X86_BASELINE=ivybridge` source build targets an older
-        // processor than every published artifact, so it never updates:
-        // installing one would leave a Hex that can't start.
-        let disabled = if option_env!("HEX_TEST_BUILD") == Some("1")
-            || cfg!(hex_x86_ivybridge)
-            || updates_off_by_env()
-        {
+        let disabled = if option_env!("HEX_TEST_BUILD") == Some("1") || updates_off_by_env() {
             Some(DesktopUpdateStatus::Unavailable)
         } else if crate::app_paths::is_local_build() {
             Some(DesktopUpdateStatus::SourceBuild)
         } else if managed_by_policy() {
             Some(DesktopUpdateStatus::Managed)
-        } else if method == Method::Source {
+        // An `HEX_X86_BASELINE=ivybridge` source build targets an older processor
+        // than every published artifact, so it never takes one: installing it
+        // would leave a Hex that can't start. A source build never checks,
+        // downloads, or installs, and its footer says so.
+        } else if method == Method::Source || cfg!(hex_x86_ivybridge) {
             Some(DesktopUpdateStatus::SourceBuild)
         } else {
             None

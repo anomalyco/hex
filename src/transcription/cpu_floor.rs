@@ -7,9 +7,10 @@
 //!
 //! An opt-in source build can target Ivy Bridge (2012: SSE4.2, AVX, F16C)
 //! instead of x86-64-v3, with `HEX_X86_BASELINE=ivybridge` and the matching
-//! `TRANSCRIBE_CMAKE_ARGS` (`build.rs` refuses either without the other;
-//! docs/linux.md and docs/windows.md). Such a build is not an official
-//! release, is slower on newer CPUs, and never self-updates.
+//! `TRANSCRIBE_CMAKE_ARGS` (`build.rs` refuses `HEX_X86_BASELINE=ivybridge`
+//! unless `TRANSCRIBE_CMAKE_ARGS` carries the matching flags; docs/linux.md
+//! and docs/windows.md). Such a build is not an official release, is slower on
+//! newer CPUs, and never self-updates.
 //!
 //! `--version` and `--help` stay available on any CPU: installers and the
 //! updater run `hex --version` to check what they install.
@@ -27,10 +28,10 @@ const V3: Floor = Floor {
     message: "Hex needs a 2013 or newer processor (Intel Haswell / AMD Excavator or later) with AVX2. This PC's processor isn't supported.",
 };
 
-/// `HEX_X86_BASELINE=ivybridge`: Ivy Bridge (2012) and newer, with AVX.
+/// `HEX_X86_BASELINE=ivybridge`: Ivy Bridge (2012) and newer, with AVX and F16C.
 const IVYBRIDGE: Floor = Floor {
     features: &["sse4.2", "avx", "f16c"],
-    message: "Hex needs a 2012 or newer processor (Intel Ivy Bridge / AMD Bulldozer or later) with AVX. This PC's processor isn't supported.",
+    message: "Hex needs a 2012 or newer processor (Intel Ivy Bridge / AMD Piledriver or later) with AVX and F16C. This PC's processor isn't supported.",
 };
 
 /// The floor this build detects, both lists stay visible to the test below.
@@ -144,7 +145,7 @@ mod tests {
         assert_eq!(V3.features, ["avx2", "bmi2", "fma", "f16c"].as_slice());
         assert_eq!(IVYBRIDGE.features, ["sse4.2", "avx", "f16c"].as_slice());
         assert!(V3.message.contains("AVX2"));
-        assert!(IVYBRIDGE.message.contains("with AVX."));
+        assert!(IVYBRIDGE.message.contains("F16C"));
         assert_ne!(V3.message, IVYBRIDGE.message);
         #[cfg(hex_x86_ivybridge)]
         assert_eq!(floor().features, IVYBRIDGE.features);
