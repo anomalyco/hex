@@ -1,3 +1,4 @@
+import HexKeyboardCore
 import XCTest
 @testable import HEX
 
@@ -69,5 +70,15 @@ final class SwipeDecoderParametersTests: XCTestCase {
         XCTAssertEqual(SwipeDecoder.costOfContraction("ma'am"), 9.5)
         XCTAssertEqual(SwipeDecoder.costOfContraction("don't\u{0}"), 9.5, "a NUL makes it no contraction, as in Swift")
         XCTAssertEqual(SwipeDecoder.costOfContraction("isn't", base: 1), 1)
+    }
+
+    /// Android reads the English contractions from the core (`hk_swipe_english_contractions`):
+    /// its copy is iOS's list, element for element, until autocorrect's list moves there.
+    @MainActor
+    func testTheCoresEnglishContractionsAreAutocorrects() {
+        var count = 0
+        let pointers = hk_swipe_english_contractions(&count)
+        let core = (0..<count).map { String(cString: pointers![$0]!) }
+        XCTAssertEqual(core, AutocorrectEngine.englishContractions)
     }
 }
