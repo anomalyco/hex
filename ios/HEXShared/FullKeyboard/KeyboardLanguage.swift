@@ -7,7 +7,7 @@ import Foundation
 /// dictionary. French is Apple's AZERTY, as on its French (France) and (Belgique) keyboards
 /// ("AZERTY – French", their own: row 3 ends in the apostrophe key, `FrenchTyping`),
 /// Canadian French QWERTY, as on Apple's French (Canada), and Swiss French QWERTZ, as on
-/// Apple's French (Suisse). Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
+/// Apple's French (Suisse), both their "– French" layouts with the key ending row 2. Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
 /// held ь); Ukrainian is the standard Ukrainian ЙЦУКЕН (ДСТУ 4862:2007) in the twelve-key
 /// rows the iPhone's own Ukrainian keyboard shows (ї, є, ʼ and ґ on keys of their own, the
 /// other apostrophes on a held ʼ, and no ы, э, ъ or ё); Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
@@ -109,6 +109,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// Korean's Hangul.
     var isLatin: Bool { self != .russian && self != .ukrainian && self != .greek && self != .korean }
 
+    /// Apple's three French keyboards: France (and Belgium), Canada and Switzerland.
+    var isFrench: Bool { self == .french || self == .frenchCanadian || self == .frenchSwiss }
+
     /// The Apple Speech language (BCP 47) to dictate in while this layout types (Settings ›
     /// Keyboard › Languages › Switch dictation too): the iPhone's own region where it has one
     /// for the language (English on a British iPhone is en-GB), else the language's usual
@@ -168,7 +171,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .own: ownLetterRows
         // Apple's Czech layouts are both its own, the ´ and ˇ keys kept: QWERTY only swaps Z and Y.
         case .qwerty where self == .czech: ["qwertyuiop", "asdfghjkl\u{00B4}", "zxcvbnm\u{02C7}"]
+        // Apple's French keyboards' own layouts add the apostrophe key (`FrenchTyping`).
+        case .qwerty where self == .frenchCanadian: ownLetterRows
         case .qwerty: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
+        case .qwertz where self == .frenchSwiss: ownLetterRows
         case .qwertz: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
         case .azerty where self == .french: ownLetterRows
         case .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
@@ -182,9 +188,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// Layout list shows them (iOS 27.0 simulator, Settings › General › Keyboard › Keyboards ›
     /// Add New Keyboard, black box). Apple's French keyboards also list "AZERTY – French",
     /// "QWERTY – French" and "QWERTZ – French", which add the apostrophe key (`FrenchTyping`);
-    /// each region lists its own first. Français (France)'s AZERTY is "AZERTY – French"; its
-    /// QWERTY and QWERTZ, and Canada's and Switzerland's layouts, are the plain ones. One
-    /// layout: no choice.
+    /// each region lists its own first. Each French keyboard's own layout is its "– French" one
+    /// (France's AZERTY, Canada's QWERTY, Switzerland's QWERTZ); its other layouts are the plain
+    /// ones. One layout: no choice.
     var letterLayouts: [KeyboardLetterLayout] {
         switch self {
         case .english: [.qwerty, .azerty, .qwertz, .dvorak]
@@ -234,13 +240,17 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
 
     private var ownLetterRows: [String] {
         switch self {
-        case .english, .italian, .frenchCanadian, .portuguese, .polish, .romanian:
+        case .english, .italian, .portuguese, .polish, .romanian:
             ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         // Apple's "AZERTY – French", the first layout Français (France) and (Belgique) list
         // (iOS 27.2 simulator): row 3 is W to N and the apostrophe key, seven keys a letter wide
         // centred between shift and delete, which keep their size (`FrenchTyping`).
         case .french: ["azertyuiop", "qsdfghjklm", "wxcvbn" + FrenchTyping.key]
-        case .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
+        // Apple's "QWERTY – French" and "QWERTZ – French", the first layouts Français (Canada)
+        // and (Suisse) list (iOS 27.2 simulator): the apostrophe key ends row 2, ten keys a letter
+        // wide edge to edge as row 1's, and row 3 keeps its seven letters between shift and delete.
+        case .frenchCanadian: ["qwertyuiop", "asdfghjkl" + FrenchTyping.key, "zxcvbnm"]
+        case .frenchSwiss: ["qwertzuiop", "asdfghjkl" + FrenchTyping.key, "yxcvbnm"]
         case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
         case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
         case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
@@ -702,6 +712,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // its row 3 starts after shift (Q under O's right half).
         let offsets = switch letters {
         case .azerty where self == .french: [0.0, 0.0, 1.5]
+        // Canada's and Switzerland's own: row 2 ends in the apostrophe key, edge to edge.
+        case .qwerty where self == .frenchCanadian, .qwertz where self == .frenchSwiss: [0.0, 0.0, 1.5]
         case .azerty: [0.0, 0.0, 2.0]
         case .dvorak: [1.85, 0.0, 1.33]
         case .own where self == .ukrainian || self == .greek || self == .czech: [0.0, 0.0, 1.0]

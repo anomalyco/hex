@@ -175,7 +175,7 @@ extension AutocorrectEngine {
     /// "qu'il"). Nil outside French, when neither side changes, for a word the dictionary knows
     /// whole ("aujourd'hui"), and for an apostrophe without a letter on both sides ("l'").
     func frenchElisionFix(for token: String) -> String? {
-        guard [.french, .frenchCanadian, .frenchSwiss].contains(language),
+        guard language.isFrench,
               token.filter({ $0 == "'" }).count == 1, let mark = token.firstIndex(of: "'") else { return nil }
         let head = String(token[..<mark])
         let tail = String(token[token.index(after: mark)...])

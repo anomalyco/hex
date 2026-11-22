@@ -1011,8 +1011,9 @@ never at a launch by itself.
   "QWERTY – Español" (with ñ), QWERTY, AZERTY, QWERTZ; Français (France) AZERTY, QWERTY,
   QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Français (France)'s
   AZERTY is Apple's "AZERTY – French", the first layout Apple lists for France and Belgium, with
-  the apostrophe key; Apple's other "– French" variants, Canada's and Switzerland's own among
-  them, add that key at the end of row 2, and Hex's are still the plain ones); Italiano and Português QWERTY,
+  the apostrophe key; Canada's QWERTY and Switzerland's QWERTZ are Apple's "QWERTY – French" and
+  "QWERTZ – French", the first each lists, with the key ending row 2; every other French layout
+  is the plain one); Italiano and Português QWERTY,
   AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
   "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
   simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Srpski
@@ -1047,6 +1048,9 @@ never at a launch by itself.
   next-letter odds and swipe typing never read it, and French autocorrect fixes a slip on either
   side of an elision's apostrophe as a word of its own ("l'hpmme" → "l'homme", "k'homme" →
   "l'homme", `frenchElisionFix`). The iPad keeps its own ' and : key instead; Français (Canada) on QWERTY and Français (Suisse) on QWERTZ, as on Apple's
+  "QWERTY – French" and "QWERTZ – French": the same apostrophe key ends row 2, ten keys a
+  letter wide edge to edge under row 1's, its rules and holds France's (keycaps on Apple's to the
+  pixel on an iPhone 17 Pro and SE, upright and turned)
   (automatic picks them for `fr-CA` and `fr-CH`, AZERTY for any other French, Belgium
   included), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
   held е, ъ on a held ь), Українська (the standard Ukrainian ЙЦУКЕН, ДСТУ 4862:2007, in the

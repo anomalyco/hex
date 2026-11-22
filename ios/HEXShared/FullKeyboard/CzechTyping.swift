@@ -33,9 +33,10 @@ nonisolated enum CzechTyping {
     }
 }
 
-/// French AZERTY's apostrophe key after n, as Apple's "AZERTY – French" keyboard was observed
-/// to apply it (iOS 27.2 simulator, iPhone 17 Pro and SE, real touches in a text view with smart
-/// quotes on and off, black box). Right after a letter its keycap shows ’, a tap types the
+/// The apostrophe key of Apple's French keyboards, after n on France's "AZERTY – French" and
+/// ending row 2 on Canada's "QWERTY – French" and Switzerland's "QWERTZ – French", as Apple's
+/// were observed to apply it (iOS 27.2 simulator, iPhone 17 Pro and SE, real touches in a text
+/// view with smart quotes on and off, black box; the same on all three). Right after a letter its keycap shows ’, a tap types the
 /// apostrophe (’ where the field curls quotes, ' where it doesn't, as the 123 page's ' key does)
 /// and a hold offers ' ’ ‘ ` (typed as they are); after anything else (a space, a digit, an
 /// apostrophe, nothing) it shows ´, types ´ (U+00B4) itself, never as a dead key ("´e" stays
@@ -59,7 +60,7 @@ extension FullKeyboardEngine {
         switch layout.language {
         case .greek: return typeGreek(&text)
         case .czech: return typeCzech(text)
-        case .french:
+        case .french, .frenchCanadian, .frenchSwiss:
             if typesFrenchApostrophe(text) { text = "'" }
             return false
         default: return false
@@ -69,7 +70,7 @@ extension FullKeyboardEngine {
     /// Whether `character` is French's apostrophe key and types the apostrophe here, right
     /// after a letter (`FrenchTyping`).
     func typesFrenchApostrophe(_ character: String) -> Bool {
-        layout.language == .french && character == FrenchTyping.key && FrenchTyping.typesApostrophe(after: typingContext)
+        layout.language.isFrench && character == FrenchTyping.key && FrenchTyping.typesApostrophe(after: typingContext)
     }
 
     /// The key a held `character` offers options for: French's apostrophe key after a letter

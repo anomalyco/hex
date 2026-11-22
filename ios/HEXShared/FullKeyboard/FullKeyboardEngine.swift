@@ -298,7 +298,7 @@ final class FullKeyboardEngine {
         refreshSuggestions()
         trackpadFieldChanged()
         // French's apostrophe key shows ’ or ´ by the character before the cursor.
-        if layout.language == .french, layout.key(.character(FrenchTyping.key)) != nil { onChange?() }
+        if layout.language.isFrench, layout.key(.character(FrenchTyping.key)) != nil { onChange?() }
     }
 
     /// Text moved by a path of Hex's own around the keys (a delete slide, a paste, a
