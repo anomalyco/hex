@@ -705,6 +705,9 @@ pub struct ModelReport {
     pub preparing: Option<String>,
     pub downloaded_bytes: u64,
     pub error: Option<String>,
+    /// The loaded model's device, when the running Hex has one to report.
+    #[serde(default)]
+    pub backend: Option<crate::transcription::SpeechBackend>,
     /// The model Hex runs in place of the saved one while that can't run.
     #[serde(default)]
     pub fallback: Option<FallbackReport>,

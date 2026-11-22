@@ -21,6 +21,8 @@ pub struct LocalTranscriber {
     selection: TranscriptionSelection,
     options: RunOptions,
     device_label: String,
+    /// Where it runs, for Settings and `hex status`.
+    backend: crate::transcription::SpeechBackend,
     max_audio_samples: Option<usize>,
     /// The finest timestamps the model gives, for a capture's or a
     /// meeting's word times.
@@ -76,14 +78,15 @@ pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Res
     Ok(())
 }
 
-/// Speech engine was CPU when [`init_backends`] ran, so only the CPU
-/// backend registered.
+/// This launch registered the CPU alone: Speech engine was CPU when
+/// [`init_backends`] ran, or someone chose GPU after the crash marker was
+/// cleared (`retry_gpu_start`), so the GPU needs a restart.
 static CPU_CHOSEN: AtomicBool = AtomicBool::new(false);
 
 /// Registers transcribe.cpp's backends once per process and returns the
 /// backend models load on: every GPU (`Auto`), or only the CPU when Speech
-/// engine is CPU, so no GPU driver loads (#1253), or on Windows after a
-/// launch of this build crashed while ggml started a GPU (#662). A GPU
+/// engine is CPU, so no GPU driver loads (#1253), or on Windows after this
+/// build's launches crashed twice while ggml started a GPU (#662). A GPU
 /// driver crash can't be caught, so a marker file spans that work.
 pub fn init_backends() -> Result<Backend> {
     static BACKEND: std::sync::OnceLock<Backend> = std::sync::OnceLock::new();
@@ -98,18 +101,20 @@ pub fn init_backends() -> Result<Backend> {
         )
         .wrap_err("could not initialize the CPU transcription backend")
     };
-    #[cfg(target_os = "windows")]
-    if gpu_guard::crashed_before() {
-        tracing::warn!(
-            marker = %gpu_guard::marker().map(|path| path.display().to_string()).unwrap_or_default(),
-            "a previous launch of this Hex crashed while starting the GPU for transcription; transcribing on the CPU until Hex updates or the marker is deleted"
-        );
-        cpu_only()?;
-        return Ok(*BACKEND.get_or_init(|| Backend::Cpu));
-    }
+    // A person who chose CPU is never a crash fallback, and needs no marker.
     if device() == TranscriptionDevice::Cpu {
         cpu_only()?;
         CPU_CHOSEN.store(true, Ordering::Relaxed);
+        return Ok(*BACKEND.get_or_init(|| Backend::Cpu));
+    }
+    #[cfg(target_os = "windows")]
+    if gpu_guard::crashed_before() {
+        gpu_health::set_crash_fallback();
+        tracing::warn!(
+            marker = %gpu_guard::marker().map(|path| path.display().to_string()).unwrap_or_default(),
+            "this build crashed starting the GPU for transcription twice; transcribing on the CPU (Settings › Speech engine › Auto or GPU tries it again)"
+        );
+        cpu_only()?;
         return Ok(*BACKEND.get_or_init(|| Backend::Cpu));
     }
     let init = || {
@@ -124,18 +129,112 @@ pub fn init_backends() -> Result<Backend> {
     Ok(*BACKEND.get_or_init(|| Backend::Auto))
 }
 
-/// Speech engine left CPU after this launch registered the CPU alone: the
-/// GPU needs a restart.
+/// The GPU needs a restart: this launch registered the CPU alone, and the
+/// Speech engine now asks for the GPU (left CPU, or a person chose GPU after
+/// a crash marker cleared it).
 pub(crate) fn gpu_after_restart() -> bool {
     CPU_CHOSEN.load(Ordering::Relaxed) && device() != TranscriptionDevice::Cpu
 }
 
+/// How many GPU starts this build may crash before it stays on the CPU: one
+/// automatic retry after a crash, and the CPU until an update or Settings ›
+/// Speech engine › GPU after a second one.
+#[cfg(any(target_os = "windows", test))]
+const MAX_GPU_START_ATTEMPTS: u32 = 2;
+
+/// What the `gpu-start.pending` marker says this launch should do about the
+/// GPU.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum GpuStart {
+    /// Start the GPU; `crashed` GPU starts already crashed under this build.
+    Attempt { crashed: u32 },
+    /// This build already crashed starting the GPU as often as it may: keep
+    /// the CPU.
+    CrashedTooOften,
+}
+
+/// A `gpu-start.pending` marker: the build it belongs to, and how many GPU
+/// starts crashed under that build.
+#[cfg(any(target_os = "windows", test))]
+struct GpuStartMarker {
+    version: String,
+    crashed: u32,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl GpuStartMarker {
+    /// Reads `<version> <crashed>`. A bare `<version>` is the first format,
+    /// written before attempts were counted, and counts as one crashed start
+    /// so the launch after it still gets a retry. Text without a readable
+    /// count counts as one attempt too, never as a reason to give up.
+    fn parse(text: &str) -> Self {
+        let text = text.trim();
+        let (version, crashed) = match text.split_once(char::is_whitespace) {
+            Some((version, crashed)) => (version, crashed.trim().parse().unwrap_or(1)),
+            None => (text, 1),
+        };
+        Self {
+            version: version.to_owned(),
+            crashed,
+        }
+    }
+}
+
+/// This launch's GPU start, from the marker at `path`. A marker from another
+/// build is deleted, so an update tries the GPU again.
+#[cfg(any(target_os = "windows", test))]
+fn gpu_start_at(path: &Path) -> GpuStart {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return GpuStart::Attempt { crashed: 0 };
+    };
+    let marker = GpuStartMarker::parse(&text);
+    if marker.version != crate::VERSION {
+        let _ = std::fs::remove_file(path);
+        return GpuStart::Attempt { crashed: 0 };
+    }
+    if marker.crashed >= MAX_GPU_START_ATTEMPTS {
+        GpuStart::CrashedTooOften
+    } else {
+        GpuStart::Attempt {
+            crashed: marker.crashed,
+        }
+    }
+}
+
+/// Runs `work` with `<version> <crashed + 1>` in `path`, so a crash inside it
+/// is recorded before it can happen; a normal return removes the marker.
+/// Every scope in one launch passes the same `crashed`, so an earlier scope
+/// that succeeded does not restart this launch's count.
+#[cfg(any(target_os = "windows", test))]
+fn guarded_at<T>(path: &Path, crashed: u32, work: impl FnOnce() -> T) -> T {
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    if let Err(error) = std::fs::write(
+        path,
+        format!("{} {}", crate::VERSION, crashed.saturating_add(1)),
+    ) {
+        tracing::warn!(%error, path = %path.display(), "could not write the GPU start marker");
+    }
+    let out = work();
+    let _ = std::fs::remove_file(path);
+    out
+}
+
 /// The marker a Windows launch keeps while ggml starts a GPU (`init_backends`,
 /// a model's load and prewarm). Left behind, that launch crashed in a GPU
-/// driver; it holds the build's version, so an update tries the GPU again.
+/// driver; it holds the build's version and the crashed starts so far, so
+/// this build retries once and then stays on the CPU until an update or
+/// Settings › GPU asks for the GPU again.
 #[cfg(target_os = "windows")]
 mod gpu_guard {
     use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    /// The crashed starts this launch began with, read once, so every guarded
+    /// scope records this launch's attempt rather than a fresh first one.
+    static CRASHED: AtomicU32 = AtomicU32::new(0);
 
     pub(super) fn marker() -> Option<PathBuf> {
         crate::app_paths::support_dir()
@@ -147,32 +246,45 @@ mod gpu_guard {
         let Some(path) = marker() else {
             return false;
         };
-        match std::fs::read_to_string(&path) {
-            Ok(version) if version == crate::VERSION => true,
-            Ok(_) => {
-                let _ = std::fs::remove_file(&path);
+        match super::gpu_start_at(&path) {
+            super::GpuStart::Attempt { crashed } => {
+                CRASHED.store(crashed, Ordering::Relaxed);
                 false
             }
-            Err(_) => false,
+            super::GpuStart::CrashedTooOften => true,
         }
     }
 
     pub(super) fn guarded<T>(work: impl FnOnce() -> T) -> T {
-        let path = marker();
-        if let Some(path) = &path {
-            if let Some(dir) = path.parent() {
-                let _ = std::fs::create_dir_all(dir);
-            }
-            if let Err(error) = std::fs::write(path, crate::VERSION) {
-                tracing::warn!(%error, "could not write the GPU start marker");
-            }
+        match marker() {
+            Some(path) => super::guarded_at(&path, CRASHED.load(Ordering::Relaxed), work),
+            None => work(),
         }
-        let out = work();
-        if let Some(path) = &path {
+    }
+
+    /// A person chose GPU in Settings: forget the crashes, so the next GPU
+    /// start is attempted again.
+    pub(super) fn clear() {
+        if let Some(path) = marker() {
             let _ = std::fs::remove_file(path);
         }
-        out
     }
+}
+
+/// Re-picking Auto or GPU in Settings after this launch registered the CPU
+/// alone asks for the GPU again: the next launch gets a fresh attempt (#662),
+/// and Settings says the GPU turns on at restart. The crash marker is cleared
+/// too, so a launch that chose CPU after the crashes cannot leave it for the
+/// next one. A launch already on the GPU changes nothing, and keeps a
+/// write-ahead marker a load in progress depends on: no guarded GPU scope
+/// runs when only the CPU registered.
+#[cfg(target_os = "windows")]
+pub(crate) fn retry_gpu_start() {
+    if !(gpu_health::crash_fallback() || CPU_CHOSEN.load(Ordering::Relaxed)) {
+        return;
+    }
+    CPU_CHOSEN.store(true, Ordering::Relaxed);
+    gpu_guard::clear();
 }
 
 pub fn devices() -> Result<Vec<String>> {
@@ -373,6 +485,11 @@ impl LocalTranscriber {
             ..Default::default()
         };
         let device_label = format!("{} ({})", device.description, device.kind);
+        let backend = crate::transcription::SpeechBackend {
+            kind: device.kind.clone(),
+            device: device.description.clone(),
+            crash_fallback: gpu_health::crash_fallback(),
+        };
         tracing::info!(
             backend = device.kind,
             device = device.description,
@@ -387,6 +504,7 @@ impl LocalTranscriber {
             selection: selection.clone(),
             options,
             device_label,
+            backend,
             max_audio_samples: crate::transcription::models::max_audio_chunk_samples(
                 &architecture,
                 capabilities.max_audio_ms,
@@ -562,6 +680,11 @@ impl LocalTranscriber {
 
     pub fn device_label(&self) -> &str {
         &self.device_label
+    }
+
+    /// Where this model runs, for `hex status` and Settings.
+    pub(crate) fn backend(&self) -> &crate::transcription::SpeechBackend {
+        &self.backend
     }
 
     /// Text and word times (ms from the clip's start) for a capture, in
@@ -969,5 +1092,105 @@ mod model_swap_tests {
         swap.want(&new);
         assert!(swap.loading.is_none());
         assert!(swap.take_ready().is_none());
+    }
+}
+
+/// The Windows GPU-start marker's rules, which are platform-neutral so every
+/// Linux test build checks them too (#662).
+#[cfg(test)]
+mod gpu_start_tests {
+    use std::path::{Path, PathBuf};
+
+    use super::*;
+
+    fn marker_path(name: &str) -> PathBuf {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!("hex-gpu-start-{name}-{unique}.pending"))
+    }
+
+    fn marker(text: &str) -> String {
+        format!("{} {text}", crate::VERSION)
+    }
+
+    fn read(path: &Path) -> String {
+        std::fs::read_to_string(path).unwrap()
+    }
+
+    #[test]
+    fn a_marker_reads_its_version_and_crashed_starts() {
+        let bare = GpuStartMarker::parse("1.2.3");
+        assert_eq!((bare.version.as_str(), bare.crashed), ("1.2.3", 1));
+        let counted = GpuStartMarker::parse(" 1.2.3 2\n");
+        assert_eq!((counted.version.as_str(), counted.crashed), ("1.2.3", 2));
+        let unreadable = GpuStartMarker::parse("1.2.3 two");
+        assert_eq!(
+            (unreadable.version.as_str(), unreadable.crashed),
+            ("1.2.3", 1)
+        );
+        let empty = GpuStartMarker::parse(" ");
+        assert_eq!((empty.version.as_str(), empty.crashed), ("", 1));
+    }
+
+    #[test]
+    fn no_marker_starts_the_gpu() {
+        let path = marker_path("absent");
+        assert_eq!(gpu_start_at(&path), GpuStart::Attempt { crashed: 0 });
+    }
+
+    #[test]
+    fn a_marker_from_another_build_is_forgotten_and_the_gpu_tried() {
+        let path = marker_path("other-build");
+        std::fs::write(&path, "0.0.1 5").unwrap();
+        assert_eq!(gpu_start_at(&path), GpuStart::Attempt { crashed: 0 });
+        assert!(!path.exists(), "the old build's marker is deleted");
+    }
+
+    #[test]
+    fn the_first_formats_bare_version_gets_one_retry() {
+        // Written before attempts were counted: one crashed start, so this
+        // launch tries the GPU and records attempt 2.
+        let path = marker_path("bare");
+        std::fs::write(&path, crate::VERSION).unwrap();
+        assert_eq!(gpu_start_at(&path), GpuStart::Attempt { crashed: 1 });
+        guarded_at(&path, 1, || {
+            assert_eq!(read(&path), marker("2"));
+        });
+        assert!(!path.exists(), "a normal start removes the marker");
+    }
+
+    #[test]
+    fn two_crashed_starts_keep_the_cpu() {
+        let path = marker_path("twice");
+        std::fs::write(&path, marker("2")).unwrap();
+        assert_eq!(gpu_start_at(&path), GpuStart::CrashedTooOften);
+        assert!(
+            path.exists(),
+            "the marker stays for an update or Settings › GPU"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_unreadable_count_still_gets_a_retry() {
+        let path = marker_path("unreadable");
+        std::fs::write(&path, marker("two")).unwrap();
+        assert_eq!(gpu_start_at(&path), GpuStart::Attempt { crashed: 1 });
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn every_guarded_scope_records_this_launchs_attempt() {
+        // The first scope succeeded and removed the marker; the second scope
+        // in the same launch still writes attempt 2, not a fresh attempt 1.
+        let path = marker_path("scopes");
+        guarded_at(&path, 1, || {});
+        assert!(!path.exists());
+        guarded_at(&path, 1, || {
+            assert_eq!(read(&path), marker("2"));
+        });
+        assert!(!path.exists());
     }
 }

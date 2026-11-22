@@ -349,6 +349,15 @@ pub(super) fn human_status(report: &StatusReport) -> String {
     if let Some(error) = &model.error {
         model_line.push_str(&format!("; error: {error}"));
     }
+    // Where the model runs, when the running Hex reports it: on the CPU the
+    // line names only the backend, and macOS does not report one.
+    let speech = report
+        .model
+        .backend
+        .as_ref()
+        .map_or_else(String::new, |backend| {
+            format!("Speech       {}\n", speech_backend(backend))
+        });
     let features = &report.features;
     let permissions = &report.permissions;
     let permission_line = if permissions.ready {
@@ -376,6 +385,7 @@ pub(super) fn human_status(report: &StatusReport) -> String {
          Capture      {capture}{pending}\n\
          Meeting      {meeting}\n\
          Model        {model_line}\n\
+         {speech}\
          Features     meetings {}, release mic while idle {}, history {}\n\
          Permissions  {permission_line}\n\
          Window       {window}\n\
@@ -397,4 +407,37 @@ pub(super) fn human_status(report: &StatusReport) -> String {
             names => names.join(", "),
         },
     )
+}
+
+/// The loaded speech model's device as a person reads it: "Vulkan — AMD
+/// Radeon RX 9060 XT", or "CPU (GPU start crashed twice)".
+fn speech_backend(backend: &crate::transcription::SpeechBackend) -> String {
+    let mut line = backend_name(&backend.kind);
+    if backend.kind != "cpu" && !backend.device.is_empty() && backend.device != line {
+        line.push_str(" — ");
+        line.push_str(&backend.device);
+    }
+    if backend.crash_fallback && backend.kind == "cpu" {
+        line.push_str(" (GPU start crashed twice)");
+    }
+    line
+}
+
+/// A backend's kind as its product spells it: "Vulkan", "CUDA", "ROCm", "CPU".
+fn backend_name(kind: &str) -> String {
+    match kind {
+        "cpu" => "CPU".into(),
+        "cuda" => "CUDA".into(),
+        "gpu" => "GPU".into(),
+        "metal" => "Metal".into(),
+        "rocm" => "ROCm".into(),
+        "vulkan" => "Vulkan".into(),
+        other => {
+            let mut characters = other.chars();
+            match characters.next() {
+                Some(first) => first.to_uppercase().collect::<String>() + characters.as_str(),
+                None => "Unknown".into(),
+            }
+        }
+    }
 }

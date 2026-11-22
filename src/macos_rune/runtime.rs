@@ -360,6 +360,7 @@ impl Runtime {
                 preparation_stage: preparation.stage,
                 selection: self.settings.transcription.clone(),
                 preparing: preparation.model,
+                backend: None,
             },
             update_status: update_status(),
             update_notes: UPDATER.get().and_then(crate::updater::Updater::notes),

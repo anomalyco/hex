@@ -411,8 +411,14 @@ pub struct TranscriptionEngine {
     thread: Option<JoinHandle<()>>,
 }
 
-/// The GGUF selection the engine's model held after its last command.
-type Held = Arc<Mutex<Option<crate::transcription::models::TranscriptionSelection>>>;
+/// The GGUF selection the engine's model holds, and where that model runs.
+#[derive(Clone, Default)]
+struct HeldSnapshot {
+    selection: Option<crate::transcription::models::TranscriptionSelection>,
+    backend: Option<crate::transcription::SpeechBackend>,
+}
+
+type Held = Arc<Mutex<HeldSnapshot>>;
 
 /// A live stream for one capture. Feed it the capture's 16 kHz audio in order,
 /// then either [`TranscriptionEngine::finish`] or drop it to cancel.
@@ -567,12 +573,17 @@ impl TranscriptionEngine {
         let requests = Arc::new(AtomicU64::new(0));
         let running = Running::default();
         let stalled = Arc::new(AtomicBool::new(false));
-        let held = Held::new(Mutex::new(
-            model
+        #[cfg(not(target_os = "macos"))]
+        let backend = model.as_ref().map(|model| model.backend().clone());
+        #[cfg(target_os = "macos")]
+        let backend = None;
+        let held = Held::new(Mutex::new(HeldSnapshot {
+            selection: model
                 .as_ref()
                 .and_then(|model| model.gguf_selection().cloned())
                 .or_else(|| parked.clone()),
-        ));
+            backend,
+        }));
         let dictating = Arc::new(AtomicBool::new(false));
         // The model the engine adopts speaks for dictation (#1984). A parked
         // engine has no model, so it leaves the last word alone.
@@ -878,6 +889,7 @@ impl TranscriptionEngine {
         self.held
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+            .selection
             .as_ref()
             == Some(selection)
     }
@@ -891,6 +903,17 @@ impl TranscriptionEngine {
         self.held
             .lock()
             .unwrap_or_else(|error| error.into_inner())
+            .selection
+            .clone()
+    }
+
+    /// Where the model held after its last finished command runs, for
+    /// `hex status`: `None` before a load and once it is unloaded.
+    pub(crate) fn held_backend(&self) -> Option<crate::transcription::SpeechBackend> {
+        self.held
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .backend
             .clone()
     }
 
@@ -1237,6 +1260,8 @@ impl Worker {
         self.model = None;
         tracing::info!(model = ?selection.model, "unloaded the idle speech model");
         self.parked = Some(selection);
+        // The device goes with the model: `hex status` must not keep naming it.
+        self.publish_selection();
     }
 
     /// Adopts a changed Labs › Faster live text or env geometry while
@@ -1289,17 +1314,20 @@ impl Worker {
     }
 
     /// Any command may load or switch the model (a dictation job activates
-    /// its selection), so the held selection is refreshed after each. An
-    /// unloaded model still counts as held: work sent to it reloads it.
+    /// its selection), so the held selection and its device are refreshed
+    /// after each. An unloaded model still counts as held, with no device.
     fn publish_selection(&self) {
-        let current = match &self.model {
+        let selection = match &self.model {
             Some(model) => model.gguf_selection(),
             None => self.parked.as_ref(),
         };
+        #[cfg(not(target_os = "macos"))]
+        let backend = self.model.as_ref().map(|model| model.backend().clone());
+        #[cfg(target_os = "macos")]
+        let backend = None;
         let mut held = self.held.lock().unwrap_or_else(|error| error.into_inner());
-        if held.as_ref() != current {
-            *held = current.cloned();
-        }
+        held.selection = selection.cloned();
+        held.backend = backend;
     }
 
     fn run_offline(&mut self, clip: Vec<f32>, offline: Offline, source: Source, job: Job) {
@@ -2969,33 +2997,42 @@ mod tests {
             engine.stream_refusal(),
             Some("no streaming speech model is loaded")
         );
-        *engine.held.lock().unwrap() = Some(crate::transcription::models::TranscriptionSelection {
-            model: crate::transcription::models::TranscriptionModelId::ParakeetUnifiedEnglish,
-            language: "en".into(),
-        });
+        *engine.held.lock().unwrap() = HeldSnapshot {
+            selection: Some(crate::transcription::models::TranscriptionSelection {
+                model: crate::transcription::models::TranscriptionModelId::ParakeetUnifiedEnglish,
+                language: "en".into(),
+            }),
+            backend: None,
+        };
         assert_eq!(
             engine.stream_refusal(),
             Some(
                 "the speech model isn't streaming on this device (a CPU, or a GPU that could not start streaming)"
             )
         );
-        *engine.held.lock().unwrap() = Some(crate::transcription::models::TranscriptionSelection {
-            model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
-            language: "en".into(),
-        });
+        *engine.held.lock().unwrap() = HeldSnapshot {
+            selection: Some(crate::transcription::models::TranscriptionSelection {
+                model: crate::transcription::models::TranscriptionModelId::ParakeetV3,
+                language: "en".into(),
+            }),
+            backend: None,
+        };
         assert_eq!(
             engine.stream_refusal(),
             Some("the selected speech model doesn't stream")
         );
         // An imported model's catalog entry says it can't stream, but its
         // GGUF is only checked when it loads: blame the device instead.
-        *engine.held.lock().unwrap() = Some(crate::transcription::models::TranscriptionSelection {
-            model: crate::transcription::models::TranscriptionModelId::Custom(
-                crate::transcription::models::CustomModelId::parse("custom-0123456789abcdef")
-                    .unwrap(),
-            ),
-            language: "en".into(),
-        });
+        *engine.held.lock().unwrap() = HeldSnapshot {
+            selection: Some(crate::transcription::models::TranscriptionSelection {
+                model: crate::transcription::models::TranscriptionModelId::Custom(
+                    crate::transcription::models::CustomModelId::parse("custom-0123456789abcdef")
+                        .unwrap(),
+                ),
+                language: "en".into(),
+            }),
+            backend: None,
+        };
         assert_eq!(
             engine.stream_refusal(),
             Some(

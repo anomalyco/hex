@@ -940,6 +940,9 @@ fn status(
                 .map(|model| model.as_str().into()),
             downloaded_bytes: published.preparation.downloaded_bytes,
             error: published.preparation.error.clone(),
+            // The shared engine reports no device for Metal or Apple Speech.
+            backend: crate::transcription::engine::TranscriptionEngine::shared()
+                .and_then(|engine| engine.held_backend()),
             ..ModelReport::saved(&settings.transcription)
         },
         features: FeatureReport {
