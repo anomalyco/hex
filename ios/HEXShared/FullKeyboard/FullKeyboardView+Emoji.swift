@@ -15,14 +15,13 @@ extension FullKeyboardView {
 
     /// Emoji in text fields that take any text: not web addresses, email addresses or
     /// ASCII-only fields.
-    var fieldTakesEmoji: Bool {
-        let document = routedTarget.document
-        guard case .keys(.text, _) = KeyboardFieldRouting.route(for: document.keyboardType) else { return false }
-        return document.keyboardType != .asciiCapable
-    }
-
     func refreshEmojiKey() {
-        let shows = emojiEnabled && fieldTakesEmoji
+        let document = routedTarget.document
+        let takesEmoji: Bool = {
+            guard case .keys(.text, _) = KeyboardFieldRouting.route(for: document.keyboardType) else { return false }
+            return document.keyboardType != .asciiCapable
+        }()
+        let shows = emojiEnabled && takesEmoji
         guard engine.showsEmoji != shows else { return }
         engine.showsEmoji = shows
         plane.setNeedsDisplay()
@@ -131,17 +130,19 @@ extension FullKeyboardView {
 
     // MARK: - Shortcodes (Settings › Experiments; EmojiShortcode)
 
-    /// Settings › Experiments › Emoji shortcodes: whether the strip offers emoji for the
-    /// ":name" being typed, and a closing ":" completes one. Off by default; without Full
-    /// Access the App Group reads off.
-    var emojiShortcodesEnabled: Bool {
-        FullKeyboardSettings().emojiShortcodes
+    /// A shortcode works where the finished word's emoji does: a text field that takes emoji
+    /// (the emoji key shows), with autocorrect on and no secure entry. The emoji search types
+    /// into its own query, so the keys there are not a field's either.
+    var allowsEmojiShortcodes: Bool {
+        engine.target.autocorrectionType != .no && engine.target.isSecureTextEntry != true
     }
 
     /// The strip's emoji for the token right before the cursor, or nil (the strip shows what
-    /// it always does) when the experiment is off, no token is being typed, or none matches.
+    /// it always does) when the experiment is off, the field keeps emoji or autocorrect away,
+    /// no token is being typed, or none matches.
     func emojiShortcodeSuggestions() -> [KeyboardSuggestion]? {
-        guard emojiShortcodesEnabled, !routedTarget.isSearching, emojiPanel == nil, fieldTakesEmoji,
+        guard emojiShortcodesEnabled, engine.showsEmoji, !routedTarget.isSearching,
+              emojiPanel == nil, allowsEmojiShortcodes,
               let before = engine.typingContext ?? engine.textBefore,
               let token = EmojiShortcode.token(before: before) else { return nil }
         guard let library = loadEmojiLibrary() else { return nil }
@@ -176,6 +177,10 @@ extension FullKeyboardView {
             usage: emojiUsageScores(usage, library: library)
         )
         guard matches.contains(entry) else { return false }
+        // A host still reporting the text from before the token caught up: the replacement
+        // does nothing, and the tap is swallowed here rather than fall through to the ordinary
+        // emoji pick, which would take back only part of the token. The next edit refreshes
+        // the strip once the host shows the token again.
         if engine.replaceEmojiShortcode(suggestion.replacement, token: token) {
             usage.record(library.entries[entry].emoji)
         }
@@ -184,7 +189,8 @@ extension FullKeyboardView {
 
     /// The engine's closing ":" hook: a name typed in full (":pizza") types its emoji instead.
     func emojiShortcodeReplacement(before text: String?) -> EmojiShortcode.Replacement? {
-        guard emojiShortcodesEnabled, !routedTarget.isSearching, emojiPanel == nil, fieldTakesEmoji,
+        guard emojiShortcodesEnabled, engine.showsEmoji, !routedTarget.isSearching,
+              emojiPanel == nil, allowsEmojiShortcodes,
               let text, EmojiShortcode.token(before: text) != nil,
               let library = loadEmojiLibrary() else { return nil }
         let usage = makeEmojiUsage()

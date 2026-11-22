@@ -5,9 +5,10 @@ import Foundation
 /// field, so a colon inside a word ("abc:pizza") is not one. Matching reads the emoji index's
 /// own words (`EmojiLibrary`, built by scripts/build-emoji-data.py from Unicode's names and
 /// Hex's chat words): an exact name or alias comes first, then the names and keywords the
-/// token starts, with your use breaking ties.
+/// token starts, with your use breaking exact ties and moving prefix matches up.
 nonisolated enum EmojiShortcode {
-    /// The shortest name a token holds: ":pi" suggests, ":p" is just a colon.
+    /// The shortest name a token holds: two letters or digits, so ":pi" suggests and ":p" is
+    /// just a colon.
     static let minimumNameLength = 2
 
     /// A ":name" right before the cursor, as typed.
@@ -39,8 +40,10 @@ nonisolated enum EmojiShortcode {
 
     // MARK: - The token
 
-    /// The token right before the cursor, or nil when the text doesn't end in one: a colon
-    /// with at least two name characters, which starts the text or follows whitespace.
+    /// The token right before the cursor, or nil when the text doesn't end in one: a colon and
+    /// a name after whitespace or at the start of the field. The name starts with a letter or
+    /// digit and holds at least two of them, then only letters, digits, "_", "+" and "-"
+    /// (case-insensitive), so the shapes of chat emoticons (":-D", ":+1") stay text.
     static func token(before text: String?) -> Token? {
         guard let text else { return nil }
         var index = text.endIndex
@@ -52,15 +55,22 @@ nonisolated enum EmojiShortcode {
             typed.append(character)
             index = previous
         }
-        guard typed.count >= minimumNameLength, index > text.startIndex else { return nil }
+        guard index > text.startIndex else { return nil }
         let colonIndex = text.index(before: index)
         guard text[colonIndex] == ":" else { return nil }
         if colonIndex > text.startIndex, !text[text.index(before: colonIndex)].isWhitespace { return nil }
         let name = String(typed.reversed())
+        guard let first = name.first, isNameStart(first),
+              name.filter({ $0.isLetter || $0.isNumber }).count >= minimumNameLength else { return nil }
         return Token(name: name, text: ":" + name)
     }
 
-    /// A name's characters: ASCII letters, digits, "_", "+" and "-".
+    /// A name's first character: a letter or digit, never "_", "+" or "-".
+    private static func isNameStart(_ character: Character) -> Bool {
+        character.isASCII && (character.isLetter || character.isNumber)
+    }
+
+    /// A name's other characters: ASCII letters, digits, "_", "+" and "-".
     private static func isNameCharacter(_ character: Character) -> Bool {
         guard character.isASCII else { return false }
         return character.isLetter || character.isNumber || character == "_" || character == "+" || character == "-"

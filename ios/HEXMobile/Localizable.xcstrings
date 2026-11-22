@@ -1208,6 +1208,26 @@
         }
       }
     },
+    "Emoji shortcodes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表情符号快捷码"
+          }
+        }
+      }
+    },
+    "Type a colon and a name, like :pizza, to pick an emoji." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入冒号和名称，例如 :pizza，即可选择表情符号。"
+          }
+        }
+      }
+    },
     "Edited" : {
       "localizations" : {
         "zh-Hans" : {

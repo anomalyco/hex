@@ -117,6 +117,9 @@ final class FullKeyboardView: UIView {
     /// Settings › Experiments › Hide word suggestions: the strip keeps its height, chips,
     /// status and notices but shows no words (`refreshStrip`).
     private var hidesWordSuggestions = false
+    /// Settings › Experiments › Emoji shortcodes, cached by `syncEmojiShortcodes`: the strip
+    /// offers emoji for a ":name" and the closing ":" completes one while it is on.
+    private(set) var emojiShortcodesEnabled = false
     /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass; another theme
     /// paints the keyboard's own colours. Read again by `syncSettings`, which rebuilds the
     /// palette when it changes.
@@ -280,7 +283,7 @@ final class FullKeyboardView: UIView {
         engine.trackpadSelectionState.enabled = FullKeyboardSettings().twoThumbSelection
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
         engine.quickAccentsEnabled = FullKeyboardSettings().quickAccents
-        engine.emojiShortcode = { [weak self] before in self?.emojiShortcodeReplacement(before: before) }
+        syncEmojiShortcodes()
         hidesWordSuggestions = FullKeyboardSettings().hideWordSuggestions
         syncHexPlacement()
         syncNumberRow()
@@ -538,6 +541,16 @@ final class FullKeyboardView: UIView {
         plane.spaceLabel = languages.spaceLabel ?? (model.hasFullAccess ? model.languageSummary : nil)
     }
 
+    /// Settings › Experiments › Emoji shortcodes, in the App Group: cached for the strip, and
+    /// the engine's closing ":" hook is set only while it is on, so an off keyboard types a
+    /// colon exactly as it did before the experiment.
+    private func syncEmojiShortcodes() {
+        emojiShortcodesEnabled = FullKeyboardSettings().emojiShortcodes
+        engine.emojiShortcode = emojiShortcodesEnabled
+            ? { [weak self] before in self?.emojiShortcodeReplacement(before: before) }
+            : nil
+    }
+
     func syncSettings() {
         syncLanguage()
         // Learn each language separately: each keyboard language's own learned words, and the
@@ -561,6 +574,7 @@ final class FullKeyboardView: UIView {
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
         engine.quickAccentsEnabled = FullKeyboardSettings().quickAccents
+        syncEmojiShortcodes()
         let selectionEnabled = FullKeyboardSettings().twoThumbSelection
         engine.trackpadSelectionState.enabled = selectionEnabled
         // Turned off mid-selection: end it now rather than let a thumb keep picking.

@@ -3068,17 +3068,24 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   callout opens on the key's own, as before.
 │   Unit tests only (`FullKeyboardEngineTests`): no CI compiles the iOS targets, and no
 │   physical iPhone run checks it
-├── Emoji shortcodes (off by default, `experiments.emojiShortcodes`): while the full
-│   keyboard's text before the cursor ends in a colon and a name after whitespace or at the
-│   start of the field (":pizza": at least two of a-z, 0-9, "_", "+" and "-", case-insensitive),
-│   the strip shows up to three emoji the bundled index names (`EmojiShortcode`, over
-│   `EmojiLibrary` and scripts/build-emoji-data.py's data) instead of its words: an exact name
-│   or alias first, then the names and keywords the token starts, one per family, with your
-│   emoji use breaking ties. A tap takes the whole token back and types the emoji with its skin
-│   tone, counted like one from the panel; typing the closing ":" of a name typed in full
-│   (":pizza:") types the emoji instead. No match leaves the strip and typing as they were, a
-│   colon inside a word ("abc:pizza") is not a token, and off, nothing changes. The setting is
-│   in the App Group, and without Full Access it reads off.
+├── Emoji shortcodes (off by default, `experiments.emojiShortcodes`): in a plain text field
+│   that takes emoji (the emoji key shows), with autocorrect on and secure entry off, while
+│   the full keyboard's text before the cursor ends in a colon and a name after whitespace or
+│   at the start of the field (":pizza": the first character a letter or digit, at least two
+│   letters or digits, then only a-z, 0-9, "_", "+" and "-", case-insensitive), the strip
+│   shows up to three emoji the bundled index names (`EmojiShortcode`, over `EmojiLibrary`
+│   and scripts/build-emoji-data.py's data) instead of its words: an exact name or alias
+│   first, then the names and keywords the token starts, one per family; your emoji use breaks
+│   exact ties and moves prefix matches up. A tap takes the whole token back and types the
+│   emoji with its skin tone, counted like one from the panel; typing the closing ":" of a
+│   name typed in full (":pizza:") types the emoji instead. The emoji search, fields with
+│   autocorrect off and secure fields get neither. No match leaves the strip and typing as
+│   they were, a colon inside a word ("abc:pizza") is not a token, and off, nothing changes.
+│   The setting is in the App Group, and without Full Access it reads off. Only names the
+│   index weighs as names or aliases complete: ":heart:", ":joy:" and ":tada:" are keywords
+│   in the data and stay text, and ":smile:" completes to 😊, its first alias, not 😄; adding
+│   them needs more aliases and a regenerated index, and scripts/build-emoji-data.py can only
+│   make one online (Unicode's emoji-test.txt 18.0 and CLDR 49 are not in the repo).
 │   Unit tests only (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical
 │   iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):

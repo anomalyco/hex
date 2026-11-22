@@ -35,6 +35,15 @@ final class EmojiShortcodeTests: XCTestCase {
         XCTAssertEqual(try matches(":piz").first ?? "", "🍕")
     }
 
+    func testChatEmoticonShapesAreNotTokens() throws {
+        let library = try library()
+        for text in [":-D", ":-p", ":+1", ":-1"] {
+            XCTAssertNil(EmojiShortcode.token(before: text), text)
+            XCTAssertNil(EmojiShortcode.completion(before: text, library: library), text)
+            XCTAssertEqual(try matches(text), [], text)
+        }
+    }
+
     func testColonInsideAWordIsNotAToken() throws {
         XCTAssertNil(EmojiShortcode.token(before: "abc:pizza"))
         XCTAssertEqual(try matches("abc:pizza"), [])
