@@ -653,11 +653,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     }
     private fun geometry(): KeyGrid? {
         grid?.let { return it }
-        val q = letters['q'] ?: return null; val w = letters['w'] ?: return null
-        if (q.width == 0 || w.left == q.left) return null
-        val centres = letters.mapValues { (_, cap) -> capCentre(cap) }
-        return KeyGrid(centres, centres.getValue('w').x - centres.getValue('q').x,
-            centres.getValue('a').y - centres.getValue('q').y, spaceRect()).also { grid = it }
+        // The pitch from the layout's own first two keys and the row under them: on AZERTY, q, w and a sit on
+        // other rows (160 x -155 px instead of 107 x 155). The apostrophe is no letter for the touch model.
+        val rows = KeyboardLetters.rows((current ?: return null).language.layoutCode)
+        val first = letters[rows[0][0]] ?: return null; val next = letters[rows[0][1]] ?: return null; val below = letters[rows[1][0]] ?: return null
+        if (first.width == 0 || next.left == first.left) return null
+        val centres = letters.filterKeys { it.isLetter() }.mapValues { (_, cap) -> capCentre(cap) }
+        return KeyGrid(centres, capCentre(next).x - capCentre(first).x, capCentre(below).y - capCentre(first).y, spaceRect()).also { grid = it }
     }
     override fun onLayout(changed: Boolean, l: Int, t: Int, r: Int, b: Int) {
         super.onLayout(changed, l, t, r, b)
