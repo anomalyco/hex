@@ -77,10 +77,12 @@ pub(super) fn entries(ui: &Ui, language: &str, models: &[PickerModel]) -> Vec<En
 }
 
 fn state(ui: &Ui, def: &'static ModelDefinition, language: &str) -> State {
-    let installed = ui.picker.installed(def, def.language_for(language));
+    let language = def.language_for(language);
+    let installed = ui.picker.installed(def, language);
+    let ready = ui.picker.ready(def, language);
     if let Some((label, fraction)) = picker::preparation(ui, def) {
         State::Preparing { label, fraction }
-    } else if picker::transcription_selection_is_active(&ui.settings.transcription, def, installed)
+    } else if picker::transcription_selection_is_active(&ui.settings.transcription, def, ready)
         // A selected import that is missing or changed isn't what Hex runs.
         && (!def.id.is_custom() || def.available())
     {

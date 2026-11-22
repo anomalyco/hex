@@ -79,6 +79,9 @@ pub(crate) struct WindowsDesktopHost {
     personal_commands: Option<crate::personal_commands::PersonalCommands>,
     personal_commands_checked_at: Instant,
     preparation: TranscriptionPreparation,
+    /// The preparation Enable started to check the selected model. Only this
+    /// one is canceled by Disable; a model download is left running.
+    checking: bool,
     keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     /// Labs › Switch model with app: the foreground app's mode choice.
     app_switcher: crate::transcription::app_model_switching::Switcher,
@@ -263,6 +266,7 @@ impl WindowsDesktopHost {
             personal_commands: None,
             personal_commands_checked_at: Instant::now(),
             preparation: TranscriptionPreparation::default(),
+            checking: false,
             keyboard_switcher,
             app_switcher,
             input_sources: None,
@@ -311,7 +315,11 @@ impl WindowsDesktopHost {
             Request::ChooseModel { model, language } => self.choose_model(model, language),
             Request::CancelModel => {
                 self.manual_choice();
+                self.checking = false;
                 self.preparation.cancel();
+                if !self.is_running() && self.status == ListenerStatus::Enabling {
+                    self.status = ListenerStatus::ModelRequired;
+                }
             }
             Request::PasteLast => {
                 if let Some(listener) = &self.listener {
@@ -370,6 +378,7 @@ impl WindowsDesktopHost {
 
     fn choose_model(&mut self, model: TranscriptionModelId, language: String) {
         self.manual_choice();
+        self.checking = false;
         let selection = crate::transcription::models::TranscriptionSelection { model, language };
         self.preparation.start(selection, false);
     }
@@ -435,11 +444,13 @@ impl WindowsDesktopHost {
         if selection.model != self.settings.transcription.model
             || selection.language != self.settings.transcription.language
         {
+            self.checking = false;
             self.preparation.start(selection, true);
             self.automatic_preparation = true;
         } else {
             // The current model stays, but an older manual preparation must
             // not replace it.
+            self.checking = false;
             self.preparation.cancel();
             self.automatic_preparation = false;
         }
@@ -486,15 +497,32 @@ impl WindowsDesktopHost {
             language: choice.language,
             ..self.settings.transcription_for_model(choice.model)
         };
+        self.checking = false;
         self.preparation.start(selection, true);
         self.automatic_preparation = true;
     }
 
     fn model_ready(&self) -> bool {
+        crate::desktop::onboarding::model_ready(&self.runtime_selection())
+    }
+
+    /// Verifies the selected model's file when it is here but unverified
+    /// (another app's catalog download), using the same installed-only
+    /// preparation as a model switch. The first check hashes the file, so it
+    /// runs off the UI thread. No file means no check: Enable says Model
+    /// required, as before.
+    fn check_selected_model(&mut self) -> bool {
         let selection = self.runtime_selection();
-        let model = crate::transcription::models::definition(selection.model);
-        crate::transcription::models::is_installed(model, &selection.language)
-            && crate::transcription::models::is_verified(model)
+        let Ok(model) = crate::transcription::models::validate(&selection) else {
+            return false;
+        };
+        if !crate::transcription::models::needs_check(model, &selection.language) {
+            return false;
+        }
+        self.checking = true;
+        self.preparation.start(selection, true);
+        self.status = ListenerStatus::Enabling;
+        true
     }
 
     pub(crate) fn start(&mut self) {
@@ -502,8 +530,20 @@ impl WindowsDesktopHost {
         if self.is_running() {
             return;
         }
+        let selection = self.runtime_selection();
         if !self.model_ready() {
-            self.status = ListenerStatus::ModelRequired;
+            // Only a preparation for the selected model (its check, or a
+            // download of it) is worth waiting for. Anything else keeps the
+            // old answer and is left running.
+            let preparing = self.preparation.status().model;
+            if preparing == Some(selection.model) {
+                self.status = ListenerStatus::Enabling;
+            } else {
+                if preparing.is_none() && self.check_selected_model() {
+                    return;
+                }
+                self.status = ListenerStatus::ModelRequired;
+            }
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -513,7 +553,6 @@ impl WindowsDesktopHost {
         let (swap_failure_sender, swap_failures) = mpsc::channel();
         let (commands, command_receiver) = mpsc::channel();
         let event_path = self.event_path.clone();
-        let selection = self.runtime_selection();
         let config = crate::windows::dictation::WindowsDictationConfig {
             swap_failures: Some(swap_failure_sender),
             commands: Some(command_receiver),
@@ -578,7 +617,22 @@ impl WindowsDesktopHost {
 
     pub(crate) fn stop(&mut self) {
         self.listen_when_ready = false;
-        self.signal_stop(ListenerStatus::Disabling);
+        if self.listener.is_some() {
+            self.signal_stop(ListenerStatus::Disabling);
+            return;
+        }
+        // Disable during a model check: stop the check too, and never leave
+        // the listener card on Enabling with nothing to finish.
+        if self.status == ListenerStatus::Enabling {
+            // Only Enable's own check is canceled; a model download the
+            // person started keeps running.
+            if self.checking {
+                self.preparation.cancel();
+                self.preparation.set_error(None);
+                self.checking = false;
+            }
+            self.status = ListenerStatus::Disabled;
+        }
     }
 
     fn is_running(&self) -> bool {
@@ -708,10 +762,18 @@ impl WindowsDesktopHost {
     pub(crate) fn refresh(&mut self) {
         self.switch_with_keyboard();
         self.switch_with_app();
+        let mut checked = false;
         if let Some(result) = self.preparation.poll() {
             self.automatic_preparation = false;
+            self.checking = false;
             let result = result.and_then(|selection| {
                 crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
+                // Only a preparation that changes what Hex runs replaces the
+                // saved choice: a check of that same model, or of a lost
+                // import's fallback, leaves the saved selection alone.
+                if selection == self.runtime_selection() {
+                    return Ok(());
+                }
                 let mut candidate = self.settings.clone();
                 candidate.remember_transcription(selection);
                 let saved = self
@@ -721,9 +783,41 @@ impl WindowsDesktopHost {
                 self.apply_settings(&saved);
                 Ok(())
             });
-            if let Err(error) = result {
-                self.preparation.set_error(Some(error));
+            match result {
+                Ok(()) => {
+                    checked = true;
+                    if self.status == ListenerStatus::Enabling && !self.model_ready() {
+                        // One check per Enable: a check that finished without
+                        // making the model ready is not retried by itself.
+                        self.status = ListenerStatus::ModelRequired;
+                    }
+                }
+                Err(error) => {
+                    // An Enable that stopped to check a model failed to reach
+                    // listening; say so instead of Enabling… forever.
+                    if self.listen_when_ready
+                        && !self.is_running()
+                        && self.status == ListenerStatus::Enabling
+                    {
+                        self.status = ListenerStatus::CouldNotEnable;
+                    }
+                    self.preparation.set_error(Some(error));
+                }
             }
+        }
+        // A listener waiting on its model starts once the check it needed
+        // passed (a model found on this computer is adopted here).
+        if checked && self.listen_when_ready && !self.is_running() && self.model_ready() {
+            self.start();
+        }
+        // A check canceled while waiting (a switch or an explicit cancel)
+        // must not leave the host on Enabling with nothing pending.
+        if self.listen_when_ready
+            && !self.is_running()
+            && self.status == ListenerStatus::Enabling
+            && self.preparation.status().model.is_none()
+        {
+            self.start();
         }
         let swap_failures = self
             .listener

@@ -327,7 +327,10 @@ pub fn run(shutdown: &'static AtomicBool, listener: ListenerConfig, hidden: bool
         .enabled
         .then(|| crate::keyboard_input_sources::current(mtm))
         .flatten();
-    let setup_ready = crate::desktop::onboarding::status(&settings.transcription).ready();
+    // A file that only awaits its pinned check is here, and macOS runs it as
+    // it is: setup is not what an upgrade needs to reopen, but a missing
+    // permission still is.
+    let setup_ready = crate::desktop::onboarding::launch_ready(&settings.transcription);
     crate::desktop::onboarding::recheck_after_identity_change(&mut settings, setup_ready);
     let onboarding_completed = crate::desktop::onboarding::completion_recorded();
     let history = match crate::history::History::open_default(settings.history_retention) {

@@ -1007,6 +1007,8 @@ pub fn is_verified(model: &ModelDefinition) -> bool {
     verification_receipt_matches(&path, model)
 }
 
+pub use super::readiness::{is_ready, needs_check};
+
 pub fn verify_installed(model: &ModelDefinition, canceled: &AtomicBool) -> Result<PathBuf> {
     check_canceled(canceled)?;
     if let TranscriptionModelId::Custom(id) = model.id {
@@ -1449,7 +1451,7 @@ pub(crate) fn sha256_hex(path: &Path, canceled: Option<&AtomicBool>) -> Result<S
         .collect())
 }
 
-fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()> {
+pub(crate) fn write_verification_receipt(path: &Path, model: &ModelDefinition) -> Result<()> {
     let ModelRuntime::Gguf(artifact) = model.runtime else {
         bail!("{} has no artifact verification receipt", model.name);
     };
@@ -2439,6 +2441,29 @@ mod tests {
         assert!(!verification_receipt_matches(&path, &model));
         let _ = fs::remove_file(verification_receipt_path(&path));
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn readiness_needs_the_pinned_files_verification_receipt() {
+        let model = fixture_model();
+        let directory = std::env::temp_dir().join(format!(
+            "hex-model-ready-{}-{}",
+            std::process::id(),
+            NEXT_TEMP_FILE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir(&directory).unwrap();
+        set_test_models_dir(Some(directory.clone()));
+        let path = directory.join("fixture.gguf");
+        fs::write(&path, b"hello").unwrap();
+        // A file at the pinned size is installed, but not ready until Hex
+        // has checked it once and written the receipt.
+        assert!(is_installed(&model, "en"));
+        assert!(!is_verified(&model));
+        assert!(!is_ready(&model, "en"));
+        write_verification_receipt(&path, &model).unwrap();
+        assert!(is_ready(&model, "en"));
+        set_test_models_dir(None);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

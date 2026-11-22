@@ -35,7 +35,7 @@ const PANEL_WIDTH: f32 = compare::WIDTH;
 /// The full list's height: the window's less a margin above and below.
 const PANEL_HEIGHT: f32 = 680.0;
 
-/// A model is the active selection only once it is installed.
+/// A model is the active selection only once it is ready to run.
 pub(super) fn transcription_selection_is_active(
     selection: &TranscriptionSelection,
     model: &ModelDefinition,
@@ -124,6 +124,21 @@ impl Picker {
     pub(super) fn selected_installed(&self, settings: &AppSettings) -> bool {
         transcription_models::validate(&settings.transcription)
             .is_ok_and(|model| self.installed(model, &settings.transcription.language))
+    }
+
+    /// Whether `model` can run here. A fixture's installed stand-ins count as
+    /// ready; live, a catalog file another app downloaded must be checked
+    /// against its pin before Setup calls it ready (`models::is_ready`).
+    pub(super) fn ready(&self, model: &ModelDefinition, language: &str) -> bool {
+        match &self.installed {
+            Some(installed) => installed.contains(&model.id),
+            None => transcription_models::is_ready(model, language),
+        }
+    }
+
+    pub(super) fn selected_ready(&self, settings: &AppSettings) -> bool {
+        transcription_models::validate(&settings.transcription)
+            .is_ok_and(|model| self.ready(model, &settings.transcription.language))
     }
 
     fn clear_deletion(&mut self) {
@@ -375,8 +390,10 @@ pub(super) fn cancel(ui: &mut Ui) {
 pub(super) fn choose(ui: &mut Ui, model: &'static ModelDefinition) {
     ui.picker.clear_deletion();
     let current = &ui.settings.transcription;
-    let installed = ui.picker.installed(model, &current.language);
-    if transcription_selection_is_active(current, model, installed) {
+    // A file that is here but not checked is not active yet: choosing it
+    // sends it through the model preparation, which verifies and adopts it.
+    let ready = ui.picker.ready(model, &current.language);
+    if transcription_selection_is_active(current, model, ready) {
         close(ui);
         return;
     }
@@ -844,7 +861,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selected_transcription_model_is_not_active_until_installed() {
+    fn selected_transcription_model_is_not_active_until_ready() {
         let selection = TranscriptionSelection::default();
         let model = transcription_models::definition(selection.model);
 

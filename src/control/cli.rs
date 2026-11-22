@@ -754,6 +754,8 @@ fn offline_model(command: ModelCommand) -> u8 {
     use crate::transcription::models::{definition, is_installed, is_verified, model_path};
     report((|| match command {
         ModelCommand::Status { model, language } => {
+            // Found catalog files count as installed, as `hex model list` says.
+            let _ = crate::transcription::found_models::scan();
             let selection = selection(model, language)?;
             let model = definition(selection.model);
             let installed = is_installed(model, &selection.language);

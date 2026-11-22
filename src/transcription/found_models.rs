@@ -1,10 +1,10 @@
 //! Speech models already on this computer: GGUF files in the Hugging Face
 //! hub cache (`$HF_HUB_CACHE`, else `$HF_HOME/hub`, else
 //! `~/.cache/huggingface/hub`). A scan runs only when the model picker or
-//! onboarding's model step opens, never in the background, and reads
-//! headers alone (`gguf_header`, the same checks as an import). Each file's
-//! result is kept per path, size, modification time, and file ID, so an
-//! unchanged file is never read twice.
+//! onboarding's model step opens (or `hex model list`/`hex model status`
+//! runs), never in the background, and reads headers alone (`gguf_header`,
+//! the same checks as an import). Each file's result is kept per path, size,
+//! modification time, and file ID, so an unchanged file is never read twice.
 //!
 //! Hex never writes or deletes inside the cache. A file whose blob name is a
 //! catalog model's pinned SHA-256 (with its size) counts as that model
@@ -842,6 +842,67 @@ mod tests {
         assert!(!super::super::models::is_in_place(model));
         assert!(!super::super::models::is_installed(model, "en"));
         assert_eq!(snapshot_of(&hub), before, "the cache is never written");
+        CACHE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last
+            .retain(|found| found.path != path);
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(hub).unwrap();
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    #[test]
+    fn a_found_catalog_model_is_not_ready_until_adopted_in_place() {
+        let hub = temporary("ready");
+        let models = temporary("ready-models");
+        super::super::models::set_test_models_dir(Some(models.clone()));
+        // A model the other tests here don't push, so the shared scan cache
+        // can't answer with their files.
+        let model = super::super::models::definition(TranscriptionModelId::CohereTranscribe);
+        let ModelRuntime::Gguf(artifact) = model.runtime else {
+            unreachable!("Cohere is a GGUF model")
+        };
+        let path = cache(
+            &hub,
+            artifact.repository,
+            artifact.revision,
+            artifact.filename,
+            artifact.sha256,
+            None,
+            artifact.bytes,
+        );
+        let found = catalog_found(
+            &path,
+            artifact.repository,
+            artifact.revision,
+            artifact.filename.to_owned(),
+            artifact.bytes,
+            Some(artifact.sha256.to_owned()),
+            model.id,
+        );
+        CACHE
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .last
+            .push(found);
+        // Another app's file at the pinned size counts as installed, but
+        // nothing may call it ready before Hex has checked it.
+        assert!(super::super::models::is_installed(model, "en"));
+        assert!(!super::super::models::is_verified(model));
+        assert!(!super::super::models::is_ready(model, "en"));
+        // The record adopt_catalog writes once its full hash matches.
+        fs::create_dir_all(adopted_file(model).unwrap().parent().unwrap()).unwrap();
+        super::super::models::write_json_atomically(
+            &adopted_file(model).unwrap(),
+            &Adopted {
+                path: path.clone(),
+                receipt: Receipt::of(&path, artifact.sha256.to_owned()).unwrap(),
+            },
+        )
+        .unwrap();
+        assert!(catalog_verified(model));
+        assert!(super::super::models::is_ready(model, "en"));
         CACHE
             .lock()
             .unwrap_or_else(|error| error.into_inner())
