@@ -227,6 +227,8 @@ struct ContentView: View {
                     turnOff: { dictation.turnOffMultilingualParakeet() }
                 )
 
+                SpeechModelHomeCard(download: KeyboardParakeetDownload.shared)
+
                 if setupMonitor.needsAllowPasteSetting {
                     AllowPasteBanner(
                         openSettings: {

@@ -130,6 +130,25 @@ final class KeyboardParakeetDownload {
         }
     }
 
+    /// `--snap-state model-card-waiting|downloading|ready`: Home's card in each state on the
+    /// simulator. The keyboard's limit is cleared, so nothing really downloads.
+    func applyFixture(_ scene: String) {
+        let group = UserDefaults(suiteName: KeyboardBridge.appGroup)
+        for key in [KeyboardParakeetSettings.enabledKey, KeyboardParakeetSettings.keyboardLimitKey, SpeechModelHomeCard.dismissedKey] {
+            group?.removeObject(forKey: key)
+        }
+        switch scene {
+        case "model-card-downloading":
+            state = .downloading(0.42)
+        case "model-card-ready":
+            try? FileManager.default.createDirectory(at: ParakeetTranscriber.cacheDirectory, withIntermediateDirectories: true)
+            SpeechModelStore.markComplete(ParakeetTranscriber.cacheDirectory)
+            KeyboardParakeetSettings().setKeyboardState(.ready)
+        default:
+            break
+        }
+    }
+
     private func show(_ fraction: Double) {
         guard task != nil, case .downloading(let shown) = state, fraction > shown else { return }
         state = .downloading(fraction)
@@ -285,5 +304,90 @@ struct KeyboardParakeetStatus: View {
         case .otherEngine, nil:
             nil
         }
+    }
+}
+
+/// Home's card about Speech model in keyboard: what it is, then where its download stands in
+/// the status lines Settings › Experiments shows. Only where the keyboard would use it (the
+/// switch on, an iPhone that fits, none of the holds that mean it never will); once it's ready
+/// it can be dismissed, and a dismissed card never comes back.
+struct SpeechModelHomeCard: View {
+    let download: KeyboardParakeetDownload
+    @State private var dismissed = SpeechModelHomeCard.isDismissed()
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    static let dismissedKey = "home.speechModelCard.dismissed"
+
+    static func isDismissed(_ defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) -> Bool {
+        defaults?.bool(forKey: dismissedKey) ?? false
+    }
+
+    static func dismiss(_ defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+        defaults?.set(true, forKey: dismissedKey)
+    }
+
+    static func shows(enabled: Bool, fits: Bool, hold: KeyboardParakeetDownload.Hold?, dismissed: Bool) -> Bool {
+        guard enabled, fits, !dismissed else { return false }
+        switch hold {
+        case .otherEngine?, .notEnglish?, .keyboardTooSmall?:
+            return false
+        default:
+            return true
+        }
+    }
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 2)) { _ in
+            let settings = KeyboardParakeetSettings()
+            if Self.shows(enabled: settings.isEnabled, fits: KeyboardParakeetSettings.fits(), hold: download.hold, dismissed: dismissed) {
+                card(ready: download.isDownloaded && settings.keyboardState?.state == .ready)
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            }
+        }
+        .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: dismissed)
+    }
+
+    private func card(ready: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "waveform")
+                    .font(.system(size: 15))
+                    .foregroundStyle(HexTheme.textMuted)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("New: Hex's own speech model")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(HexTheme.textBase)
+                    Text("English dictation, right in the keyboard.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 4)
+                if ready {
+                    Button {
+                        Self.dismiss()
+                        dismissed = true
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(HexTheme.textMuted)
+                            .frame(width: 28, height: 28)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("Dismiss")
+                }
+            }
+            KeyboardParakeetStatus(download: download)
+                .padding(.leading, 25)
+        }
+        .padding(14)
+        .background(
+            Color.white.opacity(0.055),
+            in: RoundedRectangle(cornerRadius: 14, style: .continuous)
+        )
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("speech-model-card")
     }
 }

@@ -492,7 +492,9 @@ never at a launch by itself.
     the builds where it was off by default) it downloads at once on any connection. Until
     then the row says what it waits for: "Downloads after you first use the Hex keyboard",
     "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
-    dictation". The keyboard's own dictation transcribes with Parakeet in
+    dictation". Home shows the same status under "New: Hex's own speech model" wherever the
+    keyboard would use it (`SpeechModelHomeCard`: the switch on, an iPhone that fits, English
+    and no other engine); once it's ready in the keyboard the card can be dismissed, for good. The keyboard's own dictation transcribes with Parakeet in
     the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
     V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
     dictates once its files are there, in which case Dictate and the Hex key stop opening
