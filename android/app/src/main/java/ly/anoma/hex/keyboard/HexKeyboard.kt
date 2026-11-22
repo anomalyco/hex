@@ -71,8 +71,13 @@ class HexKeyboard : InputMethodService() {
     override fun onEvaluateFullscreenMode() = false
     override fun onCreateInputView(): View = KeyboardView(this, this).also { view = it; engine.surface = it }
 
+    /** The field's type as Hex last started in it: an app can change it in place (restarting the same box). */
+    private var fieldType = 0 to 0
+    private var typeChanged = false
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         super.onStartInput(attribute, restarting)
+        typeChanged = restarting && fieldType != attribute.inputType to attribute.imeOptions
+        fieldType = attribute.inputType to attribute.imeOptions
         nextEnglish = null
         capture.cancel() // Even a different field in the same app must not receive an old result.
         engine.startInput(attribute)
@@ -80,6 +85,8 @@ class HexKeyboard : InputMethodService() {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         view?.cancelGestures()
+        // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
+        if (typeChanged) view?.closeMenu(configure = false)
         engine.configureTyping()
         view?.status(capture.phase, idleHint())
     }
