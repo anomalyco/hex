@@ -16,6 +16,9 @@ settings:
     # The compiler finds the interface's strings for the String Catalogs (Localizable.xcstrings).
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    # The keyboard's Rust core is built for arm64 only (build-keyboard-core.sh), and so is
+    # every simulator build: no Intel simulators.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
 targets:
   HEXMobile:
     type: application
@@ -118,6 +121,9 @@ targets:
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: YES
+        # The keyboard core's script phase runs Cargo, which reads crates/keyboard and
+        # ~/.cargo and writes build/keyboard-core: more than a sandboxed script may touch.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         CODE_SIGN_ENTITLEMENTS: HEXKeyboard/HEXKeyboard.entitlements
         OTHER_LDFLAGS: $(inherited) -lhex_keyboard
         LIBRARY_SEARCH_PATHS: $(inherited) $(PROJECT_DIR)/build/keyboard-core/$(PLATFORM_NAME)
