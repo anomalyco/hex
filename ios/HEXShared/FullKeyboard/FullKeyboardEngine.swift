@@ -504,7 +504,7 @@ final class FullKeyboardEngine {
             committed: false,
             returnLayer: nil
         )
-        touch.claimed = !key.hitFrame.contains(point)
+        touch.claimed = !key.takes(point)
         touch.downPoint = downPoint
         if key.character != nil {
             learning?.recordTap(on: key, at: point)
