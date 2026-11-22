@@ -755,9 +755,9 @@ never at a launch by itself.
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Korean keyboard (두벌식), Dvorak punctuation
-    keys, ABC under the emoji key, Keyboard themes (its Theme menu below the switch while
-    it's on), Two-thumb selection, Delete swiped words letter by letter, Hide word
-    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
+    keys, Comma and period keys, ABC under the emoji key, Keyboard themes (its Theme menu below
+    the switch while it's on), Two-thumb selection, Delete swiped words letter by letter, Hide
+    word suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1110,7 +1110,9 @@ never at a launch by itself.
   press or caps lock (auto-capitalization leaves the comma); on the split Duo the two
   punctuation keys join only the left half, on a pitch narrowed so it keeps its right edge (its
   top-row keys are narrower), and `;` takes from the left space bar. A URL or email field keeps its
-  own `.` key instead of row 1's. Off, every layout is key for key the one it was. Kept per
+  own `.` key instead of row 1's, and Experiments › Comma and period keys adds no second pair
+  beside the space bar where this experiment put them on row 1. Off, every layout is key for key
+  the one it was. Kept per
   language in the App Group
   (`settings.keyboardLanguages.layouts`, `LanguageSettings.letterLayout(for:)`); unset,
   not offered, or unreadable (an iPhone that keeps the App Group from a keyboard without
@@ -1305,6 +1307,18 @@ never at a launch by itself.
   number row shrinks with the others (`KeyboardMetrics.fitted`). The iPad keeps Apple's rows
   for now: its docked keyboards would need Apple's own number row on the 13-inch and room
   above the strip on the others.
+- **Comma and period keys (full keyboard, iPhone):** Settings › Experiments › Comma and
+  period keys (off by default, `experiments.commaPeriodKeys`, App Group) puts a comma just
+  left of the space bar and a period just right of it, both a letter wide, on the letters page
+  in a plain text field. Both come out of the space bar: the comma takes its left end and the
+  period its right, and neither is added unless the bar still holds a letter-wide space after
+  them. They type `,` and `.` with shift on too (they have no shifted symbols). The 123 and
+  #+= pages, a URL or email field (which keeps its own `.`), an iPad, and English's Dvorak
+  letters while Dvorak punctuation puts both on row 1 are unchanged. On the Duo's split
+  keyboard the comma takes from the left half's bar and the period from the right half's, each
+  only where that bar still holds a letter-wide space. Off, every layout is key for key the one
+  it was. Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles
+  the iOS targets, and no physical iPhone run checks it.
 - **Word suggestions (full keyboard):** The strip above the keys shows the words the engine
   offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
   Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops

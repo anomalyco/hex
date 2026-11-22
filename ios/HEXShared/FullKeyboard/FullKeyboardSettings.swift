@@ -66,6 +66,9 @@ struct FullKeyboardSettings {
     /// Simulator scenes pass `--experiment-dvorak-punctuation` for Settings › Experiments ›
     /// Dvorak punctuation keys.
     static let dvorakPunctuationLaunchArgument = "--experiment-dvorak-punctuation"
+    /// Simulator scenes pass `--experiment-comma-period-keys` for Settings › Experiments ›
+    /// Comma and period keys.
+    static let commaPeriodKeysLaunchArgument = "--experiment-comma-period-keys"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
@@ -91,6 +94,7 @@ struct FullKeyboardSettings {
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
+        static let commaPeriodKeys = "experiments.commaPeriodKeys"
     }
 
     private let defaults: UserDefaults?
@@ -313,6 +317,15 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.dvorakPunctuation) }
     }
 
+    /// Settings › Experiments › Comma and period keys (off by default): a comma just left of the
+    /// space bar and a period just right of it, both a letter wide, on an iPhone's letters page
+    /// in a text field. Where Dvorak punctuation is drawn its row 1 already has both, so they
+    /// aren't added again. Stored as `experiments.commaPeriodKeys`.
+    var commaPeriodKeys: Bool {
+        get { defaults?.bool(forKey: Key.commaPeriodKeys) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.commaPeriodKeys) }
+    }
+
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.
     /// When switching by default.
     var dictationBarAutoStart: DictationBarAutoStart {
@@ -335,8 +348,9 @@ struct FullKeyboardSettings {
     /// `--experiment-keyboard-themes` for Keyboard themes and `--keyboard-theme <raw>` for
     /// the theme it draws,
     /// `--hex-key left|right` for the Hex key's side, `--number-row on|off` for the number row,
-    /// `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded, and
-    /// `--experiment-dvorak-punctuation` for the Dvorak punctuation keys.
+    /// `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded,
+    /// `--experiment-dvorak-punctuation` for the Dvorak punctuation keys, and
+    /// `--experiment-comma-period-keys` for the comma and period keys.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -356,6 +370,9 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.dvorakPunctuationLaunchArgument) {
             dvorakPunctuation = true
+        }
+        if arguments.contains(Self.commaPeriodKeysLaunchArgument) {
+            commaPeriodKeys = true
         }
         if arguments.contains(Self.keyboardThemesLaunchArgument) {
             keyboardThemesEnabled = true

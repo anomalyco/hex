@@ -2897,10 +2897,10 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
-│   Korean keyboard (두벌식), Dvorak punctuation keys, ABC under the emoji key, Keyboard
-│   themes (Black, White, Navy, Forest, Ember), Two-thumb selection, Delete swiped words
-│   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Learn each
-│   language separately
+│   Korean keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, ABC under the
+│   emoji key, Keyboard themes (Black, White, Navy, Forest, Ember), Two-thumb selection,
+│   Delete swiped words letter by letter, Hide word suggestions, Join the keyboard when
+│   unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -3012,6 +3012,17 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   email field keeps its own `.` key rather than a second key of the same kind. With the
 │   experiment off, every layout is key for key the one it was; a docked iPad keeps Apple's own
 │   rows. Adaptive touch learns the narrower key plane apart from Apple's Dvorak.
+│   Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS
+│   targets, and no physical iPhone run checks it
+├── Comma and period keys (off by default, `experiments.commaPeriodKeys`): a comma just left
+│   of the space bar and a period just right of it, both a letter wide, on an iPhone's letters
+│   page in a plain text field. Each takes its width from the space bar (the comma its left
+│   end, the period its right), which keeps ending where it did, and neither is added unless
+│   the bar still holds a letter-wide space after them; on the Duo's split keyboard the comma
+│   takes from the left half's bar and the period from the right half's. They type `,` and
+│   `.` with shift on too. The 123 and #+= pages, a URL or email field (which keeps its own
+│   `.`), an iPad, and English's Dvorak letters while Dvorak punctuation already puts both on
+│   row 1 are unchanged; off, every layout is key for key the one it was.
 │   Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):

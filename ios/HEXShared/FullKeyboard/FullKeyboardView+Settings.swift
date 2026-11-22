@@ -52,4 +52,16 @@ extension FullKeyboardView {
         engine.dvorakPunctuation = on
         setNeedsLayout()
     }
+
+    /// Settings › Experiments › Comma and period keys: a comma and a period join the space bar
+    /// on an iPhone's letters page in a text field. No row changes height, so the host is asked
+    /// for nothing.
+    func syncCommaPeriodKeys() {
+        let on = FullKeyboardSettings().commaPeriodKeys
+        guard engine.commaPeriodKeys != on else { return }
+        plane.cancelAllTouches()
+        dismissStyleMenu()
+        engine.commaPeriodKeys = on
+        setNeedsLayout()
+    }
 }
