@@ -292,12 +292,16 @@ private fun SetupRow(title: String, note: String, ready: Boolean, action: String
 @Composable internal fun modelStatus(state: ModelStore.State) = when (state) {
     ModelStore.State.Ready -> stringResource(R.string.model_ready)
     ModelStore.State.Available -> stringResource(R.string.model_available)
-    ModelStore.State.Retry -> stringResource(R.string.model_stopped)
+    is ModelStore.State.Retry -> stringResource(when (state.problem) {
+        ModelStore.Problem.Connection -> R.string.model_no_connection
+        ModelStore.Problem.Space -> R.string.model_no_space
+        ModelStore.Problem.Server -> R.string.model_stopped
+    })
     is ModelStore.State.Loading -> stringResource(R.string.model_loading, state.percent)
 }
 internal fun modelAction(state: ModelStore.State) = when (state) {
     ModelStore.State.Available -> R.string.model_download
-    ModelStore.State.Retry -> R.string.model_try_again
+    is ModelStore.State.Retry -> R.string.model_try_again
     else -> null
 }
 

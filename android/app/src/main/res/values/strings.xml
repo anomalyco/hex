@@ -38,6 +38,8 @@
     <string name="model_ready">Whisper small, on this phone</string>
     <string name="model_available">Using the smaller built-in model</string>
     <string name="model_stopped">Download stopped. Using the smaller built-in model.</string>
+    <string name="model_no_connection">No connection. Using the smaller built-in model.</string>
+    <string name="model_no_space">Not enough storage. Using the smaller built-in model.</string>
     <string name="model_loading">Downloading · %1$d%%</string>
     <string name="model_download">Download</string>
     <string name="model_try_again">Try again</string>
