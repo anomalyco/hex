@@ -891,6 +891,8 @@ fn rows(ui: &Ui) -> Vec<Row> {
             on: !install_locked && Feature::AnnotateAgentInstall.on(settings),
             ..agent_install
         });
+        // The dictation shortcut keeps working while a capture records.
+        rows.push(row(Feature::DictateWhileAnnotating, Some(&KEYBOARD)));
         let locked = annotate_locked;
         rows.push(Row {
             lab: Lab::Annotate,
@@ -1030,6 +1032,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::CopyCaptureZip => "lab-copy-capture-zip",
         Feature::AnnotateAgentTools => "lab-annotate-agent-tools",
         Feature::AnnotateAgentInstall => "lab-annotate-agent-install",
+        Feature::DictateWhileAnnotating => "lab-dictate-while-annotating",
         Feature::MeetingImport => "lab-meeting-import",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::YoloMode => "lab-yolo-mode",

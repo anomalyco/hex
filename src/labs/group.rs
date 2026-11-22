@@ -122,7 +122,8 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::CopyCaptureZip
             | Self::AnnotateAgentTools
-            | Self::AnnotateAgentInstall => Group::Annotate,
+            | Self::AnnotateAgentInstall
+            | Self::DictateWhileAnnotating => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
             | Self::MoreDictationShortcuts

@@ -18,7 +18,7 @@ pub(super) fn merged(
     table: &[(&'static str, &'static str)],
     language: Language,
 ) -> HashMap<&'static str, &'static str> {
-    let (extra, agents, signature, style, hud_height, voice_isolation) = match language {
+    let (extra, agents, signature, style, hud_height, voice_isolation, annotate) = match language {
         Language::French => (
             FRENCH,
             super::agents::FRENCH,
@@ -26,6 +26,7 @@ pub(super) fn merged(
             super::style::FRENCH,
             super::hud_height::FRENCH,
             super::voice_isolation::FRENCH,
+            super::annotate_dictation::FRENCH,
         ),
         Language::Portuguese => (
             PORTUGUESE,
@@ -34,6 +35,7 @@ pub(super) fn merged(
             super::style::PORTUGUESE,
             super::hud_height::PORTUGUESE,
             super::voice_isolation::PORTUGUESE,
+            super::annotate_dictation::PORTUGUESE,
         ),
         Language::Russian => (
             RUSSIAN,
@@ -42,8 +44,10 @@ pub(super) fn merged(
             super::style::RUSSIAN,
             super::hud_height::RUSSIAN,
             super::voice_isolation::RUSSIAN,
+            super::annotate_dictation::RUSSIAN,
         ),
     };
+
     table
         .iter()
         .chain(extra)
@@ -52,6 +56,7 @@ pub(super) fn merged(
         .chain(style)
         .chain(hud_height)
         .chain(voice_isolation)
+        .chain(annotate)
         .copied()
         .collect()
 }
