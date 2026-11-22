@@ -1055,10 +1055,11 @@ never at a launch by itself.
   (Apple's split Dvorak unobserved). Settings › Experiments › Dvorak punctuation keys (off by
   default, `experiments.dvorakPunctuation`) puts `,` and `.` ahead of P on row 1, whose nine keys
   narrow to start at the left margin and end at the same delete key, puts `;` just left of the
-  space bar where it can give up a letter's width, and types `<`, `>` and `:` with shift or caps
-  lock; on the split Duo the two punctuation keys join only the left half, on a pitch narrowed so
-  it keeps its right edge, and `;` takes from the left space bar. A URL or email field keeps its
-  own `.` key instead of row 1's. Off, every layout is byte for byte the one it was. Kept per
+  space bar where it can give up a letter's width, and types `<`, `>` and `:` with a shift you
+  press or caps lock (auto-capitalization leaves the comma); on the split Duo the two
+  punctuation keys join only the left half, on a pitch narrowed so it keeps its right edge (its
+  top-row keys are narrower), and `;` takes from the left space bar. A URL or email field keeps its
+  own `.` key instead of row 1's. Off, every layout is key for key the one it was. Kept per
   language in the App Group
   (`settings.keyboardLanguages.layouts`, `LanguageSettings.letterLayout(for:)`); unset,
   not offered, or unreadable (an iPhone that keeps the App Group from a keyboard without

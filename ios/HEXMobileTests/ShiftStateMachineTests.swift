@@ -88,6 +88,37 @@ final class ShiftStateMachineTests: XCTestCase {
         XCTAssertTrue(shift.isUppercase)
     }
 
+    /// Auto-capitalization's shift is not a shift you pressed: caps lock and your own press are
+    /// `isUserShift`, and only those type the Dvorak punctuation keys' symbols.
+    func testAutoCapsIsNotAUserShift() {
+        var shift = ShiftStateMachine()
+        shift.refreshAutoCapitalization(true)
+        XCTAssertTrue(shift.isUppercase)
+        XCTAssertFalse(shift.isUserShift)
+        shift.didType()
+        XCTAssertFalse(shift.isUserShift)
+
+        shift.shiftDown(now: 0)
+        XCTAssertTrue(shift.isUserShift, "a press")
+        shift.didType()
+        shift.shiftUp()
+        shift.shiftDown(now: 1)
+        shift.shiftUp()
+        XCTAssertEqual(shift.state, .on)
+        XCTAssertTrue(shift.isUserShift, "one-shot from a tap")
+        shift.didType()
+        XCTAssertFalse(shift.isUserShift)
+
+        shift.refreshAutoCapitalization(true)
+        XCTAssertFalse(shift.isUserShift, "auto-caps again")
+        shift.shiftDown(now: 5)
+        shift.shiftUp()
+        shift.shiftDown(now: 5.1)
+        shift.shiftUp()
+        XCTAssertEqual(shift.state, .locked)
+        XCTAssertTrue(shift.isUserShift, "caps lock")
+    }
+
     // MARK: - Auto-capitalization
 
     func testSentenceCapitalization() {

@@ -655,8 +655,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// draws one keyboard rather than Apple's split one.
     let joinsUnfoldedKeyboard: Bool
     /// Settings › Experiments › Dvorak punctuation keys: English's Dvorak letters gain comma
-    /// and period on row 1 and a semicolon by the space bar, typed < > and : with shift. False
-    /// on a docked iPad, which keeps Apple's own two-symbol keys.
+    /// and period on row 1 and a semicolon by the space bar. False on every other arrangement,
+    /// and on a docked iPad, so those layouts are the same with the experiment on or off.
     let dvorakPunctuation: Bool
     /// Where the Hex key sits: Settings › Keyboard › Hex key picks the strip's trailing
     /// (Right) or leading (Left) end.
@@ -706,8 +706,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.language = language
         self.posture = posture
         self.joinsUnfoldedKeyboard = joinsUnfoldedKeyboard
-        // Docked on an iPad, Apple's own two-symbol keys stand in for these (`padPairs`).
-        self.dvorakPunctuation = dvorakPunctuation && pad?.isDocked != true
+        // Apple's own keys stand in for these on every other arrangement, and docked on an iPad.
+        self.dvorakPunctuation = dvorakPunctuation && pad?.isDocked != true && letters == .dvorak
         let innerWidth = width - 2 * self.horizontalInset
         var metrics = KeyboardMetrics.for(
             orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad,
@@ -761,6 +761,10 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     }
 
     var isSplit: Bool { split != nil }
+
+    /// Whether this layout draws the experiment's row: Dvorak letters in a text field (a URL or
+    /// email field keeps its own `.`). Only then is its row 1 a key plane Adaptive touch learns.
+    var hasDvorakPunctuationRow: Bool { dvorakPunctuation && layer == .letters && letters == .dvorak && field == .text }
 
     /// The Duo folded draws Apple's key labels smaller: its 123 is 70 px wide there against
     /// Hex's 80 at 2.95 px per point (iOS 27.2), 0.875 of Hex's upright iPhone size, the same

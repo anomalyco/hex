@@ -907,7 +907,10 @@ final class FullKeyboardEngine {
             return
         }
         spaceBeforeNextWord(character)
-        var text = layerState.layer == .letters && shift.isUppercase ? key.shifted ?? character.uppercased() : character
+        // The Dvorak punctuation keys' symbols follow a shift you pressed, or caps lock, not
+        // auto-capitalization; the docked iPad's two-symbol keys have always followed both.
+        let shifted = layout.metrics.pad?.isDocked == true || shift.isUserShift ? key.shifted : nil
+        var text = layerState.layer == .letters && shift.isUppercase ? shifted ?? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
         }

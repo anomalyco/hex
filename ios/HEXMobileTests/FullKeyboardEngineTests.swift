@@ -193,6 +193,48 @@ final class FullKeyboardEngineTests: XCTestCase {
         }
     }
 
+    /// Settings › Experiments › Dvorak punctuation keys: auto-capitalization's shift types no
+    /// symbols — a comma at a sentence's start stays a comma, and its keycap reads so — while a
+    /// shift you press, or caps lock, types `<`, and the semicolon `:`.
+    func testDvorakPunctuationFollowsAUserShiftNotAutoCapitalization() throws {
+        engine.width = 402
+        engine.letterLayout = .dvorak
+        engine.dvorakPunctuation = true
+        target.autocapitalizationType = .sentences
+        engine.configureForField()
+        let comma = try XCTUnwrap(engine.layout.key(.character(",")))
+        XCTAssertEqual(engine.shift.state, .on, "the field's first sentence")
+        XCTAssertFalse(engine.shift.isUserShift)
+        XCTAssertEqual(engine.keycapLabel(for: comma), ",")
+        XCTAssertEqual(engine.displayLabel(for: comma), ",")
+        tap(.character(","))
+        XCTAssertEqual(target.text, ",")
+        XCTAssertEqual(engine.shift.state, .off)
+
+        type("ok. ")
+        XCTAssertEqual(target.text, ",ok. ")
+        XCTAssertEqual(engine.shift.state, .on, "after a sentence")
+        XCTAssertFalse(engine.shift.isUserShift)
+        tap(.character(","))
+        XCTAssertEqual(target.text, ",ok. ,")
+
+        tap(.shift)
+        XCTAssertTrue(engine.shift.isUserShift)
+        XCTAssertEqual(engine.keycapLabel(for: comma), "<")
+        tap(.character(","))
+        XCTAssertEqual(target.text, ",ok. ,<")
+        XCTAssertEqual(engine.shift.state, .off, "one-shot")
+
+        tap(.shift)
+        now += 0.1
+        tap(.shift)
+        XCTAssertEqual(engine.shift.state, .locked)
+        XCTAssertTrue(engine.shift.isUserShift)
+        XCTAssertEqual(engine.keycapLabel(for: comma), "<")
+        tap(.character(";"))
+        XCTAssertEqual(target.text, ",ok. ,<:")
+    }
+
     func testHoldNumbersSlideToADigitAndLetGo() {
         down(1, .layerSwitch(.numbers))
         XCTAssertEqual(engine.layout.layer, .numbers)

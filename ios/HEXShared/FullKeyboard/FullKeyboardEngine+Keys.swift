@@ -63,12 +63,13 @@ extension FullKeyboardEngine {
     }
 
     /// A key's label as the keys read it: upper case on the letters page with shift on, and the
-    /// Dvorak punctuation keys' `<`, `>` and `:` (the docked iPad draws Apple's own pairs).
+    /// Dvorak punctuation keys' `<`, `>` and `:` with a shift you pressed (the docked iPad draws
+    /// Apple's own pairs).
     func displayLabel(for key: KeyboardKey) -> String {
         guard let character = key.character else { return key.label }
         if typesFrenchApostrophe(character) { return SmartPunctuation.apostrophe }
         guard isUppercase, layerState.layer == .letters else { return character }
-        if let shifted = key.shifted, layout.metrics.pad?.isDocked != true { return shifted }
+        if let shifted = key.shifted, layout.metrics.pad?.isDocked != true, shift.isUserShift { return shifted }
         return layout.language == .korean ? HangulComposer.shifted(character) : character.uppercased()
     }
 
@@ -81,7 +82,7 @@ extension FullKeyboardEngine {
         guard let character = key.character else { return key.label }
         if typesFrenchApostrophe(character) { return SmartPunctuation.apostrophe }
         guard keycapsUppercase else { return character }
-        if let shifted = key.shifted, layout.metrics.pad?.isDocked != true { return shifted }
+        if let shifted = key.shifted, layout.metrics.pad?.isDocked != true, shift.isUserShift { return shifted }
         return layout.language == .korean ? HangulComposer.shifted(character) : character.uppercased()
     }
 
