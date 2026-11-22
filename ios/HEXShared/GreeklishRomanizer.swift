@@ -6,9 +6,12 @@ import Foundation
 /// \u{0308} diaeresis, and the polytonic marks), then the digraphs people write as one sound
 /// (ου ou, αι ai, μπ b/mp, ντ d/nt, γκ g/gk, γγ ng, τζ tz, τσ ts), then the letters. A diaeresis
 /// blocks a digraph across it, so "οϋ" is "oy", not "ou". An all-caps Greek word becomes
-/// all-caps Latin and a capitalized one capitalized ("Θα" -> "Tha", "ΘΑ" -> "THA"), and Greek
-/// punctuation becomes the Latin it looks like (U+037E "?", U+0387 ";"). Everything that isn't
-/// Greek is left exactly as it is, Latin words, digits, emoji and whitespace included.
+/// all-caps Latin and a capitalized one capitalized ("Θα" -> "Tha", "ΘΑ" -> "THA"). Greek
+/// punctuation becomes the Latin it looks like: U+037E is "?" and U+0387 is ";", and since
+/// Unicode normalization usually writes them as a plain ";" (after Greek) and "·" (U+00B7), a
+/// ";" directly after a Greek letter becomes "?" and a "·" directly after one becomes ";".
+/// Everything that isn't Greek is left exactly as it is, Latin words, digits, emoji and
+/// whitespace included.
 ///
 /// String rules and no table, no model, so in-keyboard dictation needs no more memory.
 nonisolated enum GreeklishRomanizer {
@@ -26,6 +29,7 @@ nonisolated enum GreeklishRomanizer {
         var index = 0
         while index < scalars.count {
             let scalar = scalars[index]
+            let followsGreek = !word.isEmpty
             switch scalar.value {
             case 0x037E: // Greek question mark
                 flush()
@@ -34,6 +38,14 @@ nonisolated enum GreeklishRomanizer {
             case 0x0387: // ano teleia
                 flush()
                 output += ";"
+                index += 1
+            case 0x003B: // ";" after Greek: normalization of the Greek question mark
+                flush()
+                output += followsGreek ? "?" : ";"
+                index += 1
+            case 0x00B7: // "·" after Greek: normalization of the ano teleia
+                flush()
+                output += followsGreek ? ";" : "·"
                 index += 1
             default:
                 if isGreekLetter(scalar) {
@@ -82,8 +94,9 @@ nonisolated enum GreeklishRomanizer {
         var uppercase: Bool
     }
 
-    /// The word in Latin letters, in the case it was written: all caps stays all caps, a
-    /// capitalized word keeps its capital, anything else is lowercase.
+    /// The word in Latin letters, in the case it was written: all caps stays all caps (but a
+    /// one-letter word only takes its capital: "Θ" -> "Th"), a capitalized word keeps its
+    /// capital, anything else is lowercase.
     private static func latin(for word: [Letter]) -> String {
         var output = ""
         var index = 0
@@ -97,7 +110,7 @@ nonisolated enum GreeklishRomanizer {
                 index += 1
             }
         }
-        if word.allSatisfy({ $0.uppercase }) {
+        if word.count > 1, word.allSatisfy({ $0.uppercase }) {
             return output.uppercased()
         }
         let capitalized = word[0].uppercase && word.dropFirst().allSatisfy { !$0.uppercase }
@@ -160,11 +173,22 @@ nonisolated enum GreeklishRomanizer {
 
     // MARK: Script
 
-    /// Greek letters, including the polytonic letters Unicode decomposes for us.
+    /// Greek letters, including the polytonic letters Unicode decomposes for us, but not the
+    /// Coptic letters that share the block, the symbol at U+03F6, or Greek's spacing marks and
+    /// symbols (U+1FBD, U+1FBF–1FC1, U+1FCD–1FCF, U+1FDD–1FDF, U+1FED–1FEF, U+1FFD–1FFE).
     private static func isGreekLetter(_ scalar: Unicode.Scalar) -> Bool {
+        guard scalar.properties.isAlphabetic else { return false }
         switch scalar.value {
-        case 0x0386, 0x0388...0x038A, 0x038C, 0x038E...0x03FF, 0x1F00...0x1FFF:
-            return true
+        case 0x0370...0x03FF:
+            return !(0x03E2...0x03EF).contains(scalar.value) && scalar.value != 0x03F6
+        case 0x1F00...0x1FFF:
+            switch scalar.value {
+            case 0x1FBD, 0x1FBF...0x1FC1, 0x1FCD...0x1FCF,
+                 0x1FDD...0x1FDF, 0x1FED...0x1FEF, 0x1FFD...0x1FFE:
+                return false
+            default:
+                return true
+            }
         default:
             return false
         }
