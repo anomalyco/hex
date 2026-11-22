@@ -117,9 +117,14 @@ nonisolated struct KeyboardParakeetSettings {
 /// - V2's first transcription rose 16 MB above the recording; Ultra's rose 9 MB, so both use
 ///   V2's numbers. The first load, compiling, rose 42 MB in an idle probe keyboard
 ///   (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`).
+/// - FluidAudio reads the whole recording into memory before it transcribes (the 48 kHz file as
+///   floats, a copy of it and the 16 kHz result, `AudioConverter.resampleAudioFile`): 7.9 MB
+///   for 18.9 s of audio in Hex's keyboard, about 0.42 MB a second, counted at 0.5.
 /// So a keyboard needs a limit of the recording footprint, the transcription's rise and `margin`
 /// (131 MB), as much left (`os_proc_available_memory`) as the load's rise plus 16 MB before it
-/// loads, and the transcription's rise plus 8 MB before each transcription.
+/// loads, and the transcription's rise plus 8 MB plus the recording's own cost before each
+/// transcription, which is at most `longestAudio` long. Longer or tighter goes to Apple's speech
+/// recognition, which streams the file.
 nonisolated enum KeyboardParakeetBudget {
     static let megabyte = 1_048_576
     static let recordingFootprint = 91 * megabyte
@@ -130,6 +135,18 @@ nonisolated enum KeyboardParakeetBudget {
     static var requiredLimit: Int { recordingFootprint + transcriptionRise + margin }
     static var loadHeadroom: Int { loadRise + 16 * megabyte }
     static var transcribeHeadroom: Int { transcriptionRise + 8 * megabyte }
+    /// What a second of audio costs while FluidAudio holds the recording.
+    static let audioCostPerSecond = megabyte / 2
+    /// The longest recording Parakeet transcribes in the keyboard: 45 MB of audio at
+    /// `audioCostPerSecond`, which with the 91 MB recording and the 16 MB transcription leaves
+    /// 25 MB under an iPhone 17 Pro's 177 MB, a margin the room check alone can't promise if
+    /// memory moves while it runs. Almost every dictation is far shorter.
+    static let longestAudio: TimeInterval = 90
+
+    /// Room left for a transcription of `audioSeconds` of audio.
+    static func transcribeHeadroom(audioSeconds: Double) -> Int {
+        transcribeHeadroom + Int(max(0, audioSeconds) * Double(audioCostPerSecond))
+    }
 
     /// Whether a keyboard with `footprint` and `available` (bytes) may load the model.
     /// `available` 0 is a process iOS sets no limit for (the simulator): it may.
@@ -138,8 +155,11 @@ nonisolated enum KeyboardParakeetBudget {
         return footprint + available >= requiredLimit && available >= loadHeadroom
     }
 
-    static func allowsTranscription(footprint: Int, available: Int) -> Bool {
+    /// Whether Parakeet may transcribe `audioSeconds` of audio now: no longer than `longestAudio`,
+    /// and (where iOS sets a limit) the room it needs left.
+    static func allowsTranscription(footprint: Int, available: Int, audioSeconds: Double) -> Bool {
+        guard audioSeconds <= longestAudio else { return false }
         guard available > 0 else { return true }
-        return footprint + available >= requiredLimit && available >= transcribeHeadroom
+        return footprint + available >= requiredLimit && available >= transcribeHeadroom(audioSeconds: audioSeconds)
     }
 }

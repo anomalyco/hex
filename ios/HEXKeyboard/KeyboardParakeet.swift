@@ -159,8 +159,9 @@ final class KeyboardParakeet {
     }
 
     /// Transcribes `url` with the loaded model, or returns nil for Apple's speech recognition
-    /// (with the reason in the probe log): the experiment off, the model not loaded yet, short
-    /// of memory, another transcription running, nothing heard, or an error.
+    /// (with the reason in the probe log): the experiment off, the model not loaded yet, another
+    /// transcription running, a recording longer than `KeyboardParakeetBudget.longestAudio` or
+    /// without the room it needs, nothing heard, or an error.
     func transcribe(_ url: URL, audioSeconds: Double) async -> Transcript? {
         guard let choice = Self.choice() else { return nil }
         let before = Self.memory()
@@ -172,8 +173,14 @@ final class KeyboardParakeet {
             return fallback(loadTask != nil ? "\(choice.label) still loading" : "\(choice.label) not loaded")
         }
         guard !isTranscribing else { return fallback("another transcription running") }
-        guard KeyboardParakeetBudget.allowsTranscription(footprint: before.footprint, available: before.available) else {
-            return fallback("short of memory")
+        // FluidAudio holds the whole recording in memory; Apple's speech recognition streams it.
+        guard audioSeconds <= KeyboardParakeetBudget.longestAudio else {
+            return fallback("longer than \(Int(KeyboardParakeetBudget.longestAudio)) s")
+        }
+        guard KeyboardParakeetBudget.allowsTranscription(
+            footprint: before.footprint, available: before.available, audioSeconds: audioSeconds
+        ) else {
+            return fallback("short of memory for \(String(format: "%.0f", audioSeconds)) s of audio")
         }
         isTranscribing = true
         defer {

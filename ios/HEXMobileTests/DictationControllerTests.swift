@@ -1814,15 +1814,36 @@ final class DictationControllerTests: XCTestCase {
             KeyboardParakeetBudget.allowsLoad(footprint: 120 * mb, available: 50 * mb),
             "too little left, whatever the limit"
         )
-        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(footprint: 60 * mb, available: 117 * mb))
+        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(footprint: 60 * mb, available: 117 * mb, audioSeconds: 10))
         XCTAssertTrue(
-            KeyboardParakeetBudget.allowsTranscription(footprint: 56 * mb, available: 121 * mb),
+            KeyboardParakeetBudget.allowsTranscription(footprint: 56 * mb, available: 121 * mb, audioSeconds: 9.4),
             "Hex's keyboard recording on the iPhone 17 Pro"
         )
-        XCTAssertFalse(KeyboardParakeetBudget.allowsTranscription(footprint: 160 * mb, available: 17 * mb))
+        XCTAssertFalse(KeyboardParakeetBudget.allowsTranscription(footprint: 160 * mb, available: 17 * mb, audioSeconds: 5))
         XCTAssertTrue(
             KeyboardParakeetBudget.allowsLoad(footprint: 20 * mb, available: 0),
             "no limit where iOS sets none (the simulator)"
+        )
+    }
+
+    func testALongDictationGoesToApplesEngineWhichStreamsIt() {
+        let mb = KeyboardParakeetBudget.megabyte
+        XCTAssertEqual(KeyboardParakeetBudget.transcribeHeadroom(audioSeconds: 60), 54 * mb, "24 MB and 0.5 MB a second")
+        // The iPhone 17 Pro's keyboard after many dictations: 91 MB of its 177 MB.
+        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(footprint: 91 * mb, available: 86 * mb, audioSeconds: 60))
+        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(footprint: 91 * mb, available: 86 * mb, audioSeconds: 90))
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsTranscription(footprint: 91 * mb, available: 86 * mb, audioSeconds: 91),
+            "longer than 90 s goes to Apple's engine, whatever the room"
+        )
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsTranscription(footprint: 91 * mb, available: 50 * mb, audioSeconds: 60),
+            "a keyboard with less room: 60 s needs 54 MB"
+        )
+        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(footprint: 91 * mb, available: 50 * mb, audioSeconds: 40))
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsTranscription(footprint: 20 * mb, available: 0, audioSeconds: 120),
+            "the cap holds where iOS sets no limit (the simulator)"
         )
     }
 

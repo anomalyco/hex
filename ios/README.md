@@ -448,8 +448,11 @@ never at a launch by itself.
     memory limit (footprint plus `os_proc_available_memory`) is under 131 MB (V2 and Ultra
     alike: with the model loaded the keyboard records at up to 91 MB, and Ultra's
     transcription rose 9 MB in Hex's keyboard, V2's 16 MB), too little is
-    left, it hears nothing, or it fails (`KeyboardParakeetBudget` has the measured
-    numbers). Core ML keys what it compiled to the files themselves: a model downloaded
+    left, the recording is longer than 90 s or there isn't room for it (FluidAudio holds the
+    whole recording in memory, about 0.42 MB a second measured, counted at 0.5 MB on top of
+    the 24 MB transcription headroom; Apple's speech recognition streams the file, so a long
+    dictation goes there and arrives a little later), it hears nothing, or it fails
+    (`KeyboardParakeetBudget` has the measured numbers). Core ML keys what it compiled to the files themselves: a model downloaded
     again, or moved, compiles again, so the log calls a load "cold" by its time (5 s or
     more), and moving a legacy folder forgets the app's compile record for it
     (`ParakeetCompileRecord.forget`), so V2 says it's optimizing for this iPhone and Ultra
