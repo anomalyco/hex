@@ -250,17 +250,21 @@ fn a_panic_in_the_core_never_crosses_the_boundary() {
     }
 }
 
-/// A QWERTY row of letter keys 40 points apart, at y 50.
-fn qwerty_keys() -> Vec<HkKeyCentre> {
-    let rows = ["qwertyuiop", "asdfghjkl", "zxcvbnm"];
+/// The English letter keys of the 390 pt iPhone layout (`KeyboardLayout(width: 390)`), whose
+/// pitch is 38.3 × 54 pt: each row's keys one pitch apart, the middle row in half a key.
+fn english_390_keys() -> Vec<HkKeyCentre> {
+    let rows = [
+        ("qwertyuiop", 22.65, 67.5),
+        ("asdfghjkl", 41.8, 121.5),
+        ("zxcvbnm", 80.1, 175.5),
+    ];
     let mut centres = Vec::new();
-    for (row, letters) in rows.iter().enumerate() {
+    for (letters, first, y) in rows {
         for (i, c) in letters.chars().enumerate() {
-            let x = 20.0 + 40.0 * i as f64 + 20.0 * row as f64;
             centres.push(HkKeyCentre {
                 letter: c as u32,
-                x,
-                y: 25.0 + 50.0 * row as f64,
+                x: first + 38.3 * i as f64,
+                y,
             });
         }
     }
@@ -291,16 +295,17 @@ fn path(keys: &[HkKeyCentre], word: &str) -> Vec<f64> {
 }
 
 #[test]
-#[ignore = "needs the swipe port"]
 fn the_default_parameters_are_the_cores() {
     let mut parameters = HkSwipeParameters::default();
     unsafe { hk_swipe_default_parameters(&mut parameters) };
-    assert_ne!(parameters, HkSwipeParameters::default());
-    assert!(parameters.samples > 0);
+    assert_eq!(
+        parameters,
+        HkSwipeParameters::from(&hex_keyboard_core::swipe::Parameters::default())
+    );
+    assert_eq!(parameters.samples, 32);
 }
 
 #[test]
-#[ignore = "needs the swipe port"]
 fn reads_a_swipe_through_the_c_interface() {
     unsafe {
         let model = open_en();
@@ -325,12 +330,12 @@ fn reads_a_swipe_through_the_c_interface() {
         hk_model_free(model); // the decoder keeps its own reference
         assert!(!decoder.is_null());
 
-        let centres = qwerty_keys();
+        let centres = english_390_keys();
         let keys = HkKeys {
             centres: centres.as_ptr(),
             centre_count: centres.len(),
-            pitch_width: 40.0,
-            pitch_height: 50.0,
+            pitch_width: 38.3,
+            pitch_height: 54.0,
         };
         let points = path(&centres, "hello");
         let mut out = HkSwipeReading {
@@ -356,7 +361,7 @@ fn reads_a_swipe_through_the_c_interface() {
             .iter()
             .map(|c| CStr::from_ptr(c.text).to_str().unwrap())
             .collect();
-        assert!(texts.contains(&"hello"), "{texts:?}");
+        assert_eq!(texts.first(), Some(&"hello"), "{texts:?}");
         assert!(candidates.windows(2).all(|c| c[0].cost <= c[1].cost));
         hk_swipe_reading_free(&mut out);
         assert!(out.candidates.is_null());

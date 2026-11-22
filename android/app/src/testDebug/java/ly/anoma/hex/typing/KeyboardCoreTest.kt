@@ -4,7 +4,6 @@ import java.io.File
 import java.io.FileDescriptor
 import java.io.FileInputStream
 import org.junit.Assert.*
-import org.junit.Ignore
 import org.junit.Test
 
 /** The Rust core's JNI entry points, on a host build of it (build.gradle.kts, buildHostKeyboardCore). */
@@ -54,16 +53,16 @@ class KeyboardCoreTest {
         KeyboardCore.swipeFree(0)
     }
 
+    /** A clean swipe of "hello" on the 390 pt iPhone's English keys (pitch 38.3 × 54 pt) reads "hello" first. */
     @Test
-    @Ignore("needs the swipe port")
     fun readsASwipe() {
         val model = KeyboardCore.modelOpen(english.path)
         val decoder = KeyboardCore.swipeNew(model, IntArray(0), IntArray(0), arrayOf("hexkb"), doubleArrayOf(11.0), booleanArrayOf(false))
         KeyboardCore.modelFree(model) // the decoder keeps its own reference
         assertNotEquals(0L, decoder)
         val centres = buildMap {
-            for ((row, letters) in listOf("qwertyuiop", "asdfghjkl", "zxcvbnm").withIndex())
-                for ((i, c) in letters.withIndex()) put(c, 20.0 + 40 * i + 20 * row to 25.0 + 50 * row)
+            for ((letters, first, y) in listOf(Triple("qwertyuiop", 22.65, 67.5), Triple("asdfghjkl", 41.8, 121.5), Triple("zxcvbnm", 80.1, 175.5)))
+                for ((i, c) in letters.withIndex()) put(c, first + 38.3 * i to y)
         }
         val stops = "hello".map { centres.getValue(it) }
         val points = buildList {
@@ -78,13 +77,14 @@ class KeyboardCoreTest {
         val letters = centres.keys.map { it.code }.toIntArray()
         val xs = centres.values.map { it.first }.toDoubleArray()
         val ys = centres.values.map { it.second }.toDoubleArray()
-        val reading = KeyboardCore.swipeRead(decoder, points, null, letters, xs, ys, 40.0, 50.0, null, 5)!!
-        assertTrue(reading.texts.contentToString(), "hello" in reading.texts)
+        val reading = KeyboardCore.swipeRead(decoder, points, null, letters, xs, ys, 38.3, 54.0, null, 5)!!
+        assertEquals(reading.texts.contentToString(), "hello", reading.texts.first())
+        assertTrue(reading.costs.toList().zipWithNext().all { (a, b) -> a <= b })
         assertEquals(reading.texts.size, reading.costs.size)
         assertTrue(reading.texts.size in 1..5 && reading.scored >= reading.texts.size)
         val times = DoubleArray(points.size / 2) { it * 0.01 }
-        assertNotNull(KeyboardCore.swipeRead(decoder, points, times, letters, xs, ys, 40.0, 50.0, "say", 3))
-        assertNull(KeyboardCore.swipeRead(decoder, points, DoubleArray(1), letters, xs, ys, 40.0, 50.0, null, 3))
+        assertEquals("hello", KeyboardCore.swipeRead(decoder, points, times, letters, xs, ys, 38.3, 54.0, "say", 3)!!.texts.first())
+        assertNull(KeyboardCore.swipeRead(decoder, points, DoubleArray(1), letters, xs, ys, 38.3, 54.0, null, 3))
         KeyboardCore.swipeFree(decoder)
     }
 }
