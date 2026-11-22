@@ -285,21 +285,19 @@ pub(crate) fn render_app(rune_args: Vec<String>) -> rune::App<Ui> {
     app
 }
 
-/// The window's compositor: the UI (through the first run's GPU stage or
-/// the practice game's strike and burn while they show), then the Sounds
-/// sheet's HUD over its stage.
+/// The window's compositor: the UI, through the first run's GPU stage or
+/// the practice game's strike and burn while they show.
 #[derive(Default)]
 pub(crate) struct WindowCompositor {
     onboarding: Option<onboarding_kit::gpu_stage::OnboardingGpu>,
     game: Option<onboarding_kit::game::fx::GameFx>,
-    sounds: sound_sets::Preview,
     /// The device whose backend `process.log` names.
     logged: Option<rune::compose::DeviceKey>,
 }
 
 impl rune::compose::Compositor<Ui> for WindowCompositor {
     fn features(&self) -> wgpu::Features {
-        // The Sounds sheet's HUD, and one device shared with the HUD overlay.
+        // One device shared with the HUD overlay.
         crate::rune_hud::Painter::FEATURES
     }
 
@@ -329,7 +327,6 @@ impl rune::compose::Compositor<Ui> for WindowCompositor {
         } else {
             f.draw_ui();
         }
-        self.sounds.render(f);
         onboarding_kit::live::frame_drawn();
     }
 }
@@ -685,7 +682,6 @@ pub(crate) struct Ui {
     /// When a text field last changed without being saved.
     draft_since: Option<Instant>,
     duck_volume_drag: Option<f32>,
-    sound_volume_drag: Option<f32>,
     models: models::Models,
     history: history::HistoryPane,
     /// Labs › Transcribe dropped audio: the drop target, its queue, and the
@@ -820,7 +816,6 @@ impl Ui {
             preparing: None,
             draft_since: None,
             duck_volume_drag: None,
-            sound_volume_drag: None,
             models: models::Models::default(),
             history: history::HistoryPane::default(),
             drop: drop_transcribe::DropTranscribe::default(),
@@ -1476,7 +1471,7 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
     changed |= general::poll_level(ui, clock, tx);
     let visible = ui.window.as_ref().is_none_or(rune::AppHandle::is_visible);
     changed |= explainer::poll(ui, clock, visible, tx);
-    changed |= sound_sets::poll(ui, clock, visible, tx);
+    changed |= sound_sets::poll(ui, clock, tx);
     changed | settings::advance_capture(ui, clock, tx)
 }
 

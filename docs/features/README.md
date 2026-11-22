@@ -1043,7 +1043,7 @@ General                                  // settings
 │   │   microphone instead of Bluetooth")
 │   ├── Output -> Paste last shortcut, While dictating, Dictation HUD, Terminal paste (Linux)
 │   │   (Dictate without processing sits in the Output pane; see dictation.md)
-│   └── Application -> Enable on launch, Show Dock icon, Sound volume, Sounds,
+│   └── Application -> Enable on launch, Show Dock icon, Sounds,
 │       Interface language (System first, then alphabetical by displayed name),
 │       Update channel (self-updating installs)
 │       // Interface language System: macOS's first preferred language (zh-Hans -> 简体中文,
@@ -1095,10 +1095,10 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Sound volume -> slider 0-100%; release saves and previews start unless Off; only Sounds sheet auditions play while Off
-│   └── A saved zero displays Off; enabling sounds through the CLI restores the default level
+├── Sounds -> one row ("Classic · 50%" or Off) opening a sheet: Sound volume slider in 5% steps, then each set to hear and pick
+│   ├── Slider release saves and previews start unless Off; only the sheet's previews play while Off
+│   ├── A saved zero displays Off; enabling sounds through the CLI restores the default level
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
-├── Sounds -> Sheet: hear each set on Hex's real HUD, pick one
 └── Linux / Windows -> listener card and desktop commands below the basics
 
 Pause media + Also pause the browser     // browser_media
@@ -2667,12 +2667,12 @@ records an Arch/i3 client-independent ownership check, not transcription accurac
 or physical logout, Wayland, or signed cross-version update proof.
 
 ```ts
-Linux General > Sound volume              // dictate.feedback.linux; X11 + Wayland
+Linux General > Sounds > Sound volume     // dictate.feedback.linux; X11 + Wayland
 ├── Default / older settings -> 50%
 ├── Slider at 0 -> No recording tones; the last level is kept
 └── Release above 0 -> Save and apply live; preview the start sound
-Linux General > Sounds                    // dictate.sound-theme
-└── Signature / Classic -> Save and apply live; preview the start sound
+Linux General > Sounds > a set            // dictate.sound-theme
+└── Press it -> Save and apply live; play its dictation
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives

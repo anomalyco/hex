@@ -56,6 +56,7 @@ pub enum DictationIndicatorEvent {
     JobCompleted {
         job_id: u64,
     },
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     JobCancelled {
         job_id: u64,
     },

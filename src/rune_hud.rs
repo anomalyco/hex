@@ -52,7 +52,9 @@ pub(crate) use macos::DictationIndicatorUi;
 pub(crate) type HudEvent = DictationIndicatorEvent;
 
 /// The window's margin from the top or bottom edge on Linux and Windows.
+#[cfg(not(target_os = "macos"))]
 pub(crate) const TOP_OFFSET: f32 = 12.0;
+#[cfg(not(target_os = "macos"))]
 pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
 /// The HUD window: room for Dot scope's widest plate and drop shadow, and
 /// on macOS for an island grown out of the widest notch.

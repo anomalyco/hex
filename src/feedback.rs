@@ -639,7 +639,8 @@ impl SoundSet {
     }
 
     /// Whether the set plays a sound for `cue`. Classic and Thock have no done
-    /// sound; Classic's error is macOS Basso, or Signature's elsewhere.
+    /// sound.
+    #[cfg(test)]
     pub fn has(self, cue: Cue) -> bool {
         cue != Cue::Done || BUNDLED_SETS[self as usize].done.is_some()
     }
@@ -657,28 +658,12 @@ impl SoundSet {
     }
 }
 
-/// A moment of dictation that has its own sound, as the sound picker plays
-/// them one at a time.
+/// A moment of dictation that has its own sound.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Cue {
     Start,
     Stop,
     Done,
-    Error,
-}
-
-impl Cue {
-    pub const ALL: [Self; 4] = [Self::Start, Self::Stop, Self::Done, Self::Error];
-
-    /// The English label the sound picker shows, translated where shown.
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Start => "Start",
-            Self::Stop => "Stop",
-            Self::Done => "Done",
-            Self::Error => "Error",
-        }
-    }
 }
 
 /// What the sound picker plays of a set.
@@ -687,7 +672,6 @@ pub enum Audition {
     /// A short dictation: start, a moment of speaking, stop, a moment of
     /// transcribing, then done.
     Dictation,
-    Cue(Cue),
 }
 
 /// When a dictation audition plays each sound, from its start.
@@ -703,10 +687,6 @@ impl Audition {
     pub fn cues(self) -> &'static [(Cue, Duration)] {
         match self {
             Self::Dictation => &DICTATION_CUES,
-            Self::Cue(Cue::Start) => &[(Cue::Start, Duration::ZERO)],
-            Self::Cue(Cue::Stop) => &[(Cue::Stop, Duration::ZERO)],
-            Self::Cue(Cue::Done) => &[(Cue::Done, Duration::ZERO)],
-            Self::Cue(Cue::Error) => &[(Cue::Error, Duration::ZERO)],
         }
     }
 
@@ -714,7 +694,6 @@ impl Audition {
     pub fn length(self) -> Duration {
         match self {
             Self::Dictation => Duration::from_millis(2_900),
-            Self::Cue(_) => Duration::from_millis(900),
         }
     }
 }
@@ -772,9 +751,6 @@ struct Auditioning {
     stopped: Option<Arc<AtomicBool>>,
     /// Only a preview started while Off may keep the muted output open.
     while_off_until: Option<Instant>,
-    /// Basso, for Classic's error.
-    #[cfg(target_os = "macos")]
-    system: Option<std::process::Child>,
 }
 
 type AuditionSource = rodio::source::Amplify<Retractable<rodio::source::Delay<SamplesBuffer>>>;
@@ -794,10 +770,6 @@ impl Auditioning {
         for (sound, at, cue) in sounds.audition(set, what) {
             let (sound, _) = Retractable::with_flag(sound.delay(at), stopped.clone());
             add(cue, sound.amplify(gain));
-        }
-        #[cfg(target_os = "macos")]
-        if what == Audition::Cue(Cue::Error) && !set.has_own_error() {
-            self.system = spawn_system_sound("Basso", gain);
         }
         if level.is_none() {
             self.while_off_until = Some(Instant::now() + what.length());
@@ -825,11 +797,6 @@ impl Auditioning {
         self.while_off_until = None;
         if let Some(stopped) = self.stopped.take() {
             stopped.store(true, Ordering::Release);
-        }
-        #[cfg(target_os = "macos")]
-        if let Some(mut child) = self.system.take() {
-            let _ = child.kill();
-            let _ = child.wait();
         }
     }
 }
@@ -960,8 +927,7 @@ impl Sounds {
         &self.sets[set as usize]
     }
 
-    /// The sounds `what` plays of `set`, each with when it starts. Classic's
-    /// error is macOS Basso, which the worker plays itself.
+    /// The sounds `what` plays of `set`, each with when it starts.
     fn audition(&self, set: SoundSet, what: Audition) -> Vec<(SamplesBuffer, Duration, Cue)> {
         let sounds = self.set(set);
         what.cues()
@@ -971,7 +937,6 @@ impl Sounds {
                     Cue::Start => Some(&sounds.start),
                     Cue::Stop => Some(&sounds.stop),
                     Cue::Done => sounds.done.as_ref(),
-                    Cue::Error => sounds.error.as_ref(),
                 };
                 sound.map(|sound| (sound.clone(), at, cue))
             })
@@ -2182,7 +2147,7 @@ mod tests {
     }
 
     /// A dictation audition plays start, stop and done at their moments,
-    /// each finished before the next, and every cue plays alone at once.
+    /// each finished before the next.
     #[test]
     fn auditions_play_each_sound_at_its_moment() {
         let sounds = Sounds::load().unwrap();
@@ -2199,20 +2164,8 @@ mod tests {
                 assert!(ends < pair[1].1, "{set:?} {:?} overlaps", pair[0].2);
             }
             assert!(Audition::Dictation.length() > DICTATION_CUES[2].1);
-
-            for cue in Cue::ALL {
-                let alone = sounds.audition(set, Audition::Cue(cue));
-                let own = set.has(cue) && (cue != Cue::Error || set.has_own_error());
-                assert_eq!(alone.len(), usize::from(own), "{set:?} {cue:?}");
-                assert!(
-                    alone
-                        .iter()
-                        .all(|&(_, at, played)| at.is_zero() && played == cue)
-                );
-            }
         }
         assert!(!SoundSet::Classic.has(Cue::Done));
-        assert!(SoundSet::Classic.has(Cue::Error));
     }
 
     #[test]
@@ -2220,31 +2173,29 @@ mod tests {
         let sounds = Sounds::load().unwrap();
         let mut audition = Auditioning::default();
         let set = SoundSet::Signature;
-        for what in std::iter::once(Audition::Dictation).chain(Cue::ALL.map(Audition::Cue)) {
-            let render = |audition: &mut Auditioning, level| {
-                let mut peaks = Vec::new();
-                audition.play(&sounds, set, what, level, |cue, source| {
-                    peaks.push((cue, source.map(f32::abs).fold(0.0, f32::max)));
-                });
-                peaks
-            };
-            let off = render(&mut audition, None);
-            let now = Instant::now();
-            assert!(audition.keep_output(false, now + OBSERVATION_INTERVAL));
-            assert!(!audition.keep_output(false, now + what.length()));
-            assert_eq!(off.len(), what.cues().len());
-            assert!(off.iter().all(|(_, peak)| *peak > 0.0));
-            assert_eq!(render(&mut audition, Some(DEFAULT_VOLUME)), off);
-            for ((cue, quiet), (expected, peak)) in
-                render(&mut audition, Some(DEFAULT_VOLUME / 4.0))
-                    .into_iter()
-                    .zip(off)
-            {
-                assert_eq!((cue, quiet), (expected, peak / 4.0));
-            }
-            // Turning ordinary feedback off releases even a sounding output.
-            assert!(!audition.keep_output(false, now));
+        let what = Audition::Dictation;
+        let render = |audition: &mut Auditioning, level| {
+            let mut peaks = Vec::new();
+            audition.play(&sounds, set, what, level, |cue, source| {
+                peaks.push((cue, source.map(f32::abs).fold(0.0, f32::max)));
+            });
+            peaks
+        };
+        let off = render(&mut audition, None);
+        let now = Instant::now();
+        assert!(audition.keep_output(false, now + OBSERVATION_INTERVAL));
+        assert!(!audition.keep_output(false, now + what.length()));
+        assert_eq!(off.len(), what.cues().len());
+        assert!(off.iter().all(|(_, peak)| *peak > 0.0));
+        assert_eq!(render(&mut audition, Some(DEFAULT_VOLUME)), off);
+        for ((cue, quiet), (expected, peak)) in render(&mut audition, Some(DEFAULT_VOLUME / 4.0))
+            .into_iter()
+            .zip(off)
+        {
+            assert_eq!((cue, quiet), (expected, peak / 4.0));
         }
+        // Turning ordinary feedback off releases even a sounding output.
+        assert!(!audition.keep_output(false, now));
     }
 
     /// Stopping fades every sound of the audition, even one still waiting

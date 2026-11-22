@@ -264,6 +264,30 @@ fn choices_name_what_they_choose_and_read_their_value() {
     assert!(microphone["value"].as_str().is_some_and(|v| !v.is_empty()));
 }
 
+/// The Sounds sheet's volume reads as a percent, and each set's play
+/// button is named inside the set's row.
+#[test]
+fn the_sounds_sheet_names_its_slider_and_play_buttons() {
+    let mut rt = runtime("sound-sets");
+    rt.state.settings.sound_effect_volume = 0.35;
+    settle(&mut rt);
+    let tree = rt.accessibility_json();
+    let all = nodes(&tree);
+    let slider = all
+        .iter()
+        .find(|(path, node)| path.contains("sound-volume-slider") && node["role"] == "slider")
+        .map(|(_, node)| *node)
+        .expect("the volume slider");
+    assert_eq!(name(slider), "Sound volume");
+    assert_eq!(slider["value"].as_str(), Some("35%"));
+    let plays: Vec<_> = all
+        .iter()
+        .filter(|(path, node)| path.contains("set-") && node["key"] == "play")
+        .collect();
+    assert_eq!(plays.len(), crate::feedback::SoundSet::ALL.len());
+    assert!(plays.iter().all(|(_, node)| name(node) == "Play"));
+}
+
 /// The model picker is a dialog named by its title, the only part of the
 /// window a screen reader reaches while it is open.
 #[test]

@@ -810,7 +810,7 @@ fn mode_row(
     selected: bool,
     selection: Selection,
 ) -> El {
-    list_row(p, key, name, icons, summary, selected, move |ui| {
+    list_row(p, key, None, name, icons, summary, selected, move |ui| {
         select_mode(ui, selection)
     })
 }

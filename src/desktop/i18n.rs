@@ -726,16 +726,15 @@ mod tests {
         assert!(checked > 300, "only {checked} translated strings found");
     }
 
-    /// The sound picker translates each set's name and character and each
-    /// cue's name, which are not literals at the call.
+    /// The sound picker translates each set's name and character, which are
+    /// not literals at the call.
     #[test]
     fn every_sound_set_string_has_every_language() {
-        use crate::feedback::{Cue, SoundSet};
+        use crate::feedback::SoundSet;
         let table: std::collections::HashMap<_, _> = all_translations().copied().collect();
         let strings = SoundSet::ALL
             .into_iter()
-            .flat_map(|set| [set.name(), set.character()])
-            .chain(Cue::ALL.into_iter().map(Cue::name));
+            .flat_map(|set| [set.name(), set.character()]);
         for english in strings {
             let translations = table
                 .get(english)
