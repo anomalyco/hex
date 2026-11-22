@@ -42,9 +42,11 @@ renders it, with a Canvas 2D fallback (`?canvas2d` forces it).
 - The prerendered page shows `public/shout-idle.webp`, a still of the idle head, in
   `.show__head`. The engine chunk loads when the browser is idle or the visitor
   reaches for the key (phones wait for the tap), then draws the same head into that box (the canvas reads the
-  box, 3.2 head radii wide, so nothing moves). The keycap names the selected
-  OS's shortcut: ⌥ option on the Mac, alt on Windows, and alt + space on Linux.
-  The key the show shatters keeps that legend too (`start({ key })` reaches
+  box, 3.2 head radii wide, so nothing moves). The keycap and the "Hold …" line
+  read one table in `src/shortcuts.ts`, so they can't disagree: ⌥ option on the
+  Mac, alt on Windows, and alt + space on Linux, which new setups on GNOME and
+  KDE Plasma bind as Ctrl+Alt+Space because those desktops keep Alt+Space. The
+  key the show shatters keeps that legend too (`start({ key })` reaches
   `cards.makeKeycap`, which draws the ⌥ glyph only for option).
 - Nothing audible or heavy loads before the key press: the voice bank and its
   manifest are fetched on start, the opening clips first. The sound toggle in the

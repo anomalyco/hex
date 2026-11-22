@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react"
 import type { Platform } from "./platform"
 import { RELEASE } from "./release"
+import type { Os } from "./shortcuts"
 
 export function AppleMark() {
   return (
@@ -24,49 +25,6 @@ export function LinuxMark() {
       <path d="M5 5.5h14v13H5zM8 9l2.5 2.5L8 14M12.5 14H16" />
     </svg>
   )
-}
-
-export type Os = "mac" | "windows" | "linux"
-
-export const PLATFORM_NAMES: Record<Platform, string> = {
-  mac: "Mac",
-  "mac-intel": "Mac",
-  "windows-x64": "Windows",
-  "windows-arm64": "Windows",
-  linux: "Linux",
-  "linux-arm64": "Linux",
-  mobile: "Mac, Windows, and Linux",
-}
-
-export const SHORTCUTS: Record<Platform, string> = {
-  mac: "Option",
-  "mac-intel": "Option",
-  "windows-x64": "Alt",
-  "windows-arm64": "Alt",
-  linux: "Alt+Space",
-  "linux-arm64": "Alt+Space",
-  mobile: "a shortcut",
-}
-
-// The key and name each operating system's tab shows, so the hero follows
-// the tab the visitor picks instead of staying on their own OS.
-export const OS_SHORTCUTS: Record<Os, string> = {
-  mac: "Option",
-  windows: "Alt",
-  linux: "Alt+Space",
-}
-
-export const OS_NAMES: Record<Os, string> = {
-  mac: "Mac",
-  windows: "Windows",
-  linux: "Linux",
-}
-
-// The hero keycap's legend, in the site's lowercase keycap voice.
-export const OS_KEY_LEGENDS: Record<Os, string> = {
-  mac: "option",
-  windows: "alt",
-  linux: "alt + space",
 }
 
 function useCopy(): [boolean, (text: string) => void] {
@@ -155,12 +113,6 @@ function rows(os: Os, intelMac: boolean, { arch, setArch, pkg, setPkg }: Choices
     },
     { label: "Binary", file: linux.binary[arch], ...archSwitch },
   ]
-}
-
-export function osOf(platform: Platform): Os {
-  if (platform.startsWith("windows")) return "windows"
-  if (platform.startsWith("linux")) return "linux"
-  return "mac"
 }
 
 const archOf = (platform: Platform): Arch => (platform.endsWith("arm64") ? "arm64" : "x64")

@@ -1,6 +1,7 @@
 import { useLayoutEffect, useRef, useState } from "react"
-import Download, { OS_KEY_LEGENDS, OS_NAMES, OS_SHORTCUTS, PLATFORM_NAMES, SHORTCUTS, osOf, type Os } from "./Download"
+import Download from "./Download"
 import { guessPlatform, refinePlatform, type Platform } from "./platform"
+import { OS_NAMES, OS_SHORTCUTS, PLATFORM_NAMES, SHORTCUTS, osOf, type Os } from "./shortcuts"
 import { OptionKey, SoundToggle, useShout } from "./Shout"
 import signature from "./footer-signature.svg"
 
@@ -42,7 +43,7 @@ export default function App() {
   // the hero to that OS, until then it follows the detected platform.
   const [chosenOs, setChosenOs] = useState<Os>()
   const os = chosenOs ?? osOf(platform)
-  const shortcut = chosenOs ? OS_SHORTCUTS[chosenOs] : SHORTCUTS[platform]
+  const shortcut = chosenOs ? OS_SHORTCUTS[chosenOs].copy : SHORTCUTS[platform]
   const osName = chosenOs ? OS_NAMES[chosenOs] : PLATFORM_NAMES[platform]
 
   const root = useRef<HTMLElement>(null)
@@ -75,7 +76,7 @@ export default function App() {
           <OptionKey
             os={os}
             phase={shout.phase}
-            onStart={(el) => shout.start(el, OS_KEY_LEGENDS[os])}
+            onStart={(el) => shout.start(el, OS_SHORTCUTS[os].legend)}
             onIntent={shout.intent}
             onPress={shout.pressKey}
           />

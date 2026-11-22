@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import { setGlow } from "./glow"
+import { OS_SHORTCUTS, type Os } from "./shortcuts"
 
 // The hero show lives in ./shout (plain JS, WebGPU with a Canvas 2D fallback). The prerendered
 // page shows a still of the idle head; the engine loads when the browser is idle or the visitor
@@ -138,9 +139,10 @@ export function OptionKey({
   onIntent,
   onPress,
 }: {
-  // The hero's key names the selected OS's shortcut: Option on the Mac, Alt
-  // on Windows, and Alt+Space on Linux, which binds no modifier alone.
-  os: "mac" | "windows" | "linux"
+  // The key wears the selected OS's shortcut, from the same table its copy
+  // reads: Option with the Mac's glyph, Alt on Windows, Alt+Space on Linux,
+  // which binds no modifier alone.
+  os: Os
   phase: Phase
   onStart(el?: HTMLElement | null): void
   onIntent(): void
@@ -149,6 +151,8 @@ export function OptionKey({
   const ref = useRef<HTMLButtonElement>(null)
   const [pressed, setPressed] = useState(false)
   const gone = phase === "started"
+  // "alt + space" wears "alt" as the key's own legend and the rest smaller beside it.
+  const legend = OS_SHORTCUTS[os].legend.split(" ")
   // The glow pulses (./glow.ts) from here until the show's engine draws the head and takes it over. A timer waits
   // out each 1/30 s and the value is set in the next frame callback, so it lands on that vsync's frame.
   const pulsing = phase === "idle"
@@ -236,15 +240,8 @@ export function OptionKey({
             </svg>
           )}
           <span className="keycap__label">
-            {os === "linux" ? (
-              <>
-                alt<span className="keycap__chord">+ space</span>
-              </>
-            ) : os === "windows" ? (
-              "alt"
-            ) : (
-              "option"
-            )}
+            {legend[0]}
+            {legend.length > 1 && <span className="keycap__chord">{legend.slice(1).join(" ")}</span>}
           </span>
         </span>
       </span>
