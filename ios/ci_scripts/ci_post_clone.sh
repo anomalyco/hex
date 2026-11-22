@@ -23,11 +23,11 @@ esac
 scripts/fetch-cleanup-model.sh
 # The keyboard's Rust core (scripts/build-keyboard-core.sh) builds with rustup and the
 # toolchain crates/keyboard pins (rust-toolchain.toml). Without a rustup the build script
-# would find (scripts/rustup-env.sh), install one: rustup-init 1.29.3 from its versioned URL,
-# checked against the SHA-256 static.rust-lang.org publishes beside it, into CARGO_HOME
-# (~/.cargo by default).
-. scripts/rustup-env.sh
-if ! find_rustup; then
+# would find (crates/keyboard/tools/rustup-env.sh), install one: rustup-init 1.29.3 from its
+# versioned URL, checked against the SHA-256 static.rust-lang.org publishes beside it, into
+# CARGO_HOME (~/.cargo by default).
+. ../crates/keyboard/tools/rustup-env.sh
+if ! find_rustup ../crates/keyboard; then
   case "$(uname -m)" in
     arm64) host=aarch64-apple-darwin sha256=63752a1919a3a4793173ec70f8f212621a7ce38ba6a246095984482f4de20f9f ;;
     x86_64) host=x86_64-apple-darwin sha256=bc107f1fb0228de7fa32413c89c1b305cea9cd256e94b01150cd054128145429 ;;
@@ -38,7 +38,8 @@ if ! find_rustup; then
   echo "$sha256  $init" | shasum -a 256 -c - >/dev/null
   chmod +x "$init"
   "$init" -y -q --profile minimal --default-toolchain none --no-modify-path
-  find_rustup || { echo "rustup-init left no rustup where the build looks for it" >&2; exit 1; }
+  (cd ../crates/keyboard && "${CARGO_HOME:-$HOME/.cargo}/bin/rustup" -q toolchain install)
+  find_rustup ../crates/keyboard || { echo "rustup-init left no rustup where the build looks for it" >&2; exit 1; }
 fi
 (cd ../crates/keyboard && "$rustup_bin/rustup" -q toolchain install)
 xcodegen generate
