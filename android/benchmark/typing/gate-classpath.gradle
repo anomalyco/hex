@@ -1,0 +1,14 @@
+// Use the app's own compiled engine, platform stubs and resolved Kotlin runtime.
+gradle.projectsEvaluated {
+    def app = gradle.rootProject.project(':app')
+    app.tasks.register('typingGateClasspath') {
+        dependsOn app.tasks.named('compileDebugKotlin')
+        doLast {
+            def kotlin = app.configurations.debugRuntimeClasspath.incoming.artifactView {
+                componentFilter { id -> id instanceof ModuleComponentIdentifier && id.group == 'org.jetbrains.kotlin' && id.module == 'kotlin-stdlib' }
+            }.files.singleFile
+            def classes = app.tasks.named('compileDebugKotlin').get().destinationDirectory.get().asFile
+            new File(app.property('gateClasspath')).text = app.files(classes, kotlin, app.android.bootClasspath).asPath
+        }
+    }
+}

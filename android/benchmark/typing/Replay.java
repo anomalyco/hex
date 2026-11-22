@@ -161,7 +161,8 @@ public final class Replay {
     }
     static void replay(String[] args) throws Exception {
         String lang=args[2], group=lang.equals("en") ? "test-" : lang+"-test-";
-        PrintWriter outputs=args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
+        boolean gate=args.length==4 && args[3].equals("--gate");
+        PrintWriter outputs=!gate && args.length>3 ? new PrintWriter(new FileWriter(args[3])) : null;
         boolean hasIos=false;
         TypingModel model=TypingModel.Companion.file(new File(args[0]),lang);
         // `MODEL SET LANG OUT [GEOMETRY]`: with a measured geometry, any number of sentences.
@@ -178,15 +179,19 @@ public final class Replay {
         try (BufferedReader reader=new BufferedReader(new FileReader(args[1]))) {
             String line;
             while((line=reader.readLine())!=null) {
-                JSONObject r=new JSONObject(line);
-                if(!r.getString("id").equals(group+count)) throw new IllegalArgumentException("Unexpected row "+count);
-                String typed=r.getString("typed"); JSONArray taps=r.getJSONArray("taps");
-                if(typed.length()!=taps.length()) throw new IllegalArgumentException("Unaligned taps");
+                // Gate input is TSV so the host JVM needs no Android JSON implementation.
+                // No coordinates means exact centre taps, including explicit long-press letters.
+                String[] fields=gate ? line.split("\\t", -1) : null;
+                JSONObject r=gate ? null : new JSONObject(line);
+                if(!gate && !r.getString("id").equals(group+count)) throw new IllegalArgumentException("Unexpected row "+count);
+                String typed=gate ? fields[0] : r.getString("typed"); JSONArray taps=gate ? null : r.getJSONArray("taps");
+                String[] points=gate && fields.length==2 ? fields[1].split(" ") : null;
+                if((!gate && typed.length()!=taps.length()) || (points!=null && typed.length()!=points.length)) throw new IllegalArgumentException("Unaligned taps");
                 StringBuilder out=new StringBuilder(); state.reset("");
-                String[] planned=r.getString("intended").toLowerCase(Locale.ROOT).split(" ");
+                String[] planned=gate ? null : r.getString("intended").toLowerCase(Locale.ROOT).split(" ");
                 Map<Integer,Integer> ends=new HashMap<>(), early=new HashMap<>();
-                String want=r.optString("want","");
-                JSONArray endList=r.optJSONArray("ends");
+                String want=gate ? "" : r.optString("want","");
+                JSONArray endList=gate ? null : r.optJSONArray("ends");
                 if(endList!=null) for(int j=0, from=0;j<endList.length();j++) {
                     int end=endList.getInt(j); ends.put(end,j);
                     if(end-from>=3) early.put(from+2,j);
@@ -198,15 +203,26 @@ public final class Replay {
                 // space. An apostrophe ends the word as typed.
                 boolean tracked=true;
                 for(int i=0;i<typed.length();i++) {
-                    char key=typed.charAt(i); double x=taps.getJSONArray(i).getDouble(0), y=taps.getJSONArray(i).getDouble(1);
+                    char key=typed.charAt(i); double x, y;
+                    boolean explicit=false;
+                    if(!gate) { x=taps.getJSONArray(i).getDouble(0); y=taps.getJSONArray(i).getDouble(1); }
+                    else if(points!=null) {
+                        String[] xy=points[i].split(","); x=Double.parseDouble(xy[0]); y=Double.parseDouble(xy[1]);
+                    } else {
+                        KeyPoint p=grid.getCentres().get(key);
+                        if(key==' ') { KeyRect space=grid.getSpace(); p=new KeyPoint((space.getLeft()+space.getRight())/2,space.getCentreY()); }
+                        if(key=='\'') p=apostropheKey;
+                        explicit=p==null && Character.isLetter(key); // IME long-press choice: w.explicit, no spatial evidence
+                        x=p==null ? 0 : p.getX(); y=p==null ? 0 : p.getY();
+                    }
                     long start=System.nanoTime();
                     // As the keyboard: a touch on a letter key, or on French's apostrophe key among them, types
                     // the likelier neighbour when it is near enough (the engine leaves a word it isn't reading alone).
-                    if(Character.isLetter(key)||(key=='\''&&apostropheOnLetters)) key=likelierKey(state,out.toString(),key,x,y,grid);
+                    if(!explicit && (Character.isLetter(key)||(key=='\''&&apostropheOnLetters))) key=likelierKey(state,out.toString(),key,x,y,grid);
                     if(key!=' '&&!Character.isLetter(key)) {
                         out.append(key); state.reset(out.toString()); tracked=false; shown=Collections.emptyList();
                     } else if(key==' '&&!tracked) {
-                        out.append(' '); String before=out.toString(); state.reset(before); shown=predictions(state,before); tracked=true;
+                        out.append(' '); String before=out.toString(); state.reset(before); if(!gate) shown=predictions(state,before); tracked=true;
                     } else if(key!=' '&&state.getToken().isEmpty()&&!startsWord(state,out.toString())&&!(tracked&&out.length()==0)) {
                         out.append(key); tracked=false; shown=Collections.emptyList();
                     } else if(key==' ') {
@@ -215,11 +231,13 @@ public final class Replay {
                             if(!out.toString().endsWith(fix.getOriginal())) throw new IllegalStateException("Correction off the text");
                             out.replace(out.length()-fix.getOriginal().length(),out.length(),fix.getReplacement());
                         }
-                        out.append(' '); String before=out.toString(); state.reset(before); shown=predictions(state,before);
+                        out.append(' '); String before=out.toString(); state.reset(before); if(!gate) shown=predictions(state,before);
                     } else {
                         tracked=true;
-                        state.letter(String.valueOf(key),x,y,grid); out.append(key); shown=strip(state);
+                        if(explicit) state.explicit(String.valueOf(key)); else state.letter(String.valueOf(key),x,y,grid);
+                        out.append(key); if(!gate) shown=strip(state);
                     }
+                    if(gate) continue;
                     (key==' '?spaces:letters).add(System.nanoTime()-start);
                     Integer j;
                     if((j=early.get(i+1))!=null) { hits[4]+=hit(shown,planned[j])?1:0; hits[5]++; }
@@ -228,6 +246,7 @@ public final class Replay {
                         hits[2]+=hit(shown,planned[j+1])?1:0; hits[3]++;
                     }
                 }
+                if(gate) { System.out.println(out.toString().trim()); continue; }
                 String[] ref=words(r.getString("intended")); total+=ref.length; count++;
                 String ios=r.getString("ios_shared"); hasIos|=!ios.isEmpty();
                 if(outputs!=null) outputs.println(r.getString("id")+"\t"+out.toString().trim());
@@ -236,6 +255,7 @@ public final class Replay {
                 for(int i=0;i<3;i++) { int err=edits(ref,words(results[i])); errors[i]+=err; if(err==0) exact[i]++; }
             }
         }
+        if(gate) return;
         if(count!=2000&&args.length<=4) throw new IllegalArgumentException("Incomplete synthetic set: "+count);
         if(outputs!=null) outputs.close();
         String[] names={"raw","ios_shared","android_spatial"};

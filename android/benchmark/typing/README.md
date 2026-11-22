@@ -2,6 +2,33 @@
 
 **On the same iOS R1 word models and synthetic taps, Android with its default suggestion filter has 135 fewer English word errors and 13 fewer Spanish word errors than iOS.** The biggest part of the old 298-error English deficit was a missing step before spatial decoding: porting the English contraction and typo rules alone recovered 231 errors.
 
+## Run the per-language quality gate
+
+From the repo root, with Python 3, JDK 21 and the Android project's SDK installed:
+
+```sh
+android/benchmark/typing/quality-gate.py all
+```
+
+Use a language code instead of `all` for one language. The script compiles the current app's Kotlin classes with the Gradle wrapper and runs `Replay.java` on the host JVM. It prints the table, writes counts, rates, critical-case outputs and failed checks to `android/build/typing-quality.json` (override with `--output PATH`), and exits 1 if any language fails. No device or OS spelling dictionary is involved.
+
+[Thresholds](thresholds.json) apply to unrounded rates in every language:
+
+- **Noisy taps:** word edit distance on the original 2,000 sentences, before and after decoding. WER is edits / reference words; reduction is (raw edits − decoded edits) / raw edits (minimum 70%).
+- **Correct words changed:** replay the intended spelling, including spaces and apostrophes, on key centres. Letters available only by long press use the IME's explicit-letter path. Count reference words no longer present on a minimum-edit alignment (maximum 0.5%). Compare final sentence output, so revisions of the preceding word count. Scoring ignores case: the existing held-out references are lowercased and cannot test capitalisation.
+- **Accents restored:** take the first 500 sentences in the fixed shuffled test order containing a [mapped letter](accent-keys.json). Type full sentences on centres, replacing every mapped letter (including dedicated keys like ñ and å) with its plain spelling. A whole affected word must match exactly on the final alignment; multiple accents in one word count once (minimum 85%). English has no mapped letters and skips this metric. Ligatures use their plain-letter expansion. The existing German set excludes ß and the French set excludes œ/æ, so these mappings do not contribute coverage.
+- **Critical cases:** type each [named input](critical-cases.json) on centres, finish with space, and compare the entire sentence. Every case must pass, including valid ambiguous spellings that should remain literal.
+
+### Held-out inputs and attribution
+
+[held-out/](held-out/) contains **only the existing synthetic test split** from the benchmark below, in its original order: no dev rows, typing logs, personal offsets, predictions or model-building input. Each gzip UTF-8 TSV row is `Tatoeba sentence ID · contributor · normalized reference · literal hit keys (including final space) · space-separated x,y taps`. Test ID is the zero-based row number prefixed as in the original replay. All six raw and decoded error totals reproduce the existing benchmark. Gate inputs must remain evaluation-only.
+
+Sentences: [Tatoeba](https://tatoeba.org/), [CC BY 2.0 FR](https://creativecommons.org/licenses/by/2.0/fr/) or CC0 where released as such. Sentences are lowercased with punctuation normalized by the existing generators; taps are synthetic. ID and contributor are from the [per-language detailed exports](https://downloads.tatoeba.org/exports/per_language/) (2026-11-21); `\N` means Tatoeba lists no owner. Each source is at `https://tatoeba.org/en/sentences/show/<ID>`. No additional sentences were sampled for this gate.
+
+### iOS coverage
+
+There is no comparable iOS quality-gate result. The checked-in `TypingReplayTests` fixes the engine language to English and maps a QWERTY recording to a simulator keyboard. The experimental `ZZDecoderBench` is outside the repository; historical en/es outputs measure noisy WER only. A comparable gate needs language-specific geometry (including QWERTZ, AZERTY and dedicated keys), explicit accent selection on the clean pass, the shipped model and controlled system-dictionary behavior, and per-sentence final outputs scored on these same inputs. JVM results are Android engine results only.
+
 ## Against today's iOS engine
 
 The same 2,000 held-out English and Spanish sentences, typed by today's iOS engine (`origin/dev` 96b4f365, Spatial autocorrect on, iPhone 17 simulator, its taps moved onto today's layout key by key) and by the Android replay, which finishes each word with `TypingWord.finish` and moves each letter tap to the likelier next letter (`likelierKey`, touch areas tiling the rows) as the keyboard does. German and Bokmål have their own 2,000-sentence sets ([synthetic_sets.py](synthetic_sets.py)): held-out Tatoeba sentences typed with the same touch model on Android's eleven-key rows at a 36 pt pitch. iOS ships no Bokmål model and keeps German's behind an experiment, so those two have no iOS column.
