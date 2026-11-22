@@ -979,7 +979,8 @@ final class KeyboardLayoutTests: XCTestCase {
     /// the same field, black box): upright on an 844 to 874 pt iPhone every row is 7 pt higher
     /// with row 4 whole (254 pt), on a 900 pt or taller one 2 pt lower (264 pt), and turned its
     /// keycaps are 27.33 pt on a 35.33 pt pitch (187.33 pt). The keys' columns, the strip, the SE,
-    /// the Duo and the iPad are the same as from iOS 27.
+    /// the Duo and the iPad are the same as from iOS 27. iOS 18 (unmeasured) keeps the iOS 27 rows,
+    /// so any version but 26 draws the same keys.
     func testIOS26RowsAreApplesIOS26Rows() {
         let running = KeyboardLanguage.systemMajorVersion
         defer { KeyboardLanguage.systemMajorVersion = running }
@@ -999,8 +1000,20 @@ final class KeyboardLayoutTests: XCTestCase {
         }
         KeyboardLanguage.systemMajorVersion = 27
         let today = layouts()
+        KeyboardLanguage.systemMajorVersion = 25
+        let older = layouts()
+        KeyboardLanguage.systemMajorVersion = 18
+        let ios18 = layouts()
         KeyboardLanguage.systemMajorVersion = 26
         let ios26 = layouts()
+        for (name, layout) in today {
+            XCTAssertEqual(older[name]!.keys, layout.keys, "\(name): 25 draws 27's keys")
+            XCTAssertEqual(ios18[name]!.keys, layout.keys, "\(name): 18 draws 27's keys")
+            XCTAssertEqual(older[name]!.totalHeight, layout.totalHeight, name)
+        }
+        for name in ["17 Pro", "Pro Max", "17 Pro turned"] {
+            XCTAssertNotEqual(ios26[name]!.keys, today[name]!.keys, "\(name): 26 differs")
+        }
         let heights: [String: (CGFloat, CGFloat)] = [
             "17 Pro": (247, 254), "12": (247, 254), "Pro Max": (266, 264), "SE": (254, 254),
             "17 Pro turned": (204, 187.33), "Pro Max turned": (204, 187.33), "SE turned": (206, 206),

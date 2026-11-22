@@ -315,10 +315,11 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     )
 
     /// Whether Apple's iPhone keyboard draws iOS 26's rows (`KeyboardLanguage.systemMajorVersion`):
-    /// before iOS 27 (iOS 26.2 to 26.5 simulators, black box) its panel is 7 pt taller under the
-    /// keys on an 844 to 874 pt iPhone and 2 pt shorter on a 900 pt or taller one, and turned its
-    /// keys are smaller (`landscapeIOS26`). The SE, the Duo and the iPad keep one set of metrics.
-    static var appleRowsAreIOS26: Bool { KeyboardLanguage.systemMajorVersion < 27 }
+    /// on iOS 26 (iOS 26.2 to 26.5 simulators, black box) its panel is 7 pt taller under the keys
+    /// on an 844 to 874 pt iPhone and 2 pt shorter on a 900 pt or taller one, and turned its keys
+    /// are smaller (`landscapeIOS26`). iOS 18 is unmeasured (no simulator runtime) and keeps the
+    /// iOS 27 rows Hex always drew there. The SE, the Duo and the iPad keep one set of metrics.
+    static var appleRowsAreIOS26: Bool { KeyboardLanguage.systemMajorVersion == 26 }
 
     /// Turned, iOS draws no band above the keyboard (iPhone 17 Pro Max, iOS 27.2): Apple's keycaps
     /// start 50 pt below the panel's edge, so the strip is 42 pt and the same gap.

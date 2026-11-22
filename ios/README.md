@@ -1155,7 +1155,8 @@ never at a launch by itself.
   the same keycaps, but upright its panel is 7 pt taller under the keys on an 844 to 874 pt
   iPhone and 2 pt shorter on a 900 pt or taller one, so on iOS 26 Hex's rows sit 7 pt higher
   (row 4 whole, 254 pt) or 2 pt lower (264 pt) to stay on Apple's (`KeyboardMetrics.appleRowsAreIOS26`);
-  the SE is the same on both. The words are on Apple's line, 26 pt above the keys and
+  the SE is the same on both. iOS 18 is unmeasured (the Studio has no iOS 18 simulator) and
+  keeps the iOS 27 rows Hex drew there before. The words are on Apple's line, 26 pt above the keys and
   20 pt below the keyboard's top edge; an autocorrection is a small 18 pt chip around
   its word, and the pills (the Hex key, the recording bar) are 28 pt, 6 pt down, so
   nothing touches the top edge. iOS draws about 17 pt of its own panel above a
@@ -1165,7 +1166,7 @@ never at a launch by itself.
   strip it replaces left the words 9 pt under the edge whenever iOS added nothing.
   Turned, the strip is 42 pt and the keyboard 204 pt (32 pt keycaps on a 40 pt pitch); on iOS
   26 Apple's turned keycaps are 27.33 pt on a 35.33 pt pitch ending 4 pt above the bottom, and
-  Hex's are too, 187.33 pt in all (the SE keeps iOS 27's turned keys for now: Apple's turned SE
+  Hex's are too, 187.33 pt in all (iOS 18, unmeasured, keeps 204 pt) (the SE keeps iOS 27's turned keys for now: Apple's turned SE
   on iOS 26 is its upright keyboard across the whole screen).
   Where iOS gives the keyboard a shorter view than it asks for (Spotlight on an iPhone
   17 Pro Max, iOS 27.3, TestFlight: about 20 pt short), the rows fit the height it has:
