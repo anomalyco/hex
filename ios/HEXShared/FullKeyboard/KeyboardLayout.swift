@@ -717,6 +717,12 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
 
     var isSplit: Bool { split != nil }
 
+    /// The Duo folded draws Apple's key labels smaller: its 123 is 70 px wide there against
+    /// Hex's 80 at 2.95 px per point (iOS 27.2), 0.875 of Hex's upright iPhone size, the same
+    /// share Apple's turned keyboard uses. Every other posture draws its labels as they are.
+    static let coverLabelScale: CGFloat = 0.875
+    var keyLabelScale: CGFloat { posture == .cover && orientation == .portrait ? Self.coverLabelScale : 1 }
+
     /// Settings › Keyboard › Number row's band is above row 1 (`KeyboardMetrics.numberRowHeight`);
     /// its digits show on every page but 123 (`drawsNumberRow`).
     var hasNumberRow: Bool { metrics.numberRowHeight > 0 }
