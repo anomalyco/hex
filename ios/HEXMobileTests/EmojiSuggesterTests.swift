@@ -24,6 +24,21 @@ final class EmojiSuggesterTests: XCTestCase {
 
     // MARK: - Index
 
+    func testBundledCacheReusesInstanceAcrossPresentationsAndEvictsOnMemoryWarning() throws {
+        EmojiLibrary.evictCached()
+        let bundle = Bundle(for: FullKeyboardView.self)
+        let first = try XCTUnwrap(EmojiLibrary.bundled(language: "en", bundle: bundle))
+        let second = try XCTUnwrap(EmojiLibrary.bundled(language: "en", bundle: bundle))
+        XCTAssertTrue(first === second, "presentations in the same language share one EmojiLibrary")
+        let fallback = try XCTUnwrap(EmojiLibrary.bundled(language: "fr", bundle: bundle))
+        XCTAssertTrue(first === fallback, "languages using the English index share the cached English instance")
+        let spanish = try XCTUnwrap(EmojiLibrary.bundled(language: "es", bundle: bundle))
+        XCTAssertFalse(first === spanish)
+        EmojiLibrary.evictCached()
+        let afterWarning = try XCTUnwrap(EmojiLibrary.bundled(language: "es", bundle: bundle))
+        XCTAssertFalse(spanish === afterWarning, "a memory warning releases the cached library")
+    }
+
     func testLoadsEveryCategoryAndOnlyEmojiTheFontDraws() throws {
         let library = try library()
         XCTAssertGreaterThan(library.entries.count, 1_850)

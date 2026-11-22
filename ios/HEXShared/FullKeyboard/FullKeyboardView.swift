@@ -672,6 +672,7 @@ final class FullKeyboardView: UIView {
         dismissStyleMenu()
         if emojiPanel == nil {
             emojiLibrary = nil
+            EmojiLibrary.evictCached()
         }
         emojiPanel?.glyphs.purge()
         if !showsRecording, let panel = recordingPanel {

@@ -2425,19 +2425,79 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(keyboards.count, 1)
 
         // Switched to Apple's keyboard and back where iOS never says the first one disappeared:
-        // the new keyboard is over it, the old one under it draws nothing more.
+        // the new keyboard is over it, and the old one under it is superseded so it retires.
         keyboards.appeared(3, in: field)
         XCTAssertTrue(keyboards.isOverAnother(3))
         XCTAssertFalse(keyboards.isOverAnother(2))
-        // Again: over both.
+        XCTAssertTrue(keyboards.isSuperseded(2))
+        XCTAssertFalse(keyboards.isSuperseded(3))
+        // Again: over both, and both earlier ones are superseded while another field's is not.
         keyboards.appeared(4, in: field)
+        keyboards.appeared(9, in: other)
         XCTAssertTrue(keyboards.isOverAnother(4))
         XCTAssertTrue(keyboards.isOverAnother(3))
+        XCTAssertTrue(keyboards.isSuperseded(2))
+        XCTAssertTrue(keyboards.isSuperseded(3))
+        XCTAssertFalse(keyboards.isSuperseded(4))
+        XCTAssertFalse(keyboards.isSuperseded(9))
+        keyboards.disappeared(9)
+
+        // If the newest keyboard in that field disappears without iOS dismissing the earlier one,
+        // the one directly under it is no longer superseded and can restore its surface.
+        keyboards.disappeared(4)
+        XCTAssertFalse(keyboards.isSuperseded(3))
+        XCTAssertTrue(keyboards.isOverAnother(3))
+        XCTAssertTrue(keyboards.isSuperseded(2))
+        keyboards.disappeared(3)
+        XCTAssertFalse(keyboards.isSuperseded(2))
+        XCTAssertFalse(keyboards.isOverAnother(2))
 
         // The app closes and iOS frees them all: the next keyboard is clear again.
-        for keyboard in [2, 3, 4] { keyboards.disappeared(keyboard) }
+        keyboards.disappeared(2)
         keyboards.appeared(5, in: other)
         XCTAssertFalse(keyboards.isOverAnother(5))
+    }
+
+    func testSharedCaptureOwnershipProtectsActiveOwnerFromStaleKeyboards() {
+        var ownership = KeyboardCaptureOwnership()
+        XCTAssertTrue(ownership.canAcquire(by: 1))
+        ownership.acquireIdle(by: 1)
+        XCTAssertEqual(ownership.owner, 1)
+        XCTAssertFalse(ownership.isCapturing)
+
+        // A second keyboard appears (unnamed field, so 1 was not retired) and starts recording.
+        XCTAssertTrue(ownership.canAcquire(by: 2))
+        ownership.beginCapture(by: 2)
+        XCTAssertEqual(ownership.owner, 2)
+        XCTAssertTrue(ownership.isCapturing)
+        XCTAssertFalse(ownership.canAcquire(by: 3), "an idle preload must not steal an active capture")
+
+        // Stale keyboard 1 hiding, receiving a memory warning, seeing termination, or deallocating
+        // must not park or tear down keyboard 2's active capture.
+        XCTAssertFalse(ownership.park(by: 1))
+        XCTAssertFalse(ownership.evictForMemoryWarning(by: 1))
+        XCTAssertFalse(ownership.dropTerminated(by: 1))
+        XCTAssertFalse(ownership.ownerDidDeinit(1))
+        XCTAssertEqual(ownership.owner, 2)
+        XCTAssertTrue(ownership.isCapturing)
+        // Nor does a memory warning on the recording owner itself evict while capturing.
+        XCTAssertFalse(ownership.evictForMemoryWarning(by: 2))
+
+        // Once 2 finishes recording and stays idle on screen, 1 still cannot evict, while 2 can
+        // park it; once parked (unowned), any idle controller's memory warning may evict it.
+        ownership.endCapture(by: 2)
+        XCTAssertFalse(ownership.isCapturing)
+        XCTAssertFalse(ownership.evictForMemoryWarning(by: 1))
+        XCTAssertTrue(ownership.park(by: 2))
+        XCTAssertNil(ownership.owner)
+        XCTAssertTrue(ownership.evictForMemoryWarning(by: 1))
+        XCTAssertFalse(ownership.hasSharedCapture)
+
+        // If iOS frees the owning controller without viewWillDisappear, ownerDidDeinit parks it.
+        ownership.acquireIdle(by: 4)
+        XCTAssertTrue(ownership.ownerDidDeinit(4))
+        XCTAssertNil(ownership.owner)
+        XCTAssertTrue(ownership.hasSharedCapture)
     }
 
     /// A keyboard still on screen in another field (another app's) is not under this one. A

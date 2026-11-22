@@ -131,6 +131,22 @@ nonisolated final class EmojiLibrary: @unchecked Sendable {
     /// the emoji font draws them.
     static let assumedVersion = 15.1
 
+    @MainActor private static var cached: EmojiLibrary?
+
+    /// The layout's index, kept once per process across keyboard presentations and dropped on a
+    /// memory warning (`evictCached`).
+    @MainActor static func bundled(language: String, bundle: Bundle = .main) -> EmojiLibrary? {
+        let resolved = languages.contains(language) ? language : "en"
+        if let cached, cached.language == resolved { return cached }
+        let loaded = load(language: resolved, bundle: bundle)
+        cached = loaded
+        return loaded
+    }
+
+    @MainActor static func evictCached() {
+        cached = nil
+    }
+
     /// Loads the index for a keyboard layout ("en", "nb", "es", "de"), whose words come
     /// with English's.
     static func load(

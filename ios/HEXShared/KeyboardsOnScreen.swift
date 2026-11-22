@@ -54,4 +54,84 @@ nonisolated struct KeyboardsOnScreen: Equatable, Sendable {
         let field = entries[index].field
         return entries[..<index].contains { $0.field == nil || field == nil || $0.field == field }
     }
+
+    /// Whether a later keyboard is currently on screen in `keyboard`'s own named field: `keyboard`
+    /// sits underneath it and can retire its surface until no later keyboard remains in that field.
+    func isSuperseded(_ keyboard: Int) -> Bool {
+        guard let index = entries.firstIndex(where: { $0.keyboard == keyboard }),
+              let field = entries[index].field else { return false }
+        return entries[(index + 1)...].contains { $0.field == field }
+    }
+}
+
+/// Single-owner bookkeeping for the keyboard process's shared capture web view. Only the
+/// current owner—or any caller while the capture is parked with no owner—may park, evict on a
+/// memory warning, or tear down the shared web view; a former owner that still held a pointer
+/// drops only its own reference so an active recording on a newer keyboard is never disturbed.
+nonisolated struct KeyboardCaptureOwnership: Equatable, Sendable {
+    private(set) var hasSharedCapture = false
+    private(set) var owner: Int?
+    private(set) var isCapturing = false
+
+    /// Whether `requester` may attach or start the shared capture. False while another keyboard
+    /// is actively recording with it.
+    func canAcquire(by requester: Int) -> Bool {
+        !isCapturing || owner == requester
+    }
+
+    /// `requester` attached the shared capture while idle (creating it if needed).
+    mutating func acquireIdle(by requester: Int) {
+        hasSharedCapture = true
+        owner = requester
+        isCapturing = false
+    }
+
+    /// `requester` armed or started microphone capture on the shared web view.
+    mutating func beginCapture(by requester: Int) {
+        hasSharedCapture = true
+        owner = requester
+        isCapturing = true
+    }
+
+    /// `requester`'s capture stopped, failed or was discarded while its keyboard stays on screen.
+    mutating func endCapture(by requester: Int) {
+        guard owner == requester else { return }
+        isCapturing = false
+    }
+
+    /// `requester`'s keyboard hid: true when `requester` owned the shared capture (or nobody did),
+    /// so the caller detaches and parks it; false when another keyboard now owns it.
+    mutating func park(by requester: Int) -> Bool {
+        guard hasSharedCapture, owner == nil || owner == requester else { return false }
+        owner = nil
+        isCapturing = false
+        return true
+    }
+
+    /// `requester` deallocated: true when `requester` still owned the shared capture (or nobody
+    /// did), so the caller stops, detaches and parks it; false when another keyboard owns it.
+    mutating func ownerDidDeinit(_ requester: Int) -> Bool {
+        guard hasSharedCapture, owner == nil || owner == requester else { return false }
+        owner = nil
+        isCapturing = false
+        return true
+    }
+
+    /// `requester` received a memory warning while idle: true only when the shared capture is not
+    /// capturing and either nobody owns it or `requester` itself owns it.
+    mutating func evictForMemoryWarning(by requester: Int) -> Bool {
+        guard hasSharedCapture, !isCapturing, owner == nil || owner == requester else { return false }
+        hasSharedCapture = false
+        owner = nil
+        return true
+    }
+
+    /// WebKit's content process terminated under `requester` (or `nil` while parked).
+    mutating func dropTerminated(by requester: Int?) -> Bool {
+        guard hasSharedCapture, requester == nil || owner == nil || owner == requester else { return false }
+        hasSharedCapture = false
+        owner = nil
+        isCapturing = false
+        return true
+    }
 }
