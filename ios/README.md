@@ -1104,7 +1104,9 @@ never at a launch by itself.
   from the edge to a gap before z, the globe on z (without it, space starts there),
   space up to return, and return from a gap after m to the edge. A Hex key right of
   space takes m's column, where Apple's dictation key is; left of space it follows the
-  globe and emoji. The unfolded postures are measured in the simulator.
+  globe and emoji. Its labels are 0.875 of the iPhone's there, as Apple's are: its 123
+  is 70 px wide folded against Hex's 80 at 2.95 px per point. The unfolded postures are
+  measured in the simulator.
 - **Number row (full keyboard, iPhone):** Settings › Keyboard › Number row (off by default,
   `settings.keyboardNumberRow`, App Group) puts 1 to 0 in a row of their own above row 1, in
   every language and posture, upright and turned. Off, nothing changes. On, the keyboard

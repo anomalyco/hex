@@ -94,6 +94,7 @@ final class KeyboardKeyPlaneView: UIView {
         let layout = engine.layout
         // An iPad's keys are as large turned as upright, so they keep the portrait labels.
         let isLandscape = layout.orientation == .landscape && layout.metrics.pad == nil
+        let labelScale = layout.keyLabelScale
         let radius = layout.metrics.cornerRadius
         var pressed = engine.pressedKinds
         if let lingeringKind { pressed.insert(lingeringKind) }
@@ -135,13 +136,14 @@ final class KeyboardKeyPlaneView: UIView {
                 }
                 var label = Self.keycapLabel(engine.keycapLabel(for: key))
                 let isUpperLetter = layout.layer == .letters && engine.keycapsUppercase && label.first?.isUppercase == true
-                let style = isLandscape
+                var style = isLandscape
                     ? (isUpperLetter ? Self.landscapeCapital
                         : label.first?.isLetter == true ? Self.landscapeLowercase
                         : Self.landscapeSymbolOverrides[label] ?? Self.landscapeSymbol)
                     : isUpperLetter ? LabelStyle.capital
                     : label.first?.isLetter == true ? LabelStyle.lowercase
                     : LabelStyle.symbolOverrides[label] ?? LabelStyle.symbol
+                style = style.scaled(by: labelScale)
                 if let shown = style.shows { label = shown }
                 if !isLandscape, layout.layer == .letters, label.first?.isLetter == true {
                     drawLetter(label, in: labelFrame, style: style, capital: isUpperLetter)
@@ -211,7 +213,7 @@ final class KeyboardKeyPlaneView: UIView {
                 let lit = pressed.contains(key.kind)
                 context.fillKeycap(frame, fill: lit ? palette.keyHeldFill : palette.keyFill, radius: radius)
                 guard showGlyphs() else { continue }
-                let style = isLandscape
+                var style = isLandscape
                     ? (key.label == "123" && key.row == 3 ? LabelStyle(size: 15.5, weight: UIFont.Weight(rawValue: -0.05), yOffset: 0)
                         : key.row == 3 ? LabelStyle(size: 17.75, weight: UIFont.Weight(rawValue: 0.08), yOffset: -0.83)
                         : key.label == "#+=" ? LabelStyle(size: 12.25, weight: UIFont.Weight(rawValue: 0.2), yOffset: -1.33)
@@ -219,6 +221,7 @@ final class KeyboardKeyPlaneView: UIView {
                     : key.row == 3 ? LabelStyle.pageKey
                     : key.label == "#+=" ? LabelStyle.symbolsPageKey
                     : LabelStyle(size: 15.5, yOffset: 0)
+                style = style.scaled(by: labelScale)
                 drawText(key.label, in: labelFrame, font: style.font, color: palette.textBase, yOffset: style.yOffset)
             case .globe:
                 let lit = pressed.contains(.globe)
@@ -367,6 +370,15 @@ final class KeyboardKeyPlaneView: UIView {
         var caseSensitive = false
         /// A different glyph to draw (the key still types its own character).
         var shows: String?
+
+        /// This label at a share of its size, keeping its weight, nudge and glyph: the Duo
+        /// folded draws Apple's smaller cover labels (KeyboardLayout.keyLabelScale).
+        func scaled(by scale: CGFloat) -> LabelStyle {
+            guard scale != 1 else { return self }
+            var style = self
+            style.size *= scale
+            return style
+        }
 
         @MainActor var font: UIFont {
             let key = FontKey(size: size, weight: weight.rawValue, caseSensitive: caseSensitive)

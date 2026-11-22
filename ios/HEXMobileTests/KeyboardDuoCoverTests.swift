@@ -71,4 +71,32 @@ final class KeyboardDuoCoverTests: XCTestCase {
         XCTAssertEqual(page.width, q.width, accuracy: 0.001)
         XCTAssertEqual(globe.minX, q.maxX + landscape.metrics.gap, accuracy: 0.001)
     }
+
+    /// Folded, Apple's key labels are 0.875 of its upright iPhone's: its 123's label is 70 px
+    /// wide there against Hex's 80 at 2.95 px per point (iOS 27.2). So the cover draws every
+    /// label smaller, and every other layout keeps the iPhone's sizes.
+    @MainActor
+    func testOnlyTheFoldedCoverScreenDrawsSmallerLabels() {
+        let cover = KeyboardLayout(width: 466, showsGlobe: true, posture: .cover)
+        XCTAssertEqual(cover.keyLabelScale, 0.875, accuracy: 0.0001)
+        let styles: [KeyboardKeyPlaneView.LabelStyle] = [
+            .lowercase, .capital, .symbol, .pageKey, .symbolsPageKey,
+        ]
+        for style in styles {
+            XCTAssertLessThan(style.scaled(by: cover.keyLabelScale).size, style.size)
+        }
+        XCTAssertEqual(styles[0].scaled(by: cover.keyLabelScale).size, 24.5 * 0.875, accuracy: 0.0001)
+
+        for layout in [
+            KeyboardLayout(width: 402),
+            KeyboardLayout(width: 655, posture: .unfoldedTall, windowInset: 7),
+            KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75),
+            KeyboardLayout(width: 528, orientation: .landscape, showsGlobe: true, posture: .cover, windowInset: 75),
+        ] {
+            XCTAssertEqual(layout.keyLabelScale, 1, "\(layout.width) pt \(layout.posture) \(layout.orientation)")
+            for style in styles {
+                XCTAssertEqual(style.scaled(by: layout.keyLabelScale).size, style.size)
+            }
+        }
+    }
 }
