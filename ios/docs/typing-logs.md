@@ -1,5 +1,7 @@
 # Typing logs (Record typing logs)
 
+Part of [Hex for iPhone](../README.md).
+
 Settings › Privacy › Advanced › **Record typing logs** (off by default, asks for
 consent in a dialog before it turns on, App Group key
 `experiments.typingLogs`) makes Hex's keyboard write raw logs of everything it

@@ -39,7 +39,7 @@ TEST_RUNNER_HEX_SWIPE_REPLAY=recording.json xcodebuild test \
 Use `TEST_RUNNER_HEX_TAP_REPLAY` for a tap recording.
 
 The report line’s fields are described in
-[`ios/README.md`](../../README.md#replaying-real-typing): swipes report `attempts` (the
+[`ios/docs/build-and-test.md`](../../docs/build-and-test.md#replaying-real-typing): swipes report `attempts` (the
 decoder’s denominator, missed attempts included), `in-dictionary-accuracy` (every
 in-dictionary word, taps included and skipped gestures wrong), `all-words-accuracy` (every
 word, out-of-dictionary ones included), `taps`/`taps-right` (recordings that are taps),
