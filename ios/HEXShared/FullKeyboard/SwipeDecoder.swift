@@ -1,7 +1,6 @@
 import CoreGraphics
 import Foundation
 import HexKeyboardCore
-import os
 
 /// Experiment (Swipe typing): reads a finger's path across the letter keys as a word.
 ///
@@ -242,8 +241,8 @@ nonisolated struct SwipeDecoder: Sendable {
 
     func read(_ path: [CGPoint], times: [TimeInterval]? = nil, keys: TypingDecoder.Keys, previous: String? = nil, limit: Int = 4) -> Reading {
         let none = Reading(candidates: [], scored: 0)
-        // Without the core's model (a file it can't open, logged once) nothing can be read,
-        // as for a path that reads as no word.
+        // Without the core's model (a file it can't open) nothing can be read, as for a path
+        // that reads as no word.
         guard limit > 0, let decoder = core.decoder(self) else { return none }
         var points: [Double] = []
         points.reserveCapacity(2 * path.count)
@@ -315,20 +314,8 @@ nonisolated struct SwipeDecoder: Sendable {
             if let pointer { hk_swipe_free(pointer) }
         }
 
-        private static let logger = Logger(subsystem: "anomaly.hex.mobile.keyboard", category: "keyboard-core")
-        /// The model files the core couldn't open, each said once.
-        private static let unopened = OSAllocatedUnfairLock(initialState: Set<URL>())
-
-        private static func reportUnopened(_ url: URL) {
-            guard unopened.withLock({ $0.insert(url).inserted }) else { return }
-            logger.error("The keyboard core can't open the typing model \(url.lastPathComponent, privacy: .public): swipes read as nothing")
-        }
-
         private static func make(_ settings: SwipeDecoder) -> OpaquePointer? {
-            guard let model = settings.model.core else {
-                reportUnopened(settings.model.url)
-                return nil
-            }
+            guard let model = settings.model.core else { return nil }
             var parameters = settings.parameters.core
             let words = settings.neverSuggest.words.map { UInt32($0) }
             let pairs = settings.neverSuggest.pairs.flatMap { [UInt32($0.first), UInt32($0.second)] }
