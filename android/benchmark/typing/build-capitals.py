@@ -155,6 +155,11 @@ def merged_counts(lang, work):
 def main():
     lang, model, work, output = sys.argv[1:5]
     lowercase = scowl_lowercase(sys.argv[5]) if lang == "en" else set()
+    if lang == "en":
+        # Hex's own chat and tech words (en-extra-words.tsv, which build-typing-model.py adds to the
+        # model) are lowercase words: "plz" and "okie", capitalised in books, are held too.
+        extra = os.path.join(os.path.dirname(os.path.abspath(__file__)), "en-extra-words.tsv")
+        lowercase |= {line.split("\t")[0] for line in open(extra, encoding="utf-8") if line.strip() and not line.startswith("#")}
     merged = merged_counts(lang, work)
     unigram, pair = model_words(model)
     words = set(unigram)
