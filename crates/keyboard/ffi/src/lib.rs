@@ -16,8 +16,9 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 pub use model::{HkModel, hk_model_free, hk_model_open, hk_model_open_fd, hk_model_word_count};
 pub use swipe::{
     HkCandidate, HkExtraWord, HkKeyCentre, HkKeys, HkSwipeDecoder, HkSwipeParameters,
-    HkSwipeReading, hk_swipe_default_parameters, hk_swipe_free, hk_swipe_new, hk_swipe_read,
-    hk_swipe_reading_free,
+    HkSwipeReading, hk_swipe_contraction_cost, hk_swipe_cost_of_contraction,
+    hk_swipe_default_parameters, hk_swipe_free, hk_swipe_new, hk_swipe_own_word_cost,
+    hk_swipe_read, hk_swipe_reading_free,
 };
 
 /// `HK_ABI_VERSION` in `include/hex_keyboard.h`.

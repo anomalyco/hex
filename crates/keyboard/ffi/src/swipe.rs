@@ -4,7 +4,10 @@ use std::ffi::{CString, c_char};
 use std::ptr;
 
 use hex_keyboard_core::never_suggest::NeverSuggest;
-use hex_keyboard_core::swipe::{ExtraWord, Keys, Parameters, Reading, SwipeDecoder};
+use hex_keyboard_core::swipe::{
+    CONTRACTION_COST, ExtraWord, Keys, OWN_WORD_COST, Parameters, Reading, SwipeDecoder,
+    cost_of_contraction,
+};
 
 use crate::model::HkModel;
 use crate::{guard, slice, utf8};
@@ -244,6 +247,30 @@ pub unsafe extern "C" fn hk_swipe_default_parameters(out: *mut HkSwipeParameters
     let parameters = default_parameters().map_or_else(HkSwipeParameters::default, |p| (&p).into());
     // SAFETY: non-NULL and writable, as the caller promises; written whole, never read
     unsafe { out.write(parameters) };
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn hk_swipe_contraction_cost() -> f64 {
+    CONTRACTION_COST
+}
+
+#[unsafe(no_mangle)]
+pub extern "C" fn hk_swipe_own_word_cost() -> f64 {
+    OWN_WORD_COST
+}
+
+/// `swipe::cost_of_contraction`; a NULL or non-UTF-8 `word` is no contraction (`base` + 2), as
+/// is a panic.
+///
+/// # Safety
+/// `word` is NULL or NUL-terminated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hk_swipe_cost_of_contraction(word: *const c_char, base: f64) -> f64 {
+    let none = base + 2.0;
+    guard(none, || {
+        // SAFETY: NULL or NUL-terminated, as the caller promises.
+        unsafe { utf8(word) }.map_or(none, |word| cost_of_contraction(word, base))
+    })
 }
 
 /// # Safety

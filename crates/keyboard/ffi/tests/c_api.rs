@@ -306,6 +306,32 @@ fn the_default_parameters_are_the_cores() {
 }
 
 #[test]
+fn contraction_costs_are_the_cores() {
+    unsafe {
+        let base = hk_swipe_contraction_cost();
+        assert_eq!(base, 7.5);
+        assert_eq!(hk_swipe_own_word_cost(), 11.0);
+        let cost =
+            |word: &str| hk_swipe_cost_of_contraction(CString::new(word).unwrap().as_ptr(), base);
+        assert_eq!(cost("I'm"), 6.0, "the commonest, in any case");
+        assert_eq!(cost("DON'T"), 6.0);
+        assert_eq!(cost("we're"), 7.5);
+        assert_eq!(cost("ma'am"), 9.5);
+        assert_eq!(cost(""), 9.5);
+        assert_eq!(hk_swipe_cost_of_contraction(ptr::null(), base), 9.5);
+        let bad_utf8 = [0xffu8, 0];
+        assert_eq!(
+            hk_swipe_cost_of_contraction(bad_utf8.as_ptr().cast(), 1.0),
+            3.0
+        );
+        assert_eq!(
+            hk_swipe_cost_of_contraction(CString::new("can't").unwrap().as_ptr(), 1.0),
+            -0.5
+        );
+    }
+}
+
+#[test]
 fn reads_a_swipe_through_the_c_interface() {
     unsafe {
         let model = open_en();

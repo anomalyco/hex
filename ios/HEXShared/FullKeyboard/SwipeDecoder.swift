@@ -144,28 +144,21 @@ nonisolated struct SwipeDecoder: Sendable {
 
     /// The cost (-ln P) of a common English contraction ("isn't", "we're"), about a word ranked
     /// 1,500th: Google Books splits contractions ("do n't"), so the model's counts for them
-    /// are far too low.
-    static let contractionCost = 7.5
+    /// are far too low. The core's (`hk_swipe_contraction_cost`).
+    static let contractionCost = hk_swipe_contraction_cost()
 
     /// The cost of English contraction `word` by how often a chat uses it: the commonest ("I'm",
     /// "don't", "it's") like a word ranked about 300th, common ones at `base`, the rest ("he'll",
-    /// "ma'am") about 10,000th. (The core's `cost_of_contraction` is the same.)
+    /// "ma'am") about 10,000th. The core decides (`hk_swipe_cost_of_contraction`); a word with
+    /// a NUL in it is none of them, which the core gives for no word.
     static func costOfContraction(_ word: String, base: Double = contractionCost) -> Double {
-        let lower = word.lowercased()
-        if commonestContractions.contains(lower) { return base - 1.5 }
-        if commonContractions.contains(lower) { return base }
-        return base + 2
+        if word.unicodeScalars.contains("\0") { return hk_swipe_cost_of_contraction(nil, base) }
+        return word.withCString { hk_swipe_cost_of_contraction($0, base) }
     }
 
-    private static let commonestContractions: Set<String> = [
-        "i'm", "don't", "it's", "i'll", "can't", "that's", "didn't", "you're", "i've", "doesn't",
-    ]
-    private static let commonContractions: Set<String> = [
-        "isn't", "there's", "let's", "won't", "what's", "he's", "she's", "wasn't", "i'd", "we're",
-        "they're", "haven't", "couldn't", "wouldn't", "aren't", "you'll", "we'll", "shouldn't", "you've",
-    ]
-    /// The cost of one of your own words (as Spatial autocorrect's `userWordCost`).
-    static let ownWordCost = 11.0
+    /// The cost of one of your own words (as Spatial autocorrect's `userWordCost`): the core's
+    /// (`hk_swipe_own_word_cost`).
+    static let ownWordCost = hk_swipe_own_word_cost()
 
     struct Candidate: Equatable, Sendable {
         /// The word as the model spells it: lowercase, with its accents and apostrophes.
