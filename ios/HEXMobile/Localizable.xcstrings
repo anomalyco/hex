@@ -2017,16 +2017,6 @@
         }
       }
     },
-    "On iPad, Hex shows the dictation bar" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 iPad 上显示听写栏"
-          }
-        }
-      }
-    },
     "One file per day, kept 14 days, one event per line. Password, code and card fields are never logged." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2746,6 +2736,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下载已停止。请检查网络连接后重试。"
+          }
+        }
+      }
+    },
+    "The full keyboard works on iPad too" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPad 上也能使用完整键盘"
           }
         }
       }

@@ -673,9 +673,9 @@ never at a launch by itself.
     as `FullKeyboardSettings.isEnabled`, App Group key `experiments.fullKeyboard`
     from when the full keyboard was an experiment: unset or true is Full, false
     the dictation bar, so testers who turned that experiment off keep the bar;
-    on an iPad, where the keyboard always shows the dictation bar, the row says so:
-    "On iPad, Hex shows the dictation bar"), Auto-start (Never, On switch by default, or
-    Always) while the dictation bar is chosen or on an iPad, then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
+    an iPad follows the same choice, and there, while Full is chosen, the row says "The full
+    keyboard works on iPad too", since until build 117 an iPad always showed the bar), Auto-start (Never, On
+    switch by default, or Always) while the dictation bar is chosen, then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words, Vocabulary (Hex's custom vocabulary list, how many words it
     holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
@@ -1124,6 +1124,30 @@ never at a launch by itself.
   setting: Apple's split follows its own Split Keyboard preference, which a keyboard
   extension can't read, so Hex splits whenever the Duo is in that posture (the iOS
   27.2 simulator has Apple's off until `KeyboardShouldSplitInDefaultContext` is set).
+- **iPad:** The app is iPhone-only (`TARGETED_DEVICE_FAMILY` 1), but iPadOS runs its keyboard
+  extension as an iPad keyboard across the screen, so the full keyboard shows there too
+  (Settings › Keyboard picks it or the dictation bar, as on an iPhone). It keeps the
+  iPhone's rows and takes Apple's iPad key sizes (`KeyboardPadSize`, `KeyboardPadPlacement`,
+  `KeyboardMetrics.pad`), measured beside Apple's keyboard in the iPadOS 27.2 simulator:
+  docked, Apple's key heights, row pitch, gaps and side inset for the iPad mini (under 800 pt
+  across), 11-inch and 13-inch (1,000 pt and up), upright or turned, so its four rows sit
+  exactly on Apple's bottom four (letters and the bottom row; the 13-inch's number row and
+  the 11- and 13-inch's tab, caps lock and extra keys are a later step), counted from the
+  screen's bottom, where iPadOS leaves 20 pt empty under a third-party keyboard (3 pt under
+  Apple's). Which way up comes from the keyboard's width against the screen, not the size
+  classes, which an iPad keeps regular either way. Above the rows the strip is Apple's 44 pt
+  bar with the words centred, and above it 44 pt stay clear, as the dictation bar keeps them:
+  iPadOS always adds its own 55 pt bar above a docked keyboard (undo, redo, paste; empty in
+  Windowed Apps), and in some apps it draws that bar over the keyboard's top instead (Notes on
+  an iPad mini, iPadOS 26.6, TestFlight). So Hex is taller than Apple's (353 against 282 pt
+  on the mini and 11-inch upright). Docked, the bottom row ends in Apple's hide-keyboard key,
+  the labels keep their upright sizes turned, and keys show no balloons, as Apple's don't.
+  Floating (iPadOS makes every keyboard 320 pt wide, with no bar above and its own globe and
+  dictation band below), Hex is Apple's floating keyboard: 26 × 38.25 pt keys on a 54.3 pt
+  pitch, 35.5 pt shift and delete, 123, space and return on row 3's columns, and the strip
+  where Apple's bar is, 271 pt in all as Apple's; it shows no globe of its own there.
+  iPadOS grants a custom keyboard any height it asks for (up to 900 pt tried); one that asks
+  for none gets 258 pt (343 turned) on the 11-inch.
 - **Touch targets (full keyboard):** Every point of the key area types a key: gaps
   split down the middle, the outer keys reach the screen's edges, and row 1 also
   takes the 8 pt gap under the strip (on the Duo, the strip's bottom 4 pt below its
@@ -1298,7 +1322,7 @@ never at a launch by itself.
     suspended mid-job used to hold every keyboard in recording for good. A
     result that missed its 30 s to go in by itself stays offered as **Paste
     dictation** for 10 minutes, in the full keyboard's strip and in the dictation
-    bar's top row (the only keyboard on an iPad, which offered nothing). A failure or note
+    bar's top row (on an iPad it once offered nothing). A failure or note
     from Hex ("Another app is using the microphone. Try again.") shows for 8 s
     after Hex wrote it (`KeyboardSnapshot.messageAt`), not for as long as it
     stays in the App Group; meanwhile both keyboards dictate in the keyboard, and
@@ -1602,7 +1626,9 @@ dataset's download and its `convert.py` command.
 - **Keyboard layouts:** `KeyboardLayoutTests` check every language's rows,
   widths, hit frames (tiling the key area and row 1's band above it with no gaps
   or overlaps), balloons
-  and accent menus at 320–440 pt, in landscape and in the iPhone Duo's postures; `AutocorrectEngineTests` and
+  and accent menus at 320–440 pt, in landscape and in the iPhone Duo's postures, and the
+  iPad's (`testPad…`: each size docked either way up against Apple's rows, floating, the
+  hide-keyboard key, targets); `AutocorrectEngineTests` and
   `FullKeyboardEngineTests` check typing, dictionaries and English-only fixes.
   Whether the simulator or an iPhone has a `UITextChecker` dictionary for
   `nb` decides Norwegian autocorrect; how good those corrections are is
@@ -1736,8 +1762,9 @@ the tag `ios-beta-appstore-<version>` (e.g. `ios-beta-appstore-1.0.0`) on that `
 it matches the Xcode Cloud start condition, and `ci_scripts/ci_post_clone.sh` stamps that
 version into `project.yml` before generating the project. Once Apple approves a
 version, later uploads must be higher than it. Hex Mobile is iPhone only (`TARGETED_DEVICE_FAMILY` 1).
-An iPad still installs it (as an iPhone app) and runs its keyboard, which there is always the
-dictation bar (the full keyboard is iPhone only). Docked, the bar keeps its top 44 pt clear:
+An iPad still installs it (as an iPhone app) and runs its keyboard as an iPad keyboard: the full
+keyboard or the dictation bar, as Settings › Keyboard chooses (see **iPad** under the full
+keyboard; until build 117 an iPad always showed the bar). Docked, the bar keeps its top 44 pt clear:
 iPadOS adds its shortcut bar (undo, redo, paste) to a custom keyboard, usually above it but
 in some apps over its top (Notes, iPadOS 26.6), where it covered the bar's top row. A
 floating keyboard (iPhone-wide) has no shortcut bar and no strip. The bar's top row is

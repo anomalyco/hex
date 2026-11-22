@@ -471,6 +471,7 @@ final class TypingLogger {
         case .hex: "hex"
         case .globe: "globe"
         case .emoji: "emoji"
+        case .dismiss: "dismiss"
         }
     }
 

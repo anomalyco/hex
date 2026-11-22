@@ -1595,6 +1595,166 @@ final class KeyboardLayoutTests: XCTestCase {
 
     // MARK: - Helpers
 
+    // MARK: - iPad
+
+    /// Every iPad keyboard Hex draws: docked on the three sizes either way up, and floating.
+    private func padLayouts() -> [KeyboardLayout] {
+        var layouts: [KeyboardLayout] = []
+        let placements: [(CGFloat, KeyboardOrientation, KeyboardPadPlacement)] = [
+            (744, .portrait, .docked(.mini)), (1133, .landscape, .docked(.mini)),
+            (834, .portrait, .docked(.medium)), (1210, .landscape, .docked(.medium)),
+            (1032, .portrait, .docked(.large)), (1376, .landscape, .docked(.large)),
+            (320, .portrait, .floating),
+        ]
+        for (width, orientation, pad) in placements {
+            for layer in layers {
+                for field in fields {
+                    for (globe, emoji) in [(true, true), (true, false), (false, true)] {
+                        layouts.append(KeyboardLayout(
+                            width: width, orientation: orientation, layer: layer, field: field,
+                            showsGlobe: globe, showsEmoji: emoji, pad: pad
+                        ))
+                    }
+                }
+            }
+            for language in KeyboardLanguage.allCases {
+                layouts.append(KeyboardLayout(width: width, orientation: orientation, showsGlobe: true, language: language, pad: pad))
+            }
+        }
+        return layouts
+    }
+
+    func testPadPlacementFollowsTheScreenAndTheKeyboardsWidth() {
+        XCTAssertEqual(KeyboardPadSize.current(screenSize: CGSize(width: 744, height: 1133)), .mini)
+        XCTAssertEqual(KeyboardPadSize.current(screenSize: CGSize(width: 1133, height: 744)), .mini)
+        XCTAssertEqual(KeyboardPadSize.current(screenSize: CGSize(width: 834, height: 1210)), .medium)
+        XCTAssertEqual(KeyboardPadSize.current(screenSize: CGSize(width: 820, height: 1180)), .medium)
+        XCTAssertEqual(KeyboardPadSize.current(screenSize: CGSize(width: 1032, height: 1376)), .large)
+        XCTAssertEqual(KeyboardPadSize.current(screenSize: CGSize(width: 1366, height: 1024)), .large)
+
+        let portrait = CGSize(width: 834, height: 1210), turned = CGSize(width: 1210, height: 834)
+        XCTAssertEqual(KeyboardPadPlacement.current(screenSize: portrait, keyboardWidth: 834), .docked(.medium))
+        XCTAssertEqual(KeyboardPadPlacement.current(screenSize: portrait, keyboardWidth: 0), .docked(.medium))
+        XCTAssertEqual(KeyboardPadPlacement.current(screenSize: turned, keyboardWidth: 320), .floating)
+        XCTAssertEqual(KeyboardPadPlacement.orientation(screenSize: portrait, placement: .docked(.medium), keyboardWidth: 834), .portrait)
+        XCTAssertEqual(KeyboardPadPlacement.orientation(screenSize: turned, placement: .docked(.medium), keyboardWidth: 1210), .landscape)
+        XCTAssertEqual(KeyboardPadPlacement.orientation(screenSize: turned, placement: .docked(.medium)), .landscape)
+        XCTAssertEqual(KeyboardPadPlacement.orientation(screenSize: turned, placement: .floating, keyboardWidth: 320), .portrait)
+    }
+
+    /// Apple's iPad keyboards beside Hex's in the same field (iPadOS 27.2 simulator: iPad mini
+    /// A17 Pro, iPad Pro 11-inch and 13-inch M5), read off screenshots in screen points: the top
+    /// of Apple's q, a, z and space rows, their keycaps' height, and their side inset and gap.
+    /// iPadOS ends a third-party keyboard's view 20 pt above the screen's bottom.
+    func testPadDockedRowsSitOnApplesRows() {
+        let apple: [(KeyboardPadPlacement, KeyboardOrientation, CGSize, [CGFloat], CGFloat, CGFloat, CGFloat)] = [
+            (.docked(.mini), .portrait, CGSize(width: 744, height: 1133), [856, 920.5, 985, 1049.5], 55.5, 6, 12),
+            (.docked(.mini), .landscape, CGSize(width: 1133, height: 744), [382, 468, 553.5, 639.5], 74.75, 7, 14),
+            (.docked(.medium), .portrait, CGSize(width: 834, height: 1210), [933, 997.5, 1062, 1126.5], 55.5, 9, 10),
+            (.docked(.medium), .landscape, CGSize(width: 1210, height: 834), [472, 558, 643.5, 729.5], 73.75, 15, 14),
+            (.docked(.large), .portrait, CGSize(width: 1032, height: 1376), [1086.5, 1154.5, 1222.5, 1291], 61.1, 3.5, 7),
+            (.docked(.large), .landscape, CGSize(width: 1376, height: 1032), [665, 753, 841, 929], 79, 5, 10),
+        ]
+        for (pad, orientation, screen, tops, height, side, gap) in apple {
+            let layout = KeyboardLayout(width: screen.width, orientation: orientation, showsGlobe: true, showsEmoji: true, pad: pad)
+            let label = "\(pad) \(orientation)"
+            let viewTop = screen.height - 20 - layout.totalHeight
+            for (row, kind) in [KeyKind.character("q"), .character("a"), .character("z"), .space].enumerated() {
+                let key = layout.key(kind)!.frame
+                XCTAssertEqual(viewTop + key.minY, tops[row], accuracy: 0.34, "\(label) row \(row)")
+                XCTAssertEqual(key.height, height, accuracy: 0.34, "\(label) row \(row)")
+            }
+            let q = layout.key(.character("q"))!.frame, w = layout.key(.character("w"))!.frame
+            XCTAssertEqual(q.minX, side, accuracy: 0.001, label)
+            XCTAssertEqual(w.minX - q.maxX, gap, accuracy: 0.001, label)
+            XCTAssertEqual(layout.key(.character("p"))!.frame.maxX, screen.width - side, accuracy: 0.001, label)
+            // The strip, Apple's 44 pt bar, under 44 pt kept clear for iPadOS's shortcut bar.
+            XCTAssertEqual(layout.metrics.stripTop, 44, label)
+            XCTAssertEqual(layout.stripFrame.height, 44, label)
+            XCTAssertFalse(layout.showsBalloons, label)
+            XCTAssertNil(layout.balloon(for: layout.key(.character("g"))!), label)
+            XCTAssertEqual(KeyboardLayout.height(for: orientation, pad: pad), layout.totalHeight, label)
+        }
+    }
+
+    /// Apple's floating keyboard (the same 320 pt on every iPad): 26 pt keycaps on a 54.3 pt
+    /// pitch, 4 pt in, shift and delete 35.5 pt, 123 and return 73.5 pt with space 153 pt
+    /// between, all in 271 pt under its 44 pt bar; Hex's strip takes the bar's place.
+    func testPadFloatingIsApplesFloatingKeyboard() {
+        let layout = KeyboardLayout(width: 320, showsGlobe: false, pad: .floating)
+        XCTAssertEqual(layout.totalHeight, 271, accuracy: 0.01)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, pad: .floating), layout.totalHeight)
+        let q = layout.key(.character("q"))!.frame
+        XCTAssertEqual(q.minX, 4, accuracy: 0.001)
+        XCTAssertEqual(q.width, 25.8, accuracy: 0.001)
+        XCTAssertEqual(q.height, 38.25, accuracy: 0.001)
+        XCTAssertEqual(layout.key(.character("a"))!.frame.minY - q.minY, 54.33, accuracy: 0.01)
+        XCTAssertEqual(layout.key(.shift)!.frame.width, 35.5, accuracy: 0.1)
+        XCTAssertEqual(layout.key(.delete)!.frame.width, 35.5, accuracy: 0.1)
+        XCTAssertEqual(layout.key(.layerSwitch(.numbers))!.frame.width, 73.5, accuracy: 0.5)
+        XCTAssertEqual(layout.key(.space)!.frame.width, 153, accuracy: 0.5)
+        XCTAssertEqual(layout.key(.returnKey)!.frame.width, 73.5, accuracy: 0.5)
+        XCTAssertEqual(layout.stripFrame.minY, 0)
+        XCTAssertEqual(layout.stripFrame.height, 44)
+        XCTAssertNil(layout.key(.dismiss))
+        XCTAssertTrue(layout.showsBalloons)
+    }
+
+    /// Docked on an iPad the bottom row ends in Apple's hide-keyboard key, one letter wide, on
+    /// every page and field; floating and on an iPhone there is none.
+    func testHideKeyboardKeyEndsTheDockedIPadsBottomRow() {
+        for layout in padLayouts() {
+            let dismiss = layout.key(.dismiss)
+            guard layout.metrics.pad?.isDocked == true else {
+                XCTAssertNil(dismiss, describe(layout))
+                continue
+            }
+            guard let key = dismiss?.frame else {
+                XCTFail("no hide-keyboard key: \(describe(layout))")
+                continue
+            }
+            XCTAssertEqual(key.maxX, layout.width - layout.metrics.side, accuracy: 0.001, describe(layout))
+            XCTAssertEqual(key.width, KeyboardLayout.letterWidth(innerWidth: layout.width, metrics: layout.metrics), accuracy: 0.001, describe(layout))
+            XCTAssertEqual(layout.keys.filter { $0.row == 3 }.max { $0.frame.maxX < $1.frame.maxX }?.kind, .dismiss, describe(layout))
+        }
+        for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
+            XCTAssertNil(layout.key(.dismiss), describe(layout))
+            XCTAssertNil(layout.metrics.pad, describe(layout))
+        }
+        XCTAssertEqual(KeyboardLayout(width: 402).metrics, .portrait)
+    }
+
+    func testPadTargetsTileTheKeyAreaAndKeycapsNeverOverlap() {
+        for layout in padLayouts() {
+            let area = layout.touchAreaFrame
+            var rowTop = area.minY
+            for row in 0..<4 {
+                let targets = layout.keys.filter { $0.row == row }.sorted { $0.hitFrame.minX < $1.hitFrame.minX }
+                    .filter { !($0.kind == .emoji && row == 3) }.map(\.hitFrame)
+                XCTAssertEqual(targets.first?.minX, 0, describe(layout))
+                XCTAssertEqual(targets.last?.maxX, layout.width, describe(layout))
+                for target in targets { XCTAssertEqual(target.minY, rowTop, accuracy: 0.0001, "\(describe(layout)) row \(row)") }
+                rowTop = targets[0].maxY
+            }
+            XCTAssertEqual(rowTop, area.maxY, accuracy: 0.0001, describe(layout))
+            let bounds = CGRect(x: 0, y: 0, width: layout.width, height: layout.totalHeight).insetBy(dx: -0.001, dy: -0.001)
+            for (i, a) in layout.keys.enumerated() {
+                // Apple's emoji key takes only the middle of its keycap (`testEmojiKeyTakesOnlyTheMiddleOfItsKeycapAsApplesDoes`).
+                if a.kind != .emoji {
+                    XCTAssertTrue(a.hitFrame.insetBy(dx: -0.001, dy: -0.001).contains(a.frame), "\(describe(layout)) \(a.label)")
+                }
+                XCTAssertTrue(bounds.contains(a.frame), "\(describe(layout)) \(a.label)")
+                for b in layout.keys[(i + 1)...] {
+                    XCTAssertFalse(a.frame.intersects(b.frame), "\(describe(layout)) \(a.label) × \(b.label)")
+                }
+            }
+            // Nothing of Hex's in the room kept clear above a docked strip.
+            if layout.metrics.pad?.isDocked == true {
+                XCTAssertTrue(layout.keys.allSatisfy { $0.hitFrame.minY >= KeyboardMetrics.padClearance }, describe(layout))
+            }
+        }
+    }
+
     private func landscapeLayouts() -> [KeyboardLayout] {
         [
             KeyboardLayout(width: 667, orientation: .landscape),

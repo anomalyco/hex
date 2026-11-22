@@ -678,12 +678,11 @@ final class KeyboardViewController: UIInputViewController {
         mountSurface()
     }
 
-    /// The full keyboard (iPhone only), or the dictation bar once it was chosen. Without Full
-    /// Access always the full keyboard: the bar types nothing but spaces and line breaks,
-    /// and its Dictate needs Full Access. Only switches while idle.
+    /// The full keyboard, or the dictation bar once it was chosen, on an iPhone and an iPad alike.
+    /// Without Full Access always the full keyboard: the bar types nothing but spaces and line
+    /// breaks, and its Dictate needs Full Access. Only switches while idle.
     private func mountSurface() {
-        let wantsFull = (FullKeyboardSettings().isEnabled || !hasFullAccess)
-            && UIDevice.current.userInterfaceIdiom == .phone
+        let wantsFull = FullKeyboardSettings().isEnabled || !hasFullAccess
         guard surface == nil || wantsFull != (fullKeyboard != nil) else { return }
         guard surface == nil || viewModel.stagePhase == .idle || viewModel.stagePhase == .failed else { return }
         closeBarEmojiPanel()
@@ -1261,12 +1260,12 @@ final class KeyboardViewController: UIInputViewController {
         if viewModel.returnKeyEnabled != returnOn {
             viewModel.returnKeyEnabled = returnOn
         }
-        // As the full keyboard's emoji key: fields that take any text, on an iPhone.
+        // As the full keyboard's emoji key: fields that take any text.
         let takesEmoji: Bool = {
             guard case .keys(.text, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) else { return false }
             return textDocumentProxy.keyboardType != .asciiCapable
         }()
-        let showsEmoji = FullKeyboardSettings().emoji && takesEmoji && UIDevice.current.userInterfaceIdiom == .phone
+        let showsEmoji = FullKeyboardSettings().emoji && takesEmoji
         if viewModel.showsEmojiKey != showsEmoji {
             viewModel.showsEmojiKey = showsEmoji
         }
