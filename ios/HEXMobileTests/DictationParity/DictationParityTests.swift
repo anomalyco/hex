@@ -28,15 +28,10 @@ final class DictationParityTests: XCTestCase {
             throw XCTSkip("Set TEST_RUNNER_HEX_DICTATION_PARITY_OUT to export the dictation parity cases.")
         }
         let count = environment["HEX_DICTATION_PARITY_COUNT"].flatMap(Int.init) ?? 600
-        var writer = try ParityWriter(path: path)
-        var cases = ParityCases(writer: writer)
-        cases.corpus(full: count >= 100_000)
-        let seed = environment["HEX_DICTATION_PARITY_SEED"].flatMap { UInt64($0) } ?? 0x4845_5844_4943_5441
-        var random = DictationRandom(seed: seed)
-        for _ in 0..<count {
-            cases.generated(&random)
+        let writer = try ParityWriter(path: path)
+        ParityCases.run(count: count, seed: environment["HEX_DICTATION_PARITY_SEED"].flatMap(UInt64.init)) {
+            writer.write($0)
         }
-        writer = cases.writer
         try writer.close()
         print("dictation parity: \(writer.lines) cases in \(path)")
     }
@@ -68,7 +63,19 @@ struct ParityLanguage {
 }
 
 struct ParityCases {
-    var writer: ParityWriter
+    /// Takes each case as it's made.
+    let emit: ([String: Any]) -> Void
+
+    /// The test strings (through everything from `count` 100,000) and `count` generated
+    /// transcripts, each case to `emit`.
+    static func run(count: Int, seed: UInt64?, emit: @escaping ([String: Any]) -> Void) {
+        var cases = ParityCases(emit: emit)
+        cases.corpus(full: count >= 100_000)
+        var random = DictationRandom(seed: seed ?? 0x4845_5844_4943_5441)
+        for _ in 0..<count {
+            cases.generated(&random)
+        }
+    }
     static let styles = DictationStyleOracle.allCases
     static let dictionary: [String] = ["the", "hello", "world", "black", "that's", "it", "and", "see", "you",
                                        "great", "sounds", "good", "hola", "i", "okay", "ok", "is", "a", "send"]
@@ -224,13 +231,13 @@ struct ParityCases {
     private mutating func write(_ op: String, language: ParityLanguage, _ fields: [String: Any]) {
         var record = fields.merging(language.json) { first, _ in first }
         record["op"] = op
-        writer.write(record)
+        emit(record)
     }
 }
 
 // MARK: Writing
 
-struct ParityWriter {
+final class ParityWriter {
     private let handle: FileHandle
     private var buffer = Data()
     private(set) var lines = 0
@@ -243,7 +250,7 @@ struct ParityWriter {
         self.handle = handle
     }
 
-    mutating func write(_ record: [String: Any]) {
+    func write(_ record: [String: Any]) {
         // Sorted keys and no escaped slashes, so a fixture's diff reads.
         guard let line = try? JSONSerialization.data(withJSONObject: record,
                                                      options: [.sortedKeys, .withoutEscapingSlashes]) else {
@@ -255,12 +262,12 @@ struct ParityWriter {
         if buffer.count > 1 << 20 { flush() }
     }
 
-    mutating func close() throws {
+    func close() throws {
         flush()
         try handle.close()
     }
 
-    private mutating func flush() {
+    private func flush() {
         handle.write(buffer)
         buffer.removeAll(keepingCapacity: true)
     }
