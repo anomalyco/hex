@@ -199,6 +199,13 @@ final class FullKeyboardEngine {
     var hexPlacement: HexKeyPlacement = .stripTrailing {
         didSet { if hexPlacement != oldValue { rebuildLayout(cause: "hex_placement") } }
     }
+    /// Settings › Keyboard › Number row (off by default): 1 to 0 above row 1, on an iPhone.
+    var showsNumberRow = false {
+        didSet { if showsNumberRow != oldValue { rebuildLayout(cause: "number_row") } }
+    }
+    /// Whether the keys have the number row's band: its switch is on and this is an iPhone (the
+    /// iPad keeps Apple's rows; `KeyboardMetrics.for`).
+    var hasNumberRow: Bool { showsNumberRow && pad == nil }
     /// The letters, accents and spelling dictionary (Settings › Keyboard › Languages).
     var language: KeyboardLanguage = .english {
         didSet {
@@ -1464,6 +1471,7 @@ final class FullKeyboardEngine {
             hexPlacement: hexPlacement,
             phoneSize: phoneSize,
             pad: pad,
+            numberRow: hasNumberRow,
             availableHeight: availableHeight
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)

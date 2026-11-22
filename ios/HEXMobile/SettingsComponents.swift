@@ -278,6 +278,7 @@ enum SettingsSnapshotFixture {
         let args = ProcessInfo.processInfo.arguments
         keyboard.hexKeyOnLeft = args.firstIndex(of: FullKeyboardSettings.hexKeyLaunchArgument)
             .flatMap { $0 + 1 < args.count ? args[$0 + 1] : nil } == "left"
+        keyboard.numberRow = on
         keyboard.autocorrect = true
         keyboard.spatialAutocorrect = true
         keyboard.germanSpatialAutocorrect = on

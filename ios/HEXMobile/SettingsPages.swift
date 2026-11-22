@@ -243,7 +243,7 @@ private enum HexKeySide: CaseIterable {
 /// under the bar, On switch by default), the full keyboard's rows (only while it's
 /// chosen; Auto-capitalization, on by default as Apple's, sits above Autocorrect; Spatial autocorrect only while Autocorrect is on, and Suggest swear words off by
 /// default, as Apple's keyboard never offers them, then Vocabulary, Hex's list of your own
-/// words; Hex key, Right by default, under Languages),
+/// words; Hex key, Right by default, under Languages, then Number row, off by default),
 /// and haptics, which the dictation bar uses too. Below, Swipe typing, which says it needs
 /// the full keyboard while the dictation bar is chosen, and Emoji (on by default, with Clear
 /// emoji history while it's on), the bar's emoji key too. The dictation bar and Haptics say
@@ -255,6 +255,7 @@ struct KeyboardSettingsPage: View {
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
     @State private var autoCapitalization = FullKeyboardSettings().autoCapitalization
     @State private var hexKeyOnLeft = FullKeyboardSettings().hexKeyOnLeft
+    @State private var numberRow = FullKeyboardSettings().numberRow
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
     @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
@@ -351,6 +352,14 @@ struct KeyboardSettingsPage: View {
                     }
                     .padding(.horizontal, 16)
                     .frame(minHeight: 50)
+
+                    SettingsDivider()
+
+                    SettingsToggleRow(
+                        title: String(localized: "Number row"),
+                        detail: String(localized: "Shows 1 to 0 above the letters"),
+                        isOn: $numberRow
+                    )
 
                     SettingsDivider()
 
@@ -462,6 +471,9 @@ struct KeyboardSettingsPage: View {
         .onChange(of: hexKeyOnLeft) { _, onLeft in
             FullKeyboardSettings().hexKeyOnLeft = onLeft
         }
+        .onChange(of: numberRow) { _, enabled in
+            FullKeyboardSettings().numberRow = enabled
+        }
         .onChange(of: autocorrect) { _, enabled in
             FullKeyboardSettings().autocorrect = enabled
         }
@@ -490,6 +502,7 @@ struct KeyboardSettingsPage: View {
             fullKeyboard = FullKeyboardSettings().isEnabled
             autoCapitalization = FullKeyboardSettings().autoCapitalization
             hexKeyOnLeft = FullKeyboardSettings().hexKeyOnLeft
+            numberRow = FullKeyboardSettings().numberRow
             autocorrect = FullKeyboardSettings().autocorrect
             spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
             suggestSwearWords = FullKeyboardSettings().suggestSwearWords

@@ -253,6 +253,7 @@ final class FullKeyboardView: UIView {
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
         hidesWordSuggestions = FullKeyboardSettings().hideWordSuggestions
         syncHexPlacement()
+        syncNumberRow()
         refreshEmojiKey()
         syncSpatialAutocorrect()
         refreshLanguageSignals()
@@ -308,7 +309,14 @@ final class FullKeyboardView: UIView {
     private var padOrientation: KeyboardOrientation?
 
     var preferredHeight: CGFloat {
-        KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize, pad: engine.pad) + lift
+        keysHeight + lift
+    }
+
+    /// The strip and the keys, without the lift.
+    private var keysHeight: CGFloat {
+        KeyboardLayout.height(
+            for: orientation, posture: engine.posture, phoneSize: engine.phoneSize, pad: engine.pad, numberRow: engine.hasNumberRow
+        )
     }
 
     /// Room above the strip for the emoji search results. The strip itself keeps its height in
@@ -320,7 +328,7 @@ final class FullKeyboardView: UIView {
 
     /// How much of the lift the view actually has yet, so nothing jumps before the host grows it.
     private var appliedLift: CGFloat {
-        max(0, min(lift, bounds.height - KeyboardLayout.height(for: orientation, posture: engine.posture, phoneSize: engine.phoneSize, pad: engine.pad)))
+        max(0, min(lift, bounds.height - keysHeight))
     }
 
     /// Reads which device and posture the keyboard is on, and how far iOS set it in from the
@@ -525,6 +533,7 @@ final class FullKeyboardView: UIView {
         }
         hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
+        syncNumberRow()
         refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
@@ -558,6 +567,18 @@ final class FullKeyboardView: UIView {
         dismissStyleMenu()
         engine.hexPlacement = placement
         setNeedsLayout()
+    }
+
+    /// Settings › Keyboard › Number row: the keyboard grows by the row, so the host is asked
+    /// for the new height.
+    private func syncNumberRow() {
+        let shows = FullKeyboardSettings().numberRow
+        guard engine.showsNumberRow != shows else { return }
+        plane.cancelAllTouches()
+        dismissStyleMenu()
+        engine.showsNumberRow = shows
+        setNeedsLayout()
+        onPreferredHeightChange?()
     }
 
     /// Fixtures and tests turn Swipe typing on or off; otherwise its switch in Settings › Keyboard.

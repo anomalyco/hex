@@ -678,7 +678,7 @@ never at a launch by itself.
     the dictation bar, so testers who turned that experiment off keep the bar;
     an iPad follows the same choice, and there, while Full is chosen, the row says "The full
     keyboard works on iPad too", since until build 117 an iPad always showed the bar), Auto-start (Never, On
-    switch by default, or Always) while the dictation bar is chosen, then Languages, Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
+    switch by default, or Always) while the dictation bar is chosen, then Languages, Number row (off by default), Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
     on), Suggest swear words, Vocabulary (Hex's custom vocabulary list, how many words it
     holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
     then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
@@ -1085,6 +1085,23 @@ never at a launch by itself.
   for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
   upright, starting as far in from the screen's side as Apple's. Measured in the
   simulator; unverified on a Duo.
+- **Number row (full keyboard, iPhone):** Settings › Keyboard › Number row (off by default,
+  `settings.keyboardNumberRow`, App Group) puts 1 to 0 in a row of their own above row 1, in
+  every language and posture, upright and turned. Off, nothing changes. On, the keyboard
+  grows upward by the row and every row below stays on Apple's lines (iOS keeps a keyboard
+  on the screen's bottom): Apple's iPhone keyboard has no number row, so it follows
+  SwiftKey's (0.85 of a letter row's pitch, the same row gap; Gboard on iPhone has no row,
+  only digits held on row 1): 34.9 pt keycaps and 45.9 pt more keyboard on a 17 Pro (293 pt,
+  granted in a text view, a Safari form and Spotlight on the iOS 27.2 simulator), 47.6 pt on
+  a Pro Max, 34 pt turned. The digits sit on the 123 page's columns, take the gap under the
+  strip as row 1 did, and hold what the 123 page's digits hold (0 holds °). On the 123 page
+  the row hides, since its row 1 is the same digits, but its band stays so nothing jumps, and
+  that row 1 reaches up through it; the #+= page keeps the row. The digits never reach
+  Spatial autocorrect, next-letter touch help or Swipe typing (a drag from a digit is no
+  swipe), and a word holding digits is never corrected. Where iOS gives less height, the
+  number row shrinks with the others (`KeyboardMetrics.fitted`). The iPad keeps Apple's rows
+  for now: its docked keyboards would need Apple's own number row on the 13-inch and room
+  above the strip on the others.
 - **Word suggestions (full keyboard):** The strip above the keys shows the words the engine
   offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
   Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops

@@ -1987,6 +1987,16 @@
         }
       }
     },
+    "Number row" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数字行"
+          }
+        }
+      }
+    },
     "Notes" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2443,6 +2453,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "简短分行，多项内容列成清单"
+          }
+        }
+      }
+    },
+    "Shows 1 to 0 above the letters" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在字母上方显示 1 到 0"
           }
         }
       }
