@@ -1801,9 +1801,9 @@ Model advertises streaming, GPU device             // dictate.streaming
     -> Finalize -> Final text
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
-       ├── ≥ 300 ms of speech it heard before the text, outside the pre-roll and
-       │   start tone   -> Transcribe the whole clip offline (source=fallback)
-       │                                                  // likely lost opening
+       ├── ≥ 300 ms of speech it heard > 400 ms before the text (1.2 s for a
+       │   buffered Parakeet stream), outside the pre-roll and start tone
+       │   -> Transcribe the whole clip offline (source=fallback)  // lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
        ├── The raw decode carries two different <ll-RR> language tags
@@ -2108,7 +2108,9 @@ source of false positives on a real microphone (the first version of this
 check, which summed them, likely rejected streams that had lost nothing — see
 `hexs_own_sounds_at_the_captures_head_are_not_a_lost_opening`), but that is
 not measured on a device, and the false-positive rate of this check on real
-speech (fillers, coughs, clicks outside the press window) is still unmeasured.
+speech (fillers, coughs, clicks outside the press window) was still unmeasured
+until November 22, when it was found to refuse nearly every Unified English
+stream on that model's own emission-time stamps (below).
 Because it counts every counted frame, a lost opening is caught however it is
 broken up, including one followed by a pause longer than the 400 ms slack
 (`a_lost_opening_after_a_long_pause_still_falls_back_to_the_whole_clip`).
@@ -2147,6 +2149,25 @@ latency was not measured. Checks:
 `text_with_nothing_before_the_closers_fails_the_mark_check`, and
 `only_unified_english_streams_require_a_closing_mark` (synthetic text). Not
 measured on a real model or microphone.
+
+**Fixed November 22, 2026 (opening slack, Unified English):** the opening
+check used the trailing check's 400 ms slack, but Unified English stamps a
+token at its emission frame: the first word's `t0` lands 640–750 ms after its
+acoustic onset, in both the stream and the whole-clip run (the same value
+within one 80 ms frame), independent of the stream's chunk and lookahead
+geometry. A capture with no pre-roll head, as duck/mute/pause behaviors and
+"Release microphone while idle" cold opens leave, therefore reported openings
+the stream never lost: "text starts at 1280 ms but 560 ms of speech precedes
+it, from 220 to 860 ms". A stream whose model runs Parakeet's buffered chunk
+menus (Unified English, and an import with the same menus) now gets 1.2 s of
+opening slack, the measured bias plus the 400 ms margin; every other
+streaming model, including Nemotron 3.5's cache-aware stream, keeps 400 ms.
+The trailing check is unchanged. Measured on the real Unified English Q8_0
+model through transcribe.cpp on the CPU: the stream text was word-identical
+to the whole-clip run in every run, including speech starting at sample 0.
+Checks: `parakeets_emission_stamped_first_word_is_not_a_lost_opening` and
+`parakeets_opening_slack_still_refuses_a_lost_opening` (synthetic tones, a
+fake stream). Not measured on a microphone or a device.
 
 ### Ongoing Jobs And Output
 

@@ -236,6 +236,15 @@ impl WarmTranscriber {
         }
     }
 
+    /// Whether the warm model streams with Parakeet's buffered chunk menus,
+    /// whose token times are emission frames rather than word onsets.
+    pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
+        match &mut self.active {
+            Some(Transcriber::Gguf(model)) => model.streams_buffered_parakeet(),
+            _ => false,
+        }
+    }
+
     /// Stream options of the warm model, when it can stream on its device.
     pub(crate) fn stream_options(&self) -> Option<&transcribe_cpp::StreamOptions> {
         match &self.active {

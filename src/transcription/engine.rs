@@ -1373,8 +1373,11 @@ impl Worker {
         };
         let trailing_silence = stream_trailing_silence(model);
         let closing_mark = stream_requires_closing_mark(model);
+        let opening_slack = stream_opening_slack(model);
         let ended = model.with_stream(&options, cancel, |stream| {
-            let mut capped = PauseCap::new(stream, trailing_silence).ignoring_head(head_ignored);
+            let mut capped = PauseCap::new(stream, trailing_silence)
+                .ignoring_head(head_ignored)
+                .opening_slack(opening_slack);
             let ended = drive_stream(
                 id,
                 &mut capped,
@@ -1740,12 +1743,32 @@ mod tests {
         text_start_ms: Option<u64>,
         text_end_ms: u64,
     ) -> Result<String, String> {
+        finish_with_opening_slack(
+            clip,
+            head_ignored,
+            text_start_ms,
+            text_end_ms,
+            UNTRANSCRIBED_SLACK_SAMPLES,
+        )
+    }
+
+    /// As above, with `slack` samples of speech the stream may leave before
+    /// its text starts, as a model whose token times are biased late gets.
+    fn finish_with_opening_slack(
+        clip: &[f32],
+        head_ignored: usize,
+        text_start_ms: Option<u64>,
+        text_end_ms: u64,
+        slack: usize,
+    ) -> Result<String, String> {
         let mut fake = FakeStream {
             text_start_ms,
             text_end_ms: Some(text_end_ms),
             ..FakeStream::default()
         };
-        let mut capped = PauseCap::new(&mut fake, 0).ignoring_head(head_ignored);
+        let mut capped = PauseCap::new(&mut fake, 0)
+            .ignoring_head(head_ignored)
+            .opening_slack(slack);
         for chunk in clip.chunks(1_600) {
             capped.feed(chunk).unwrap();
         }
@@ -1833,6 +1856,47 @@ mod tests {
         assert_eq!(
             finish_with_text_bounds(&clip, Some(500), 4_200),
             Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn parakeets_emission_stamped_first_word_is_not_a_lost_opening() {
+        // Unified English stamps its first word at the emission frame, 640 ms
+        // after its onset. With no pre-roll to exclude, speech at 220-860 ms
+        // and text at 1280 ms is a stream that lost nothing, as the measured
+        // production lines did; the 400 ms slack refused it.
+        let mut clip = vec![0.0; 3_520]; // 220 ms
+        clip.extend(tone(10_240)); // speech, 220-860 ms
+        clip.extend(vec![0.0; 6_720]); // pause to the text, 860-1280 ms
+        clip.extend(tone(5_120)); // the text's own speech, 1280-1600 ms
+        clip.extend(vec![0.0; 3_200]);
+        assert!(
+            finish_with_text_bounds(&clip, Some(1_280), 1_600)
+                .is_err_and(|reason| reason.contains("precedes")),
+            "the tight slack is what refused this stream"
+        );
+        assert_eq!(
+            finish_with_opening_slack(&clip, 0, Some(1_280), 1_600, PARAKEET_OPENING_SLACK_SAMPLES),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    #[test]
+    fn parakeets_opening_slack_still_refuses_a_lost_opening() {
+        // 3 s of speech the stream lost, then a 1 s pause, then the text at
+        // 4.5 s: more than 1.2 s of slack plus the 300 ms threshold before t0.
+        let mut clip = vec![0.0; 8_000]; // 500 ms
+        clip.extend(tone(48_000)); // the lost speech, 500-3500 ms
+        clip.extend(vec![0.0; 16_000]); // a 1 s pause
+        clip.extend(tone(16_000)); // the text's own speech, 4500-5500 ms
+        clip.extend(vec![0.0; 3_200]);
+        let result =
+            finish_with_opening_slack(&clip, 0, Some(4_500), 5_500, PARAKEET_OPENING_SLACK_SAMPLES);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("precedes")),
+            "{result:?}"
         );
     }
 
