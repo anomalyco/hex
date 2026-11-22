@@ -1,26 +1,25 @@
 import UIKit
 
-/// A thin blurred material under everything the keyboard extension draws. It takes most of
-/// the colour of iOS's glass panel behind it, and blurs away the shapes of anything iOS leaves
-/// there.
+/// A thin blurred material under everything the keyboard extension draws, shown only when iOS
+/// may have left Apple's keyboard under Hex. The rest of the time Hex draws nothing behind its
+/// keys, so its background is iOS's own glass panel: the same colour as the band iOS adds above
+/// a third-party keyboard and the globe row under it, over any app or wallpaper.
 ///
 /// iOS 26 and later draw a glass panel behind a third-party keyboard, and Hex's keys are
 /// translucent. In a field that takes focus as its screen appears and has an input accessory
-/// view, switching from Hex to Apple's keyboard and back leaves Apple's whole key plane in the
-/// host's view tree under the remote keyboard (a `UIKeyboardAutomatic` beside the remote view
-/// in `_UIKBCompatInputView`; iOS 27.0 and 27.2 simulators, every switch, also under a bare
-/// keyboard extension with a clear view). A clear Hex showed Apple's keys a row above its own
-/// (TestFlight build 56, iPhone 17, iOS 27.0.1). A keyboard can't see or remove that view, only
-/// cover it.
+/// view, opened with Hex, switching to Apple's keyboard and back leaves Apple's whole key plane
+/// in the app's view tree under the new Hex (`KeyboardsOnScreen` has the mechanism; iOS 27.0
+/// and 27.2 simulators, every switch, also under a bare keyboard extension with a clear view).
+/// A keyboard can't see or remove that view, only cover it, and `KeyboardsOnScreen.isOverAnother`
+/// says when: an earlier Hex keyboard iOS never took off screen in the same field.
 ///
-/// The cover was an opaque fill in the panel's colour over a plain background (34,34,35 dark,
-/// 226,227,232 light). But the glass follows what is behind it: on an iPhone 17 Pro (iOS 27.2)
-/// in dark mode it reads 31 (of 255) over Notes and 54 over a light web page, so over light
-/// pages Hex was a slab 20 darker with a hard, straight top edge and square corners inside
-/// iOS's rounded panel, and the top bar looked clipped. Through the material's blur the
-/// leftover keys are an even, slightly lighter tone with no shapes, and Hex's area reads 36
-/// over Notes and 46 over that page: within 8 of the glass both ways, with the panel's own
-/// corners. A clear keyboard is the glass exactly, but shows the leftover keys.
+/// The cover was always on: first an opaque fill (34,34,35 dark), a slab 20 darker than the
+/// glass over light pages; then this material everywhere, which reads 36 where the glass is 31
+/// (Notes) and 46 where it is 54 (a light page, iPhone 17 Pro, iOS 27.2, dark mode) and stays
+/// neutral grey where the glass takes a wallpaper's tint (Spotlight: 37,38,38 under a band of
+/// 32,37,39). Either way Hex was a panel of another colour inside iOS's panel, with its own
+/// corners and a seam under the band. Now the material is only there in the one case that
+/// needs it, where the leftover keys are an even, slightly lighter tone with no shapes.
 @MainActor
 final class KeyboardBackdropView: UIView {
     /// The thinnest system material: closest to the bare glass (228,230,232 on a glass of
