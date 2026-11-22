@@ -130,6 +130,15 @@ whole clip. CPU devices (including ARM64) always use the whole-clip path. Set
 also set `TRANSCRIBE_CMAKE_ARGS=-DGGML_NATIVE=OFF`; without it ggml tunes its
 CPU kernels to the build machine and the binary can crash on older CPUs.
 
+An x64 PC below the release floor (for example Ivy Bridge: AVX and F16C, but no
+AVX2) can still build from source. Set
+`TRANSCRIBE_CMAKE_ARGS=-DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_F16C=ON -DGGML_AVX2=OFF -DGGML_BMI2=OFF -DGGML_FMA=OFF`
+and `HEX_X86_BASELINE=ivybridge` for `cargo build --release`
+(`HEX_X86_BASELINE` without those flags fails the build with the full value).
+Such a build is not an official release, is slower on newer CPUs, and never
+self-updates: every official artifact targets x86-64-v3 and would not start on
+that PC.
+
 Run the checked-in setup script from the repository root. It keeps an existing
 compatible Visual Studio installation and installs only missing prerequisites.
 

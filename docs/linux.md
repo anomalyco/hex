@@ -14,6 +14,10 @@ or a software Vulkan driver. See the Wayland requirements below.
 
 x86_64 machines need a 2013 or newer processor with AVX2 (Intel Haswell / AMD Excavator or later); on an older processor Hex shows a message and quits instead of starting.
 
+An x86_64 PC below that floor (for example Ivy Bridge: AVX and F16C, but no AVX2) can still build from source. Set `HEX_X86_BASELINE=ivybridge` and
+`TRANSCRIBE_CMAKE_ARGS="-DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_F16C=ON -DGGML_AVX2=OFF -DGGML_BMI2=OFF -DGGML_FMA=OFF"` for
+`./scripts/install-linux.sh` (`HEX_X86_BASELINE` without those flags fails the build with the full value). Such a build is slower on newer CPUs, is not an official release, and never self-updates, because every official artifact targets x86-64-v3 and would not start on that processor.
+
 Linux opens the same window as macOS and Windows: Settings, Modes,
 and History. Meetings are macOS-only.
 Paste on Wayland uses `wtype` where the compositor offers the virtual keyboard

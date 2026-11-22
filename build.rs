@@ -3,6 +3,7 @@ use std::process::Command;
 
 fn main() {
     check_windows_split();
+    x86_baseline();
     build_version();
     test_build_commit();
     // `hex_dev_onboarding`: the first run's replay strip and its swearing
@@ -120,6 +121,47 @@ fn check_windows_split() {
         allocator, hal,
         "Cargo.lock: gpu-allocator must use wgpu-hal's `windows` crate, or the Windows build breaks"
     );
+}
+
+/// `HEX_X86_BASELINE=ivybridge` builds ggml for Ivy Bridge (2012: SSE4.2, AVX,
+/// F16C) instead of the releases' x86-64-v3, for source builds below the release
+/// floor (docs/linux.md, docs/windows.md). Unset and `v3` keep the release
+/// baseline exactly as CI builds it; any other target ignores the switch.
+fn x86_baseline() {
+    println!("cargo::rustc-check-cfg=cfg(hex_x86_ivybridge)");
+    println!("cargo:rerun-if-env-changed=HEX_X86_BASELINE");
+    println!("cargo:rerun-if-env-changed=TRANSCRIBE_CMAKE_ARGS");
+    const RECOMMENDED: &str = "-DGGML_NATIVE=OFF -DGGML_SSE42=ON -DGGML_AVX=ON -DGGML_F16C=ON -DGGML_AVX2=OFF -DGGML_BMI2=OFF -DGGML_FMA=OFF";
+    let baseline = std::env::var("HEX_X86_BASELINE").ok();
+    match baseline.as_deref() {
+        None | Some("v3") => return,
+        Some("ivybridge") => {}
+        Some(other) => panic!(
+            "HEX_X86_BASELINE={other} is not a baseline; use `v3` (the release baseline), `ivybridge`, or leave it unset"
+        ),
+    }
+    if !matches!(
+        std::env::var("CARGO_CFG_TARGET_OS").as_deref(),
+        Ok("linux" | "windows")
+    ) || std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("x86_64")
+    {
+        return;
+    }
+    let cmake = std::env::var("TRANSCRIBE_CMAKE_ARGS").unwrap_or_default();
+    for flag in [
+        "-DGGML_NATIVE=OFF",
+        "-DGGML_AVX2=OFF",
+        "-DGGML_BMI2=OFF",
+        "-DGGML_FMA=OFF",
+    ] {
+        assert!(
+            cmake.split_whitespace().any(|argument| argument == flag),
+            "HEX_X86_BASELINE=ivybridge needs `{flag}` in TRANSCRIBE_CMAKE_ARGS, or ggml still \
+             targets x86-64-v3 and Hex would crash on the processor this build is for.\n\
+             Set TRANSCRIBE_CMAKE_ARGS=\"{RECOMMENDED}\""
+        );
+    }
+    println!("cargo::rustc-cfg=hex_x86_ivybridge");
 }
 
 fn build_version() {
