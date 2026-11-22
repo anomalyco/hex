@@ -17,7 +17,7 @@ In **Hold** mode, hold Alt while speaking and release it to transcribe and
 paste. In **Toggle** mode, press Alt to start and again to finish, or press
 the **Cancel** shortcut (Escape by default) to throw the recording away; Hex
 takes that key only while a recording runs. Hold mode has no cancel shortcut
-(every dictation finishes and pastes). Alt is the shortcut only while it is held
+(releasing the hold transcribes and pastes). Alt is the shortcut only while it is held
 alone: another key, or a modifier the shortcut doesn't include, joining it
 makes an ordinary chord for the app in front (Alt-tab, Alt+F4, Alt+Shift for
 the input language, or Ctrl on the way to Ctrl+Alt+V), which cancels the

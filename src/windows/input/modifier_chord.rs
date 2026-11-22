@@ -19,7 +19,8 @@ impl CallbackState {
         // is a chord meant for another application. Its press takes the hold
         // away (Labs › Hold through other keys keeps it, as for keys), and
         // Alt's release then passes through unmasked, since Hex swallowed
-        // nothing the app would read as Alt alone.
+        // nothing the app would read as Alt alone — unless Hex later swallows
+        // a key of this chord (Paste Last's V re-arms the mask).
         let joining_modifier =
             is_down && self.trigger_vk.is_none() && !self.binding.names_modifier(vk);
         if joining_modifier {

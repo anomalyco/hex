@@ -5,7 +5,8 @@
 //! input-language switch, is another application's chord from that press on.
 //! It takes the hold away like any key joining it, Toggle must not lock the
 //! cancelled press, and Alt's release is the app's: nothing was swallowed
-//! that would read as a lone Alt tap.
+//! that would read as a lone Alt tap, unless Hex later swallows a key of this
+//! chord (Paste Last's V re-arms the mask).
 //!
 //! These drive the real hook state machine through `process_button`, whose
 //! `key_held` lookup stands in for the physical keys a test cannot press.
