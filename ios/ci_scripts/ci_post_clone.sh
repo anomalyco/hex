@@ -21,6 +21,13 @@ case "${CI_TAG:-}" in
     ;;
 esac
 scripts/fetch-cleanup-model.sh
+# The keyboard's Rust core (scripts/build-keyboard-core.sh) builds with rustup's cargo and
+# the toolchain and iOS targets crates/keyboard pins (rust-toolchain.toml).
+if [ ! -x "$HOME/.cargo/bin/rustup" ]; then
+  curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs |
+    sh -s -- -y -q --profile minimal --default-toolchain none --no-modify-path
+fi
+(cd ../crates/keyboard && "$HOME/.cargo/bin/rustup" -q toolchain install)
 xcodegen generate
 pins=HEXMobile.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
 mkdir -p "$pins"
