@@ -80,15 +80,17 @@ extension FullKeyboardEngine {
 
     /// The key a touch going down at `point` presses: the one under it, or a neighbouring
     /// letter within `letterReach` points that is enough likelier to come next in the word.
+    /// The number row's digits are never letters: a digit's tap stays a digit, and no digit
+    /// claims a row-1 letter's.
     func key(at point: CGPoint) -> KeyboardKey? {
         let point = pointOnKeys(point)
         guard let key = layout.hitTest(point) else { return nil }
-        guard key.character != nil, let model = letterOdds, layerState.layer == .letters,
+        guard key.character != nil, !key.isNumberRow, let model = letterOdds, layerState.layer == .letters,
               field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
               shift.state != .locked, model.language == language.rawValue else { return key }
         let reach = letterReach
         let near = layout.keys.filter {
-            $0.character != nil && $0.kind != key.kind && Self.distance(from: point, to: $0.hitFrame) < reach
+            $0.character != nil && !$0.isNumberRow && $0.kind != key.kind && Self.distance(from: point, to: $0.hitFrame) < reach
         }
         guard !near.isEmpty, let continuations = continuationMass(model) else { return key }
         // An accented letter without a key of its own is typed from its base letter's (é from e).

@@ -34,6 +34,8 @@ struct FullKeyboardSettings {
     static let hexKeyLaunchArgument = "--hex-key"
     /// Simulator scenes pass `--keyboard dictation-bar` (or `full`) to pick the keyboard.
     static let keyboardLaunchArgument = "--keyboard"
+    /// Simulator scenes pass `--number-row on` (or `off`) for Settings › Keyboard › Number row.
+    static let numberRowLaunchArgument = "--number-row"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
@@ -52,6 +54,7 @@ struct FullKeyboardSettings {
         static let twoThumbSelection = "experiments.twoThumbSelection"
         static let hideWordSuggestions = "experiments.hideWordSuggestions"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
+        static let numberRow = "settings.keyboardNumberRow"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
     }
 
@@ -214,6 +217,15 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.hexKeyOnLeft) }
     }
 
+    /// Settings › Keyboard › Number row: 1 to 0 in a row of their own above the letters on an
+    /// iPhone, on every page but 123 (whose top row is the same digits). Off by default, where
+    /// the keys stay exactly on Apple's rows; on, the keyboard grows upward by the row and every
+    /// row below stays where it was (`KeyboardMetrics.withNumberRow`).
+    var numberRow: Bool {
+        get { defaults?.bool(forKey: Key.numberRow) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.numberRow) }
+    }
+
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.
     /// When switching by default.
     var dictationBarAutoStart: DictationBarAutoStart {
@@ -232,8 +244,8 @@ struct FullKeyboardSettings {
     /// Simulator scenes pass `--experiment-full-keyboard` or `--keyboard full|dictation-bar`
     /// to pick the keyboard, `--experiment-emoji` to turn Emoji on, `--experiment-swipe` for
     /// Swipe typing (both on by default; the arguments override a stored off),
-    /// `--experiment-emoji-letters` for ABC under the emoji key, and
-    /// `--hex-key left|right` for the Hex key's side.
+    /// `--experiment-emoji-letters` for ABC under the emoji key,
+    /// `--hex-key left|right` for the Hex key's side, and `--number-row on|off` for the number row.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -261,6 +273,13 @@ struct FullKeyboardSettings {
             switch arguments[index + 1] {
             case "left": hexKeyOnLeft = true
             case "right": hexKeyOnLeft = false
+            default: break
+            }
+        }
+        if let index = arguments.firstIndex(of: Self.numberRowLaunchArgument), index + 1 < arguments.count {
+            switch arguments[index + 1] {
+            case "on": numberRow = true
+            case "off": numberRow = false
             default: break
             }
         }

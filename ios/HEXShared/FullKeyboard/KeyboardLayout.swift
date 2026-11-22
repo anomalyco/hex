@@ -49,6 +49,9 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
         if case .character(let text) = kind { return text }
         return nil
     }
+
+    /// One of Settings › Keyboard › Number row's digits (`KeyboardLayout.numberRowIndex`).
+    var isNumberRow: Bool { row == KeyboardLayout.numberRowIndex }
 }
 
 /// The pop-up balloon over a pressed key: a wider bubble joined to the key by a neck.
@@ -208,6 +211,9 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// Docked on an iPad, the width of a cell in a held key's accent menu, as Apple's is there
     /// (`AccentMenu.padArrangement`); nil elsewhere, where a cell is the held key's width.
     var accentCellWidth: CGFloat?
+    /// Settings › Keyboard › Number row: the keycap height of the row of 1 to 0 above row 1
+    /// (`withNumberRow()`), with a row gap under it; 0 without it.
+    var numberRowHeight: CGFloat = 0
 
     /// The suggestion strip is Apple's predictive bar from the top of its suggestion pill down.
     /// Apple's bar is 44 pt from its panel's edge, the pill around a suggested word starts 6 pt
@@ -397,14 +403,47 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     static let padClearance: CGFloat = 44
 
     /// `windowInset` is how far iOS set the keyboard in from each side of the screen (the Duo).
-    /// `pad` is the iPad keyboard to draw, nil on an iPhone.
+    /// `pad` is the iPad keyboard to draw, nil on an iPhone. `numberRow` adds Settings ›
+    /// Keyboard › Number row's band above row 1, on an iPhone only (the iPad keeps Apple's rows).
     static func `for`(
         _ orientation: KeyboardOrientation,
         innerWidth: CGFloat? = nil,
         posture: KeyboardPosture = .phone,
         windowInset: CGFloat = 0,
         phoneSize: KeyboardPhoneSize = .regular,
-        pad: KeyboardPadPlacement? = nil
+        pad: KeyboardPadPlacement? = nil,
+        numberRow: Bool = false
+    ) -> KeyboardMetrics {
+        let rows = letterRows(orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad)
+        return numberRow && pad == nil ? rows.withNumberRow() : rows
+    }
+
+    /// The number row's pitch as a share of the letter rows': Apple's iPhone keyboard has no
+    /// number row to copy, and SwiftKey's iPhone layout gives its number row 0.85 of a letter
+    /// row (Gboard's iPhone keyboard has none, only digits held on row 1). Hex keeps its row gap
+    /// under the row, so the keycaps are what's left: 34.9 pt on the 17 Pro's 54 pt pitch, 26 pt
+    /// turned. Each key's touch target still runs from the strip's gap to half the gap below
+    /// (48.4 pt tall on the 17 Pro), above Apple's 44 pt minimum.
+    static let numberRowPitchRatio: CGFloat = 0.85
+
+    /// These metrics with the number row above row 1: the keyboard grows upward by its pitch,
+    /// and everything from row 1 down stays where it was.
+    func withNumberRow() -> KeyboardMetrics {
+        var m = self
+        m.numberRowHeight = Self.numberRowPitchRatio * (keyHeight + rowGap) - rowGap
+        return m
+    }
+
+    /// The number row's keycaps and the gap under them; 0 without it.
+    var numberRowPitch: CGFloat { numberRowHeight > 0 ? numberRowHeight + rowGap : 0 }
+
+    private static func letterRows(
+        _ orientation: KeyboardOrientation,
+        innerWidth: CGFloat?,
+        posture: KeyboardPosture,
+        windowInset: CGFloat,
+        phoneSize: KeyboardPhoneSize,
+        pad: KeyboardPadPlacement?
     ) -> KeyboardMetrics {
         if let pad { return .pad(pad, orientation: orientation) }
         let base: KeyboardMetrics
@@ -467,32 +506,35 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
-            modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth
+            modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth,
+            numberRowHeight: numberRowHeight
         )
     }
 
     /// These metrics with the keys fitted into a view `height` tall, where iOS gives the keyboard
     /// less than it asked for (TestFlight, Spotlight on an iPhone 17 Pro Max, iOS 27.3: the view
     /// ended about 20 pt short and row 4 fell below it, under iOS's globe band). The strip keeps
-    /// its size; the keycaps and the gaps between rows shrink alike. Unchanged at full height,
-    /// and while the room for the keys is under half theirs (no height yet, or a passing one).
+    /// its size; the keycaps and the gaps between rows shrink alike, the number row's too.
+    /// Unchanged at full height, and while the room for the keys is under half theirs (no
+    /// height yet, or a passing one).
     func fitted(toHeight height: CGFloat) -> KeyboardMetrics {
         let keys = height - stripArea
         guard height < totalHeight - 0.5, keys >= keysArea / 2 else { return self }
-        let scale = (keys - keysTop - keysBottom + bottomRowTrim) / (4 * keyHeight + 3 * rowGap)
+        let scale = (keys - keysTop - keysBottom + bottomRowTrim) / (4 * keyHeight + 3 * rowGap + numberRowPitch)
         return KeyboardMetrics(
             side: side, gap: gap, rowGap: rowGap * scale, keyHeight: keyHeight * scale,
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
-            modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth
+            modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth,
+            numberRowHeight: numberRowHeight * scale
         )
     }
 
     var stripArea: CGFloat { stripTop + stripHeight + stripBottom }
     /// Row 4's keycap height.
     var bottomRowHeight: CGFloat { keyHeight - bottomRowTrim }
-    var keysArea: CGFloat { keysTop + 4 * keyHeight + 3 * rowGap + keysBottom - bottomRowTrim }
+    var keysArea: CGFloat { keysTop + numberRowPitch + 4 * keyHeight + 3 * rowGap + keysBottom - bottomRowTrim }
     var totalHeight: CGFloat { stripArea + keysArea }
 }
 
@@ -566,6 +608,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         hexPlacement: HexKeyPlacement = .stripTrailing,
         phoneSize: KeyboardPhoneSize = .regular,
         pad: KeyboardPadPlacement? = nil,
+        numberRow: Bool = false,
         availableHeight: CGFloat? = nil
     ) {
         self.width = width
@@ -582,7 +625,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         self.posture = posture
         let innerWidth = width - 2 * self.horizontalInset
         var metrics = KeyboardMetrics.for(
-            orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad
+            orientation, innerWidth: innerWidth, posture: posture, windowInset: windowInset, phoneSize: phoneSize, pad: pad,
+            numberRow: numberRow
         )
         if let availableHeight { metrics = metrics.fitted(toHeight: availableHeight) }
         self.metrics = metrics
@@ -620,6 +664,10 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
 
     var isSplit: Bool { split != nil }
 
+    /// Settings › Keyboard › Number row's band is above row 1 (`KeyboardMetrics.numberRowHeight`);
+    /// its digits show on every page but 123 (`drawsNumberRow`).
+    var hasNumberRow: Bool { metrics.numberRowHeight > 0 }
+
     /// The Hex key sits at the strip's leading (left) end, so what grows from it or points at
     /// it (the recording bar's ✕ and ✓, its menu, the Full Access hint's Open Hex) mirrors.
     var hexOnLeading: Bool { hexPlacement == .stripLeading }
@@ -628,9 +676,23 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         for orientation: KeyboardOrientation,
         posture: KeyboardPosture = .phone,
         phoneSize: KeyboardPhoneSize = .regular,
-        pad: KeyboardPadPlacement? = nil
+        pad: KeyboardPadPlacement? = nil,
+        numberRow: Bool = false
     ) -> CGFloat {
-        KeyboardMetrics.for(orientation, posture: posture, phoneSize: phoneSize, pad: pad).totalHeight
+        KeyboardMetrics.for(orientation, posture: posture, phoneSize: phoneSize, pad: pad, numberRow: numberRow).totalHeight
+    }
+
+    /// `KeyboardKey.row` for Settings › Keyboard › Number row's digits (row 1 is 0, the strip's
+    /// Hex key -1).
+    static let numberRowIndex = -2
+    static let numberRowDigits = "1234567890".map(String.init)
+
+    /// Whether this page draws the number row: wherever its band is, but on the 123 page, whose
+    /// row 1 is the same digits in the same columns. Its band stays there, so the keyboard
+    /// keeps its height, and row 1's touch targets reach up through it: a tap where a digit was
+    /// types that digit.
+    static func drawsNumberRow(_ metrics: KeyboardMetrics, layer: KeyboardLayer) -> Bool {
+        metrics.numberRowHeight > 0 && layer != .numbers
     }
 
     var totalHeight: CGFloat { metrics.totalHeight }
@@ -827,13 +889,14 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         let right = width - inset - m.side
 
         func rowY(_ row: Int) -> CGFloat {
-            m.stripArea + m.keysTop + CGFloat(row) * (m.keyHeight + m.rowGap)
+            if row == numberRowIndex { return m.stripArea + m.keysTop }
+            return m.stripArea + m.keysTop + m.numberRowPitch + CGFloat(row) * (m.keyHeight + m.rowGap)
         }
 
         var drawn: [(KeyKind, Int, CGRect, String)] = []
 
         func add(_ kind: KeyKind, row: Int, x: CGFloat, w: CGFloat, label: String) {
-            let h = row == 3 ? m.bottomRowHeight : m.keyHeight
+            let h = row == 3 ? m.bottomRowHeight : row == numberRowIndex ? m.numberRowHeight : m.keyHeight
             drawn.append((kind, row, CGRect(x: x, y: rowY(row), width: w, height: h), label))
         }
 
@@ -860,6 +923,12 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             addCharacters(rows[1], row: 1, startX: left, keyWidth: lw)
             add(.shift, row: 2, x: left, w: modW, label: "shift")
             addCharacters(rows[2], row: 2, startX: left + modW + m.gap, keyWidth: lw)
+        }
+
+        // The number row: 1 to 0 on the 123 page's digit columns, whatever the letters.
+        let numberRow = drawsNumberRow(m, layer: layer)
+        if numberRow {
+            addCharacters(numberRowDigits, row: numberRowIndex, startX: centredStart(count: 10, keyWidth: referenceW), keyWidth: referenceW)
         }
 
         // Rows 1 and 2.
@@ -1022,10 +1091,10 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         let top = m.stripArea - max(m.stripBottom, stripTouchBand)
         let bottom = m.totalHeight
         var keys: [KeyboardKey] = []
-        for row in 0..<4 {
+        for row in (numberRow ? [numberRowIndex] : []) + Array(0..<4) {
             let rowKeys = drawn.filter { $0.1 == row }.sorted { $0.2.minX < $1.2.minX }
-            let y0 = row == 0 ? top : rowY(row) - m.rowGap / 2
-            let y1 = row == 3 ? bottom : rowY(row + 1) - m.rowGap / 2
+            let y0 = row == numberRowIndex || (row == 0 && !numberRow) ? top : rowY(row) - m.rowGap / 2
+            let y1 = row == 3 ? bottom : rowY(row == numberRowIndex ? 0 : row + 1) - m.rowGap / 2
             for (i, item) in rowKeys.enumerated() {
                 let x0 = i == 0 ? 0 : (rowKeys[i - 1].2.maxX + item.2.minX) / 2
                 let x1 = i == rowKeys.count - 1 ? width : (item.2.maxX + rowKeys[i + 1].2.minX) / 2
@@ -1122,11 +1191,13 @@ extension KeyboardLayout {
         let p = G.pitch
 
         func rowY(_ row: Int) -> CGFloat {
-            m.stripArea + m.keysTop + CGFloat(row) * (m.keyHeight + m.rowGap)
+            if row == numberRowIndex { return m.stripArea + m.keysTop }
+            return m.stripArea + m.keysTop + m.numberRowPitch + CGFloat(row) * (m.keyHeight + m.rowGap)
         }
         var drawn: [(KeyKind, Int, CGRect, String, Bool)] = [] // kind, row, frame, label, right half
         func add(_ kind: KeyKind, row: Int, x: CGFloat, w: CGFloat, label: String, rightHalf: Bool) {
-            drawn.append((kind, row, CGRect(x: x, y: rowY(row), width: w, height: m.keyHeight), label, rightHalf))
+            let h = row == numberRowIndex ? m.numberRowHeight : m.keyHeight
+            drawn.append((kind, row, CGRect(x: x, y: rowY(row), width: w, height: h), label, rightHalf))
         }
         func addRow(_ chars: [String], row: Int, leftStart: CGFloat, rightEnd: CGFloat) -> (CGFloat, CGFloat) {
             let (l, r) = G.halves(chars)
@@ -1138,6 +1209,12 @@ extension KeyboardLayout {
                 add(.character(ch), row: row, x: rStart + CGFloat(i) * p, w: G.keyWidth, label: ch, rightHalf: true)
             }
             return (leftStart + CGFloat(l.count) * p - G.gap, rStart)
+        }
+
+        // The number row: 1 to 5 and 6 to 0 over row 1's halves.
+        let numberRow = drawsNumberRow(m, layer: layer)
+        if numberRow {
+            _ = addRow(numberRowDigits, row: numberRowIndex, leftStart: left, rightEnd: right)
         }
 
         // Rows 1 and 2: row 2 sits half a key in from each side.
@@ -1197,9 +1274,9 @@ extension KeyboardLayout {
         // middle between the halves is no key's.
         let top = m.stripArea - max(m.stripBottom, stripTouchBand)
         var keys: [KeyboardKey] = []
-        for row in 0..<4 {
-            let y0 = row == 0 ? top : rowY(row) - m.rowGap / 2
-            let y1 = row == 3 ? m.totalHeight : rowY(row + 1) - m.rowGap / 2
+        for row in (numberRow ? [numberRowIndex] : []) + Array(0..<4) {
+            let y0 = row == numberRowIndex || (row == 0 && !numberRow) ? top : rowY(row) - m.rowGap / 2
+            let y1 = row == 3 ? m.totalHeight : rowY(row == numberRowIndex ? 0 : row + 1) - m.rowGap / 2
             for half in [false, true] {
                 let items = drawn.filter { $0.1 == row && $0.4 == half }.sorted { $0.2.minX < $1.2.minX }
                 for (i, item) in items.enumerated() {

@@ -2133,6 +2133,81 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hello world keyboard", "no second space after one typed")
     }
 
+    // MARK: - Number row (Settings › Keyboard › Number row)
+
+    /// With the number row on, digits type straight from the letters page beside letters, and
+    /// nothing corrects a word holding them: "12b", "9pm," and "0199" stay as typed, with
+    /// Spatial autocorrect reading the letters around them.
+    func testNumberRowTypesDigitsBesideLettersAndNothingCorrectsThem() throws {
+        engine.showsNumberRow = true
+        let model = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        engine.letterOdds = model
+        engine.autocorrect.decoder = TypingDecoder(model: model)
+        XCTAssertTrue(engine.layout.hasNumberRow)
+        XCTAssertEqual(engine.layout.layer, .letters)
+        tap(.shift)
+        type("flat 12b at 9pm")
+        XCTAssertEqual(engine.layout.layer, .letters, "the digits never leave the letters page")
+        tap(.layerSwitch(.numbers))
+        XCTAssertTrue(engine.layout.keys.filter(\.isNumberRow).isEmpty, "the 123 page's row 1 is the digits")
+        tap(.character(","))
+        type(" call 555 0199")
+        XCTAssertEqual(target.text, "Flat 12b at 9pm, call 555 0199")
+        tap(.space)
+        XCTAssertEqual(target.text, "Flat 12b at 9pm, call 555 0199 ")
+        let keys = try XCTUnwrap(engine.autocorrect.decoderKeys)
+        XCTAssertFalse(keys.centres.keys.contains { $0.isNumber }, "digits aren't in the decoder's letters")
+    }
+
+    /// Next-letter touch help never turns a digit into a letter or a letter into a digit: a tap
+    /// on a digit's edge right by row 1 types the digit, and a tap on a row-1 letter's top edge
+    /// right under the digits types a letter, however likely the letters around them are.
+    func testNextLetterHelpLeavesTheNumberRowAlone() throws {
+        engine.showsNumberRow = true
+        engine.letterOdds = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        type("th")
+        let layout = engine.layout
+        for digit in layout.keys where digit.isNumberRow {
+            let edge = CGPoint(x: digit.frame.midX, y: digit.hitFrame.maxY - 0.5)
+            XCTAssertEqual(engine.key(at: edge)?.kind, digit.kind)
+        }
+        for letter in layout.keys where letter.row == 0 {
+            let edge = CGPoint(x: letter.frame.midX, y: letter.hitFrame.minY + 0.5)
+            XCTAssertEqual(engine.key(at: edge)?.character?.first?.isLetter, true, letter.label)
+        }
+    }
+
+    /// A drag from a digit never becomes a swipe, and a swipe across row 1 under the digits
+    /// still types its word.
+    func testSwipesNeverStartOnTheNumberRowAndStillWorkUnderIt() throws {
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.showsNumberRow = true
+        let one = try XCTUnwrap(plane.engine.layout.key(.character("1")))
+        let zero = try XCTUnwrap(plane.engine.layout.key(.character("0")))
+        let points = (0...10).map { i in
+            CGPoint(x: one.frame.midX + (zero.frame.midX - one.frame.midX) * CGFloat(i) / 10, y: one.frame.midY)
+        }
+        swipe(points: points, on: plane, lift: false)
+        XCTAssertFalse(plane.engine.isSwiping)
+        plane.ended(id: 50, sample: sample(points[points.count - 1]))
+        XCTAssertFalse(field.text.contains { $0.isLetter }, field.text)
+
+        let (rowOne, rowOnePlane) = try swipeKeyboard()
+        rowOnePlane.engine.showsNumberRow = true
+        swipe("power", on: rowOnePlane)
+        XCTAssertEqual(rowOne.text, "power")
+    }
+
+    /// Without the switch, or on an iPad, the keys have no number row.
+    func testNumberRowNeedsItsSwitchAndAnIPhone() {
+        XCTAssertFalse(engine.layout.hasNumberRow, "off by default")
+        engine.showsNumberRow = true
+        XCTAssertTrue(engine.layout.hasNumberRow)
+        engine.pad = .docked(.mini)
+        XCTAssertFalse(engine.hasNumberRow)
+        XCTAssertFalse(engine.layout.hasNumberRow)
+    }
+
     /// TestFlight (build 56): "Swipe keyboard doesn't handle next word capitalization
     /// correctly. Also forgets to add a space sometimes. For example try swiping 'this is a
     /// test'. Example: This Isa test." In a field that capitalises sentences, swiping "this"

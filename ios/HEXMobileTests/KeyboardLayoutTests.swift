@@ -1789,6 +1789,194 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    // MARK: - Number row (Settings › Keyboard › Number row)
+
+    private func assertSameRect(_ a: CGRect, _ b: CGRect, _ message: String, file: StaticString = #filePath, line: UInt = #line) {
+        for (x, y) in [(a.minX, b.minX), (a.minY, b.minY), (a.width, b.width), (a.height, b.height)] {
+            XCTAssertEqual(x, y, accuracy: 0.0001, "\(message): \(a) vs \(b)", file: file, line: line)
+        }
+    }
+
+    /// Each keyboard with the number row on and off, and its 123 page with the row on.
+    private func numberRowLayouts() -> [(on: KeyboardLayout, off: KeyboardLayout, numbers: KeyboardLayout)] {
+        var pairs: [(KeyboardLayout, KeyboardLayout, KeyboardLayout)] = []
+        func pair(_ layer: KeyboardLayer = .letters, _ make: (Bool, KeyboardLayer) -> KeyboardLayout) {
+            pairs.append((make(true, layer), make(false, layer), make(true, .numbers)))
+        }
+        for width in portraitWidths {
+            for layer in layers {
+                for size in [KeyboardPhoneSize.regular, .large, .homeButton] {
+                    pair(layer) { KeyboardLayout(width: width, layer: $1, showsEmoji: true, phoneSize: size, numberRow: $0) }
+                }
+                pair(layer) { KeyboardLayout(width: width, layer: $1, field: .email, showsGlobe: true, numberRow: $0) }
+            }
+            for language in KeyboardLanguage.allCases {
+                pair { KeyboardLayout(width: width, layer: $1, language: language, numberRow: $0) }
+                for letters in language.letterLayouts.dropFirst() {
+                    pair { KeyboardLayout(width: width, layer: $1, language: language, letters: letters, numberRow: $0) }
+                }
+            }
+        }
+        for layer in layers {
+            pair(layer) { KeyboardLayout(width: 874, orientation: .landscape, layer: $1, horizontalInset: 62, numberRow: $0) }
+            pair(layer) { KeyboardLayout(width: 667, orientation: .landscape, layer: $1, phoneSize: .homeButton, numberRow: $0) }
+            for (width, posture, inset) in [(452.0, KeyboardPosture.cover, 7.0), (655, .unfoldedTall, 7), (801, .unfoldedWide, 75)] {
+                pair(layer) { KeyboardLayout(width: width, layer: $1, showsGlobe: true, posture: posture, windowInset: inset, numberRow: $0) }
+            }
+        }
+        return pairs
+    }
+
+    /// Off (the default) the number row changes nothing, and an iPad never gets one yet.
+    func testNumberRowOffLeavesEveryKeyOnApplesRows() {
+        for width in portraitWidths {
+            XCTAssertEqual(KeyboardLayout(width: width, numberRow: false), KeyboardLayout(width: width))
+            XCTAssertEqual(KeyboardLayout(width: width, numberRow: false).totalHeight, 247)
+        }
+        XCTAssertEqual(KeyboardMetrics.for(.portrait).numberRowHeight, 0)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: false), 247)
+        for placement in [KeyboardPadPlacement.docked(.mini), .docked(.large), .floating] {
+            let width: CGFloat = placement == .floating ? 320 : 744
+            XCTAssertEqual(
+                KeyboardLayout(width: width, pad: placement, numberRow: true),
+                KeyboardLayout(width: width, pad: placement),
+                "\(placement)"
+            )
+        }
+    }
+
+    /// On, 1 to 0 sit above row 1 on the 123 page's digit columns, 0.85 of a letter row's pitch
+    /// tall with the row gap under them: the keyboard grows upward by that pitch (45.9 pt on a
+    /// 17 Pro, 34 pt turned) and every other key keeps its place counted from the bottom, which
+    /// is where iOS keeps a keyboard, so the strip moves up with the keyboard's top.
+    func testNumberRowGrowsTheKeyboardUpwardAndLeavesEveryOtherKeyInPlace() {
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: true), 247 + 45.9, accuracy: 0.001)
+        XCTAssertEqual(KeyboardLayout.height(for: .landscape, numberRow: true), 204 + 34, accuracy: 0.001)
+        XCTAssertEqual(KeyboardMetrics.for(.portrait, numberRow: true).numberRowHeight, 34.9, accuracy: 0.001)
+        for (on, off, numbers) in numberRowLayouts() {
+            let m = on.metrics
+            let pitch = KeyboardMetrics.numberRowPitchRatio * (m.keyHeight + m.rowGap)
+            XCTAssertTrue(on.hasNumberRow, describe(on))
+            XCTAssertFalse(off.hasNumberRow, describe(off))
+            XCTAssertEqual(on.totalHeight - off.totalHeight, pitch, accuracy: 0.001, describe(on))
+            XCTAssertEqual(m.numberRowPitch, pitch, accuracy: 0.001, describe(on))
+            XCTAssertEqual(on.stripFrame, off.stripFrame, describe(on))
+            let others = on.keys.filter { !$0.isNumberRow }
+            XCTAssertEqual(others.count, off.keys.count, describe(on))
+            for (a, b) in zip(others, off.keys) {
+                XCTAssertEqual(a.kind, b.kind, describe(on))
+                let shift = b.row < 0 ? 0 : pitch
+                assertSameRect(a.frame, b.frame.offsetBy(dx: 0, dy: shift), "\(describe(on)) \(a.label)")
+                if b.row > 0 { assertSameRect(a.hitFrame, b.hitFrame.offsetBy(dx: 0, dy: shift), "\(describe(on)) \(a.label)") }
+            }
+
+            let digits = on.keys.filter(\.isNumberRow)
+            guard on.layer != .numbers else {
+                XCTAssertTrue(digits.isEmpty, "the 123 page's own row 1 is the digits: \(describe(on))")
+                continue
+            }
+            XCTAssertEqual(digits.map(\.label), KeyboardLayout.numberRowDigits, describe(on))
+            XCTAssertEqual(digits.map(\.kind), KeyboardLayout.numberRowDigits.map { .character($0) }, describe(on))
+            for key in digits {
+                XCTAssertEqual(key.frame.minY, m.stripArea, accuracy: 0.001, describe(on))
+                XCTAssertEqual(key.frame.height, m.numberRowHeight, accuracy: 0.001, describe(on))
+            }
+            // Same widths and gaps as the 123 page's digits (row 1's letter columns), and the 123
+            // page keeps the keyboard's height.
+            XCTAssertEqual(numbers.totalHeight, on.totalHeight, accuracy: 0.001, describe(on))
+            let numberDigits = numbers.keys.filter { $0.row == 0 }
+            XCTAssertEqual(digits.map(\.frame.minX), numberDigits.map(\.frame.minX), describe(on))
+            XCTAssertEqual(digits.map(\.frame.width), numberDigits.map(\.frame.width), describe(on))
+        }
+    }
+
+    /// With the number row the touch targets still tile the keys with no gaps: the digits take
+    /// the gap under the strip, as row 1 did, and row 1 starts halfway down the gap under them.
+    /// On the 123 page the band stays (the keyboard keeps its height) and its row 1, the same
+    /// digits, reaches up through it, so a tap where a digit was types that digit.
+    func testNumberRowTargetsTileAndThe123PageReachesUpThroughItsBand() {
+        var generator = SystemRandomNumberGenerator()
+        for (layout, _, _) in numberRowLayouts() {
+            let area = layout.touchAreaFrame
+            XCTAssertEqual(area.minY, layout.metrics.stripArea - layout.rowOneReach, accuracy: 0.001, describe(layout))
+            let top = layout.hasNumberRow && layout.layer != .numbers ? KeyboardLayout.numberRowIndex : 0
+            for key in layout.keys where key.row == top {
+                XCTAssertEqual(key.hitFrame.minY, area.minY, accuracy: 0.001, "\(describe(layout)) \(key.label)")
+            }
+            for key in layout.keys where key.isNumberRow {
+                let rowOne = layout.keys.first { $0.row == 0 }!
+                XCTAssertEqual(key.hitFrame.maxY, rowOne.frame.minY - layout.metrics.rowGap / 2, accuracy: 0.001, describe(layout))
+                XCTAssertGreaterThanOrEqual(key.hitFrame.height, 0.8 * (layout.metrics.keyHeight + layout.metrics.rowGap) - 0.01, describe(layout))
+                XCTAssertEqual(layout.balloon(for: key) == nil, !layout.showsBalloons, describe(layout))
+            }
+            for _ in 0..<(layout.isSplit ? 0 : 300) {
+                let point = CGPoint(
+                    x: CGFloat.random(in: 0..<layout.width, using: &generator),
+                    y: CGFloat.random(in: area.minY..<area.maxY, using: &generator)
+                )
+                let hits = layout.keys.filter { $0.hitFrame.contains(point) }
+                let emoji = layout.key(.emoji)
+                let inEmojiMargin = emoji.map { $0.row == 3 && !$0.hitFrame.contains(point) && point.y >= $0.frame.minY - layout.metrics.rowGap / 2
+                    && point.x >= $0.frame.minX - layout.metrics.gap / 2 && point.x < $0.frame.maxX + layout.metrics.gap / 2 } ?? false
+                if !inEmojiMargin {
+                    XCTAssertEqual(hits.count, 1, "\(describe(layout)) at \(point): \(hits.map(\.label))")
+                } else {
+                    XCTAssertLessThanOrEqual(hits.count, 1, "\(describe(layout)) at \(point)")
+                }
+            }
+            if layout.layer == .numbers, !layout.isSplit {
+                let three = layout.key(.character("3"))!
+                let band = CGPoint(x: three.frame.midX, y: layout.metrics.stripArea + layout.metrics.numberRowHeight / 2)
+                XCTAssertEqual(layout.hitTest(band)?.kind, .character("3"), describe(layout))
+            }
+            for (i, a) in layout.keys.enumerated() {
+                if a.kind != .emoji {
+                    XCTAssertTrue(a.hitFrame.insetBy(dx: -0.001, dy: -0.001).contains(a.frame), "\(describe(layout)) \(a.label)")
+                }
+                for b in layout.keys[(i + 1)...] {
+                    XCTAssertFalse(a.frame.intersects(b.frame), "\(describe(layout)) \(a.label) × \(b.label)")
+                }
+            }
+        }
+    }
+
+    /// The Duo's split keyboard splits the number row over row 1's halves: 1 to 5 and 6 to 0.
+    func testNumberRowSplitsWithTheKeyboard() {
+        let layout = KeyboardLayout(width: 801, showsGlobe: true, posture: .unfoldedWide, windowInset: 75, numberRow: true)
+        guard let split = layout.split else { return XCTFail("not split") }
+        let digits = layout.keys.filter(\.isNumberRow)
+        XCTAssertEqual(digits.filter { $0.frame.midX < split.middle }.map(\.label), ["1", "2", "3", "4", "5"])
+        XCTAssertEqual(digits.filter { $0.frame.midX > split.middle }.map(\.label), ["6", "7", "8", "9", "0"])
+        XCTAssertEqual(layout.key(.character("5"))?.frame.maxX ?? 0, split.leftEdge, accuracy: 0.001)
+        XCTAssertEqual(layout.key(.character("6"))?.frame.minX ?? 0, split.rightEdge, accuracy: 0.001)
+    }
+
+    /// Where iOS gives the keyboard less room than it asked for, the number row shrinks with the
+    /// other rows, under the same strip, and everything still fits.
+    func testNumberRowFitsAShorterViewWithTheOtherRows() {
+        for orientation in [KeyboardOrientation.portrait, .landscape] {
+            for size in [KeyboardPhoneSize.regular, .large, .homeButton] {
+                let width: CGFloat = orientation == .portrait ? 393 : 852
+                let full = KeyboardLayout(width: width, orientation: orientation, showsEmoji: true, phoneSize: size, numberRow: true)
+                XCTAssertEqual(KeyboardLayout(width: width, orientation: orientation, showsEmoji: true, phoneSize: size, numberRow: true, availableHeight: full.totalHeight), full)
+                let height = full.totalHeight - 20
+                let short = KeyboardLayout(width: width, orientation: orientation, showsEmoji: true, phoneSize: size, numberRow: true, availableHeight: height)
+                XCTAssertEqual(short.totalHeight, height, accuracy: 0.01, "\(size) \(orientation)")
+                XCTAssertEqual(short.stripFrame, full.stripFrame)
+                XCTAssertEqual(short.key(.character("1"))?.frame.minY, full.key(.character("1"))?.frame.minY)
+                XCTAssertLessThan(short.metrics.numberRowHeight, full.metrics.numberRowHeight)
+                XCTAssertEqual(
+                    short.metrics.numberRowHeight / short.metrics.keyHeight,
+                    full.metrics.numberRowHeight / full.metrics.keyHeight, accuracy: 0.001
+                )
+                for key in short.keys where key.row != -1 {
+                    XCTAssertLessThanOrEqual(key.frame.maxY, height + 0.01, "\(size) \(key.label)")
+                }
+                XCTAssertEqual(short.key(.space)?.hitFrame.maxY ?? 0, height, accuracy: 0.01)
+            }
+        }
+    }
+
     private func landscapeLayouts() -> [KeyboardLayout] {
         [
             KeyboardLayout(width: 667, orientation: .landscape),
@@ -2095,5 +2283,20 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertTrue(fresh.emoji)
         fresh.swipeTyping = false
         XCTAssertEqual(defaults.object(forKey: "experiments.swipeTyping") as? Bool, false)
+    }
+
+    /// Settings › Keyboard › Number row is off by default, and `--number-row on|off` sets it.
+    func testNumberRowIsOffByDefault() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertFalse(settings.numberRow)
+        XCTAssertFalse(FullKeyboardSettings(defaults: nil).numberRow, "without the App Group")
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.numberRowLaunchArgument, "on"])
+        XCTAssertTrue(settings.numberRow)
+        XCTAssertEqual(defaults.object(forKey: "settings.keyboardNumberRow") as? Bool, true)
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.numberRowLaunchArgument, "off"])
+        XCTAssertFalse(settings.numberRow)
     }
 }
