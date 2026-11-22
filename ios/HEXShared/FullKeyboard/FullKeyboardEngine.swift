@@ -1317,7 +1317,7 @@ final class FullKeyboardEngine {
     /// that may be offered.
     func showSwipePreview(_ words: [String]) {
         guard isSwiping else { return }
-        let next = swipeReadings(words).first.map { swipeCased($0, capital: swipeCapital) }
+        let next = swipeReadings(words).first.flatMap { swipeTyped([$0])?.word }
         guard next != swipePreview else { return }
         swipePreview = next
         refreshSuggestions()
@@ -1341,15 +1341,13 @@ final class FullKeyboardEngine {
                 TypingLogField("readings", .strings(Array(readings.prefix(4)))),
             ])
         }
-        guard let first = readings.first else {
+        let before = typingContext
+        guard let typed = swipeTyped(readings) else {
             refreshSuggestions()
             onChange?()
             return
         }
-        let before = typingContext
-        let space = SwipeTyping.needsSpace(before: before)
-        let capital = swipeCapital
-        let word = swipeCased(first, capital: capital)
+        let space = typed.space, word = typed.word
         let inserted = (space ? " " : "") + word
         if space { learning?.didFinish(word: AutocorrectEngine.currentToken(in: before), language: autocorrect.language.rawValue) }
         tokenTaps.removeAll()
@@ -1370,7 +1368,7 @@ final class FullKeyboardEngine {
             word: word,
             before: (before ?? "") + SmartPunctuation.plain(rendered),
             after: target.documentContextAfterInput,
-            alternatives: swipeAlternatives(readings, capital: capital)
+            alternatives: typed.alternatives
         )
         logState("typed")
         didEdit()
