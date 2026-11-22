@@ -3020,11 +3020,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   start and the period ends where it used to end, the bar moving inward at both ends; on the
 │   Duo's split keyboard the comma takes from the left half's bar and the period from the right
 │   half's, each bar keeping its inner edge. Neither is added unless the bar still holds a
-│   letter-wide space after them (on an iPhone showing both the globe and emoji keys with the
-│   Hex key beside space there isn't room, so they're skipped). They type `,` and `.` with
-│   shift on too. The 123 and #+= pages, a URL or email field (which keeps its own `.`), an
-│   iPad, and English's Dvorak letters while Dvorak punctuation already puts both on row 1 are
-│   unchanged; off, every layout is key for key the one it was.
+│   letter-wide space after them (on an upright iPhone showing both the globe and emoji keys
+│   with the Hex key beside space there isn't room, so they're skipped). They type `,` and
+│   `.` with shift on too. The 123 and #+= pages, a URL or email field (which keeps its own
+│   `.`), an iPad, and English's Dvorak letters while Dvorak punctuation already puts both on
+│   row 1 are unchanged; off, every layout is key for key the one it was.
 │   Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):

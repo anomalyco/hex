@@ -1314,13 +1314,13 @@ never at a launch by itself.
   and the period ends where it used to end, the bar moving inward at both ends; on the Duo's
   split keyboard the comma takes from the left half's bar and the period from the right
   half's, each bar keeping its inner edge. Neither is added unless the bar still holds a
-  letter-wide space after them (on an iPhone showing both the globe and emoji keys with the
-  Hex key beside space there isn't room, so they're skipped). They type `,` and `.` with shift
-  on too (they have no shifted symbols). The 123 and #+= pages, a URL or email field (which
-  keeps its own `.`), an iPad, and English's Dvorak letters while Dvorak punctuation puts both
-  on row 1 are unchanged. Off, every layout is key for key the one it was. Unit tests only
-  (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS targets, and no
-  physical iPhone run checks it.
+  letter-wide space after them (on an upright iPhone showing both the globe and emoji keys
+  with the Hex key beside space there isn't room, so they're skipped). They type `,` and `.`
+  with shift on too (they have no shifted symbols). The 123 and #+= pages, a URL or email
+  field (which keeps its own `.`), an iPad, and English's Dvorak letters while Dvorak
+  punctuation puts both on row 1 are unchanged. Off, every layout is key for key the one it
+  was. Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the
+  iOS targets, and no physical iPhone run checks it.
 - **Word suggestions (full keyboard):** The strip above the keys shows the words the engine
   offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
   Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops
