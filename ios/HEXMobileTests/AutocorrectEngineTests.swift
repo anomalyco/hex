@@ -228,6 +228,35 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(fix(engine, "github"), "GitHub")
     }
 
+    /// Two of your own words with the same letters ("Bell" and "bell") reach Spatial
+    /// autocorrect and Swipe typing in a fixed order, so the same one wins every launch: text
+    /// replacements by shortcut, learned typo fixes by typo, never a dictionary's order.
+    func testOwnWordsSpelledTwoWaysAlwaysGiveTheSameSpelling() throws {
+        let model = try XCTUnwrap(TypingDecoderModel.bundled("en"))
+        let fillers = (0..<24).map { (userInput: "zz\($0)", documentText: "filler\(UnicodeScalar(97 + $0)!)word") }
+        let entries = [(userInput: "bll", documentText: "bell"), (userInput: "bel", documentText: "Bell"),
+                       (userInput: "iph", documentText: "Iphone"), (userInput: "ip", documentText: "iPhone")] + fillers
+        let typos = ["hrllo": "hello", "hekko": "Hello"]
+        var built: [(swipe: [String], spatial: [String])] = []
+        for order in [entries, Array(entries.reversed())] {
+            let engine = stubbed { _ in }
+            engine.loadLexiconEntries(order)
+            engine.applyLearning(TypingLearning(typos: typos))
+            let swipe = SwipeDecoder.ExtraWords(engine.ownWords, cost: SwipeDecoder.ownWordCost, model: model).texts
+            let spatial = TypingDecoder.UserWords(engine.decoderUserWords, model: model).texts
+            XCTAssertEqual(Array(engine.ownWords.prefix(4)), ["Bell", "bell", "iPhone", "Iphone"], "by shortcut: bel, bll, ip, iph")
+            XCTAssertEqual(Array(engine.decoderUserWords.suffix(2)), ["Hello", "hello"], "by typo: hekko, hrllo")
+            for words in [swipe, spatial] {
+                XCTAssertTrue(words.contains("Bell") && !words.contains("bell"))
+                XCTAssertTrue(words.contains("iPhone") && !words.contains("Iphone"))
+            }
+            XCTAssertTrue(spatial.contains("Hello") && !spatial.contains("hello"))
+            built.append((swipe, spatial))
+        }
+        XCTAssertEqual(built[0].swipe, built[1].swipe, "whatever order the lexicon listed them in")
+        XCTAssertEqual(built[0].spatial, built[1].spatial)
+    }
+
     func testAmbiguousContractionsSuggestWithoutAutoReplacing() {
         let slots = engine.autocorrect.suggestions(
             beforeInput: "well",

@@ -1398,7 +1398,23 @@ final class AutocorrectEngine {
     /// Your own words for Swipe typing: Contacts names and other `UILexicon` terms, one-word
     /// text replacements, and words you kept twice that may be offered.
     var ownWords: [String] {
-        lexiconTerms + lexiconShortcuts.values.filter { !$0.contains(" ") } + learnedWords.words.filter { mayOffer($0) }
+        lexiconTerms + Self.inKeyOrder(lexiconShortcuts).filter { !$0.contains(" ") } + learnedWords.words.filter { mayOffer($0) }
+    }
+
+    /// The words Spatial autocorrect reads as your own (`syncUserWords`), in the order the
+    /// decoder takes them.
+    var decoderUserWords: [String] {
+        let learned = (learnedWords.words + Self.inKeyOrder(learning.typos)).filter { mayOffer($0) }
+        return lexiconTerms + Self.inKeyOrder(lexiconShortcuts) + learned
+    }
+
+    /// `words`' values by key. The decoders keep the first spelling of each run of letters
+    /// ("Bell" or "bell"), so your own words go to them in a fixed order, never a
+    /// dictionary's, which changes from one launch to the next: your `UILexicon` terms and
+    /// vocabulary as listed, then text replacements by shortcut, then words you kept as
+    /// kept, then learned typo fixes by typo.
+    static func inKeyOrder(_ words: [String: String]) -> [String] {
+        words.sorted { $0.key < $1.key }.map(\.value)
     }
 
     /// The English contractions Hex corrects to or offers ("I'm", "don't", "we'll"), which
@@ -1418,9 +1434,7 @@ final class AutocorrectEngine {
         guard let model = decoder?.model else { return }
         let id = ObjectIdentifier(model)
         if let built = userWordsBuilt, built.revision == userWordsRevision, built.model == id { return }
-        let learned = (learnedWords.words + Array(learning.typos.values)).filter { mayOffer($0) }
-        let words = lexiconTerms + Array(lexiconShortcuts.values) + learned
-        decoder?.userWords = TypingDecoder.UserWords(words, model: model)
+        decoder?.userWords = TypingDecoder.UserWords(decoderUserWords, model: model)
         decoder?.neverSuggest = TypingDecoder.NeverSuggest(offensiveWords.blocked(allowSwearing: allowsSwearing), model: model)
         userWordsBuilt = (userWordsRevision, id)
         decoderCache = nil
