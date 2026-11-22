@@ -637,6 +637,11 @@ struct KeyboardSurfaceView: View {
 
             Spacer(minLength: 4)
 
+            if showsPasteDictation {
+                pasteDictationChip(palette: p)
+                Spacer(minLength: 4)
+            }
+
             // The translation note takes the bar's width for its few seconds.
             if model.showsLanguageSwitch || model.showsTranslationSwitch, model.translationNote == nil {
                 languageTrigger(palette: p)
@@ -646,6 +651,30 @@ struct KeyboardSurfaceView: View {
                 .hexTrayReveal(model.hasFullAccess && model.translationNote == nil, reduceMotion: reduceMotion, offsetY: 0)
         }
         .frame(height: TopBarMetrics.height)
+    }
+
+    /// A dictation that didn't go in by itself, as the full keyboard's strip offers it: the
+    /// bar is the only keyboard on an iPad, and without this a late one was out of reach.
+    private var showsPasteDictation: Bool {
+        model.hasFullAccess && model.offeredDictation != nil && !isStageActive && model.translationNote == nil
+    }
+
+    private func pasteDictationChip(palette p: KeyboardChromePalette) -> some View {
+        Button {
+            model.onKeyFeedback?()
+            model.onPasteDictation?()
+        } label: {
+            Text("Paste dictation")
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(p.textBase)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 11)
+                .frame(height: 26)
+                .background(p.chipActiveFill, in: Capsule())
+        }
+        .buttonStyle(TopBarChipButtonStyle())
+        .layoutPriority(1)
     }
 
     private func styleTrayBar(palette p: KeyboardChromePalette) -> some View {
