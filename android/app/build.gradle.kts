@@ -144,10 +144,12 @@ tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, v
 
 // The keyboard's Rust core (crates/keyboard), debug builds only for now: libhex_keyboard.so
 // for the APK and a host build for the JVM unit tests. Release builds don't include it.
-// rustup's cargo, run from the crate so its pinned toolchain (rust-toolchain.toml) is used;
-// Cargo tracks the sources, so the tasks always run.
+// rustup's cargo (in CARGO_HOME, by default ~/.cargo, as iOS's build-keyboard-core.sh looks
+// for it), run from the crate so its pinned toolchain (rust-toolchain.toml) is used; Cargo
+// tracks the sources, so the tasks always run.
 val keyboardCrate = rootProject.file("../crates/keyboard")
-val rustupBin = File(System.getProperty("user.home"), ".cargo/bin")
+val rustupBin = (System.getenv("CARGO_HOME")?.takeIf { it.isNotEmpty() }?.let(::File)
+    ?: File(System.getProperty("user.home"), ".cargo")).resolve("bin")
 abstract class CargoBuild : Exec() {
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
 }
