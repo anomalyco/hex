@@ -40,6 +40,7 @@ mod geometry;
 mod gesture;
 #[cfg(test)]
 mod tests;
+pub mod typing;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
