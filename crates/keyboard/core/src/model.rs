@@ -340,13 +340,26 @@ impl Model {
         previous: &str,
         mut allowing: impl FnMut(&str) -> bool,
     ) -> Vec<String> {
+        self.next_word_indices(previous, |b| allowing(&self.word(b)))
+            .into_iter()
+            .map(|b| self.word(b))
+            .collect()
+    }
+
+    /// `next_words` as word indices: `allowing` is asked about each contender's index, in
+    /// the same order `next_words` asks about its text.
+    pub fn next_word_indices(
+        &self,
+        previous: &str,
+        mut allowing: impl FnMut(usize) -> bool,
+    ) -> Vec<usize> {
         let Some(a) = self.index(previous) else {
             return Vec::new();
         };
         let Some((start, end)) = self.pair_row(a) else {
             return Vec::new();
         };
-        let mut best: Vec<(usize, String)> = Vec::new();
+        let mut best: Vec<(usize, usize)> = Vec::new();
         for i in start..end {
             let cost = self.pair_cost_byte(i);
             let b = self.follower(i);
@@ -358,15 +371,14 @@ impl Model {
             if best.len() == 3 && rank >= best[2].0 {
                 continue;
             }
-            let text = self.word(b);
-            if !allowing(&text) {
+            if !allowing(b) {
                 continue;
             }
             let at = best.iter().position(|e| rank < e.0).unwrap_or(best.len());
-            best.insert(at, (rank, text));
+            best.insert(at, (rank, b));
             best.truncate(3);
         }
-        best.into_iter().map(|(_, text)| text).collect()
+        best.into_iter().map(|(_, b)| b).collect()
     }
 
     /// Completes a one- to three-letter prefix with the word frequencies, backed by the
@@ -379,6 +391,20 @@ impl Model {
         previous: Option<&str>,
         mut allowing: impl FnMut(&str) -> bool,
     ) -> Vec<String> {
+        self.completion_indices(prefix, previous, |i| allowing(&self.word(i)))
+            .into_iter()
+            .map(|i| self.word(i))
+            .collect()
+    }
+
+    /// `completions` as word indices: `allowing` is asked about each contender's index, in
+    /// the same order `completions` asks about its text.
+    pub fn completion_indices(
+        &self,
+        prefix: &str,
+        previous: Option<&str>,
+        mut allowing: impl FnMut(usize) -> bool,
+    ) -> Vec<usize> {
         let Some(codes) = self.encode(prefix) else {
             return Vec::new();
         };
@@ -408,7 +434,7 @@ impl Model {
                 }
             }
         }
-        let mut best: Vec<(usize, String)> = Vec::new();
+        let mut best: Vec<(usize, usize)> = Vec::new();
         let mut next = if link < end { self.follower(link) } else { hi };
         for i in lo..hi {
             let unigram = self.unigram_byte(i);
@@ -426,15 +452,14 @@ impl Model {
             {
                 continue;
             }
-            let text = self.word(i);
-            if !allowing(&text) {
+            if !allowing(i) {
                 continue;
             }
             let at = best.iter().position(|e| rank < e.0).unwrap_or(best.len());
-            best.insert(at, (rank, text));
+            best.insert(at, (rank, i));
             best.truncate(2);
         }
-        best.into_iter().map(|(_, text)| text).collect()
+        best.into_iter().map(|(_, i)| i).collect()
     }
 
     /// How much of the word list's frequency continues `prefix` with each letter, by letter
