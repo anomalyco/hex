@@ -63,6 +63,9 @@ internal class KeyboardEngine(
     private var word: TypingWord? = null
     private var editor: EditorInfo? = null
     private var ordinaryField = false
+    /** Whether a swipe may start in this field: iOS's `.text` field kind (`KeyboardFieldRouting`), any text field
+     * but a web address's or an email's. Passwords aside: iOS never gives a third-party keyboard one. */
+    private var swipeField = false
     private var prefix = ""
     private var expectedCaret = -1
     private data class Undo(val language: String, val original: String, val replacement: String)
@@ -105,6 +108,8 @@ internal class KeyboardEngine(
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
             attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
+        swipeField = kind == InputType.TYPE_CLASS_TEXT && !secure && variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI,
+            InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS)
         resetTyping(); word = null; clearSpaces(); swiped.forget()
         pad = Pad.of(attribute.inputType)
         symbols = pad != null
@@ -509,15 +514,18 @@ internal class KeyboardEngine(
     class SwipeSession(val reader: SwipeDecoder, val handles: SwipeDecoder.Handles, val previous: String?)
     private var swipe: SwipeSession? = null
 
-    /** A swipe's reader when a letter touch may become one now: on the letters page of an ordinary text field,
+    /** A swipe's reader when a letter touch may become one now: on the letters page of a text field ([swipeField]),
      * in English or Spanish, with Swipe typing on; else null. */
     fun swipeSession(): SwipeSession? {
-        val w = word ?: return null
-        if (!feedback.swipeTyping || symbols || pad != null || secure || !target.connected) return null
-        val model = w.decoder.model
-        if (model.language != "en" && model.language != "es") return null
-        val reader = swipeReaders.getOrPut(model.language) { openSwipe?.invoke(model) } ?: return null
-        val handles = reader.sync(feedback.suggestSwearWords, w.decoder.personal) { swipeWork.execute(it) } ?: return null
+        if (!feedback.swipeTyping || !swipeField || symbols || pad != null || !target.connected) return null
+        val language = layoutLanguage().layoutCode
+        if (language != "en" && language != "es") return null
+        // The typing model a field without word help (no suggestions, incognito) has no TypingWord for.
+        val decoder = word?.decoder?.takeIf { it.model.language == language }
+            ?: try { models.getOrPut(language) { loadDecoder(language).also(::loadPersonal) } } catch (_: java.io.IOException) { return null }
+        val model = decoder.model
+        val reader = swipeReaders.getOrPut(language) { openSwipe?.invoke(model) } ?: return null
+        val handles = reader.sync(feedback.suggestSwearWords, decoder.personal) { swipeWork.execute(it) } ?: return null
         return SwipeSession(reader, handles, swipePrevious()).also { swipe = it }
     }
     /** The word before a swipe's, lowercased, when only spaces (or the one the swipe will add) come between
@@ -575,8 +583,8 @@ internal class KeyboardEngine(
             else -> 0
         }
         val shifted = when { shift.locked -> 2; shift.mode == ShiftState.Mode.On -> 1; else -> 0 }
-        // Text replacements apply in any ordinary field, whatever Autocorrect is set to (see space()).
+        // Text replacements apply in any ordinary field, whatever Autocorrect is set to (see space()), and nowhere else.
         return KeyboardCore.swipeTyped(session.handles.words, offered.toTypedArray(), if (secure) null else target.before(96), shifted,
-            shift.held, mode, feedback.autoCapitalize, true, session.reader.checker)
+            shift.held, mode, feedback.autoCapitalize, ordinaryField, session.reader.checker)
     }
 }
