@@ -788,12 +788,14 @@ pub(crate) fn run(
                     }
                 }
                 // Annotate records the narration itself: while it records,
-                // dictation starts nothing. The desktop already took the keys,
-                // so nothing reaches the app.
+                // dictation starts nothing, unless Labs › Dictate while
+                // annotating lets it dictate as usual. The desktop already
+                // took the keys, so nothing reaches the app.
                 HotkeyEvent::Start { .. }
-                    if capture_host
-                        .as_mut()
-                        .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
+                    if !crate::labs::dictate_while_annotating()
+                        && capture_host
+                            .as_mut()
+                            .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 HotkeyEvent::Start { flavour, command }
                     if !capture.is_recording() && !start_pending =>
                 {

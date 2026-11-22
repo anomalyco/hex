@@ -62,6 +62,17 @@ pub(crate) const BOTTOM_OFFSET: f32 = 24.0;
 pub(crate) const WINDOW: (f32, f32) = (320.0, 128.0);
 #[cfg(not(target_os = "macos"))]
 pub(crate) const WINDOW: (f32, f32) = (304.0, 80.0);
+/// The position a HUD shows at: a dictation during an Annotate capture
+/// takes the bottom edge, clear of the capture capsule at the screen's top
+/// (Labs › Dictate while annotating). Hidden stays hidden.
+fn place_during_capture(position: IndicatorPosition, capture: bool) -> IndicatorPosition {
+    if capture && position != IndicatorPosition::Hidden {
+        IndicatorPosition::Bottom
+    } else {
+        position
+    }
+}
+
 /// The notch's own bottom corner radius, which the island starts from.
 const NOTCH_RADIUS: f32 = 8.0;
 /// The open island's bottom corner radius.
@@ -494,7 +505,11 @@ impl Hud {
         {
             self.position = crate::app_settings::indicator_position();
         }
-        if self.position == IndicatorPosition::Hidden {
+        // A capture records with its capsule at the screen's top, so a
+        // dictation during one shows at the bottom, clear of it (Labs ›
+        // Dictate while annotating).
+        let position = place_during_capture(self.position, crate::capture_host::recording());
+        if position == IndicatorPosition::Hidden {
             #[cfg(target_os = "macos")]
             self.place_live_text_without_hud();
             #[cfg(not(target_os = "macos"))]
@@ -510,19 +525,22 @@ impl Hud {
             return;
         }
         #[cfg(target_os = "macos")]
-        self.place_on_pointer_screen(&overlay);
+        {
+            self.position = position;
+            self.place_on_pointer_screen(&overlay);
+        }
         #[cfg(not(target_os = "macos"))]
         {
-            let (edge, margin) = match self.position {
+            let (edge, margin) = match position {
                 IndicatorPosition::Bottom => (ScreenEdge::Bottom, BOTTOM_OFFSET),
                 _ => (ScreenEdge::Top, TOP_OFFSET),
             };
             // Placing picks the display again (`display`); while shown, the
             // HUD follows the pointer to another display at its own pace
             // (`follow_pointer`).
-            if self.edge_placed != Some(self.position) {
+            if self.edge_placed != Some(position) {
                 overlay.place(edge, margin);
-                self.edge_placed = Some(self.position);
+                self.edge_placed = Some(position);
             }
             // The plate sits in the middle of the window.
             let past_plate = margin + (WINDOW.1 + PLATE_HEIGHT) / 2.0 + LIVE_TEXT_GAP;

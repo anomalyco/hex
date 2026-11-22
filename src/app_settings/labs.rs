@@ -276,6 +276,9 @@ pub struct LabsSettings {
     /// coding agents' own folders and, on macOS, links `hex` onto PATH
     /// (Labs › Install agent skill from Annotate).
     pub annotate_agent_install: bool,
+    /// While an Annotate capture records, the dictation shortcut dictates
+    /// as it always does, and the capture keeps recording.
+    pub dictate_while_annotating: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -523,6 +526,7 @@ impl Default for LabsSettings {
             vocabulary_files: false,
             annotate_agent_tools: false,
             annotate_agent_install: false,
+            dictate_while_annotating: false,
             api_processing: false,
             api_timestamps: false,
             speakers_only: false,

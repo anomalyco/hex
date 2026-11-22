@@ -25,7 +25,8 @@ window, and its OSes `labs::Feature::oses`.
 
 **On the web.** Every `Everyone` lab (not Dev ones, nor the labs that only
 matter once Annotate is on: Screenshots, Annotate last 15 seconds, Record the
-screen under the pointer, Copy a capture as one file, Agent tools for captures)
+screen under the pointer, Copy a capture as one file, Agent tools for captures,
+Dictate while annotating)
 has a page at `anoma.ly/hex/labs/<id>` (`dev.anoma.ly` for
 the dev site), listed newest first at `/hex/labs`, with a 1200 × 630 social
 card. The pages come from `site/src/labs.json`, which only the registry
@@ -350,6 +351,15 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // lines, every refusal), control::cli::annotate_read's clap conflicts, and
 │                                        // agent_tools_for_captures_is_its_own_switch_and_everywhere (labs.rs); the video decode
 │                                        // path is unverified on a real bundle, and no capture was recorded for this change
+├── Dictate while annotating no labs.dictate_while_annotating (every OS)
+│                                        while an Annotate capture records, the dictation shortcut dictates as usual: hold,
+│                                        toggle, or lock it and the text pastes into the app in front, History and Paste Last keep
+│                                        it, and the capture goes on recording and keeps the dictated words in its own track
+│                                        (both copies of the same microphone timeline). Off, a press during a capture starts
+│                                        nothing, as before
+│                                        // checks: dictate_while_annotating_is_its_own_switch_and_everywhere (labs.rs);
+│                                        // a_dictation_during_a_capture_shows_at_the_bottom_clear_of_the_capsule (rune_hud);
+│                                        // not observed with a real Mac, Linux session, or Windows PC recording while dictating
 ├── Install agent skill from Annotate no labs.annotate_agent_install (every OS)
 │                                        Annotate gains an Agents section: one row per coding agent writes the
 │                                        hex-annotate skill into its own skills folder (Claude Code, OpenCode; Codex and

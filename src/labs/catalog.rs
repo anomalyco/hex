@@ -92,7 +92,8 @@ impl Feature {
             | Self::Signature
             | Self::DictationStyle
             | Self::HudHeight
-            | Self::VoiceIsolation => Audience::Everyone,
+            | Self::VoiceIsolation
+            | Self::DictateWhileAnnotating => Audience::Everyone,
         }
     }
 
@@ -167,6 +168,7 @@ impl Feature {
             Self::DictationStyle => 20261122,
             Self::HudHeight => 20261122,
             Self::VoiceIsolation => 20261122,
+            Self::DictateWhileAnnotating => 20261122,
         }
     }
 
@@ -329,7 +331,8 @@ impl Feature {
             | Self::AnnotateAgentTools
             | Self::AnnotateAgentInstall
             | Self::Signature
-            | Self::DictationStyle => EVERY,
+            | Self::DictationStyle
+            | Self::DictateWhileAnnotating => EVERY,
         }
     }
 
@@ -418,6 +421,7 @@ impl Feature {
             Self::DictationStyle => "dictation-style",
             Self::HudHeight => "hud-height",
             Self::VoiceIsolation => "voice-isolation",
+            Self::DictateWhileAnnotating => "dictate-while-annotating",
         }
     }
 
@@ -506,6 +510,7 @@ impl Feature {
             Self::DictationStyle => "labs.dictation_style",
             Self::HudHeight => "labs.hud_height",
             Self::VoiceIsolation => "labs.voice_isolation",
+            Self::DictateWhileAnnotating => "labs.dictate_while_annotating",
         }
     }
 

@@ -230,7 +230,9 @@ On Linux                                 // capture.linux
 │   Area isn't offered), and takes the same opt-in whenever it does. Check:
 │   labs gnome_annotate_is_its_own_bit_*; not run on a GNOME session
 ├── While it records, dictation starts nothing (the portal
-│   or grab already took their keys, so nothing reaches the app)
+│   or grab already took their keys, so nothing reaches the app), unless Labs ›
+│   Dictate while annotating is on: then the shortcut dictates as usual and the
+│   capture keeps recording, hearing the words too
 ├── Pane -> no Screen Recording row, no transcriber choice, no "Show in screen
 │   recordings" (the portal asks; Wayland can't keep overlays out)
 ├── Sending -> OpenCode's sessions and prompts over HTTP to the running
@@ -258,7 +260,8 @@ On Windows                               // capture.windows
 │   records every pointer move, click, wheel turn, and modifier change
 │   (capture_host::report_input, as the macOS tap): Shift alone inks, the
 │   laser follows the pointer, clicks are logged. Injected events are skipped
-├── While it records, dictation starts nothing
+├── While it records, dictation starts nothing, unless Labs › Dictate while
+│   annotating is on
 ├── While dictating -> General's setting through windows/audio_control, one
 │   suppressor per capture, restored when it ends
 ├── Copy and paste -> the engine's own clipboard and Ctrl+V (handoff): the
@@ -409,6 +412,7 @@ First launch with Annotate on            // capture.import
 │   and Hex's tap lets it through; a dictation under it goes on too (#786)
 ├── The binding is swallowed, never chord evidence for dictation
 ├── Hold the dictation shortcut mid-capture -> dictation pastes as usual
+│   (only with Labs › Dictate while annotating on; without it, nothing starts)
 └── Another app holds Secure Event Input -> ⌥⇧S still starts and stops (a
     Carbon hotkey while it lasts; Esc doesn't arrive). See dictation.md's
     Shortcuts Under Secure Input
@@ -422,7 +426,11 @@ While a capture records                  // capture.quiet
 │   switch carries it to the next capture without restoring in between
 ├── Dictation shortcut -> starts nothing while it records
 │   (macOS: recognition.rs swallows it in the tap; Linux: linux/dictation
-│   ignores Start). Nothing leaks to the app in front
+│   ignores Start). Nothing leaks to the app in front. With Labs › Dictate
+│   while annotating on it dictates as usual instead: the text pastes into the
+│   app in front, History and Paste Last keep it, the capture keeps recording
+│   and its words include the dictated span, and the dictation HUD sits at the
+│   bottom edge, clear of the capsule at the top
 └── Dictation that began before the capture -> each effect is held from the first session that
     wants it to the last, so neither unmutes or resumes what the other still
     holds; a While dictating change mid-capture composes too (the capture keeps
