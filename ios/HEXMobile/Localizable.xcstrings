@@ -4241,12 +4241,52 @@
         }
       }
     },
-    "%@ download. Until it's ready, the keyboard uses Apple's speech recognition." : {
+    "For English. Uses about %@, downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需下载 %@。准备好之前，键盘使用 Apple 的语音识别。"
+            "value" : "适用于英语。约占用 %@，通过 Wi-Fi 下载。在此之前，键盘使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "Only for English dictation." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于英语听写。"
+          }
+        }
+      }
+    },
+    "Downloads after you first use the Hex keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "首次使用 Hex 键盘后开始下载。"
+          }
+        }
+      }
+    },
+    "Downloads on Wi-Fi." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接 Wi-Fi 后下载。"
+          }
+        }
+      }
+    },
+    "Downloads once the iPhone has %@ free." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 有 %@ 可用空间后下载。"
           }
         }
       }

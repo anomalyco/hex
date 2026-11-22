@@ -55,10 +55,12 @@ nonisolated struct KeyboardSelfDictation {
         if let handed = handedToHex, now.timeIntervalSince(handed.at) < Self.recentWindow { return false }
         let languages = LanguageSettings(defaults: defaults)
         if languages.keyboardNeedsHex(now: now) { return false }
-        // With Speech model in keyboard on, the keyboard may load it itself; if it doesn't, the
-        // record above says so.
+        // Speech model in keyboard (on unless turned off) dictates the multilingual model's
+        // language in the keyboard only once the keyboard has that model loaded; until then
+        // Dictate opens Hex for it.
         let multilingual = MultilingualParakeetSettings(defaults: defaults)
         let language = multilingual.language(set: languages.dictationLanguage, keyboard: languages.keyboardDictationLanguage())
-        return KeyboardParakeetSettings(defaults: defaults).isEnabled || !multilingual.keyboardOpensHex(language: language)
+        return !multilingual.keyboardOpensHex(language: language)
+            || KeyboardParakeetSettings(defaults: defaults).keyboardHasMultilingualModel
     }
 }

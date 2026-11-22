@@ -3,8 +3,9 @@ import Darwin
 import FluidAudio
 import Foundation
 
-/// Experiments › Speech model in keyboard: the keyboard's own dictation transcribed with
-/// Parakeet on the Neural Engine, in the keyboard's process, so Hex needn't be open or warm.
+/// Experiments › Speech model in keyboard (on unless turned off): the keyboard's own dictation
+/// transcribed with Parakeet on the Neural Engine, in the keyboard's process, so Hex needn't be
+/// open or warm.
 /// English uses Parakeet V2; a language Experiments › Multilingual model dictates uses Parakeet
 /// Ultra. Both load from the App Group (`SpeechModelStore`), after the keyboard's first frame
 /// and launch work (`warmUp`), and stay loaded while the keyboard's process lives, until a
@@ -57,6 +58,9 @@ final class KeyboardParakeet {
     static let neuralEngineEvidence = 100 * KeyboardParakeetBudget.megabyte
     /// After a memory warning, no new load in this process for this long.
     static let reloadAfterWarning: TimeInterval = 300
+    /// A load this long compiled the model: on an iPhone 17 Pro a load Core ML had compiled
+    /// before took 0.3 s, one that compiled 11.6 s (Ultra) to 16.5 s (V2).
+    static let compilingLoad: TimeInterval = 5
 
     /// The model the keyboard would transcribe with, or nil for Apple's speech recognition:
     /// the experiment on, an iPhone with the memory, not Two-language dictation, and the
@@ -82,18 +86,20 @@ final class KeyboardParakeet {
         return Self.choice()?.multilingual == true
     }
 
-    /// After the keyboard's first frame and launch work: loads the model it would use, off the
-    /// main thread, when it fits. Does nothing with the experiment off.
+    /// After the keyboard's first frame and launch work: notes the keyboard's memory limit for
+    /// Hex's download, then loads the model it would use, off the main thread, when it fits.
     func warmUp() {
+        let measured = Self.memory()
+        if measured.available > 0 {
+            KeyboardParakeetSettings().recordKeyboardLimit(measured.footprint + measured.available)
+        }
         guard let choice = Self.choice() else { return }
         if loaded?.multilingual == choice.multilingual { return }
         guard loadTask == nil, !setAside.contains(choice.multilingual) else { return }
         if let warned = memoryWarnedAt, Date().timeIntervalSince(warned) < Self.reloadAfterWarning { return }
         let memory = Self.memory()
         let settings = KeyboardParakeetSettings()
-        guard KeyboardParakeetBudget.allowsLoad(
-            multilingual: choice.multilingual, footprint: memory.footprint, available: memory.available
-        ) else {
+        guard KeyboardParakeetBudget.allowsLoad(footprint: memory.footprint, available: memory.available) else {
             note("parakeet: \(choice.label) not loaded, short of memory \(memory)")
             settings.setKeyboardState(.unavailable)
             return
@@ -105,9 +111,8 @@ final class KeyboardParakeet {
             return
         }
         if loaded != nil { release(reason: "language changed") }
-        let cold = !Self.compiledBefore(choice)
         settings.setKeyboardState(.preparing)
-        KeyboardProbeLog.shared.write("parakeet: loading \(choice.label)\(cold ? " (first load, compiling)" : "") \(memory)")
+        KeyboardProbeLog.shared.write("parakeet: loading \(choice.label) \(memory)")
         let started = Date()
         loadTask = Task { [weak self] in
             let neuralBefore = Self.memory().neural
@@ -131,9 +136,9 @@ final class KeyboardParakeet {
                     KeyboardProbeLog.shared.write("parakeet: \(choice.label) not on the Neural Engine, Apple's speech recognition \(Self.memory())")
                     return
                 }
+                let cold = seconds >= Self.compilingLoad
                 self.loaded = Loaded(multilingual: choice.multilingual, manager: manager, seconds: seconds, cold: cold, at: Date())
-                Self.markCompiled(choice)
-                settings.setKeyboardState(.ready)
+                settings.setKeyboardState(.ready, multilingual: choice.multilingual)
                 KeyboardProbeLog.shared.write(
                     "parakeet: \(choice.label) loaded in \(String(format: "%.1f", seconds)) s (\(cold ? "cold" : "warm")) \(after)"
                 )
@@ -167,9 +172,9 @@ final class KeyboardParakeet {
             return fallback(loadTask != nil ? "\(choice.label) still loading" : "\(choice.label) not loaded")
         }
         guard !isTranscribing else { return fallback("another transcription running") }
-        guard KeyboardParakeetBudget.allowsTranscription(
-            multilingual: choice.multilingual, footprint: before.footprint, available: before.available
-        ) else { return fallback("short of memory") }
+        guard KeyboardParakeetBudget.allowsTranscription(footprint: before.footprint, available: before.available) else {
+            return fallback("short of memory")
+        }
         isTranscribing = true
         defer {
             isTranscribing = false
@@ -302,19 +307,6 @@ final class KeyboardParakeet {
         }
         program.functions.values.forEach { walk($0.block) }
         return total > 0 && neural / total >= 0.5
-    }
-
-    /// Core ML keeps what it compiled in the keyboard's own Caches, per iOS version.
-    nonisolated private static func compiledKey(_ choice: Choice) -> String {
-        "keyboardParakeet.compiled.\(choice.label)"
-    }
-
-    nonisolated private static func compiledBefore(_ choice: Choice) -> Bool {
-        UserDefaults.standard.string(forKey: compiledKey(choice)) == ProcessInfo.processInfo.operatingSystemVersionString
-    }
-
-    nonisolated private static func markCompiled(_ choice: Choice) {
-        UserDefaults.standard.set(ProcessInfo.processInfo.operatingSystemVersionString, forKey: compiledKey(choice))
     }
 
     // MARK: - Memory

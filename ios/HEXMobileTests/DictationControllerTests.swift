@@ -1759,10 +1759,19 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
-    func testSpeechModelInKeyboardIsOffByDefaultAndNeedsTheMemory() {
+    func testSpeechModelInKeyboardIsOnUnlessTurnedOffAndNeedsTheMemory() {
         let settings = KeyboardParakeetSettings(defaults: defaults)
-        XCTAssertFalse(settings.isEnabled, "off by default: the keyboard keeps Apple's speech recognition")
+        XCTAssertTrue(settings.isEnabled, "on by default")
         XCTAssertFalse(settings.isTurnedOff, "never set: nothing to delete")
+        XCTAssertFalse(settings.isTurnedOnByHand, "on by default waits for Wi-Fi and the keyboard's measure")
+        settings.isEnabled = false
+        XCTAssertFalse(settings.isEnabled)
+        XCTAssertTrue(settings.isTurnedOff)
+        settings.isEnabled = true
+        XCTAssertTrue(settings.isTurnedOnByHand, "turned back on: downloads at once")
+        XCTAssertNil(settings.keyboardLimit, "until the keyboard first opens")
+        settings.recordKeyboardLimit(177 * KeyboardParakeetBudget.megabyte)
+        XCTAssertEqual(settings.keyboardLimit, 177 * KeyboardParakeetBudget.megabyte)
         XCTAssertTrue(KeyboardParakeetSettings.fits(physicalMemory: Self.sixGB))
         XCTAssertFalse(KeyboardParakeetSettings.fits(physicalMemory: Self.fourGB))
         settings.setKeyboardState(.preparing, now: Date(timeIntervalSince1970: 100))
@@ -1774,29 +1783,56 @@ final class DictationControllerTests: XCTestCase {
 
     func testTheKeyboardLoadsParakeetOnlyWithTheRoomMeasuredOnAnIPhone() {
         let mb = KeyboardParakeetBudget.megabyte
-        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit(multilingual: false), 96 * mb)
-        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit(multilingual: true), 115 * mb)
+        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit, 131 * mb, "V2 and Ultra alike")
         // An iPhone 17 Pro's keyboard: a 177 MB limit, 33 MB used before Hex's keyboard records.
-        XCTAssertTrue(KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 33 * mb, available: 144 * mb))
-        XCTAssertTrue(KeyboardParakeetBudget.allowsLoad(multilingual: true, footprint: 33 * mb, available: 144 * mb))
+        XCTAssertTrue(KeyboardParakeetBudget.allowsLoad(footprint: 33 * mb, available: 144 * mb))
         XCTAssertFalse(
-            KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 33 * mb, available: 44 * mb),
+            KeyboardParakeetBudget.allowsLoad(footprint: 20 * mb, available: 80 * mb),
+            "a 100 MB limit: with the model loaded the keyboard records at up to 91 MB"
+        )
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsLoad(footprint: 33 * mb, available: 44 * mb),
             "a 77 MB limit keeps Apple's speech recognition"
         )
         XCTAssertFalse(
-            KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 120 * mb, available: 50 * mb),
+            KeyboardParakeetBudget.allowsLoad(footprint: 120 * mb, available: 50 * mb),
             "too little left, whatever the limit"
         )
-        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(multilingual: false, footprint: 60 * mb, available: 117 * mb))
+        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(footprint: 60 * mb, available: 117 * mb))
         XCTAssertTrue(
-            KeyboardParakeetBudget.allowsTranscription(multilingual: false, footprint: 56 * mb, available: 121 * mb),
+            KeyboardParakeetBudget.allowsTranscription(footprint: 56 * mb, available: 121 * mb),
             "Hex's keyboard recording on the iPhone 17 Pro"
         )
-        XCTAssertFalse(KeyboardParakeetBudget.allowsTranscription(multilingual: true, footprint: 160 * mb, available: 17 * mb))
+        XCTAssertFalse(KeyboardParakeetBudget.allowsTranscription(footprint: 160 * mb, available: 17 * mb))
         XCTAssertTrue(
-            KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 20 * mb, available: 0),
+            KeyboardParakeetBudget.allowsLoad(footprint: 20 * mb, available: 0),
             "no limit where iOS sets none (the simulator)"
         )
+    }
+
+    func testTheKeyboardsSpeechModelDownloadsByItselfOnlyWhereTheKeyboardWouldUseIt() {
+        let mb = KeyboardParakeetBudget.megabyte
+        func hold(
+            otherEngine: Bool = false,
+            english: Bool = true,
+            limit: Int? = 177 * mb,
+            unmetered: Bool? = true,
+            free: Int64? = 8_000_000_000
+        ) -> KeyboardParakeetDownload.Hold? {
+            KeyboardParakeetDownload.hold(
+                otherEngine: otherEngine, english: english, keyboardLimit: limit, unmetered: unmetered, freeBytes: free
+            )
+        }
+        XCTAssertNil(hold(), "an iPhone 17 Pro on Wi-Fi with room")
+        XCTAssertEqual(hold(english: false), .notEnglish)
+        XCTAssertEqual(hold(otherEngine: true), .otherEngine)
+        XCTAssertEqual(hold(limit: nil), .keyboardNotMeasured, "nothing before the keyboard has opened")
+        XCTAssertEqual(hold(limit: 80 * mb), .keyboardTooSmall)
+        XCTAssertEqual(hold(limit: 100 * mb), .keyboardTooSmall, "barely above what the keyboard records at")
+        XCTAssertEqual(hold(unmetered: false), .notOnWiFi, "cellular, a hotspot or Low Data Mode")
+        XCTAssertEqual(hold(unmetered: nil), .notOnWiFi, "before the connection is known")
+        XCTAssertEqual(hold(free: 1_500_000_000), .needsSpace)
+        XCTAssertNil(hold(free: nil), "space iOS doesn't report doesn't hold it")
     }
 
     func testParakeetsFilesMoveIntoTheAppGroupRatherThanDownloadingAgain() throws {
@@ -1817,17 +1853,22 @@ final class DictationControllerTests: XCTestCase {
             try files.createDirectory(at: folder, withIntermediateDirectories: true)
             try Data("w".utf8).write(to: folder.appendingPathComponent("weight.bin.partial"))
         }
+        let compiled = ParakeetCompileRecord(key: "test.compiledForSystem", defaults: defaults, system: "27.2")
+        compiled.markCurrent()
         try partial(in: old)
-        SpeechModelStore.move(from: old, to: new, isComplete: { _ in false }, fileManager: files)
+        SpeechModelStore.move(from: old, to: new, isComplete: { _ in false }, forgetting: compiled, fileManager: files)
         XCTAssertTrue(files.fileExists(atPath: new.appendingPathComponent("weight.bin.partial").path), "a download under way moves, partial file and all")
         XCTAssertFalse(files.fileExists(atPath: old.path))
         XCTAssertFalse(SpeechModelStore.isComplete(new))
+        XCTAssertFalse(compiled.isCurrent, "Core ML compiles moved files again, and the next load says so")
 
+        compiled.markCurrent()
         SpeechModelStore.markComplete(new)
         try partial(in: old)
-        SpeechModelStore.move(from: old, to: new, isComplete: { SpeechModelStore.isComplete($0) }, fileManager: files)
+        SpeechModelStore.move(from: old, to: new, isComplete: { SpeechModelStore.isComplete($0) }, forgetting: compiled, fileManager: files)
         XCTAssertTrue(SpeechModelStore.isComplete(new), "a complete copy in the App Group stays")
         XCTAssertFalse(files.fileExists(atPath: old.path), "and the old, partial one goes")
+        XCTAssertTrue(compiled.isCurrent, "nothing moved: what Core ML compiled still holds")
     }
 
     func testTheMultilingualDownloadResumesFromItsPartialFileAndSaysItsBytes() async throws {
