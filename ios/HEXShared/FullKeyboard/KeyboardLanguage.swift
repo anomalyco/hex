@@ -4,7 +4,8 @@ import Foundation
 /// and the spelling dictionary its autocorrect uses, matching Apple's keyboard for it;
 /// another language is a new case with those filled in. Italian and Portuguese type on the
 /// English letters (Apple's keyboards for them are QWERTY) with their own accents and
-/// dictionary. French is Apple's AZERTY, as on its French (France) and (Belgique) keyboards,
+/// dictionary. French is Apple's AZERTY, as on its French (France) and (Belgique) keyboards
+/// ("AZERTY – French", their own: row 3 ends in the apostrophe key, `FrenchTyping`),
 /// Canadian French QWERTY, as on Apple's French (Canada), and Swiss French QWERTZ, as on
 /// Apple's French (Suisse). Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
 /// held ь); Ukrainian is the standard Ukrainian ЙЦУКЕН (ДСТУ 4862:2007) in the twelve-key
@@ -169,6 +170,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .qwerty where self == .czech: ["qwertyuiop", "asdfghjkl\u{00B4}", "zxcvbnm\u{02C7}"]
         case .qwerty: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
         case .qwertz: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
+        case .azerty where self == .french: ownLetterRows
         case .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
         case .dvorak: ["pyfgcrl", "aoeuidhtns", "qjkxbmwvz"]
         }
@@ -179,8 +181,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// (today's, `defaultLetterLayout`) first, then the rest in the order Apple's Keyboard
     /// Layout list shows them (iOS 27.0 simulator, Settings › General › Keyboard › Keyboards ›
     /// Add New Keyboard, black box). Apple's French keyboards also list "AZERTY – French",
-    /// "QWERTY – French" and "QWERTZ – French", which differ from the plain ones only by the ´
-    /// dead key Hex leaves out, so French offers the three plain ones. One layout: no choice.
+    /// "QWERTY – French" and "QWERTZ – French", which add the apostrophe key (`FrenchTyping`);
+    /// each region lists its own first. Français (France)'s AZERTY is "AZERTY – French"; its
+    /// QWERTY and QWERTZ, and Canada's and Switzerland's layouts, are the plain ones. One
+    /// layout: no choice.
     var letterLayouts: [KeyboardLetterLayout] {
         switch self {
         case .english: [.qwerty, .azerty, .qwertz, .dvorak]
@@ -232,10 +236,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .english, .italian, .frenchCanadian, .portuguese, .polish, .romanian:
             ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        // Apple's French keyboards also hold a ´ dead key (AZERTY's row 3, the end of the
-        // others' row 2), which its French and English keyboard leaves out (a TestFlight
-        // tester's screenshot). Hex leaves it out too: accents are on a held letter.
-        case .french: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
+        // Apple's "AZERTY – French", the first layout Français (France) and (Belgique) list
+        // (iOS 27.2 simulator): row 3 is W to N and the apostrophe key, seven keys a letter wide
+        // centred between shift and delete, which keep their size (`FrenchTyping`).
+        case .french: ["azertyuiop", "qsdfghjklm", "wxcvbn" + FrenchTyping.key]
         case .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
         case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
         case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
@@ -357,6 +361,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "o": ["o", "ö", "ô", "œ", "ò", "ó", "õ", "ø", "ō", "º"],
                 "c": ["c", "ç", "ć", "č"],
                 "n": ["n", "ñ", "ń"],
+                // The apostrophe key where it types ´; after a letter it holds the 123 page's
+                // ' options instead (`FrenchTyping.heldBase`).
+                FrenchTyping.key: [FrenchTyping.key, "\u{02CB}", "\u{02C6}", "\u{00A8}"],
             ]
         case .portuguese:
             [
@@ -686,13 +693,15 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     func keyCoordinates(_ letters: KeyboardLetterLayout? = nil) -> [Character: (Double, Double)] {
         var map: [Character: (Double, Double)] = [:]
         let letters = offered(letters)
-        // AZERTY's row 2 runs edge to edge, and its row 3 starts under e (W under E).
+        // AZERTY's row 2 runs edge to edge, and its row 3 starts under e (W under E); French's,
+        // seven keys with the apostrophe key, starts between z and e.
         // Ukrainian's rows 1 and 2 are both twelve keys, and its row 3 starts under ц; Greek's
         // are both nine (row 1 ending in the tonos key), and its row 3 starts under σ; Czech's
         // both ten (row 2 ending in ´), its row 3 starting under s.
         // Dvorak's row 2 runs from the edge, its row 1 ends at delete (P over U's left half) and
         // its row 3 starts after shift (Q under O's right half).
         let offsets = switch letters {
+        case .azerty where self == .french: [0.0, 0.0, 1.5]
         case .azerty: [0.0, 0.0, 2.0]
         case .dvorak: [1.85, 0.0, 1.33]
         case .own where self == .ukrainian || self == .greek || self == .czech: [0.0, 0.0, 1.0]

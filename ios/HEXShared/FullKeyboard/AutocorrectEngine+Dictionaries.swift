@@ -163,3 +163,41 @@ extension AutocorrectEngine {
         "ipohne": "iPhone",
     ]
 }
+
+extension AutocorrectEngine {
+    /// French's elided words, which end in an apostrophe before the next word ("l'homme",
+    /// "qu'il", "jusqu'ici"), commonest first.
+    static let frenchElisions = ["l", "d", "j", "qu", "n", "c", "s", "m", "t", "jusqu", "lorsqu", "puisqu", "quoiqu", "quelqu", "presqu"]
+
+    /// A French word with an elision and a slip on either side of its apostrophe: the word after
+    /// it is corrected as a word of its own ("l'hpmme" -> "l'homme"), and a head that is no
+    /// elision becomes the commonest one a key away ("k'homme" -> "l'homme", "qi'il" ->
+    /// "qu'il"). Nil outside French, when neither side changes, for a word the dictionary knows
+    /// whole ("aujourd'hui"), and for an apostrophe without a letter on both sides ("l'").
+    func frenchElisionFix(for token: String) -> String? {
+        guard [.french, .frenchCanadian, .frenchSwiss].contains(language),
+              token.filter({ $0 == "'" }).count == 1, let mark = token.firstIndex(of: "'") else { return nil }
+        let head = String(token[..<mark])
+        let tail = String(token[token.index(after: mark)...])
+        guard !head.isEmpty, !tail.isEmpty, head.allSatisfy(\.isLetter), tail.allSatisfy(\.isLetter),
+              !checker.isWordValid(token) else { return nil }
+        var fixedHead = head
+        let lowerHead = head.lowercased()
+        if !Self.frenchElisions.contains(lowerHead) {
+            var best: (word: String, cost: Double)?
+            for word in Self.frenchElisions {
+                guard let cost = Self.singleEditKeyboardCost(from: lowerHead, to: word, language: layoutLanguage, letters: layoutLetters),
+                      cost > 0, cost <= 0.65 else { continue }
+                if best == nil || cost < best!.cost { best = (word, cost) }
+            }
+            guard let best else { return nil }
+            fixedHead = Self.matchCase(of: head, onto: best.word)
+        }
+        var fixedTail = tail
+        if let word = ownReplacement(for: tail), word.allSatisfy(\.isLetter) {
+            fixedTail = word
+        }
+        guard fixedHead != head || fixedTail != tail else { return nil }
+        return fixedHead + "'" + fixedTail
+    }
+}

@@ -33,17 +33,49 @@ nonisolated enum CzechTyping {
     }
 }
 
+/// French AZERTY's apostrophe key after n, as Apple's "AZERTY – French" keyboard was observed
+/// to apply it (iOS 27.2 simulator, iPhone 17 Pro and SE, real touches in a text view with smart
+/// quotes on and off, black box). Right after a letter its keycap shows ’, a tap types the
+/// apostrophe (’ where the field curls quotes, ' where it doesn't, as the 123 page's ' key does)
+/// and a hold offers ' ’ ‘ ` (typed as they are); after anything else (a space, a digit, an
+/// apostrophe, nothing) it shows ´, types ´ (U+00B4) itself, never as a dead key ("´e" stays
+/// two characters), and a hold offers ´ ˋ ˆ ¨. It is no letter: the decoder, Adaptive touch,
+/// next-letter odds and swipe typing read letters only, so none of them sees it.
+nonisolated enum FrenchTyping {
+    static let key = "\u{00B4}"
+
+    /// Whether the key types the apostrophe after `before`: right after a letter.
+    static func typesApostrophe(after before: String?) -> Bool {
+        before?.last?.isLetter == true
+    }
+}
+
 @MainActor
 extension FullKeyboardEngine {
     /// The layout's own keys' typing rules: Greek's tonos key and final sigma (`GreekTyping`),
-    /// Czech's ´ and ˇ (`CzechTyping`). True when the key already did all it does; else
-    /// `text` is what to type.
+    /// Czech's ´ and ˇ (`CzechTyping`), French's apostrophe key (`FrenchTyping`). True when
+    /// the key already did all it does; else `text` is what to type.
     func typeLayoutRules(_ text: inout String) -> Bool {
         switch layout.language {
-        case .greek: typeGreek(&text)
-        case .czech: typeCzech(text)
-        default: false
+        case .greek: return typeGreek(&text)
+        case .czech: return typeCzech(text)
+        case .french:
+            if typesFrenchApostrophe(text) { text = "'" }
+            return false
+        default: return false
         }
+    }
+
+    /// Whether `character` is French's apostrophe key and types the apostrophe here, right
+    /// after a letter (`FrenchTyping`).
+    func typesFrenchApostrophe(_ character: String) -> Bool {
+        layout.language == .french && character == FrenchTyping.key && FrenchTyping.typesApostrophe(after: typingContext)
+    }
+
+    /// The key a held `character` offers options for: French's apostrophe key after a letter
+    /// holds the 123 page's ', else itself.
+    func heldBase(_ character: String) -> String {
+        typesFrenchApostrophe(character) ? "'" : character
     }
 
     /// Czech: a held ˇ's ˇ or ˚ accents the letter before it, as a tapped ˇ does. True when it

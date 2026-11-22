@@ -1937,6 +1937,61 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "“well--known”")
     }
 
+    /// Apple's "AZERTY – French" apostrophe key (iOS 27.2 simulator, black box): right after a
+    /// letter it shows ’ and types the apostrophe, curled as the field curls quotes; after
+    /// anything else it shows and types ´. Held, it offers ' ’ ‘ ` after a letter and ´ ˋ ˆ ¨
+    /// elsewhere, each typed as it is.
+    func testFrenchApostropheKeyTypesAsApplesDoes() {
+        smartField(language: .french)
+        engine.autocorrect.isEnabled = false
+        let apostrophe = KeyKind.character(FrenchTyping.key)
+        let key = engine.layout.key(apostrophe)!
+        XCTAssertEqual(engine.keycapLabel(for: key), "´", "nothing before it")
+        tap(apostrophe)
+        type("l")
+        XCTAssertEqual(engine.keycapLabel(for: key), "’")
+        XCTAssertEqual(engine.displayLabel(for: key), "’")
+        tap(apostrophe)
+        XCTAssertEqual(engine.keycapLabel(for: key), "´", "after an apostrophe")
+        tap(apostrophe)
+        type("ami e ")
+        tap(apostrophe)
+        type("e")
+        XCTAssertEqual(target.text, "´l’´ami e ´e", "never a dead key")
+
+        smartField(quotes: .no, language: .french)
+        engine.autocorrect.isEnabled = false
+        type("l")
+        tap(apostrophe)
+        type("homme")
+        XCTAssertEqual(target.text, "l'homme")
+
+        smartField(language: .french)
+        engine.autocorrect.isEnabled = false
+        var id = 700
+        func hold(pick: String) {
+            let key = engine.layout.key(apostrophe)!
+            id += 1
+            engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: id), pick)
+            guard let menu = engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("no \(pick) in \(engine.activeAccentMenu?.options ?? [])")
+            }
+            let cell = menu.cellFrames[index]
+            engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        hold(pick: "¨")
+        type("d")
+        hold(pick: "'")
+        type("a")
+        hold(pick: "‘")
+        XCTAssertEqual(target.text, "¨d'a‘", "a held choice goes in as it is")
+        type(" ")
+        hold(pick: "ˆ")
+        XCTAssertEqual(target.text, "¨d'a‘ ˆ")
+    }
+
     /// Each of Apple's keyboards types its language's quotes (black box, iOS 27.2): „Hallo“ ‚tag‘
     /// in German, where the apostrophe key types ‘ in a word too; « Bonjour » with no-break
     /// spaces inside and ‘salut’ in French; „tak” ‚nie’ in Polish; «да» in Russian.
