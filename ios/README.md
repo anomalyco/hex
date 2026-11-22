@@ -634,10 +634,18 @@ never at a launch by itself.
     autocorrect count (`TypingJournal.allows`). Nothing leaves the iPhone.
     - **Typing:** words you erase and retype, autocorrect fixes you undo from the
       strip, suggestions you pick, and autocorrections you turn down by
-      tapping what you typed. A typo you fixed the same way twice (never a
-      completion, never fixed two ways) becomes a fix on space, only a suggestion
-      when what you typed is a real word; an autocorrection you turned down twice
-      never applies again (`TypingLearning`, read by `AutocorrectEngine`).
+      tapping what you typed. A word you erase and retype counts only when it was
+      plausibly a slip of the new one (`TypingLearning.isSlip`): the same word with
+      other capitals or an apostrophe ("Im" then "I'm"), or, two letters or more,
+      starting alike (the same letter, a neighbouring key, or the first letter
+      missed or one typed before it) with at most one slip for every four letters,
+      where a neighbouring key, a missing accent, two swapped letters and a doubled
+      letter count half ("Ciry" then "City"). A change of mind ("Sunda" then
+      "Saturday") or an unfinished word finished teaches nothing, and one a journal
+      already holds is not counted, listed or applied. A typo you fixed the same way
+      twice (never a completion, never fixed two ways) becomes a fix on space, only
+      a suggestion when what you typed is a real word; an autocorrection you turned
+      down twice never applies again (`TypingLearning`, read by `AutocorrectEngine`).
     - **Dictation:** from the full keyboard and the dictation bar alike, the
       keyboard remembers each dictation by the text around it
       (`DictationEditTracker`), finds it again after edits through Hex's keys and
@@ -660,7 +668,7 @@ never at a launch by itself.
       whole words only (never inside a longer, hyphenated, dotted, or slashed
       word) and following the original's case unless the fix has capitals. Its
       meant words join the Apple Speech hints after custom vocabulary's.
-      Typing insights lists these fixes with a switch each and the share of
+      Typing insights lists these dictation fixes with a switch each and the share of
       dictations kept and edited; Delete what Hex learned erases everything,
       including what a running keyboard still holds.
     - **Per language (Settings › Experiments › Learn each language separately):**
