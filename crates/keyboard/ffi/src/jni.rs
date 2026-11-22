@@ -5,13 +5,15 @@
 //! renamed) is cleared before the entry point returns.
 //!
 //! Release builds don't ship the core yet. When one does, R8 must keep `KeyboardCore`'s
-//! `external fun`s (their names are these functions' symbols) and `SwipeReading`'s
-//! `(String[], double[], int)` constructor, which `swipe_reading` calls by name.
+//! `external fun`s (their names are these functions' symbols), `SwipeReading`'s
+//! `(String[], double[], int)` and `SwipeTyped`'s `(boolean, String, String[])` constructors,
+//! which `swipe_reading` and `swipe_typed` call by name, and `WordChecker.isWordValid`.
 
 use std::path::Path;
 use std::ptr;
 
-use hex_keyboard_core::swipe::{ExtraWord, Reading};
+use hex_keyboard_core::swipe::typing::{self as core_typing, SwipeContext, SwipeWords, Typed};
+use hex_keyboard_core::swipe::{Candidate, ExtraWord, Reading};
 use jni::JNIEnv;
 use jni::objects::{
     JBooleanArray, JDoubleArray, JIntArray, JObject, JObjectArray, JPrimitiveArray, JString, JValue,
@@ -20,6 +22,7 @@ use jni::sys::{jboolean, jdouble, jint, jlong, jobject};
 
 use crate::model::{self, HkModel};
 use crate::swipe::{self, HkKeyCentre, HkSwipeDecoder};
+use crate::typing::{self, HkSwipeWords};
 use crate::{HK_ABI_VERSION, guard};
 
 type Result<T> = jni::errors::Result<T>;
@@ -335,4 +338,317 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeRead(
         swipe_reading(&mut env, reading).map_or(ptr::null_mut(), JObject::into_raw)
     });
     settled(&mut env, reading)
+}
+
+// MARK: - What a swipe types
+//
+// The Kotlin these entry points expect, in `ly.anoma.hex.typing` (beside `SwipeReading`):
+//
+//     /** Whether the dictionary knows a word; the core asks only while a call runs. */
+//     fun interface WordChecker {
+//         fun isWordValid(word: String): Boolean
+//     }
+//
+//     /** What a finished swipe types: a space first or not, the word, the strip's others. */
+//     data class SwipeTyped(val space: Boolean, val word: String, val alternatives: Array<String>)
+//
+// and in `object KeyboardCore`:
+//
+//     /**
+//      * Your text replacements (`shortcuts` lowercased, in step with `replacements`) and words
+//      * (`own`: other own spellings; `vocabulary`: your vocabulary's words), for the layout's
+//      * `language`; 0 when malformed. Immutable: make a new one when any of them changes.
+//      */
+//     external fun swipeWordsNew(
+//         language: String,
+//         hasDictionary: Boolean,
+//         shortcuts: Array<String>,
+//         replacements: Array<String>,
+//         own: Array<String>,
+//         vocabulary: Array<String>,
+//     ): Long
+//
+//     external fun swipeWordsFree(words: Long)
+//
+//     /** The order of a reading's candidates once rare names cost more; null when malformed. */
+//     external fun swipeRank(decoder: Long, words: Long, texts: Array<String>, costs: DoubleArray, checker: WordChecker): IntArray?
+//
+//     /**
+//      * What a swipe with these `readings` (best first, those that may be offered; at least one)
+//      * types. `shift`: 0 off, 1 on, 2 caps lock. `autoCapitalization`: 0 none, 1 words,
+//      * 2 sentences, 3 all characters (0 also with Auto-capitalization off). Null when malformed.
+//      */
+//     external fun swipeTyped(
+//         words: Long,
+//         readings: Array<String>,
+//         before: String?,
+//         shift: Int,
+//         shiftHeld: Boolean,
+//         autoCapitalization: Int,
+//         autoCapitalizes: Boolean,
+//         autocorrection: Boolean,
+//         checker: WordChecker,
+//     ): SwipeTyped?
+//
+//     external fun swipeNeedsSpace(before: String?): Boolean
+//
+//     /** `points` interleaves (x, y); `key` is the character of the key it went down and lifted on. */
+//     external fun swipeIsSlidTap(points: DoubleArray, pitch: Double, key: String?, firstReading: String?): Boolean
+//
+// A `WordChecker` that throws counts as "not a word": its exception is cleared at once, since no
+// other JNI call may follow a pending one. R8 must keep `WordChecker.isWordValid` and
+// `SwipeTyped`'s `(boolean, String, String[])` constructor too, once a release build ships this.
+
+/// The words behind a handle from `swipeWordsNew`, or None for 0.
+///
+/// # Safety
+/// `handle` is 0 or a live handle from `swipeWordsNew`.
+unsafe fn words_of<'a>(handle: jlong) -> Option<&'a HkSwipeWords> {
+    // SAFETY: 0 or a live HkSwipeWords pointer, as the caller promises.
+    unsafe { (handle as *const HkSwipeWords).as_ref() }
+}
+
+fn optional_string(env: &mut JNIEnv, value: &JString) -> Option<Option<String>> {
+    if value.is_null() {
+        Some(None)
+    } else {
+        string(env, value).ok().map(Some)
+    }
+}
+
+/// `checker.isWordValid(word)`, false when it throws (the exception cleared) or can't be asked.
+fn is_word_valid(env: &mut JNIEnv, checker: &JObject, word: &str) -> bool {
+    let answer = (|| -> Result<bool> {
+        let word = env.new_string(word)?;
+        let answer = env
+            .call_method(
+                checker,
+                "isWordValid",
+                "(Ljava/lang/String;)Z",
+                &[JValue::Object(&word)],
+            )?
+            .z()?;
+        env.delete_local_ref(word)?;
+        Ok(answer)
+    })();
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+    answer.unwrap_or(false)
+}
+
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeWordsNew(
+    mut env: JNIEnv,
+    _this: JObject,
+    language: JString,
+    has_dictionary: jboolean,
+    shortcuts: JObjectArray,
+    replacements: JObjectArray,
+    own: JObjectArray,
+    vocabulary: JObjectArray,
+) -> jlong {
+    let words = guard(0, || {
+        let read = |env: &mut JNIEnv| -> Option<SwipeWords> {
+            let language = string(env, &language).ok()?;
+            let shortcuts = strings(env, &shortcuts).ok()?;
+            let replacements = strings(env, &replacements).ok()?;
+            if shortcuts.len() != replacements.len() {
+                return None;
+            }
+            let own = strings(env, &own).ok()?;
+            let vocabulary = strings(env, &vocabulary).ok()?;
+            Some(SwipeWords::new(
+                &language,
+                has_dictionary != 0,
+                shortcuts.into_iter().zip(replacements).collect(),
+                own,
+                vocabulary,
+            ))
+        };
+        read(&mut env).map_or(0, |words| {
+            handle(Box::into_raw(Box::new(HkSwipeWords { words })))
+        })
+    });
+    settled(&mut env, words)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeWordsFree(
+    _env: JNIEnv,
+    _this: JObject,
+    words: jlong,
+) {
+    // SAFETY: 0 or a handle from swipeWordsNew, freed once, as the Kotlin caller promises.
+    unsafe { typing::hk_swipe_words_free(words as *mut HkSwipeWords) };
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeRank(
+    mut env: JNIEnv,
+    _this: JObject,
+    decoder: jlong,
+    words: jlong,
+    texts: JObjectArray,
+    costs: JDoubleArray,
+    checker: JObject,
+) -> jobject {
+    let order = guard(ptr::null_mut(), || {
+        // SAFETY: 0 or live handles, as the Kotlin caller promises.
+        let (Some(decoder), Some(words)) =
+            (unsafe { decoder_of(decoder) }, unsafe { words_of(words) })
+        else {
+            return ptr::null_mut();
+        };
+        let read = |env: &mut JNIEnv| -> Option<Vec<Candidate>> {
+            let texts = strings(env, &texts).ok()?;
+            let costs = doubles(env, &costs).ok()?;
+            (texts.len() == costs.len()).then(|| {
+                texts
+                    .into_iter()
+                    .zip(costs)
+                    .map(|(text, cost)| Candidate { text, cost })
+                    .collect()
+            })
+        };
+        let Some(candidates) = read(&mut env) else {
+            return ptr::null_mut();
+        };
+        let mut check = |word: &str| is_word_valid(&mut env, &checker, word);
+        let order = decoder
+            .decoder
+            .ranked(&candidates, &words.words, &mut check);
+        let order: Vec<jint> = order.into_iter().map(|i| i as jint).collect();
+        let array = (|| -> Result<JObject> {
+            let array = env.new_int_array(order.len() as jint)?;
+            env.set_int_array_region(&array, 0, &order)?;
+            Ok(array.into())
+        })();
+        array.map_or(ptr::null_mut(), JObject::into_raw)
+    });
+    settled(&mut env, order)
+}
+
+/// `SwipeTyped(space, word, alternatives)`.
+fn swipe_typed<'local>(env: &mut JNIEnv<'local>, typed: Typed) -> Result<JObject<'local>> {
+    let count = jint::try_from(typed.alternatives.len()).unwrap_or(jint::MAX);
+    let alternatives = env.new_object_array(count, "java/lang/String", JObject::null())?;
+    for (i, text) in (0..count).zip(&typed.alternatives) {
+        let text = env.new_string(text)?;
+        env.set_object_array_element(&alternatives, i, &text)?;
+        env.delete_local_ref(text)?;
+    }
+    let word = env.new_string(&typed.word)?;
+    env.new_object(
+        "ly/anoma/hex/typing/SwipeTyped",
+        "(ZLjava/lang/String;[Ljava/lang/String;)V",
+        &[
+            JValue::Bool(u8::from(typed.space)),
+            JValue::Object(&word),
+            JValue::Object(&alternatives),
+        ],
+    )
+}
+
+#[unsafe(no_mangle)]
+#[allow(clippy::too_many_arguments)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeTyped(
+    mut env: JNIEnv,
+    _this: JObject,
+    words: jlong,
+    readings: JObjectArray,
+    before: JString,
+    shift: jint,
+    shift_held: jboolean,
+    auto_capitalization: jint,
+    auto_capitalizes: jboolean,
+    autocorrection: jboolean,
+    checker: JObject,
+) -> jobject {
+    let typed = guard(ptr::null_mut(), || {
+        // SAFETY: 0 or a live handle from swipeWordsNew, as the Kotlin caller promises.
+        let Some(words) = (unsafe { words_of(words) }) else {
+            return ptr::null_mut();
+        };
+        let (Some(readings), Some(before)) = (
+            strings(&mut env, &readings).ok(),
+            optional_string(&mut env, &before),
+        ) else {
+            return ptr::null_mut();
+        };
+        let (Some(shift), Some(auto_capitalization)) = (
+            u8::try_from(shift).ok().and_then(typing::shift),
+            u8::try_from(auto_capitalization)
+                .ok()
+                .and_then(typing::auto_capitalization),
+        ) else {
+            return ptr::null_mut();
+        };
+        let context = SwipeContext {
+            before: before.as_deref(),
+            shift,
+            shift_held: shift_held != 0,
+            auto_capitalization,
+            auto_capitalizes: auto_capitalizes != 0,
+            autocorrection: autocorrection != 0,
+        };
+        let readings: Vec<&str> = readings.iter().map(String::as_str).collect();
+        let mut check = |word: &str| is_word_valid(&mut env, &checker, word);
+        let Some(typed) = core_typing::typed(&readings, &context, &words.words, &mut check) else {
+            return ptr::null_mut();
+        };
+        swipe_typed(&mut env, typed).map_or(ptr::null_mut(), JObject::into_raw)
+    });
+    settled(&mut env, typed)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeNeedsSpace(
+    mut env: JNIEnv,
+    _this: JObject,
+    before: JString,
+) -> jboolean {
+    let needs = guard(0, || {
+        optional_string(&mut env, &before).map_or(0, |before| {
+            u8::from(core_typing::needs_space(before.as_deref()))
+        })
+    });
+    settled(&mut env, needs)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeIsSlidTap(
+    mut env: JNIEnv,
+    _this: JObject,
+    points: JDoubleArray,
+    pitch: jdouble,
+    key: JString,
+    first_reading: JString,
+) -> jboolean {
+    let slid = guard(0, || {
+        let (Some(points), Some(key), Some(first_reading)) = (
+            doubles(&env, &points).ok(),
+            optional_string(&mut env, &key),
+            optional_string(&mut env, &first_reading),
+        ) else {
+            return 0;
+        };
+        if !points.len().is_multiple_of(2) {
+            return 0;
+        }
+        let path: Vec<(f64, f64)> = points
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|&[x, y]| (x, y))
+            .collect();
+        u8::from(core_typing::is_slid_tap(
+            &path,
+            pitch,
+            key.as_deref(),
+            first_reading.as_deref(),
+        ))
+    });
+    settled(&mut env, slid)
 }

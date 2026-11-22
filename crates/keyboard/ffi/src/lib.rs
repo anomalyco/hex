@@ -9,6 +9,7 @@
 mod jni;
 mod model;
 mod swipe;
+mod typing;
 
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -20,9 +21,14 @@ pub use swipe::{
     hk_swipe_default_parameters, hk_swipe_free, hk_swipe_new, hk_swipe_own_word_cost,
     hk_swipe_read, hk_swipe_reading_free,
 };
+pub use typing::{
+    HkIsWordValid, HkSwipeContext, HkSwipeTyped, HkSwipeWords, HkTextReplacement,
+    hk_swipe_is_slid_tap, hk_swipe_needs_space, hk_swipe_rank, hk_swipe_typed, hk_swipe_typed_free,
+    hk_swipe_words_free, hk_swipe_words_new,
+};
 
 /// `HK_ABI_VERSION` in `include/hex_keyboard.h`.
-pub const HK_ABI_VERSION: u32 = 1;
+pub const HK_ABI_VERSION: u32 = 2;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn hk_abi_version() -> u32 {
