@@ -17,6 +17,8 @@ jni = ["dep:jni"]
 [dependencies]
 hex-keyboard-core = { path = "../core" }
 memmap2 = "0.9"
+# fcntl, to duplicate a caller's descriptor (hk_model_open_fd); already in the lock via memmap2.
+libc = "0.2"
 jni = { version = "0.21", optional = true, default-features = false }
 
 [lints]

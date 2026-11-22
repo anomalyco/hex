@@ -2,7 +2,7 @@
 
 use std::ffi::{OsStr, c_char, c_int};
 use std::fs::File;
-use std::os::fd::BorrowedFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::sync::Arc;
@@ -52,12 +52,15 @@ pub(crate) fn open_fd(fd: c_int, offset: i64, length: i64) -> *mut HkModel {
     }
     guard(None, || {
         let (offset, length) = (u64::try_from(offset).ok()?, u64::try_from(length).ok()?);
-        // SAFETY: only borrowed for the dup below, which leaves the caller's descriptor as it
-        // was; a descriptor that isn't open fails there cleanly (EBADF), as the caller is
-        // told any value is safe.
-        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
         // A duplicate of our own to map from, closed once mapped: the map outlives it.
-        let file = File::from(borrowed.try_clone_to_owned().ok()?);
+        // SAFETY: fcntl(F_DUPFD_CLOEXEC) reads no memory and leaves the caller's descriptor as
+        // it was; any value is safe, and one that isn't open fails cleanly (EBADF).
+        let dup = unsafe { libc::fcntl(fd, libc::F_DUPFD_CLOEXEC, 0) };
+        if dup < 0 {
+            return None;
+        }
+        // SAFETY: `dup` is a descriptor fcntl just opened for us alone.
+        let file = File::from(unsafe { OwnedFd::from_raw_fd(dup) });
         let size = file.metadata().ok()?.len();
         if offset.checked_add(length)? > size {
             return None;
