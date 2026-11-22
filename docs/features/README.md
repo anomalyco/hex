@@ -2970,8 +2970,8 @@ access): an app, or with Allow websites to use Hex a website the person
 allowed in the lab's card, calls
 `POST /connect/authorize` without the token, Hex's permission window (its own
 floating window on every OS, shown whether or not the main window is open, with
-both allows disabled for its first second; on X11 and Windows it takes clicks
-but no keys, and Wayland without layer-shell answers unavailable, its Labs card
+both allows disabled for its first second and after every key; it takes the
+keyboard on every OS, and Wayland without layer-shell answers unavailable, its Labs card
 disabled with a note saying so) names its verified
 origin and offers Deny / Allow Once / Always Allow, and an allowed PKCE exchange mints one
 upload token that spends itself on one plain `POST /transcriptions` from the

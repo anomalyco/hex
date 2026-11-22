@@ -265,13 +265,12 @@ after 0.8 s, and is cached by code-directory hash. Nothing the client sends
 names it. The footer says Always Allow lasts until it is revoked in Hex ›
 Connected apps.
 
-Where the window can't take keys or can't open, the platform decides:
+It takes the keyboard when it shows, on macOS, Wayland with layer-shell,
+X11 and Windows alike. Where it can't open, the platform decides:
 
 ```ts
-macOS, Wayland with layer-shell -> as above
-X11, Windows                    -> buttons work; Return and Escape never reach it
-                                   (Rune's overlays there take no keyboard), so
-                                   they go to the app in front and grant nothing
+macOS, X11, Windows             -> as above
+Wayland with layer-shell        -> as above
 Wayland without layer-shell     -> no overlay that takes keys (Rune refuses XWayland
 (GNOME)                            for one): the ask answers 403 *-unavailable
                                    within a second instead of waiting unseen
@@ -286,8 +285,12 @@ rune_ui::consent_window::tests::snapshots`), and its state, guard, keys, and
 answers are tested headless. On Linux the running app was driven under Xvfb
 (X11, lavapipe) with `curl` asks from an allowed origin and `xdotool` clicks:
 both asks showed centred with the main window closed, Allow Once during the
-guard did nothing, Escape did not reach the window, Deny answered
-`consent-denied` and hid it, and Allow Once after the guard issued a code.
+guard did nothing, Deny answered `consent-denied` and hid it, and Allow
+Once after the guard issued a code. After the move to Rune `63ad0209`
+(overlays take the keyboard on X11), the window took the input focus on
+showing with the main window closed: Escape denied, Tab moved the focus
+ring to Allow Once (restarting the guard, so a Space at once did nothing),
+and Space after the guard allowed the native client's pairing.
 A later run with Labs › Connected apps on (websites included, one allowed
 origin in `local-consent.json`) answered an unknown page's pairing with
 `website-not-allowed` and CORS, wrote it to the file's tried list, and showed
