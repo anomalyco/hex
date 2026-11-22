@@ -963,11 +963,63 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(pro.key(.character("й"))!.frame.minX, 5, accuracy: 2)
         XCTAssertEqual(pro.key(.character("ї"))!.frame.minX, 367, accuracy: 2)
         for layer in [KeyboardLayer.numbers, .symbols] {
-            XCTAssertEqual(
-                KeyboardLayout(width: 402, layer: layer, language: .ukrainian).keys,
-                KeyboardLayout(width: 402, layer: layer).keys
-            )
+            let ukrainian = KeyboardLayout(width: 402, layer: layer, language: .ukrainian).keys
+            let english = KeyboardLayout(width: 402, layer: layer).keys
+            XCTAssertEqual(ukrainian.map(\.frame), english.map(\.frame))
+            XCTAssertEqual(ukrainian.map(\.character), english.map { $0.character == "'" ? "\u{02BC}" : $0.character }, "ʼ where English has '")
         }
+    }
+
+    /// Before iOS 27 the system Ukrainian keyboard is Russian's rows with і for ы and є for э
+    /// (iOS 26.2, 26.4 and 26.5 simulators, iPhone 12 and 17 Pro, read through accessibility):
+    /// 11, 11 and 9 keys, every letter the two share on Russian's key, shift and delete one
+    /// letter wide, ї on a held і, ґ on a held г and ʼ only on the 123 and #+= pages. From iOS 27
+    /// it is the twelve-key rows (`testUkrainiansTwelveKeyRowsMatchApples`).
+    func testUkrainianBeforeIOS27IsRussiansRows() {
+        let running = KeyboardLanguage.systemMajorVersion
+        defer { KeyboardLanguage.systemMajorVersion = running }
+        KeyboardLanguage.systemMajorVersion = 26
+        XCTAssertEqual(KeyboardLanguage.ukrainian.letterRows.map { $0.joined() }, ["йцукенгшщзх", "фівапролджє", "ячсмитьбю"])
+        let cases: [(CGFloat, KeyboardOrientation, CGFloat)] = [
+            (375, .portrait, 0), (390, .portrait, 0), (402, .portrait, 0), (440, .portrait, 0),
+            (844, .landscape, 47), (956, .landscape, 60),
+        ]
+        for (width, orientation, inset) in cases {
+            let label = "\(width)pt \(orientation)"
+            let ukrainian = KeyboardLayout(width: width, orientation: orientation, horizontalInset: inset, language: .ukrainian)
+            let russian = KeyboardLayout(width: width, orientation: orientation, horizontalInset: inset, language: .russian)
+            XCTAssertEqual(ukrainian.keys.map(\.frame), russian.keys.map(\.frame), label)
+            for key in russian.keys {
+                guard let character = key.character else { continue }
+                let own = ["ы": "і", "э": "є"][character] ?? character
+                XCTAssertEqual(ukrainian.key(.character(own))?.frame, key.frame, "\(label) \(own)")
+            }
+            XCTAssertEqual(ukrainian.key(.shift)?.frame, russian.key(.shift)?.frame, label)
+            XCTAssertEqual(ukrainian.key(.delete)?.frame, russian.key(.delete)?.frame, label)
+            for letter in ["ї", "ґ", "ʼ"] { XCTAssertNil(ukrainian.key(.character(letter)), "\(label) \(letter) is held") }
+        }
+        // Apple's 390 pt iPhone 12 (iOS 26.5): row 1 runs from 4.7 to 387.7 pt, 11 keys.
+        let twelve = KeyboardLayout(width: 390, language: .ukrainian)
+        XCTAssertEqual(twelve.key(.character("й"))!.frame.minX, 6.67, accuracy: 1)
+        XCTAssertEqual(twelve.key(.character("х"))!.frame.maxX, 383.67, accuracy: 1)
+        XCTAssertEqual(AccentCatalog.options(for: "і", uppercase: false, language: .ukrainian), ["і", "ї"])
+        XCTAssertEqual(AccentCatalog.options(for: "І", uppercase: true, language: .ukrainian), ["І", "Ї"])
+        XCTAssertEqual(AccentCatalog.options(for: "г", uppercase: false, language: .ukrainian), ["г", "ґ"])
+        for letter in KeyboardLanguage.ukrainian.letterRows.joined() where letter != "і" && letter != "г" {
+            XCTAssertNil(AccentCatalog.options(for: letter, uppercase: false, language: .ukrainian), letter)
+        }
+        XCTAssertEqual(AccentCatalog.options(for: "ʼ", uppercase: false, language: .ukrainian), ["ʼ", "'", "’", "‘", "`"], "the 123 page's ʼ")
+        let coordinates = KeyboardLanguage.ukrainian.keyCoordinates()
+        XCTAssertEqual(coordinates["є"]?.0, 1)
+        XCTAssertEqual(coordinates["є"]?.1, 10, "under х")
+        XCTAssertEqual(coordinates["я"]?.1, 1, "row 3 starts under ц")
+        XCTAssertNil(coordinates["ї"])
+        for layer in [KeyboardLayer.numbers, .symbols] {
+            XCTAssertEqual(KeyboardLayout.characterRows(for: layer, language: .ukrainian)[2].last, "\u{02BC}")
+        }
+        KeyboardLanguage.systemMajorVersion = 27
+        XCTAssertEqual(KeyboardLanguage.ukrainian.letterRows.map { $0.joined() }, ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"])
+        XCTAssertNil(AccentCatalog.options(for: "і", uppercase: false, language: .ukrainian))
     }
 
     /// The standard Greek layout in the rows the system Greek keyboard shows on an iPhone 17
@@ -1007,7 +1059,7 @@ final class KeyboardLayoutTests: XCTestCase {
                 KeyboardLayout(width: 402, layer: layer).keys.map(\.frame),
                 "the same keys, a few characters changed"
             )
-            XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .ukrainian).keys, KeyboardLayout(width: 402, layer: layer).keys)
+            XCTAssertEqual(KeyboardLayout(width: 402, layer: layer, language: .ukrainian).keys.map(\.frame), KeyboardLayout(width: 402, layer: layer).keys.map(\.frame))
         }
     }
 

@@ -905,7 +905,9 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         // Greek's pages, as the system Greek keyboard shows them: ; is its question mark, so it
         // takes ?'s key on both, the ano teleia · takes ;'s key on 123, and ? takes |'s on #+=.
         let greek = language == .greek
-        let punctuation = [".", ",", greek ? ";" : "?", "!", "'"]
+        // Ukrainian's apostrophe key on both pages is ʼ (U+02BC), as on the system Ukrainian
+        // keyboard (iOS 26.2 to 27.2 simulators), holding ʼ's options (`letterHolds`).
+        let punctuation = [".", ",", greek ? ";" : "?", "!", language == .ukrainian ? "\u{02BC}" : "'"]
         switch layer {
         case .letters:
             return language.letterRows(language.offered(letters))

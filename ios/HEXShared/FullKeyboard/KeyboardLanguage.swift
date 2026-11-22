@@ -8,9 +8,10 @@ import Foundation
 /// ("AZERTY – French", their own: row 3 ends in the apostrophe key, `FrenchTyping`),
 /// Canadian French QWERTY, as on Apple's French (Canada), and Swiss French QWERTZ, as on
 /// Apple's French (Suisse), both their "– French" layouts with the key ending row 2. Russian is Apple's ЙЦУКЕН (ё on a held е, ъ on a
-/// held ь); Ukrainian is the standard Ukrainian ЙЦУКЕН (ДСТУ 4862:2007) in the twelve-key
-/// rows the iPhone's own Ukrainian keyboard shows (ї, є, ʼ and ґ on keys of their own, the
-/// other apostrophes on a held ʼ, and no ы, э, ъ or ё); Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
+/// held ь); Ukrainian is the standard Ukrainian ЙЦУКЕН (ДСТУ 4862:2007) in the rows the
+/// iPhone's own Ukrainian keyboard shows on the iOS it runs on: from iOS 27 twelve keys (ї, є,
+/// ʼ and ґ on keys of their own, the other apostrophes on a held ʼ), before it Russian's eleven
+/// (є after ж, ї on a held і, ґ on a held г, ʼ on the 123 page), never ы, э, ъ or ё; Serbian (Latin) is Apple's QWERTZ option for it, which on iPhone has no keys of
 /// its own for č ć đ š ž: they are held on c, d, s and z, as on Apple's. Polish types on the
 /// English letters (the standard Polish layout is QWERTY) with ą ć ę ł ń ó ś ź ż on held keys.
 /// Romanian is QWERTY too, its own ă â î ș ț held on a, i, s and t (the comma-below ș and ț, not
@@ -162,6 +163,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// The three letter rows of the language's own layout (its `defaultLetterLayout`), lowercase.
     var letterRows: [[String]] { letterRows(defaultLetterLayout) }
 
+    /// The major version of the iOS Hex runs on, for the one system keyboard measured to differ
+    /// between versions: Ukrainian's (`ukrainianHasTwelveKeys`). Tests set it.
+    nonisolated(unsafe) static var systemMajorVersion = ProcessInfo.processInfo.operatingSystemVersion.majorVersion
+
+    /// Apple's Ukrainian keyboard has twelve keys in rows 1 and 2 from iOS 27 (iOS 27.0 and 27.2
+    /// simulators) and Russian's eleven before it (iOS 26.2 to 26.5 simulators, black box).
+    static var ukrainianHasTwelveKeys: Bool { systemMajorVersion >= 27 }
+
     /// The three letter rows on `letters` (Settings › Keyboard › Languages › Layout), lowercase,
     /// or on the language's own layout where it doesn't offer `letters`. Rows 1 and 2 may hold
     /// 11 keys (Apple's Nordic, German and Russian layouts) or 12 (Ukrainian); row 3 sits
@@ -256,10 +265,12 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
         case .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"]
         // The standard Ukrainian ЙЦУКЕН (ДСТУ 4862:2007) in the rows the iPhone's own Ukrainian
-        // keyboard shows (iOS 27.2 simulator): ї after х, є and the apostrophe ʼ (U+02BC, the
-        // one Ukrainian spelling uses) after ж, ґ after ю, so shift and delete are one letter
-        // wide.
-        case .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"]
+        // keyboard shows. From iOS 27 (27.0 and 27.2 simulators): ї after х, є and the apostrophe
+        // ʼ (U+02BC, the one Ukrainian spelling uses) after ж, ґ after ю. Before it (26.2 to 26.5
+        // simulators): Russian's rows with і for ы and є for э, every shared letter where
+        // Russian's is. Either way shift and delete are one letter wide.
+        case .ukrainian where Self.ukrainianHasTwelveKeys: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"]
+        case .ukrainian: ["йцукенгшщзх", "фівапролджє", "ячсмитьбю"]
         // The standard Greek layout in the rows the iPhone's own Greek keyboard shows (iOS 27.2
         // simulator): no ; or ς keys (; is on the 123 page, ς on a held σ), so row 1 is nine
         // keys ending in the tonos key ´, over row 2's nine.
@@ -456,8 +467,17 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "ь": ["ь", "ъ", "ӏ", "ѫ"],
                 "ю": ["ю", "ҩ", "ѭ"],
             ]
+        // From iOS 27 only ʼ holds anything; before it a held і offers ї and a held г ґ (iOS 26.5
+        // simulator, screenshots of every key held). ʼ's list is also the 123 and #+= pages' ʼ
+        // key's, on both.
+        case .ukrainian where Self.ukrainianHasTwelveKeys:
+            [
+                "ʼ": ["ʼ", "'", "’", "‘", "`"],
+            ]
         case .ukrainian:
             [
+                "і": ["і", "ї"],
+                "г": ["г", "ґ"],
                 "ʼ": ["ʼ", "'", "’", "‘", "`"],
             ]
         case .greek:

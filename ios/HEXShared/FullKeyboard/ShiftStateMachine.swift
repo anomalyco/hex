@@ -176,7 +176,7 @@ nonisolated struct KeyboardLayerState: Equatable, Sendable {
 
     mutating func didInsert(_ text: String) {
         guard layer != .letters else { return }
-        if text == " " || text == "\n" || text == "'" {
+        if text == " " || text == "\n" || text == "'" || text == "\u{02BC}" {
             layer = .letters
         }
     }
