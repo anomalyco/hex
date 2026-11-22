@@ -71,9 +71,9 @@ nonisolated struct OffensiveWords: Equatable, Sendable {
         entries.compactMap { word, kind in kind == .slur || !allowSwearing ? word : nil }
     }
 
-    /// The list for a keyboard layout's language ("en", "es", "de", "nb"; the shared `*` lines
-    /// for the others), read once per process from the bundle (the keyboard's, or the app's
-    /// for its keyboard preview).
+    /// The list for a keyboard layout's language ("en", "es", "de", "nb", "fr", "it", its
+    /// `KeyboardLanguage.baseLanguage`; the shared `*` lines for the others), read once per
+    /// process from the bundle (the keyboard's, or the app's for its keyboard preview).
     @MainActor static func bundled(_ language: String) -> OffensiveWords {
         if let cached = loaded[language] { return cached }
         let words = OffensiveWords(tsv: bundledTSV, language: language)

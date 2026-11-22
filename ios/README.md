@@ -560,7 +560,8 @@ never at a launch by itself.
     keyboard, the strip and autocorrect never offer slurs, and offer swear words only
     with Suggest swear words on (off by default; App Store rating 4+). The list
     (`HEXShared/FullKeyboard/never-suggest.tsv`: layout, `slur` or `swear`, spelling or
-    two-word expression; `*` lines apply to every layout) is LDNOOBW as curated for Hex
+    two-word expression; `*` lines apply to every layout, and the three French layouts all
+    read the `fr` lines) is LDNOOBW as curated for Hex
     for Android, entry for entry the same as `android/app/src/main/assets/typing/never-suggest.tsv`
     (see Acknowledgements below); change both together. `OffensiveWords` is checked when a
     suggestion is looked up: `UITextChecker`'s guesses and completions, learned fixes, and

@@ -1616,6 +1616,34 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(Array(strip(autocorrect, "nig").dropFirst()), ["night", "nigh"])
     }
 
+    /// French and Italian have their own lines, as on Android, and all three French layouts
+    /// (France, Canada, Suisse) read the "fr" ones.
+    func testFrenchAndItalianSlursAreNeverOfferedAndTheirSwearWordsOnlyWhenTurnedOn() {
+        for french in [KeyboardLanguage.french, .frenchCanadian, .frenchSwiss] {
+            let autocorrect = stubbed {
+                $0.valid = ["bougie", "bouger", "connaître", "connu"]
+                $0.completionTable = ["boug": ["bougnoule", "bougie", "bouger"], "conn": ["connard", "connaître", "connu"]]
+            }
+            autocorrect.setLanguage(french, available: ["fr_FR"])
+            XCTAssertEqual(Array(strip(autocorrect, "boug").dropFirst()), ["bougie", "bouger"], "\(french)")
+            XCTAssertEqual(Array(strip(autocorrect, "conn").dropFirst()), ["connaître", "connu"], "\(french)")
+            autocorrect.allowsSwearing = true
+            XCTAssertEqual(Array(strip(autocorrect, "boug").dropFirst()), ["bougie", "bouger"], "\(french): a slur, even with swear words on")
+            XCTAssertEqual(Array(strip(autocorrect, "conn").dropFirst()), ["connard", "connaître"], "\(french)")
+        }
+
+        let italian = stubbed {
+            $0.valid = ["negroni", "cazzuola"]
+            $0.completionTable = ["negr": ["negro", "negri", "negroni"], "cazz": ["cazzo", "cazzata", "cazzuola"]]
+        }
+        italian.setLanguage(.italian, available: ["it"])
+        XCTAssertEqual(Array(strip(italian, "negr").dropFirst()), ["negroni"])
+        XCTAssertEqual(Array(strip(italian, "cazz").dropFirst()), ["cazzuola"])
+        italian.allowsSwearing = true
+        XCTAssertEqual(Array(strip(italian, "negr").dropFirst()), ["negroni"], "a slur, even with swear words on")
+        XCTAssertEqual(Array(strip(italian, "cazz").dropFirst()), ["cazzo", "cazzata"])
+    }
+
     func testAnOffensiveWordTypedInFullIsNeverCorrected() {
         let autocorrect = stubbed {
             $0.guessTable = ["fuck": ["duck", "luck"], "nigger": ["bigger", "niggle"]]

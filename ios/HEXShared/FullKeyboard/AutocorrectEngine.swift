@@ -395,7 +395,8 @@ final class AutocorrectEngine {
             partner?.layoutLanguage = language
             partner?.decoderCache = nil
         }
-        offensiveWords = .bundled(language.rawValue)
+        // The list is by language: Apple's three French layouts all read its "fr" lines.
+        offensiveWords = .bundled(language.baseLanguage)
         userWordsRevision += 1
         decoderCache = nil
         let code = language.spellCheckLanguage(available: available)
