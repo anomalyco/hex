@@ -158,8 +158,8 @@ internal object SwipeParity {
         return out.toLongArray()
     }
 
-    /** Just enough JSON for the fixture: objects, arrays, strings, integers, booleans and null. */
-    private class Json(private val s: String) {
+    /** Just enough JSON for the fixtures: objects, arrays, strings, integers, booleans and null. */
+    class Json(private val s: String) {
         private var at = 0
         fun value(): Any? {
             while (s[at] == ' ') at++

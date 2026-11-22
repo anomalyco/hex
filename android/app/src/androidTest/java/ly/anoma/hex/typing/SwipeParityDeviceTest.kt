@@ -8,8 +8,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
 
-/** The swipe parity fixture through the JNI entry points on the device, with bionic's libm
- * ([SwipeParity]): the models are the APK's own assets, opened from their descriptors as the IME does. */
+/** The swipe fixtures through the JNI entry points on the device, with bionic's libm ([SwipeParity],
+ * [SwipeRules]): the models are the APK's own assets, opened from their descriptors as the IME does. */
 @RunWith(AndroidJUnit4::class)
 class SwipeParityDeviceTest {
     @Test
@@ -25,6 +25,21 @@ class SwipeParityDeviceTest {
         }
         Log.i("SwipeParity", "swipe parity (device): $result")
         assertTrue(result.cases > 0)
+        assertEquals(result.toString(), 0, result.differences.size)
+    }
+
+    /** The swipe rules fixture on the device ([SwipeRules]). */
+    @Test
+    fun typesEveryFixtureSwipeAsTheFixtureSays() {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val app = instrumentation.targetContext.assets
+        val result = instrumentation.context.assets.open("swipe-rules.jsonl").bufferedReader().useLines { lines ->
+            SwipeRules.check(lines) { language ->
+                app.openFd("typing/$language.hextm").use { KeyboardCore.modelOpenFd(it.parcelFileDescriptor.fd, it.startOffset, it.length) }
+            }
+        }
+        Log.i("SwipeParity", "swipe rules (device): $result")
+        assertTrue(result.cases.values.sum() > 0)
         assertEquals(result.toString(), 0, result.differences.size)
     }
 }
