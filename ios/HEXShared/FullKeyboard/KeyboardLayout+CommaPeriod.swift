@@ -29,14 +29,15 @@ nonisolated extension KeyboardLayout {
     static func addCommaPeriodKeys(
         to drawn: inout [(kind: KeyKind, row: Int, frame: CGRect, label: String, shifted: String?)],
         keyWidth: CGFloat,
-        gap: CGFloat
+        gap: CGFloat,
+        commaMark: String = ","
     ) {
         guard let i = drawn.firstIndex(where: { $0.kind == .space && $0.row == 3 }),
               let period = spaceBar(drawn[i].frame, takingPunctuation: true, keyWidth: keyWidth, gap: gap),
               let comma = spaceBar(period.space, takingPunctuation: false, keyWidth: keyWidth, gap: gap)
         else { return }
         drawn[i] = (.space, 3, comma.space, "space", nil)
-        drawn.append((.character(","), 3, comma.key, ",", nil))
+        drawn.append((.character(commaMark), 3, comma.key, commaMark, nil))
         drawn.append((.character("."), 3, period.key, ".", nil))
     }
 
@@ -45,13 +46,14 @@ nonisolated extension KeyboardLayout {
     static func addSplitCommaPeriodKeys(
         to drawn: inout [(kind: KeyKind, row: Int, frame: CGRect, label: String, rightHalf: Bool, shifted: String?)],
         keyWidth: CGFloat,
-        gap: CGFloat
+        gap: CGFloat,
+        commaMark: String = ","
     ) {
         for i in drawn.indices where drawn[i].kind == .space && drawn[i].row == 3 {
             let trailing = drawn[i].rightHalf
             guard let carved = spaceBar(drawn[i].frame, takingPunctuation: trailing, keyWidth: keyWidth, gap: gap)
             else { continue }
-            let mark = trailing ? "." : ","
+            let mark = trailing ? "." : commaMark
             drawn[i] = (.space, 3, carved.space, "space", trailing, nil)
             drawn.append((.character(mark), 3, carved.key, mark, trailing, nil))
         }

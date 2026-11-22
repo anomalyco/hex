@@ -709,6 +709,7 @@ struct ExperimentsSettingsPage: View {
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var swipeMoreLanguages = FullKeyboardSettings().swipeMoreLanguages
     @State private var koreanKeyboard = FullKeyboardSettings().koreanKeyboard
+    @State private var arabicKeyboard = FullKeyboardSettings().arabicKeyboard
     @State private var dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
     @State private var commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
     @State private var quickAccents = FullKeyboardSettings().quickAccents
@@ -785,6 +786,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: koreanKeyboard) { _, enabled in
                 FullKeyboardSettings().koreanKeyboard = enabled
+            }
+            .onChange(of: arabicKeyboard) { _, enabled in
+                FullKeyboardSettings().arabicKeyboard = enabled
             }
             .onChange(of: dvorakPunctuation) { _, enabled in
                 FullKeyboardSettings().dvorakPunctuation = enabled
@@ -930,6 +934,15 @@ struct ExperimentsSettingsPage: View {
 
         SettingsDivider()
 
+        // Off by default: العربية isn't offered in Languages and a stored "ar" is ignored.
+        SettingsToggleRow(
+            title: String(localized: "Arabic keyboard (العربية)"),
+            detail: String(localized: "Adds العربية, right to left on Apple's Arabic keys"),
+            isOn: $arabicKeyboard
+        )
+
+        SettingsDivider()
+
         // Off by default: English's Dvorak keeps Apple's keys until this is on.
         SettingsToggleRow(
             title: String(localized: "Dvorak punctuation keys"),
@@ -1069,6 +1082,7 @@ struct ExperimentsSettingsPage: View {
         germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
         swipeMoreLanguages = FullKeyboardSettings().swipeMoreLanguages
         koreanKeyboard = FullKeyboardSettings().koreanKeyboard
+        arabicKeyboard = FullKeyboardSettings().arabicKeyboard
         dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
         commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
         quickAccents = FullKeyboardSettings().quickAccents

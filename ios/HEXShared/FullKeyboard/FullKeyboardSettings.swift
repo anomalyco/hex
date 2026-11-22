@@ -36,6 +36,58 @@ nonisolated enum KoreanKeyboardExperiment {
     }
 }
 
+/// Settings › Experiments › Arabic keyboard (العربية), read the same way as Korean's: off by
+/// default, العربية isn't listed, Automatic never picks it, and a stored "ar" is ignored.
+nonisolated enum ArabicKeyboardExperiment {
+    static let key = "experiments.arabicKeyboard"
+
+    static var isEnabled: Bool {
+        UserDefaults(suiteName: KeyboardBridge.appGroup)?.bool(forKey: key) ?? false
+    }
+
+    static func isEnabled(in defaults: UserDefaults?) -> Bool {
+        guard let defaults else { return isEnabled }
+        return defaults.object(forKey: key) as? Bool ?? false
+    }
+}
+
+/// The experimental keyboard languages Settings › Experiments turns on, read together where
+/// the pure language helpers need them before a keyboard exists. Every other language is
+/// always available; Korean and Arabic are not until their switch is on.
+nonisolated struct KeyboardLanguageExperiments: Equatable, Sendable {
+    var korean = false
+    var arabic = false
+
+    static let none = KeyboardLanguageExperiments()
+
+    /// The switches in the App Group.
+    static var current: KeyboardLanguageExperiments {
+        KeyboardLanguageExperiments(in: UserDefaults(suiteName: KeyboardBridge.appGroup))
+    }
+
+    init(korean: Bool = false, arabic: Bool = false) {
+        self.korean = korean
+        self.arabic = arabic
+    }
+
+    /// A store a caller already owns (LanguageSettings' injected defaults).
+    init(in defaults: UserDefaults?) {
+        self.init(
+            korean: KoreanKeyboardExperiment.isEnabled(in: defaults),
+            arabic: ArabicKeyboardExperiment.isEnabled(in: defaults)
+        )
+    }
+
+    /// Whether Settings › Keyboard › Languages may offer `language`.
+    func includes(_ language: KeyboardLanguage) -> Bool {
+        switch language {
+        case .korean: korean
+        case .arabic: arabic
+        default: true
+        }
+    }
+}
+
 /// The full keyboard's switches in the shared App Group.
 ///
 /// Without Full Access an iPhone may not let the keyboard read the App Group (the simulator
@@ -80,6 +132,7 @@ struct FullKeyboardSettings {
         static let spatialAutocorrect = "experiments.spatialAutocorrect"
         static let germanSpatialAutocorrect = "experiments.germanSpatialAutocorrect"
         static let koreanKeyboard = KoreanKeyboardExperiment.key
+        static let arabicKeyboard = ArabicKeyboardExperiment.key
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
         static let hapticStrength = "settings.keyboardHapticStrength"
@@ -164,6 +217,14 @@ struct FullKeyboardSettings {
     var koreanKeyboard: Bool {
         get { defaults?.object(forKey: Key.koreanKeyboard) as? Bool ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.koreanKeyboard) }
+    }
+
+    /// Settings › Experiments › Arabic keyboard (العربية): adds العربية to Settings › Keyboard ›
+    /// Languages, typed on Apple's Arabic rows. Off by default: العربية isn't offered, Automatic
+    /// never picks it, and a stored "ar" is ignored.
+    var arabicKeyboard: Bool {
+        get { defaults?.object(forKey: Key.arabicKeyboard) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.arabicKeyboard) }
     }
 
     /// The typing model the keyboard may read `language`'s taps with: its bundled model, with
