@@ -9,7 +9,11 @@ publish.workspace = true
 name = "hex_keyboard_core"
 
 [dependencies]
+# Swift's `caseInsensitiveCompare` (full case folding) and `Character`s (grapheme clusters),
+# which autocorrect reads words by.
+caseless = "0.2"
 unicode-normalization = "0.1"
+unicode-segmentation = "1"
 
 [dev-dependencies]
 # The parity fixtures (tests/swipe_parity.rs, tests/tap_parity.rs) and the replay benchmark's

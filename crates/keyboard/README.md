@@ -17,9 +17,9 @@ This is its own Cargo workspace with its own `Cargo.lock` and pinned toolchain
 
 Pieces move here one at a time from the Swift keyboard (`ios/HEXShared/FullKeyboard`), each
 proven identical to the Swift it replaces before iOS switches to it. Today: the typing
-model reader, Swipe typing's decoder and the tap decoder (Spatial autocorrect,
-`core/src/decoder`, which iOS runs through `TypingDecoder` and `TypingDecoderModel`). Tune
-those here, not in Swift.
+model reader, Swipe typing's decoder, the tap decoder (Spatial autocorrect,
+`core/src/decoder`, which iOS runs through `TypingDecoder` and `TypingDecoderModel`) and
+autocorrect's decisions (`core/src/autocorrect`). Tune those here, not in Swift.
 
 ## Setup
 
@@ -133,3 +133,20 @@ cargo run --release -p hex-keyboard-core --example tap_replay -- --split test --
 cargo run --release -p hex-keyboard-core --example tap_replay -- \
   --make-sample 200 /tmp/sample.jsonl $M/en.hextm
 ```
+
+## Autocorrect
+
+`core/src/autocorrect` is `AutocorrectEngine` (`ios/HEXShared/FullKeyboard/AutocorrectEngine*.swift`)
+decision for decision: the strip, what space puts in, the next word's revision of the word
+before, bilingual autocorrect's partner language, and the helpers they read (the never-suggest
+list, German's capitals, Learn how I type's typos). The spelling dictionary stays the host's,
+behind `TextChecker` (iOS: `UITextChecker`), asked in the same order the Swift asked; your
+lexicon, vocabulary, kept words (the host keeps `LearnedWordsStore` on disk), settings and the
+field come in as data. `autocorrect::text` replicates the Swift and Foundation string semantics
+the decisions read by (grapheme clusters, canonical equivalence, `caseInsensitiveCompare`,
+diacritic folding).
+
+`tests/autocorrect_parity` replays `tests/fixtures/autocorrect-parity.jsonl`, cases the Swift
+oracle (`ios/HEXMobileTests/AutocorrectParity`) wrote with a deterministic dictionary, and must
+give the same answers, the same engine state and the same dictionary calls in the same order;
+it says how to write the fixture again, or a larger set for `HEX_AUTOCORRECT_PARITY=/path`.

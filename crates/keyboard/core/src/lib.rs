@@ -3,6 +3,7 @@
 //! crate (`hex-keyboard-ffi`) maps the model files.
 #![forbid(unsafe_code)]
 
+pub mod autocorrect;
 pub mod decoder;
 pub mod model;
 pub mod never_suggest;
