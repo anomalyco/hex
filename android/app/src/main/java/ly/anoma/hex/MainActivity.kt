@@ -67,7 +67,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         capture = MicCapture(LocalSpeech(applicationContext),
             update = { next, reason -> phase = next; notice = reason },
-            meter = {}, insert = { transcript = it })
+            meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)

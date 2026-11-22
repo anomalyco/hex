@@ -7,43 +7,53 @@ import android.media.MediaRecorder
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.util.Log
 import java.util.concurrent.Executors
 import kotlin.math.sqrt
 
 internal enum class SpeechPhase { Idle, Opening, Listening, Transcribing }
 
-// The IME calls start/finish/cancel on the main thread. All audio and inference live on
-// one worker. Every posted result belongs to its original ticket, including failures.
+// The IME calls start/finish/cancel on the main thread. One worker records, another transcribes,
+// so a dictation can start while the one before is still transcribing (as desktop Hex queues
+// them); results are inserted in the order they were spoken. Every posted result belongs to its
+// original ticket, including failures.
 internal class MicCapture(
     private val recognizer: Recognizer,
     private val update: (SpeechPhase, String?) -> Unit,
     private val meter: (Float) -> Unit,
-    private val insert: (String) -> Unit,
+    private val insert: (String, SpeechOptions) -> Unit,
 ) {
     private class Ticket(val options: SpeechOptions) {
         @Volatile var finish = false
         @Volatile var cancelled = false
+        var done = false
+        var note: String? = null
+        var text: String? = null
     }
     private val main = Handler(Looper.getMainLooper())
-    private val worker = Executors.newSingleThreadExecutor { Thread(it, "Hex dictation") }
+    private val recorder = Executors.newSingleThreadExecutor { Thread(it, "Hex dictation") }
+    private val transcriber = Executors.newSingleThreadExecutor { Thread(it, "Hex transcription") }
+    /** The dictation holding the microphone. */
     private var active: Ticket? = null
+    /** Dictations that stopped recording, oldest first, until their text is inserted. */
+    private val queue = ArrayDeque<Ticket>()
     var phase = SpeechPhase.Idle
         private set
+    /** Whether a new dictation can start: nothing holds the microphone. */
+    val canStart get() = active == null
 
     fun start(options: SpeechOptions) {
         if (active != null) return
         val ticket = Ticket(options)
         active = ticket
         publish(SpeechPhase.Opening)
-        worker.execute {
+        recorder.execute {
             try {
-                recordAndDecode(ticket)
+                record(ticket)
             } catch (_: SecurityException) {
                 complete(ticket, "Allow the microphone in Hex")
             } catch (_: Exception) {
                 complete(ticket, "Microphone unavailable. Try again.")
-            } catch (_: UnsatisfiedLinkError) {
-                complete(ticket, "Speech model unavailable")
             }
         }
     }
@@ -54,31 +64,84 @@ internal class MicCapture(
         publish(SpeechPhase.Transcribing)
     }
 
+    /** The ✕: discards the dictation recording now, else the ones still transcribing. Earlier
+     * dictations still arrive when a later one is discarded while it records. */
+    fun cancelLatest() {
+        val ticket = active
+        if (ticket != null) {
+            ticket.cancelled = true
+            active = null
+            publish(current())
+        } else cancel()
+    }
+
+    /** Leaving the field: nothing recording or transcribing may reach another editor. */
     fun cancel() {
         active?.cancelled = true
         active = null
+        queue.forEach { it.cancelled = true }
+        queue.clear()
         publish(SpeechPhase.Idle)
     }
 
-    fun close() { cancel(); worker.shutdownNow() }
+    fun close() { cancel(); recorder.shutdownNow(); transcriber.shutdownNow() }
+
+    private fun current() = when {
+        active != null -> phase.takeIf { it == SpeechPhase.Opening || it == SpeechPhase.Listening } ?: SpeechPhase.Listening
+        queue.isNotEmpty() -> SpeechPhase.Transcribing
+        else -> SpeechPhase.Idle
+    }
 
     private fun publish(value: SpeechPhase, note: String? = null) {
         phase = value
         update(value, note)
     }
 
+    /** A dictation ends: recording stopped with nothing to transcribe, or its text is ready. */
     private fun complete(ticket: Ticket, note: String? = null, text: String? = null) = main.post {
-        if (active === ticket) {
-            active = null
-            publish(SpeechPhase.Idle, note)
-            if (text != null) insert(text)
+        if (active === ticket) active = null
+        if (ticket.cancelled) { publish(current()); return@post }
+        ticket.done = true; ticket.note = note; ticket.text = text
+        if (ticket !in queue) queue.addLast(ticket)
+        var shown: String? = null
+        while (queue.firstOrNull()?.done == true) {
+            val next = queue.removeFirst()
+            shown = next.note ?: shown
+            next.text?.let { insert(it, next.options) }
+        }
+        publish(current(), shown)
+    }
+
+    /** Recording stopped with audio to transcribe: queue it behind earlier dictations. */
+    private fun transcribe(ticket: Ticket, pcm: ShortArray, count: Int) = main.post {
+        if (active === ticket) active = null
+        if (ticket.cancelled) { publish(current()); return@post }
+        queue.addLast(ticket)
+        publish(current())
+        transcriber.execute {
+            try {
+                if (ticket.cancelled) return@execute
+                val options = ticket.options
+                val raw = recognizer.decode(pcm, count, options.spoken.code, options.translate,
+                    options.vocabulary.takeIf { it.isNotEmpty() }?.joinToString(", "))
+                if (ticket.cancelled) return@execute
+                when (val text = raw?.let { SpokenText.format(it, options) }) {
+                    null -> complete(ticket, "Couldn’t transcribe. Try again.")
+                    "" -> complete(ticket, "No speech heard")
+                    else -> complete(ticket, text = text)
+                }
+            } catch (_: UnsatisfiedLinkError) {
+                complete(ticket, "Speech model unavailable")
+            } catch (_: Exception) {
+                complete(ticket, "Couldn’t transcribe. Try again.")
+            }
         }
     }
 
     // No audio-focus request, playback stream, device selection or communication mode.
     // Capture dies before inference starts. No audio or transcript is written to storage.
     @SuppressLint("MissingPermission")
-    private fun recordAndDecode(ticket: Ticket) {
+    private fun record(ticket: Ticket) {
         if (ticket.cancelled) return
         val rate = 16_000
         val block = rate / 25
@@ -89,7 +152,8 @@ internal class MicCapture(
             .setAudioSource(MediaRecorder.AudioSource.MIC)
             .setAudioFormat(AudioFormat.Builder().setSampleRate(rate).setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                 .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
-            .setBufferSizeInBytes(maxOf(minBuffer, block * 2 * 4)).build()
+            // Two seconds, so the reader can fall behind while an earlier dictation transcribes.
+            .setBufferSizeInBytes(maxOf(minBuffer, rate * 2 * 2)).build()
         var count = 0
         var voiced = 0
         var lastUpdate = 0L
@@ -119,20 +183,13 @@ internal class MicCapture(
                 if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) record.stop()
             } finally { record.release() }
         }
+        // Only with "setprop log.tag.HexSpeech DEBUG": how much audio arrived, never the audio or its words.
+        if (Log.isLoggable("HexSpeech", Log.DEBUG)) Log.d("HexSpeech", "captured $count samples, $voiced voiced")
         if (ticket.cancelled) return
         if (voiced < rate / 10 || count < rate / 4) {
             complete(ticket, "No speech heard")
             return
         }
-        main.post { if (active === ticket && phase != SpeechPhase.Transcribing) publish(SpeechPhase.Transcribing) }
-        val options = ticket.options
-        val raw = recognizer.decode(pcm, maxOf(count, rate + rate / 10), options.spoken.code, options.translate,
-            options.vocabulary.takeIf { it.isNotEmpty() }?.joinToString(", "))
-        if (ticket.cancelled) return
-        when (val text = raw?.let { SpokenText.format(it, options) }) {
-            null -> complete(ticket, "Couldn’t transcribe. Try again.")
-            "" -> complete(ticket, "No speech heard")
-            else -> complete(ticket, text = text)
-        }
+        transcribe(ticket, pcm, maxOf(count, rate + rate / 10))
     }
 }

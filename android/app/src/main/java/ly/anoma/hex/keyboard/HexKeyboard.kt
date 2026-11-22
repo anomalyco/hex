@@ -31,7 +31,6 @@ class HexKeyboard : InputMethodService() {
     internal val preferences by lazy { SpeechPreferences(this) }
     internal var nextEnglish: Boolean? = null
     /** The options the dictation in flight started with: its language decides mid-sentence case. */
-    private var dictating: SpeechOptions? = null
     internal val feedback by lazy { TypingPreferences(this) }
     internal val layoutLanguage get() = feedback.layout ?: preferences.spoken.layout ?: Spoken.English
     // Android's personal dictionary is read off the main thread, and again whenever it changes.
@@ -88,29 +87,28 @@ class HexKeyboard : InputMethodService() {
         else -> R.string.keyboard_hint_hold
     })
     internal fun beginSpeech(): Boolean {
-        if (engine.secure || currentInputConnection == null || capture.phase != SpeechPhase.Idle ||
+        if (engine.secure || currentInputConnection == null || !capture.canStart ||
             checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             view?.status(capture.phase, idleHint())
             return false
         }
         engine.clearForDictation()
-        dictating = preferences.options(nextEnglish).also(capture::start)
+        capture.start(preferences.options(nextEnglish))
         nextEnglish = null
         return true
     }
     internal fun toggleSpeech() = when (capture.phase) {
-        SpeechPhase.Idle -> { beginSpeech(); Unit }
+        // A dictation may start while the one before still transcribes; texts go in in order.
+        SpeechPhase.Idle, SpeechPhase.Transcribing -> { beginSpeech(); Unit }
         SpeechPhase.Opening, SpeechPhase.Listening -> finishSpeech()
-        SpeechPhase.Transcribing -> Unit
     }
     internal fun finishSpeech() {
         if (capture.phase == SpeechPhase.Listening || capture.phase == SpeechPhase.Opening) capture.finish()
     }
-    internal fun cancelSpeech() = capture.cancel()
-    private fun commitSpeech(text: String) {
+    internal fun cancelSpeech() = capture.cancelLatest()
+    private fun commitSpeech(text: String, options: SpeechOptions) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) return
-        val options = dictating
-        engine.insertDictation(text, if (options?.translate == true) "en" else options?.spoken?.code)
+        engine.insertDictation(text, if (options.translate) "en" else options.spoken.code)
     }
     private fun leaveEditor() { view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
