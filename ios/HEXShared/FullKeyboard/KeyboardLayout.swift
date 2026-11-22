@@ -304,17 +304,34 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         keysTop: 0, keysBottom: 0, cornerRadius: keyCornerRadius, bottomRowTrim: 4
     )
 
+    /// Upright on iOS 26 (iPhone 12, 16 and 17 Pro, iOS 26.5, beside Hex in the same field): the
+    /// same keycaps, pitch and prediction bar, but Apple's panel is 7 pt taller under the keys, so
+    /// every row is 7 pt higher and row 4 is whole, ending 3 pt above where a third-party
+    /// keyboard's view ends: 46 pt + 208 pt of keys (4 × 43 pt + 3 × 11 pt + 3 pt) = 254 pt.
+    static let portraitIOS26 = KeyboardMetrics(
+        side: 6.5, gap: 6, rowGap: 11, keyHeight: 43,
+        stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
+        keysTop: 0, keysBottom: 3, cornerRadius: keyCornerRadius
+    )
+
+    /// Whether Apple's iPhone keyboard draws iOS 26's rows (`KeyboardLanguage.systemMajorVersion`):
+    /// before iOS 27 (iOS 26.2 to 26.5 simulators, black box) its panel is 7 pt taller under the
+    /// keys on an 844 to 874 pt iPhone and 2 pt shorter on a 900 pt or taller one, and turned its
+    /// keys are smaller (`landscapeIOS26`). The SE, the Duo and the iPad keep one set of metrics.
+    static var appleRowsAreIOS26: Bool { KeyboardLanguage.systemMajorVersion < 27 }
+
     /// Turned, iOS draws no band above the keyboard (iPhone 17 Pro Max, iOS 27.2): Apple's keycaps
     /// start 50 pt below the panel's edge, so the strip is 42 pt and the same gap.
     static let landscapeStripHeight: CGFloat = 42
 
     /// The other iPhones' key planes (`KeyboardPhoneSize`), measured the same way: a Home-button
     /// iPhone (SE) has 42 pt keycaps on a 54 pt pitch and 4 pt under row 4; one 900 pt or taller
-    /// (Air, Pro Max) 45 pt keycaps on a 56 pt pitch and 7 pt under row 4.
+    /// (Air, Pro Max) 45 pt keycaps on a 56 pt pitch and 7 pt under row 4, 5 pt on iOS 26 (Air and
+    /// 17 Pro Max, iOS 26.5: every row 2 pt lower, 264 pt in all).
     static func phonePortrait(_ size: KeyboardPhoneSize) -> KeyboardMetrics {
         switch size {
         case .regular:
-            return .portrait
+            return appleRowsAreIOS26 ? .portraitIOS26 : .portrait
         case .homeButton:
             return KeyboardMetrics(
                 side: 6.5, gap: 6, rowGap: 12, keyHeight: 42,
@@ -325,7 +342,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             return KeyboardMetrics(
                 side: 6.5, gap: 6, rowGap: 11, keyHeight: 45,
                 stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
-                keysTop: 0, keysBottom: 7, cornerRadius: keyCornerRadius
+                keysTop: 0, keysBottom: appleRowsAreIOS26 ? 5 : 7, cornerRadius: keyCornerRadius
             )
         }
     }
@@ -340,6 +357,17 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         side: 4, gap: 6, rowGap: 8, keyHeight: 32,
         stripTop: 0, stripHeight: landscapeStripHeight, stripBottom: stripGap,
         keysTop: 0, keysBottom: 2, cornerRadius: keyCornerRadius, bottomRowReturnColumn: 8,
+        modifierLetterRatio: 1.33
+    )
+
+    /// Turned on iOS 26 (iPhone 12, 16, 17 Pro, Air and 17 Pro Max, iOS 26.5): iOS 26's 27.33 pt
+    /// keycaps on a 35.33 pt pitch, row 4 ending 4 pt above the view's bottom, in iOS 27's
+    /// columns: 50 pt + 137.33 pt of keys (4 × 27.33 pt + 3 × 8 pt + 4 pt) = 187.33 pt, whose top
+    /// edge meets Apple's panel edge.
+    static let landscapeIOS26 = KeyboardMetrics(
+        side: 4, gap: 6, rowGap: 8, keyHeight: 82.0 / 3,
+        stripTop: 0, stripHeight: landscapeStripHeight, stripBottom: stripGap,
+        keysTop: 0, keysBottom: 4, cornerRadius: keyCornerRadius, bottomRowReturnColumn: 8,
         modifierLetterRatio: 1.33
     )
 
@@ -466,7 +494,13 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
         if let pad { return .pad(pad, orientation: orientation) }
         let base: KeyboardMetrics
         if orientation == .landscape {
-            base = posture == .phone && phoneSize == .homeButton ? .homeButtonLandscape : .landscape
+            if posture != .phone {
+                base = .landscape
+            } else if phoneSize == .homeButton {
+                base = .homeButtonLandscape
+            } else {
+                base = appleRowsAreIOS26 ? .landscapeIOS26 : .landscape
+            }
         } else if posture == .phone {
             let phone = phonePortrait(phoneSize)
             // Apple's keys start 6.5 pt in on every iPhone from the SE's 375 pt up.
