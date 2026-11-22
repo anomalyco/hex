@@ -237,7 +237,7 @@ impl WarmTranscriber {
     }
 
     /// Whether the warm model streams with Parakeet's buffered chunk menus,
-    /// whose token times are emission frames rather than word onsets.
+    /// whose first-word timestamp lags its audio.
     pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
         match &mut self.active {
             Some(Transcriber::Gguf(model)) => model.streams_buffered_parakeet(),

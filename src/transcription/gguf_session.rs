@@ -348,10 +348,9 @@ impl OfflineGgufSession {
     }
 
     /// Whether this model streams with Parakeet's buffered chunk menus rather
-    /// than a cache-aware window such as Nemotron's. A buffered model's token
-    /// times are emission frames, so its first word starts later than its
-    /// audio. Any other architecture, and a file with no menus, is not
-    /// buffered.
+    /// than a cache-aware window such as Nemotron's. A buffered model times its
+    /// first word later than its audio. Any other architecture, and a file
+    /// with no menus, is not buffered.
     pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
         if self.architecture != "parakeet" {
             return false;

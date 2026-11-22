@@ -159,10 +159,9 @@ pub(super) fn stream_requires_closing_mark(model: &Model) -> bool {
 }
 
 /// Speech a dictation stream of `model` may leave before its text starts and
-/// still count as transcribed. A buffered Parakeet stream stamps each token at
-/// its emission frame, hundreds of milliseconds after the word begins, so it
-/// gets the measured bias; every other streaming model keeps the tighter
-/// slack.
+/// still count as transcribed. A buffered Parakeet stream times its first word
+/// later than its audio, in the whole-clip run too, so it gets the wider slack
+/// measured to fit it; every other streaming model keeps the tighter slack.
 pub(super) fn stream_opening_slack(model: &mut Model) -> usize {
     if model.streams_buffered_parakeet() {
         PARAKEET_OPENING_SLACK_SAMPLES
@@ -206,13 +205,17 @@ pub(super) const PAUSE_TAIL_SAMPLES: usize = 4_800;
 /// Speech the stream heard may end this long after its text does and still
 /// count as transcribed: a word's last token can be emitted before the word
 /// fully ends. It is also the opening slack for every stream whose model does
-/// not stamp tokens at their emission frame.
+/// not time its first word late.
 pub(super) const UNTRANSCRIBED_SLACK_SAMPLES: usize = 6_400;
 /// Speech a buffered Parakeet stream may leave before its text starts and
-/// still count as transcribed (1.2 s at 16 kHz). Its token times are emission
-/// frames: the first word's t0 lands 640-750 ms after its acoustic onset, in
-/// the stream and the whole-clip run alike, so the trailing check's 400 ms
-/// would refuse a stream that lost nothing.
+/// still count as transcribed (1.2 s at 16 kHz). Its first-word timestamp
+/// lags its audio: offline on the real Unified English Q8_0 model, over clean
+/// 16 kHz clips whose speech began at 0, 450 ms, and 1 s, the stream's first
+/// token time matched the whole-clip run's first word within one 80 ms frame
+/// while trailing the detected speech onset by about 100-1000 ms (most
+/// 440-1000 ms), and the stream's opening words matched the whole-clip text
+/// in every run. The trailing check's 400 ms refused 6 of those 20 runs;
+/// 1.2 s refused none. Chunk and lookahead geometry was not varied.
 pub(super) const PARAKEET_OPENING_SLACK_SAMPLES: usize = 19_200;
 /// Speech heard after the text's end (and its slack) that makes the stream
 /// unusable: a phrase the stream dropped (#1101). Longer than the stop
@@ -228,11 +231,11 @@ pub(super) const UNTRANSCRIBED_SPEECH_SAMPLES: usize = 4_800;
 /// both ends: speech before its start that Hex did not itself play means the
 /// stream lost its opening, speech well past its end means it dropped a
 /// phrase (#1101), and the whole clip decides. A buffered Parakeet stream
-/// stamps a token at its emission frame rather than its onset, so the opening
-/// check gives it a wider slack than the trailing one. The capture's own
-/// sounds (the pre-roll, the start tone) are ignored at the head. A raw decode
-/// carrying two different language tags means it changed language mid-clip,
-/// so the whole clip decides too.
+/// times its first word later than its audio, in the whole-clip run too, so
+/// the opening check gives it a wider slack than the trailing one. The
+/// capture's own sounds (the pre-roll, the start tone) are ignored at the
+/// head. A raw decode carrying two different language tags means it changed
+/// language mid-clip, so the whole clip decides too.
 pub(super) struct PauseCap<'a, S> {
     stream: &'a mut S,
     speech: crate::transcription::pause_segmenter::SpeechFrames,
@@ -255,7 +258,7 @@ pub(super) struct PauseCap<'a, S> {
     /// and the start tone. Speech there is never a lost opening.
     head_ignored: usize,
     /// Speech samples the stream may leave before its text starts, wider for
-    /// a model whose token times are emission frames.
+    /// a model whose first-word timestamp lags its audio.
     opening_slack: usize,
 }
 
@@ -277,8 +280,8 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
         }
     }
 
-    /// Widens the opening check to `slack` samples, as a model whose token
-    /// times are biased late needs.
+    /// Widens the opening check to `slack` samples, as a model whose
+    /// first-word timestamp lags its audio needs.
     pub(super) fn opening_slack(mut self, slack: usize) -> Self {
         self.opening_slack = slack;
         self
@@ -367,9 +370,10 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
         {
             // The threshold is the trailing check's, on the speech that ends
             // before the text begins, without Hex's own sounds at the capture's
-            // head. The slack is the model's: an emission-stamped first token
-            // moves t0 later, the unsafe direction here, so the cost is at
-            // most a whole-clip run.
+            // head. The wider Parakeet slack avoids refusing a stream over a
+            // late first-word time; the cost is that a stream that lost a short
+            // opening, up to roughly 0.8 s of speech right before its text, is
+            // no longer caught.
             let covered = (start_ms as usize * 16).saturating_sub(self.opening_slack);
             let frame = crate::transcription::pause_segmenter::FRAME_SAMPLES;
             let (mut first, mut last, mut untranscribed) = (None, 0, 0);

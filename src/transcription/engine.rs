@@ -1861,10 +1861,11 @@ mod tests {
 
     #[test]
     fn parakeets_emission_stamped_first_word_is_not_a_lost_opening() {
-        // Unified English stamps its first word at the emission frame, 640 ms
-        // after its onset. With no pre-roll to exclude, speech at 220-860 ms
-        // and text at 1280 ms is a stream that lost nothing, as the measured
-        // production lines did; the 400 ms slack refused it.
+        // An illustrative late first-word timestamp, 640 ms after its onset;
+        // the measured lag was about 100-1000 ms. With no pre-roll to exclude,
+        // speech at 220-860 ms and text at 1280 ms is a stream that lost
+        // nothing, as the measured production lines did; the 400 ms slack
+        // refused it.
         let mut clip = vec![0.0; 3_520]; // 220 ms
         clip.extend(tone(10_240)); // speech, 220-860 ms
         clip.extend(vec![0.0; 6_720]); // pause to the text, 860-1280 ms
@@ -1898,6 +1899,43 @@ mod tests {
                 .is_err_and(|reason| reason.contains("precedes")),
             "{result:?}"
         );
+    }
+
+    #[test]
+    fn parakeets_opening_slack_edge_is_one_frame() {
+        use crate::transcription::pause_segmenter::FRAME_SAMPLES;
+        // The 1.2 s slack with the 300 ms threshold: a speech frame counts
+        // only while it ends strictly before t0 - 1.2 s. A threshold's worth
+        // of speech is the shortest that can be refused, so the same 300 ms
+        // of lost opening is refused when it ends one frame before that edge
+        // and kept when it ends one frame after it (the frames ending at and
+        // past the edge no longer count).
+        let text_start_ms: u64 = 3_000;
+        let covered = text_start_ms as usize * 16 - PARAKEET_OPENING_SLACK_SAMPLES; // 28_800
+        let frame: usize = FRAME_SAMPLES;
+        let threshold = UNTRANSCRIBED_SPEECH_SAMPLES / frame; // 15 frames
+        for (speech_end, refused) in [
+            (covered - frame, true),  // 28_480: all 15 frames count
+            (covered + frame, false), // 29_120: 2 frames fall past the edge
+        ] {
+            let mut clip = vec![0.0; speech_end - threshold * frame];
+            clip.extend(tone(threshold * frame)); // the lost opening, 300 ms
+            clip.extend(vec![0.0; 4_800]); // the pause to the text
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(text_start_ms),
+                text_start_ms + 300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .is_err_and(|reason| reason.contains("precedes")),
+                refused,
+                "{speech_end}: {result:?}"
+            );
+        }
     }
 
     #[test]

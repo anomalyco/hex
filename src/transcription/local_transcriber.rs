@@ -476,7 +476,7 @@ impl LocalTranscriber {
     }
 
     /// Whether this model streams with Parakeet's buffered chunk menus, whose
-    /// token times are emission frames rather than word onsets.
+    /// first-word timestamp lags its audio.
     pub(crate) fn streams_buffered_parakeet(&mut self) -> bool {
         self.session.streams_buffered_parakeet()
     }
