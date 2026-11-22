@@ -780,7 +780,7 @@ function pressKey(down, rect) {
   }
 }
 
-function explodeKeycap(rect) {
+function explodeKeycap(rect, key = "option") {
   if (keycapExploded || reduced) return
   keycapExploded = true
   root.setAttribute("data-key-exploded", "")
@@ -792,8 +792,9 @@ function explodeKeycap(rect) {
   const kw = rect && rect.width > 0 ? rect.width : 124
   const kh = rect && rect.height > 0 ? rect.height : 102
 
-  // 1. Textured keycap atlas slot fractured into Voronoi chunks (cap face with ⌥ + "option", bevels, amber LED)
-  const kc = cards.makeKeycap()
+  // 1. Textured keycap atlas slot fractured into Voronoi chunks (cap face with the
+  // selected OS's legend, bevels, amber LED)
+  const kc = cards.makeKeycap(key)
   if (kc) {
     const cols = 6
     const rows = 4
@@ -2546,7 +2547,7 @@ if (capture) {
       })),
     }),
     pressKey: (down, rect) => pressKey(down, rect),
-    explodeKey: (rect) => explodeKeycap(rect),
+    explodeKey: (rect, key) => explodeKeycap(rect, key),
     focus: () => {
       const c = head.target && head.target.state !== "dead" ? head.target : live.find((o) => o.state === "typing")
       return c ? { x: c.x, y: c.y, kind: c.kind } : null
@@ -2561,12 +2562,12 @@ return {
   pressKey,
   explodeKey: explodeKeycap,
   // Call from a click with an AudioContext created inside that gesture.
-  async start({ context, muted, keyRect }) {
+  async start({ context, muted, keyRect, key }) {
     if (started) return
     audio.attach(context, { muted })
     if (!reduced) {
       audio.keyBoom()
-      explodeKeycap(keyRect)
+      explodeKeycap(keyRect, key)
     }
     wake()
     const [m] = await Promise.all([import("./audio/manifest.json").then((x) => x.default), cards.ready])

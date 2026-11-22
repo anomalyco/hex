@@ -8,8 +8,8 @@ import { setGlow } from "./glow"
 type Engine = {
   renderer: string
   pressKey?(pressed: boolean, rect?: DOMRect | null): void
-  explodeKey?(rect?: DOMRect | null): void
-  start(options: { context: AudioContext | null; muted: boolean; keyRect?: DOMRect | null }): Promise<void>
+  explodeKey?(rect?: DOMRect | null, key?: string): void
+  start(options: { context: AudioContext | null; muted: boolean; keyRect?: DOMRect | null; key?: string }): Promise<void>
   setMuted(muted: boolean, context?: AudioContext | null): void
   destroy(): void
 }
@@ -92,7 +92,7 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
 
   // Must run inside the click: that gesture is what lets the browser play audio.
   const start = useCallback(
-    (el?: HTMLElement | null) => {
+    (el?: HTMLElement | null, key = "option") => {
       if (phase === "starting" || phase === "started") return
       const quiet = readMuted()
       if (!quiet) context.current ??= newContext()
@@ -101,14 +101,14 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
       setPhase("starting")
       if (live.current && !reduced.current) {
         root.current?.setAttribute("data-key-exploded", "")
-        live.current.explodeKey?.(keyRect)
+        live.current.explodeKey?.(keyRect, key)
       }
       void load().then(async (e) => {
         if (!e) return setPhase("idle")
         if (!reduced.current) root.current?.setAttribute("data-key-exploded", "")
         // A context made before the gesture is still suspended; the engine only sounds once it runs.
         if (resumed && context.current?.state !== "running") await Promise.race([resumed.catch(() => {}), new Promise((r) => setTimeout(r, 250))])
-        await e.start({ context: context.current, muted: quiet, keyRect })
+        await e.start({ context: context.current, muted: quiet, keyRect, key })
         setPhase("started")
       })
     },
@@ -132,11 +132,15 @@ export function useShout(root: RefObject<HTMLElement | null>, canvas: RefObject<
 }
 
 export function OptionKey({
+  os,
   phase,
   onStart,
   onIntent,
   onPress,
 }: {
+  // The hero's key names the selected OS's shortcut: Option on the Mac, Alt
+  // on Windows, and Alt+Space on Linux, which binds no modifier alone.
+  os: "mac" | "windows" | "linux"
   phase: Phase
   onStart(el?: HTMLElement | null): void
   onIntent(): void
@@ -226,10 +230,22 @@ export function OptionKey({
       <span className="keycap__well" aria-hidden="true" />
       <span className="keycap__cap" aria-hidden="true">
         <span className="keycap__dish">
-          <svg viewBox="0 0 24 18" className="keycap__glyph">
-            <path d="M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3" />
-          </svg>
-          <span className="keycap__label">option</span>
+          {os === "mac" && (
+            <svg viewBox="0 0 24 18" className="keycap__glyph">
+              <path d="M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3" />
+            </svg>
+          )}
+          <span className="keycap__label">
+            {os === "linux" ? (
+              <>
+                alt<span className="keycap__chord">+ space</span>
+              </>
+            ) : os === "windows" ? (
+              "alt"
+            ) : (
+              "option"
+            )}
+          </span>
         </span>
       </span>
       <span className="keycap__hint" aria-hidden="true">

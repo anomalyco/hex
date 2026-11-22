@@ -29,6 +29,7 @@ use crate::dictation::ShortcutMode;
 mod activity;
 mod capsule;
 mod disposition;
+mod modifier_chord;
 mod modifiers;
 mod rearm;
 mod watchdog;
@@ -84,13 +85,16 @@ pub struct WindowsHotkey {
 }
 
 impl Default for WindowsHotkey {
+    /// Left Alt alone, as macOS defaults to Option (#2278). The left one
+    /// only: Windows sends AltGr as a synthesized Left Ctrl plus Right Alt,
+    /// and either Alt would press on every AltGr character.
     fn default() -> Self {
         Self {
-            control: Some(ModifierSide::Either),
+            control: None,
             windows: None,
-            alt: None,
+            alt: Some(ModifierSide::Left),
             shift: None,
-            key: Some("space".into()),
+            key: None,
         }
     }
 }
@@ -993,7 +997,7 @@ fn process_button(
             // The hook never sees a release that lands on another desktop,
             // such as the Windows key of Win+L or the modifiers of
             // Ctrl+Alt+Delete, so tracked modifiers stayed held after
-            // unlocking and Ctrl+Space no longer matched. Re-read them on
+            // unlocking and the shortcut no longer matched. Re-read them on
             // every event: the asynchronous key state does not include this
             // event yet, so `update` applies it on top.
             let read = ModifierState::read(key_held);
@@ -1192,57 +1196,7 @@ fn process_button(
                     state.mask_release = false;
                     mask = !state.share_trigger;
                 }
-                if state.trigger_vk.is_none()
-                    && state.capture.locked
-                    && state.capture.flavour.normal()
-                    && !state.dirty
-                    && is_down
-                    && state.holds(&state.binding)
-                    && state.side_down.together(&state.binding)
-                {
-                    // Only a modifier-only shortcut finishes on a modifier
-                    // press. A key chord such as Ctrl+Space finishes on its
-                    // key, so resting a finger on Ctrl never ends a locked
-                    // or toggled capture.
-                    if let Some(action) =
-                        state
-                            .capture
-                            .press(state.double_tap_enabled, state.double_tap_only, time)
-                    {
-                        state.dirty = true;
-                        send_event(state, action, time);
-                    }
-                } else if state.capture.active
-                    && state.capture.flavour.normal()
-                    && !state.holds(&state.binding)
-                {
-                    if let Some(action) = state.capture.release(state.double_tap_enabled, time) {
-                        state.dirty = state.holds_any_required(&state.binding);
-                        send_event(state, action, time);
-                    }
-                } else if state.trigger_vk.is_none()
-                    && !state.capture.active
-                    && !state.capture.locked
-                    && !state.dirty
-                    && is_down
-                    && state.holds(&state.binding)
-                    && state.side_down.together(&state.binding)
-                {
-                    state.capture.claim(DictationFlavour::Normal);
-                    if let Some(action) =
-                        state
-                            .capture
-                            .press(state.double_tap_enabled, state.double_tap_only, time)
-                    {
-                        send_event(state, action, time);
-                    }
-                }
-                if is_down && state.binding.masks_release() && state.holds(&state.binding) {
-                    state.mask_release = true;
-                }
-                if state.dirty && !state.holds_any_required(&state.binding) {
-                    state.dirty = false;
-                }
+                state.modifier_chord(vk, is_down, time);
             }
         }
     }
@@ -1497,6 +1451,8 @@ mod tests {
 
     use super::*;
 
+    mod chords;
+
     #[test]
     fn a_shared_shortcut_trigger_does_not_end_a_paste_continuation() {
         // Labs › Share shortcut lets the dictation trigger's key reach the
@@ -1512,8 +1468,31 @@ mod tests {
         assert!(!Handled::PASS.ends_continuation(true, false, HEX_INJECTED));
     }
 
+    /// A key chord, Ctrl+Space, for the tests that drive a trigger key; the
+    /// default is one modifier alone.
+    fn ctrl_space() -> WindowsHotkey {
+        WindowsHotkey {
+            control: Some(ModifierSide::Either),
+            windows: None,
+            alt: None,
+            shift: None,
+            key: Some("space".into()),
+        }
+    }
+
+    /// One test at a time drives the hook's process-wide [`CALLBACK_STATE`].
+    /// Nextest gives every test its own process, but plain `cargo test` runs
+    /// them as threads, and these tests install, drive, and clear the same
+    /// state.
+    static STATE_LOCK: Mutex<()> = Mutex::new(());
+
+    /// Holds [`STATE_LOCK`] for a test that touches [`CALLBACK_STATE`].
+    pub(super) fn state_lock() -> std::sync::MutexGuard<'static, ()> {
+        STATE_LOCK.lock().unwrap_or_else(|error| error.into_inner())
+    }
+
     /// The hook's state machine as the keyboard hook installs it, for one
-    /// Ctrl+Space binding; the caller drives events through
+    /// keyed binding; the caller drives events through
     /// [`process_button`], whose `key_held` lookup stands in for the physical
     /// modifiers a test cannot press.
     fn callback_state(binding: WindowsHotkey, share_trigger: bool) -> Receiver<HotkeyEvent> {
@@ -1573,12 +1552,13 @@ mod tests {
 
     #[test]
     fn a_bare_trigger_key_ends_a_paste_continuation_but_the_shortcut_does_not() {
+        let _state = state_lock();
         let space = u32::from(VK_SPACE);
         let ctrl_held = |key: u16| key == VK_LCONTROL;
 
         // Labs › Share shortcut: Ctrl+Space reaches the app in front, and
         // since Hex's shortcut fired, its press is Hex's key, not typing.
-        let events = callback_state(WindowsHotkey::default(), true);
+        let events = callback_state(ctrl_space(), true);
         let handled = process_button(space, LeftControl::Other, true, 1_000, ctrl_held);
         assert_eq!(handled.disposition, Disposition::Pass);
         assert!(!handled.ends_continuation(true, false, 0));
@@ -1589,7 +1569,7 @@ mod tests {
 
         // A bare Space without the shortcut's Ctrl is the user typing: it
         // reaches the app, starts nothing, and ends the continuation.
-        let events = callback_state(WindowsHotkey::default(), true);
+        let events = callback_state(ctrl_space(), true);
         let handled = process_button(space, LeftControl::Other, true, 2_000, |_| false);
         assert_eq!(handled.disposition, Disposition::Pass);
         assert!(handled.ends_continuation(true, false, 0));
@@ -1597,7 +1577,7 @@ mod tests {
 
         // Sharing off, the shortcut's press is swallowed before it can end
         // anything.
-        let events = callback_state(WindowsHotkey::default(), false);
+        let events = callback_state(ctrl_space(), false);
         let handled = process_button(space, LeftControl::Other, true, 3_000, ctrl_held);
         assert_eq!(handled.disposition, Disposition::Suppress);
         assert!(!handled.ends_continuation(true, false, 0));
@@ -1721,10 +1701,39 @@ mod tests {
     }
 
     #[test]
-    fn default_binding_is_ctrl_space() {
+    fn default_binding_is_left_alt_alone() {
         let binding = WindowsHotkey::default();
-        assert_eq!(binding.label(), "Ctrl+Space");
+        assert_eq!(binding.label(), "Alt");
+        assert_eq!(binding.alt, Some(ModifierSide::Left));
+        assert_eq!(binding.key, None);
         assert!(binding.validate().is_ok());
+        assert!(
+            binding.masks_release(),
+            "Alt alone opens the menu bar, so its release is masked"
+        );
+        // AltGr sends the Right Alt: the default must not press on it, or
+        // every AltGr character would start and cancel a dictation.
+        let altgr = ModifierState {
+            left_control: true,
+            right_alt: true,
+            ..ModifierState::default()
+        };
+        assert!(!altgr.without_altgr(true).holds(&binding, &altgr));
+        let either_alt = WindowsHotkey {
+            alt: Some(ModifierSide::Either),
+            ..binding.clone()
+        };
+        assert!(
+            altgr.without_altgr(true).holds(&either_alt, &altgr),
+            "either side would press on AltGr, which is why the default is left only"
+        );
+        // Left Alt is the default's alone: the right side does not press it.
+        let mut left = ModifierState::default();
+        left.update(u32::from(VK_LMENU), true);
+        assert!(left.matches(&binding));
+        let mut right = ModifierState::default();
+        right.update(u32::from(VK_RMENU), true);
+        assert!(!right.matches(&binding));
     }
 
     #[test]
@@ -1856,7 +1865,10 @@ mod tests {
             alt_space.holds_menu_modifier(),
             "a swallowed key leaves Alt alone, so its release is masked (#1254)"
         );
-        assert!(!WindowsHotkey::default().holds_menu_modifier());
+        assert!(
+            !right_control.holds_menu_modifier(),
+            "Ctrl alone opens nothing, so its release is never masked"
+        );
 
         let mut held = ModifierState::default();
         held.update(u32::from(VK_RMENU), true);
@@ -2050,16 +2062,16 @@ mod tests {
     #[test]
     fn a_release_missed_while_locked_does_not_block_the_shortcut() {
         let binding = WindowsHotkey::default();
-        // Win+L: the hook saw Windows go down, then the lock screen took
-        // its release, so tracking events alone leaves it held.
+        // Win+L: the hook saw the Windows key go down, then the lock screen
+        // took its release, so tracking events alone leaves it held.
         let mut tracked = ModifierState::default();
         tracked.update(u32::from(VK_LWIN), true);
-        tracked.update(u32::from(VK_LCONTROL), true);
+        tracked.update(u32::from(VK_LMENU), true);
         assert!(!tracked.matches(&binding));
         // After unlocking, the system reports every key up before this
-        // Ctrl press, which `update` then applies.
+        // Alt press, which `update` then applies.
         let mut synced = ModifierState::read(|_| false);
-        synced.update(u32::from(VK_LCONTROL), true);
+        synced.update(u32::from(VK_LMENU), true);
         assert!(synced.matches(&binding));
     }
 
@@ -2308,7 +2320,7 @@ mod tests {
     /// key, another shortcut's capture, and an idle capture.
     #[test]
     fn the_release_heal_leaves_other_captures_alone() {
-        let (mut keyed, events) = callback_state_value(WindowsHotkey::default(), false);
+        let (mut keyed, events) = callback_state_value(ctrl_space(), false);
         assert_eq!(
             keyed.capture.press(false, false, 1_000),
             Some(HotkeyAction::Start)

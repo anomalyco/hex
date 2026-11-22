@@ -30,7 +30,9 @@ release once there is one and to the newest dev build until then. The AUR
 package appears from the first build after a stable release, which pushes
 `hex-bin`. Add
 `?platform=mac|mac-intel|windows-x64|windows-arm64|linux|linux-arm64|mobile`
-to see each default.
+to see each default. The hero's key and its "Hold …" line follow the selected
+tab, so clicking Windows reads Alt and clicking Linux reads Alt+Space; until a
+tab is clicked they follow the detected platform.
 
 The hero is a show (`src/shout/`, plain JS): Kit's notifications pile up around a
 floating head that answers them out loud, dictates prompts into an OpenCode window
@@ -39,8 +41,11 @@ renders it, with a Canvas 2D fallback (`?canvas2d` forces it).
 
 - The prerendered page shows `public/shout-idle.webp`, a still of the idle head, in
   `.show__head`. The engine chunk loads when the browser is idle or the visitor
-  reaches for the ⌥ key (phones wait for the tap), then draws the same head into that box (the canvas reads the
-  box, 3.2 head radii wide, so nothing moves).
+  reaches for the key (phones wait for the tap), then draws the same head into that box (the canvas reads the
+  box, 3.2 head radii wide, so nothing moves). The keycap names the selected
+  OS's shortcut: ⌥ option on the Mac, alt on Windows, and alt + space on Linux.
+  The key the show shatters keeps that legend too (`start({ key })` reaches
+  `cards.makeKeycap`, which draws the ⌥ glyph only for option).
 - Nothing audible or heavy loads before the key press: the voice bank and its
   manifest are fetched on start, the opening clips first. The sound toggle in the
   header remembers its choice in `localStorage`.

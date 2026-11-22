@@ -26,6 +26,8 @@ export function LinuxMark() {
   )
 }
 
+export type Os = "mac" | "windows" | "linux"
+
 export const PLATFORM_NAMES: Record<Platform, string> = {
   mac: "Mac",
   "mac-intel": "Mac",
@@ -39,11 +41,32 @@ export const PLATFORM_NAMES: Record<Platform, string> = {
 export const SHORTCUTS: Record<Platform, string> = {
   mac: "Option",
   "mac-intel": "Option",
-  "windows-x64": "Ctrl+Space",
-  "windows-arm64": "Ctrl+Space",
+  "windows-x64": "Alt",
+  "windows-arm64": "Alt",
   linux: "Alt+Space",
   "linux-arm64": "Alt+Space",
   mobile: "a shortcut",
+}
+
+// The key and name each operating system's tab shows, so the hero follows
+// the tab the visitor picks instead of staying on their own OS.
+export const OS_SHORTCUTS: Record<Os, string> = {
+  mac: "Option",
+  windows: "Alt",
+  linux: "Alt+Space",
+}
+
+export const OS_NAMES: Record<Os, string> = {
+  mac: "Mac",
+  windows: "Windows",
+  linux: "Linux",
+}
+
+// The hero keycap's legend, in the site's lowercase keycap voice.
+export const OS_KEY_LEGENDS: Record<Os, string> = {
+  mac: "option",
+  windows: "alt",
+  linux: "alt + space",
 }
 
 function useCopy(): [boolean, (text: string) => void] {
@@ -61,7 +84,6 @@ function useCopy(): [boolean, (text: string) => void] {
   ]
 }
 
-type Os = "mac" | "windows" | "linux"
 type Arch = "x64" | "arm64"
 
 interface Choice {
@@ -135,7 +157,7 @@ function rows(os: Os, intelMac: boolean, { arch, setArch, pkg, setPkg }: Choices
   ]
 }
 
-function osOf(platform: Platform): Os {
+export function osOf(platform: Platform): Os {
   if (platform.startsWith("windows")) return "windows"
   if (platform.startsWith("linux")) return "linux"
   return "mac"
@@ -240,9 +262,16 @@ function useTabIndicator(list: RefObject<HTMLDivElement | null>, selected: Os) {
   }, [list, selected])
 }
 
-export default function Download({ platform }: { platform: Platform }) {
-  const [chosenOs, setOs] = useState<Os>()
-  const os = chosenOs ?? osOf(platform)
+export default function Download({
+  platform,
+  os,
+  onChooseOs,
+}: {
+  platform: Platform
+  // The selected tab is the page's, so the hero's key and copy follow it.
+  os: Os
+  onChooseOs(os: Os): void
+}) {
   const [chosenArch, setArch] = useState<Arch>()
   const arch = chosenArch ?? archOf(platform)
   const [pkg, setPkg] = useState<Package>("deb")
@@ -263,7 +292,7 @@ export default function Download({ platform }: { platform: Platform }) {
             aria-controls={`install-panel-${entry.id}`}
             onClick={() => {
               if (tabs.current) tabs.current.dataset.animate = ""
-              setOs(entry.id)
+              onChooseOs(entry.id)
             }}
           >
             {entry.mark}

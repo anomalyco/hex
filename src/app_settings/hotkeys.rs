@@ -94,7 +94,7 @@ impl HotkeyModifiers {
         }
     }
 
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     pub const fn control() -> Self {
         Self {
             control: Some(ModifierSide::Either),
@@ -688,9 +688,14 @@ impl<'de> Deserialize<'de> for HotkeyBinding {
 }
 
 impl Default for HotkeyBinding {
-    /// Option on macOS, Ctrl+Space on Windows, Alt+Space on Linux, and
+    /// Option on macOS, Left Alt on Windows, Alt+Space on Linux, and
     /// Ctrl+Alt+Space on GNOME, whose window menu takes Alt+Space (#723), and
     /// on KDE Plasma, whose KRunner does (#898).
+    ///
+    /// Windows takes one modifier alone, and the left Alt sits under the
+    /// thumb where the Mac's Option does (#2278). It is the left one only:
+    /// Windows sends AltGr as a synthesized Left Ctrl plus Right Alt, and a
+    /// shortcut that took either Alt would press on every AltGr character.
     fn default() -> Self {
         #[cfg(target_os = "macos")]
         let binding = Self {
@@ -698,7 +703,13 @@ impl Default for HotkeyBinding {
             key: None,
         };
         #[cfg(target_os = "windows")]
-        let binding = Self::chord(HotkeyModifiers::control(), "space");
+        let binding = Self {
+            modifiers: HotkeyModifiers {
+                option: Some(ModifierSide::Left),
+                ..HotkeyModifiers::default()
+            },
+            key: None,
+        };
         #[cfg(target_os = "linux")]
         let binding =
             Self::linux_dictation_default(crate::linux::portal::desktop_takes_alt_space());

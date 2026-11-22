@@ -292,26 +292,49 @@ key is visible before release. `hex settings` takes
 `left-option+right-option`. Settings store `{"keys": [...]}`; files with the
 old `modifiers`/`key` shape load as the same chord and are written back once.
 Windows matches sides through its low-level hook and accepts one modifier
-alone (Right Alt or Right Ctrl, [#508](https://github.com/anomalyco/hex/issues/508))
+alone (left Alt by default, [#2278](https://github.com/anomalyco/hex/issues/2278);
+Right Alt or Right Ctrl too, [#508](https://github.com/anomalyco/hex/issues/508))
 as well as both Alts:
 
 ```ts
 Windows modifier-only shortcut                           // dictate.windows-lone-modifier
+  ├── Default: left Alt alone (the Mac's Option under the thumb)
   ├── Press alone -> Down; release -> Up (hold, lock, Toggle as above)
   ├── Any key or click joins while held -> Chord: Cancel if recording, else nothing
   │   (Escape never: it reaches the app and the capture goes on, #786)
   │   (the key reaches the app; locked and toggle captures keep recording)
+  ├── A modifier the chord doesn't name joins -> Its chord too: Cancel at once,
+  │   a Toggle press locks nothing, and Alt's release is the app's (no mask,
+  │   no 0xE8 tap), so Ctrl+Alt+V still fires Paste Last; if Hex swallows a key
+  │   of that chord (Paste Last's V), the mask comes back (#2278)
+  │   (a modifier the chord names, like Ctrl of Ctrl+Alt, is part of it, in either order)
   ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
   │   -> No menu bar or Start menu; Share shortcut skips the mask
+  ├── AltGr -> A synthesized Left Ctrl and the Right Alt: the left Alt's
+  │   default ignores both, so it types and starts nothing
   └── Hex's own injected keys (paste, mask) -> Skipped by the hook (HEX_INJECTED)
 ```
+
+A modifier the chord does not name is a chord like any key: it cancels the
+hold (`names_modifier`), Toggle's press then locks nothing, and the shortcut's
+Alt release is the app's, with no mask key — unless Hex swallowed a key of
+that chord, as Paste Last's V is, which re-arms the mask so the app never
+reads a lone Alt tap. So Left Alt on the way to Ctrl+Alt+V cancels a
+dictation and Paste Last still fires, and Alt+Shift switches the keyboard
+language. A modifier the chord names is part of it,
+whichever order the keys go down in. Labs › Hold through other keys keeps a
+hold a second or more old, as it does for keys.
 
 On layouts where Right Alt is AltGr, Windows sends a synthesized Left Ctrl
 (scan code 0x21D, not 0x1D), and `GetAsyncKeyState` reports it as a real Ctrl.
 The listener's hook and the recorder's own both leave it out, so Right Alt
 alone fires there and recording it stores `right-option`; it still reaches the
-app, so AltGr keeps typing. A modifier-only binding an AltGr-layout recording
-made before this (`control+option`) still fires on AltGr, while a real Left
+app, so AltGr keeps typing. That is also why the default names the left Alt:
+an either-side Alt matches the masked read (Right Alt with its Ctrl dropped),
+so every AltGr character would press it, start a capture, and cancel it when
+the character joined — a HUD flash and a Started/Cancelled pair per character.
+A modifier-only binding an AltGr-layout recording made before this
+(`control+option`) still fires on AltGr, while a real Left
 Ctrl with Right Alt is a chord and matches only a binding that names Ctrl. On
 AltGr layouts, AltGr plus a typing key (a letter, a digit, or a punctuation
 key) types its character instead of pressing a Ctrl+Alt shortcut, so the key
@@ -319,12 +342,15 @@ reaches the app (#1964): use Left Ctrl+Alt for those shortcuts. A key that
 types nothing keeps its chord, so AltGr+F9 still presses Ctrl+Alt+F9, and
 AltGr never presses an Alt+<key> chord. Any key joining the hold still
 discards it. Checks:
+`default_binding_is_left_alt_alone`,
 `one_modifier_alone_is_a_shortcut_and_alt_or_windows_mask_their_release`,
 `altgr_left_ctrl_is_no_ctrl_for_a_right_alt_shortcut`,
 `an_altgr_recorded_control_option_still_fires`,
 `a_key_chord_on_altgr_is_not_alt_with_that_key`,
 `a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
 [windows/input.rs](../../src/windows/input.rs),
+`ctrl_after_alt_leaves_paste_last_to_fire` in
+[windows/input/tests/chords.rs](../../src/windows/input/tests/chords.rs),
 `left_control_bits_follow_the_hooks_and_heal_a_missed_release`,
 `a_typing_key_is_a_letter_a_digit_or_punctuation` in
 [windows/input/modifiers.rs](../../src/windows/input/modifiers.rs), and

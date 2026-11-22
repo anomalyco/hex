@@ -842,8 +842,9 @@ Object.assign(DRAW, {
     ctx.lineTo(sx + 4.5, by - 0.5)
     ctx.stroke()
   },
-  // Tactile ⌥ Option keycap rendered into the atlas so it shatters into real Voronoi chunks.
-  keycap(ctx, _c, w, h) {
+  // Tactile shortcut keycap rendered into the atlas so it shatters into real Voronoi chunks.
+  // `key` is the legend the hero keycap shows: "option", "alt", or "alt + space".
+  keycap(ctx, c, w, h) {
     // 1. Switch well & glowing amber LED underglow
     ctx.save()
     const glow = ctx.createRadialGradient(w * 0.5, h * 0.78, 4, w * 0.5, h * 0.68, w * 0.54)
@@ -897,27 +898,39 @@ Object.assign(DRAW, {
     ctx.lineWidth = 1.1
     ctx.stroke()
 
-    // 4. ⌥ Option glyph at top-right of dish
-    ctx.save()
-    ctx.translate(dX + dW - 12 - 22, dY + 10)
-    ctx.scale(22 / 24, 18 / 18)
-    ctx.strokeStyle = "rgba(248, 249, 252, 0.96)"
-    ctx.lineWidth = 2.25
-    ctx.lineCap = "round"
-    ctx.lineJoin = "round"
-    ctx.shadowColor = "rgba(255, 196, 110, 0.65)"
-    ctx.shadowBlur = 8
-    ctx.stroke(path2d("M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3"))
-    ctx.restore()
+    const key = c?.key ?? "option"
 
-    // 5. "option" legend at bottom-left of dish
+    // 4. The Mac's ⌥ glyph at top-right of dish; Windows and Linux keys have none.
+    if (key === "option") {
+      ctx.save()
+      ctx.translate(dX + dW - 12 - 22, dY + 10)
+      ctx.scale(22 / 24, 18 / 18)
+      ctx.strokeStyle = "rgba(248, 249, 252, 0.96)"
+      ctx.lineWidth = 2.25
+      ctx.lineCap = "round"
+      ctx.lineJoin = "round"
+      ctx.shadowColor = "rgba(255, 196, 110, 0.65)"
+      ctx.shadowBlur = 8
+      ctx.stroke(path2d("M2.5 3.5h5.2l6.2 11h7.6M14.2 3.5h7.3"))
+      ctx.restore()
+    }
+
+    // 5. The legend at bottom-left of dish; a chord's second key is smaller and dimmer.
     ctx.save()
-    ctx.font = `560 14.5px ${SANS}`
     ctx.fillStyle = "rgba(248, 249, 252, 0.96)"
     ctx.textBaseline = "alphabetic"
     ctx.shadowColor = "rgba(255, 196, 110, 0.55)"
     ctx.shadowBlur = 8
-    ctx.fillText("option", dX + 12, dY + dH - 10)
+    const first = key.split(" ")[0]
+    const chord = key.slice(first.length)
+    ctx.font = `560 14.5px ${SANS}`
+    ctx.fillText(first, dX + 12, dY + dH - 10)
+    if (chord.trim()) {
+      const x = dX + 12 + ctx.measureText(first).width
+      ctx.font = `520 11.5px ${SANS}`
+      ctx.fillStyle = "rgba(248, 249, 252, 0.7)"
+      ctx.fillText(chord, x, dY + dH - 10)
+    }
     ctx.restore()
   },
 })
@@ -1020,12 +1033,13 @@ export class Cards {
     return c
   }
 
-  makeKeycap() {
+  makeKeycap(key = "option") {
     const L = LAYOUT.keycap
     const c = {
       kind: "keycap",
       layout: "keycap",
       item: "__keycap__",
+      key,
       w: L.w,
       h: L.h,
       sw: L.w + PAD * 2,

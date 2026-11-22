@@ -11,17 +11,27 @@ contextual Modes can rewrite completed dictation through the same
 deadline-bounded OpenCode processing policy as macOS, then run ordered built-in
 or user-defined TypeScript transformations.
 
-The default shortcut is `Ctrl+Space`. In **Hold** mode, hold both keys while
-speaking and release Space to transcribe and paste. In **Toggle** mode, press
-`Ctrl+Space` to start and again to finish, or press the **Cancel** shortcut
-(Escape by default) to throw the recording away; Hex takes that key only while
-a recording runs. Hold mode has no cancel (every dictation finishes and
-pastes), and holding a modifier on its own does nothing. Hex consumes the chord while it matches, so
-applications and input methods no longer see `Ctrl+Space`; rebind it in Settings
-if you rely on that chord elsewhere. To let another app use the same key, such as
-a Discord push-to-talk key, turn on **Share dictation shortcut with other apps**
-under Advanced: Hex still reacts to it but passes its key-down and key-up on,
-which can also trigger that binding in other apps. In Hold mode, tap the shortcut twice within
+The default shortcut is the left **Alt** key alone, the key under your thumb
+where Option sits on a Mac ([#2278](https://github.com/anomalyco/hex/issues/2278)).
+In **Hold** mode, hold Alt while speaking and release it to transcribe and
+paste. In **Toggle** mode, press Alt to start and again to finish, or press
+the **Cancel** shortcut (Escape by default) to throw the recording away; Hex
+takes that key only while a recording runs. Hold mode has no cancel shortcut
+(releasing the hold transcribes and pastes). Alt is the shortcut only while it is held
+alone: another key, or a modifier the shortcut doesn't include, joining it
+makes an ordinary chord for the app in front (Alt-tab, Alt+F4, Alt+Shift for
+the input language, or Ctrl on the way to Ctrl+Alt+V), which cancels the
+press before anything is transcribed, and AltGr keeps typing on the layouts
+that use it. With Labs › Hold through other keys, a hold that is already a
+second old keeps recording through those keys instead. Windows opens its
+menus on an Alt tap, so Hex swallows Alt's release when nothing joined it,
+the way macOS keeps Option from opening its menus. A hold another key or
+modifier joined leaves the release to the app, unless Hex swallowed a key of
+that chord too (Paste Last's V, say), which brings the mask back. Rebind it in
+Settings if you rely on a bare Alt elsewhere. To let another app use the same
+key, such as a Discord push-to-talk key, turn on **Share dictation shortcut
+with other apps** under Advanced: Hex still reacts to it but passes its
+key-down and key-up on, which can also trigger that binding in other apps. In Hold mode, tap the shortcut twice within
 300 ms to lock recording, then press it again to finish. Paste Last defaults to
 `Ctrl+Alt+V`. Settings changes apply live or through an automatic listener
 restart.

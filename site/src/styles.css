@@ -213,10 +213,22 @@ a {
 
 .keycap__label {
   align-self: flex-start;
+  /* The dish is a column with space-between: without the Mac's glyph above
+     it, the label is the only child and would sit at the top. The auto margin
+     keeps it on the bottom row, where the canvas shatter draws the legend. */
+  margin-top: auto;
   font-size: 0.9rem;
   font-weight: 540;
   line-height: 1;
   letter-spacing: -0.01em;
+}
+
+/* Linux's chord reads as a second, smaller legend beside the key's own. */
+.keycap__chord {
+  margin-left: 0.22rem;
+  font-size: 0.72rem;
+  font-weight: 500;
+  color: rgba(246, 247, 250, 0.66);
 }
 
 .keycap__hint {
