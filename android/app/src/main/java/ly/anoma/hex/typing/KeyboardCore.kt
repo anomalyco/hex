@@ -56,7 +56,56 @@ object KeyboardCore {
         previous: String?,
         limit: Int,
     ): SwipeReading?
+
+    /**
+     * Your text replacements (`shortcuts` lowercased, in step with `replacements`) and words
+     * (`own`: other own spellings; `vocabulary`: your vocabulary's words), for the layout's
+     * `language`; 0 when malformed. Immutable: make a new one when any of them changes.
+     */
+    external fun swipeWordsNew(
+        language: String,
+        hasDictionary: Boolean,
+        shortcuts: Array<String>,
+        replacements: Array<String>,
+        own: Array<String>,
+        vocabulary: Array<String>,
+    ): Long
+
+    external fun swipeWordsFree(words: Long)
+
+    /** The order of a reading's candidates once rare names cost more; null when malformed. */
+    external fun swipeRank(decoder: Long, words: Long, texts: Array<String>, costs: DoubleArray, checker: WordChecker): IntArray?
+
+    /**
+     * What a swipe with these `readings` (best first, those that may be offered; at least one)
+     * types. `shift`: 0 off, 1 on, 2 caps lock. `autoCapitalization`: 0 none, 1 words,
+     * 2 sentences, 3 all characters (0 also with Auto-capitalization off). Null when malformed.
+     */
+    external fun swipeTyped(
+        words: Long,
+        readings: Array<String>,
+        before: String?,
+        shift: Int,
+        shiftHeld: Boolean,
+        autoCapitalization: Int,
+        autoCapitalizes: Boolean,
+        autocorrection: Boolean,
+        checker: WordChecker,
+    ): SwipeTyped?
+
+    external fun swipeNeedsSpace(before: String?): Boolean
+
+    /** `points` interleaves (x, y); `key` is the character of the key it went down and lifted on. */
+    external fun swipeIsSlidTap(points: DoubleArray, pitch: Double, key: String?, firstReading: String?): Boolean
 }
 
 /** A swipe's candidates, best first, and how many words passed the key filters and were scored. */
 data class SwipeReading(val texts: Array<String>, val costs: DoubleArray, val scored: Int)
+
+/** Whether the dictionary knows a word; the core asks only while a call runs. */
+fun interface WordChecker {
+    fun isWordValid(word: String): Boolean
+}
+
+/** What a finished swipe types: a space first or not, the word, the strip's others. */
+data class SwipeTyped(val space: Boolean, val word: String, val alternatives: Array<String>)
