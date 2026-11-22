@@ -66,6 +66,23 @@ fn tap(rt: &mut Runtime<Ui>, key: &str) {
     settle(rt);
 }
 
+/// Wheels a scrolling body until `key` sits inside it, for a page taller
+/// than the window.
+fn scroll_into_view(rt: &mut Runtime<Ui>, key: &str, viewport: &str) {
+    for _ in 0..400 {
+        let view = element(rt, viewport).rect;
+        let target = element(rt, key).rect;
+        if target[1] >= view[1] && target[1] + target[3] <= view[1] + view[3] {
+            return;
+        }
+        // A positive delta moves the content down.
+        let dy = if target[1] < view[1] { 20.0 } else { -20.0 };
+        rt.wheel(view[0] + view[2] / 2.0, view[1] + view[3] / 2.0, dy);
+        rt.frame(1.0 / 60.0);
+    }
+    panic!("{key} never scrolled into {viewport}");
+}
+
 /// Opens Labs with every group unfolded, so each card is on screen.
 fn open_labs(rt: &mut Runtime<Ui>) {
     tap(rt, "nav-labs");
@@ -3743,7 +3760,7 @@ fn whats_new_opens_controls_without_changing_them() {
     for dark in [true, false] {
         for (key, scene) in [
             (None, "whats-new"),
-            (Some("open-lab"), "whats-new-yolo"),
+            (Some("open-lab-dictation-style"), "whats-new-newest"),
             (Some("open-sounds"), "whats-new-sounds"),
         ] {
             let mut rt = runtime("mac-settings", dark, PANE_SIZE);
@@ -3751,9 +3768,15 @@ fn whats_new_opens_controls_without_changing_them() {
             tap(&mut rt, "nav-whats-new");
             assert_eq!(rt.state.pane, Pane::WhatsNew);
             if let Some(key) = key {
+                // The feed is taller than the window; reach the oldest entry
+                // before pressing it.
+                scroll_into_view(&mut rt, key, "whats-new-scroll");
                 tap(&mut rt, key);
-                if key == "open-lab" {
-                    assert!(rt.state.labs_open && rt.find("lab-card-yolo-mode").is_some());
+                if key == "open-lab-dictation-style" {
+                    assert!(
+                        rt.state.labs_open && rt.find("lab-card-dictation-style").is_some(),
+                        "the newest lab's card opens"
+                    );
                 } else {
                     assert!(rt.find("sound-sets").is_some());
                 }
@@ -3762,6 +3785,36 @@ fn whats_new_opens_controls_without_changing_them() {
             check_render(scene, dark, render_runtime(rt, PANE_SIZE));
         }
     }
+}
+
+/// What's new lists the newest lab the registry offers, no more than eight
+/// labs, and each lab's button and row keys are its own.
+#[test]
+fn whats_new_lists_the_newest_offered_labs() {
+    let mut rt = runtime("mac-settings", true, (980.0, 2600.0));
+    tap(&mut rt, "nav-whats-new");
+    let mut labs: Vec<String> = rt
+        .elements()
+        .into_iter()
+        .filter_map(|element| element.key)
+        .filter_map(|key| key.strip_prefix("open-lab-").map(str::to_string))
+        .collect();
+    assert!(
+        labs.iter().any(|lab| lab == "dictation-style"),
+        "the newest lab: {labs:?}"
+    );
+    assert!(labs.len() <= 8, "at most eight labs: {labs:?}");
+    assert_eq!(labs.first().map(String::as_str), Some("dictation-style"));
+    labs.sort();
+    labs.dedup();
+    for lab in labs {
+        assert!(
+            rt.find(&format!("highlight-{lab}")).is_some(),
+            "{lab}'s row has its own key"
+        );
+    }
+    tap(&mut rt, "open-lab-dictation-style");
+    assert!(rt.state.labs_open && rt.find("lab-card-dictation-style").is_some());
 }
 
 /// Collects every golden mismatch in a test and fails once at the end, so

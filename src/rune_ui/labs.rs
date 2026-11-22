@@ -495,11 +495,20 @@ fn shown(ui: &Ui) -> Vec<Row> {
         .collect()
 }
 
-pub(super) fn offered(ui: &Ui, feature: Feature) -> bool {
-    feature.audience() == crate::labs::Audience::Everyone
-        && shown(ui)
-            .iter()
-            .any(|row| row.lab.id() == feature.name() && !row.locked)
+/// Every lab this build offers anyone: its audience is everyone, it shows on
+/// this OS, and nothing locks it, each with the icon its card draws. What's
+/// new lists its newest entries from this.
+pub(super) fn offered_labs(ui: &Ui) -> Vec<(Feature, &'static Icon)> {
+    shown(ui)
+        .into_iter()
+        .filter(|row| !row.locked)
+        .filter_map(|row| match row.lab {
+            Lab::Feature(feature) if feature.audience() == crate::labs::Audience::Everyone => {
+                Some((feature, row.icon))
+            }
+            _ => None,
+        })
+        .collect()
 }
 
 /// Search only the cards the current store can reveal. This also covers

@@ -740,13 +740,19 @@ immediate write; the unused key drops on a subsequent save. General’s ⌘F
 opens Find. Labs’ own ⌘F, tabs, chips and local filter still work normally.
 
 The sidebar footer's **What's new** opens a short feed of shipped features,
-newest first. Each entry has a decorative feature icon. Entries shipped on the
-same date share a heading: Today, Yesterday, or 2–6 days ago by local calendar
-day; older entries show the month and day, and the year outside the current
-year. YOLO mode opens and highlights its Labs card without changing
-the switch; Sounds opens General's sound picker without selecting or playing
-a set. `whats_new_opens_controls_without_changing_them` follows both links
-with a fixture and compares the settings before and after.
+newest first. The feed follows the Labs registry: it lists the newest eight
+labs this build offers (audience Everyone, on this OS, not locked), each with
+its Labs card's date, title, description, and icon, so a lab that ships
+appears here without another edit, plus the hand-written Sounds entry
+(20261029) with the volume icon. Entries shipped on the same date share a
+heading: Today, Yesterday, or 2–6 days ago by local calendar day; older
+entries show the month and day, and the year outside the current year. A lab
+entry opens and highlights its Labs card without changing the switch; Sounds
+opens General's sound picker without selecting or playing a set.
+`whats_new_opens_controls_without_changing_them` follows both kinds of link
+with a fixture and compares the settings before and after, and
+`whats_new_lists_the_newest_offered_labs` checks the newest offered lab is
+listed first and no more than eight labs show.
 
 Appearance (`appearance`, every OS): while on, its card shows "Theme"
 (System, Light mode, Dark mode; default System). `labs::window_dark` resolves

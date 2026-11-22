@@ -1,5 +1,7 @@
-//! Shipped highlights. A lab supplies its own date and copy; highlighting it
-//! here is independent of whether the person has switched it on.
+//! Shipped highlights. The feed follows the Labs registry: the newest eight
+//! labs this build offers, each with its own date, copy, and card icon, then
+//! the hand-written Sounds note. Highlighting a lab is independent of whether
+//! the person has switched it on.
 use super::*;
 use crate::calendar::date::{LocalDate, local_date};
 use crate::desktop::i18n::tr_named;
@@ -30,34 +32,33 @@ impl Highlight {
         }
     }
 
-    fn row(self, ui: &Ui, p: Paint, symbol: &'static rune::Icon) -> Option<(u32, El)> {
+    fn row(self, p: Paint, symbol: &'static rune::Icon) -> (u32, El) {
         let (day, id, title, summary, button, label) = match self {
-            Self::Lab(f) if labs::offered(ui, f) => (
+            Self::Lab(f) => (
                 f.added(),
                 f.name(),
                 tr(f.title()),
                 tr(f.summary()),
-                "open-lab",
+                format!("open-lab-{}", f.name()),
                 tr("Labs"),
             ),
-            Self::Lab(_) => return None,
             Self::Sounds => (
                 20261029,
                 "sounds",
                 tr("Sounds"),
                 tr("Preview the tones Hex plays when you dictate."),
-                "open-sounds",
+                "open-sounds".to_owned(),
                 tr("Sounds"),
             ),
         };
         let link = controls::button(
             p,
-            button,
+            &button,
             label,
             controls::ButtonKind::Secondary,
             move |ui, tx| self.open(ui, tx),
         );
-        Some((
+        (
             day,
             rune::row()
                 .key(id)
@@ -66,28 +67,54 @@ impl Highlight {
                 .gap(12.0)
                 .child(icons::tile(p, symbol, 36.0))
                 .child(
-                    controls::setting_row(p, "highlight", title, Some(summary), link)
-                        .pl(0.0)
-                        .grow(1.0)
-                        .shrink(),
+                    controls::setting_row(
+                        p,
+                        &format!("highlight-{id}"),
+                        title,
+                        Some(summary),
+                        link,
+                    )
+                    .pl(0.0)
+                    .grow(1.0)
+                    .shrink(),
                 ),
-        ))
+        )
     }
 }
 
+/// What's new lists no more than this many labs.
+const NEWEST_LABS: usize = 8;
+/// The day a fixture's feed dates from when this build offers no lab at all.
+const FIXTURE_DAY: u32 = 20261115;
+
 pub(super) fn feed(ui: &Ui, p: Paint) -> El {
+    // Newest first, then the registry's own order, as Labs lists its newest.
+    let mut labs = labs::offered_labs(ui);
+    labs.sort_by_key(|(feature, _)| {
+        std::cmp::Reverse((
+            feature.added(),
+            Feature::ALL
+                .iter()
+                .position(|known| known == feature)
+                .unwrap_or(0),
+        ))
+    });
+    labs.truncate(NEWEST_LABS);
     let today = if ui.is_fixture() {
-        Some(LocalDate::from_ymd(20261115))
+        Some(LocalDate::from_ymd(
+            labs.first()
+                .map_or(FIXTURE_DAY, |(feature, _)| feature.added()),
+        ))
     } else {
         local_date(crate::history::now_ms() as i64)
     };
-    let highlights = [
-        (Highlight::Lab(Feature::YoloMode), &icons::RETURN),
-        (Highlight::Sounds, &icons::VOLUME),
-    ]
-    .into_iter()
-    .filter_map(|(entry, symbol)| entry.row(ui, p, symbol));
-    controls::page("whats-new-feed").children(sections(p, today, highlights))
+    let highlights = labs
+        .into_iter()
+        .map(|(feature, icon)| (Highlight::Lab(feature), icon))
+        .chain([(Highlight::Sounds, &icons::VOLUME)])
+        .map(|(entry, symbol)| entry.row(p, symbol));
+    let feed = controls::page("whats-new-feed").children(sections(p, today, highlights));
+    super::scroll_body(p.k, "whats-new-scroll", feed)
 }
 
 fn sections(
