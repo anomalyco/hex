@@ -261,8 +261,11 @@ mod tests {
 
     #[test]
     fn skill_is_the_bundled_guide() {
-        assert!(SKILL.starts_with("---\nname: hex-annotate\n"));
-        assert!(SKILL.contains("npx skills add anomalyco/hex --skill hex-annotate"));
-        assert!(SKILL.contains("labs.annotate_agent_tools"));
+        // A Windows checkout writes the guide with CRLF; its content is the
+        // same either way.
+        let skill = SKILL.replace("\r\n", "\n");
+        assert!(skill.starts_with("---\nname: hex-annotate\n"));
+        assert!(skill.contains("npx skills add anomalyco/hex --skill hex-annotate"));
+        assert!(skill.contains("labs.annotate_agent_tools"));
     }
 }
