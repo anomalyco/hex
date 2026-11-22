@@ -18,7 +18,9 @@ import Foundation
 /// observed long-press options, in the iPhone's rows (no ; or ς keys, the tonos key ending row
 /// 1; its typing rules are `GreekTyping`). Czech matches the standard Czech layout and the
 /// system keyboard's observed long-press options: QWERTZ, with the ´ and ˇ keys that accent the
-/// letter before them (`CzechTyping`) and every other Czech letter on a held key.
+/// letter before them (`CzechTyping`) and every other Czech letter on a held key. Korean is the
+/// standard two-set (Dubeolsik, 두벌식) layout, whose syllables `HangulComposer` composes as the
+/// jamo are typed; it is offered only while Settings › Experiments › Korean keyboard is on.
 nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case english = "en"
     case norwegian = "nb"
@@ -36,6 +38,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case ukrainian = "uk"
     case greek = "el"
     case serbianLatin = "sr-Latn"
+    case korean = "ko"
 
     /// Its own name, as Apple's keyboard list shows it.
     var displayName: String {
@@ -56,6 +59,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .ukrainian: "Українська"
         case .greek: "Ελληνικά"
         case .serbianLatin: "Srpski"
+        case .korean: "한국어"
         }
     }
 
@@ -95,12 +99,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .ukrainian: "uk-UA"
         case .greek: "el-GR"
         case .serbianLatin: "sr-Latn-RS"
+        case .korean: "ko-KR"
         }
     }
 
     /// Latin letters, so another Latin-script language can be autocorrected on its keys
-    /// (bilingual autocorrect). Russian's and Ukrainian's are Cyrillic, Greek's Greek.
-    var isLatin: Bool { self != .russian && self != .ukrainian && self != .greek }
+    /// (bilingual autocorrect). Russian's and Ukrainian's are Cyrillic, Greek's Greek, and
+    /// Korean's Hangul.
+    var isLatin: Bool { self != .russian && self != .ukrainian && self != .greek && self != .korean }
 
     /// The Apple Speech language (BCP 47) to dictate in while this layout types (Settings ›
     /// Keyboard › Languages › Switch dictation too): the iPhone's own region where it has one
@@ -191,7 +197,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // Apple lists QWERTY first for Serbian (Latin) and adds it as QWERTY; Hex keeps the
         // QWERTZ it always typed on as the default.
         case .serbianLatin: [.qwertz, .qwerty, .azerty]
-        case .norwegian, .russian, .ukrainian, .greek: [.own]
+        case .norwegian, .russian, .ukrainian, .greek, .korean: [.own]
         }
     }
 
@@ -249,6 +255,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // (iOS 27.2 simulator): the ´ key (U+00B4) ends row 2, ten keys edge to edge, and the ˇ
         // key (U+02C7) ends row 3, so shift and delete are one letter wide.
         case .czech: ["qwertzuiop", "asdfghjkl\u{00B4}", "yxcvbnm\u{02C7}"]
+        // Standard Dubeolsik (두벌식): the iPhone Korean keyboard's rows. Shift doubles the five
+        // consonants (ㅂㅈㄷㄱㅅ) and ㅐㅔ (`HangulComposer.shifted`); each syllable is composed as
+        // it is typed, not typed as a jamo.
+        case .korean: ["ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ", "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ", "ㅋㅌㅊㅍㅠㅜㅡ"]
         }
     }
 
@@ -455,6 +465,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "d": ["d", "đ"],
                 "c": ["c", "č", "ć", "ç"],
             ]
+        case .korean:
+            // Hangul's letters hold nothing: a syllable is composed from the keys.
+            [:]
         }
     }
 
@@ -482,7 +495,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// system keyboard's held $, is held there.
     var symbolHolds: [String: [String]] {
         switch self {
-        case .english, .serbianLatin:
+        case .english, .serbianLatin, .korean:
             [:]
         case .norwegian:
             [
@@ -578,6 +591,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .greek: ["el", "el_GR"]
         // Latin only: a Cyrillic `sr` dictionary would reject every Latin word.
         case .serbianLatin: ["sr_Latn", "sr_Latn_RS", "sr-Latn"]
+        // No dictionary: Hangul is composed, not spelled, and never autocorrected into another
+        // language.
+        case .korean: []
         }
     }
 
@@ -617,7 +633,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
         case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
             []
         }
     }
@@ -646,7 +662,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "giovedi": "giovedì", "venerdi": "venerdì",
             ]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .portuguese, .polish, .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin,
+             .korean:
             [:]
         }
     }
@@ -658,7 +675,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .italian: ["e": "è", "ce": "c'è"]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .portuguese, .polish, .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin,
+             .korean:
             [:]
         }
     }
@@ -717,8 +735,16 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "uk": return .ukrainian
         case "el": return .greek
         case "sr": return parts.contains("latn") ? .serbianLatin : nil
+        case "ko": return KoreanKeyboardExperiment.isEnabled ? .korean : nil
         default: return nil
         }
+    }
+
+    /// The languages Settings › Keyboard › Languages may offer: 한국어 only while its experiment
+    /// is on, so off it is not listed, Automatic never picks it, and a stored "ko" is ignored
+    /// (`LanguageSettings.keyboardLanguages`).
+    static var selectable: [KeyboardLanguage] {
+        allCases.filter { $0 != .korean || KoreanKeyboardExperiment.isEnabled }
     }
 
     /// The layouts of the iPhone's own keyboards, then of its preferred languages, in that

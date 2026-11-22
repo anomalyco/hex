@@ -18,6 +18,17 @@ nonisolated enum DictationBarAutoStart: String, CaseIterable, Sendable {
     case always
 }
 
+/// Settings › Experiments › Korean keyboard (두벌식), read where the pure language helpers need
+/// it before a keyboard exists (Settings' Languages list, Automatic). Stored as
+/// `experiments.koreanKeyboard`, off by default like every experiment.
+nonisolated enum KoreanKeyboardExperiment {
+    static let key = "experiments.koreanKeyboard"
+
+    static var isEnabled: Bool {
+        UserDefaults(suiteName: KeyboardBridge.appGroup)?.bool(forKey: key) ?? false
+    }
+}
+
 /// The full keyboard's switches in the shared App Group.
 ///
 /// Without Full Access an iPhone may not let the keyboard read the App Group (the simulator
@@ -46,6 +57,7 @@ struct FullKeyboardSettings {
         static let autoCapitalization = "settings.keyboardAutoCapitalization"
         static let spatialAutocorrect = "experiments.spatialAutocorrect"
         static let germanSpatialAutocorrect = "experiments.germanSpatialAutocorrect"
+        static let koreanKeyboard = KoreanKeyboardExperiment.key
         static let keyPopups = "settings.keyboardKeyPopups"
         static let haptics = "settings.keyboardHaptics"
         static let hapticStrength = "settings.keyboardHapticStrength"
@@ -114,6 +126,15 @@ struct FullKeyboardSettings {
     var germanSpatialAutocorrect: Bool {
         get { defaults?.object(forKey: Key.germanSpatialAutocorrect) as? Bool ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.germanSpatialAutocorrect) }
+    }
+
+    /// Settings › Experiments › Korean keyboard (두벌식): adds 한국어 to Settings › Keyboard ›
+    /// Languages, typed on the standard two-set layout and composed as Hangul while the run is
+    /// in the field (`HangulComposer`). Off by default: 한국어 isn't offered, Automatic never
+    /// picks it, and a stored "ko" is ignored.
+    var koreanKeyboard: Bool {
+        get { defaults?.object(forKey: Key.koreanKeyboard) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.koreanKeyboard) }
     }
 
     /// The typing model the keyboard may read `language`'s taps with: its bundled model, with

@@ -115,7 +115,10 @@ nonisolated struct LanguageSettings {
                 ?? defaults?.string(forKey: Key.keyboardLayout).map { [$0] }
                 ?? []
             var seen = Set<KeyboardLanguage>()
-            return stored.compactMap(KeyboardLanguage.init(rawValue:)).filter { seen.insert($0).inserted }
+            return stored.compactMap(KeyboardLanguage.init(rawValue:))
+                .filter { seen.insert($0).inserted }
+                // 한국어 is ignored while its experiment is off, even if it was stored before.
+                .filter { $0 != .korean || KoreanKeyboardExperiment.isEnabled }
         }
         nonmutating set {
             var seen = Set<KeyboardLanguage>()
@@ -146,7 +149,11 @@ nonisolated struct LanguageSettings {
 
     /// The language the space bar last switched to, so the keyboard comes back in it.
     var currentKeyboardLanguage: KeyboardLanguage? {
-        get { defaults?.string(forKey: Key.currentKeyboardLanguage).flatMap(KeyboardLanguage.init(rawValue:)) }
+        get {
+            guard let language = defaults?.string(forKey: Key.currentKeyboardLanguage)
+                .flatMap(KeyboardLanguage.init(rawValue:)) else { return nil }
+            return language == .korean && !KoreanKeyboardExperiment.isEnabled ? nil : language
+        }
         nonmutating set { defaults?.set(newValue?.rawValue, forKey: Key.currentKeyboardLanguage) }
     }
 

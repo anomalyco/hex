@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|ro|ru|uk|el|sr-Latn|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
 /// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, or `t` on Romanian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
@@ -181,6 +181,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Kasnim deset minuta, biću kod kuć"
             case "accents": Self.accentKey == "s" ? "Po" : "Laku no"
             default: "Kasnim deset minuta, "
+            }
+        case .korean:
+            return switch state {
+            case "inserted": "10분 늦어요. 7시 30분까지 집에 갈게요. 먼저 시작하세요."
+            case "numbers": "10분 늦어요. 7시 3"
+            case "shift": "10분 늦어요. "
+            case "typing": "10분 늦어"
+            case "accents": "한"
+            default: "10분 늦어요. "
             }
         case .english:
             break

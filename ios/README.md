@@ -702,9 +702,9 @@ never at a launch by itself.
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
     Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
-    German spatial autocorrect, ABC under the emoji key, Two-thumb selection, Delete swiped
-    words letter by letter, Hide word suggestions, Join the keyboard when unfolded, and
-    Multilingual model (Parakeet).
+    German spatial autocorrect, Korean keyboard (두벌식), ABC under the emoji key, Two-thumb
+    selection, Delete swiped words letter by letter, Hide word suggestions, Join the keyboard
+    when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -949,6 +949,17 @@ never at a launch by itself.
   Keyboard". There it fixed "I dont know" and "Dont do it" to "don't", kept "est" and
   "merci" after English words, and wrote "Im" as "I m"; the simulator's French word data is
   thin ("je pense" became "he pence"), so how it weighs French there is unverified.
+  **한국어 (두벌식):** Settings › Experiments › Korean keyboard (off by
+  default, `experiments.koreanKeyboard`) adds 한국어 to the list: the standard Dubeolsik rows
+  with shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, and no qwerty/azerty choice. `HangulComposer` composes each
+  syllable in the field (한, then delete to 하, ㅎ, nothing; ㅘ splits to ㅗ; 닭 + ㅗ → 달고,
+  한 + ㅏ → 하나), the keyboard replacing only the run's changed characters through
+  `deleteBackward`/`insertText` (no marked text). Space, return, punctuation, a page or
+  language switch, emoji, dictation, a cursor move or hiding the keyboard commits the run.
+  Korean has no accent holds, spelling dictionary, autocorrect, word suggestions or typing
+  model, and with the experiment off the language isn't listed, Automatic never picks it,
+  and a stored "ko" is ignored. Unit tests only (`HangulComposerTests`); no CI compiles the
+  iOS targets and no device run checks it.
 - **Layout per language (Settings › Keyboard › Languages › Layout):** each language the keys
   show (every chosen one, Automatic's while none is, and only the first of English and
   Español together) gets a menu of the layouts Apple's Keyboard Layout list offers for it
@@ -1691,6 +1702,7 @@ dataset's download and its `convert.py` command.
 - **Keyboard languages:** `KeyboardLayoutTests` cover the list (resolution, switching,
   space-bar label, pairing, migration, the dictation pick, English & Spanish's keys,
   dictation following the keyboard, Spanish's Americas variants and the iPhone's Region),
+  `HangulComposerTests` the two-set composer and the keyboard typing through it,
   `FullKeyboardEngineTests` the swipe against the
   hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too,
   and a picked Spanish variant surviving the swipe away and back), and

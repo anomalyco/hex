@@ -603,6 +603,7 @@ struct ExperimentsSettingsPage: View {
     @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
     @State private var confirmingTouchReset = false
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+    @State private var koreanKeyboard = FullKeyboardSettings().koreanKeyboard
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var twoThumbSelection = FullKeyboardSettings().twoThumbSelection
     @State private var deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
@@ -676,6 +677,15 @@ struct ExperimentsSettingsPage: View {
                     title: String(localized: "German spatial autocorrect"),
                     detail: String(localized: "Needs Spatial autocorrect"),
                     isOn: $germanSpatialAutocorrect
+                )
+
+                SettingsDivider()
+
+                // Off by default: 한국어 isn't offered in Languages and a stored "ko" is ignored.
+                SettingsToggleRow(
+                    title: String(localized: "Korean keyboard (두벌식)"),
+                    detail: String(localized: "Adds 한국어, composing syllables as you type"),
+                    isOn: $koreanKeyboard
                 )
 
                 SettingsDivider()
@@ -770,6 +780,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: germanSpatialAutocorrect) { _, enabled in
             FullKeyboardSettings().germanSpatialAutocorrect = enabled
         }
+        .onChange(of: koreanKeyboard) { _, enabled in
+            FullKeyboardSettings().koreanKeyboard = enabled
+        }
         .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
             FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
         }
@@ -801,6 +814,7 @@ struct ExperimentsSettingsPage: View {
             adaptiveTouch = AdaptiveTouchSettings().isEnabled
             refreshAdaptiveTouchStatus()
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+            koreanKeyboard = FullKeyboardSettings().koreanKeyboard
             emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
             twoThumbSelection = FullKeyboardSettings().twoThumbSelection
             deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter

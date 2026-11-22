@@ -671,6 +671,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .greek: ["ερτυθιοπ´", "ασδφγηξκλ", "ζχψωβνμ"],
             .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
             .czech: ["qwertzuiop", "asdfghjkl´", "yxcvbnmˇ"],
+            .korean: ["ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ", "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ", "ㅋㅌㅊㅍㅠㅜㅡ"],
         ]
         for (language, expected) in rows {
             let layout = KeyboardLayout(width: 402, language: language)
@@ -702,6 +703,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .ukrainian: [.own],
             .greek: [.own],
             .czech: [.own, .qwerty],
+            .korean: [.own],
         ]
         for language in KeyboardLanguage.allCases {
             XCTAssertEqual(language.letterLayouts, offered[language], "\(language)")

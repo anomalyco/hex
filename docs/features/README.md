@@ -2891,9 +2891,9 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 └── Not yet: custom caption
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
-│   Hinglish, Adaptive touch, German spatial autocorrect, ABC under the emoji key,
-│   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions,
-│   Join the keyboard when unfolded, Learn each language separately
+│   Hinglish, Adaptive touch, German spatial autocorrect, Korean keyboard (두벌식), ABC
+│   under the emoji key, Two-thumb selection, Delete swiped words letter by letter, Hide
+│   word suggestions, Join the keyboard when unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2903,6 +2903,17 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   "perché", "citta" → "città", `KeyboardLanguage.accentRestorations`) and offers "è" and
 │   "c'è" in the strip for "e" and "ce", which are words of their own and are never changed
 │   by space
+├── Korean keyboard (두벌식) (off by default, `experiments.koreanKeyboard`): Settings ›
+│   Experiments adds 한국어 to Settings › Keyboard › Languages, typed on the standard two-set
+│   rows (ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ / ㅁㄴㅇㄹㅎㅗㅓㅏㅣ / ㅋㅌㅊㅍㅠㅜㅡ, shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, no
+│   qwerty or azerty choice). `HangulComposer` composes each syllable in the field (한 → 하 →
+│   ㅎ → nothing on delete, ㅗ then ㅏ → ㅘ and back, 닭 then ㅗ → 달고, 한 then ㅏ → 하나) by
+│   deleting only the part of the run that changed and inserting what it became; space,
+│   return, punctuation, a page or language switch, emoji, dictation, a cursor move or the
+│   keyboard hiding commits the run. Korean has no accent holds, spelling dictionary,
+│   autocorrect, word suggestions or typing model, and while the experiment is off it is not
+│   listed, Automatic never picks it, and a stored "ko" is ignored.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
 │   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
 │   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file
