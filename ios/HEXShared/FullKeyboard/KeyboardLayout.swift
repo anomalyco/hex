@@ -617,10 +617,10 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// and on a docked iPad, so those layouts are the same with the experiment on or off.
     let dvorakPunctuation: Bool
     /// Settings › Experiments › Comma and period keys: a comma just left of the space bar and a
-    /// period just right of it on an iPhone's letters page in a text field. False where it
-    /// changes nothing (other pages and fields, an iPad, and the Dvorak letters with Dvorak
-    /// punctuation, which already puts them on row 1), so those layouts are the same with it on
-    /// or off.
+    /// period just right of it on an iPhone's letters page in a text field. False where the
+    /// experiment never draws them (other pages and fields, an iPad, and the Dvorak letters with
+    /// Dvorak punctuation, which already puts them on row 1). True even where the space bar has
+    /// no room and they are skipped, so a bar too narrow is key for key the same either way.
     let commaPeriodKeys: Bool
     /// Where the Hex key sits: Settings › Keyboard › Hex key picks the strip's trailing
     /// (Right) or leading (Left) end.

@@ -3016,13 +3016,15 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   targets, and no physical iPhone run checks it
 ├── Comma and period keys (off by default, `experiments.commaPeriodKeys`): a comma just left
 │   of the space bar and a period just right of it, both a letter wide, on an iPhone's letters
-│   page in a plain text field. Each takes its width from the space bar (the comma its left
-│   end, the period its right), which keeps ending where it did, and neither is added unless
-│   the bar still holds a letter-wide space after them; on the Duo's split keyboard the comma
-│   takes from the left half's bar and the period from the right half's. They type `,` and
-│   `.` with shift on too. The 123 and #+= pages, a URL or email field (which keeps its own
-│   `.`), an iPad, and English's Dvorak letters while Dvorak punctuation already puts both on
-│   row 1 are unchanged; off, every layout is key for key the one it was.
+│   page in a plain text field. On the joined keyboard the comma starts where the bar used to
+│   start and the period ends where it used to end, the bar moving inward at both ends; on the
+│   Duo's split keyboard the comma takes from the left half's bar and the period from the right
+│   half's, each bar keeping its inner edge. Neither is added unless the bar still holds a
+│   letter-wide space after them (with the Hex key left or right of space, or a bar too narrow,
+│   they're skipped). They type `,` and `.` with shift on too. The 123 and #+= pages, a URL
+│   or email field (which keeps its own `.`), an iPad, and English's Dvorak letters while
+│   Dvorak punctuation already puts both on row 1 are unchanged; off, every layout is key for
+│   key the one it was.
 │   Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):

@@ -1310,15 +1310,17 @@ never at a launch by itself.
 - **Comma and period keys (full keyboard, iPhone):** Settings › Experiments › Comma and
   period keys (off by default, `experiments.commaPeriodKeys`, App Group) puts a comma just
   left of the space bar and a period just right of it, both a letter wide, on the letters page
-  in a plain text field. Both come out of the space bar: the comma takes its left end and the
-  period its right, and neither is added unless the bar still holds a letter-wide space after
-  them. They type `,` and `.` with shift on too (they have no shifted symbols). The 123 and
-  #+= pages, a URL or email field (which keeps its own `.`), an iPad, and English's Dvorak
-  letters while Dvorak punctuation puts both on row 1 are unchanged. On the Duo's split
-  keyboard the comma takes from the left half's bar and the period from the right half's, each
-  only where that bar still holds a letter-wide space. Off, every layout is key for key the one
-  it was. Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles
-  the iOS targets, and no physical iPhone run checks it.
+  in a plain text field. On the joined keyboard the comma starts where the bar used to start
+  and the period ends where it used to end, the bar moving inward at both ends; on the Duo's
+  split keyboard the comma takes from the left half's bar and the period from the right
+  half's, each bar keeping its inner edge. Neither is added unless the bar still holds a
+  letter-wide space after them (with the Hex key left or right of space, or a bar too narrow,
+  they're skipped). They type `,` and `.` with shift on too (they have no shifted symbols).
+  The 123 and #+= pages, a URL or email field (which keeps its own `.`), an iPad, and English's
+  Dvorak letters while Dvorak punctuation puts both on row 1 are unchanged. Off, every layout
+  is key for key the one it was. Unit tests only (`KeyboardLayoutTests`,
+  `FullKeyboardEngineTests`): no CI compiles the iOS targets, and no physical iPhone run
+  checks it.
 - **Word suggestions (full keyboard):** The strip above the keys shows the words the engine
   offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
   Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops

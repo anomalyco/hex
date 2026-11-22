@@ -1267,6 +1267,58 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    /// Settings › Experiments › Comma and period keys reaches every portrait bottom row, with the
+    /// Hex key left of space, right of space or in the strip: the comma and period are there if
+    /// and only if the space bar held three letters and two gaps, the bar they leave is still a
+    /// letter wide, every key is inside the keyboard, and its midpoint hits itself.
+    func testCommaAndPeriodKeysFitEveryPortraitBottomRow() throws {
+        var cases: [(KeyboardLayout, KeyboardLayout)] = []
+        for width in portraitWidths {
+            for phoneSize in [KeyboardPhoneSize.homeButton, .regular, .large] {
+                for (globe, emoji) in [(false, false), (true, false), (false, true), (true, true)] {
+                    for placement in [HexKeyPlacement.leftOfSpace, .rightOfSpace, .stripLeading, .stripTrailing] {
+                        func layout(_ punctuation: Bool) -> KeyboardLayout {
+                            KeyboardLayout(
+                                width: width, showsGlobe: globe, showsEmoji: emoji,
+                                hexPlacement: placement, phoneSize: phoneSize,
+                                commaPeriodKeys: punctuation
+                            )
+                        }
+                        cases.append((layout(false), layout(true)))
+                    }
+                }
+            }
+        }
+        for (off, on) in cases {
+            let label = describe(on) + " emoji=\(on.showsEmoji) hex=\(on.hexPlacement.rawValue)"
+            let gap = on.metrics.gap
+            let letterWidth = on.letterWidth
+            let offSpace = try XCTUnwrap(off.key(.space)).frame
+            let room = offSpace.width >= 3 * letterWidth + 2 * gap
+            let comma = on.key(.character(","))
+            let period = on.key(.character("."))
+            XCTAssertEqual(comma != nil, room, "\(label): a comma if and only if the bar had room")
+            XCTAssertEqual(period != nil, room, "\(label): a period if and only if the bar had room")
+            if let comma, let period {
+                let space = try XCTUnwrap(on.key(.space)).frame
+                XCTAssertGreaterThanOrEqual(space.width, letterWidth, "\(label): the space bar stays a letter wide")
+                XCTAssertEqual(comma.frame.minX, offSpace.minX, accuracy: 0.001, "\(label): the comma starts where the bar did")
+                XCTAssertEqual(comma.frame.maxX + gap, space.minX, accuracy: 0.001, "\(label): just left of space")
+                XCTAssertEqual(space.maxX + gap, period.frame.minX, accuracy: 0.001, "\(label): just right of space")
+                XCTAssertEqual(period.frame.maxX, offSpace.maxX, accuracy: 0.001, "\(label): the period ends where the bar did")
+                XCTAssertEqual(comma.frame.width, letterWidth, accuracy: 0.001, "\(label): a comma a letter wide")
+                XCTAssertEqual(period.frame.width, letterWidth, accuracy: 0.001, "\(label): a period a letter wide")
+                XCTAssertNil(comma.shifted, label)
+                XCTAssertNil(period.shifted, label)
+            }
+            let bounds = CGRect(x: 0, y: 0, width: on.width, height: on.totalHeight).insetBy(dx: -0.001, dy: -0.001)
+            for key in on.keys {
+                XCTAssertTrue(bounds.contains(key.frame), "\(label) \(key.label)")
+                XCTAssertEqual(on.hitTest(CGPoint(x: key.frame.midX, y: key.frame.midY))?.kind, key.kind, "\(label) \(key.label)")
+            }
+        }
+    }
+
     /// Settings › Keyboard › Languages › Layout is kept per language in the App Group; a language
     /// never set, or set to one it doesn't offer, types on its own, as without the App Group.
     func testTheLayoutIsKeptPerLanguageWithItsOwnAsTheFallback() {
