@@ -296,8 +296,10 @@ never at a launch by itself.
     (`LiveFieldTyping`), only the changed tail retyped. It keeps exactly what it typed and
     edits only while the text before the cursor still ends with it; when the dictation's
     text goes in, its words come out first, so the text goes in where and as it would without
-    them, in one step. ✕, a failure or nothing heard take them out; the keyboard hiding
-    mid-dictation takes them out and the held text goes in at the next keyboard as before.
+    them, in one step. ✕, a failure or nothing heard take them out. The keyboard hiding
+    mid-dictation takes them out where the app still takes edits; one gone to the background
+    doesn't, so they are noted (`LiveDictationSettings.leftover`) and the held text, inserted by
+    itself or with Paste dictation, replaces them where the field still ends with them.
     Once the field changes under it (a key, a cursor move, a selection, or an app that
     reports no text), it stops and leaves its words, and the text goes in at the cursor as
     without it. Never in secure, password, one-time code or card number fields, over a
@@ -307,12 +309,19 @@ never at a launch by itself.
     keyboard with margin, and the speech model's transcription after it), on an error, or
     when the recogniser isn't running 4–6 s into the audio; under 24 MB, or on a memory warning, the recogniser goes
     and the dictation goes on. The dictation bar shows no preview (Type as I speak works
-    there, unverified on an iPhone). Measured on the Mac Studio (macOS 27.2.1) with the
-    keyboard's own code fed a clip in the page's 4,096-sample chunks in real time: first
-    words 0.5–1.0 s after the first word ends, then 0.6–0.8 s behind (90% within 1.2 s), in
-    bursts about once a second; 2% of words shown were rewritten (7 of 336, "730." to "7.30.");
-    words settle only at a pause. Without fast results words came 2.7–3.5 s late, and
-    `DictationTranscriber` rewrote 15% of them. The simulator has no speech models: in
+    there, unverified on an iPhone). On an iPhone 17 Pro (iOS 27.2, keyboard limit 177 MB,
+    Parakeet loaded, a clip played from a Mac's speaker): the first words show about 1.2–1.3 s
+    after speech starts (2 s after the capture's first audio; 2.1 s and 3 s on the first
+    dictation after the keyboard starts), then about a second behind; over a 60 s dictation
+    the keyboard ended at 60.1 MB with the preview against 58.1 MB without (peak while
+    recording 66.5 against 60.1, at Parakeet's transcription 78.7 against 76.6), and two-sentence
+    dictations 0.4–0.8 MB higher. A scrolling text view holding the whole text had peaked
+    27 MB higher there, so the preview draws only about its box's worth. Measured on the Mac
+    Studio (macOS 27.2.1) with the keyboard's own code fed a clip in the page's
+    4,096-sample chunks in real time: first words 0.5–1.0 s after the first word ends, then
+    0.6–0.8 s behind (90% within 1.2 s), in bursts about once a second; 2% of words shown
+    were rewritten (7 of 336, "730." to "7.30."); words settle only at a pause. Without fast
+    results words came 2.7–3.5 s late, and `DictationTranscriber` rewrote 15% of them. The simulator has no speech models: in
     simulator builds only, `LiveTranscriptReplay` plays a recorded run (`live-replay.json` in
     the App Group, or the keyboard's own Library for an unsigned build) from the first audio.
     `ParakeetLiveTranscriber` (the audio so far again about once a second, a 20 s window) is
@@ -1923,6 +1932,17 @@ dataset's download and its `convert.py` command.
   record with the microphone on with Hex closed, Hex open and idle, a warm
   session on, and during in-keyboard dictation (WebKit's `videoChat` session,
   which Hex can't change), and compare.
+- **Show what I say and Type as I speak:** `LiveDictationTests` cover how results become the
+  words shown, the switches' defaults, the end of a long dictation, and Type as I speak's
+  typing, revising, taking back, stopping when the field changes or an app reports no text, and
+  private fields. The simulator has no speech models, so there the preview and typing ran on a
+  replay of Apple's results recorded on a Mac (`LiveTranscriptReplay`), in a host app, light and
+  dark, upright and turned, on an iPhone SE's globe key and with no model at all (no preview).
+  On an iPhone 17 Pro (iOS 27.2): the preview, Type as I speak, a 60 s dictation, memory with
+  and without, and the keyboard hidden mid-dictation with Type as I speak (Home, then back: the
+  held text pasted over its words). Unchecked: VoiceOver on a device (the test runner there has
+  no VoiceOver control), hosts that lag or show part of the text (web views, Notes) and real
+  speech in a room rather than a clip from a speaker.
 - **In-keyboard dictation's start time:** The simulator's WebKit captures from a
   mock microphone, and on a Mac without a microphone the warm session's
   recorder can't start, so how long a real microphone takes to open
