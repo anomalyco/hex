@@ -705,7 +705,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: the strip above the keys hides its words, not itself.
                 SettingsToggleRow(
                     title: String(localized: "Hide word suggestions"),
-                    detail: String(localized: "On the full keyboard, the bar above the keys stops showing suggested words. Autocorrect, the Hex key and Paste stay as they are."),
+                    detail: String(localized: "On the full keyboard, the bar above the keys stops suggesting words. Autocorrect still fixes words as you type, and the Hex key and Paste stay."),
                     isOn: $hideWordSuggestions
                 )
 

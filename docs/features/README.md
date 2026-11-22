@@ -2946,10 +2946,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Hide word suggestions (off by default, `experiments.hideWordSuggestions`): the full
 │   keyboard's strip keeps its height, the Hex key, Undo, status, notices and the Paste chip,
-│   but shows no words: not the typing and next-word suggestions, and not the finished word's
-│   emoji. Autocorrect is untouched: it reads `engine.suggestions` (`willAutoReplace`), which
-│   the switch never changes, so space still fixes a word with nothing offered above it. Off,
-│   the strip suggests exactly as it did.
+│   but stops suggesting words: no typing or next-word suggestions, swipe readings, finished
+│   word emoji, or the chip that keeps what you typed while a correction is still ahead.
+│   Autocorrect still corrects on space, and after Delete the chip that puts back what it
+│   replaced (`.revert`) stays. With nothing suggested above it, holding a strip word to add it
+│   to Custom vocabulary is gone. Off, the strip suggests exactly as it did.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed

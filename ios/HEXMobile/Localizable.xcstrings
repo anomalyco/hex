@@ -3813,12 +3813,12 @@
         }
       }
     },
-    "On the full keyboard, the bar above the keys stops showing suggested words. Autocorrect, the Hex key and Paste stay as they are." : {
+    "On the full keyboard, the bar above the keys stops suggesting words. Autocorrect still fixes words as you type, and the Hex key and Paste stay." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在完整键盘上，按键上方的栏不再显示建议的词语。自动改正、Hex 键和粘贴保持原样。"
+            "value" : "在全键盘上，按键上方的栏不再建议词语。自动改正仍会在你输入时修正词语，Hex 键和粘贴保持原样。"
           }
         }
       }

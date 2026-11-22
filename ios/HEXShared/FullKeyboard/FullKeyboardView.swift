@@ -862,9 +862,12 @@ final class FullKeyboardView: UIView {
         }
         // The experiment hides the words, not the strip: Undo, Paste, status, notices and the
         // Hex key keep their places, and an empty strip offers the clipboard as it does when no
-        // word is suggested. Autocorrect reads `engine.suggestions`, never this.
+        // word is suggested. What you typed before a correction (`.revert`) stays, so Delete
+        // after a corrected word can still put it back; keep literal, swipe readings, next
+        // words and the finished word's emoji go. Autocorrect still reads
+        // `engine.suggestions`, never this.
         if hidesWordSuggestions {
-            suggestions = []
+            suggestions = suggestions.filter { $0.kind == .revert }
         }
         stripView.update(
             suggestions: suggestions,
