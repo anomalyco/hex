@@ -700,7 +700,8 @@ never at a launch by itself.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
     learned below the switch), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
-  - **Experiments:** Hinglish (Hindi in Latin letters), Two-language dictation,
+  - **Experiments:** Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin
+    letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Korean keyboard (두벌식), ABC under the
     emoji key, Keyboard themes (its Theme menu below the switch while it's on), Two-thumb
@@ -868,7 +869,8 @@ never at a launch by itself.
   error code, never the text) beside the download until a dictation
   translates. With Hinglish on, Hindi going into another language is
   translated from its Devanagari, and romanized only if it goes in as
-  spoken. Where you dictate, a "Translate to
+  spoken; Greeklish does the same for Greek, translated from Greek letters.
+  Where you dictate, a "Translate to
   English" switch turns it on or off without opening Hex (testers asked for
   a button, not a setting): a row in the full keyboard's Hex key menu, lit
   with a checkmark while on, and a chip in the dictation bar's language tray.

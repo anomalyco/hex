@@ -3003,6 +3003,26 @@
         }
       }
     },
+    "Greeklish (Greek in Latin letters)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Greeklish（用拉丁字母书写希腊语）"
+          }
+        }
+      }
+    },
+    "Adds Greeklish to dictation languages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在听写语言中加入 Greeklish"
+          }
+        }
+      }
+    },
     "Setting up Hex" : {
       "localizations" : {
         "zh-Hans" : {

@@ -13,6 +13,7 @@ struct HEXMobileApp: App {
         TypingLogSettings().turnOffOnce()
         TypingLogSettings().applyLaunchArguments()
         HinglishSettings().applyLaunchArguments()
+        GreeklishSettings().applyLaunchArguments()
         TwoLanguageDictationSettings().applyLaunchArguments()
         MultilingualParakeetSettings().applyLaunchArguments()
         SettingsSnapshotFixture.applyDefaults()

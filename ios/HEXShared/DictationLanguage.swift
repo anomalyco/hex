@@ -70,6 +70,7 @@ nonisolated struct LanguageSettings {
     func keyboardLanguageChoices(
         preferred: [String] = Locale.preferredLanguages,
         hinglish: Bool = HinglishSettings().isEnabled,
+        greeklish: Bool = GreeklishSettings().isEnabled,
         region: String? = Locale.current.region?.identifier
     ) -> [String] {
         DictationLanguageSwitch.choices(
@@ -78,6 +79,7 @@ nonisolated struct LanguageSettings {
             preferred: preferred,
             supported: supportedDictationLanguages,
             hinglish: hinglish,
+            greeklish: greeklish,
             removed: removedDictationLanguages,
             region: region
         )

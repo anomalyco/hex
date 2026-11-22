@@ -1290,15 +1290,16 @@ final class KeyboardViewController: UIInputViewController {
         let translationLanguage: String? = if #available(iOS 26.0, *) { translation.targetLanguage } else { nil }
         let translationLanguages = Self.translationLanguages
         let hinglish = HinglishSettings().isEnabled
+        let greeklish = GreeklishSettings().isEnabled
         let signature = [
             explicit ?? "", automatic ?? "", recent.joined(separator: ","), removed.joined(separator: ","),
             "\(supported.count)",
-            target ?? "", "\(hinglish)",
+            target ?? "", "\(hinglish)", "\(greeklish)",
             translationLanguage ?? "", "\(translationLanguages?.count ?? -1)",
         ].joined(separator: "|")
         guard signature != languageSignature else { return }
         languageSignature = signature
-        let choices = settings.keyboardLanguageChoices(hinglish: hinglish)
+        let choices = settings.keyboardLanguageChoices(hinglish: hinglish, greeklish: greeklish)
         let more = DictationLanguageSwitch.more(choices: choices, preferred: Locale.preferredLanguages, supported: supported)
         if viewModel.dictationLanguage != explicit { viewModel.dictationLanguage = explicit }
         if viewModel.automaticLanguage != automatic { viewModel.automaticLanguage = automatic }

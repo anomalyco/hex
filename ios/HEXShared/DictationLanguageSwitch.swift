@@ -6,7 +6,8 @@ nonisolated enum DictationLanguageSwitch {
     static let maxChoices = 5
 
     /// Up to five languages, best first: the one set now, the ones picked recently, Hindi while
-    /// Experiments › Hinglish is on (shown as Hinglish), then the iPhone's preferred languages.
+    /// Experiments › Hinglish is on and Greek while Greeklish is (shown as Hinglish and
+    /// Greeklish), then the iPhone's preferred languages.
     /// Each is matched to a language Apple Speech has (`supported`, BCP 47) when that list is
     /// known, and dropped when it has none. One variant per language: the first of es-US and
     /// es-ES wins, so no two chips mean the same language (`variantKey`), except Chinese,
@@ -20,6 +21,7 @@ nonisolated enum DictationLanguageSwitch {
         preferred: [String],
         supported: [String],
         hinglish: Bool = false,
+        greeklish: Bool = false,
         removed: [String] = [],
         region: String? = Locale.current.region?.identifier
     ) -> [String] {
@@ -36,7 +38,8 @@ nonisolated enum DictationLanguageSwitch {
                   languages.insert(variantKey(of: match) ?? match).inserted else { return }
             result.append(match)
         }
-        let offered = hinglish ? [HinglishSettings.language] : []
+        let offered = (hinglish ? [HinglishSettings.language] : [])
+            + (greeklish ? [GreeklishSettings.language] : [])
         for identifier in recent + offered + preferred {
             guard result.count < maxChoices else { break }
             offer(identifier)
@@ -51,6 +54,7 @@ nonisolated enum DictationLanguageSwitch {
         preferred: [String],
         supported: [String],
         hinglish: HinglishSettings = HinglishSettings(),
+        greeklish: GreeklishSettings = GreeklishSettings(),
         region: String? = Locale.current.region?.identifier
     ) -> [String] {
         guard !supported.isEmpty else { return [] }
@@ -62,7 +66,7 @@ nonisolated enum DictationLanguageSwitch {
         }
         let codes = preferred.compactMap { Locale(identifier: $0).language.languageCode?.identifier }
         let rest = supported.filter { !choices.contains($0) && !first.contains($0) }
-        let names = nativeNames(for: supported, hinglish: hinglish)
+        let names = nativeNames(for: supported, hinglish: hinglish, greeklish: greeklish)
         func byName(_ a: String, _ b: String) -> Bool {
             (names[a] ?? a).localizedStandardCompare(names[b] ?? b) == .orderedAscending
         }
@@ -168,7 +172,8 @@ nonisolated enum DictationLanguageSwitch {
 
     /// The language's own short name: "English", "Norsk", "Español", "Deutsch", "עברית",
     /// "Русский", and "Srpski" in its script for Serbian (Latin). Hindi is "Hinglish" while
-    /// Experiments › Hinglish writes it in Latin letters. `supported` (what Apple Speech has
+    /// Experiments › Hinglish writes it in Latin letters, and Greek is "Greeklish" while
+    /// Greeklish does. `supported` (what Apple Speech has
     /// here) adds the region where it offers more than one of the language, as Apple's own
     /// keyboards do: "Español (US)" while it also has Spain's, "English (GB)"; Norwegian stays
     /// "Norsk" because it has only one.
@@ -180,30 +185,45 @@ nonisolated enum DictationLanguageSwitch {
         nativeName(for: identifier, supported: [], hinglish: hinglish)
     }
 
+    static func nativeName(for identifier: String, greeklish: GreeklishSettings) -> String {
+        nativeName(for: identifier, supported: [], greeklish: greeklish)
+    }
+
     static func nativeName(
         for identifier: String,
         supported: [String],
-        hinglish: HinglishSettings = HinglishSettings()
+        hinglish: HinglishSettings = HinglishSettings(),
+        greeklish: GreeklishSettings = GreeklishSettings()
     ) -> String {
-        nativeName(for: identifier, among: supported, hinglish: hinglish)
+        nativeName(for: identifier, among: supported, hinglish: hinglish, greeklish: greeklish)
     }
 
     /// Native names for a list, with the region code only where two share a language:
     /// "English (US)", "English (GB)", "Norsk". `supported` is Apple Speech's list here, so a
     /// language with another region it doesn't show still names the one in the list.
-    static func nativeNames(for identifiers: [String], hinglish: HinglishSettings = HinglishSettings()) -> [String: String] {
-        nativeNames(for: identifiers, supported: [], hinglish: hinglish)
+    static func nativeNames(
+        for identifiers: [String],
+        hinglish: HinglishSettings = HinglishSettings(),
+        greeklish: GreeklishSettings = GreeklishSettings()
+    ) -> [String: String] {
+        nativeNames(for: identifiers, supported: [], hinglish: hinglish, greeklish: greeklish)
     }
 
     static func nativeNames(
         for identifiers: [String],
         supported: [String],
-        hinglish: HinglishSettings = HinglishSettings()
+        hinglish: HinglishSettings = HinglishSettings(),
+        greeklish: GreeklishSettings = GreeklishSettings()
     ) -> [String: String] {
         let variants = supported.isEmpty ? identifiers : supported
         var names: [String: String] = [:]
         for identifier in identifiers {
-            names[identifier] = nativeName(for: identifier, among: variants, hinglish: hinglish)
+            names[identifier] = nativeName(
+                for: identifier,
+                among: variants,
+                hinglish: hinglish,
+                greeklish: greeklish
+            )
         }
         return names
     }
@@ -211,16 +231,22 @@ nonisolated enum DictationLanguageSwitch {
     private static func nativeName(
         for identifier: String,
         among variants: [String],
-        hinglish: HinglishSettings
+        hinglish: HinglishSettings,
+        greeklish: GreeklishSettings
     ) -> String {
-        let name = nativeLanguageName(for: identifier, hinglish: hinglish)
+        let name = nativeLanguageName(for: identifier, hinglish: hinglish, greeklish: greeklish)
         guard showsRegion(for: identifier, among: variants),
               let region = Locale(identifier: identifier).region?.identifier else { return name }
         return "\(name) (\(region))"
     }
 
-    private static func nativeLanguageName(for identifier: String, hinglish: HinglishSettings) -> String {
+    private static func nativeLanguageName(
+        for identifier: String,
+        hinglish: HinglishSettings,
+        greeklish: GreeklishSettings
+    ) -> String {
         if let name = hinglish.name(for: identifier) { return name }
+        if let name = greeklish.name(for: identifier) { return name }
         let language = Locale(identifier: identifier).language
         let code = language.languageCode?.identifier ?? identifier
         switch code {

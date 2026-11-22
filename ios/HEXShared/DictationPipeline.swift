@@ -78,15 +78,55 @@ nonisolated struct HinglishSettings {
     }
 }
 
+/// Experiments › Greeklish (Greek in Latin letters), in the shared App Group so in-keyboard
+/// dictation reads it too. Off by default. While it is on, Greek dictation is written in Latin
+/// letters (`GreeklishRomanizer`) and Greek is called Greeklish in the language menus.
+nonisolated struct GreeklishSettings {
+    static let enabledKey = "experiments.greeklish"
+    static let launchArgument = "--experiment-greeklish"
+    /// Greek's name in the Hex key's language menu and Settings › Dictation language while on.
+    static let languageName = "Greeklish"
+    /// The language it is for: Apple Speech's Greek, also what the keyboard offers to switch to.
+    static let language = "el-GR"
+
+    private let defaults: UserDefaults?
+
+    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+        self.defaults = defaults
+    }
+
+    var isEnabled: Bool {
+        get { defaults?.bool(forKey: Self.enabledKey) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Self.enabledKey) }
+    }
+
+    /// "Greeklish" for Greek while the experiment is on; nil for other languages, or while off.
+    func name(for language: String) -> String? {
+        isEnabled && Self.isGreek(language) ? Self.languageName : nil
+    }
+
+    static func isGreek(_ language: String?) -> Bool {
+        guard let language else { return false }
+        return Locale(identifier: language).language.languageCode?.identifier == "el"
+    }
+
+    /// Simulator scenes pass `--experiment-greeklish` to turn the experiment on.
+    func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
+        if arguments.contains(Self.launchArgument) {
+            isEnabled = true
+        }
+    }
+}
+
 /// The steps between the speech model and the text Hex inserts, the same wherever Hex
 /// dictates: `DictationController` (the app, the keyboard's warm session and cold start, the
 /// Action Button, Control Center and Siri) and in-keyboard dictation
 /// (`KeyboardLocalDictation`), so a style and Lowercase apply on every path.
 ///
-/// In order: Hinglish (Hindi in Latin letters, while that experiment is on), learned fixes,
-/// custom vocabulary, Clean up what I say
-/// (`CleanupTagger.cleanIfEnabled`, which guards its own memory in the keyboard), `refine`
-/// (Clean up with Apple Intelligence, only in the app), translation, the style
+/// In order: Hinglish (Hindi in Latin letters, while that experiment is on) or Greeklish
+/// (Greek in Latin letters, while that one is on), learned fixes, custom vocabulary, Clean up
+/// what I say (`CleanupTagger.cleanIfEnabled`, which guards its own memory in the keyboard),
+/// `refine` (Clean up with Apple Intelligence, only in the app), translation, the style
 /// (`TranscriptFormatter`, with Format lists' `SpokenLists` and Spoken punctuation's
 /// `SpokenPunctuation` inside it), the spellings again,
 /// Lowercase, then French spacing (`FrenchSpacing`, in every style but Verbatim). The style,
@@ -108,6 +148,8 @@ nonisolated struct DictationPipeline: Sendable {
     /// Experiments › Hinglish: Hindi is written in Latin letters before every other step, so
     /// learned fixes, vocabulary and the style see the Latin words.
     var hinglish = false
+    /// Experiments › Greeklish: Greek is written in Latin letters there too.
+    var greeklish = false
     /// Settings › Dictation › End with a period; off, no line ends with a full stop.
     var endsWithPeriod = true
     /// Translate what I say's translator; nil is Apple's. Tests stand in for it.
@@ -115,8 +157,8 @@ nonisolated struct DictationPipeline: Sendable {
 
     /// Each step's text, for Record typing logs.
     struct Stages: Equatable, Sendable {
-        /// What the speech model heard, in Latin letters for Hinglish: what learning compares
-        /// the inserted text with.
+        /// What the speech model heard, in Latin letters for Hinglish or Greeklish: what
+        /// learning compares the inserted text with.
         var heard: String
         /// After learned fixes.
         var fixed: String
@@ -142,12 +184,19 @@ nonisolated struct DictationPipeline: Sendable {
         refine: ((String) async -> String)? = nil
     ) async -> Stages {
         let translation = DictationTranslationSettings()
-        let romanizes = hinglish && HinglishSettings.isHindi(language)
-        // Apple translates Hindi from Devanagari, not Hinglish's Latin letters: a dictation that
-        // may go into another language keeps its Devanagari, romanized only if it goes in as spoken.
-        let translatesHindi = romanizes && translation.isEnabled && !HinglishSettings.isHindi(translation.targetLanguage)
-        let heard = romanizes ? HinglishRomanizer.romanize(spoken) : spoken
-        let fixed = DictationCorrections.apply(corrections, to: translatesHindi ? spoken : heard)
+        let romanizesHindi = hinglish && HinglishSettings.isHindi(language)
+        let romanizesGreek = greeklish && GreeklishSettings.isGreek(language)
+        // Apple translates Hindi from Devanagari and Greek from Greek letters, not the
+        // experiments' Latin: a dictation that may go into another language keeps its script,
+        // romanized only if it goes in as spoken.
+        let translatesLatin = (romanizesHindi && translation.isEnabled
+            && !HinglishSettings.isHindi(translation.targetLanguage))
+            || (romanizesGreek && translation.isEnabled
+                && !GreeklishSettings.isGreek(translation.targetLanguage))
+        let heard = romanizesHindi ? HinglishRomanizer.romanize(spoken)
+            : romanizesGreek ? GreeklishRomanizer.romanize(spoken)
+            : spoken
+        let fixed = DictationCorrections.apply(corrections, to: translatesLatin ? spoken : heard)
         let spelled = VocabularySpelling.apply(vocabulary, to: fixed)
         let tagged = await CleanupTagger.cleanIfEnabled(
             spelled,
@@ -163,7 +212,9 @@ nonisolated struct DictationPipeline: Sendable {
             engine: translationEngine
         )
         let translated = outcome.text
-        let cleaned = translatesHindi && translated == nil ? HinglishRomanizer.romanize(refined) : refined
+        let cleaned = translatesLatin && translated == nil
+            ? (romanizesGreek ? GreeklishRomanizer.romanize(refined) : HinglishRomanizer.romanize(refined))
+            : refined
         // A translation is formatted in the language it is now in.
         let formatLanguage = translated == nil ? language : translation.targetLanguage
         return Stages(

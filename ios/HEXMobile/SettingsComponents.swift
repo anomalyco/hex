@@ -311,6 +311,7 @@ enum SettingsSnapshotFixture {
         TypingJournalSettings().learnsPerLanguage = on
         TypingLogSettings().isEnabled = on
         HinglishSettings().isEnabled = on
+        GreeklishSettings().isEnabled = on
         TwoLanguageDictationSettings().isEnabled = on
         AdaptiveTouchSettings().isEnabled = on
         // Settings scenes skip preparing a model, so this only draws the switch.
