@@ -78,6 +78,15 @@ typedef struct {
 
 void hk_swipe_default_parameters(HkSwipeParameters *out);
 
+/// The cost (-ln P) of a common English contraction ("isn't", "we're"): 7.5.
+double hk_swipe_contraction_cost(void);
+/// The cost of one of your own words: 11.
+double hk_swipe_own_word_cost(void);
+/// The cost of English contraction `word` (any case) by how often a chat uses it: the
+/// commonest ("I'm", "don't") `base` - 1.5, common ones `base`, the rest `base` + 2. NULL or
+/// not UTF-8 is none of them: `base` + 2.
+double hk_swipe_cost_of_contraction(const char *word, double base);
+
 /// A word read beside the model's: an English contraction or one of your own words.
 typedef struct {
     const char *text;
