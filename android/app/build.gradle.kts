@@ -142,6 +142,48 @@ val verifyTypingModels by tasks.registering {
 }
 tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
 
+// The keyboard's Rust core (crates/keyboard), debug builds only for now: libhex_keyboard.so
+// for the APK and a host build for the JVM unit tests. Release builds don't include it.
+// rustup's cargo, run from the crate so its pinned toolchain (rust-toolchain.toml) is used;
+// Cargo tracks the sources, so the tasks always run.
+val keyboardCrate = rootProject.file("../crates/keyboard")
+val rustupBin = File(System.getProperty("user.home"), ".cargo/bin")
+abstract class CargoBuild : Exec() {
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+}
+/** `cargo <arguments(output directory)>` for hex-keyboard-ffi with JNI, the output resolved as it runs. */
+fun CargoBuild.cargo(arguments: (File) -> List<String>) {
+    workingDir(keyboardCrate)
+    environment("PATH", rustupBin.path + File.pathSeparator + System.getenv("PATH"))
+    executable(rustupBin.resolve("cargo"))
+    outputs.upToDateWhen { false }
+    doFirst {
+        args(arguments(outputDirectory.get().asFile))
+        args("--manifest-path", keyboardCrate.resolve("Cargo.toml").path, "-p", "hex-keyboard-ffi", "--features", "jni")
+    }
+}
+// Its output directory is the debug variant's (addGeneratedSourceDirectory below).
+val buildKeyboardCore by tasks.registering(CargoBuild::class) {
+    environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
+    cargo { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
+}
+val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
+    outputDirectory.set(layout.buildDirectory.dir("rustHost"))
+    cargo {
+        environment("CARGO_TARGET_DIR", it.path)
+        listOf("build", "--release")
+    }
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(buildKeyboardCore, CargoBuild::outputDirectory)
+}
+tasks.withType<Test>().matching { it.name == "testDebugUnitTest" }.configureEach {
+    dependsOn(buildHostKeyboardCore)
+    // KeyboardCore loads libhex_keyboard from here; KeyboardCoreTest opens a descriptor.
+    systemProperty("java.library.path", buildHostKeyboardCore.get().outputDirectory.get().dir("release").asFile.path)
+    jvmArgs("--add-opens", "java.base/java.io=ALL-UNNAMED")
+}
+
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
