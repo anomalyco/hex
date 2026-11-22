@@ -1,7 +1,12 @@
 package ly.anoma.hex
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.*
 import androidx.compose.foundation.layout.*
@@ -21,6 +26,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.heading
@@ -33,24 +39,37 @@ import androidx.compose.ui.unit.sp
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
 
-private enum class Page(val title: String) {
-    Home("Hex"), Dictation("Dictation"), Keyboard("Keyboard"), Privacy("Privacy"), Experiments("Experiments"),
-    Language("Dictation language"), Layout("Keyboard layout"), Styles("Style"),
-    Policy("Privacy policy"), Licences("Open-source licences");
+private enum class Page(val title: Int) {
+    Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
+    Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
+    Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences);
     val parent get() = when (this) {
         Language, Styles -> Dictation
         Layout -> Keyboard
         Policy, Licences -> Privacy
+        Licence -> Licences
         else -> Home
     }
 }
 
+private val Style.label get() = when (this) {
+    Style.Polished -> R.string.style_polished
+    Style.Casual -> R.string.style_casual
+    Style.Notes -> R.string.style_notes
+    Style.Verbatim -> R.string.style_verbatim
+}
+
+/** Licence files the credits name, in the order they appear in assets/licenses. */
+private fun licenceFiles(context: Context) =
+    context.assets.list("licenses").orEmpty().filter { it != "credits.txt" }.sorted()
+
 @Composable
 internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: TypingPreferences,
                          model: ModelStore.State, download: () -> Unit, phase: SpeechPhase, transcript: String,
-                         notice: String?, dictate: () -> Unit, cancel: () -> Unit, setupPage: (Int) -> Unit,
+                         notice: String?, dictate: () -> Unit, cancel: () -> Unit, clear: () -> Unit, setupPage: (Int) -> Unit,
                          systemSettings: () -> Unit) {
     var page by rememberSaveable { mutableStateOf(Page.Home) }
+    var licence by rememberSaveable { mutableStateOf("") }
     var practice by remember { mutableStateOf("") }
     val context = LocalContext.current
     // The activity and the IME write the same preferences.
@@ -80,6 +99,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val spatial = remember(revision) { typing.spatial }
     val popups = remember(revision) { typing.popups }
     val haptics = remember(revision) { typing.haptics }
+    var copied by remember(transcript) { mutableStateOf(false) }
     fun open(next: Page) { if (phase != SpeechPhase.Idle) cancel(); page = next }
     BackHandler(page != Page.Home) { open(page.parent) }
 
@@ -95,15 +115,16 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
                         else Box(Modifier.size(44.dp).clickable(role = Role.Button) { open(page.parent) },
                             contentAlignment = Alignment.CenterStart) {
-                            Image(painterResource(R.drawable.ic_back), "Back", Modifier.size(24.dp),
+                            Image(painterResource(R.drawable.ic_back), stringResource(R.string.back), Modifier.size(24.dp),
                                 colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
                         }
                         if (page == Page.Home) Spacer(Modifier.width(10.dp))
-                        Label(page.title, size = 26, weight = FontWeight.SemiBold, mod = Modifier.semantics { heading() })
+                        Label(if (page == Page.Licence) licence else stringResource(page.title), size = 26, weight = FontWeight.SemiBold,
+                            lines = 2, mod = Modifier.semantics { heading() })
                     }
                     if (page == Page.Home) {
                         val steps = listOf(setup.mic, setup.chosen).count { !it }
-                        val status = if (steps == 0) "Ready" else "Finish setup · $steps " + if (steps == 1) "step" else "steps"
+                        val status = if (steps == 0) stringResource(R.string.home_ready) else pluralStringResource(R.plurals.home_finish_setup, steps, steps)
                         Row((if (steps > 0) Modifier.clickable(role = Role.Button) { setupPage(1) } else Modifier)
                             .heightIn(min = if (steps > 0) 44.dp else 26.dp), verticalAlignment = Alignment.CenterVertically) {
                             if (steps == 0) Image(painterResource(R.drawable.ic_check), null, Modifier.size(16.dp),
@@ -119,31 +140,42 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             .height(52.dp), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.weight(1f).fillMaxHeight().clickable(phase != SpeechPhase.Transcribing, role = Role.Button) { dictate() },
                                 contentAlignment = Alignment.Center) {
-                                Label(when (phase) {
-                                    SpeechPhase.Idle -> "Dictate"
-                                    SpeechPhase.Transcribing -> "Transcribing…"
-                                    else -> "Finish dictation"
-                                }, inverted = true, weight = FontWeight.SemiBold)
+                                Label(stringResource(when (phase) {
+                                    SpeechPhase.Idle -> R.string.home_dictate
+                                    SpeechPhase.Transcribing -> R.string.home_transcribing
+                                    else -> R.string.home_finish
+                                }), inverted = true, weight = FontWeight.SemiBold)
                             }
                             if (phase != SpeechPhase.Idle) Box(Modifier.fillMaxHeight().width(68.dp).clickable(role = Role.Button) { cancel() },
-                                contentAlignment = Alignment.Center) { Label("Cancel", inverted = true, size = 14) }
+                                contentAlignment = Alignment.Center) { Label(stringResource(R.string.home_cancel), inverted = true, size = 14) }
                         }
-                        if (transcript.isNotEmpty()) Card { SelectionContainer { Label(transcript, mod = Modifier.padding(16.dp), lines = Int.MAX_VALUE) } }
-                        if (notice != null) Label(notice, muted = true, size = 14)
+                        if (transcript.isNotEmpty()) Card {
+                            SelectionContainer { Label(transcript, mod = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp), lines = Int.MAX_VALUE) }
+                            // iPhone Hex's Copy and Clear. Android 13 and later show their own copied preview.
+                            Row(Modifier.padding(horizontal = 4.dp)) {
+                                Action(stringResource(if (copied) R.string.home_copied else R.string.home_copy)) {
+                                    context.getSystemService(ClipboardManager::class.java)
+                                        ?.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.app_name), transcript))
+                                    copied = Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU
+                                }
+                                Action(stringResource(R.string.home_clear), clear)
+                            }
+                        }
+                        if (notice != null) Label(notice, muted = true, size = 14, lines = 3)
                         Card {
-                            listOf(Page.Dictation, Page.Keyboard, Page.Privacy, Page.Experiments).forEachIndexed { i, dest ->
+                            listOf(Page.Dictation, Page.Keyboard, Page.Privacy).forEachIndexed { i, dest ->
                                 if (i != 0) Rule()
-                                Entry(dest.title, action = { open(dest) })
+                                Entry(stringResource(dest.title), action = { open(dest) })
                             }
                         }
                         Card {
-                            Entry("Keyboard settings", value = "↗", action = systemSettings)
-                            Rule(); Entry("Run setup again", action = { setupPage(0) })
+                            Entry(stringResource(R.string.home_keyboard_settings), value = "↗", action = systemSettings)
+                            Rule(); Entry(stringResource(R.string.home_run_setup), action = { setupPage(0) })
                         }
                     }
                     Page.Dictation -> {
                         Card {
-                            Entry("Style", value = style.name, action = { open(Page.Styles) })
+                            Entry(stringResource(R.string.settings_style), value = stringResource(style.label), action = { open(Page.Styles) })
                             Rule(); Toggle(stringResource(R.string.dictation_lowercase), stringResource(R.string.dictation_lowercase_detail),
                                 lowercase) { speech.lowercase = it }
                             Rule(); Toggle(stringResource(R.string.dictation_format_lists), stringResource(R.string.dictation_format_lists_detail),
@@ -152,12 +184,12 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 spokenPunctuation) { speech.spokenPunctuation = it }
                             Rule(); Toggle(stringResource(R.string.dictation_end_with_period), stringResource(R.string.dictation_end_with_period_detail),
                                 endWithPeriod) { speech.endWithPeriod = it }
-                            Rule(); Entry("Dictation language", if (selectedLanguage == null) automatic.label else null,
-                                selectedLanguage?.label ?: "Automatic", { open(Page.Language) })
+                            Rule(); Entry(stringResource(R.string.settings_dictation_language), if (selectedLanguage == null) automatic.label else null,
+                                selectedLanguage?.label ?: stringResource(R.string.settings_automatic), { open(Page.Language) })
                         }
                         Card {
-                            Toggle("Translate what I say", "Dictate in Spanish, write in English", translate) { speech.translation = it }
-                            Rule(); Toggle("Clean up what I say", "Drop hesitations and spoken corrections", clean) { speech.clean = it }
+                            Toggle(stringResource(R.string.settings_translate), stringResource(R.string.settings_translate_detail), translate) { speech.translation = it }
+                            Rule(); Toggle(stringResource(R.string.settings_clean), stringResource(R.string.settings_clean_detail), clean) { speech.clean = it }
                             Rule(); Toggle(stringResource(R.string.dictation_vocabulary), stringResource(R.string.dictation_vocabulary_detail),
                                 customVocabulary) { speech.customVocabulary = it }
                             if (customVocabulary) {
@@ -172,27 +204,27 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             }
                         }
                         Card {
-                            val detail = when (model) {
-                                ModelStore.State.Ready -> "Whisper small is ready"
-                                ModelStore.State.Available -> "Tiny works offline"
-                                ModelStore.State.Retry -> "Download interrupted; tiny is available"
-                                is ModelStore.State.Loading -> "Downloading · ${model.percent}%"
-                            }
-                            val action = model == ModelStore.State.Available || model == ModelStore.State.Retry
-                            Entry("Speech model", detail, if (action) "Download" else "",
-                                if (action) download else null)
+                            val action = modelAction(model)
+                            Entry(stringResource(R.string.model_title), modelStatus(model), action?.let { stringResource(it) } ?: "",
+                                if (action != null) download else null)
                         }
                     }
                     Page.Keyboard -> {
                         Card {
-                            Entry("Keyboard layout", if (selectedLayout == null) "Follows dictation · " + automatic.label else null,
-                                selectedLayout?.label ?: "Automatic", { open(Page.Layout) })
+                            Entry(stringResource(R.string.settings_keyboard_layout),
+                                if (selectedLayout == null) stringResource(R.string.settings_layout_follows, automatic.label) else null,
+                                selectedLayout?.label ?: stringResource(R.string.settings_automatic), { open(Page.Layout) })
                             Rule(); Toggle(stringResource(R.string.settings_auto_capitalisation), stringResource(R.string.settings_auto_capitalisation_detail),
                                 autoCapitalize) { typing.autoCapitalize = it }
-                            Rule(); Toggle("Autocorrect", "Fix typos when you press space", autocorrect) { typing.autocorrect = it }
-                            Rule(); Toggle("Suggest swear words", "Slurs are never suggested", swearWords) { typing.suggestSwearWords = it }
-                            Rule(); Toggle("Key pop-ups", "Show the letter above your finger", popups) { typing.popups = it }
-                            Rule(); Toggle("Haptics", "A light tap when you press a key", haptics) { typing.haptics = it }
+                            Rule(); Toggle(stringResource(R.string.settings_autocorrect), stringResource(R.string.settings_autocorrect_detail), autocorrect) { typing.autocorrect = it }
+                            // Shown under Autocorrect while it is on, as on iPhone (it was alone on an Experiments page, on by default).
+                            if (autocorrect) { Rule(); Toggle(stringResource(R.string.settings_spatial), stringResource(R.string.settings_spatial_detail), spatial) { typing.spatial = it } }
+                            Rule(); Toggle(stringResource(R.string.settings_swear_words), stringResource(R.string.settings_swear_words_detail), swearWords) { typing.suggestSwearWords = it }
+                            // The words the keyboard keeps and suggests are Android's own personal dictionary.
+                            Rule(); Entry(stringResource(R.string.settings_personal_dictionary), stringResource(R.string.settings_personal_dictionary_detail), "↗",
+                                { context.startActivity(Intent(Settings.ACTION_USER_DICTIONARY_SETTINGS)) })
+                            Rule(); Toggle(stringResource(R.string.settings_popups), stringResource(R.string.settings_popups_detail), popups) { typing.popups = it }
+                            Rule(); Toggle(stringResource(R.string.settings_haptics), stringResource(R.string.settings_haptics_detail), haptics) { typing.haptics = it }
                         }
                         val ink = colorResource(R.color.ink)
                         Card {
@@ -200,28 +232,26 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                                 textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
                                 cursorBrush = SolidColor(ink), decorationBox = { field ->
-                                    Box { if (practice.isEmpty()) Label("Test keyboard…", muted = true); field() }
+                                    Box { if (practice.isEmpty()) Label(stringResource(R.string.settings_test_keyboard), muted = true); field() }
                                 })
                         }
                     }
                     Page.Privacy -> {
-                        Card {
-                            Entry("Everything stays on this device", "Voice and typed text are never uploaded")
-                            Rule(); Entry("Typing history", "Hex stores no keystrokes or transcripts")
+                        // A statement, not rows that look tappable.
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Image(painterResource(R.drawable.ic_lock), null, Modifier.size(15.dp), colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
+                            Spacer(Modifier.width(8.dp)); Label(stringResource(R.string.settings_privacy_line), weight = FontWeight.Medium)
                         }
+                        Label(stringResource(R.string.settings_privacy_detail), muted = true, size = 14, lines = Int.MAX_VALUE)
                         Card {
-                            Entry("Privacy policy", action = { open(Page.Policy) })
-                            Rule(); Entry("Open-source licences", action = { open(Page.Licences) })
+                            Entry(stringResource(R.string.settings_privacy_policy), action = { open(Page.Policy) })
+                            Rule(); Entry(stringResource(R.string.settings_licences), action = { open(Page.Licences) })
                         }
-                    }
-                    Page.Experiments -> Card {
-                        Toggle("Spatial autocorrect", if (autocorrect) "Use where taps land to fix typos" else "Turn on Autocorrect in Keyboard",
-                            spatial, enabled = autocorrect) { typing.spatial = it }
                     }
                     Page.Styles -> Card {
                         Style.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()
-                            Entry(it.name, value = if (it == style) "✓" else "", action = { speech.style = it; open(Page.Dictation) })
+                            Entry(stringResource(it.label), value = if (it == style) "✓" else "", action = { speech.style = it; open(Page.Dictation) })
                         }
                     }
                     Page.Language, Page.Layout -> Card {
@@ -232,14 +262,22 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             else (listOf(null) + DictationLanguage.entries).map { Triple(it?.label, it == selectedLanguage, { speech.language = it }) }
                         choices.forEachIndexed { i, (label, chosen, pick) ->
                             if (i != 0) Rule()
-                            Entry(label ?: "Automatic", if (label != null) null else if (layout) "Follow dictation language" else stringResource(R.string.dictation_language_automatic_detail),
+                            Entry(label ?: stringResource(R.string.settings_automatic),
+                                if (label != null) null else stringResource(if (layout) R.string.settings_layout_automatic_detail else R.string.dictation_language_automatic_detail),
                                 if (chosen) "✓" else "", { pick(); open(page.parent) })
                         }
                     }
-                    Page.Policy, Page.Licences -> {
-                        val asset = if (page == Page.Policy) "privacy-policy.txt" else "licenses/credits.txt"
+                    Page.Policy, Page.Licences, Page.Licence -> {
+                        val asset = when (page) { Page.Policy -> "privacy-policy.txt"; Page.Licences -> "licenses/credits.txt"; else -> "licenses/$licence" }
                         val text = remember(asset) { context.assets.open(asset).bufferedReader().use { it.readText() } }
-                        SelectionContainer { Label(text.trim(), size = 14, lines = Int.MAX_VALUE) }
+                        SelectionContainer { Column(verticalArrangement = Arrangement.spacedBy(14.dp)) { Document(text) } }
+                        // The credits name these files; each opens here.
+                        if (page == Page.Licences) Card {
+                            licenceFiles(context).forEachIndexed { i, file ->
+                                if (i != 0) Rule()
+                                Entry(file, action = { licence = file; open(Page.Licence) })
+                            }
+                        }
                     }
                 }
             }
@@ -253,6 +291,30 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
         lineHeight = (size + 5).sp, color = colorResource(if (inverted) R.color.page else if (muted) R.color.quiet else R.color.ink)),
         maxLines = lines, overflow = TextOverflow.Ellipsis)
 }
+/** Plain text as paragraphs: hard-wrapped lines joined so they wrap to the screen, and a short first line
+ * with no closing punctuation (the policy's section names) set as a heading. */
+@Composable private fun Document(text: String) {
+    for (block in text.trim().split(Regex("\\n\\s*\\n"))) {
+        val lines = block.lines().map { it.trim() }.filter { it.isNotEmpty() }
+        if (lines.isEmpty()) continue
+        val titled = lines.size > 1 && lines[0].length <= 40 && lines[0].last() !in ".,:;!?)"
+        if (titled) Column { Label(lines[0], size = 15, weight = FontWeight.SemiBold); Label(reflow(lines.drop(1)), size = 14, lines = Int.MAX_VALUE) }
+        else Label(reflow(lines), size = 14, lines = Int.MAX_VALUE)
+    }
+}
+/** Joins a line to the next unless it ends a sentence or a list entry, or ends with an address. */
+private fun reflow(lines: List<String>) = buildString {
+    for ((i, line) in lines.withIndex()) {
+        append(line)
+        if (i == lines.lastIndex) break
+        val ends = line.last() in ".:;!?)" || line.substringAfterLast(' ').startsWith("http")
+        append(if (ends) "\n" else " ")
+    }
+}
+@Composable private fun Action(text: String, onClick: () -> Unit) {
+    Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
+        contentAlignment = Alignment.Center) { Label(text, weight = FontWeight.Medium, size = 15) }
+}
 @Composable private fun Card(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.sheet)), content = content)
 }
@@ -262,7 +324,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
 @Composable private fun RowScope.RowTitle(title: String, note: String?) {
     Column(Modifier.weight(1f)) {
         Label(title, weight = FontWeight.Medium)
-        if (note != null) Label(note, size = 13, muted = true)
+        if (note != null) Label(note, size = 13, muted = true, lines = 2)
     }
 }
 @Composable private fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
