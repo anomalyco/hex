@@ -361,53 +361,91 @@ nonisolated struct ParakeetCompileRecord {
 /// launch that loaded it again at once ended the same way every time. After that, Hex takes
 /// another engine (`SpeechEngineChoice`): Apple's, where it has the language, else it waits
 /// for a tap on Set up instead of loading Parakeet at launch. In the app's own defaults.
+///
+/// Hex ending mid-load is no evidence by itself: iOS ends a backgrounded app, people swipe it
+/// away, an update installs. So a load is set aside only after two in a row ended Hex (or a
+/// load found too little memory), and the decision lasts a day and only for this build of
+/// Hex: then it tries again by itself.
 nonisolated struct ParakeetLoadGuard {
     static let message = String(localized: "Hex closed while loading the speech model. Close other apps, then tap Set up.")
+    /// How long a set-aside load stays set aside.
+    static let setAsideDuration: TimeInterval = 24 * 60 * 60
 
     private let loadingKey: String
-    private let interruptedKey: String
+    private let interruptionsKey: String
+    private let setAsideAtKey: String
+    private let setAsideBuildKey: String
+    /// The lasting flag older builds kept; read only to forget it.
+    private let legacyInterruptedKey: String
     private let defaults: UserDefaults
+    private let build: String
+    private let now: () -> Date
 
     /// `model` names the keys: "parakeet" for V2, as before, "parakeetUltra" for Ultra.
-    init(model: String = "parakeet", defaults: UserDefaults = .standard) {
+    init(
+        model: String = "parakeet",
+        defaults: UserDefaults = .standard,
+        build: String = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "",
+        now: @escaping () -> Date = Date.init
+    ) {
         loadingKey = "\(model).loadStartedAt"
-        interruptedKey = "\(model).loadInterrupted"
+        interruptionsKey = "\(model).loadInterruptions"
+        setAsideAtKey = "\(model).setAsideAt"
+        setAsideBuildKey = "\(model).setAsideBuild"
+        legacyInterruptedKey = "\(model).loadInterrupted"
         self.defaults = defaults
+        self.build = build
+        self.now = now
     }
 
     /// Once per launch: a load still marked as running belonged to a process that ended.
+    /// The second in a row sets Parakeet aside.
     func noteLaunch() {
+        if defaults.object(forKey: legacyInterruptedKey) != nil {
+            // An older build's lasting flag: the load gets another try.
+            defaults.removeObject(forKey: legacyInterruptedKey)
+        }
         guard defaults.object(forKey: loadingKey) != nil else { return }
         defaults.removeObject(forKey: loadingKey)
-        defaults.set(true, forKey: interruptedKey)
-    }
-
-    var lastLoadWasInterrupted: Bool {
-        defaults.bool(forKey: interruptedKey)
-    }
-
-    func begin() {
-        defaults.set(Date().timeIntervalSince1970, forKey: loadingKey)
-    }
-
-    /// Too little memory left to load Parakeet: counts as an interrupted load, so Hex picks
-    /// another engine (`SpeechEngineChoice`) instead of loading it.
-    func setAside() {
-        defaults.set(true, forKey: interruptedKey)
-    }
-
-    /// A load that returned, loaded or not; only a loaded one clears the interruption.
-    func end(loaded: Bool) {
-        defaults.removeObject(forKey: loadingKey)
-        if loaded {
-            defaults.removeObject(forKey: interruptedKey)
+        let interruptions = defaults.integer(forKey: interruptionsKey) + 1
+        defaults.set(interruptions, forKey: interruptionsKey)
+        if interruptions >= 2 {
+            setAside()
         }
     }
 
-    /// Forgets an interrupted load, for a person who asks to try again.
-    func forget() {
+    /// Set aside now: two loads in a row ended Hex, or one found too little memory, within
+    /// the last day and on this build.
+    var lastLoadWasInterrupted: Bool {
+        guard let at = defaults.object(forKey: setAsideAtKey) as? Double,
+              defaults.string(forKey: setAsideBuildKey) == build else { return false }
+        return now().timeIntervalSince1970 - at < Self.setAsideDuration
+    }
+
+    func begin() {
+        defaults.set(now().timeIntervalSince1970, forKey: loadingKey)
+    }
+
+    /// Too little memory left to load Parakeet: set aside for a day, so Hex picks another
+    /// engine (`SpeechEngineChoice`) instead of loading it.
+    func setAside() {
+        defaults.set(now().timeIntervalSince1970, forKey: setAsideAtKey)
+        defaults.set(build, forKey: setAsideBuildKey)
+    }
+
+    /// A load that returned, loaded or not; only a loaded one clears what came before.
+    func end(loaded: Bool) {
         defaults.removeObject(forKey: loadingKey)
-        defaults.removeObject(forKey: interruptedKey)
+        if loaded {
+            forget()
+        }
+    }
+
+    /// Forgets interrupted loads, for a person who asks to try again.
+    func forget() {
+        for key in [loadingKey, interruptionsKey, setAsideAtKey, setAsideBuildKey, legacyInterruptedKey] {
+            defaults.removeObject(forKey: key)
+        }
     }
 }
 

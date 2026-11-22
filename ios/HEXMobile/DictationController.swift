@@ -212,6 +212,11 @@ final class DictationController {
     var isInBackground = false
     /// A model download that failed while Hex was in the background, tried again on return.
     var preparationFailedInBackground = false
+    /// `watchPreparation`: when the preparation last said something new, whether it has said
+    /// anything yet, and how long each may last.
+    @ObservationIgnored var preparationChangedAt = ContinuousClock.now
+    @ObservationIgnored var preparationReported = false
+    @ObservationIgnored var preparationLimits = (firstReport: Duration.seconds(30), stall: Duration.seconds(120))
 
     init(
         audio: (any AudioManaging)? = nil,

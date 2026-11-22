@@ -100,6 +100,7 @@ nonisolated enum AppleSpeechAssets {
     static func install(
         _ language: SpeechLanguage,
         settings: LanguageSettings = LanguageSettings(),
+        setsAside: Bool = true,
         log: @escaping @Sendable (String) -> Void = { _ in },
         progress: @escaping @Sendable (Double) -> Void = { _ in }
     ) async throws -> SpeechLanguage {
@@ -108,6 +109,7 @@ nonisolated enum AppleSpeechAssets {
                 language,
                 steps: steps,
                 settings: settings,
+                setsAside: setsAside,
                 stallLimit: .seconds(60),
                 log: log,
                 progress: progress

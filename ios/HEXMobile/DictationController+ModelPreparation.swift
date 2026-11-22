@@ -57,6 +57,7 @@ extension DictationController {
             detail: String(localized: "Checking the speech model")
         )
         preparationFailedInBackground = false
+        watchPreparation(prepGen)
         // A few more seconds from iOS when Hex goes to the background mid-download or mid-compile.
         let backgroundTime = BackgroundTime("Prepare speech model")
 
@@ -76,6 +77,11 @@ extension DictationController {
                 try await candidate.prepare { [weak self] progress in
                     Task { @MainActor [weak self] in
                         guard let self, self.modelPrepGeneration == prepGen else { return }
+                        if progress.fractionCompleted != self.modelPreparation.fractionCompleted
+                            || progress.detail != self.modelPreparation.detail {
+                            self.preparationChangedAt = .now
+                            self.preparationReported = true
+                        }
                         self.modelPreparation = progress
                     }
                 }
@@ -120,6 +126,40 @@ extension DictationController {
                 self.publishKeyboardSnapshot()
                 // A downloaded Parakeet Ultra can still dictate.
                 self.syncMultilingualParakeet()
+            }
+        }
+    }
+
+    /// Ends a preparation that has said nothing new for too long, in plain words with Try
+    /// again (Set up), instead of a bar that never moves: `firstReport` (30 s) before it has
+    /// said anything (Apple's speech service or asset store not answering leaves "Checking
+    /// the speech model" up for good, TestFlight build 126), `stall` (120 s) after, longer
+    /// than the downloads' own stall limits. Time while iOS had Hex suspended doesn't count.
+    /// The work it ends can't always be cancelled (an XPC call that never returns); its
+    /// result is dropped, and Try again starts a new one.
+    func watchPreparation(_ prepGen: UInt64) {
+        preparationChangedAt = .now
+        preparationReported = false
+        Task { [weak self] in
+            let clock = ContinuousClock()
+            var polled = clock.now
+            while true {
+                try? await Task.sleep(for: .milliseconds(500))
+                guard let self, self.modelPrepGeneration == prepGen, self.phase == .preparingModel else { return }
+                let now = clock.now
+                if now - polled > .seconds(5) {
+                    self.preparationChangedAt = now
+                }
+                polled = now
+                let limit = self.preparationReported ? self.preparationLimits.stall : self.preparationLimits.firstReport
+                guard now - self.preparationChangedAt >= limit else { continue }
+                print("speech model preparation said nothing new for \(limit): ended")
+                self.modelPrepGeneration &+= 1
+                self.pendingHandoff = nil
+                self.keyboardBridge.setModelInstalled(ParakeetTranscriber.hasCachedModel)
+                self.phase = .failed(String(localized: "The speech model isn't ready. Try again."))
+                self.publishKeyboardSnapshot()
+                return
             }
         }
     }

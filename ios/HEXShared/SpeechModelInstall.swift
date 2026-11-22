@@ -65,14 +65,22 @@ nonisolated struct SpeechModelUnavailable: HexDescribedError, Equatable {
 nonisolated struct SpeechModelNeedsHex: HexDescribedError, Equatable {
     /// BCP 47, such as `en-US`.
     let language: String
+    /// False for a first failure: the keyboard keeps dictating itself and asks for another try.
+    var handedOff = true
 
     /// Short enough for the full keyboard's strip (about 60 characters).
     var errorDescription: String? {
-        String(localized: "Open Hex to download \(SpeechModelUnavailable.interfaceName(language)).")
+        guard handedOff else { return UserFacingError.Context.transcription.fallback }
+        return String(localized: "Open Hex to download \(SpeechModelUnavailable.interfaceName(language)).")
     }
 
-    /// Hands the keyboard's dictation to Hex for `language` and says so.
+    /// Hands the keyboard's dictation to Hex for `language` and says so, the second time in a
+    /// row the keyboard couldn't get its model (`LanguageSettings.noteKeyboardModelFailure`).
+    /// One failure is no evidence: the keyboard tries again itself next time.
     static func handOff(_ language: String, settings: LanguageSettings) -> SpeechModelNeedsHex {
+        guard settings.noteKeyboardModelFailure() else {
+            return SpeechModelNeedsHex(language: language, handedOff: false)
+        }
         settings.markKeyboardNeedsHex()
         return SpeechModelNeedsHex(language: language)
     }
@@ -119,10 +127,16 @@ nonisolated enum SpeechModelInstall {
 
     /// Installs `language`'s model, or the same language's on `DictationTranscriber`, and
     /// returns the language it installed. Throws `SpeechModelUnavailable` when neither does.
+    /// A failure sets a module or language aside only the second time in a row
+    /// (`LanguageSettings.noteSpeechModuleFailure`, `noteUnavailable`), and only where
+    /// `setsAside`: in-keyboard dictation passes false, as its failures are often the
+    /// keyboard's own (its reservation released or over Apple's limit, "Too many asset
+    /// locales allocated") and must not take a language away from Hex too.
     static func run(
         _ language: SpeechLanguage,
         steps: Steps,
         settings: LanguageSettings,
+        setsAside: Bool = true,
         stallLimit: Duration = Self.stallLimit,
         log: @Sendable (String) -> Void = { _ in },
         progress: @escaping @Sendable (Double) -> Void = { _ in }
@@ -136,6 +150,7 @@ nonisolated enum SpeechModelInstall {
         // A model in place ends the keyboard's handoff to Hex, whichever process installed it.
         func installed(_ attempt: SpeechLanguage) -> SpeechLanguage {
             settings.clearKeyboardNeedsHex()
+            settings.clearFailureStrikes(attempt.identifier, speechModule: attempt.module == .speech)
             return attempt
         }
         for attempt in attempts {
@@ -167,9 +182,10 @@ nonisolated enum SpeechModelInstall {
                 if error is StallWatch.Stalled { stalled = true }
                 log("speech \(attempt.identifier) \(attempt.module.rawValue): \(Self.describe(error))")
             }
-            if attempt.module == .speech, attempts.count > 1 {
-                // Try DictationTranscriber next, and go straight to it for a while.
-                settings.markSpeechModuleFailed(attempt.identifier)
+            if attempt.module == .speech, attempts.count > 1, setsAside {
+                // Try DictationTranscriber next, and go straight to it for a while once this
+                // has failed twice in a row.
+                settings.noteSpeechModuleFailure(attempt.identifier)
             }
         }
         if downloadable {
@@ -178,7 +194,9 @@ nonisolated enum SpeechModelInstall {
                 throw SpeechModelUnavailable(language: language.identifier, reason: .downloadFailed)
             }
         }
-        settings.markUnavailable(language.identifier)
+        if setsAside {
+            settings.noteUnavailable(language.identifier)
+        }
         throw SpeechModelUnavailable(language: language.identifier, reason: .notOnThisIPhone)
     }
 

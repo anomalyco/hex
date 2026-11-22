@@ -257,19 +257,33 @@ extension DictationController {
     /// The language Apple Speech dictates in, or nil for Parakeet V2, which knows only
     /// English: Apple Speech's pick, unless it is English that Parakeet takes
     /// (`AppleSpeechTranscriber.shouldUse`). With no pick (Speech not answering), English goes
-    /// to Parakeet and any other language (`wanted`: the one set, else the keyboard's
-    /// Automatic follows, else the iPhone's) stays on Apple Speech, which says it can't
-    /// dictate it rather than Parakeet hearing Spanish as English words.
+    /// to Parakeet only on an iPhone without `SpeechTranscriber`, and any other language
+    /// (`wanted`: the one set, else the keyboard's Automatic follows, else the iPhone's) stays
+    /// on Apple Speech, which says it can't dictate it rather than Parakeet hearing Spanish as
+    /// English words.
     @available(iOS 26.0, *)
     nonisolated static func appleSpeechLanguage(
         picked: SpeechLanguage?,
         wanted: String? = wantedLanguage(),
-        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory,
+        hasSpeechTranscriber: Bool = SpeechTranscriber.isAvailable,
+        appleSetAside: Bool? = nil
     ) -> SpeechLanguage? {
         if let picked {
-            return AppleSpeechTranscriber.shouldUse(picked, parakeetFits: parakeetFits) ? picked : nil
+            return AppleSpeechTranscriber.shouldUse(
+                picked,
+                parakeetFits: parakeetFits,
+                hasSpeechTranscriber: hasSpeechTranscriber,
+                appleSetAside: appleSetAside
+            ) ? picked : nil
         }
-        guard let wanted, !SpeechLanguagePicker.isEnglish(wanted) else { return nil }
+        guard let wanted else { return nil }
+        if SpeechLanguagePicker.isEnglish(wanted) {
+            let english = SpeechLanguage(locale: Locale(identifier: wanted), module: .speech)
+            let setAside = appleSetAside ?? LanguageSettings().isUnavailable(english.identifier)
+            guard hasSpeechTranscriber, !setAside else { return nil }
+            return english
+        }
         return SpeechLanguage(locale: Locale(identifier: wanted), module: .dictation)
     }
 

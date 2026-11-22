@@ -289,7 +289,15 @@ struct SetupSheet: View {
                     title: "Speech model",
                     status: modelStatus,
                     icon: modelReady ? .done : .todo
-                )
+                ) {
+                    // A check or download that ended is never the last word: try it again here.
+                    if modelFailed {
+                        smallButton("Try again") {
+                            keyboardSpeech.start(retry: true) { dictation.engineName }
+                            if case .failed = dictation.phase { dictation.prepareModel() }
+                        }
+                    }
+                }
             }
             .background(
                 HexTheme.bgBase,
@@ -360,6 +368,12 @@ struct SetupSheet: View {
         case .denied: String(localized: "Off")
         default: String(localized: "For dictation")
         }
+    }
+
+    private var modelFailed: Bool {
+        if case .failed = keyboardSpeech.state { return true }
+        if case .failed = dictation.phase { return !dictation.isModelReady }
+        return false
     }
 
     private var modelStatus: String {
