@@ -321,8 +321,20 @@ never at a launch by itself.
     whole lines above it. It takes every touch where the keys were, so nothing types while
     it shows; the recording bar's ✕ and ✓ work as before, and an iPhone with a Home button
     keeps its globe key where it was. VoiceOver reads it as one element, never announced as
-    words change. When the dictation goes in, the preview fades with the words it had while
-    the keys come back; the field gets the dictation's own text, with its style, clean-up,
+    words change. Its motion is one family, a spring with no bounce by its duration
+    (`LiveWordsMotion`, `LiveDictationPreviewHost.Motion`, and the recording bar's morph and
+    fades), and Core Animation runs every frame of it, so it keeps the display's pace however
+    busy the main thread is with the capture, the recogniser and the Dot Scope (a display link
+    drawing the words got a quarter of its frames on time on an iPhone 17 Pro): the keys fade
+    (0.2 s) as the words fade in rising 6 pt (0.3 s); whatever changes in the words (new words,
+    a settled tail turning to ink, a word the recogniser changed) cross-fades in place (0.3 s,
+    the cubic closest to the spring) while what didn't change stays exactly as it is; a new line
+    moves the block up (0.3 s) and the line leaving the top fades through a 14 pt band, then out
+    of it once the words are at rest. With Reduce Motion, the cross-fade only (0.2 s) and lines
+    jump. `LiveWordsView` draws the words once per update into one layer (TextKit 1) and drops
+    the lines above the box, whole, at rest. When the dictation goes in, the preview's words
+    fade drifting 6 pt up (0.15 s) as the keys come back (0.3 s), and they stop taking touches
+    at once; the field gets the dictation's own text, with its style, clean-up,
     punctuation, held results and Undo dictation as before, so it can differ from the
     preview: with the speech model in keyboard (Parakeet, English's default) the preview's
     words are Apple's and the text Parakeet's ("10" can go in as "ten"). **Type as I speak**

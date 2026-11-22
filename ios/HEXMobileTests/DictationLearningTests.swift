@@ -531,16 +531,20 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertTrue(LiveTranscript(settled: " ", tentative: "").isEmpty)
     }
 
-    func testTheLongestDictationShowsOnlyItsEndFromAWordsStart() {
-        let short = LiveTranscript(settled: "Hey, I am late.", tentative: "Can you")
-        XCTAssertTrue(LiveDictationPreviewView.tail(of: short, characters: 200) == ("Hey, I am late.", " Can you"))
-        let long = LiveTranscript(settled: "one two three four five six", tentative: "seven eight")
-        let end = LiveDictationPreviewView.tail(of: long, characters: 20)
-        XCTAssertEqual(end.settled, "five six", "no word shows cut")
-        XCTAssertEqual(end.tentative, " seven eight")
-        let tentativeOnly = LiveDictationPreviewView.tail(of: LiveTranscript(settled: "", tentative: "alpha beta gamma delta"), characters: 12)
-        XCTAssertEqual(tentativeOnly.settled, "")
-        XCTAssertEqual(tentativeOnly.tentative, "gamma delta")
+    func testLongWordsScrollByWholeLinesAndDropLinesWellOutOfView() {
+        let words = LiveWordsView()
+        let line = words.lineHeight
+        words.frame = CGRect(x: 0, y: 0, width: 320, height: LiveWordsView.edge + 4 * line)
+        words.layoutIfNeeded()
+        let sentence = "We need to finish the design review before Friday and send it to the whole team. "
+        words.show(text: String(repeating: sentence, count: 8), settled: 0)
+        XCTAssertGreaterThan(words.scrollOffset, 0, "the newest line is in view")
+        XCTAssertEqual(words.scrollOffset.truncatingRemainder(dividingBy: line), 0, accuracy: 0.01, "whole lines at the top")
+        let landed = expectation(description: "lines well above the box dropped")
+        DispatchQueue.main.asyncAfter(deadline: .now() + LiveWordsMotion.change + 0.4) { landed.fulfill() }
+        wait(for: [landed], timeout: 2)
+        XCTAssertEqual(words.scrollOffset, 0, accuracy: 0.01, "at rest no line waits above the box")
+        XCTAssertEqual(words.drawnHeight, 4 * line, accuracy: 0.5, "a long dictation draws only the box's lines, the last at its foot")
     }
 
     func testTheSwitchesDefaultToShowingButNotTyping() throws {
