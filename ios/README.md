@@ -768,8 +768,8 @@ never at a launch by itself.
     counts under `scripts/.build-german-capitals`, keeps their merged per-token counts there
     so a rule change renders without streaming again, and applies the caps after counting.
     Off, Deutsch keeps the dictionary engine exactly as before: no decoder, no word list for
-    the letter odds or model completions, and no model for a bilingual partner. Swipe typing
-    reads German only while its model is on, Swipe typing in more languages included.
+    the letter odds or model completions, and no model for a bilingual partner. Off, swipe
+    typing never reads German, even with Swipe typing in more languages on.
   - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
     (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
     letter key, on this device, and Spatial autocorrect's decoder and the strip read your
@@ -889,6 +889,16 @@ never at a launch by itself.
     2026-11-20-hex-swipe-typing, results/2026-11-21). Record typing logs keeps a swipe's
     touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
     real fingers.
+    Known gaps in these languages:
+    - A word with ß (German) or œ/æ (French) has no key, so a swipe drops it from its
+      candidates ("groß", "Straße", "cœur").
+    - A swiped German noun goes in lowercase: the noun capitalisation applies to tapped
+      words only.
+    - French and Polish have no language-specific never-suggest rows (only the shared
+      ones), so a swipe's top reading isn't filtered for language-specific offensive
+      words there.
+    - The decoder's parameters are tuned on English and Spanish, so French, Polish and
+      German accuracy is unmeasured.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. A one-time migration (`migrations.typingLogsOff.v1` in the
     App Group, `TypingLogSettings.turnOffOnce`, run by the app and the keyboard at launch)

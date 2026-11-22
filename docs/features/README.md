@@ -2996,6 +2996,16 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   German while Spatial autocorrect and German spatial autocorrect are on. A language with
 │   no typing model keeps a drag as a slide to another key. Off, only English and Spanish
 │   swipe, exactly as before.
+│   Gaps:
+│   - A word with ß (German) or œ/æ (French) has no key, so a swipe drops it from its
+│     candidates ("groß", "Straße", "cœur").
+│   - A swiped German noun goes in lowercase: the noun capitalisation applies to tapped
+│     words only.
+│   - French and Polish have no language-specific never-suggest rows (only the shared
+│     ones), so a swipe's top reading isn't filtered for language-specific offensive words
+│     there.
+│   - The decoder's parameters are tuned on English and Spanish, so French, Polish and
+│     German accuracy is unmeasured.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Delete swiped words letter by letter (off by default, `experiments.swipeDeleteLetterByLetter`):
 │   right after a swipe, delete acts as anywhere else and takes one character, instead of the

@@ -3583,12 +3583,32 @@
         }
       }
     },
-    "French, Polish and German too" : {
+    "English, Spanish, French and Polish" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "也包括法语、波兰语和德语"
+            "value" : "英语、西班牙语、法语和波兰语"
+          }
+        }
+      }
+    },
+    "English, Spanish, French, Polish and German" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "英语、西班牙语、法语、波兰语和德语"
+          }
+        }
+      }
+    },
+    "French and Polish, and German with German spatial autocorrect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "法语和波兰语；德语需开启“德语按触点自动改正”"
           }
         }
       }

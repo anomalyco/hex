@@ -306,6 +306,7 @@ struct KeyboardSettingsPage: View {
     @State private var numberRow = FullKeyboardSettings().numberRow
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
+    @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
     @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var haptics = FullKeyboardSettings().haptics
@@ -323,10 +324,15 @@ struct KeyboardSettingsPage: View {
         fullAccessOn ? nil : String(localized: "Needs Full Access")
     }
 
-    /// Swipe typing's detail: the layouts that swipe, which Settings › Experiments › Swipe
-    /// typing in more languages widens.
+    /// Swipe typing's detail: the layouts that swipe. Settings › Experiments › Swipe typing in
+    /// more languages adds French and Polish, and German while its model is on (German spatial
+    /// autocorrect and Spatial autocorrect).
     private var swipeLanguages: String {
-        swipeMoreLanguages ? String(localized: "French, Polish and German too") : String(localized: "English and Spanish only")
+        guard swipeMoreLanguages else { return String(localized: "English and Spanish only") }
+        guard spatialAutocorrect, germanSpatialAutocorrect else {
+            return String(localized: "English, Spanish, French and Polish")
+        }
+        return String(localized: "English, Spanish, French, Polish and German")
     }
 
     var body: some View {
@@ -548,6 +554,7 @@ struct KeyboardSettingsPage: View {
             numberRow = FullKeyboardSettings().numberRow
             autocorrect = FullKeyboardSettings().autocorrect
             spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
+            germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
             suggestSwearWords = FullKeyboardSettings().suggestSwearWords
             keyPopups = FullKeyboardSettings().keyPopups
             haptics = FullKeyboardSettings().haptics
@@ -869,7 +876,7 @@ struct ExperimentsSettingsPage: View {
         // a slide to another key.
         SettingsToggleRow(
             title: String(localized: "Swipe typing in more languages"),
-            detail: String(localized: "French, Polish and German too"),
+            detail: String(localized: "French and Polish, and German with German spatial autocorrect"),
             isOn: $swipeMoreLanguages
         )
 
