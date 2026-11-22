@@ -228,10 +228,14 @@ fn colon_list(line: &str, english: bool) -> Option<(String, Vec<String>)> {
                 tail = tail[joiner.len()..].to_owned();
             }
         }
-        match tail.find(" and ").or_else(|| tail.find(" or ")) {
-            Some(split) => {
-                items.push(tail[..split].trim().to_owned());
-                items.push(tail[split + 5..].trim().to_owned());
+        let split = tail
+            .find(" and ")
+            .map(|at| (at, " and ".len()))
+            .or_else(|| tail.find(" or ").map(|at| (at, " or ".len())));
+        match split {
+            Some((at, separator)) => {
+                items.push(tail[..at].trim().to_owned());
+                items.push(tail[at + separator..].trim().to_owned());
             }
             None => items.push(tail),
         }

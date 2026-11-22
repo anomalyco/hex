@@ -2077,7 +2077,8 @@ mod tests {
     #[test]
     fn the_dictation_style_writes_a_dictation_and_leaves_typed_text_and_the_api_alone() {
         use crate::app_settings::DictationStyle;
-        let profiles = Profiles::new(Profile::new("Global", ""));
+        let profiles =
+            Profiles::new(Profile::new("Global", "").transformations(vec!["lowercase".into()]));
         let context = context("Zed", None);
         let cancelled = AtomicBool::new(false);
         let casual = DictationLabs {
@@ -2095,6 +2096,16 @@ mod tests {
             casual,
         );
         assert_eq!(dictated.text, "i'll call Ravi");
+        // The transformation runs after the style, so its lowercase output
+        // proves the style wrote "i'll call Ravi" first.
+        let mut dictated = dictated;
+        dictated.apply_transformations(
+            &crate::personal_commands::TransformationClient::default(),
+            &context,
+            &cancelled,
+            Source::Dictation,
+        );
+        assert_eq!(dictated.text, "i'll call ravi");
         let typed = profiles.process_cancellable_inner(
             "Um, I'll call Ravi.",
             "en",
@@ -2117,8 +2128,7 @@ mod tests {
             casual,
         );
         assert_eq!(api.text, "Um, I'll call Ravi.");
-        // The transformations still come after the style.
-        assert!(dictated.transformations.is_empty());
+        assert_eq!(dictated.transformations, ["lowercase"]);
     }
 
     /// Labs › Transform typed text runs the same profile but never the

@@ -208,7 +208,9 @@ pub(super) fn recasing_pronoun_i(text: &str, from: char, to: char) -> String {
             } else if suffix.starts_with("ll") || suffix.starts_with("ve") {
                 2
             } else {
-                0
+                // A bare apostrophe is in Swift's forbidden lookahead set, so
+                // "i'" is no pronoun to recase.
+                continue;
             };
             after += 1 + length;
         }

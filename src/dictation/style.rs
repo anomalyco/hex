@@ -126,8 +126,9 @@ fn filler_at(language: FillerLanguage, chars: &[char], start: usize) -> Option<u
             }
             // ø+h+m*, ö+h+m*
             'ø' | 'ö' => {
-                let after_h = run(chars, start + 1, 'h');
-                (after_h > start + 1).then(|| run(chars, after_h, 'm'))
+                let after_vowel = run(chars, start, first);
+                let after_h = run(chars, after_vowel, 'h');
+                (after_h > after_vowel).then(|| run(chars, after_h, 'm'))
             }
             // hm+
             'h' => {
@@ -137,17 +138,16 @@ fn filler_at(language: FillerLanguage, chars: &[char], start: usize) -> Option<u
             _ => None,
         },
         Spanish => match first {
-            // e+h+m*
-            'e' if second == Some('h') => {
-                let after_e = run(chars, start, 'e');
-                let after_h = run(chars, after_e, 'h');
-                (after_h > after_e).then(|| run(chars, after_h, 'm'))
-            }
-            // e+m+
+            // e+h+m*, then e+m+
             'e' => {
                 let after_e = run(chars, start, 'e');
-                let after_m = run(chars, after_e, 'm');
-                (after_m > after_e).then_some(after_m)
+                let after_h = run(chars, after_e, 'h');
+                if after_h > after_e {
+                    Some(run(chars, after_h, 'm'))
+                } else {
+                    let after_m = run(chars, after_e, 'm');
+                    (after_m > after_e).then_some(after_m)
+                }
             }
             // m{2,}
             'm' => {
@@ -164,8 +164,9 @@ fn filler_at(language: FillerLanguage, chars: &[char], start: usize) -> Option<u
         German => match first {
             // ä+h+m*, ö+h+m*
             'ä' | 'ö' => {
-                let after_h = run(chars, start + 1, 'h');
-                (after_h > start + 1).then(|| run(chars, after_h, 'm'))
+                let after_vowel = run(chars, start, first);
+                let after_h = run(chars, after_vowel, 'h');
+                (after_h > after_vowel).then(|| run(chars, after_h, 'm'))
             }
             // hm+
             'h' => {

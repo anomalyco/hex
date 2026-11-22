@@ -180,6 +180,40 @@ fn filler_trimming_follows_the_dictation_language() {
     assert!(!is_english("de"));
 }
 
+/// The filler patterns count every leading vowel, so a repeated one still
+/// matches the iOS alternation.
+#[test]
+fn repeated_filler_vowels_are_trimmed() {
+    assert_eq!(
+        format("Eeh, hola.", DictationStyle::Polished, "es-ES"),
+        "Hola."
+    );
+    assert_eq!(
+        format("Eem, hola.", DictationStyle::Polished, "es-ES"),
+        "Hola."
+    );
+    assert_eq!(
+        format("Ääh, das ist gut.", DictationStyle::Polished, "de-DE"),
+        "Das ist gut."
+    );
+    assert_eq!(
+        format("Øøh, det er bra.", DictationStyle::Polished, "nb-NO"),
+        "Det er bra."
+    );
+}
+
+/// A bare apostrophe after "i" keeps Swift's forbidden lookahead, so it is
+/// neither Polished's pronoun "I" nor Casual's "i".
+#[test]
+fn a_bare_apostrophe_after_i_blocks_recasing() {
+    assert_eq!(format("say i'", DictationStyle::Polished, "en"), "Say i'.");
+    assert_eq!(format("say I'", DictationStyle::Casual, "en"), "say I'");
+    assert_eq!(
+        format("i'm ready", DictationStyle::Polished, "en"),
+        "I'm ready."
+    );
+}
+
 /// Polished writes full sentences: "I", a capital and an ending for each
 /// paragraph, in Chinese with "。" (never a second mark after one).
 #[test]
@@ -339,6 +373,24 @@ fn notes_list_several_items_concisely() {
     assert_eq!(
         format("买牛奶。给妈妈打电话。", DictationStyle::Notes, "zh-CN"),
         "- 买牛奶\n- 给妈妈打电话"
+    );
+}
+
+/// A colon list splits the last "and" and "or" by the separator's own
+/// length, so "or" never eats a byte of the next item.
+#[test]
+fn notes_splits_a_colon_list_on_or_without_losing_bytes() {
+    assert_eq!(
+        format(
+            "Shopping list: eggs, milk or bread.",
+            DictationStyle::Notes,
+            "en"
+        ),
+        "Shopping list:\n- Eggs\n- Milk\n- Bread"
+    );
+    assert_eq!(
+        format("List: a, b, x or é", DictationStyle::Notes, "en"),
+        "List:\n- A\n- B\n- X\n- É"
     );
 }
 

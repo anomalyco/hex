@@ -232,7 +232,7 @@ impl Feature {
                 "Each normal dictation pastes with your signature on its own line at the end, and Paste Last and History keep the same text; not added to raw, printed, or API output"
             }
             Self::DictationStyle => {
-                "Format every dictation as Polished, Casual, Notes, or Verbatim, like the iPhone app, without an AI model"
+                "Write each dictation as Polished, Casual, Notes, or Verbatim after the corrections and rewrite and before transformations; Dictate without processing, Voice Action, meetings, and the local API are left alone"
             }
         }
     }
