@@ -18,12 +18,14 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import androidx.core.view.children
 import androidx.emoji2.emojipicker.EmojiPickerView
 import ly.anoma.hex.R
 import ly.anoma.hex.typing.KeyGrid
@@ -466,9 +468,9 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
 
     /** The emoji panel opens in place of the letter rows and the strip above them ([extra]), and grows as
      * Gboard's does (124 dp above the keys), as long as the keyboard stays within 60% of the screen (two
-     * thirds turned). A new
-     * picker each time: it reads its recents and skin tones as it starts (its own preferences, on this
-     * device), and only refreshes them later once its Recently used row scrolls away. */
+     * thirds turned). One picker for the keys' life, hidden while closed: a new one per opening was never
+     * collected (its emoji are drawn into bitmaps, about 5 MB a panel). Each opening hands it the recents
+     * again, which redraws its Recently used row, and starts it at the top, as a new picker did. */
     fun openEmoji(extra: Int) {
         cancelGestures()
         val keyboard = height + extra // the keys' and the strip's height as they are
@@ -476,22 +478,25 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val share = if (landscape) 0.67f else 0.6f
         val grow = minOf(px(KeyboardMetrics.EMOJI_GROW), (resources.displayMetrics.heightPixels * share).toInt() - keyboard).coerceAtLeast(0)
         val height = 3 * rowHeight + reach + extra + grow
-        picker?.let(::removeView)
-        val p = EmojiPickerView(ContextThemeWrapper(context, R.style.HexEmoji))
-        p.setOnEmojiPickedListener { item ->
-            // Gboard's tap as an emoji is chosen; the picker's own view plays the click.
-            if (vibrates(context, ime.feedback.haptics)) p.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
-            ime.engine.type(item.emoji)
+        val p = picker?.also { it.setRecentEmojiProvider(recents); it.post { it.toTop() } } ?: EmojiPickerView(ContextThemeWrapper(context, R.style.HexEmoji)).also { p ->
+            p.setRecentEmojiProvider(recents)
+            p.setOnEmojiPickedListener { item ->
+                // Gboard's tap as an emoji is chosen; the picker's own view plays the click.
+                if (vibrates(context, ime.feedback.haptics)) p.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP)
+                ime.engine.type(item.emoji)
+            }
+            picker = p; addView(p, 0, LayoutParams(LayoutParams.MATCH_PARENT, height))
         }
-        picker = p; addView(p, 0, LayoutParams(LayoutParams.MATCH_PARENT, height))
-        // Square cells about Gboard's size: nine across in portrait, more when turned. The picker sizes its rows
-        // from what its grid has left after two category titles.
-        val cell = if (landscape) KeyboardMetrics.EMOJI_CELL_LANDSCAPE else KeyboardMetrics.EMOJI_CELL
-        val columns = maxOf(9, (resources.displayMetrics.widthPixels / (cell * density)).toInt())
-        p.emojiGridColumns = columns
-        p.emojiGridRows = ((height - (KeyboardMetrics.EMOJI_HEADER + 2 * KeyboardMetrics.EMOJI_TITLE) * density) /
-            (resources.displayMetrics.widthPixels.toFloat() / columns)).coerceAtLeast(1f)
-        p.layoutParams.height = height
+        if (pickerSized != height) {
+            // Square cells about Gboard's size: nine across in portrait, more when turned. The picker sizes its rows
+            // from what its grid has left after two category titles.
+            val cell = if (landscape) KeyboardMetrics.EMOJI_CELL_LANDSCAPE else KeyboardMetrics.EMOJI_CELL
+            val columns = maxOf(9, (resources.displayMetrics.widthPixels / (cell * density)).toInt())
+            p.emojiGridColumns = columns
+            p.emojiGridRows = ((height - (KeyboardMetrics.EMOJI_HEADER + 2 * KeyboardMetrics.EMOJI_TITLE) * density) /
+                (resources.displayMetrics.widthPixels.toFloat() / columns)).coerceAtLeast(1f)
+            p.layoutParams.height = height; p.requestLayout(); pickerSized = height
+        }
         rows.visibility = GONE; bottom.visibility = GONE
         p.visibility = VISIBLE; emojiBottom.visibility = VISIBLE
         emojiOpen = true
@@ -499,9 +504,19 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     fun closeEmoji() {
         if (!emojiOpen) return
         cancelGestures()
-        picker?.let(::removeView); picker = null; emojiBottom.visibility = GONE
+        picker?.visibility = GONE; emojiBottom.visibility = GONE
         rows.visibility = VISIBLE; bottom.visibility = VISIBLE
         emojiOpen = false
+    }
+    private val recents by lazy { RecentEmoji(context) }
+    private var pickerSized = 0
+    /** The picker back at Recently used: its tab for them (the icon's clickable item), tapped. */
+    private fun EmojiPickerView.toTop() {
+        val name = context.getString(R.string.emoji_category_recent)
+        fun tab(v: View): View? = if (v.contentDescription == name) v else (v as? ViewGroup)?.children?.firstNotNullOfOrNull(::tab)
+        var item = tab(this)
+        while (item != null && !item.isClickable) item = item.parent as? View
+        item?.performClick()
     }
 
     /** Touches for a key that types as it lifts: pressed, its pop-up, after [KeyboardMetrics.HOLD_MS] its held

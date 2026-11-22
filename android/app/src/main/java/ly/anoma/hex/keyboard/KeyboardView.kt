@@ -78,10 +78,13 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         menu.accents(accents) { accent -> closeMenu(); ime.engine.type(accent) }
     }
     fun backInMenu() { if (menu.visibility == VISIBLE) menu.back() }
-    fun closeMenu() {
+    /** [configure] false: the caller sets typing up next (a new field), so the keys are drawn once. */
+    fun closeMenu(configure: Boolean = true) {
         if (menu.visibility != VISIBLE) return
         menu.visibility = GONE; keys.visibility = VISIBLE
-        strip.choosing = false; strip.menuClosed(); keys.refreshSpace(); ime.engine.configureTyping(keepWord = true); strip.update()
+        strip.choosing = false; strip.menuClosed(); keys.refreshSpace()
+        if (configure) ime.engine.configureTyping(keepWord = true)
+        strip.update()
         // TalkBack's focus goes back to the key that was held, as on Gboard, not to the first suggestion.
         // By place: typing on a symbol page draws its keys again.
         val at = heldAt ?: return
