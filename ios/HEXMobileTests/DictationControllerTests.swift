@@ -90,9 +90,15 @@ private final class FakeAudioManager: AudioManaging {
 private actor SilentTranscriber: LocalTranscribing {
     nonisolated let displayName = "Apple Speech"
     let languageName = "English"
+    private(set) var preparationCancelled = false
 
     func prepare(progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void) async throws {
-        try await Task.sleep(for: .seconds(3_600))
+        do {
+            try await Task.sleep(for: .seconds(3_600))
+        } catch {
+            preparationCancelled = true
+            throw error
+        }
     }
 
     func transcribe(_ audioURL: URL) async throws -> String { "" }
@@ -1511,6 +1517,14 @@ final class DictationControllerTests: XCTestCase {
         }
         XCTAssertEqual(controller.phase, .failed("The speech model isn't ready. Try again."), "never a spinner for good")
 
+        // The preparation Hex gave up on is cancelled, so it can't publish after the failure.
+        var cancelled = false
+        for _ in 0..<100 where !cancelled {
+            cancelled = await stuck.preparationCancelled
+            if !cancelled { try await Task.sleep(for: .milliseconds(10)) }
+        }
+        XCTAssertTrue(cancelled)
+
         // Try again (Set up) starts a new preparation, which gets ready.
         controller.performPrimaryAction()
         try await settle()
@@ -1921,6 +1935,40 @@ final class DictationControllerTests: XCTestCase {
         download.start()
         try await waitUntil(seconds: 10) { download.state == .loading || download.isFailed }
         XCTAssertEqual(download.state, .loading, "each drop came after more bytes, so it kept going")
+        XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files))
+    }
+
+    func testTheMultilingualDownloadRestartsOnlyAfterALongBackgroundTrip() async throws {
+        let model = try UltraStubModel()
+        defer { model.remove() }
+        UltraStubProtocol.script([.hang(1200), .serve])
+        var now = Date(timeIntervalSinceReferenceDate: 0)
+        let download = model.download(stallLimit: .seconds(30), now: { now })
+        download.start()
+        try await waitUntil(seconds: 5) { download.state == .downloading(1200) }
+
+        // Inactive to active (Control Center, Face ID, an alert) suspends nothing.
+        download.appBecameActive()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(UltraStubProtocol.requested.count, 1, "nothing was suspended, so nothing restarts")
+
+        // A trip too short for iOS to have dropped the connection is left alone too.
+        download.appMovedToBackground()
+        now = now.addingTimeInterval(10)
+        download.appBecameActive()
+        try await Task.sleep(for: .milliseconds(150))
+        XCTAssertEqual(UltraStubProtocol.requested.count, 1, "a short trip suspends nothing long enough")
+
+        // One long enough for iOS to cut it starts over from the bytes on disk.
+        download.appMovedToBackground()
+        now = now.addingTimeInterval(30)
+        download.appBecameActive()
+        try await waitUntil(seconds: 5) { download.state == .loading }
+        XCTAssertEqual(
+            Array(UltraStubProtocol.requested.prefix(2)),
+            [nil, "bytes=1200-"],
+            "the suspended transfer resumed from its partial file"
+        )
         XCTAssertTrue(ParakeetUltraModel.isDownloaded(in: model.folder, files: model.files))
     }
 
@@ -2578,7 +2626,10 @@ private struct UltraStubModel {
         UltraStubProtocol.reset(bodies: bodies)
     }
 
-    func download(stallLimit: Duration = .seconds(1)) -> ParakeetUltraDownload {
+    func download(
+        stallLimit: Duration = .seconds(1),
+        now: @escaping () -> Date = { Date() }
+    ) -> ParakeetUltraDownload {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [UltraStubProtocol.self]
         return ParakeetUltraDownload(
@@ -2587,7 +2638,8 @@ private struct UltraStubModel {
             base: "https://stub.invalid/model",
             session: URLSession(configuration: configuration),
             stallLimit: stallLimit,
-            backoff: { _ in 0 }
+            backoff: { _ in 0 },
+            now: now
         )
     }
 
@@ -3024,12 +3076,19 @@ final class SpeechModelInstallTests: XCTestCase {
         var downloads: [SpeechModuleKind: Download] = [:]
         var dictationHas = true
         var online = true
+        /// A status call that never answers, as after the speech daemon stops responding.
+        var hangsStatus = false
         var downloaded: [SpeechModuleKind] = []
 
         var steps: SpeechModelInstall.Steps {
             SpeechModelInstall.Steps(
                 dictationEquivalent: { [self] locale in dictationHas ? locale : nil },
-                status: { [self] language in lock.withLock { status[language.module] ?? .unsupported } },
+                status: { [self] language in
+                    if lock.withLock({ hangsStatus }) {
+                        try? await Task.sleep(for: .seconds(60))
+                    }
+                    return lock.withLock { status[language.module] ?? .unsupported }
+                },
                 download: { [self] language, progress in
                     let outcome = lock.withLock {
                         downloaded.append(language.module)
@@ -3065,6 +3124,18 @@ final class SpeechModelInstallTests: XCTestCase {
         let installed = try await run(assets)
         XCTAssertEqual(installed, russian)
         XCTAssertTrue(assets.downloaded.isEmpty)
+    }
+
+    func testAStatusThatNeverAnswersFailsInsteadOfInstalling() async throws {
+        let assets = FakeAssets()
+        assets.hangsStatus = true
+        do {
+            _ = try await run(assets)
+            XCTFail("a status that never answers must not install")
+        } catch {
+            XCTAssertTrue(error is SpeechModelUnresponsive, "\(error)")
+        }
+        XCTAssertTrue(assets.downloaded.isEmpty, "nothing is downloaded behind a hung status call")
     }
 
     func testASpeechTranscriberAssetThatNeverArrivesFallsBackToDictationTranscriber() async throws {

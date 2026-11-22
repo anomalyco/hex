@@ -836,7 +836,11 @@ never at a launch by itself.
   ("Checking the speech model": Speech or its asset store not answering), or nothing
   new for 120 s after, ends with "The speech model isn't ready. Try again."
   (`watchPreparation`), as does the keyboard model's check behind setup's last step,
-  whose row then offers **Try again**. **When a model won't install**
+  whose row then offers **Try again**. Apple's reservation and asset status are watched
+  at 60 s the same way (`SpeechModelDeadline`), a reservation or release that never
+  answers is forgotten so the next attempt asks again, and a keyboard check that hangs
+  counts no strike toward Hex's handoff (`SpeechModelNeedsHex.keyboardError`).
+  **When a model won't install**
   (`SpeechModelInstall`, shared by the app and in-keyboard dictation): Apple lists
   some languages whose `SpeechTranscriber` asset never arrives ("transcription.ru
   asset not found after attempted download"), so Hex then installs the same
@@ -860,7 +864,9 @@ never at a launch by itself.
   installs (in either process; Hex checks again each time it comes to the front), a
   language is chosen, or a day passes (`SpeechModelNeedsHex`,
   `settings.dictationLanguage.keyboardNeedsHex`); a move to another language keeps its
-  own sentence. Reservations make room
+  own sentence. Coming back to Hex after it was in the background starts over a check
+  that failed or never answered, and a check that gives up bumps its generation so a
+  late answer can't reopen the row (`KeyboardSpeechPreparation`). Reservations make room
   under `AssetInventory.maximumReservedLocales` by releasing others first. Only
   Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
   and other packages' descriptions go to logs, however readable.

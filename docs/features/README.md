@@ -2895,6 +2895,16 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 ├── Modes app icons: the executable's first icon (PrivateExtractIconsW)
 └── Not yet: custom caption
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
+├── Speech model preparation: launch dictates with Apple Speech on iOS 26 (an OS
+│   asset, no app download) or Parakeet V2; a preparation that says nothing for 30 s, or
+│   nothing new for 120 s, ends as "The speech model isn't ready. Try again." (time iOS
+│   has Hex suspended doesn't count), so "Checking the speech model" cannot stay at 0%
+│   forever. Apple's reservation and asset status are watched at 60 s the same way, a
+│   reservation or release that never answers is forgotten, and a keyboard check that
+│   hangs counts no strike toward Hex's handoff. The keyboard's own check has its own 30 s
+│   limit, retries after a real background trip, and a late answer can't reopen it. Unit
+│   tests only (`DictationControllerTests`, `SpeechModelInstallTests`,
+│   `AppleSpeechAssetReservationsTests`); no physical iPhone run checks either deadline.
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
 │   Korean keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, ABC under the

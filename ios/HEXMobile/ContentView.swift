@@ -46,6 +46,8 @@ struct ContentView: View {
     @State private var onboardingPage = OnboardingProgress.launchPage
     @State private var settingsPath = SettingsSnapshotFixture.initialPath
     @State private var showAcknowledgements = false
+    /// Whether Hex went to the background, so only a real return starts the keyboard's check over.
+    @State private var keyboardCheckWasInBackground = false
 
     private static let stageWellHeight: CGFloat = 48
     private static let stageControlHeight: CGFloat = 36
@@ -86,8 +88,22 @@ struct ContentView: View {
         }
         .task { keyboardSpeech.start { dictation.engineName } }
         .onChange(of: scenePhase) { _, phase in
-            // Opened from a keyboard handing its dictations to Hex: check again whether it must.
-            if phase == .active { keyboardSpeech.recheckKeyboardHandoff { dictation.engineName } }
+            switch phase {
+            case .background:
+                keyboardCheckWasInBackground = true
+            case .active:
+                // Only after a real background trip: an alert, Face ID or Control Center goes
+                // inactive and back without suspending anything, and launch starts active. The
+                // app's own preparation resumes in HEXMobileApp, which tracks it the same way.
+                if keyboardCheckWasInBackground {
+                    keyboardCheckWasInBackground = false
+                    keyboardSpeech.resumeOnForeground { dictation.engineName }
+                }
+                // Opened from a keyboard handing its dictations to Hex: check again whether it must.
+                keyboardSpeech.recheckKeyboardHandoff { dictation.engineName }
+            default:
+                break
+            }
         }
         .animation(HexMotion.reducedFade, value: openedFromKeyboard)
         .animation(HexMotion.reducedFade, value: onboardingPage == nil)

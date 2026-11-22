@@ -45,6 +45,8 @@ final class ParakeetUltraDownload {
     @ObservationIgnored private let session: URLSession
     @ObservationIgnored private let stallLimit: Duration
     @ObservationIgnored private let backoff: (Int) -> Int
+    /// Now, so a background trip's length is testable.
+    @ObservationIgnored private let now: () -> Date
 
     init(
         directory: URL = ParakeetUltraModel.directory,
@@ -52,7 +54,8 @@ final class ParakeetUltraDownload {
         base: String = ParakeetUltraModel.baseURL,
         session: URLSession = ParakeetUltraDownload.makeSession(),
         stallLimit: Duration = ParakeetUltraDownload.stallLimit,
-        backoff: @escaping (Int) -> Int = ParakeetUltraDownload.backoff
+        backoff: @escaping (Int) -> Int = ParakeetUltraDownload.backoff,
+        now: @escaping () -> Date = { Date() }
     ) {
         self.directory = directory
         self.files = files
@@ -60,6 +63,7 @@ final class ParakeetUltraDownload {
         self.session = session
         self.stallLimit = stallLimit
         self.backoff = backoff
+        self.now = now
     }
 
     /// A connection that sends nothing for 30 s ends, rather than after the default minute.
@@ -85,12 +89,24 @@ final class ParakeetUltraDownload {
         run()
     }
 
-    /// Starts over from what's on disk, with all the automatic tries again.
+    /// Starts over from what's on disk, with all the automatic tries again. The transfer it
+    /// replaces is cancelled and awaited first, as `stop` does, so a late write can't land in
+    /// the `.partial` file the new one resumes from.
     func restart() {
-        task?.cancel()
+        let running = task
         task = nil
         tries = 0
-        run()
+        guard let running else {
+            run()
+            return
+        }
+        running.cancel()
+        task = Task { [weak self] in
+            await running.value
+            guard let self, !Task.isCancelled else { return }
+            self.task = nil
+            self.run()
+        }
     }
 
     /// Stops it and waits until nothing writes to the folder any more, so it can be deleted.
@@ -127,7 +143,7 @@ final class ParakeetUltraDownload {
     }
 
     func appMovedToBackground() {
-        backgroundedAt = Date()
+        backgroundedAt = now()
         // A few more seconds from iOS, so a quick look at another app doesn't stop it.
         if task != nil, backgroundTime == nil {
             backgroundTime = BackgroundTime("Download the multilingual model")
@@ -137,7 +153,7 @@ final class ParakeetUltraDownload {
     /// Back in front: a download that stopped tries again at once, and one suspended long
     /// enough for iOS to drop its connection starts a fresh one from where it is.
     func appBecameActive() {
-        let away = backgroundedAt.map { Date().timeIntervalSince($0) } ?? 0
+        let away = backgroundedAt.map { now().timeIntervalSince($0) } ?? 0
         backgroundedAt = nil
         endBackgroundTime()
         switch state {
