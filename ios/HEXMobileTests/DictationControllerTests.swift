@@ -1783,9 +1783,13 @@ final class DictationControllerTests: XCTestCase {
 
     func testTheKeyboardLoadsParakeetOnlyWithTheRoomMeasuredOnAnIPhone() {
         let mb = KeyboardParakeetBudget.megabyte
-        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit, 96 * mb, "V2 and Ultra alike")
+        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit, 131 * mb, "V2 and Ultra alike")
         // An iPhone 17 Pro's keyboard: a 177 MB limit, 33 MB used before Hex's keyboard records.
         XCTAssertTrue(KeyboardParakeetBudget.allowsLoad(footprint: 33 * mb, available: 144 * mb))
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsLoad(footprint: 20 * mb, available: 80 * mb),
+            "a 100 MB limit: with the model loaded the keyboard records at up to 91 MB"
+        )
         XCTAssertFalse(
             KeyboardParakeetBudget.allowsLoad(footprint: 33 * mb, available: 44 * mb),
             "a 77 MB limit keeps Apple's speech recognition"
@@ -1824,6 +1828,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(hold(otherEngine: true), .otherEngine)
         XCTAssertEqual(hold(limit: nil), .keyboardNotMeasured, "nothing before the keyboard has opened")
         XCTAssertEqual(hold(limit: 80 * mb), .keyboardTooSmall)
+        XCTAssertEqual(hold(limit: 100 * mb), .keyboardTooSmall, "barely above what the keyboard records at")
         XCTAssertEqual(hold(unmetered: false), .notOnWiFi, "cellular, a hotspot or Low Data Mode")
         XCTAssertEqual(hold(unmetered: nil), .notOnWiFi, "before the connection is known")
         XCTAssertEqual(hold(free: 1_500_000_000), .needsSpace)

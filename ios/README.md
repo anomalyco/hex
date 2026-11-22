@@ -392,8 +392,9 @@ never at a launch by itself.
     that, and uses Apple's speech recognition exactly as with the experiment off whenever
     the model isn't loaded, isn't on the Neural Engine (the keyboard's Neural Engine memory,
     else Core ML's compute plan before iOS 27), another transcription runs, the keyboard's
-    memory limit (footprint plus `os_proc_available_memory`) is under 96 MB (V2 and Ultra
-    alike: Ultra's transcription rose 9 MB in Hex's keyboard, V2's 16 MB), too little is
+    memory limit (footprint plus `os_proc_available_memory`) is under 131 MB (V2 and Ultra
+    alike: with the model loaded the keyboard records at up to 91 MB, and Ultra's
+    transcription rose 9 MB in Hex's keyboard, V2's 16 MB), too little is
     left, it hears nothing, or it fails (`KeyboardParakeetBudget` has the measured
     numbers). Core ML keys what it compiled to the files themselves: a model downloaded
     again, or moved, compiles again, so the log calls a load "cold" by its time (5 s or

@@ -111,16 +111,18 @@ nonisolated struct KeyboardParakeetSettings {
 /// How much memory Parakeet needs in the keyboard, measured in Hex's keyboard on an iPhone 17 Pro
 /// on iOS 27.2, whose keyboard limit is 177 MB. The Neural Engine's copy of the model (468 MB for
 /// V2, 607 MB for Ultra) is outside the footprint iOS limits; what counts:
-/// - Hex's keyboard records at 56 MB (the capture and recording screen), with or without the model.
-/// - V2's first transcription rose 16 MB above that, to 72 MB; Ultra's rose 9 MB, to 66 MB, so
-///   both use V2's numbers. The first load, compiling, rose 42 MB in an idle probe keyboard
+/// - Hex's keyboard records at up to 91 MB with the model loaded: over twenty dictations in one
+///   keyboard process, recordings started at 74.7–78.0 MB through the ninth and at 87.9–91.4 MB
+///   after (56 MB for a first dictation, and with Apple's speech recognition throughout).
+/// - V2's first transcription rose 16 MB above the recording; Ultra's rose 9 MB, so both use
+///   V2's numbers. The first load, compiling, rose 42 MB in an idle probe keyboard
 ///   (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`).
 /// So a keyboard needs a limit of the recording footprint, the transcription's rise and `margin`
-/// (96 MB), as much left (`os_proc_available_memory`) as the load's rise plus 16 MB before it
+/// (131 MB), as much left (`os_proc_available_memory`) as the load's rise plus 16 MB before it
 /// loads, and the transcription's rise plus 8 MB before each transcription.
 nonisolated enum KeyboardParakeetBudget {
     static let megabyte = 1_048_576
-    static let recordingFootprint = 56 * megabyte
+    static let recordingFootprint = 91 * megabyte
     static let margin = 24 * megabyte
     static let transcriptionRise = 16 * megabyte
     static let loadRise = 42 * megabyte
