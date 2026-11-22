@@ -18,11 +18,15 @@ paste. In **Toggle** mode, press Alt to start and again to finish, or press
 the **Cancel** shortcut (Escape by default) to throw the recording away; Hex
 takes that key only while a recording runs. Hold mode has no cancel (every
 dictation finishes and pastes). Alt is the shortcut only while it is held
-alone: another key joining it makes an ordinary chord for the app in front
-(Alt-tab, Alt+F4), which discards the press before the hold threshold, and
-AltGr keeps typing on the layouts that use it. Windows opens its menus on an
+alone: another key, or a modifier the shortcut doesn't include, joining it
+makes an ordinary chord for the app in front (Alt-tab, Alt+F4, Alt+Shift for
+the input language, or Ctrl on the way to Ctrl+Alt+V), which cancels the
+press before anything is transcribed, and AltGr keeps typing on the layouts
+that use it. Labs › Hold through other keys keeps a hold that is a second or
+more old recording through those keys instead. Windows opens its menus on an
 Alt tap, so Hex swallows Alt's release when nothing joined it, the way macOS
-keeps Option from opening its menus. Rebind the shortcut in Settings if you
+keeps Option from opening its menus; a chord's release is always the app's
+own, with no key injected. Rebind the shortcut in Settings if you
 rely on a bare Alt elsewhere. To let another app use the same key, such as a
 Discord push-to-talk key, turn on **Share dictation shortcut with other apps**
 under Advanced: Hex still reacts to it but passes its key-down and key-up on,

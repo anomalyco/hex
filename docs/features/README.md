@@ -2451,7 +2451,10 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 ├── One modifier alone (left Alt by default, #2278) -> Shortcut; Alt/Win release masked (no menu, Start)
 │   ├── AltGr (a synthesized Left Ctrl plus Right Alt) -> Never presses the default;
 │   │   an either-side Alt would press on every AltGr character
-│   └── Another key joining the hold -> Its chord; the press cancels before the hold threshold
+│   ├── Another key joining the hold -> Its chord; the press cancels at once
+│   │   (Labs › Hold through other keys keeps a hold a second or more old)
+│   └── Another modifier the chord doesn't name -> Its chord too: cancels, and
+│       Toggle's press locks nothing; Alt's release goes unmasked (no 0xE8 tap)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
 │   ├── Windows default input changes -> Switch once capture is idle // cpal's default-device report

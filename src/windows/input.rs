@@ -29,6 +29,7 @@ use crate::dictation::ShortcutMode;
 mod activity;
 mod capsule;
 mod disposition;
+mod modifier_chord;
 mod modifiers;
 mod rearm;
 mod watchdog;
@@ -1195,57 +1196,7 @@ fn process_button(
                     state.mask_release = false;
                     mask = !state.share_trigger;
                 }
-                if state.trigger_vk.is_none()
-                    && state.capture.locked
-                    && state.capture.flavour.normal()
-                    && !state.dirty
-                    && is_down
-                    && state.holds(&state.binding)
-                    && state.side_down.together(&state.binding)
-                {
-                    // Only a modifier-only shortcut finishes on a modifier
-                    // press. A key chord such as Alt+Space finishes on its
-                    // key, so resting a finger on Alt never ends a locked
-                    // or toggled capture.
-                    if let Some(action) =
-                        state
-                            .capture
-                            .press(state.double_tap_enabled, state.double_tap_only, time)
-                    {
-                        state.dirty = true;
-                        send_event(state, action, time);
-                    }
-                } else if state.capture.active
-                    && state.capture.flavour.normal()
-                    && !state.holds(&state.binding)
-                {
-                    if let Some(action) = state.capture.release(state.double_tap_enabled, time) {
-                        state.dirty = state.holds_any_required(&state.binding);
-                        send_event(state, action, time);
-                    }
-                } else if state.trigger_vk.is_none()
-                    && !state.capture.active
-                    && !state.capture.locked
-                    && !state.dirty
-                    && is_down
-                    && state.holds(&state.binding)
-                    && state.side_down.together(&state.binding)
-                {
-                    state.capture.claim(DictationFlavour::Normal);
-                    if let Some(action) =
-                        state
-                            .capture
-                            .press(state.double_tap_enabled, state.double_tap_only, time)
-                    {
-                        send_event(state, action, time);
-                    }
-                }
-                if is_down && state.binding.masks_release() && state.holds(&state.binding) {
-                    state.mask_release = true;
-                }
-                if state.dirty && !state.holds_any_required(&state.binding) {
-                    state.dirty = false;
-                }
+                state.modifier_chord(vk, is_down, time);
             }
         }
     }
@@ -1499,6 +1450,8 @@ mod tests {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::VK_LCONTROL;
 
     use super::*;
+
+    mod chords;
 
     #[test]
     fn a_shared_shortcut_trigger_does_not_end_a_paste_continuation() {
@@ -1902,7 +1855,7 @@ mod tests {
         );
         assert!(
             !right_control.holds_menu_modifier(),
-            "Ctrl alone leaves the desktop's menus alone, so the default is not it"
+            "Ctrl alone opens nothing, so its release is never masked"
         );
 
         let mut held = ModifierState::default();
