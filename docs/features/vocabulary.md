@@ -102,7 +102,36 @@ Context prompt (Whisper incl. ivrit.ai, NB-Whisper and KB-Whisper, Qwen3-ASR, Qw
 │   slot; Qwen3-ASR: the system message
 ├── Output that only repeats the prompt (two or more terms) is dropped, as
 │   both models return it on silence or noise (README.md#get-ready)
-└── "Sounds like" spellings are not sent; rewriting and search use them
+└── "Sounds like" spellings are not sent; rewriting and search use them (see
+    the correction below)
+
+"Sounds like" correction for prompt runs  // vocabulary.sounds-like-correction; dictation::vocabulary::correct_sounds_like
+├── Prompt models such as Whisper and Qwen3-ASR, after a whole-clip run only:
+│   dictation, meetings, captures, and the local API; never a live stream's
+│   text
+├── Parakeet does it in the engine (above). Other models and Apple Speech
+│   don't: a model without a vocabulary slot never reads the list, so the
+│   Settings note and `hex status` stay accurate for them
+├── vocabulary_boost Off turns it off, as does an entry with no usable spelling
+├── Uses the whole vocabulary, not only the terms that fit in the prompt: a
+│   spelling is corrected even when its term did not fit
+├── Each listed spelling, whole word and case-insensitive, becomes its term:
+│   "push to JetHub" -> "push to GitHub", "гитхаб" -> "GitHub"
+├── A spelling shorter than 2 characters (ASCII letters and digits plus every
+│   non-ASCII code point, counted after dropping ASCII spaces and punctuation;
+│   never lowercased, so `İ` counts once) is ignored, like the engine's own
+│   pass; so is one equal to its term in any case
+├── Every entry's term is protected, including a term with no spellings, so
+│   another entry's spelling cannot rewrite it: "Next.js" with no spellings
+│   survives "Nest" [next]. A spelling inside its own term keeps the term,
+│   other occurrences keep their original casing ("next.js" and "Open Code
+│   Hub" stay as written), and an entry with an empty term is skipped
+├── A longer word ("JetHubber") and a differently split one ("Jet Hub") are
+│   left alone
+├── Text and segments get every spelling; the timed words get only
+│   single-word spellings, so a multi-word spelling ("open code") fixes the
+│   text and segments but leaves each timed word as the model wrote it
+└── Word times stay put
 
 Words on screen (Labs › Words on screen, macOS)  // vocabulary.screen
 ├── Off by default; off, or for a model that ignores vocabulary, no
@@ -288,7 +317,25 @@ comma splitting, reading the saved list without settings, the
 first 64 terms and their spellings reaching transcription, the prompt bounded
 by characters alone (`the_prompt_keeps_the_first_terms_that_fit`), the
 sheet's count matching both (`terms_read_counts_exactly_what_transcription_takes`),
-folding hints, boost names);
+the post-run spelling correction
+(`sounds_like_spellings_become_their_terms_after_transcription`,
+`sounds_like_corrections_need_a_boost_and_skip_the_terms_own_spelling`,
+`a_spelling_inside_its_own_term_keeps_the_term`,
+`a_term_without_spellings_still_protects_itself`,
+`an_entry_without_a_term_is_skipped`,
+`a_term_keeps_its_casing_outside_its_spellings`,
+`a_timed_word_keeps_its_casing_and_takes_a_spelling`,
+`a_one_letter_spelling_is_ignored`,
+`a_transcripts_text_segments_and_words_are_corrected`, and
+`a_multi_word_spelling_corrects_text_and_segments_but_not_words`), folding
+hints, boost names;
+`protect_rules_keep_the_matched_text_and_still_win_the_longest_match` and
+`a_protect_rule_coexists_with_deletion_rules` in
+[dictation/text_replacements.rs](../../src/dictation/text_replacements.rs)
+cover the protection rule;
+`only_a_prompt_run_corrects_sounds_like_spellings` in
+[transcription/gguf_session_tests.rs](../../src/transcription/gguf_session_tests.rs)
+checks the per-slot wiring;
 `loading_folds_saved_recognition_hints_into_the_vocabulary_once` in
 [app_settings.rs](../../src/app_settings.rs);
 `the_embedded_service_reads_the_saved_vocabulary` in

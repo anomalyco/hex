@@ -977,11 +977,24 @@ overridden; not run with Cohere on real audio).
 its own long-form loop also decoded a near-silent remainder (a 70 ms tail
 zero-padded to 30 s) and invented text: the Turkish
 "İzlediğiniz için teşekkür ederim.", "Altyazı M.K." (once truncated to
-"Altyazı M."), or "abone ol" repeated. A Whisper clip now chunks at Whisper's
-own 30-second window, each window passes the same detector gate as Cohere's,
-and a Whisper clip drops the audio outside its detected speech plus 500 ms
-before transcription (`whisper_audio` in
-[gguf_session.rs](../../src/transcription/gguf_session.rs)). Long Whisper
+"Altyazı M."), or "abone ol" repeated.
+
+Whisper large-v3 and large-v3-turbo do the same in Russian, appending
+"Продолжение следует..." ("to be continued") or a subtitle community's credit:
+"Субтитры сделал DimaTorzok", "Субтитры делал DimaTorzok",
+"Субтитры создавались сообществом Amara.org", "Редактор субтитров А.Семкин
+Корректор А.Егорова", or "Редактор субтитров А.Синецкая
+Корректор А.Егорова". Those join the trailing-credit list
+([subtitle_credits.rs](../../src/transcription/subtitle_credits.rs), checks
+`a_russian_continues_credit_is_removed`,
+`a_russian_subtitle_credit_is_removed`, and
+`russian_credits_later_in_the_speech_are_kept`). Not run with Whisper on real
+Russian audio.
+
+A Whisper clip now chunks at Whisper's own 30-second window, each window
+passes the same detector gate as Cohere's, and a Whisper clip drops the audio
+outside its detected speech plus 500 ms before transcription (`whisper_audio`
+in [gguf_session.rs](../../src/transcription/gguf_session.rs)). Long Whisper
 dictations in every language now go through Hex's own 30 s chunking — each
 window cut at the quietest 100 ms of its last 5 s and decoded independently —
 instead of Whisper's long-form loop; not measured on long continuous speech.
@@ -2332,7 +2345,7 @@ load, a quiet relative-path clip is discarded as before, so only captures at or
 above the fixed threshold reach the model without one.
 Output that only repeats the vocabulary prompt (Whisper, Qwen3-ASR) is dropped as well
 ([models](README.md#get-ready)), and so is a known subtitle credit at the very
-end of the text, Turkish included (#1141, #1770). A Whisper clip also loses the
+end of the text, Turkish and Russian included (#1141, #1770). A Whisper clip also loses the
 audio outside its detected speech plus 500 ms before a whole-clip transcription
 run, and a chunk of a longer one the detector hears no speech in is skipped (see
 [ongoing jobs and output](#ongoing-jobs-and-output)). Other hallucinations
