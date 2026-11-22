@@ -64,8 +64,7 @@ final class FullKeyboardView: UIView {
     private var barHoldTouch: UITouch?
     private var barHoldWork: DispatchWorkItem?
     private var lastDictation: DictationUndo?
-    /// The globe's touch went off the key before lifting (`globeTouch`).
-    private var globeTouchLeftKey = false
+    private let inputModeListTouch = InputModeListTouch()
     /// The model's stage last seen, for a selection's dictation ending
     /// (`FullKeyboardView+Selection`).
     var lastStagePhase: KeyboardViewModel.StagePhase?
@@ -196,14 +195,16 @@ final class FullKeyboardView: UIView {
             self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
         stripView.onNextKeyboard = { [weak self] in
-            // Never where Apple's keyboard is split, where the strip doesn't offer it either.
+            // Never where Apple's keyboard is split, where the strip doesn't offer it either
+            // (`InputModeListTouch`).
             guard let self, self.currentPosture?.splitsKeyboard == false else { return }
             self.typingLog?.ui("next_keyboard")
             self.hostController?.advanceToNextInputMode()
         }
         stripView.onKeyboardListTouch = { [weak self] chip, event in
             if event.touches(for: chip)?.first?.phase == .began { self?.typingLog?.ui("keyboard_list") }
-            self?.inputModeListTouch(chip, with: event, holdsBackTap: true)
+            guard let self, let controller = self.hostController else { return }
+            self.inputModeListTouch.forward(chip, with: event, to: controller, alwaysHoldsBackTap: true)
         }
         selectionStrip.onAction = { [weak self] action in self?.selectionAction(action) }
 
@@ -383,11 +384,7 @@ final class FullKeyboardView: UIView {
     }
 
     /// The posture as the keyboard's window shows it now; nil on the Duo before it has one.
-    var currentPosture: KeyboardPosture? {
-        guard Self.isFoldable else { return .phone }
-        guard let screen = window?.windowScene?.screen ?? window?.screen else { return nil }
-        return KeyboardPosture.current(screenSize: screen.bounds.size, isFoldable: true)
-    }
+    var currentPosture: KeyboardPosture? { KeyboardPosture.current(in: window) }
 
     /// Hex's globe key where iOS asks for one, except floating on an iPad: iPadOS draws its own
     /// globe in the band under a floating keyboard.
@@ -1431,9 +1428,7 @@ final class FullKeyboardView: UIView {
         }
     }
 
-    /// The globe's touches go to UIKit's `handleInputModeList(from:with:)` as this control's
-    /// real events, as Apple documents: a tap switches to the next keyboard, a hold (0.2 s) or a
-    /// slide up opens the list, and lifting over the list picks that keyboard.
+    /// The globe's touches go to UIKit's keyboard list (`InputModeListTouch`).
     private func configureGlobe() {
         globeButton.removeTarget(nil, action: nil, for: .allEvents)
         guard hostController != nil else { return }
@@ -1441,31 +1436,7 @@ final class FullKeyboardView: UIView {
     }
 
     @objc private func globeTouch(_ sender: UIButton, with event: UIEvent) {
-        inputModeListTouch(sender, with: event, holdsBackTap: engine.posture.splitsKeyboard)
-    }
-
-    /// Code from Messages, where the next keyboard could be Emoji or another third-party one,
-    /// holds back its tap the same way, so a tap opens the list and the person picks Apple's.
-    private func inputModeListTouch(_ sender: UIButton, with event: UIEvent, holdsBackTap: Bool) {
         guard let controller = hostController else { return }
-        if let touch = event.touches(for: sender)?.first {
-            let onKey = sender.bounds.contains(touch.location(in: sender))
-            if touch.phase == .began { globeTouchLeftKey = false }
-            if touch.phase == .moved, !onKey { globeTouchLeftKey = true }
-            guard Self.passesGlobeTouch(
-                phase: touch.phase, onKey: onKey, leftKey: globeTouchLeftKey, appleKeyboardSplits: holdsBackTap
-            ) else { return }
-        }
-        controller.handleInputModeList(from: sender, with: event)
-    }
-
-    /// Where Apple's keyboard is split (the Duo unfolded and upright), a lift on the globe that
-    /// never left it isn't passed on, so UIKit's hold opens the list instead of switching to the
-    /// next keyboard. iOS 27.2's switch to the next keyboard can end the app being typed in there
-    /// (TestFlight build 121, iPhone Duo: `-[UIKeyboardLayoutStar activationIndicatorView]` reads
-    /// one key past the end of a split keyboard not laid out yet, to show its language); a pick
-    /// from the list doesn't show that indicator.
-    static func passesGlobeTouch(phase: UITouch.Phase, onKey: Bool, leftKey: Bool, appleKeyboardSplits: Bool) -> Bool {
-        !(appleKeyboardSplits && phase == .ended && onKey && !leftKey)
+        inputModeListTouch.forward(sender, with: event, to: controller)
     }
 }

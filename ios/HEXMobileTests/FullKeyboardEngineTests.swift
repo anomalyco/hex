@@ -3353,14 +3353,14 @@ final class FullKeyboardEngineTests: XCTestCase {
             XCTAssertEqual(view.globeButton.actions(forTarget: view, forControlEvent: event), ["globeTouch:with:"])
         }
         for phase: UITouch.Phase in [.began, .moved, .ended, .cancelled] {
-            XCTAssertTrue(FullKeyboardView.passesGlobeTouch(phase: phase, onKey: true, leftKey: false, appleKeyboardSplits: false))
+            XCTAssertTrue(InputModeListTouch.passes(phase: phase, onKey: true, leftKey: false, appleKeyboardSplits: false))
         }
-        XCTAssertFalse(FullKeyboardView.passesGlobeTouch(phase: .ended, onKey: true, leftKey: false, appleKeyboardSplits: true), "a tap")
-        XCTAssertTrue(FullKeyboardView.passesGlobeTouch(phase: .began, onKey: true, leftKey: false, appleKeyboardSplits: true))
-        XCTAssertTrue(FullKeyboardView.passesGlobeTouch(phase: .moved, onKey: false, leftKey: true, appleKeyboardSplits: true))
-        XCTAssertTrue(FullKeyboardView.passesGlobeTouch(phase: .ended, onKey: false, leftKey: true, appleKeyboardSplits: true), "lifting over the list picks")
-        XCTAssertTrue(FullKeyboardView.passesGlobeTouch(phase: .ended, onKey: true, leftKey: true, appleKeyboardSplits: true))
-        XCTAssertTrue(FullKeyboardView.passesGlobeTouch(phase: .cancelled, onKey: true, leftKey: false, appleKeyboardSplits: true))
+        XCTAssertFalse(InputModeListTouch.passes(phase: .ended, onKey: true, leftKey: false, appleKeyboardSplits: true), "a tap")
+        XCTAssertTrue(InputModeListTouch.passes(phase: .began, onKey: true, leftKey: false, appleKeyboardSplits: true))
+        XCTAssertTrue(InputModeListTouch.passes(phase: .moved, onKey: false, leftKey: true, appleKeyboardSplits: true))
+        XCTAssertTrue(InputModeListTouch.passes(phase: .ended, onKey: false, leftKey: true, appleKeyboardSplits: true), "lifting over the list picks")
+        XCTAssertTrue(InputModeListTouch.passes(phase: .ended, onKey: true, leftKey: true, appleKeyboardSplits: true))
+        XCTAssertTrue(InputModeListTouch.passes(phase: .cancelled, onKey: true, leftKey: false, appleKeyboardSplits: true))
     }
 
     func testOnlyTheEnglishAndSpanishLayoutsSwipe() {

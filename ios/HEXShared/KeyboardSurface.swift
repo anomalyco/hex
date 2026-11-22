@@ -39,17 +39,29 @@ private struct GlobeKeyRepresentable: UIViewRepresentable {
             : UIColor(red: 0x14 / 255.0, green: 0x16 / 255.0, blue: 0x1B / 255.0, alpha: 1)
         button.configuration = config
         button.accessibilityLabel = "Next keyboard"
-        if let controller {
-            button.addTarget(
-                controller,
-                action: #selector(UIInputViewController.handleInputModeList(from:with:)),
-                for: .allTouchEvents
-            )
+        if controller != nil {
+            button.addTarget(context.coordinator, action: #selector(Coordinator.touch(_:with:)), for: .allTouchEvents)
         }
         return button
     }
 
+    func makeCoordinator() -> Coordinator { Coordinator(controller: controller) }
+
+    /// Holds back a tap where Apple's keyboard splits, as the full keyboard's globe does.
+    @MainActor final class Coordinator: NSObject {
+        weak var controller: UIInputViewController?
+        private let inputModeListTouch = InputModeListTouch()
+
+        init(controller: UIInputViewController?) { self.controller = controller }
+
+        @objc func touch(_ sender: UIButton, with event: UIEvent) {
+            guard let controller else { return }
+            inputModeListTouch.forward(sender, with: event, to: controller)
+        }
+    }
+
     func updateUIView(_ uiView: UIButton, context: Context) {
+        context.coordinator.controller = controller
         uiView.configuration?.baseForegroundColor = isDark
             ? UIColor(white: 0.92, alpha: 1)
             : UIColor(red: 0x14 / 255.0, green: 0x16 / 255.0, blue: 0x1B / 255.0, alpha: 1)
