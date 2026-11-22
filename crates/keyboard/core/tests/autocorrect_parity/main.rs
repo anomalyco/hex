@@ -131,6 +131,20 @@ struct Tally {
     today: usize,
     tie: usize,
     examples: Vec<String>,
+    today_examples: Vec<String>,
+}
+
+/// The first answer the port's order of your own words changes.
+fn order_example(case: &Value, today: &Value, out: &[Value]) -> String {
+    let ops = case["ops"].as_array().unwrap();
+    let today = today.as_array().unwrap();
+    let i = (0..out.len())
+        .find(|&i| today[i]["r"] != out[i]["r"])
+        .unwrap_or(0);
+    format!(
+        "case {} ({}): op {i} {}\n    swift's order {}\n    port's order  {}",
+        case["id"], case["lang"], ops[i], today[i]["r"], out[i]["r"]
+    )
 }
 
 fn compare(
@@ -251,11 +265,13 @@ fn check(path: &str) {
                 if v.get("tie").is_some() {
                     tally.tie += 1;
                 }
-                // Your own words reach the decoders in the order the host passes them: a case
-                // Swift's dictionary order decides is left out.
-                if v.get("today").is_some() {
+                // Your own words reach the decoders by shortcut and typo, as `out`'s oracle run
+                // had them; `today` is what Swift's dictionary order gave instead.
+                if let Some(today) = v.get("today") {
                     tally.today += 1;
-                    continue;
+                    if tally.today_examples.len() < 3 {
+                        tally.today_examples.push(order_example(&v, today, out));
+                    }
                 }
                 if compare(world, &ios, &v, out, calls, &mut tally) {
                     tally.failures += 1;
@@ -265,10 +281,13 @@ fn check(path: &str) {
         }
     }
     println!(
-        "{path}: {} cases, {} operations, {} dictionary calls; {} differ; {} left out (own words \
-         in Swift's dictionary order decide them), {} with Swift's decoder tie order",
+        "{path}: {} cases, {} operations, {} dictionary calls; {} differ; {} answer otherwise \
+         with own words in Swift's dictionary order, {} with Swift's decoder tie order",
         tally.cases, tally.ops, tally.calls, tally.failures, tally.today, tally.tie
     );
+    for e in &tally.today_examples {
+        println!("  own words' order: {e}");
+    }
     for (kind, n) in &tally.by_kind {
         println!("  first difference at {kind}: {n}");
     }

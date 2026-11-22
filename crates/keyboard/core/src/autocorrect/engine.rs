@@ -50,7 +50,9 @@ pub(crate) struct Engine {
     pub accepts_any_letters: Option<bool>,
     pub layout_language: Language,
     pub layout_letters: Option<LetterLayout>,
-    /// Lowercased shortcut (composed) → your text, in the order they were loaded.
+    /// Lowercased shortcut (composed) → your text, ordered by shortcut: the order your text
+    /// replacements reach the decoder and Swipe typing in (Swift's was its dictionary's,
+    /// random per process).
     pub shortcuts: Vec<(String, String)>,
     pub shortcut_index: HashMap<String, usize>,
     pub lexicon_terms: Vec<String>,
@@ -154,6 +156,7 @@ impl Engine {
         let mut shortcuts: Vec<(String, String)> = Vec::new();
         let mut index: HashMap<String, usize> = HashMap::new();
         let mut terms = Vec::new();
+        // A later entry for the same shortcut wins, as in Swift's dictionary.
         for (input, output) in entries {
             let input = text::trimmed(input.as_ref());
             let output = text::trimmed(output.as_ref());
@@ -174,8 +177,13 @@ impl Engine {
                 terms.push(output.to_owned());
             }
         }
+        shortcuts.sort_by(|a, b| a.0.cmp(&b.0));
+        self.shortcut_index = shortcuts
+            .iter()
+            .enumerate()
+            .map(|(i, (k, _))| (k.clone(), i))
+            .collect();
         self.shortcuts = shortcuts;
-        self.shortcut_index = index;
         self.lexicon_terms = terms.clone();
         self.lexicon_terms
             .extend(tokens::vocabulary_words(&self.vocabulary));

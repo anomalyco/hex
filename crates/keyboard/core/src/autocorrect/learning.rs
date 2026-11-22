@@ -11,7 +11,8 @@ use super::text;
 /// `TypingLearning`: typos you fixed the same way twice, and words you turned down twice.
 #[derive(Debug, Clone, Default)]
 pub struct TypingLearning {
-    /// Lowercased typo → the word you fixed it to, in the host's order.
+    /// Lowercased typo → the word you fixed it to, ordered by typo: the order the fixes reach
+    /// the decoder in (Swift's was its dictionary's, random per process).
     typos: Vec<(String, String)>,
     by_typo: HashMap<String, usize>,
     rejected: HashSet<String>,
@@ -32,6 +33,13 @@ impl TypingLearning {
                 }
             }
         }
+        out.typos.sort_by(|a, b| a.0.cmp(&b.0));
+        out.by_typo = out
+            .typos
+            .iter()
+            .enumerate()
+            .map(|(i, (k, _))| (k.clone(), i))
+            .collect();
         out.rejected = rejected
             .iter()
             .map(|r| text::nfc(r.as_ref()).into_owned())
