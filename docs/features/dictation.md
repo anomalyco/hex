@@ -2610,11 +2610,30 @@ plate; the overlay itself is not natively verified on macOS or Windows. See
 
 **Fixed November 1, 2026 (issue 873):** on macOS the HUD remembered its last
 placement and skipped sending it to Rune again when it matched, so a HUD Rune
-had put in the wrong spot on a second display (offset by the display's origin,
-with a different backing scale) stayed there on every later dictation. Each
-capture's start and each hide now forget the placement, so the next show sends
-the display and rectangle again, as Linux and Windows already do. Not run on a
-two-display Mac; the misplacement inside Rune itself is not addressed here.
+had put in the wrong spot on a second display stayed there on every later
+dictation. Each capture's start and each hide now forget the placement, so the
+next show sends the display and rectangle again, as Linux and Windows already
+do. The misplacement inside Rune itself is not addressed here.
+
+**Fixed November 21, 2026 (issue 1175):** the bottom HUD's 320 x 128 pt window
+used to hang its 27 pt transparent shadow padding below `visibleFrame`. With no
+Dock on that display and another display below it, the window crossed onto the
+display below. The reports have the external 1x display above the laptop; it
+was the primary in one report and not the other. The suspected trigger is that
+crossing a backing-scale boundary in that arrangement could leave the plate at
+the top of the display. The bottom placement now puts the window's bottom on
+`visibleFrame.y` and moves the plate down inside the window with
+`Layout.center`, so its visible 24 pt gap above the Dock or screen edge is
+unchanged and the window stays on its display. macOS also pins the HUD to the
+pointer screen's `NSScreenNumber` (`DisplayTarget::Native`) and sends a rect in
+that screen's own top-down points; in Rune's AppKit path this resolves to the
+same frame as the global `Primary` rect, so the pin is a consistency change, not
+the fix for the jump. The global `Primary` rect remains the fallback when the
+screen number cannot be read. Checks:
+`hud_placement::tests::the_bottom_window_stays_on_its_own_screen` and
+`hud_placement::tests::the_bottom_window_clears_a_dock` cover the geometry. The
+panel is not run on a two-display Mac here, so the native trigger is suspected,
+not observed.
 
 **Fixed November 10, 2026 (issue 1663):** on Linux Wayland the HUD stopped
 appearing after its monitor was removed and added back (a KVM switch, for
@@ -2850,6 +2869,17 @@ and normal Spaces keep their position. Check: `scripts/check
 dictation::indicator::tests::top_capsule` covers the math only; placement over a
 fullscreen app on a notched Mac is not yet observed.
 
+At the bottom position the plate keeps its 24 pt gap above
+`visibleFrame.y` (`rune_hud::hud_placement::BOTTOM_OFFSET`). The whole 320 x 128
+pt window sits on that display, with `Layout.center` moving the plate inside it,
+so its transparent shadow padding never hangs onto a display below. The HUD is
+also pinned to the pointer screen's `NSScreenNumber` with a display-local rect;
+that resolves to the same frame as the global `Primary` rect, so the pin is
+consistency only, and `Primary` remains the fallback when the number is
+unavailable. Checks: `hud_placement::tests::the_bottom_window_stays_on_its_own_screen`
+and `hud_placement::tests::the_bottom_window_clears_a_dock` cover the pure
+geometry; the two-display panel is not yet observed.
+
 ### Dot scope
 
 The HUD is Dot scope on every OS ([rune_hud/dot_scope.rs](../../src/rune_hud/dot_scope.rs),
@@ -3069,7 +3099,9 @@ pointer:
 
 ```ts
 Placement                                     // rune_hud::hud_placement::place
-├── Below the menu bar (default) -> 6 pt under the menu bar, or above the Dock
+├── Below the menu bar (default) -> 6 pt under the menu bar; at the bottom,
+│   24 pt above the Dock or the screen's edge, with the 320×128 pt window's
+│   bottom on the visible bottom and the plate moved down inside it
 ├── In the menu bar -> A plate fitted to the bar's height, centred on a flat
 │   screen, just right of the notch on a notched one
 ├── From the notch -> A black island grows out of the notch, 28 pt wider
@@ -3083,7 +3115,9 @@ Placement                                     // rune_hud::hud_placement::place
 ```
 
 The window is 320×128 pt so the widest plate, its shadow, and the widest
-island fit. Notch metrics come from `safeAreaInsets.top` and
+island fit. At the bottom, the window's bottom edge sits on `visibleFrame.y`
+and `Layout.center` moves the plate down inside it by the shadow padding, so
+the window never crosses onto a display below. Notch metrics come from `safeAreaInsets.top` and
 `auxiliaryTopLeftArea`/`auxiliaryTopRightArea`; the bar's height from
 `NSStatusBar.systemStatusBar.thickness`. HUD Lab tunes it live in debug
 builds, and in release builds while the `playground` experiment is on

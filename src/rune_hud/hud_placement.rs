@@ -46,6 +46,14 @@ impl Rect {
     }
 }
 
+/// A window's global top-left, converted to `screen_frame`'s top-down points:
+/// the rect an overlay pinned to that display sends. Rune's AppKit placement
+/// adds the frame's origin back and flips by its height, so this is its
+/// inverse.
+pub fn local_rect(top_left: (f64, f64), screen_frame: Rect) -> (f64, f64) {
+    (top_left.0 - screen_frame.x, screen_frame.top() - top_left.1)
+}
+
 /// One screen as `NSScreen` describes it.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Screen {
@@ -200,10 +208,30 @@ pub fn place(placement: Placement, screen: &Screen, content: Content, bottom: bo
         over_menu_bar: true,
     };
     match placement {
-        Placement::Below if bottom => centred(
-            screen.frame.mid_x(),
-            screen.visible.y + BOTTOM_OFFSET + plate_height / 2.0,
-        ),
+        Placement::Below if bottom => {
+            // The whole window stays on this screen. Its bottom edge sits on
+            // the visible bottom, and the plate moves down inside the window
+            // (positive center.y is y down) so its visible gap above the Dock
+            // or the screen's edge is unchanged. The window's transparent
+            // shadow padding can no longer cross onto a display below.
+            let plate_center = BOTTOM_OFFSET + plate_height / 2.0;
+            // Keep the plate inside the window; only a plate as tall as the
+            // window or taller is centred (the real 26 pt plate fits with
+            // room to spare).
+            let limit = ((window_height - plate_height) / 2.0).max(0.0);
+            let center = (window_height / 2.0 - plate_center).clamp(-limit, limit);
+            Placed {
+                top_left: (
+                    screen.frame.mid_x() - window_width / 2.0,
+                    screen.visible.y + window_height,
+                ),
+                layout: Layout {
+                    center: [0.0, center as f32],
+                    ..Layout::default()
+                },
+                over_menu_bar: false,
+            }
+        }
         Placement::Below => {
             // Under the notch where a fullscreen space hides the menu bar
             // and `visibleFrame` reaches the top of a notched screen.
@@ -520,6 +548,99 @@ mod tests {
         assert_eq!(placed.layout, Layout::default());
         let placed = place(Placement::Below, &notched(), CONTENT, true);
         assert_eq!(plate(&placed), (756.0, 70.0 + 24.0 + 13.0));
+    }
+
+    #[test]
+    fn the_bottom_window_stays_on_its_own_screen() {
+        // A 1x 2560 x 1440 display above the primary, with no Dock and
+        // therefore no visible-frame inset: the window's bottom must not hang
+        // onto the display below it.
+        let screen = Screen {
+            frame: Rect {
+                x: 0.0,
+                y: 982.0,
+                width: 2560.0,
+                height: 1440.0,
+            },
+            visible: Rect {
+                x: 0.0,
+                y: 982.0,
+                width: 2560.0,
+                height: 1440.0,
+            },
+            ..Screen::default()
+        };
+        let placed = place(Placement::Below, &screen, CONTENT, true);
+        assert_eq!(
+            placed.top_left.1 - CONTENT.window.1,
+            screen.visible.y,
+            "the window's bottom sits on the display's visible bottom"
+        );
+        assert_eq!(
+            plate(&placed),
+            (
+                screen.frame.mid_x(),
+                screen.visible.y + BOTTOM_OFFSET + CONTENT.plate.1 / 2.0,
+            ),
+            "the plate keeps its old on-screen gap"
+        );
+        assert_eq!(
+            f64::from(placed.layout.center[1]),
+            CONTENT.window.1 / 2.0 - (BOTTOM_OFFSET + CONTENT.plate.1 / 2.0),
+            "the plate moves down inside the window by the shadow padding"
+        );
+    }
+
+    #[test]
+    fn the_bottom_window_clears_a_dock() {
+        // A 1440 x 900 display with a 60 pt Dock: the window's bottom starts
+        // at the Dock's top and the plate stays 24 pt above it.
+        let screen = Screen {
+            frame: Rect {
+                x: 0.0,
+                y: 0.0,
+                width: 1440.0,
+                height: 900.0,
+            },
+            visible: Rect {
+                x: 0.0,
+                y: 60.0,
+                width: 1440.0,
+                height: 816.0,
+            },
+            bar: 24.0,
+            ..Screen::default()
+        };
+        let placed = place(Placement::Below, &screen, CONTENT, true);
+        assert_eq!(placed.top_left.1 - CONTENT.window.1, screen.visible.y);
+        assert_eq!(
+            plate(&placed),
+            (
+                screen.frame.mid_x(),
+                screen.visible.y + BOTTOM_OFFSET + CONTENT.plate.1 / 2.0,
+            )
+        );
+    }
+
+    #[test]
+    fn a_screen_local_rect_round_trips_through_rune() {
+        // A display above and left of the primary. Rune's AppKit placement
+        // adds the origin back and flips by the height, so the frame's x and
+        // bottom must come back unchanged.
+        let screen = Rect {
+            x: -1440.0,
+            y: 982.0,
+            width: 2560.0,
+            height: 1440.0,
+        };
+        let top_left = (-160.0, 1083.0);
+        let (x, y) = local_rect(top_left, screen);
+        assert_eq!((x, y), (1280.0, 1339.0));
+        assert_eq!(screen.x + x, top_left.0);
+        assert_eq!(
+            screen.y + screen.height - (y + CONTENT.window.1),
+            top_left.1 - CONTENT.window.1
+        );
     }
 
     #[test]
