@@ -215,7 +215,7 @@ final class AutocorrectEngine {
     /// of `UITextChecker`'s one-edit guesses, for the language its model was built for. Nil
     /// while off or without a model.
     var decoder: TypingDecoder? {
-        didSet { if oldValue?.model !== decoder?.model { userWordsBuilt = nil } }
+        didSet { if oldValue?.model !== decoder?.model { userWordsBuilt = nil; useOwnWords(decoder?.model) } }
     }
     /// The layout language's word list and word pairs (the typing model, whether or not
     /// Spatial autocorrect is on): English chooses between words the same letters spell with
@@ -653,7 +653,7 @@ final class AutocorrectEngine {
                 KeyboardSuggestion(displayText: replacement, replacement: replacement, kind: .primary(autoReplace: true)),
             ]
         }
-        guard hasDictionary else { return replacementOnly ?? [] }
+        guard hasWords else { return replacementOnly ?? [] }
         // An empty field, or a new sentence (". ", "! ", "? ", a new line): three common
         // first words, as Apple's keyboard offers.
         if Self.isSentenceStart(beforeInput, language: language) {
@@ -854,7 +854,7 @@ final class AutocorrectEngine {
         guard !suppressedInSession.contains(lower),
               !learning.rejected.contains(lower),
               !learnedWords.contains(lower) else { return nil }
-        guard isEnabled, hasDictionary, !Self.shorthandAllowlist.contains(lower) else { return nil }
+        guard isEnabled, hasWords, !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
         return (token, fix)
     }
@@ -1366,7 +1366,7 @@ final class AutocorrectEngine {
     /// see" becomes "we'll see", as Apple's keyboard decides at the next word. `before` is
     /// the text up to the end of `word`. Nil to leave it.
     func revision(of word: String, before: String, next: String, field: KeyboardFieldKind, autocorrectionType: UITextAutocorrectionType?) -> String? {
-        guard field == .text, autocorrectionType != .no, hasDictionary, word.count >= 2 else { return nil }
+        guard field == .text, autocorrectionType != .no, hasWords, word.count >= 2 else { return nil }
         let isAllCaps = word == word.uppercased() && word != word.lowercased() && !word.hasPrefix("I'")
         guard !isAllCaps, let nextWord = next.split(separator: " ").first.map(String.init) else { return nil }
         let previous = Self.previousWord(before, token: word)
@@ -1386,7 +1386,7 @@ final class AutocorrectEngine {
     /// end of `first`. `first` and `firstTaps` are as you typed them.
     func merge(first: String, firstTaps: [CGPoint], space: CGPoint, second: String, before: String) -> String? {
         // Adaptive touch's personal centres never join words: the centres read without it decide.
-        guard isEnabled, hasDictionary, let decoder, let keys = decoderBaselineKeys ?? decoderKeys, let taps = decoderTaps,
+        guard isEnabled, hasWords, let decoder, let keys = decoderBaselineKeys ?? decoderKeys, let taps = decoderTaps,
               decoder.model.language == language.rawValue, !first.contains("'"), !second.contains("'") else { return nil }
         for word in [first, second] {
             let lower = word.lowercased()

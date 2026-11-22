@@ -23,6 +23,11 @@ final class SystemTextChecker: TextChecking {
         self.language = language
     }
 
+    /// Hex's own words for the language Spatial autocorrect reads (`AutocorrectEngine.useOwnWords`):
+    /// while set, they alone say what is a word, and `UITextChecker`'s guesses and completions
+    /// count only while it is in that language (iOS may have no dictionary for it).
+    var ownWords: HexOwnWords?
+
     func useLanguage(_ code: String) {
         language = code
     }
@@ -49,6 +54,7 @@ final class SystemTextChecker: TextChecking {
     }
 
     func isWordValid(_ word: String) -> Bool {
+        if let ownWords { return ownWords.knows(word) }
         let ns = word as NSString
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return true }
@@ -62,7 +68,12 @@ final class SystemTextChecker: TextChecking {
         return misspelled.location == NSNotFound
     }
 
+    private var speaksOwnLanguage: Bool {
+        ownWords.map { language.hasPrefix($0.language) } ?? true
+    }
+
     func guesses(for word: String) -> [String] {
+        guard speaksOwnLanguage else { return [] }
         let ns = word as NSString
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return [] }
@@ -70,6 +81,7 @@ final class SystemTextChecker: TextChecking {
     }
 
     func completions(for prefix: String) -> [String] {
+        guard speaksOwnLanguage else { return [] }
         let ns = prefix as NSString
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return [] }

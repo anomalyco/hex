@@ -583,6 +583,14 @@ never at a launch by itself.
     the raw taps (35.3% with `UITextChecker` alone), changes 0.10% of correctly typed words
     (0.56%) and restores 81.1% of the accents left out where the plain spelling is in neither
     the model nor `fr.valid` (78.7%), short of the gate's 85%. Canada's and Switzerland's French don't read it yet (`fr-CA`, `fr-CH`).
+    Beside a model, a language with its own word list (`HEXKeyboard/TypingModel/<code>.valid`,
+    Android's `android/benchmark/typing/build-valid-words.py` output: today French's) takes what
+    is a word from the model and that list alone, not from `UITextChecker` (`HexWordList`,
+    memory-mapped and searched in place; `SystemTextChecker.ownWords`), and a missing system
+    dictionary no longer turns its model off (`AutocorrectEngine.hasWords`). `UITextChecker`
+    still gives guesses and completions while it is in that language. With `fr.valid` French
+    restores 86.1% of the accents the gate counts (81.1% with `UITextChecker`). English, Spanish
+    and German keep `UITextChecker`: their own lists moved a gate number the wrong way.
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
     Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
     Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
@@ -1722,8 +1730,8 @@ never at a launch by itself.
 
 The app shows these under Settings › Acknowledgements (`HEXMobile/AcknowledgementsView.swift`).
 
-- **Google Books Ngram data:** Spatial autocorrect's word and word-pair frequencies, and
-  German's capitalisation shares, come from the Google Books Ngram Viewer data, version 3
+- **Google Books Ngram data:** Spatial autocorrect's word and word-pair frequencies,
+  German's capitalisation shares and French's list of words outside its model come from the Google Books Ngram Viewer data, version 3
   (2020), by Google, licensed under
   [Creative Commons Attribution 3.0](https://creativecommons.org/licenses/by/3.0/). Counts
   are summed over 1980–2019 and kept only for words in the lists below.

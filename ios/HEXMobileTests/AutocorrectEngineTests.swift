@@ -1335,6 +1335,32 @@ final class AutocorrectEngineTests: XCTestCase {
     /// Without it the Deutsch layout keeps the dictionary engine exactly as before: no word
     /// list either, so no letter odds, no model completions in the strip, and no partner model.
     /// English and Spanish never wait on the experiment.
+    /// French's own word list (`fr.valid`) is read in place and, beside its model, says what is a
+    /// word instead of the phone's dictionary: a real word outside the model counts, letters that
+    /// are no word don't even where iOS's dictionary takes any letters, and a missing system
+    /// dictionary doesn't switch the model off.
+    func testFrenchReadsItsOwnWordList() throws {
+        let list = try XCTUnwrap(HexWordList.bundled("fr"), "fr.valid is bundled")
+        XCTAssertTrue(list.contains("abaissait"))
+        XCTAssertFalse(list.contains("qzxjvkq"))
+        XCTAssertFalse(list.contains(""))
+        let model = try XCTUnwrap(TypingDecoderModel.bundled("fr"))
+        let checker = SystemTextChecker()
+        let autocorrect = AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
+        autocorrect.setLanguage(.french, available: [])
+        XCTAssertFalse(autocorrect.hasWords, "no dictionary and no model")
+        autocorrect.decoder = TypingDecoder(model: model)
+        XCTAssertTrue(autocorrect.hasWords, "the model needs no system dictionary")
+        XCTAssertNotNil(checker.ownWords)
+        for word in ["maison", "Maison", "c'est", "c\u{2019}est", "abaissait"] {
+            XCTAssertTrue(checker.isWordValid(word), word)
+        }
+        XCTAssertFalse(checker.isWordValid("qzxjvkq"), "only Hex's words count")
+        XCTAssertEqual(checker.guesses(for: "maisn"), [], "no English guesses for French words")
+        autocorrect.decoder = TypingDecoder(model: try XCTUnwrap(TypingDecoderModel.bundled("en")))
+        XCTAssertNil(checker.ownWords, "English ships no list")
+    }
+
     func testTheGermanTypingModelNeedsItsExperiment() {
         let settings = FullKeyboardSettings(defaults: defaults)
         XCTAssertFalse(settings.germanSpatialAutocorrect, "off by default")
