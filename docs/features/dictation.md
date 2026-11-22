@@ -1802,8 +1802,9 @@ Model advertises streaming, GPU device             // dictate.streaming
        ├── Stream failed, produced no text, or was fed > 250 ms past the clip
        │   -> Transcribe the whole clip offline (source=fallback)
        ├── ≥ 300 ms of speech it heard > 400 ms before the text (1.2 s for a
-       │   buffered Parakeet stream, which also refuses speech starting more
-       │   than ~1.5 s before the text), outside the pre-roll and start tone
+       │   buffered Parakeet stream, which also refuses speech starting 1.5 s
+       │   or more before the text once 100 ms is detected more than 400 ms
+       │   before it), outside the pre-roll and start tone
        │   -> Transcribe the whole clip offline (source=fallback)  // lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
@@ -2173,19 +2174,26 @@ Unified English Q8_0 model through transcribe.cpp on the CPU, over clean
 stream's opening words matched the whole-clip text in every run, including
 speech starting at sample 0. The stream's chunk and lookahead geometry was not
 varied. What the slack excuses: detected speech within 1.2 s before the text's
-start. With the span rule, a buffered stream whose detected speech starts more
-than about 1.5 s before its text is still refused, even when the frames it
-counted there are too sparse to reach 300 ms. Still open: the waited-first
-refusals still fall back to the whole clip, now caught by the span rule once
-100 ms or more of the opening is detected before its 1.2 s edge
-(`parakeets_sparse_opening_spanning_1800_ms_is_refused` and
-`parakeets_sparse_opening_spanning_3080_ms_is_refused`); whether those streams
-actually lost their opening is unknown, as the production logs do not record
-the stream's text and the lag was measured only on the CPU. Checks:
+start. A buffered stream also gets a span rule with both conditions: at
+least 100 ms of speech detected more than 400 ms before the text, and detected
+speech that starts 1.5 s or more before the text. When both hold the stream is
+refused, however sparse the earlier frames are and however much dense speech
+sits inside the 1.2 s window. That makes the waited-first refusals fall back
+to the whole clip too (`parakeets_sparse_opening_spanning_1800_ms_is_refused`,
+`parakeets_sparse_opening_spanning_3080_ms_is_refused`, and
+`parakeets_sparse_frames_cannot_hide_a_dense_lost_opening`); whether those
+streams actually lost their opening is unknown, as the production logs do not
+record the stream's text and the lag was measured only on the CPU. The cost is
+more fallbacks: an early click or breath more than ~1.5 s before the text,
+with normal speech after it, now transcribes the whole clip, which costs
+latency only. Checks:
 `parakeets_late_first_word_time_is_not_a_lost_opening`,
 `parakeets_measured_lags_are_not_lost_openings`,
 `parakeets_sparse_opening_spanning_1800_ms_is_refused`,
 `parakeets_sparse_opening_spanning_3080_ms_is_refused`,
+`parakeets_sparse_frames_cannot_hide_a_dense_lost_opening`,
+`parakeets_span_rule_needs_100_ms_before_the_old_edge`,
+`parakeets_span_rule_edge_is_one_frame`,
 `parakeets_opening_slack_still_refuses_a_lost_opening`, and
 `parakeets_opening_slack_edge_is_one_frame` (synthetic tones, a fake stream).
 Not measured on a microphone or a device.

@@ -1917,12 +1917,12 @@ mod tests {
     fn parakeets_opening_slack_edge_is_one_frame() {
         use crate::transcription::pause_segmenter::FRAME_SAMPLES;
         // The 1.2 s slack with the 300 ms threshold: a speech frame counts
-        // only while it ends strictly before t0 - 1.2 s, and detected speech
-        // that opens a threshold before that edge is refused by its span
-        // alone. So 15 frames (300 ms) ending one frame before the edge are
-        // refused, while 14 frames (280 ms) ending at the edge are kept: the
-        // frame ending exactly at the edge is not counted, and the span is
-        // under the threshold.
+        // only while it ends strictly before t0 - 1.2 s, and the span rule
+        // refuses speech that opens 300 ms or more before that edge once
+        // 100 ms is detected before the 400 ms edge. So 15 frames (300 ms)
+        // ending one frame before the edge are refused, while 14 (280 ms)
+        // ending at the edge are kept: the edge frame is not counted and the
+        // span stays under 300 ms.
         let text_start_ms: u64 = 3_000;
         let covered = text_start_ms as usize * 16 - PARAKEET_OPENING_SLACK_SAMPLES; // 28_800
         let frame: usize = FRAME_SAMPLES;
@@ -1967,7 +1967,7 @@ mod tests {
             finish_with_opening_slack(&clip, 0, Some(3_920), 4_220, PARAKEET_OPENING_SLACK_SAMPLES);
         assert!(
             result.as_ref().is_err_and(
-                |reason| reason.contains("240 ms of speech precedes it, from 920 to 2400 ms")
+                |reason| reason.contains("speech from 920 ms precedes it and spans 1800 ms")
             ),
             "{result:?}"
         );
@@ -1989,17 +1989,87 @@ mod tests {
             finish_with_opening_slack(&clip, 0, Some(4_480), 4_780, PARAKEET_OPENING_SLACK_SAMPLES);
         assert!(
             result.as_ref().is_err_and(
-                |reason| reason.contains("240 ms of speech precedes it, from 200 to 1680 ms")
+                |reason| reason.contains("speech from 200 ms precedes it and spans 3080 ms")
             ),
             "{result:?}"
         );
     }
 
     #[test]
+    fn parakeets_sparse_frames_cannot_hide_a_dense_lost_opening() {
+        // Four old frames (80 ms) around 1 s, then 800 ms of lost speech from
+        // 2.8 s to 3.6 s, text at 4 s. Counting only before the 1.2 s edge
+        // (2.8 s) sees 80 ms and accepts; counting before the 400 ms edge
+        // (3.6 s) sees the dense speech, so the 1.84 s span refuses it.
+        let clip = sparse_speech(&[(960, 80), (2_800, 800)]);
+        let result =
+            finish_with_opening_slack(&clip, 0, Some(4_000), 4_300, PARAKEET_OPENING_SLACK_SAMPLES);
+        assert!(
+            result.as_ref().is_err_and(
+                |reason| reason.contains("speech from 960 ms precedes it and spans 1840 ms")
+            ),
+            "{result:?}"
+        );
+    }
+
+    #[test]
+    fn parakeets_span_rule_needs_100_ms_before_the_old_edge() {
+        // Speech at 400 ms starts 1.4 s before the 1.2 s edge at 1.8 s. Four
+        // frames (80 ms) before the 400 ms edge are under the rule's minimum
+        // and kept; five (100 ms) are refused.
+        for (frames, refused) in [(4usize, false), (5, true)] {
+            let mut clip = vec![0.0; 400 * 16];
+            clip.extend(tone(frames * 20 * 16));
+            clip.extend(vec![0.0; 3_200]);
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(3_000),
+                3_300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            assert_eq!(
+                result
+                    .as_ref()
+                    .is_err_and(|reason| reason
+                        .contains("speech from 400 ms precedes it and spans 1400 ms")),
+                refused,
+                "{frames}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn parakeets_span_rule_edge_is_one_frame() {
+        // Text at 3 s puts the 1.2 s edge at 1.8 s: speech starting exactly
+        // 300 ms before it is refused, one frame later (280 ms) is kept. Both
+        // have the rule's 100 ms minimum before the 400 ms edge.
+        for (speech_start_ms, refused) in [(1_500usize, true), (1_520, false)] {
+            let mut clip = vec![0.0; speech_start_ms * 16];
+            clip.extend(tone(100 * 16));
+            clip.extend(vec![0.0; 3_200]);
+            let result = finish_with_opening_slack(
+                &clip,
+                0,
+                Some(3_000),
+                3_300,
+                PARAKEET_OPENING_SLACK_SAMPLES,
+            );
+            assert_eq!(
+                result.as_ref().is_err_and(|reason| {
+                    reason.contains("speech from") && reason.contains("spans 300 ms")
+                }),
+                refused,
+                "{speech_start_ms}: {result:?}"
+            );
+        }
+    }
+
+    #[test]
     fn parakeets_measured_lags_are_not_lost_openings() {
-        // Production's accepted cases: first detected speech 820-1420 ms
-        // before the text, inside the measured lag plus the slack, so none is
-        // a lost opening.
+        // Production refused these streams. Their first detected speech came
+        // 820-1420 ms before the text, under the span rule's 1.5 s, so this
+        // fix keeps them accepted.
         for (speech_start_ms, text_start_ms) in
             [(220u64, 1_280u64), (300, 1_120), (220, 1_440), (340, 1_760)]
         {

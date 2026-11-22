@@ -371,11 +371,15 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
             // The threshold is the trailing check's, on the speech that ends
             // before the text begins, without Hex's own sounds at the capture's
             // head. The wider Parakeet slack excuses only the 1.2 s before the
-            // text, so a buffered stream whose detected speech opens a whole
-            // threshold before that is refused by its span alone: sparse
-            // frames there are still a lost sentence. Models with real token
-            // times keep the count alone, where a click inside the 400 ms
-            // slack was never a lost opening.
+            // text, so a buffered stream also gets a span rule: at least
+            // 100 ms of speech detected before the old 400 ms edge, and
+            // speech starting 1.5 s or more before the text (300 ms before
+            // the 1.2 s edge), means the stream lost its opening however
+            // sparse those old frames are.
+            // Dense speech inside the 1.2 s window counts toward the minimum,
+            // so a few old frames cannot hide it. Models with real token times
+            // keep the count alone, where a click inside the 400 ms slack was
+            // never a lost opening.
             let covered = (start_ms as usize * 16).saturating_sub(self.opening_slack);
             let frame = crate::transcription::pause_segmenter::FRAME_SAMPLES;
             let (mut first, mut last, mut untranscribed) = (None, 0, 0);
@@ -389,11 +393,26 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
                 last = end;
                 untranscribed += frame;
             }
-            let spanned = self.opening_slack > UNTRANSCRIBED_SLACK_SAMPLES
-                && untranscribed >= 5 * frame
-                && first
-                    .is_some_and(|first| covered - (first - frame) >= UNTRANSCRIBED_SPEECH_SAMPLES);
-            if (untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES || spanned)
+            let buffered = self.opening_slack > UNTRANSCRIBED_SLACK_SAMPLES;
+            let (mut early_first, mut early_count) = (None, 0);
+            if buffered {
+                let old_edge = (start_ms as usize * 16).saturating_sub(UNTRANSCRIBED_SLACK_SAMPLES);
+                for end in self
+                    .speech_ends
+                    .iter()
+                    .copied()
+                    .filter(|&end| end > self.head_ignored && end < old_edge)
+                {
+                    early_first.get_or_insert(end);
+                    early_count += frame;
+                }
+            }
+            let spanned = buffered
+                && early_count >= 5 * frame
+                && early_first.is_some_and(|first| {
+                    covered.saturating_sub(first - frame) >= UNTRANSCRIBED_SPEECH_SAMPLES
+                });
+            if untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES
                 && let Some(first) = first
             {
                 return Err(format!(
@@ -402,6 +421,15 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
                     untranscribed / 16,
                     (first - frame) / 16,
                     last / 16
+                ));
+            }
+            if spanned && let Some(first) = early_first {
+                let start = first - frame;
+                return Err(format!(
+                    "the stream's text starts at {start_ms} ms but speech from {} ms precedes \
+                     it and spans {} ms before the stream's 1.2 s slack",
+                    start / 16,
+                    (covered - start) / 16
                 ));
             }
         }
