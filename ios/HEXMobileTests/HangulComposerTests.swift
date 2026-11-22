@@ -344,8 +344,8 @@ final class KoreanKeyboardGatingTests: XCTestCase {
 
         XCTAssertEqual(settings.keyboardLanguages, [.english], "a stored ko is ignored")
         XCTAssertNil(settings.currentKeyboardLanguage, "a stored ko is ignored")
-        XCTAssertNil(KeyboardLanguage.matching("ko-KR", koreanEnabled: false))
-        XCTAssertFalse(KeyboardLanguage.selectable(koreanEnabled: false).contains(.korean))
+        XCTAssertNil(KeyboardLanguage.matching("ko-KR", experiments: .none))
+        XCTAssertFalse(KeyboardLanguage.selectable(experiments: .none).contains(.korean))
     }
 
     func testKoreanAppearsWhileTheExperimentIsOn() {
@@ -356,7 +356,7 @@ final class KoreanKeyboardGatingTests: XCTestCase {
 
         XCTAssertEqual(settings.keyboardLanguages, [.english, .korean])
         XCTAssertEqual(settings.currentKeyboardLanguage, KeyboardLanguage.korean)
-        XCTAssertEqual(KeyboardLanguage.matching("ko-KR", koreanEnabled: true), KeyboardLanguage.korean)
-        XCTAssertTrue(KeyboardLanguage.selectable(koreanEnabled: true).contains(.korean))
+        XCTAssertEqual(KeyboardLanguage.matching("ko-KR", experiments: .init(korean: true)), KeyboardLanguage.korean)
+        XCTAssertTrue(KeyboardLanguage.selectable(experiments: .init(korean: true)).contains(.korean))
     }
 }

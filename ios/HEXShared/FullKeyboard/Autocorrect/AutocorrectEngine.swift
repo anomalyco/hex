@@ -567,7 +567,7 @@ final class AutocorrectEngine {
         case .ukrainian: ["я", "це", "ми"]
         case .greek: ["θα", "δεν", "το"]
         case .serbianLatin: ["ja", "to", "da"]
-        case .korean: []
+        case .korean, .arabic: []
         }
     }
 
@@ -592,7 +592,7 @@ final class AutocorrectEngine {
         case .ukrainian: ["і", "але", "що"]
         case .greek: ["και", "αλλά", "που"]
         case .serbianLatin: ["i", "ali", "da"]
-        case .korean: []
+        case .korean, .arabic: []
         }
     }
 
@@ -614,7 +614,7 @@ final class AutocorrectEngine {
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
         case .greek: ["και", "να", "το", "θα", "δεν", "η"]
         case .serbianLatin: ["i", "je", "da", "u", "se", "na"]
-        case .korean: []
+        case .korean, .arabic: []
         }
     }
 

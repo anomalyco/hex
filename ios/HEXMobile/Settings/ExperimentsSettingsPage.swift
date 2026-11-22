@@ -169,6 +169,15 @@ struct ExperimentsSettingsPage: View {
 
             SettingsDivider()
 
+            // Off by default: العربية isn't offered in Languages and a stored "ar" is ignored.
+            SettingsToggleRow(
+                title: String(localized: "Arabic keyboard (العربية)"),
+                detail: String(localized: "Adds العربية, right to left on Apple's Arabic keys"),
+                isOn: keyboardBinding(\.arabicKeyboard)
+            )
+
+            SettingsDivider()
+
             SettingsToggleRow(
                 title: String(localized: "Swipe typing in more languages"),
                 detail: String(localized: "French and Polish, and German with German spatial autocorrect"),

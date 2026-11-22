@@ -566,6 +566,31 @@ the experiment off the language isn't listed, Automatic never picks it, and a st
 ignored. Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,
 `KoreanKeyboardGatingTests`): no CI compiles the iOS targets and no device run checks it.
 
+**العربية (Arabic):** Settings › Experiments › Arabic keyboard (off by default,
+`experiments.arabicKeyboard`) adds العربية to the same list, read from Apple's own iPhone
+and iPad keyboards (iOS 26.5 simulator, `AppleKeyboards ar@sw=Arabic`). On iPhone the rows
+are ض ص ث ق ف غ ع ه خ ح ج / ش س ي ب ل ا ت ن م ك ة / ء ظ ط ذ د ز ر و ى, drawn left to
+right as Apple shows them, with no shift key: Arabic writes without letter case, so nothing
+auto-capitalizes and a period starts no capital. Row 3's nine letters keep their width and
+leave Apple's gap before delete. iPad uses the same top two rows and the nine letters plus
+the Arabic comma, with no shift. Holds match Apple's callouts: ا → أ إ آ, ي and ى → ئ,
+و → ؤ, ه → ة, ء → أ إ ؤ ئ, and ل → لا. A harakat key sits between space and return on both
+device classes' letters pages: tapping types fathatan, and its callout offers ً ٌ ٍ َ ُ ِ ّ ْ
+ٖ ٰ ٓ. Hex presents them in its normal accent bubble above the key, while Apple draws a
+full-width strip of dotted circles; the marks are the same. The 123 page types the Eastern
+Arabic digits ١٢٣٤٥٦٧٨٩٠ with ، ؟ ! ’ and ؛; the iPhone #+= page keeps Latin , and ? and ends
+in ’. iPad's 123 rows are ! @ # $ % ^ & * ( ) ؟ and . | / = + … : ؛ ،, and its #+= rows are
+[ ] € £ ~ _ { } < > ? and % • \ , ’ ’ ” ; ,. Its page keys read ١٢٣ and أبج. Remaining
+differences: Hex's bottom row keeps its globe, Hex, emoji and hide keys where Apple shows
+dictation and a second page key, and Hex's iPad accent callouts use its own bubble and cell
+geometry. It reports input language `ar-SA`, has no spelling dictionary, autocorrect,
+suggestions, typing model or bilingual partner, and no accent restorations or accent
+suggestions; the apostrophe and quotation keys keep Hex's default English curly quotes, which
+Arabic letters never see. With the experiment off, العربية is not listed, Automatic never
+picks it (an Arabic dictation language falls back to English), and a stored "ar" is ignored.
+Unit tests only (`ArabicKeyboardTests`): no CI compiles the iOS targets and no device run
+checks it.
+
 ## Layout per language (Settings › Keyboard › Languages › Layout)
 
 Each language the keys
@@ -1048,7 +1073,9 @@ full-width text view on an iPhone, a row is a line and Hex moves as many lines a
 where it's narrower, a row is more than a line and up and down skip lines (iOS 27.2
 simulator, 20 / 40 / 60 pt up: Apple's 1 / 2 / 3 lines, Hex's 2 / 5 / 7 in a field half the
 width; on the Duo's cover screen an app gets 382 pt of the 466 while the keyboard spans 452,
-so even a full-width field skips one going down). The keys blank to keycaps 60%
+so even a full-width field skips one going down). In an Arabic run its UTF-16 offsets are
+logical, so the cursor steps through the run's characters in writing order rather than its
+right-to-left display order: a known limit, not a bidi-aware cursor. The keys blank to keycaps 60%
 of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
 tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
 selection but not make one. Off (the default), a second finger does nothing. Settings ›

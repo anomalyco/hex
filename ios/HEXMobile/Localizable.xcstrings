@@ -557,6 +557,16 @@
         }
       }
     },
+    "Adds العربية, right to left on Apple's Arabic keys" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加入 العربية，从右到左，按键与 Apple 的阿拉伯语键盘相同"
+          }
+        }
+      }
+    },
     "Advanced" : {
       "localizations" : {
         "zh-Hans" : {
@@ -696,6 +706,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Apple 的语音识别无法在这台 iPhone 上听写这种语言。"
+          }
+        }
+      }
+    },
+    "Arabic keyboard (العربية)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阿拉伯语键盘（العربية）"
           }
         }
       }

@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|ro|ru|uk|el|sr-Latn|ko|ar|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
 /// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, `t` on Romanian, or `o` on Hungarian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
@@ -201,6 +201,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "10분 늦어"
             case "accents": "한"
             default: "10분 늦어요. "
+            }
+        case .arabic:
+            return switch state {
+            case "inserted": "سأتأخر عشر دقائق، سأكون في المنزل الساعة 19:30. ابدأوا من دوني."
+            case "numbers": "سأتأخر عشر دقائق، سأكون في المنزل الساعة 19:3"
+            case "shift": "سأتأخر عشر دقائق. "
+            case "typing": "سأتأخر عشر دقائ"
+            case "accents": Self.accentKey == "ا" ? "سأتأخ" : "الب"
+            default: "سأتأخر عشر دقائق، "
             }
         case .english:
             break

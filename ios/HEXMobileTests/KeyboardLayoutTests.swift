@@ -752,6 +752,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .czech: ["qwertzuiop", "asdfghjkl´", "yxcvbnmˇ"],
             .hungarian: ["qwertzuiop", "asdfghjkl", "yxcvbnm"],
             .korean: ["ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ", "ㅁㄴㅇㄹㅎㅗㅓㅏㅣ", "ㅋㅌㅊㅍㅠㅜㅡ"],
+            .arabic: ["ضصثقفغعهخحج", "شسيبلاتنمكة", "ءظطذدزروى"],
         ]
         for (language, expected) in rows {
             let layout = KeyboardLayout(width: 402, language: language)
@@ -785,6 +786,7 @@ final class KeyboardLayoutTests: XCTestCase {
             .czech: [.own, .qwerty],
             .hungarian: [.own, .qwerty],
             .korean: [.own],
+            .arabic: [.own],
         ]
         for language in KeyboardLanguage.allCases {
             XCTAssertEqual(language.letterLayouts, offered[language], "\(language)")
@@ -2885,8 +2887,8 @@ final class KeyboardLayoutTests: XCTestCase {
                 XCTAssertTrue(digits.isEmpty, "the 123 page's own row 1 is the digits: \(describe(on))")
                 continue
             }
-            XCTAssertEqual(digits.map(\.label), KeyboardLayout.numberRowDigits, describe(on))
-            XCTAssertEqual(digits.map(\.kind), KeyboardLayout.numberRowDigits.map { .character($0) }, describe(on))
+            XCTAssertEqual(digits.map(\.label), on.language.digits.map(String.init), describe(on))
+            XCTAssertEqual(digits.map(\.kind), on.language.digits.map { .character(String($0)) }, describe(on))
             for key in digits {
                 XCTAssertEqual(key.frame.minY, m.stripArea, accuracy: 0.001, describe(on))
                 XCTAssertEqual(key.frame.height, m.numberRowHeight, accuracy: 0.001, describe(on))
