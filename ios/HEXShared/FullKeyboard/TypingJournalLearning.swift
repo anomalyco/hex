@@ -169,7 +169,7 @@ nonisolated struct TypingLearning: Equatable, Sendable {
 
         // typo → lowercased word → (spelling, count)
         var fixes: [String: [String: (spelling: String, count: Int)]] = [:]
-        for correction in corrections where correction.kind == .retyped || correction.kind == .picked {
+        for correction in corrections where (correction.kind == .retyped || correction.kind == .picked) && correction.teaches {
             let typo = correction.typed.lowercased()
             let word = correction.final.lowercased()
             guard typo.count >= 2, isWord(typo), isWord(word), typo != word,
@@ -192,7 +192,68 @@ nonisolated struct TypingLearning: Equatable, Sendable {
         return TypingLearning(typos: typos, rejected: rejected)
     }
 
+    /// Whether a word you erased (`typed`) is plausibly a slip of the one you typed in its place
+    /// (`final`), so the pair may teach a fix. Plausible: the same word with other capitals or
+    /// an apostrophe ("Im" → "I'm"); or, both two letters or more, starting alike (the same
+    /// letter, a neighbouring key, or its first letter missed or one typed before it) and at
+    /// most one slip for every four letters of `final` (at least one), where a neighbouring
+    /// key, a missing accent, two letters swapped and a doubled or undoubled letter count half
+    /// ("Ciry" → "City", "Diaxuss" → "Discuss"). A change of mind ("Sunda" → "Saturday",
+    /// "is" → "this") or an unfinished word finished ("reqe" → "request") is no slip.
+    /// Neighbours are on `language`'s own layout (`KeyboardLanguage.rawValue`; English when
+    /// unknown).
+    static func isSlip(typed: String, final: String, language: String? = nil) -> Bool {
+        func plain(_ word: String) -> [Character] { Array(word.lowercased().filter { $0 != "'" && $0 != "’" }) }
+        let a = plain(typed), b = plain(final)
+        if a == b { return true }
+        guard a.count >= 2, b.count >= 2, a.allSatisfy(\.isLetter), b.allSatisfy(\.isLetter) else { return false }
+        let keys = keyCoordinates[KeyboardLanguage(rawValue: language ?? "") ?? .english] ?? [:]
+        func near(_ x: Character, _ y: Character) -> Bool {
+            if x == y || base(x) == base(y) { return true }
+            guard let p = keys[x], let q = keys[y] else { return false }
+            return hypot(p.0 - q.0, p.1 - q.1) <= 1.6
+        }
+        guard near(a[0], b[0]) || a[0] == b[1] || a[1] == b[0] else { return false }
+        return slipCost(a, b, near: near) <= max(1, Double(b.count) / 4)
+    }
+
+    /// The weighted edit distance `isSlip` bounds: 0.5 for a neighbouring key or an accent, two
+    /// letters swapped, or a doubled letter added or dropped; 1 for any other change.
+    private static func slipCost(_ a: [Character], _ b: [Character], near: (Character, Character) -> Bool) -> Double {
+        func step(_ s: [Character], _ i: Int) -> Double { i > 0 && s[i] == s[i - 1] ? 0.5 : 1 }
+        var d = Array(repeating: Array(repeating: 0.0, count: b.count + 1), count: a.count + 1)
+        for i in 1...a.count { d[i][0] = d[i - 1][0] + step(a, i - 1) }
+        for j in 1...b.count { d[0][j] = d[0][j - 1] + step(b, j - 1) }
+        for i in 1...a.count {
+            for j in 1...b.count {
+                let substitution = a[i - 1] == b[j - 1] ? 0 : near(a[i - 1], b[j - 1]) ? 0.5 : 1
+                var cost = min(d[i - 1][j - 1] + substitution, d[i - 1][j] + step(a, i - 1), d[i][j - 1] + step(b, j - 1))
+                if i > 1, j > 1, a[i - 1] == b[j - 2], a[i - 2] == b[j - 1] { cost = min(cost, d[i - 2][j - 2] + 0.5) }
+                d[i][j] = cost
+            }
+        }
+        return d[a.count][b.count]
+    }
+
+    private static func base(_ c: Character) -> Unicode.Scalar? {
+        String(c).decomposedStringWithCanonicalMapping.unicodeScalars.first
+    }
+
+    /// Each language's letters on its own layout, for `isSlip`'s neighbouring keys.
+    private static let keyCoordinates: [KeyboardLanguage: [Character: (Double, Double)]] = Dictionary(
+        uniqueKeysWithValues: KeyboardLanguage.allCases.map { ($0, $0.keyCoordinates()) }
+    )
+
     private static func isWord(_ text: String) -> Bool {
         !text.isEmpty && text.allSatisfy { $0.isLetter || $0 == "'" || $0 == "’" }
+    }
+}
+
+extension TypingJournalCorrection {
+    /// Whether this correction may be counted, listed and learned from: a word you erased and
+    /// retyped only when it was a slip of the new one (`TypingLearning.isSlip`), so a change of
+    /// mind ("Sunda" → "Saturday") teaches nothing, in a journal written before this check too.
+    var teaches: Bool {
+        kind != .retyped || TypingLearning.isSlip(typed: typed, final: final, language: language)
     }
 }

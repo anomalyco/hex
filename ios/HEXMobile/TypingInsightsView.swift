@@ -77,7 +77,7 @@ struct TypingInsightsView: View {
             return String(localized: "Nothing learned yet")
         }
         let taps = snapshot.tapCount
-        let fixes = snapshot.corrections.count
+        let fixes = snapshot.corrections.filter(\.teaches).count
         let dictations = snapshot.dictationOutcomes.count
         return dictations == 1
             ? String(localized: "\(taps) taps, \(fixes) typing fixes and 1 dictation learned")
@@ -118,7 +118,7 @@ struct TypingInsightsView: View {
 
     private var topFixes: [(label: String, count: Int)] {
         var counts: [String: Int] = [:]
-        for correction in snapshot.corrections where correction.kind != .undone && correction.kind != .keptTyped {
+        for correction in snapshot.corrections where correction.kind != .undone && correction.kind != .keptTyped && correction.teaches {
             counts["\(correction.typed) → \(correction.final)", default: 0] += 1
         }
         return counts.sorted { $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }

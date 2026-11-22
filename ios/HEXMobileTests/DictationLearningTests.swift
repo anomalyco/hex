@@ -470,6 +470,41 @@ final class TypingJournalLearningTests: XCTestCase {
         XCTAssertEqual(learning.rejected, ["kit"])
     }
 
+    /// TestFlight (build 142): Learn how I type listed "Sunda → Saturday" beside real fixes, a
+    /// word erased for another. A word erased and retyped teaches only when it was a slip of the
+    /// new one: a change of mind isn't recorded, and one a journal already holds isn't counted,
+    /// listed or learned.
+    func testAWordErasedForAnotherWordTeachesNothing() {
+        let slips = [("Ciry", "City"), ("Diaxuss", "Discuss"), ("Im", "I'm"), ("i", "I"), ("teh", "the"),
+                     ("thw", "the"), ("hexx", "hex"), ("bonjor", "bonjour"), ("ity", "city")]
+        for (typed, final) in slips {
+            XCTAssertTrue(TypingLearning.isSlip(typed: typed, final: final), "\(typed) → \(final)")
+        }
+        let changes = [("Sunda", "Saturday"), ("is", "this"), ("reqe", "request"), ("agent", "subagent"),
+                       ("bat", "cat"), ("take", "talk"), ("a", "do")]
+        for (typed, final) in changes {
+            XCTAssertFalse(TypingLearning.isSlip(typed: typed, final: final), "\(typed) → \(final)")
+        }
+        XCTAssertTrue(TypingLearning.isSlip(typed: "tu", final: "zu", language: "de"), "t beside z on German's keys")
+        XCTAssertFalse(TypingLearning.isSlip(typed: "tu", final: "zu"), "not on English's")
+
+        let journal = TypingJournal(directory: directory, settings: settings)
+        for (erased, word) in [("Sunda", "Saturday"), ("Ciry", "City")] {
+            journal.willErase(word: erased)
+            journal.didFinish(word: word)
+        }
+        XCTAssertEqual(journal.current.corrections.map { "\($0.typed) → \($0.final)" }, ["Ciry → City"])
+
+        func correction(_ kind: TypingJournalCorrection.Kind, _ typed: String, _ final: String) -> TypingJournalCorrection {
+            TypingJournalCorrection(kind: kind, typed: typed, final: final, at: 0)
+        }
+        let older = [correction(.retyped, "Sunda", "Saturday"), correction(.retyped, "Sunda", "Saturday"),
+                     correction(.retyped, "Ciry", "City"), correction(.retyped, "Ciry", "City")]
+        XCTAssertEqual(TypingLearning.derive(from: older).typos, ["ciry": "City"], "never applied")
+        XCTAssertEqual(older.filter(\.teaches).count, 2, "never counted or listed")
+        XCTAssertTrue(correction(.autocorrected, "Sunda", "Saturday").teaches, "only what you erased and retyped")
+    }
+
     func testTheKeysUseTheJournalsLearning() {
         let target = FixtureTextTarget()
         target.autocapitalizationType = UITextAutocapitalizationType.none
