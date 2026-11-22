@@ -61,3 +61,22 @@ cd ../crates/keyboard && cargo test --release --test swipe_parity -- --nocapture
 
 `TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1` adds each read's time; a larger count makes a larger
 file for `HEX_SWIPE_PARITY`.
+
+What a swipe types is the core's too (`core/src/swipe/typing.rs`): the space before the word
+and the capital it brings, the word's casing (caps lock, shift, a name the dictionary knows
+only capitalised, your own words' capitals, Auto-capitalization off), the strip's
+alternatives with text replacements, the rare-name ranking and the slid tap. The host answers
+what only it knows: whether the dictionary knows a word (a callback), your text replacements
+and words, and the field, shift and auto-capitalization state with the text before the
+cursor; which readings may be offered at all stays its filter. Ported from iOS's Swift and
+proven alike on 1,000,000 generated cases in one process, it's held to
+`core/tests/fixtures/swipe-rules.jsonl` (5,000 of those cases) by `core/tests/swipe_rules.rs`
+and iOS's `SwipeRulesFixtureTests`. Refresh it for an intended change the same way:
+
+```sh
+TEST_RUNNER_HEX_SWIPE_RULES_OUT=/tmp/swipe-rules.jsonl TEST_RUNNER_HEX_SWIPE_RULES_COUNT=5000 \
+  xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+  -destination 'platform=iOS Simulator,name=<simulator>' \
+  -only-testing:HEXMobileTests/SwipeRulesFixtureTests/testExportSwipeRulesFixture
+cp /tmp/swipe-rules.jsonl ../crates/keyboard/core/tests/fixtures/swipe-rules.jsonl
+```
