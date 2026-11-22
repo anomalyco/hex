@@ -319,9 +319,15 @@ never at a launch by itself.
     under the recording bar (`LiveDictationPreviewView`), the settled words in the keys'
     ink and the tail the recogniser may still change muted, the newest line in view with
     whole lines above it. It takes every touch where the keys were, so nothing types while
-    it shows; the recording bar's ✕ and ✓ work as before, and an iPhone with a Home button
-    keeps its globe key where it was. VoiceOver reads it as one element, never announced as
-    words change. Its motion is one family, a spring with no bounce by its duration
+    it shows, and a tap on the words finishes the dictation as ✓ does (✕ is still the only
+    way to throw one away). Only a tap, by the keys' own measures: a touch that moves more
+    than a key's slop (`FullKeyboardEngine.accentSlop`, 10 pt) or is held as long as a key
+    takes to open its accents (`accentHoldDelay`, 0.36 s) does nothing, and so does one
+    landing within 0.4 s of the words appearing (their 0.3 s fade in and 0.1 s more: the end
+    of the tap that started the dictation, or a thumb settling); it finishes once. The
+    recording bar's ✕ and ✓ work as before, and an iPhone with a Home button keeps its globe
+    key where it was. VoiceOver reads it as one element, never announced as words change;
+    activating it, or its Finish dictation action, finishes the dictation. Its motion is one family, a spring with no bounce by its duration
     (`LiveWordsMotion`, `LiveDictationPreviewHost.Motion`, and the recording bar's morph and
     fades), and Core Animation runs every frame of it, so it keeps the display's pace however
     busy the main thread is with the capture, the recogniser and the Dot Scope (a display link
