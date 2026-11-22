@@ -3345,7 +3345,7 @@ final class KeyboardClipboardTests: XCTestCase {
         func offer(appleKeyboard: Bool) -> KeyboardClipboardOffer? {
             tracker.offer(
                 textContentType: .oneTimeCode, keyboardType: .numberPad, autocorrectionType: .default, fieldIsEmpty: true,
-                hasFullAccess: true, reachesAppleKeyboard: { _ in appleKeyboard }, pasteboard: pasteboard
+                hasFullAccess: true, appleKeyboardRoute: { _ in appleKeyboard ? .next : nil }, pasteboard: pasteboard
             )
         }
         XCTAssertEqual(offer(appleKeyboard: true), .code(canPaste: false))
@@ -3356,7 +3356,7 @@ final class KeyboardClipboardTests: XCTestCase {
         XCTAssertEqual(
             tracker.offer(
                 textContentType: nil, keyboardType: .default, autocorrectionType: .default, fieldIsEmpty: true,
-                hasFullAccess: true, reachesAppleKeyboard: { _ in XCTFail("asked outside a code field"); return true }, pasteboard: pasteboard
+                hasFullAccess: true, appleKeyboardRoute: { _ in XCTFail("asked outside a code field"); return .next }, pasteboard: pasteboard
             ),
             .paste
         )
@@ -3371,7 +3371,7 @@ final class KeyboardClipboardTests: XCTestCase {
         func offer(canSwitch: Bool) -> KeyboardClipboardOffer? {
             tracker.offer(
                 textContentType: .oneTimeCode, keyboardType: .numberPad, autocorrectionType: .default, fieldIsEmpty: true,
-                hasFullAccess: true, canSwitchKeyboard: canSwitch, reachesAppleKeyboard: { _ in true }, pasteboard: pasteboard
+                hasFullAccess: true, canSwitchKeyboard: canSwitch, appleKeyboardRoute: { _ in .next }, pasteboard: pasteboard
             )
         }
         XCTAssertEqual(offer(canSwitch: true), .code(canPaste: false))
@@ -3394,7 +3394,7 @@ final class KeyboardClipboardTests: XCTestCase {
         ) -> KeyboardClipboardOffer? {
             tracker.offer(
                 textContentType: .oneTimeCode, keyboardType: keyboardType, autocorrectionType: autocorrection, fieldIsEmpty: empty,
-                hasFullAccess: true, reachesAppleKeyboard: { _ in true }, pasteboard: pasteboard
+                hasFullAccess: true, appleKeyboardRoute: { _ in .next }, pasteboard: pasteboard
             )
         }
         XCTAssertNil(offer(.default, .default), "a chat box with nothing copied: suggestions")
@@ -3420,8 +3420,9 @@ final class KeyboardClipboardTests: XCTestCase {
     }
 
     /// TestFlight build 126: in Safari's one-time-code field the switch landed on Emoji or another
-    /// third-party keyboard about half the time; on a number pad it always reached Apple's.
-    func testCodeFromMessagesOnlyWhereTheSwitchReachesApplesKeyboard() {
+    /// third-party keyboard about half the time; on a number pad it always reached Apple's. Where
+    /// it could miss, the chip opens iOS's keyboard list instead.
+    func testCodeFromMessagesOpensTheListWhereTheSwitchCouldMissApplesKeyboard() {
         typealias Mode = KeyboardInputModes.Mode
         let english = Mode(primaryLanguage: "en-US", className: "UIKeyboardInputMode")
         let french = Mode(primaryLanguage: "fr-FR", className: "UIKeyboardInputMode")
@@ -3429,14 +3430,14 @@ final class KeyboardClipboardTests: XCTestCase {
         let other = Mode(primaryLanguage: "en-US", className: "UIKeyboardExtensionInputMode")
         let emoji = Mode(primaryLanguage: "emoji", className: "UIKeyboardInputMode")
         for modes in [[english, hex], [hex, english], [english, french, hex]] {
-            XCTAssertTrue(KeyboardInputModes.switchReachesAppleKeyboard(modes, numberPad: false))
-            XCTAssertTrue(KeyboardInputModes.switchReachesAppleKeyboard(modes, numberPad: true))
+            XCTAssertEqual(KeyboardInputModes.route(modes, numberPad: false), .next)
+            XCTAssertEqual(KeyboardInputModes.route(modes, numberPad: true), .next)
         }
         for modes in [[english, emoji, hex], [hex, emoji, english], [hex, other, english], [english, hex, other]] {
-            XCTAssertFalse(KeyboardInputModes.switchReachesAppleKeyboard(modes, numberPad: false))
-            XCTAssertTrue(KeyboardInputModes.switchReachesAppleKeyboard(modes, numberPad: true))
+            XCTAssertEqual(KeyboardInputModes.route(modes, numberPad: false), .list)
+            XCTAssertEqual(KeyboardInputModes.route(modes, numberPad: true), .next)
         }
-        XCTAssertFalse(KeyboardInputModes.switchReachesAppleKeyboard([hex, emoji], numberPad: true))
+        XCTAssertNil(KeyboardInputModes.route([hex, emoji], numberPad: true))
 
         let pasteboard = UIPasteboard.withUniqueName()
         defer { UIPasteboard.remove(withName: pasteboard.name) }
@@ -3444,16 +3445,16 @@ final class KeyboardClipboardTests: XCTestCase {
         func offer(_ keyboardType: UIKeyboardType, fullAccess: Bool = true) -> KeyboardClipboardOffer? {
             tracker.offer(
                 textContentType: .oneTimeCode, keyboardType: keyboardType, autocorrectionType: .yes, fieldIsEmpty: true,
-                hasFullAccess: fullAccess, reachesAppleKeyboard: { numberPad in
-                    KeyboardInputModes.switchReachesAppleKeyboard([english, emoji, hex], numberPad: numberPad)
+                hasFullAccess: fullAccess, appleKeyboardRoute: { numberPad in
+                    KeyboardInputModes.route([english, emoji, hex], numberPad: numberPad)
                 }, pasteboard: pasteboard
             )
         }
-        XCTAssertNil(offer(.default), "Safari's field with Emoji on")
+        XCTAssertEqual(offer(.default), .code(canPaste: false, opensList: true), "Safari's field with Emoji on")
         XCTAssertEqual(offer(.numberPad), .code(canPaste: false))
-        XCTAssertEqual(offer(.numberPad, fullAccess: false), .code(canPaste: false), "switching needs no Full Access")
+        XCTAssertEqual(offer(.default, fullAccess: false), .code(canPaste: false, opensList: true), "needs no Full Access")
         pasteboard.string = "482913"
-        XCTAssertEqual(offer(.default), .paste, "a copied code still pastes")
+        XCTAssertEqual(offer(.default), .code(canPaste: true, opensList: true))
         XCTAssertEqual(offer(.numberPad, fullAccess: false), .code(canPaste: false), "no Paste without Full Access")
     }
 }

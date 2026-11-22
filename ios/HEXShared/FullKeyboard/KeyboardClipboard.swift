@@ -17,8 +17,10 @@ enum KeyboardClipboardOffer: Equatable {
     /// An empty field that expects a code (`KeyboardClipboardTracker.expectsCode`) with Apple's
     /// keyboard among the user's keyboards: paste a copied code, or switch to it so iOS can
     /// offer a code from Messages or Mail (only Apple's keyboard receives those; a third-party
-    /// keyboard gets nothing, not even the system's suggestion above it).
-    case code(canPaste: Bool)
+    /// keyboard gets nothing, not even the system's suggestion above it). `opensList`: the chip
+    /// opens iOS's keyboard list, where a switch to the next keyboard could land elsewhere
+    /// (`KeyboardInputModes.route`).
+    case code(canPaste: Bool, opensList: Bool = false)
     /// A finished dictation the keyboard didn't insert by itself
     /// (`KeyboardViewModel.offeredDictation`); it never touches the clipboard.
     case dictation
@@ -30,7 +32,8 @@ enum KeyboardClipboardOffer: Equatable {
 /// `emoji`. `advanceToNextInputMode` from Hex on a number pad lands on Apple's keyboard whenever
 /// one is on: Emoji and other third-party keyboards don't take number pads. On any other field it
 /// lands on Emoji or another third-party keyboard about half the time when one is in the list, in
-/// any order (simulator, black box, TestFlight build 126).
+/// any order (simulator, black box, TestFlight build 126); iOS's keyboard list
+/// (`handleInputModeList`) lands where the person picks.
 enum KeyboardInputModes {
     struct Mode: Equatable {
         var primaryLanguage: String?
@@ -49,20 +52,27 @@ enum KeyboardInputModes {
         }
     }
 
-    @MainActor
-    static func switchReachesAppleKeyboard(numberPad: Bool, _ modes: [UITextInputMode] = UITextInputMode.activeInputModes) -> Bool {
-        switchReachesAppleKeyboard(
-            modes.map { Mode(primaryLanguage: $0.primaryLanguage, className: NSStringFromClass(type(of: $0))) },
-            numberPad: numberPad
-        )
+    /// How Code from Messages reaches Apple's keyboard.
+    enum Route: Equatable {
+        /// A switch to the next keyboard always lands on Apple's.
+        case next
+        /// It could land on Emoji or another third-party keyboard: iOS's keyboard list instead,
+        /// where the person picks Apple's.
+        case list
     }
 
-    /// Whether one switch to the next keyboard always lands on Apple's: on a number pad whenever
-    /// Apple's keyboard is on; elsewhere only when Emoji and other third-party keyboards are off.
-    static func switchReachesAppleKeyboard(_ modes: [Mode], numberPad: Bool) -> Bool {
-        guard hasAppleKeyboard(modes) else { return false }
-        if numberPad { return true }
-        return !modes.contains { $0.primaryLanguage == "emoji" } && modes.filter { $0.className.contains("Extension") }.count <= 1
+    @MainActor
+    static func route(numberPad: Bool, _ modes: [UITextInputMode] = UITextInputMode.activeInputModes) -> Route? {
+        route(modes.map { Mode(primaryLanguage: $0.primaryLanguage, className: NSStringFromClass(type(of: $0))) }, numberPad: numberPad)
+    }
+
+    /// Nil without Apple's keyboard. The next keyboard is always Apple's on a number pad, and
+    /// elsewhere only when Emoji and other third-party keyboards are off.
+    static func route(_ modes: [Mode], numberPad: Bool) -> Route? {
+        guard hasAppleKeyboard(modes) else { return nil }
+        if numberPad { return .next }
+        let onlyApple = !modes.contains { $0.primaryLanguage == "emoji" } && modes.filter { $0.className.contains("Extension") }.count <= 1
+        return onlyApple ? .next : .list
     }
 }
 
@@ -100,11 +110,12 @@ struct KeyboardClipboardTracker {
     }
 
     /// Only in an empty field, as Apple's keyboard offers a recent copy (iOS 27.2): once
-    /// something is typed the strip goes back to suggestions. `reachesAppleKeyboard` is asked only
+    /// something is typed the strip goes back to suggestions. `appleKeyboardRoute` is asked only
     /// where a code is expected, given whether the field is a number pad: Code from Messages shows
-    /// only where its switch always lands on Apple's keyboard, as Emoji or another third-party
-    /// keyboard gets no code and the chip would do nothing (TestFlight builds 56 and 126). It needs
-    /// no Full Access, which only Paste does. `canSwitchKeyboard` is false where Apple's keyboard is
+    /// only with Apple's keyboard on (Emoji or another third-party keyboard gets no code,
+    /// TestFlight build 56), and opens the keyboard list where the next keyboard could be one of
+    /// those (TestFlight build 126). It needs no Full Access, which only Paste does.
+    /// `canSwitchKeyboard` is false where Apple's keyboard is
     /// split (the Duo unfolded and upright, or not known yet): iOS 27.2's switch to the next
     /// keyboard can end the app being typed in there (`FullKeyboardView.passesGlobeTouch`), so
     /// only Paste is offered and the globe's list leads to Apple's keyboard.
@@ -115,7 +126,7 @@ struct KeyboardClipboardTracker {
         fieldIsEmpty: Bool,
         hasFullAccess: Bool,
         canSwitchKeyboard: Bool = true,
-        reachesAppleKeyboard: (_ numberPad: Bool) -> Bool = { KeyboardInputModes.switchReachesAppleKeyboard(numberPad: $0) },
+        appleKeyboardRoute: (_ numberPad: Bool) -> KeyboardInputModes.Route? = { KeyboardInputModes.route(numberPad: $0) },
         pasteboard: UIPasteboard = .general,
         now: Date = Date()
     ) -> KeyboardClipboardOffer? {
@@ -124,8 +135,8 @@ struct KeyboardClipboardTracker {
         let fresh = hasFullAccess && hasFreshCopy(pasteboard: pasteboard, now: now)
         if canSwitchKeyboard,
            Self.expectsCode(textContentType: textContentType, keyboardType: keyboardType, autocorrectionType: autocorrectionType),
-           reachesAppleKeyboard(Self.isNumberPad(keyboardType)) {
-            return .code(canPaste: fresh)
+           let route = appleKeyboardRoute(Self.isNumberPad(keyboardType)) {
+            return .code(canPaste: fresh, opensList: route == .list)
         }
         return fresh ? .paste : nil
     }

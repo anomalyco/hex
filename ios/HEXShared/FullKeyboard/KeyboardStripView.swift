@@ -68,6 +68,8 @@ final class KeyboardStripView: UIView {
     var onUndoDictation: (() -> Void)?
     var onPaste: (() -> Void)?
     var onNextKeyboard: (() -> Void)?
+    /// Code from Messages' touches where it opens iOS's keyboard list (`.code(opensList: true)`).
+    var onKeyboardListTouch: ((UIButton, UIEvent) -> Void)?
     /// The Full Access hint's Open Hex was tapped (it opens Hex's setup).
     var onOpenHexFromHint: (() -> Void)?
     /// The notice's chip was tapped (`KeyboardStripNotice`).
@@ -167,9 +169,9 @@ final class KeyboardStripView: UIView {
         next.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
         next.background.cornerRadius = 15
         nextKeyboardChip.configuration = next
-        nextKeyboardChip.accessibilityHint = String(localized: "Switches to the next keyboard, where iOS offers codes from Messages and Mail")
         nextKeyboardChip.isHidden = true
         nextKeyboardChip.addTarget(self, action: #selector(handleNextKeyboard), for: .touchUpInside)
+        nextKeyboardChip.addTarget(self, action: #selector(keyboardListTouch(_:with:)), for: .allTouchEvents)
         addSubview(nextKeyboardChip)
 
         for (index, button) in slotButtons.enumerated() {
@@ -223,6 +225,9 @@ final class KeyboardStripView: UIView {
         }
         show(pasteControl, showsPasteChip)
         show(nextKeyboardChip, showsNextKeyboardChip)
+        nextKeyboardChip.accessibilityHint = chipOpensList
+            ? String(localized: "Shows your keyboards: pick Apple's, where iOS offers codes from Messages and Mail")
+            : String(localized: "Switches to the next keyboard, where iOS offers codes from Messages and Mail")
         // Words swap letter by letter (and leave the same way when a chip or status takes the
         // strip); the strip being shown for the first time just draws them.
         let animated = window != nil
@@ -283,7 +288,13 @@ final class KeyboardStripView: UIView {
     }
 
     private var showsPasteChip: Bool {
-        showsClipboard && clipboard != .code(canPaste: false)
+        if case .code(canPaste: false, _)? = clipboard { return false }
+        return showsClipboard
+    }
+
+    private var chipOpensList: Bool {
+        if case .code(_, opensList: true)? = clipboard { return true }
+        return false
     }
 
     private var showsNextKeyboardChip: Bool {
@@ -296,7 +307,13 @@ final class KeyboardStripView: UIView {
     }
 
     @objc private func handleNextKeyboard() {
+        guard !chipOpensList else { return }
         onNextKeyboard?()
+    }
+
+    @objc private func keyboardListTouch(_ sender: UIButton, with event: UIEvent) {
+        guard chipOpensList else { return }
+        onKeyboardListTouch?(sender, event)
     }
 
     private func makeFullAccessHintView() -> FullAccessHintView {

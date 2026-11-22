@@ -298,9 +298,11 @@ never at a launch by itself.
     from Messages only in an empty one-time-code field with a number pad or with
     autocorrection set either way (as WebKit sets it on Safari's
     `autocomplete="one-time-code"`): a chat box that marks itself one-time-code
-    keeps its suggestions. Outside number pads it shows only while Emoji and
-    other third-party keyboards are off, since the switch lands on them about
-    half the time; it needs no Full Access, which only Paste does.
+    keeps its suggestions. On a number pad, or with only Apple's keyboards
+    beside Hex, it switches to the next keyboard; elsewhere (Emoji or another
+    third-party keyboard on, where that switch lands on them about half the
+    time) a tap opens iOS's keyboard list, as the globe's hold does, to pick
+    Apple's. It needs no Full Access, which only Paste does.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly
