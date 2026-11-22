@@ -1274,6 +1274,21 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "got ")
     }
 
+    /// Settings › Experiments › Join the keyboard when unfolded: on, the Duo unfolded upright
+    /// rebuilds as one keyboard rather than the split one, and off splits it again.
+    func testJoiningTheUnfoldedKeyboardRebuildsOneLayout() {
+        engine.posture = .unfoldedWide
+        engine.windowInset = 75
+        engine.width = 801
+        XCTAssertTrue(engine.layout.isSplit)
+        engine.joinsUnfoldedKeyboard = true
+        XCTAssertFalse(engine.layout.isSplit)
+        XCTAssertEqual(engine.layout.keys.filter { $0.label == "q" }.count, 1)
+        XCTAssertEqual(engine.layout.key(.character("q"))?.frame.minX ?? 0, 19, accuracy: 0.001)
+        engine.joinsUnfoldedKeyboard = false
+        XCTAssertTrue(engine.layout.isSplit)
+    }
+
     func testEmailFieldShowsAtAndDot() {
         target.keyboardType = .emailAddress
         engine.configureForField()

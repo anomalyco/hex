@@ -2893,7 +2893,7 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Adaptive touch, German spatial autocorrect, ABC under the emoji key,
 │   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions,
-│   Learn each language separately
+│   Join the keyboard when unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2959,6 +2959,14 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Autocorrect still corrects on space, and after Delete the chip that puts back what it
 │   replaced (`.revert`) stays. With nothing suggested above it, holding a strip word to add it
 │   to Custom vocabulary is gone. Off, the strip suggests exactly as it did.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
+├── Join the keyboard when unfolded (off by default, `experiments.joinKeyboardWhenUnfolded`):
+│   the Duo unfolded and held upright splits as Apple's does there; on, it draws one joined
+│   keyboard instead, at unfoldedWide's own 39 pt rows and 51.7 pt pitch, 19 pt in from the
+│   keyboard's own side as unfoldedTall's keys sit from its screen's, with the iPhone's
+│   portrait bottom row (123 and the globe to z's right edge, space after them, return
+│   from m). Apple's Split Keyboard preference can't be read by a keyboard extension. Off,
+│   the split keyboard is unchanged.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed

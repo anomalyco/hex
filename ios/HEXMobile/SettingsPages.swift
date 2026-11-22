@@ -607,6 +607,7 @@ struct ExperimentsSettingsPage: View {
     @State private var twoThumbSelection = FullKeyboardSettings().twoThumbSelection
     @State private var deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
     @State private var hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
+    @State private var joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
@@ -715,6 +716,15 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsDivider()
 
+                // Off by default: the Duo unfolded still splits as Apple's does there.
+                SettingsToggleRow(
+                    title: String(localized: "Join the keyboard when unfolded"),
+                    detail: String(localized: "On the Duo unfolded, keeps the keys on one keyboard instead of splitting them."),
+                    isOn: $joinsKeyboardWhenUnfolded
+                )
+
+                SettingsDivider()
+
                 // Off by default: one shared list of learned words and fixes, as before.
                 SettingsToggleRow(
                     title: String(localized: "Learn each language separately"),
@@ -772,6 +782,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: hideWordSuggestions) { _, enabled in
             FullKeyboardSettings().hideWordSuggestions = enabled
         }
+        .onChange(of: joinsKeyboardWhenUnfolded) { _, enabled in
+            FullKeyboardSettings().joinsKeyboardWhenUnfolded = enabled
+        }
         .onChange(of: learnPerLanguage) { _, enabled in
             TypingJournalSettings().learnsPerLanguage = enabled
         }
@@ -792,6 +805,7 @@ struct ExperimentsSettingsPage: View {
             twoThumbSelection = FullKeyboardSettings().twoThumbSelection
             deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
             hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
+            joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
             learnPerLanguage = TypingJournalSettings().learnsPerLanguage
             multilingualParakeet = MultilingualParakeetSettings().isEnabled
         }

@@ -203,6 +203,11 @@ final class FullKeyboardEngine {
     var showsNumberRow = false {
         didSet { if showsNumberRow != oldValue { rebuildLayout(cause: "number_row") } }
     }
+    /// Settings › Experiments › Join the keyboard when unfolded (off by default): the Duo
+    /// unfolded upright draws the joined keyboard instead of the split one.
+    var joinsUnfoldedKeyboard = false {
+        didSet { if joinsUnfoldedKeyboard != oldValue { rebuildLayout(cause: "join_unfolded") } }
+    }
     /// Whether the keys have the number row's band: its switch is on and this is an iPhone (the
     /// iPad keeps Apple's rows; `KeyboardMetrics.for`).
     var hasNumberRow: Bool { showsNumberRow && pad == nil }
@@ -1472,6 +1477,7 @@ final class FullKeyboardEngine {
             phoneSize: phoneSize,
             pad: pad,
             numberRow: hasNumberRow,
+            joinsUnfoldedKeyboard: joinsUnfoldedKeyboard,
             availableHeight: availableHeight
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)

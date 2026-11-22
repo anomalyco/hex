@@ -703,7 +703,8 @@ never at a launch by itself.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
     Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
     German spatial autocorrect, ABC under the emoji key, Two-thumb selection, Delete swiped
-    words letter by letter, Hide word suggestions, and Multilingual model (Parakeet).
+    words letter by letter, Hide word suggestions, Join the keyboard when unfolded, and
+    Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1159,10 +1160,15 @@ never at a launch by itself.
   recording bar still spans the top. Every layout splits by the same rule (measured
   against Apple's English split only; AZERTY, QWERTZ, Russian and the rest follow the
   rule unchecked), and every page (123, #+=). Spatial autocorrect reads taps as on the
-  unsplit keyboard (`KeyboardLayout.unsplitX`), so either G is one key. There's no
-  setting: Apple's split follows its own Split Keyboard preference, which a keyboard
-  extension can't read, so Hex splits whenever the Duo is in that posture (the iOS
-  27.2 simulator has Apple's off until `KeyboardShouldSplitInDefaultContext` is set).
+  unsplit keyboard (`KeyboardLayout.unsplitX`), so either G is one key. Apple's split
+  follows its own Split Keyboard preference, which a keyboard extension can't read, so
+  Hex splits whenever the Duo is in that posture (the iOS 27.2 simulator has Apple's off
+  until `KeyboardShouldSplitInDefaultContext` is set). Settings › Experiments › Join the
+  keyboard when unfolded (off by default, `experiments.joinKeyboardWhenUnfolded`, App
+  Group) draws one joined keyboard there instead: unfoldedWide's own 39 pt rows on a
+  51.7 pt pitch, 19 pt in from the keyboard's own side as unfoldedTall's keys sit from
+  its screen's, with the iPhone's portrait bottom row (123 and the globe to z's right
+  edge, space after them, return from m). Off, nothing changes.
 - **iPad:** The app is iPhone-only (`TARGETED_DEVICE_FAMILY` 1), but iPadOS runs its keyboard
   extension as an iPad keyboard across the screen, so the full keyboard shows there too
   (Settings › Keyboard picks it or the dictation bar, as on an iPhone). Docked, it has

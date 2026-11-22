@@ -3743,6 +3743,26 @@
         }
       }
     },
+    "Join the keyboard when unfolded" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "展开时合并键盘"
+          }
+        }
+      }
+    },
+    "On the Duo unfolded, keeps the keys on one keyboard instead of splitting them." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Duo 展开时让按键保持在一个键盘上，而不是分开。"
+          }
+        }
+      }
+    },
     "The multilingual model isn't downloaded yet." : {
       "localizations" : {
         "zh-Hans" : {
