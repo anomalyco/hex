@@ -586,6 +586,42 @@ final class LiveDictationTests: XCTestCase {
         }
     }
 
+    /// The two things only a real thumb would show, at their edges. A tap is the keys' own:
+    /// it may move up to `FullKeyboardEngine.accentSlop` (10 pt) from where it landed and must
+    /// lift before `FullKeyboardEngine.accentHoldDelay` (0.36 s). And none counts that lands
+    /// within `LiveDictationPreviewView.settle` (0.4 s: the words' 0.3 s fade in and 0.1 s)
+    /// of the words appearing, measured from touch-down on the touches' clock.
+    @MainActor
+    func testOnlyAKeysTapAfterTheWordsHaveComeInCounts() {
+        XCTAssertEqual(FullKeyboardEngine.accentSlop, 10)
+        XCTAssertEqual(FullKeyboardEngine.accentHoldDelay, 0.36, accuracy: 0.001)
+        XCTAssertEqual(LiveDictationPreviewView.settle, 0.4, accuracy: 0.001)
+        XCTAssertEqual(LiveDictationPreviewView.settle, LiveDictationPreviewHost.Motion.wordsIn + 0.1, accuracy: 0.001)
+        let slop = FullKeyboardEngine.accentSlop, hold = FullKeyboardEngine.accentHoldDelay, settle = LiveDictationPreviewView.settle
+        func finishes(down: TimeInterval, up: TimeInterval, path: [CGPoint] = [], lift: CGPoint? = nil) -> Bool {
+            let words = LiveDictationPreviewView(frame: CGRect(x: 0, y: 0, width: 402, height: 220))
+            var finished = 0
+            words.onFinish = { finished += 1 }
+            let at = CGPoint(x: 200, y: 100)
+            words.touchDown(at: at, time: words.shownAt + down)
+            for step in path { words.touchMoved(to: CGPoint(x: at.x + step.x, y: at.y + step.y)) }
+            let end = lift ?? path.last ?? .zero
+            words.touchUp(at: CGPoint(x: at.x + end.x, y: at.y + end.y), time: words.shownAt + up)
+            return finished == 1
+        }
+        XCTAssertTrue(finishes(down: 1, up: 1.08), "a tap")
+        XCTAssertTrue(finishes(down: 1, up: 1.08, path: [CGPoint(x: slop * 0.6, y: slop * 0.8)]), "a tap that rolls a key's slop")
+        XCTAssertFalse(finishes(down: 1, up: 1.08, path: [CGPoint(x: slop + 0.5, y: 0)]), "a touch that moves further is no tap")
+        XCTAssertFalse(finishes(down: 1, up: 1.2, path: [CGPoint(x: 0, y: -(slop + 1)), .zero]), "nor one that goes out and comes back")
+        XCTAssertFalse(finishes(down: 1, up: 1.08, lift: CGPoint(x: 0, y: slop + 1)), "nor one that lifts further away")
+        XCTAssertFalse(finishes(down: 1, up: 1.6, path: (1 ... 32).map { CGPoint(x: CGFloat($0) * 10, y: 0) }), "nor a thumb sliding across the words")
+        XCTAssertTrue(finishes(down: 1, up: 1 + hold - 0.01), "lifted just inside a key's hold")
+        XCTAssertFalse(finishes(down: 1, up: 1 + hold), "held as long as a key takes to open its accents")
+        XCTAssertFalse(finishes(down: 0, up: 0.06), "the end of the tap that started the dictation")
+        XCTAssertFalse(finishes(down: settle - 0.01, up: settle + 0.07), "landing just inside the window, even lifting after it")
+        XCTAssertTrue(finishes(down: settle + 0.01, up: settle + 0.09), "landing just after it")
+    }
+
     /// VoiceOver reads the words and finishes from them by activating or by Finish dictation;
     /// with the words switched off the keys stay as they are while it records.
     @MainActor
