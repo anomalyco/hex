@@ -38,11 +38,6 @@ macro_rules! line_icon {
 }
 
 line_icon!(
-    RETURN,
-    "hex-return",
-    ["M20 5v7a2 2 0 0 1-2 2H4", "m9 9-5 5 5 5"]
-);
-line_icon!(
     KEYBOARD,
     "hex-row-keyboard",
     [
