@@ -1,8 +1,8 @@
 {
   "en": [["correct article typo", "teh cat", "the cat"], ["keep noun well", "a deep well", "a deep well"]],
-  "es": [["restore mañana", "hasta manana", "hasta mañana"], ["keep article el", "el tren", "el tren"]],
-  "de": [["restore für", "fur mich", "für mich"], ["keep adverb schon", "schon gut", "schon gut"]],
-  "nb": [["restore på", "pa jobb", "på jobb"], ["keep preposition for", "takk for hjelpen", "takk for hjelpen"]],
+  "es": [["restore después", "hasta despues", "hasta después"], ["keep article el", "el tren", "el tren"]],
+  "de": [["restore transposed dank", "vielen dnak", "vielen dank"], ["keep adverb schon", "schon gut", "schon gut"]],
+  "nb": [["restore doubled consonant", "tusen takkk", "tusen takk"], ["keep article en", "jeg har en bok", "jeg har en bok"]],
   "fr": [["restore café", "le cafe", "le café"], ["keep verb a", "il a faim", "il a faim"]],
   "it": [["restore caffè", "un caffe", "un caffè"], ["keep conjunction e", "pane e vino", "pane e vino"]]
 }
