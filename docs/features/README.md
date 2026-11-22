@@ -2908,7 +2908,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   a device); Italian restores unambiguous unaccented spellings on space ("perche" →
 │   "perché", "citta" → "città", `KeyboardLanguage.accentRestorations`) and offers "è" and
 │   "c'è" in the strip for "e" and "ce", which are words of their own and are never changed
-│   by space
+│   by space. Hungarian is a normal language (no experiment): its own QWERTZ rows and QWERTY,
+│   its nine accented vowels held on a e i o u (á é í ó ö ő ú ü ű), the iPhone's `hu`
+│   dictionary behind its autocorrect (a missing accent is the cheapest fix, "koszonom" →
+│   "köszönöm", while a word of its own such as "meg" keeps its spelling), English as its
+│   bilingual partner through the Latin-script rule, and no typing (spatial) model
 ├── Korean keyboard (두벌식) (off by default, `experiments.koreanKeyboard`): Settings ›
 │   Experiments adds 한국어 to Settings › Keyboard › Languages, typed on the standard two-set
 │   rows (ㅂㅈㄷㄱㅅㅛㅕㅑㅐㅔ / ㅁㄴㅇㄹㅎㅗㅓㅏㅣ / ㅋㅌㅊㅍㅠㅜㅡ, shift's ㅃㅉㄸㄲㅆ and ㅒㅖ, no

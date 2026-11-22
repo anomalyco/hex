@@ -644,6 +644,52 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(AutocorrectEngine.sentenceStarters(.czech).count, 3)
     }
 
+    /// Hungarian types with iOS's hu dictionary, and a missing accent is the cheapest fix there
+    /// is, however many a word lacks ("koszonom" -> "köszönöm", "kesobb" -> "később"): ő and ű
+    /// are the double-acute letters, which have no decomposition to o or u, so they are named as
+    /// Polish's ł is; other languages keep one edit. A word of its own is never accented ("meg",
+    /// "kor" stay though the dictionary offers "még", "kör"): the checker knows it as typed. The
+    /// fixes run against a stub dictionary answering as an iPhone's would.
+    func testHungarianRestoresMissingDiacritics() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "szivesen", to: "szívesen", language: .hungarian)!, 0.15, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "talalkozunk", to: "találkozunk", language: .hungarian)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "koszonom", to: "köszönöm", language: .hungarian)!, 0.25, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kesobb", to: "később", language: .hungarian)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kor", to: "kör", language: .hungarian)!, 0.15, accuracy: 0.001)
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "koszonom", to: "köszönöm", language: .english), "three edits elsewhere")
+        XCTAssertNil(AutocorrectEngine.singleEditKeyboardCost(from: "kesobb", to: "később", language: .english), "two edits elsewhere")
+        engine.language = .hungarian
+        XCTAssertEqual(engine.autocorrect.language, .hungarian)
+        XCTAssertNil(engine.autocorrect.decoder, "no Hungarian typing model")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.hungarian).count, 3)
+        XCTAssertEqual(AutocorrectEngine.clauseStarters(.hungarian).count, 3)
+        XCTAssertEqual(AutocorrectEngine.commonWords(.hungarian).count, 6)
+
+        let hungarian = stubbed {
+            $0.valid = ["köszönöm", "szívesen", "kérem", "kerek", "találkozunk", "később", "üdvözlöm", "meg", "még", "kor", "kör", "szépen"]
+            // "kerek" is one adjacent key (m to k) from "kerem" and listed first; "kérem" only
+            // lacks its accent, and wins.
+            $0.guessTable = [
+                "koszonom": ["köszönöm"], "szivesen": ["szívesen"], "kerem": ["kerek", "kérem"],
+                "talalkozunk": ["találkozunk"], "kesobb": ["később"], "udvozlom": ["üdvözlöm"],
+                "meg": ["még"], "kor": ["kör"],
+            ]
+        }
+        hungarian.setLanguage(.hungarian, available: ["hu", "en_US"])
+        XCTAssertEqual(fix(hungarian, "koszonom"), "köszönöm")
+        XCTAssertEqual(fix(hungarian, "Koszonom"), "Köszönöm")
+        XCTAssertEqual(fix(hungarian, "szivesen"), "szívesen")
+        XCTAssertEqual(fix(hungarian, "kerem"), "kérem", "over kerek, one adjacent key away and listed first")
+        XCTAssertEqual(fix(hungarian, "talalkozunk"), "találkozunk")
+        XCTAssertEqual(fix(hungarian, "kesobb"), "később")
+        XCTAssertEqual(fix(hungarian, "udvozlom"), "üdvözlöm")
+        XCTAssertNil(fix(hungarian, "meg"), "meg is a word: no accent put on it")
+        XCTAssertNil(fix(hungarian, "kor"), "kor is one too")
+        XCTAssertNil(fix(hungarian, "szépen"), "a word stays")
+        hungarian.setLanguage(.spanish, available: ["hu", "es_ES"])
+        XCTAssertNil(fix(hungarian, "koszonom"), "three accents are three edits on another layout")
+    }
+
     /// TestFlight (build 56): "Autocomplete suggests English words in Czech too." With Czech
     /// and English chosen, a sentence the words before show is Czech (`languageLean`) gets
     /// Czech completions only, none of English's even where Czech has none, and an English
