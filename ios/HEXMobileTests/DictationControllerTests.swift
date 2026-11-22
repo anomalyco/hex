@@ -86,6 +86,18 @@ private final class FakeAudioManager: AudioManaging {
     }
 }
 
+/// A preparation that never answers, as Speech or its asset store not answering.
+private actor SilentTranscriber: LocalTranscribing {
+    nonisolated let displayName = "Apple Speech"
+    let languageName = "English"
+
+    func prepare(progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void) async throws {
+        try await Task.sleep(for: .seconds(3_600))
+    }
+
+    func transcribe(_ audioURL: URL) async throws -> String { "" }
+}
+
 private actor ControlledTranscriber: LocalTranscribing {
     nonisolated let displayName = "Controlled Speech"
     let languageName = "English"
@@ -1389,10 +1401,76 @@ final class DictationControllerTests: XCTestCase {
     func testIPhonesWithoutRoomForParakeetDictateEnglishWithApple() throws {
         guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech needs iOS 26") }
         let dictation = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .dictation)
-        XCTAssertFalse(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: true), "Parakeet where it fits, as before")
-        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: false), "an iPhone 11 has 4 GB")
+        XCTAssertFalse(
+            AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: true, hasSpeechTranscriber: false, appleSetAside: false),
+            "Parakeet where it fits on an iPhone without SpeechTranscriber, as before"
+        )
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: false, hasSpeechTranscriber: false), "an iPhone 11 has 4 GB")
         let speech = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .speech)
-        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(speech, parakeetFits: true))
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(speech, parakeetFits: true, hasSpeechTranscriber: true))
+    }
+
+    /// TestFlight build 126 (iPhone 15 Pro Max, 8 GB, iOS 26.6): one failed install of
+    /// SpeechTranscriber's English set it aside, English went to DictationTranscriber, and on a
+    /// 6 GB+ iPhone that lost to Parakeet V2, which needs a download: "Set up", then a download
+    /// that stalled, until a reinstall cleared the mark. English stays on Apple Speech now.
+    func testASetAsideSpeechTranscriberNeverSendsEnglishToADownload() throws {
+        guard #available(iOS 26.0, *) else { throw XCTSkip("Apple Speech needs iOS 26") }
+        let dictation = SpeechLanguage(locale: Locale(identifier: "en-US"), module: .dictation)
+        XCTAssertTrue(AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: true, hasSpeechTranscriber: true, appleSetAside: false))
+        XCTAssertEqual(
+            DictationController.appleSpeechLanguage(
+                picked: dictation, wanted: "en-US", parakeetFits: true, hasSpeechTranscriber: true, appleSetAside: false
+            ),
+            dictation
+        )
+        XCTAssertFalse(
+            AppleSpeechTranscriber.shouldUse(dictation, parakeetFits: true, hasSpeechTranscriber: true, appleSetAside: true),
+            "neither Apple module's English installed, twice in a row: Parakeet is the way left"
+        )
+        // Speech not answering at launch: English stays on Apple Speech where it has SpeechTranscriber.
+        XCTAssertEqual(
+            DictationController.appleSpeechLanguage(
+                picked: nil, wanted: "en-US", parakeetFits: true, hasSpeechTranscriber: true, appleSetAside: false
+            ),
+            SpeechLanguage(locale: Locale(identifier: "en-US"), module: .speech)
+        )
+        XCTAssertNil(
+            DictationController.appleSpeechLanguage(picked: nil, wanted: "en-US", parakeetFits: true, hasSpeechTranscriber: false),
+            "an iPhone without SpeechTranscriber keeps Parakeet for English"
+        )
+        XCTAssertEqual(
+            DictationController.appleSpeechLanguage(picked: nil, wanted: "de-DE", parakeetFits: true, hasSpeechTranscriber: true)?.module,
+            .dictation
+        )
+    }
+
+    func testAPreparationThatSaysNothingEndsInPlainWordsWithTryAgain() async throws {
+        let stuck = SilentTranscriber()
+        let working = ControlledTranscriber()
+        var factory: [any LocalTranscribing] = [stuck, working]
+        let controller = DictationController(
+            audio: FakeAudioManager(),
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: working,
+            transcriberFactory: { factory.removeFirst() },
+            autoPrepareOnInit: false
+        )
+        controller.preparationLimits = (.milliseconds(600), .milliseconds(600))
+        controller.prepareModel()
+        try await settle()
+        XCTAssertEqual(controller.phase, .preparingModel)
+        XCTAssertEqual(controller.modelPreparation.detail, "Checking the speech model")
+        for _ in 0..<40 where controller.phase == .preparingModel {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        XCTAssertEqual(controller.phase, .failed("The speech model isn't ready. Try again."), "never a spinner for good")
+
+        // Try again (Set up) starts a new preparation, which gets ready.
+        controller.performPrimaryAction()
+        try await settle()
+        XCTAssertEqual(controller.phase, .ready)
+        XCTAssertTrue(factory.isEmpty)
     }
 
     func testParakeetsFirstCompileKeepsTheBarMovingAndSaysWhy() {
@@ -1505,9 +1583,15 @@ final class DictationControllerTests: XCTestCase {
         loads.noteLaunch()
         XCTAssertFalse(loads.lastLoadWasInterrupted)
 
+        // iOS ends Hex while Core ML compiles (or ends it in the background, or it is swiped
+        // away): one ended load is no evidence, and the next launch loads it again.
         loads.begin()
-        // iOS ends Hex while Core ML compiles; the next launch finds the load still marked.
         let nextLaunch = ParakeetLoadGuard(defaults: defaults)
+        nextLaunch.noteLaunch()
+        XCTAssertFalse(nextLaunch.lastLoadWasInterrupted, "Hex ended once mid-load: tried again")
+
+        // The same again: two in a row set it aside.
+        nextLaunch.begin()
         nextLaunch.noteLaunch()
         XCTAssertTrue(nextLaunch.lastLoadWasInterrupted)
 
@@ -1518,6 +1602,26 @@ final class DictationControllerTests: XCTestCase {
         nextLaunch.begin()
         nextLaunch.end(loaded: true)
         XCTAssertFalse(nextLaunch.lastLoadWasInterrupted, "a load that worked clears it")
+    }
+
+    func testASetAsideParakeetLoadTriesAgainNextDayOrNextBuild() {
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        var now = start
+        func guardAt(build: String = "126") -> ParakeetLoadGuard {
+            ParakeetLoadGuard(defaults: defaults, build: build, now: { now })
+        }
+        guardAt().setAside()
+        XCTAssertTrue(guardAt().lastLoadWasInterrupted)
+        XCTAssertFalse(guardAt(build: "127").lastLoadWasInterrupted, "a new build tries again")
+        now = start.addingTimeInterval(ParakeetLoadGuard.setAsideDuration + 1)
+        XCTAssertFalse(guardAt().lastLoadWasInterrupted, "a day later it tries again")
+
+        // An older build's lasting flag gives the load another try.
+        defaults.set(true, forKey: "parakeet.loadInterrupted")
+        let upgraded = guardAt()
+        upgraded.noteLaunch()
+        XCTAssertFalse(upgraded.lastLoadWasInterrupted)
+        XCTAssertNil(defaults.object(forKey: "parakeet.loadInterrupted"))
     }
 
     // MARK: - Experiments › Multilingual model (Parakeet)
@@ -1558,10 +1662,12 @@ final class DictationControllerTests: XCTestCase {
 
     func testAMultilingualParakeetLoadThatEndedHexIsKeptApartFromV2s() {
         let ultra = ParakeetLoadGuard(model: ParakeetUltraTranscriber.loadGuardModel, defaults: defaults)
-        ultra.begin()
+        for _ in 0..<2 {
+            ultra.begin()
+            ultra.noteLaunch()
+        }
         let v2 = ParakeetLoadGuard(defaults: defaults)
         v2.noteLaunch()
-        ultra.noteLaunch()
         XCTAssertFalse(v2.lastLoadWasInterrupted)
         XCTAssertTrue(ultra.lastLoadWasInterrupted)
         ultra.forget()
@@ -2128,9 +2234,11 @@ final class DictationControllerTests: XCTestCase {
 
     func testAParakeetLoadThatEndedHexMovesEnglishToTheRecognizerBeforeIOS26() {
         let loads = ParakeetLoadGuard(defaults: defaults)
-        loads.begin()
         let nextLaunch = ParakeetLoadGuard(defaults: defaults)
-        nextLaunch.noteLaunch()
+        for _ in 0..<2 {
+            loads.begin()
+            nextLaunch.noteLaunch()
+        }
         let choice = device(setAside: nextLaunch.lastLoadWasInterrupted)
         XCTAssertEqual(choice.engine(for: "en-US", appleSpeechPicks: false), .onDeviceRecognizer)
         XCTAssertEqual(
@@ -2809,7 +2917,32 @@ final class SpeechModelInstallTests: XCTestCase {
         XCTAssertEqual(installed.module, .dictation)
         XCTAssertEqual(installed.identifier, "ru-RU")
         XCTAssertEqual(assets.downloaded, [.speech, .dictation])
-        XCTAssertTrue(settings.speechModuleFailed("ru-RU"), "the next dictation goes straight to DictationTranscriber")
+        XCTAssertFalse(settings.speechModuleFailed("ru-RU"), "one failure sets nothing aside")
+        _ = try await run(assets)
+        XCTAssertTrue(settings.speechModuleFailed("ru-RU"), "twice in a row: the next dictation goes straight to DictationTranscriber")
+        XCTAssertFalse(settings.isUnavailable("ru-RU"))
+    }
+
+    func testASpeechTranscriberModelThatInstallsBetweenTwoFailuresIsNotSetAside() async throws {
+        let failing = FakeAssets()
+        failing.downloads[.speech] = .fails
+        _ = try await run(failing)
+        _ = try await run(FakeAssets())
+        _ = try await run(failing)
+        XCTAssertFalse(settings.speechModuleFailed("ru-RU"), "not in a row")
+    }
+
+    func testTheKeyboardsInstallFailuresSetNothingAsideForHex() async {
+        // The keyboard's own reservation released or over Apple's limit ("Too many asset
+        // locales allocated") is no evidence about the language: Hex keeps SpeechTranscriber.
+        let assets = FakeAssets()
+        assets.downloads = [.speech: .fails, .dictation: .fails]
+        for _ in 0..<3 {
+            _ = try? await SpeechModelInstall.run(
+                russian, steps: assets.steps, settings: settings, setsAside: false, stallLimit: .milliseconds(300)
+            )
+        }
+        XCTAssertFalse(settings.speechModuleFailed("ru-RU"))
         XCTAssertFalse(settings.isUnavailable("ru-RU"))
     }
 
@@ -2823,6 +2956,8 @@ final class SpeechModelInstallTests: XCTestCase {
             XCTAssertEqual(error as? SpeechModelUnavailable, SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone))
             XCTAssertEqual(UserFacingError.message(for: error, context: .transcription), "Russian isn't available for dictation on this iPhone yet.")
         }
+        XCTAssertFalse(settings.isUnavailable("ru-RU"), "one failure sets nothing aside")
+        _ = try? await run(assets)
         XCTAssertTrue(settings.isUnavailable("ru-RU"))
     }
 
@@ -2887,11 +3022,33 @@ final class SpeechModelInstallTests: XCTestCase {
         ]
         for error in cases {
             settings.clearKeyboardNeedsHex()
+            // One failure is no evidence: the keyboard keeps dictating itself.
+            let first = SpeechModelNeedsHex.keyboardError(for: error, language: "en-US", settings: settings)
+            XCTAssertEqual(UserFacingError.message(for: first, context: .transcription), "Hex couldn't transcribe that. Try again.")
+            XCTAssertFalse(settings.keyboardNeedsHex(), "\(error)")
+            // The second in a row hands its dictations to Hex.
             let shown = SpeechModelNeedsHex.keyboardError(for: error, language: "en-US", settings: settings)
             XCTAssertEqual(shown as? SpeechModelNeedsHex, SpeechModelNeedsHex(language: "en-US"), "\(error)")
             XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Open Hex to download English.")
             XCTAssertTrue(settings.keyboardNeedsHex(), "the Hex key opens Hex, which downloads it")
         }
+    }
+
+    func testAKeyboardDictationThatWorksBetweenTwoFailuresKeepsTheKeyboardDictating() async throws {
+        let failure = StallWatch.Stalled()
+        _ = SpeechModelNeedsHex.keyboardError(for: failure, language: "en-US", settings: settings)
+        let installed = FakeAssets()
+        installed.status[.speech] = .installed
+        _ = try await run(installed)
+        _ = SpeechModelNeedsHex.keyboardError(for: failure, language: "en-US", settings: settings)
+        XCTAssertFalse(settings.keyboardNeedsHex(), "not in a row")
+
+        // A first failure hours ago no longer counts.
+        let marked = Date(timeIntervalSince1970: 1_000_000)
+        settings.clearKeyboardNeedsHex()
+        XCTAssertFalse(settings.noteKeyboardModelFailure(at: marked))
+        XCTAssertFalse(settings.noteKeyboardModelFailure(at: marked.addingTimeInterval(LanguageSettings.keyboardStrikeWindow + 1)))
+        XCTAssertTrue(settings.noteKeyboardModelFailure(at: marked.addingTimeInterval(LanguageSettings.keyboardStrikeWindow + 60)))
     }
 
     func testTheKeyboardKeepsAMoveToAnotherLanguageAndACancel() {

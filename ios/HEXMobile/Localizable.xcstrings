@@ -4180,6 +4180,16 @@
           }
         }
       }
+    },
+    "The speech model isn't ready. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音模型尚未就绪。请重试。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

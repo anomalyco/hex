@@ -136,16 +136,26 @@ actor AppleSpeechTranscriber: LocalTranscribing {
     }
 
     /// Whether Hex dictates this language with Apple Speech rather than Parakeet. English
-    /// without `SpeechTranscriber` stays on Parakeet where it fits; every other language
-    /// `DictationTranscriber` has beats English-only Parakeet. The iPhones without
+    /// on an iPhone without `SpeechTranscriber` stays on Parakeet where it fits; every other
+    /// language `DictationTranscriber` has beats English-only Parakeet. The iPhones without
     /// `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation) have 3–4 GB, where loading
     /// Parakeet ended Hex at "50%" and again at every launch, so they dictate English with
-    /// `DictationTranscriber`.
+    /// `DictationTranscriber`. An iPhone that has `SpeechTranscriber` keeps English on Apple
+    /// Speech even on `DictationTranscriber` (its `SpeechTranscriber` model set aside after
+    /// failed installs): Parakeet would need a download for something Apple already hears
+    /// (TestFlight build 126, iPhone 15 Pro Max, iOS 26.6). Only once neither Apple module's
+    /// English would install, twice in a row (`appleSetAside`), is Parakeet the way left.
     nonisolated static func shouldUse(
         _ language: SpeechLanguage,
-        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory
+        parakeetFits: Bool = ParakeetTranscriber.fitsInMemory,
+        hasSpeechTranscriber: Bool = SpeechTranscriber.isAvailable,
+        appleSetAside: Bool? = nil
     ) -> Bool {
-        language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier) || !parakeetFits
+        if language.module == .speech || !SpeechLanguagePicker.isEnglish(language.identifier) || !parakeetFits {
+            return true
+        }
+        let setAside = appleSetAside ?? LanguageSettings().isUnavailable(language.identifier)
+        return hasSpeechTranscriber && !setAside
     }
 
     func prepare(

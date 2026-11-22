@@ -39,14 +39,37 @@ final class KeyboardSpeechPreparation {
         state == .ready || state == .followsApp
     }
 
+    /// How long it may check before saying so: Speech or the asset store not answering would
+    /// otherwise leave setup's last step on "Preparing" for good.
+    @ObservationIgnored var checkLimit: Duration = .seconds(30)
+
     /// Checks, and downloads if needed. Runs once unless "retry" (after a failure).
-    func start(retry: Bool = false, appEngine: @escaping @MainActor () -> String) {
+    func start(retry: Bool = false, recheck: Bool = false, appEngine: @escaping @MainActor () -> String) {
         guard !OnboardingFixture.isSnapshot else { return }
-        if task != nil, !retry { return }
-        if retry, isReady { return }
+        if task != nil, !retry, !recheck { return }
+        if retry, !recheck, isReady { return }
         task?.cancel()
         state = .checking
         task = Task { await run(appEngine: appEngine) }
+        let started = task
+        Task { [weak self, checkLimit] in
+            try? await Task.sleep(for: checkLimit)
+            guard let self, self.task == started, self.state == .checking else { return }
+            self.task?.cancel()
+            self.state = .failed(String(localized: "The speech model isn't ready. Try again."))
+        }
+    }
+
+    /// Back in front while the keyboard hands its dictations to Hex: when the keyboard's
+    /// language has Apple's model here after all, its handoff ends (`SpeechModelInstall`
+    /// clears it) and the keyboard dictates itself again, rather than for the rest of the day.
+    func recheckKeyboardHandoff(appEngine: @escaping @MainActor () -> String) {
+        guard !OnboardingFixture.isSnapshot, LanguageSettings().keyboardNeedsHex() else { return }
+        switch state {
+        case .checking, .downloading: return
+        default: break
+        }
+        start(recheck: true, appEngine: appEngine)
     }
 
     private func run(appEngine: @MainActor () -> String) async {
@@ -60,7 +83,10 @@ final class KeyboardSpeechPreparation {
         }
         guard !Task.isCancelled else { return }
         // Parakeet Ultra (Experiments › Multilingual model): the Hex key hands its dictations to Hex.
-        if appEngine() == "Apple Speech" || appEngine() == ParakeetUltraTranscriber.name {
+        // Apple Speech in Hex is the keyboard's model too, unless the keyboard is handing its
+        // dictations to Hex: then it checks, so a model in place ends that.
+        let needsHex = LanguageSettings().keyboardNeedsHex()
+        if appEngine() == ParakeetUltraTranscriber.name || (appEngine() == "Apple Speech" && !needsHex) {
             state = .followsApp
             return
         }

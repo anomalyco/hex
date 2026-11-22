@@ -748,32 +748,47 @@ never at a launch by itself.
   An iPhone without `SpeechTranscriber` (A13: iPhone 11, SE 2nd generation, all
   3–4 GB) dictates English with `DictationTranscriber` on iOS 26+: loading
   Parakeet there sat at 50% (Core ML's compile) until iOS ended Hex, at every
-  launch. Parakeet stays where it fits (6 GB) and before iOS 26, for English only: when
-  Apple Speech doesn't answer, any other language stays on Apple Speech, which says it can't
-  dictate it, rather than going to Parakeet as English
-  (`DictationController.appleSpeechLanguage`). After Hex ended
-  while loading Parakeet, the next launch waits for Set up instead of loading it
-  again (`ParakeetLoadGuard`), and a Parakeet download that sits at one fraction
-  for 90 s ends with a message. **When a model won't install**
+  launch. Parakeet stays where it fits (6 GB) and before iOS 26, for English only, on
+  an iPhone without `SpeechTranscriber`: an iPhone that has it keeps English on Apple
+  Speech, on `DictationTranscriber` too while `SpeechTranscriber`'s English is set
+  aside, and goes to Parakeet only once neither Apple module's English installed twice
+  in a row (TestFlight build 126: one failed install sent an iPhone 15 Pro Max to a
+  Parakeet download that stalled, until a reinstall). When Apple Speech doesn't answer,
+  English stays on it there too, and any other language stays on Apple Speech, which
+  says it can't dictate it, rather than going to Parakeet as English
+  (`DictationController.appleSpeechLanguage`). After Hex ended twice in a row while
+  loading Parakeet, the next launches wait for Set up instead of loading it again, for
+  a day and on that build only (`ParakeetLoadGuard`: iOS ending Hex in the background
+  or a swipe away mid-load once is no evidence), and a Parakeet download that sits at
+  one fraction for 90 s ends with a message. A preparation that says nothing for 30 s
+  ("Checking the speech model": Speech or its asset store not answering), or nothing
+  new for 120 s after, ends with "The speech model isn't ready. Try again."
+  (`watchPreparation`), as does the keyboard model's check behind setup's last step,
+  whose row then offers **Try again**. **When a model won't install**
   (`SpeechModelInstall`, shared by the app and in-keyboard dictation): Apple lists
   some languages whose `SpeechTranscriber` asset never arrives ("transcription.ru
   asset not found after attempted download"), so Hex then installs the same
-  language on `DictationTranscriber` and goes straight to it for three days. A
-  download whose progress doesn't move for 60 s is given up on. When neither
-  module installs while the iPhone is online, Automatic sets the language aside
-  for three days and dictates the next one ("Russian isn't available on this
-  iPhone yet. Using English."); a language picked by hand says so and offers that
-  one ("Try English", with **Use English** in the app). With nothing else to move
+  language on `DictationTranscriber`, and after the second such failure in a row goes
+  straight to it for three days. A download whose progress doesn't move for 60 s is
+  given up on. When neither module installs while the iPhone is online, twice in a row,
+  Automatic sets the language aside for three days and dictates the next one ("Russian
+  isn't available on this iPhone yet. Using English."); a language picked by hand says
+  so and offers that one ("Try English", with **Use English** in the app). A model that
+  installs clears the failures so far. Only Hex's own failures set anything aside:
+  in-keyboard dictation's are often its own (each process holds its own reservation, one
+  released, removed or over Apple's limit reads as not installed there, "Too many asset
+  locales allocated"). With nothing else to move
   to (an English-only iPhone), Automatic tries the set-aside language again
   rather than none, so "Apple's speech recognition can't dictate this language" means neither
   module lists any of the iPhone's languages. Offline or stalled, it
   says the download failed and tries again next time. In the keyboard, a model it
-  can't get itself (each process holds its own reservation, and one released or
-  removed since Hex downloaded it reads as not installed there) says "Open Hex to
-  download English." and Dictate and the Hex key open Hex, which downloads it,
-  until a model installs, a language is chosen, or a day passes
-  (`SpeechModelNeedsHex`, `settings.dictationLanguage.keyboardNeedsHex`); a move
-  to another language keeps its own sentence. Reservations make room
+  can't get itself says "Hex couldn't transcribe that. Try again." the first time, and the
+  second time in a row (within 6 h, no model in place since) "Open Hex to download
+  English.": Dictate and the Hex key then open Hex, which downloads it, until a model
+  installs (in either process; Hex checks again each time it comes to the front), a
+  language is chosen, or a day passes (`SpeechModelNeedsHex`,
+  `settings.dictationLanguage.keyboardNeedsHex`); a move to another language keeps its
+  own sentence. Reservations make room
   under `AssetInventory.maximumReservedLocales` by releasing others first. Only
   Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
   and other packages' descriptions go to logs, however readable.

@@ -85,6 +85,10 @@ struct ContentView: View {
             }
         }
         .task { keyboardSpeech.start { dictation.engineName } }
+        .onChange(of: scenePhase) { _, phase in
+            // Opened from a keyboard handing its dictations to Hex: check again whether it must.
+            if phase == .active { keyboardSpeech.recheckKeyboardHandoff { dictation.engineName } }
+        }
         .animation(HexMotion.reducedFade, value: openedFromKeyboard)
         .animation(HexMotion.reducedFade, value: onboardingPage == nil)
     }

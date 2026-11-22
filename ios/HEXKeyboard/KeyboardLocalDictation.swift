@@ -1212,7 +1212,9 @@ private enum KeyboardSpeech {
         let started = Date()
         let language: SpeechLanguage
         do {
-            language = try await AppleSpeechAssets.install(picked, settings: settings, log: { log.write($0) })
+            // The keyboard's failures set nothing aside for Hex (`setsAside`): they are often
+            // the keyboard's own reservation, not the language.
+            language = try await AppleSpeechAssets.install(picked, settings: settings, setsAside: false, log: { log.write($0) })
         } catch {
             throw SpeechModelNeedsHex.keyboardError(for: error, language: picked.identifier, settings: settings)
         }
