@@ -204,7 +204,7 @@ pub struct Keys {
     pub pitch: (f64, f64),
 }
 
-/// One word read beside the model's (`SwipeDecoder.ExtraWords`): an English contraction or
+/// One word read beside the model's (Swift's `SwipeDecoder.ExtraWords`): an English contraction or
 /// one of your own words, with its cost (-ln P(word)).
 #[derive(Debug, Clone, PartialEq)]
 pub struct ExtraWord {
@@ -230,7 +230,7 @@ pub struct Reading {
     pub scored: usize,
 }
 
-/// `SwipeDecoder.ExtraWords`, built once: each word's codes, text, cost, the model's index
+/// The Swift decoder's `ExtraWords`, built once: each word's codes, text, cost, the model's index
 /// of the same word (for its pairs) and a contraction's first word in the model.
 #[derive(Debug, Clone, Default)]
 struct ExtraWords {

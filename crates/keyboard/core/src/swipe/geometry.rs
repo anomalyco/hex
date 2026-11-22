@@ -1,8 +1,8 @@
 //! Geometry in key pitches: distances, resampling, shapes and the two location passes
-//! (`SwipeDecoder`'s static helpers, in the same operation order, so every cost comes out
+//! (the Swift decoder's static helpers, in the same operation order, so every cost comes out
 //! bit for bit as Swift's).
 
-/// A point or a step, in key pitches (`SwipeDecoder.Vec`).
+/// A point or a step, in key pitches (the Swift decoder's `Vec`).
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct Point {
     pub x: f64,

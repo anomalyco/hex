@@ -1,10 +1,10 @@
 //! The Rust swipe decoder reads every swipe as the Swift one it was ported from does: the same
 //! candidates in the same order, the same `scored`, and costs equal bit for bit.
 //!
-//! The cases and the Swift oracle's readings come from `SwipeParityExportTests`
-//! (`ios/HEXMobileTests/SwipeParity`), which documents the format: the committed
-//! `tests/fixtures/swipe-parity.jsonl`, and with `HEX_SWIPE_PARITY=/path/to.jsonl` a larger
-//! export too (for timings, run it with `--release`).
+//! The cases come from `SwipeParityExportTests` (`ios/HEXMobileTests/SwipeParity`), which
+//! documents the format: the committed `tests/fixtures/swipe-parity.jsonl`, with the Swift
+//! decoder's readings, and with `HEX_SWIPE_PARITY=/path/to.jsonl` a larger export too (for
+//! timings, run it with `--release`).
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -120,7 +120,7 @@ fn check(path: &str) {
                 assert_eq!(
                     inputs(&points, times.as_deref()),
                     v["inputs"].as_str().unwrap(),
-                    "case {}: the path and times rebuilt from the fixture aren't the oracle's",
+                    "case {}: the path and times rebuilt from the fixture aren't the fixture's",
                     v["id"]
                 );
                 let previous = v["previous"].as_str();

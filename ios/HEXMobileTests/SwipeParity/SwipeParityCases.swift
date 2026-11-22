@@ -3,8 +3,9 @@ import Foundation
 @testable import HEX
 
 /// Swipe typing's parity cases: deterministic swipes (SplitMix64 from a fixed seed per
-/// language) for the decoder's Swift oracle and its Rust port to read alike. They know no
-/// decoder, so one stream of cases feeds either, or both in one process.
+/// language) that the Rust decoder was proven on against the Swift one it replaced, and that
+/// the committed fixture (`crates/keyboard/core/tests/fixtures/swipe-parity.jsonl`) records.
+/// They know no decoder.
 ///
 /// Words are drawn from the model by frequency (its commonest 2,000, the next 18,000, the
 /// rest), plus the English contractions and your own words (names with capitals, words the
