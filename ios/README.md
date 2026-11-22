@@ -709,11 +709,8 @@ never at a launch by itself.
     Privacy › Advanced › Typing logs shares a day or all of them (AirDrop to a Mac) and
     deletes them. Password, one-time code, and card fields write one `skipped`
     line and nothing else. Events are buffered on the main thread and encoded and
-    appended on a utility queue every 2 s. Nothing is sent. While a field is
-    logged, both keyboards show a small "● Logging" mark the whole time (App
-    Review 2.5.14): in the full keyboard's strip corner, or at the start of its
-    recording bar while dictating, and beside the Hex mark in the dictation bar.
-    The schema is in
+    appended on a utility queue every 2 s. Nothing is sent. The keyboards look
+    the same with it on as with it off: it is only the switch. The schema is in
     [`docs/typing-logs.md`](docs/typing-logs.md).
 - **Settings (`ContentView`, `SettingsPages.swift`):** Home fits one screen: the
   Hex header, one status line ("Ready" with a check, or "Finish setup · 1 step ›"),
@@ -1227,7 +1224,7 @@ never at a launch by itself.
   as thick as Apple's (iOS 26.5 and 27.2 simulators, iPhone 17 Pro, Air, 17 Pro Max and SE,
   upright and turned, light and dark, beside Hex in the same field): 44 pt from the
   keyboard's top edge in every state (suggestions, Undo dictation, Paste, the Full Access
-  hint, the recording bar, the emoji panel's top row, the Logging mark), with Apple's 8 pt
+  hint, the recording bar, the emoji panel's top row), with Apple's 8 pt
   under it upright (6 pt turned), so row 1's keycaps start 52 pt down (50 turned), the keys
   stay on Apple's rows, and where iOS adds nothing above the keyboard Hex is exactly as tall
   as Apple's keyboard: 253 pt on an iPhone 17 or 17 Pro, 260 pt on an SE, 272 pt on an Air or
@@ -1954,8 +1951,7 @@ dataset's download and its `convert.py` command.
   keys typed through the engine autocorrect ("thw" became "the", "tk" "to",
   and with Spatial autocorrect, on by default, "ofthw" "of the"); the Hex key shows the
   hint. Scenes: `full-keyboard-no-access[-hint][-dark]`; `--keyboard
-  full|dictation-bar` picks the keyboard and `--typing-log-mark` shows the
-  Logging mark in the keyboard scenes. The simulator's keyboard reads the App
+  full|dictation-bar` picks the keyboard. The simulator's keyboard reads the App
   Group without Full Access; whether an iPhone's does is unverified, which is
   why the keyboard mounts the full keyboard without Full Access whatever was
   chosen. Full Access in a simulator: a `kTCCServiceKeyboardNetwork` row for

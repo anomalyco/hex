@@ -67,9 +67,6 @@ final class KeyboardViewModel: ObservableObject {
     @Published var translationLanguage: String?
     /// The targets the full keyboard's Hex key menu offers (`DictationTranslationSettings.targetChoices`).
     @Published var translationTargetChoices: [String] = []
-    /// Record typing logs is recording this field: both keyboards show a small mark the
-    /// whole time, so logging is never hidden.
-    @Published var isLoggingTyping = false
     /// The dictation bar's emoji key: Settings › Keyboard › Emoji, in a field that takes emoji.
     @Published var showsEmojiKey = true
     /// A finished dictation the keyboard didn't insert by itself (it missed its moment, or

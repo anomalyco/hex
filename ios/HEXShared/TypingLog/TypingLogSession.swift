@@ -23,9 +23,9 @@ nonisolated struct TypingLogSettings {
     /// Set once `turnOffOnce()` has run; a later version turns it off again under a new key.
     static let turnedOffKey = "migrations.typingLogsOff.v1"
 
-    /// Once per App Group (Nov 2026): Record typing logs goes off for everyone who had it on,
-    /// so the bar's Logging mark goes. The logs already recorded stay, and so does the switch
-    /// in Settings › Privacy › Advanced, which turns it back on for good.
+    /// Once per App Group (Nov 2026): Record typing logs goes off for everyone who had it on.
+    /// The logs already recorded stay, and so does the switch in Settings › Privacy › Advanced,
+    /// which turns it back on for good.
     func turnOffOnce() {
         guard let defaults, !defaults.bool(forKey: Self.turnedOffKey) else { return }
         if isEnabled { isEnabled = false }

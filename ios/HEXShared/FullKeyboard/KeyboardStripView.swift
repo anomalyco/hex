@@ -87,7 +87,7 @@ final class KeyboardStripView: UIView {
     /// Built for the first notice, in the Full Access hint's shape.
     private var noticeView: FullAccessHintView?
     /// The Hex key sits left of the strip (Settings › Keyboard › Hex key): the Full Access
-    /// hint's Open Hex leads, beside the key, and the Logging mark moves to the far corner.
+    /// hint's Open Hex leads, beside the key.
     var hexOnLeading = false {
         didSet {
             guard hexOnLeading != oldValue else { return }
@@ -96,21 +96,6 @@ final class KeyboardStripView: UIView {
             setNeedsLayout()
         }
     }
-    /// Record typing logs is recording: a small mark in the strip's corner away from the Hex key.
-    var showsLoggingMark = false {
-        didSet {
-            guard showsLoggingMark != oldValue else { return }
-            if showsLoggingMark, loggingMark == nil {
-                let mark = TypingLogMarkView()
-                mark.textColor = palette.textMuted
-                addSubview(mark)
-                loggingMark = mark
-            }
-            loggingMark?.isHidden = !showsLoggingMark
-            setNeedsLayout()
-        }
-    }
-    private var loggingMark: TypingLogMarkView?
     /// Where the bar's middle slot centres, from this view's leading edge: the keyboard's middle,
     /// not this view's, which leaves out the Hex key. Paste and Next keyboard centre on it.
     var barMidX: CGFloat? { didSet { if barMidX != oldValue { setNeedsLayout() } } }
@@ -348,7 +333,6 @@ final class KeyboardStripView: UIView {
         undoChip.configuration = chip
         fullAccessHintView?.palette = palette
         noticeView?.palette = palette
-        loggingMark?.textColor = palette.textMuted
         for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
             slotButtons[slot].configure(with: currentSuggestions[item], palette: palette, animated: false)
         }
@@ -393,20 +377,7 @@ final class KeyboardStripView: UIView {
         // The hint's two lines and chip centre on the words' line, as everything in the strip.
         let hintHalf = min(midY, bounds.height - midY)
         let hintY = midY - hintHalf
-        var hintFrame = CGRect(x: 12, y: hintY, width: max(0, bounds.width - 24), height: 2 * hintHalf)
-        var markRoom: CGFloat = 0
-        if let loggingMark, showsLoggingMark {
-            // On the text line at the outer slot's end, in from the keyboard's rounded corner;
-            // that slot centres its word in the rest, so a long word never runs under it.
-            let size = loggingMark.sizeThatFits(bounds.size)
-            let markX = hexOnLeading ? bounds.width - 12 - size.width : 12
-            loggingMark.frame = CGRect(x: markX, y: (midY - size.height / 2).rounded(), width: size.width, height: size.height)
-            markRoom = 12 + size.width + 4
-            bringSubviewToFront(loggingMark)
-            hintFrame = hexOnLeading
-                ? CGRect(x: 12, y: hintY, width: max(0, loggingMark.frame.minX - 8 - 12), height: 2 * hintHalf)
-                : CGRect(x: loggingMark.frame.maxX + 8, y: hintY, width: max(0, bounds.width - loggingMark.frame.maxX - 20), height: 2 * hintHalf)
-        }
+        let hintFrame = CGRect(x: 12, y: hintY, width: max(0, bounds.width - 24), height: 2 * hintHalf)
         fullAccessHintView?.frame = hintFrame
         fullAccessHintView?.chipHeight = chipH
         noticeView?.frame = hintFrame
@@ -415,8 +386,6 @@ final class KeyboardStripView: UIView {
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
             button.frame = slots[idx]
-            button.leadingRoom = !hexOnLeading && idx == 0 ? markRoom : 0
-            button.trailingRoom = hexOnLeading && idx == 2 ? markRoom : 0
         }
     }
 
@@ -480,9 +449,6 @@ final class KeyboardStripView: UIView {
         var chipHeight: CGFloat? { didSet { if chipHeight != oldValue { setNeedsDisplay() } } }
         /// Apple's bar: the bubble fills the slot across, from `pillInset` down `chipHeight`.
         var fillsCell = false { didSet { if fillsCell != oldValue { setNeedsDisplay() } } }
-        /// Room the Logging mark takes at the slot's outer end: the word centres in the rest.
-        var leadingRoom: CGFloat = 0 { didSet { if leadingRoom != oldValue { setNeedsDisplay() } } }
-        var trailingRoom: CGFloat = 0 { didSet { if trailingRoom != oldValue { setNeedsDisplay() } } }
         private var suggestion: KeyboardSuggestion?
         private var palette = FullKeyboardPalette(isDark: false)
         /// The word leaving while its letters fade, and when the swap began.
@@ -569,11 +535,10 @@ final class KeyboardStripView: UIView {
             // Apple's words are all SF 17 pt regular, the one in the capsule included.
             let font = UIFont.systemFont(ofSize: suggestion.kind == .emoji ? 22 : 17, weight: .regular)
             let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
-            // The word centres in the slot, less any room the Logging mark takes; a revert's
-            // with its arrow after it.
+            // The word centres in the slot; a revert's with its arrow after it.
             let arrowRoom = suggestion.kind == .revert ? Self.revertArrowSize + Self.revertArrowGap : 0
-            let textMidX = (leadingRoom + bounds.width - trailingRoom - arrowRoom) / 2
-            let maxTextW = max(20, min(bounds.width - 12, bounds.width - leadingRoom - trailingRoom - 8) - arrowRoom)
+            let textMidX = (bounds.width - arrowRoom) / 2
+            let maxTextW = max(20, bounds.width - 12 - arrowRoom)
             let text = suggestion.displayText
             let size = (text as NSString).size(withAttributes: attributes)
             guard size.width > maxTextW else {
@@ -793,56 +758,6 @@ final class FullAccessHintView: UIView {
     }
 }
 
-/// Record typing logs is recording this field: a dot and "Logging", flat and small, in the
-/// strip's corner and in the recording bar, so logging is never hidden.
-@MainActor
-final class TypingLogMarkView: UIView {
-    static let text = "Logging"
-    static let accessibilityText = "Typing logs are recording"
-
-    /// The dot and the word share the strip's muted ink: an orange dot would read as iOS's
-    /// microphone indicator.
-    var textColor: UIColor = .secondaryLabel {
-        didSet {
-            label.textColor = textColor
-            dot.backgroundColor = textColor
-        }
-    }
-
-    private let dot = UIView()
-    private let label = UILabel()
-    private static let dotSize: CGFloat = 5
-    private static let gap: CGFloat = 4
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isUserInteractionEnabled = false
-        isAccessibilityElement = true
-        accessibilityLabel = Self.accessibilityText
-        dot.backgroundColor = textColor
-        dot.layer.cornerRadius = Self.dotSize / 2
-        label.text = Self.text
-        label.font = .systemFont(ofSize: 10, weight: .medium)
-        label.textColor = textColor
-        addSubview(dot)
-        addSubview(label)
-    }
-
-    @available(*, unavailable)
-    required init?(coder: NSCoder) { fatalError() }
-
-    override func sizeThatFits(_ size: CGSize) -> CGSize {
-        let text = label.sizeThatFits(size)
-        return CGSize(width: Self.dotSize + Self.gap + ceil(text.width), height: max(Self.dotSize, ceil(text.height)))
-    }
-
-    override func layoutSubviews() {
-        super.layoutSubviews()
-        dot.frame = CGRect(x: 0, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
-        label.frame = CGRect(x: Self.dotSize + Self.gap, y: 0, width: max(0, bounds.width - Self.dotSize - Self.gap), height: bounds.height)
-    }
-}
-
 /// The strip's geometry: Apple's prediction bar on an iPhone (`appleBar`), the 38 pt strip before
 /// it was measured, and the Duo's and iPad's bars.
 nonisolated extension KeyboardMetrics {
@@ -856,8 +771,8 @@ nonisolated extension KeyboardMetrics {
     /// which, so the strip carries its own room above the words. It was 27 pt, the part of
     /// Apple's bar below that band: without the band the words sat 9 pt under the keyboard's top
     /// edge and a chip touched it. Everything the strip shows (suggestions, Undo dictation, the
-    /// Full Access hint, the recording bar, the emoji panel's top row, the Logging mark) lives in
-    /// those 38 pt, centred on the words' line (`stripTextCenter`).
+    /// Full Access hint, the recording bar, the emoji panel's top row) lives in those 38 pt,
+    /// centred on the words' line (`stripTextCenter`).
     static let stripBarHeight: CGFloat = 38
     static let stripGap: CGFloat = 8
     /// On the iPhone Duo iOS sets the keyboard in a platter with its own band above, and the
