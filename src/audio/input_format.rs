@@ -13,7 +13,7 @@ use cpal::{
 };
 
 use super::CaptureInstant;
-use super::stream::{StreamErrorReporter, build_stream};
+use super::stream::{StreamError, StreamErrorReporter, build_stream};
 
 /// A running microphone stream; dropping it stops capture.
 pub(super) enum InputStream {
@@ -34,7 +34,7 @@ pub(super) enum InputStream {
 pub(super) struct StartedStream {
     pub stream: InputStream,
     pub chunks: Receiver<(Vec<f32>, CaptureInstant)>,
-    pub stream_errors: Receiver<String>,
+    pub stream_errors: Receiver<StreamError>,
     pub hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
     pub sample_rate: u32,
 }

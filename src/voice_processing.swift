@@ -37,6 +37,9 @@ private func writeVoiceProcessingError(
 private final class VoiceProcessingGate {
     let lock = NSLock()
     var active = true
+    /// Set once start() has returned, so notifications from building or
+    /// starting the graph are not mistaken for a reconfigured running engine.
+    var started = false
 }
 
 /// Runs `body`, turning an Objective-C exception AVAudioEngine raises into a
@@ -257,16 +260,18 @@ final class VoiceProcessingCapture {
         self.sampleRate = graph.sampleRate
         self.channels = graph.channels
         self.tapInstalled = true
-        // A route or hardware change can stop an engine; report it so the
-        // listener reopens (raw if voice processing has now failed).
+        // A route or hardware change that stops a started engine is reported
+        // so the listener reopens. One that leaves it running is its own
+        // business; one during setup or start is not a reconfiguration yet.
+        let engine = graph.engine
         self.configurationObserver = NotificationCenter.default.addObserver(
             forName: .AVAudioEngineConfigurationChange,
-            object: graph.engine,
+            object: engine,
             queue: nil
         ) { _ in
             gate.lock.lock()
             defer { gate.lock.unlock() }
-            guard gate.active else { return }
+            guard gate.active, gate.started, !engine.isRunning else { return }
             errorCallback(context)
         }
     }
@@ -277,6 +282,7 @@ final class VoiceProcessingCapture {
 
     func start() throws {
         let engine = self.engine
+        let gate = self.gate
         let deviceID = self.deviceID
         try withVoiceProcessingGuard {
             engine.prepare()
@@ -285,8 +291,13 @@ final class VoiceProcessingCapture {
             // Hex records from the chosen one or not at all.
             let selected = try voiceProcessingSelected(engine.inputNode)
             guard selected == deviceID else {
-                throw VoiceProcessingError("Voice processing started on a different microphone.")
+                throw VoiceProcessingError(
+                    "Voice processing started on microphone \(selected) instead of \(deviceID)."
+                )
             }
+            gate.lock.lock()
+            gate.started = true
+            gate.lock.unlock()
         }
     }
 
@@ -296,6 +307,7 @@ final class VoiceProcessingCapture {
     func stop() {
         gate.lock.lock()
         gate.active = false
+        gate.started = false
         gate.lock.unlock()
         if let configurationObserver {
             NotificationCenter.default.removeObserver(configurationObserver)

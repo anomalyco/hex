@@ -19,6 +19,12 @@ use super::stream::{AudioInput, AudioInputEvent, Opened, STREAM_PROVEN_UPTIME, S
 
 type Opener = Arc<dyn Fn(&OpenRequest) -> Result<Opened> + Send + Sync>;
 
+/// Configuration-change reopens inside this window count toward a loop.
+const VOICE_PROCESSING_RECONFIGURE_WINDOW: Duration = Duration::from_secs(30);
+/// More than this many reopens in the window means the engine keeps
+/// reconfiguring, so voice processing is remembered as failed.
+const VOICE_PROCESSING_RECONFIGURE_LIMIT: usize = 3;
+
 pub struct RecoveringAudioInput {
     input: Option<AudioInput>,
     /// When the installed stream first delivered a chunk, and whether it has
@@ -39,6 +45,12 @@ pub struct RecoveringAudioInput {
     /// the device's clock; its install must not remember a voice-processing
     /// failure.
     voice_isolation_skipped: bool,
+    /// When engine configuration changes reopened voice processing, to tell
+    /// one reconfiguration from a loop.
+    voice_processing_reconfigures: Vec<Instant>,
+    /// The resolved microphone last installed, kept while the stream is
+    /// closed so a reopen on another device can be told apart.
+    resolved_device: Option<(String, Option<String>)>,
     active_revision: u64,
     recovery: MicrophoneRecovery,
     replacement: Option<Receiver<InputOpenResult>>,
@@ -125,6 +137,8 @@ impl RecoveringAudioInput {
             voice_isolation: crate::labs::voice_isolation(),
             voice_isolation_fallback: false,
             voice_isolation_skipped: false,
+            voice_processing_reconfigures: Vec::new(),
+            resolved_device: None,
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
             replacement: None,
@@ -157,6 +171,8 @@ impl RecoveringAudioInput {
         input.voice_isolation = false;
         input.voice_isolation_fallback = false;
         input.voice_isolation_skipped = false;
+        input.voice_processing_reconfigures.clear();
+        input.resolved_device = None;
         input.opener = Arc::new(opener);
         input
     }
@@ -210,6 +226,7 @@ impl RecoveringAudioInput {
         if enabled != self.voice_isolation {
             self.voice_isolation = enabled;
             self.voice_isolation_fallback = false;
+            self.voice_processing_reconfigures.clear();
         }
         if !capture_idle || self.replacement.is_some() || self.recovery.blocks_audio() {
             return;
@@ -291,7 +308,25 @@ impl RecoveringAudioInput {
     /// raw silence-recovery open, whose raw stream is deliberate and not a
     /// voice-processing failure to remember.
     fn install_after_open(&mut self, input: AudioInput, voice_isolation_skipped: bool) {
-        if !voice_isolation_skipped && input.voice_isolation && !input.voice_processing_active {
+        let device_changed = self.resolved_device.as_ref().is_some_and(|(name, uid)| {
+            match (uid.as_deref(), input.uid.as_deref()) {
+                (Some(previous), Some(next)) => previous != next,
+                _ => name != &input.device_name,
+            }
+        });
+        self.resolved_device = Some((input.device_name.clone(), input.uid.clone()));
+        let had_fallback = self.voice_isolation_fallback;
+        if device_changed {
+            // A different resolved microphone, even one the saved setting
+            // didn't name (a stand-in, the OS default, or a route change),
+            // gets a fresh try at voice processing.
+            self.voice_isolation_fallback = false;
+            self.voice_processing_reconfigures.clear();
+        }
+        let fell_back = input.voice_isolation && !input.voice_processing_active;
+        // A raw open made because the old fallback skipped voice processing
+        // says nothing about the new device; the next idle pass tries it.
+        if !voice_isolation_skipped && fell_back && !(device_changed && had_fallback) {
             let reason = format!(
                 "{} did not open through voice processing",
                 input.device_name
@@ -359,6 +394,7 @@ impl RecoveringAudioInput {
         }
         self.selected_device = selected_device.map(str::to_owned);
         self.voice_isolation_fallback = false;
+        self.voice_processing_reconfigures.clear();
         if self.input.is_none() && !self.is_recovering() {
             let was_opening = self.replacement.take().is_some();
             self.voice_isolation_skipped = false;
@@ -493,6 +529,17 @@ impl RecoveringAudioInput {
                 }
             }
             AudioInputEvent::Timeout => RecoveringAudioInputEvent::Timeout,
+            AudioInputEvent::StreamReconfigured => {
+                let now = Instant::now();
+                let device = input.device_name.clone();
+                tracing::info!(
+                    device = %device,
+                    "voice processing engine reconfigured; reopening the microphone"
+                );
+                self.note_voice_processing_reconfigure(now, &device);
+                self.recovery.request_stream_recovery(now);
+                RecoveringAudioInputEvent::Interrupted
+            }
             AudioInputEvent::StreamFailed(error) => {
                 let failed_at = Instant::now();
                 let voice_processing_failed =
@@ -514,6 +561,24 @@ impl RecoveringAudioInput {
                 }
                 RecoveringAudioInputEvent::Interrupted
             }
+        }
+    }
+
+    /// Counts a configuration-change reopen. A few are ordinary route or
+    /// hardware changes; more than the limit inside the window means the
+    /// engine keeps reconfiguring, so voice processing is remembered as
+    /// failed and the raw stream takes over.
+    fn note_voice_processing_reconfigure(&mut self, now: Instant, device: &str) {
+        if !self.voice_isolation || self.voice_isolation_fallback {
+            return;
+        }
+        self.voice_processing_reconfigures
+            .retain(|at| now.saturating_duration_since(*at) <= VOICE_PROCESSING_RECONFIGURE_WINDOW);
+        self.voice_processing_reconfigures.push(now);
+        if self.voice_processing_reconfigures.len() > VOICE_PROCESSING_RECONFIGURE_LIMIT {
+            let reason = format!("{device} reconfigured repeatedly");
+            self.remember_voice_isolation_failure(&reason);
+            self.voice_processing_reconfigures.clear();
         }
     }
 

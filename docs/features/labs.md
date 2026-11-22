@@ -88,8 +88,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        processing, so Control Center's Mic Mode can offer Voice Isolation and background
 │                                        noise is reduced; meetings, captures, the level meter, the local API's host
 │                                        audio, and named opens stay on the raw cpal path; an open stream is replaced only while capture is
-│                                        idle, and any voice-processing failure falls back to normal capture for that
-│                                        microphone until the lab is toggled or the selected microphone changes
+│                                        idle; an actual voice-processing failure (an open, a wrong device, a stall, or
+│                                        more than three engine reconfigurations in 30 s) falls back to normal capture
+│                                        until the lab is toggled or the resolved microphone changes
 │                                        // checks: voice_isolation_is_its_own_bit_and_off_by_default (labs.rs);
 │                                        // a_voice_isolation_change_reopens_only_while_capture_is_idle (audio/recovering/tests.rs);
 │                                        // not run on a Mac, and no hardware confirmed Control Center offers the mode for Hex
@@ -776,18 +777,22 @@ silent main mixer to the output (voice processing is duplex), and taps
 channel 0 at the bus rate in a standard Float32 non-interleaved format with
 `AVAudioTime.hostTime`; Rust converts the Mach ticks with
 `CaptureInstant::from_mach_ticks` and feeds the same chunk and Hex
-Microphone channels a cpal stream does. The bridge observes
-`AVAudioEngineConfigurationChange` and reports it to Rust through an error
-callback, and reads `kAudioOutputUnitProperty_CurrentDevice` back after
-start. Any voice-processing failure falls back to normal capture: an
-exception from the graph (the Objective-C `@try/@catch` guard in
-`native/voice_processing_guard.m`), a refused format, device, or start, a
-device that isn't the requested one after start, or a stream that stalls or
-fails. `RecoveringAudioInput` remembers that failure for the current
-microphone, so every later open uses the raw cpal stream without reopening
-the engine, until Labs › Voice isolation is toggled or the selected
-microphone changes. A silence recovery's renegotiating open is raw too. A
-gate change is applied by `DictationAudio::reconcile_input` only while
+Microphone channels a cpal stream does. The bridge reads
+`kAudioOutputUnitProperty_CurrentDevice` back after start. It observes
+`AVAudioEngineConfigurationChange` only once start has returned, and reports
+it through a separate error callback only while the engine has stopped; that
+is a plain reopen, so the next open tries voice processing again. More than
+three such reopens within 30 s count as a failure. An actual voice-processing
+failure falls back to normal capture: an exception from the graph (the
+Objective-C `@try/@catch` guard in `native/voice_processing_guard.m`), a
+refused format, device, or start, a device that isn't the requested one after
+start, or a stream that stalls or fails. `RecoveringAudioInput` remembers that
+failure for the resolved microphone, so every later open uses the raw cpal
+stream without reopening the engine, until Labs › Voice isolation is toggled
+or the resolved microphone changes (the saved selection, the OS default, or a
+stand-in). A configuration change reopens through voice processing again, so
+it never disables the lab. A silence recovery's renegotiating open is raw too.
+A gate change is applied by `DictationAudio::reconcile_input` only while
 nothing records and no capture sink holds the microphone; the same device
 is then reopened on the other path rather than kept as unchanged, and a
 change during a capture waits for it to end. Off, every open is

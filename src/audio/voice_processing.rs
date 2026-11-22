@@ -19,6 +19,7 @@ use color_eyre::eyre::{Result, eyre};
 
 use super::hex_microphone::{CaptureFeed, CaptureFeedSwitch, capture_feed};
 use super::instant::{CaptureInstant, duration_for_frames};
+use super::stream::StreamError;
 
 /// One tap buffer: mono float samples, the host time they were captured at
 /// (Mach ticks), and the rate they were captured at.
@@ -28,10 +29,10 @@ type TapCallback = unsafe extern "C" fn(*mut c_void, *const f32, usize, u64, u32
 type ErrorCallback = unsafe extern "C" fn(*mut c_void);
 
 unsafe extern "C" {
-    /// Builds the engine for `device_uid` with voice processing on and its
-    /// graph connected, without a tap or a running engine yet. Answers a
-    /// retained handle, the capture rate and channel count, or null with a
-    /// message in `error`.
+    /// Builds the engine for `device_uid` with voice processing on, its graph
+    /// connected, and its tap installed, without starting the engine yet.
+    /// Answers a retained handle, the capture rate and channel count, or null
+    /// with a message in `error`.
     fn hex_voice_processing_start(
         device_uid: *const c_char,
         callback: TapCallback,
@@ -41,8 +42,8 @@ unsafe extern "C" {
         channels: *mut u32,
         error: *mut *mut c_char,
     ) -> *mut c_void;
-    /// Installs the tap, starts the engine behind `handle`, and verifies its
-    /// device; 0 on success, else a message in `error`.
+    /// Starts the engine behind `handle` and verifies its device; 0 on
+    /// success, else a message in `error`.
     fn hex_voice_processing_begin(handle: *mut c_void, error: *mut *mut c_char) -> i32;
     /// Removes the tap, stops the engine, and releases `handle`.
     fn hex_voice_processing_stop(handle: *mut c_void);
@@ -65,7 +66,7 @@ unsafe impl Send for VoiceProcessingStream {}
 /// installed before the engine starts, so no callback sees it empty.
 struct VoiceProcessingContext {
     sender: Sender<(Vec<f32>, CaptureInstant)>,
-    errors: SyncSender<String>,
+    errors: SyncSender<StreamError>,
     /// Filled once the bridge reports its capture rate and before the engine
     /// starts. Swift's gate serializes callbacks, but the Rust callback gets
     /// a shared context pointer, so the uncontended mutex supplies the `&mut`
@@ -77,7 +78,7 @@ struct VoiceProcessingContext {
 pub(super) struct StartedVoiceProcessing {
     pub(super) stream: VoiceProcessingStream,
     pub(super) chunks: Receiver<(Vec<f32>, CaptureInstant)>,
-    pub(super) stream_errors: Receiver<String>,
+    pub(super) stream_errors: Receiver<StreamError>,
     pub(super) hex_microphone: CaptureFeedSwitch,
     pub(super) sample_rate: u32,
     pub(super) channels: u32,
@@ -122,8 +123,8 @@ pub(super) fn start(device_uid: &str) -> Result<StartedVoiceProcessing> {
     }
     let rate = sample_rate.round() as u32;
     if !sample_rate.is_finite() || !(8_000..=384_000).contains(&rate) || channels == 0 {
-        // SAFETY: the handle owns the Swift capture, and the context has no
-        // tap running yet, so both can be released here.
+        // SAFETY: the handle owns the Swift capture, and the engine has not
+        // started, so its tap cannot be running; both can be released here.
         unsafe {
             hex_voice_processing_stop(handle);
             drop(Box::from_raw(context));
@@ -133,8 +134,8 @@ pub(super) fn start(device_uid: &str) -> Result<StartedVoiceProcessing> {
         ));
     }
     let (feed, hex_microphone) = capture_feed(rate);
-    // SAFETY: the engine has not started and has no tap yet, so nothing can
-    // be reading the context; and the context is the one this call owns.
+    // SAFETY: the engine has not started, so its installed tap cannot be
+    // reading the context; and the context is the one this call owns.
     unsafe {
         if let Ok(mut installed) = (*context).feed.lock() {
             *installed = Some(feed);
@@ -144,7 +145,7 @@ pub(super) fn start(device_uid: &str) -> Result<StartedVoiceProcessing> {
     // answers an owned message when the begin fails.
     let started = unsafe { hex_voice_processing_begin(handle, &mut error) };
     if started != 0 {
-        // SAFETY: the begin failed after building the engine, so the
+        // SAFETY: the begin may have failed after starting the engine, so the
         // retained handle still owns its tap and engine to clean up.
         let message = unsafe { take_error(error) };
         // SAFETY: the handle and context are this call's, and no tap can run
@@ -192,7 +193,7 @@ unsafe extern "C" fn report_error(context: *mut c_void) {
     let context = unsafe { &*context.cast::<VoiceProcessingContext>() };
     let _ = context
         .errors
-        .try_send("voice processing engine reconfigured".into());
+        .try_send(StreamError::VoiceProcessingConfigurationChanged);
 }
 
 /// Delivers one tap buffer, on AVAudioEngine's render thread while the Swift
@@ -230,9 +231,9 @@ unsafe extern "C" fn deliver(
         .send((mono.to_vec(), captured_through))
         .is_err()
     {
-        let _ = context
-            .errors
-            .try_send("voice processing audio channel disconnected".into());
+        let _ = context.errors.try_send(StreamError::Failed(
+            "voice processing audio channel disconnected".into(),
+        ));
     }
 }
 

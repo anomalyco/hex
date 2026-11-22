@@ -1072,7 +1072,8 @@ never at a launch by itself.
   Center's Mic Mode can offer Voice Isolation while Hex records, and
   in-keyboard dictation asks `getUserMedia` for echo cancellation and noise
   suppression (automatic gain stays off). Other audio may be lowered while
-  recording. With it off, both record exactly as before. Not verified on a
+  recording, and Bluetooth headphones may switch to their hands-free call
+  profile. With it off, both record exactly as before. Not verified on a
   device: that Control Center actually offers Voice Isolation for Hex, and how
   the mode changes a recording's level.
 - **Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+):**

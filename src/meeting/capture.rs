@@ -790,6 +790,9 @@ impl LiveSource for MicrophoneSource {
             }
             crate::audio::AudioInputEvent::Timeout => Ok(()),
             crate::audio::AudioInputEvent::StreamFailed(error) => Err(error),
+            crate::audio::AudioInputEvent::StreamReconfigured => {
+                Err("microphone reconfigured".into())
+            }
         }
     }
 
