@@ -799,21 +799,11 @@ struct ContentView: View {
     }
 
     private var primaryActionLabel: String {
-        switch dictation.phase {
-        case .modelRequired, .failed:
-            String(localized: "Set up")
-        default:
-            String(localized: "Dictate")
-        }
+        dictation.primaryActionPreparesModel ? String(localized: "Set up") : String(localized: "Dictate")
     }
 
     private var primaryActionIcon: String {
-        switch dictation.phase {
-        case .modelRequired, .failed:
-            "arrow.down"
-        default:
-            "mic.fill"
-        }
+        dictation.primaryActionPreparesModel ? "arrow.down" : "mic.fill"
     }
 
     private var handoffStatusLine: String? {
