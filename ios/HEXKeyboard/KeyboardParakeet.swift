@@ -138,7 +138,7 @@ final class KeyboardParakeet {
                 }
                 let cold = seconds >= Self.compilingLoad
                 self.loaded = Loaded(multilingual: choice.multilingual, manager: manager, seconds: seconds, cold: cold, at: Date())
-                settings.setKeyboardState(.ready)
+                settings.setKeyboardState(.ready, multilingual: choice.multilingual)
                 KeyboardProbeLog.shared.write(
                     "parakeet: \(choice.label) loaded in \(String(format: "%.1f", seconds)) s (\(cold ? "cold" : "warm")) \(after)"
                 )
