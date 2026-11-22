@@ -3,7 +3,7 @@
 Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
-only for calls answered Record automatically (Meetings › Settings › Calls), and
+only for calls answered Always record (Meetings › Settings › Calls), and
 never stops automatically unless the Calls sheet's Stop when the call ends is
 on (see
 [meetings.auto-stop](#record)). This map describes macOS; [Linux and Windows](#linux-and-windows)
@@ -267,7 +267,7 @@ Browser calls -> a browser holding the microphone is a browser call after 20 s
         through UI Automation, at most six, one read in flight and 2 s for
         the whole read (a hung provider leaves their titles): a page address
         or window title naming a call (Meet, a Teams page, ...) offers that
-        service with its site, and Record automatically follows it like any known
+        service with its site, and Always record follows it like any known
         call; a page that names no call stays "<browser> call detected"
         └── the browser executable's windows, not the microphone process's:
             a Chromium audio utility process has none; each window's search
@@ -379,8 +379,8 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      A Teams page uses the Microsoft Teams app's answer.
      The watcher records the provider in the seen list (below).
      ├── Don't offer -> nothing shown; an earlier offer stays snoozed
-     ├── Record automatically -> starts recording, no offer   // meetings.auto-record
-     │   └── a default of Record automatically starts only calls Hex can
+     ├── Always record -> starts recording, no offer   // meetings.auto-record
+     │   └── a default of Always record starts only calls Hex can
      │       name (not a browser on an unknown page); those are offered
      │   └── recording capsule says "Started automatically" for 10 s; with the
      │       indicator off, a "Recording automatically" capsule with Stop
@@ -408,7 +408,7 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          │   │   open past the timeout, until answered or the offer is withdrawn.
          │   ├── Don't offer -> saved, close; the app's row shows
          │   │   in the Calls sheet at once
-         │   ├── Always record -> saved (Record automatically), records
+         │   ├── Always record -> saved, records
          │   │   this call too; the row shows in the Calls sheet at once
          │   │   └── not offered for a browser on an unknown page
          │   └── Cancel -> Back to Record / Not now; if the original timer
@@ -500,7 +500,7 @@ Vivaldi, Ardia, or Zen call.
 Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
 `teams.live.com`) are known call sites: a browser on one is a
 Microsoft Teams call after 2 s. They use the Microsoft Teams app's
-`com.microsoft.teams2` answer, so Record automatically set for the app covers its
+`com.microsoft.teams2` answer, so Always record set for the app covers its
 website too; an answer saved earlier for a Teams page's own address still
 applies to that host until the app's answer is set, which drops it. Check:
 `teams_web_calls_are_the_teams_service`; not observed on a
@@ -567,7 +567,7 @@ Meet call in a background Arc without Automation was an unnamed browser call
 observed against a live background Arc. Background tabs are not searched: a
 call open in one says nothing about which tab holds the microphone, and a
 voice note elsewhere would otherwise get a known service's 2 s threshold or
-trigger Record automatically. (A call in a background tab is therefore judged by the
+trigger Always record. (A call in a background tab is therefore judged by the
 active tab's page, which is the unknown-page 20 s for a new site.) That query is
 an AppleScript round trip, so the watcher starts it on its own
 thread (at most one at a time) and reads the newest answer,
@@ -786,9 +786,9 @@ Lead time reached (or Mac wakes within 5 min of the start)   // meetings.reminde
      │   ├── Not now -> close; this call is not offered when detected
      │   ├── Join & record (only with a link) -> open the link, then record
      │   └── Record -> recording titled "Design sync" with its attendees
-     └── Service set to Record automatically: "Starts in 1 min · Hex records automatically"
+     └── Service set to Always record: "Starts in 1 min · Hex records automatically"
          ├── Don't record -> close; the detected call neither offers nor auto-records
-         └── Join (only with a link) -> open the link; Record automatically starts on detection
+         └── Join (only with a link) -> open the link; Always record starts on detection
   -> Closes 60 s after the start (at least 30 s after showing); withdrawn if the
      meeting is cancelled, moved, or reminders are turned off. One at a time: an
      overlapping meeting's reminder waits until this one is answered or closes.
@@ -1159,7 +1159,7 @@ Panel capsules move like the recording capsule (#1093, graduated from Labs; only
 
 Meetings › Settings › Calls › Stop when the call ends (macOS, off by default; #835;
 meetings.stop_when_call_ends) // meetings.auto-stop
-  Only a recording Hex started on its own (Record automatically); manual, offered,
+  Only a recording Hex started on its own (Always record); manual, offered,
   and calendar recordings are never stopped
   -> The call app counts as present while it holds the microphone OR any of
      its Core Audio processes plays output (WhatsApp keeps the microphone
@@ -1175,7 +1175,7 @@ meetings.stop_when_call_ends) // meetings.auto-stop
          "meeting recording stopped automatically after its call ended";
          its call's snooze ends as after a hand stop, so the app retaking the
          microphone (a mute or an audio restart that outlasted the grace) is
-         a new call Record automatically records again rather than the call staying
+         a new call Always record records again rather than the call staying
          snoozed for the rest of it. Check:
          `an_automatic_call_ended_stop_offers_the_call_again_when_it_returns`
   -> A browser that never releases the microphone between calls (Arc, #1775):

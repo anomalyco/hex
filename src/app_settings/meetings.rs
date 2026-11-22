@@ -292,7 +292,7 @@ pub const MORE_MEETING_PROVIDERS: [(&str, &str); 10] = [
 ];
 
 /// What Hex does when it detects a call from a provider. Shown as Ask each
-/// time, Record automatically, and Don't offer; the stored names predate
+/// time, Always record, and Don't offer; the stored names predate
 /// those and stay so older builds can read the file.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -315,7 +315,7 @@ impl MeetingPolicy {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Ask => "Ask each time",
-            Self::AlwaysRecord => "Record automatically",
+            Self::AlwaysRecord => "Always record",
             Self::NeverOffer => "Don't offer",
         }
     }

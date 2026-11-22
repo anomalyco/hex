@@ -139,7 +139,7 @@ impl CallProvider {
     }
 
     /// The key the Calls sheet saves this service's answer under (Ask each
-    /// time, Record automatically, or Don't offer).
+    /// time, Always record, or Don't offer).
     pub fn choice_key(self) -> Option<&'static str> {
         match self {
             Self::Zoom => Some("us.zoom.xos"),

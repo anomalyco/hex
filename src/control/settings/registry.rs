@@ -850,12 +850,12 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "meetings.providers",
         Kind::Json,
-        "Per-app call choices, as a JSON array of {key, label, policy: ask|always_record|never_offer} (Ask each time, Record automatically, Don't offer)",
+        "Per-app call choices, as a JSON array of {key, label, policy: ask|always_record|never_offer} (Ask each time, Always record, Don't offer)",
     ),
     key(
         "meetings.default_policy",
         Kind::Choice(&["ask", "always_record", "never_offer"]),
-        "What to do when a call starts in a website or app with no entry in meetings.providers: ask (Ask each time), always_record (Record automatically), or never_offer (Don't offer)",
+        "What to do when a call starts in a website or app with no entry in meetings.providers: ask (Ask each time), always_record (Always record), or never_offer (Don't offer)",
     ),
     read_only(
         "meetings.calendar.connected",

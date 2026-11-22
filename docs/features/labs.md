@@ -2724,7 +2724,7 @@ controller's `ControllerCommand::JoinFromMenu`, the menu's own join path
 records that occurrence as already reminded so its reminder never pops, and
 sends `ReminderWithdrawn` when that reminder is currently showing so its
 capsule closes. A moved meeting is a new occurrence and may remind again. The
-click itself starts no recording, though a provider set to Record automatically may
+click itself starts no recording, though a provider set to Always record may
 still record once the call is detected. A row without a link is informational
 and disabled. The gate, `labs::calendar_menu()`, is read when the meeting
 controller decides to read its calendar, on the status item's 500 ms refresh,

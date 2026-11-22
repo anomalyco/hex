@@ -176,7 +176,7 @@ impl MeetingProvider {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Detection {
     Offer(MeetingCandidate),
-    /// The provider is set to Record automatically.
+    /// The provider is set to Always record.
     Record(MeetingCandidate),
 }
 
@@ -714,7 +714,7 @@ impl MeetingDetector {
     /// The snoozed call's recording stopped: by hand, or on its own once its
     /// call ended (Stop when the call ends). Its app being off the
     /// microphone is no longer that call, so the next call in the same app is
-    /// offered, or recorded under Record automatically (#1113). A call already gone
+    /// offered, or recorded under Always record (#1113). A call already gone
     /// for [`CALL_ENDED_AFTER`] when its recording stops ends its snooze at
     /// once, so the app retaking the microphone is a new call rather than the
     /// snoozed one returning.
@@ -913,7 +913,7 @@ impl MeetingDetector {
 
     /// One observation under the user's answers, `default` for calls with
     /// none of their own. A Don't offer call shows nothing but still counts
-    /// as present; Record automatically ones pass the same stability time and
+    /// as present; Always record ones pass the same stability time and
     /// snooze as an offer, so a stopped or dismissed call never starts again
     /// until its app leaves the microphone.
     pub fn detect(
@@ -949,7 +949,7 @@ impl MeetingDetector {
             return None;
         }
         let candidate = self.observe_at(candidate, now, now_ms)?;
-        // A default of Record automatically starts only calls Hex can name;
+        // A default of Always record starts only calls Hex can name;
         // a browser page it can't is offered instead of recording every page.
         let records = match candidate.own_policy(choices) {
             Some(policy) => policy == MeetingPolicy::AlwaysRecord,
@@ -2784,7 +2784,7 @@ mod tests {
         let zoom = zoom();
         let always = [choice("us.zoom.xos", MeetingPolicy::AlwaysRecord)];
         let mut watch = Watch::new();
-        // Record automatically starts the recording on its own.
+        // Always record starts the recording on its own.
         assert_eq!(
             watch.stable(&zoom, &always),
             Some(Detection::Record(zoom.clone()))
@@ -3255,7 +3255,7 @@ mod tests {
         let mut watch = Watch::new();
         assert!(watch.run(Some(&slack), &never, 8_000).is_empty());
 
-        // Offered and dismissed, then switched to Record automatically mid-call.
+        // Offered and dismissed, then switched to Always record mid-call.
         let mut watch = Watch::new();
         assert!(watch.run(Some(&slack), &[], 2_000).is_empty());
         assert_eq!(
@@ -3268,7 +3268,7 @@ mod tests {
         )];
         assert!(watch.run(None, &always, 20_000).is_empty());
         assert!(watch.run(Some(&slack), &always, 8_000).is_empty());
-        // Don't offer, then Record automatically, while the call stays on the
+        // Don't offer, then Always record, while the call stays on the
         // microphone well past the snooze reset: still nothing.
         let never = [choice(
             "com.tinyspeck.slackmacgap",
@@ -3429,7 +3429,7 @@ mod tests {
     fn a_voice_note_on_another_site_is_not_a_banshee_call() {
         // The browser's active tab is the page using the microphone; a
         // Banshee tab open in the background is never read, so it can neither
-        // shorten the threshold nor trigger Record automatically.
+        // shorten the threshold nor trigger Always record.
         let problems = candidate_from_microphone(
             &brave(),
             &context("Brave Browser", Some("https://example.com/"), "Problems"),
@@ -3588,7 +3588,7 @@ mod tests {
         watch.leave();
         watch.wall_ms = 30;
         assert_eq!(watch.stable(&zoom, &[]), None);
-        // Record automatically doesn't restart a call the user already stopped.
+        // Always record doesn't restart a call the user already stopped.
         watch.wall_ms = 40;
         watch.leave();
         let always = [choice("us.zoom.xos", MeetingPolicy::AlwaysRecord)];

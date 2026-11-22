@@ -698,7 +698,7 @@ command to use instead.
 
 `meetings.default_policy` is the answer a call gets when its app or website
 has none of its own in `meetings.providers`: `ask` (Ask each time, the
-default), `always_record` (Record automatically), or `never_offer` (Don't
+default), `always_record` (Always record), or `never_offer` (Don't
 offer); the window calls these the same names. Setting it changes only the
 default; the Calls sheet's radios also move every entry that matched the old
 one. The list of apps and websites Hex has seen a call in

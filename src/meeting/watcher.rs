@@ -45,7 +45,7 @@ pub(crate) enum ControllerCommand {
         meeting: CalendarMeeting,
         join: bool,
     },
-    /// Open the meeting's call link without recording (Record automatically
+    /// Open the meeting's call link without recording (Always record
     /// starts once the call is detected).
     JoinMeeting(CalendarMeeting),
     /// Joined from the Labs menu: opens the call link without recording, and
@@ -64,7 +64,7 @@ pub(crate) enum ControllerEvent {
     Offer(OfferId, MeetingCandidate),
     OfferWithdrawn(OfferId),
     /// A calendar meeting is about to start. `automatic` when its call
-    /// service is set to Record automatically.
+    /// service is set to Always record.
     Reminder {
         meeting: CalendarMeeting,
         automatic: bool,
@@ -76,7 +76,7 @@ pub(crate) enum ControllerEvent {
     },
     /// The accepted offer, or None for a start that did not come from one.
     Starting(Option<OfferId>),
-    /// `automatic` when the provider is set to Record automatically.
+    /// `automatic` when the provider is set to Always record.
     RecordingStarted {
         id: String,
         title: String,
@@ -1102,7 +1102,7 @@ fn withdraw_stop(
 }
 
 /// Whether a recording stops on its own once its call ends: only one Hex
-/// started automatically (Record automatically), and only with Stop when
+/// started automatically (Always record), and only with Stop when
 /// the call ends on. Manual and offered recordings never do.
 fn stops_when_call_ends(automatic: bool, lab_on: bool) -> bool {
     automatic && lab_on

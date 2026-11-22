@@ -6,7 +6,6 @@
 #[rustfmt::skip]
 pub(super) const FRENCH: &[(&str, &str)] = &[
     ("Ask each time", "Demander à chaque fois"),
-    ("Record automatically", "Enregistrer automatiquement"),
     ("Don't offer", "Ne pas proposer"),
     ("Always record", "Toujours enregistrer"),
     ("Calls", "Appels"),
@@ -27,7 +26,6 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
 #[rustfmt::skip]
 pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ("Ask each time", "Perguntar sempre"),
-    ("Record automatically", "Gravar automaticamente"),
     ("Don't offer", "Não oferecer"),
     ("Always record", "Sempre gravar"),
     ("Calls", "Chamadas"),
@@ -48,7 +46,6 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
 #[rustfmt::skip]
 pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Ask each time", "Спрашивать каждый раз"),
-    ("Record automatically", "Записывать автоматически"),
     ("Don't offer", "Не предлагать"),
     ("Always record", "Всегда записывать"),
     ("Calls", "Звонки"),
