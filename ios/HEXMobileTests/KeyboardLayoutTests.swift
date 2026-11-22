@@ -142,8 +142,9 @@ final class KeyboardLayoutTests: XCTestCase {
     /// as far in from the screen's side as Apple's, and keys filling the width.
     func testDuoKeysMatchApplesRowsAndEdges() {
         let cases: [(KeyboardLayout, windowInset: CGFloat, pitch: CGFloat, appleEdge: CGFloat)] = [
-            // Folded, Apple's keys start 6.67 pt in, just outside the view: Hex's start at its edge.
-            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 6.67),
+            // Folded, Apple's keys start 18.5 pt in from the 466 pt cover screen: Hex's start so
+            // far in too, whether iOS gives the view the whole screen or an inset platter.
+            (KeyboardLayout(width: 452, posture: .cover, windowInset: 7), 7, 56, 18.5),
             (KeyboardLayout(width: 655, posture: .unfoldedTall, windowInset: 7), 7, 59.7, 19),
             (KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75), 75, 51.7, 86),
         ]

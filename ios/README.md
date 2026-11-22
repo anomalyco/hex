@@ -1083,8 +1083,13 @@ never at a launch by itself.
   model `iPhone19,4`) iOS sets third-party keyboards in an inset platter with a band
   of its own above them, so the strip has no gap there, and the keys follow Apple's
   for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
-  upright, starting as far in from the screen's side as Apple's. Measured in the
-  simulator; unverified on a Duo.
+  upright, starting as far in from the screen's side as Apple's. Folded, the cover
+  screen was measured beside Apple's keyboard on a Duo: its keycaps start 18.5 pt in
+  (54.5 px of 1375 at 2.95 px per point), and row 4 stands on row 3's columns: 123
+  from the edge to a gap before z, the globe on z, space from x on to return (Apple's
+  stops at n, before its dictation key), and return from a gap after m to the edge. A
+  Hex key beside space takes m's column, where Apple's dictation key is. The unfolded
+  postures are measured in the simulator.
 - **Number row (full keyboard, iPhone):** Settings › Keyboard › Number row (off by default,
   `settings.keyboardNumberRow`, App Group) puts 1 to 0 in a row of their own above row 1, in
   every language and posture, upright and turned. Off, nothing changes. On, the keyboard

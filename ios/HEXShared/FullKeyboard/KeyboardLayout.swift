@@ -174,13 +174,14 @@ nonisolated enum KeyboardPosture: Equatable, Sendable {
     var hasSystemBand: Bool { self != .phone }
 
     /// How far in from the screen's side Apple's keycaps start on the Duo; nil on an iPhone,
-    /// where the keyboard has the whole width. Measured in the iOS 27.2 simulator.
+    /// where the keyboard has the whole width.
     var appleKeyInset: CGFloat? {
         switch self {
         case .phone: nil
-        // Folded: 6.67 pt in, a third of a point outside the 452 pt view iOS gives a third-party
-        // keyboard, so Hex's keys run to the view's edges (`KeyboardMetrics.for`).
-        case .cover: 6.67
+        // Folded: 18.5 pt in on the 466 pt cover screen, measured beside Apple's keyboard on a
+        // Duo (its keycaps start 54.5 px in at 2.95 px per point), so the platter's own inset and
+        // the keys' margin add up to it.
+        case .cover: 18.5
         case .unfoldedWide: 86
         case .unfoldedTall: 19
         }
@@ -201,11 +202,17 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// How much shorter row 4's keycaps are than the others: where Apple's row 4 reaches
     /// below the bottom of a third-party keyboard's view, Hex's keeps Apple's top edge.
     var bottomRowTrim: CGFloat = 0
-    /// Row 4 on the letter columns, as Apple's is turned and on the Duo folded: 123, the globe
-    /// and emoji one key wide on row 1's columns from q, space after them, and return from this
-    /// many letter pitches in (8, o's column, turned; 8.5, row 2's l column, on the Duo, where
-    /// Apple's dictation key sits on m before it). nil: the iPhone's portrait row.
+    /// Row 4 on the letter columns, as Apple's is turned and on the Duo folded: the page key,
+    /// the globe and emoji on row 1's columns from q (`bottomRowLeadColumn`), space after them,
+    /// and return from this many letter pitches in (8, o's column, turned; 8.5, row 2's l
+    /// column, on the Duo, where Apple's dictation key sits on m before it). nil: the iPhone's
+    /// portrait row.
     var bottomRowReturnColumn: CGFloat?
+    /// How many of row 1's columns row 4's first key takes from its edge, where
+    /// `bottomRowReturnColumn` places that row: 1.5 on the Duo folded, where Apple's 123 runs
+    /// from the edge to a gap before z's column and the globe stands on z; nil, one letter
+    /// wide, as it is turned.
+    var bottomRowLeadColumn: CGFloat?
     /// Shift and delete (and #+=, 123 on row 3) as a share of a letter's width, where it isn't
     /// the portrait rule (`KeyboardLayout.modifierWidth`): 1.33 turned, as Apple's on every iPhone.
     var modifierLetterRatio: CGFloat?
@@ -499,6 +506,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             keysBottom: coverPortrait ? 7 : orientation == .portrait ? 5 : base.keysBottom,
             cornerRadius: coverPortrait ? 9.8 : base.cornerRadius,
             bottomRowReturnColumn: coverPortrait ? 8.5 : base.bottomRowReturnColumn,
+            bottomRowLeadColumn: coverPortrait ? 1.5 : base.bottomRowLeadColumn,
             modifierLetterRatio: base.modifierLetterRatio
         )
     }
@@ -509,6 +517,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
+            bottomRowLeadColumn: bottomRowLeadColumn,
             modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth,
             numberRowHeight: numberRowHeight
         )
@@ -529,6 +538,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
+            bottomRowLeadColumn: bottomRowLeadColumn,
             modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth,
             numberRowHeight: numberRowHeight * scale
         )
@@ -1027,21 +1037,26 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         }
 
         if field == .text, let returnColumn = m.bottomRowReturnColumn {
-            // Turned, and on the Duo folded: each key before the space bar one letter wide on
-            // row 1's columns, space up to return's column (on the Duo, Apple's dictation key
-            // sits just before return: Hex has none, so space runs on) and a Hex key right of
-            // space one pitch before return.
+            // Turned, and on the Duo folded: the page key, the globe and emoji on row 1's
+            // columns (`bottomRowLeadColumn`), space up to return's column (on the Duo, Apple's
+            // dictation key sits just before return: Hex has none, so space runs on) and a Hex
+            // key right of space one pitch before return.
             let pitch = referenceW + m.gap
             let returnStart = left + returnColumn * pitch
             let kColumn = returnStart - pitch
+            let leadColumn = m.bottomRowLeadColumn ?? 1
             var lead: [(KeyKind, String)] = [leading[0].0 == .layerSwitch(.numbers) ? (.layerSwitch(.numbers), "123") : (.layerSwitch(.letters), "ABC")]
             if showsGlobe { lead.append((.globe, "globe")) }
             if showsEmoji { lead.append((.emoji, "emoji")) }
             if placement == .leftOfSpace { lead.append((.hex, "hex")) }
             for (i, (kind, label)) in lead.enumerated() {
-                add(kind, row: 3, x: left + CGFloat(i) * pitch, w: referenceW, label: label)
+                // The first key takes the columns before the rest (one and a half on the Duo
+                // folded, where 123 runs to a gap before z); the globe and emoji one each.
+                let column = i == 0 ? 0 : leadColumn + CGFloat(i - 1)
+                let w = i == 0 && leadColumn != 1 ? leadColumn * pitch - m.gap : referenceW
+                add(kind, row: 3, x: left + column * pitch, w: w, label: label)
             }
-            let spaceStart = left + CGFloat(lead.count) * pitch
+            let spaceStart = left + (leadColumn + CGFloat(lead.count - 1)) * pitch
             var spaceEnd = returnStart - m.gap
             if placement == .rightOfSpace {
                 add(.hex, row: 3, x: kColumn, w: returnStart - m.gap - kColumn, label: "hex")
