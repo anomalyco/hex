@@ -425,7 +425,14 @@ never at a launch by itself.
     Group so Home, Settings › Keyboard, and Setup surface the same one-tap Open
     Settings banner once iOS has created that row. A later fast cross-app paste
     (ignoring Hex's own copies via `markOwnedCopy`) or tapping dismiss clears
-    it.
+    it. With Full Access, when the keyboard appears while it would dictate English
+    with Hex's speech model but the model isn't downloaded, the strip shows
+    `New speech model` / `Downloads in Hex on Wi-Fi` with an **Open Hex** chip
+    that opens Hex as it is, where the download starts on Wi-Fi
+    (`KeyboardParakeetNotice`): at most once a day and three times in all, never
+    again once tapped or put away with its ✕ (counts in the App Group), gone as
+    soon as you type or dictate, and never in a password or one-time-code field.
+    Turning off Speech model in keyboard (Settings › Dictation) stops it too.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly

@@ -126,6 +126,7 @@ final class FullKeyboardView: UIView {
     private var keyboardTheme = FullKeyboardSettings().effectiveKeyboardTheme
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     var showsAllowPasteHint = false
+    var showsModelNotice = false
     var allowPasteHintHideWork: DispatchWorkItem?
     static let allowPasteHintDuration: TimeInterval = 8
 
@@ -189,6 +190,7 @@ final class FullKeyboardView: UIView {
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
+        stripView.onDismissNotice = { [weak self] in self?.dismissModelNotice() }
         stripView.onOpenNotice = { [weak self] in
             guard let self else { return }
             self.keyFeedback()
@@ -200,6 +202,7 @@ final class FullKeyboardView: UIView {
                 self.addToVocabulary(word)
                 return
             }
+            if self.modelNotice != nil { return self.openHexForModel() }
             self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
         stripView.onNextKeyboard = { [weak self] in
@@ -252,6 +255,7 @@ final class FullKeyboardView: UIView {
             self.vocabularyOffer = nil
             self.hideFullAccessHint()
             self.hideAllowPasteHint()
+            self.hideModelNotice()
             self.refreshReturnKey()
             self.refreshStrip()
             self.onTextEdit?()
@@ -953,7 +957,7 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice
+            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice ?? modelNotice
         )
     }
 
@@ -975,7 +979,7 @@ final class FullKeyboardView: UIView {
     private func setRecording(_ recording: Bool) {
         showsRecording = recording
         dismissStyleMenu()
-        if recording { closeEmojiPanel() }
+        if recording { closeEmojiPanel(); hideModelNotice() }
         let closingFrames = recording ? nil : morphFrames()
         if recording {
             plane.cancelAllTouches()
@@ -1254,7 +1258,7 @@ final class FullKeyboardView: UIView {
         let m = engine.layout.metrics
         let bar = CGRect(x: 0, y: appliedLift, width: bounds.width, height: m.stripTop + m.stripHeight)
         guard bar.contains(point), !showsRecording, emojiPanel == nil, styleMenu == nil,
-              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil
+              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil, modelNotice == nil
         else { return false }
         return model.stagePhase == .idle || model.stagePhase == .failed
     }

@@ -108,6 +108,73 @@ nonisolated struct KeyboardParakeetSettings {
     }
 }
 
+/// The keyboard's New speech model notice (`FullKeyboardView.offerModelNotice`): Hex downloads
+/// the model only when it opens on Wi-Fi, so someone who only uses the keyboard would never get
+/// it. Shown when the keyboard appears, while it would dictate English with the model and its
+/// files aren't in the App Group, at most once a day and three times in all, and never again
+/// once the person opened Hex from it or dismissed it with its ✕. The counts are in the App Group.
+nonisolated struct KeyboardParakeetNotice {
+    static let shownKey = "experiments.keyboardParakeet.notice.shown"
+    static let dayKey = "experiments.keyboardParakeet.notice.day"
+    static let openedKey = "experiments.keyboardParakeet.notice.opened"
+    static let dismissedKey = "experiments.keyboardParakeet.notice.dismissed"
+    static let maximumShowings = 3
+    /// Opens Hex as it is, starting nothing (Home when it wasn't running), where the model
+    /// downloads by itself on Wi-Fi.
+    static let opensHex = URL(string: "hex-dictation://keyboard")!
+
+    private let defaults: UserDefaults?
+
+    init(defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)) {
+        self.defaults = defaults
+    }
+
+    /// The keyboard would dictate with Hex's model, as `KeyboardParakeet.choice` and Hex's own
+    /// download decide (`KeyboardParakeetDownload.hold`): the switch on, an iPhone with the
+    /// memory, the keyboard's limit measured and enough, English, not Two-language dictation or
+    /// the multilingual model. And the model isn't downloaded yet.
+    static func modelAwaitsDownload(
+        settings: KeyboardParakeetSettings = KeyboardParakeetSettings(),
+        english: Bool = Self.dictatesEnglish(),
+        otherEngine: Bool = TwoLanguageDictationSettings().isEnabled || MultilingualParakeetSettings().language() != nil,
+        downloaded: Bool = SpeechModelStore.isComplete(SpeechModelStore.parakeetV2)
+    ) -> Bool {
+        guard settings.isOn, let limit = settings.keyboardLimit, limit >= KeyboardParakeetBudget.requiredLimit else { return false }
+        return english && !otherEngine && !downloaded
+    }
+
+    static func dictatesEnglish(_ languages: LanguageSettings = LanguageSettings()) -> Bool {
+        guard let wanted = languages.dictationLanguage ?? languages.keyboardDictationLanguage() ?? Locale.preferredLanguages.first else { return false }
+        return Locale(identifier: wanted).language.languageCode?.identifier == "en"
+    }
+
+    /// Not opened from or dismissed, under three showings, and not shown today.
+    func mayShow(now: Date = Date(), calendar: Calendar = .current) -> Bool {
+        guard let defaults, !defaults.bool(forKey: Self.openedKey), !defaults.bool(forKey: Self.dismissedKey),
+              defaults.integer(forKey: Self.shownKey) < Self.maximumShowings else { return false }
+        return defaults.string(forKey: Self.dayKey) != Self.day(now, calendar)
+    }
+
+    func recordShown(now: Date = Date(), calendar: Calendar = .current) {
+        defaults?.set((defaults?.integer(forKey: Self.shownKey) ?? 0) + 1, forKey: Self.shownKey)
+        defaults?.set(Self.day(now, calendar), forKey: Self.dayKey)
+    }
+
+    func recordOpened() {
+        defaults?.set(true, forKey: Self.openedKey)
+    }
+
+    /// Its ✕: never again on this iPhone, whatever the counts.
+    func recordDismissed() {
+        defaults?.set(true, forKey: Self.dismissedKey)
+    }
+
+    private static func day(_ date: Date, _ calendar: Calendar) -> String {
+        let parts = calendar.dateComponents([.year, .month, .day], from: date)
+        return "\(parts.year ?? 0)-\(parts.month ?? 0)-\(parts.day ?? 0)"
+    }
+}
+
 /// How much memory Parakeet needs in the keyboard, measured in Hex's keyboard on an iPhone 17 Pro
 /// on iOS 27.2, whose keyboard limit is 177 MB. The Neural Engine's copy of the model (468 MB for
 /// V2, 607 MB for Ultra) is outside the footprint iOS limits; what counts:
