@@ -29,6 +29,7 @@ extension AutocorrectEngine {
     }
 }
 
+@MainActor
 extension AutocorrectEngine {
     /// The letters a language writes with a mark on a plain key, by that key: Polish's ą ć ę ł
     /// ń ó ś ź ż, Czech's háčky and čárky, Hungarian's accented vowels, Romanian's ă â î ș ț
@@ -84,7 +85,7 @@ extension AutocorrectEngine {
     }
 
     /// The words of this language's dictionary that `token` spells once its own letters are put
-    /// back (`markedSpellings`), lowercase: those the dictionary's guesses list first, in their
+    /// back (`markedSpellings`, at most 48 tried for a partner), lowercase: those the dictionary's guesses list first, in their
     /// order, then the rest, fewest marks first. Empty without such letters, or when the
     /// dictionary takes any letters for a word (iOS lists Polish, Czech, Hungarian, Romanian and
     /// Norwegian with no word data until their keyboard's data is on the iPhone: the iOS 27.2 simulator,
@@ -92,13 +93,37 @@ extension AutocorrectEngine {
     /// `ranked`: how many come from the guesses.
     func markedWords(for token: String) -> (words: [String], ranked: Int) {
         let lower = token.lowercased()
-        guard token.count >= 2, token.count <= 24, !token.contains("'"), !Self.markedLetters(language).isEmpty,
-              !dictionaryTakesAnything else { return ([], 0) }
-        let words = Self.markedSpellings(of: lower, language: language).filter { checker.isWordValid($0) }
-        guard words.count > 1 else { return (words, 0) }
-        let ranked = checker.guesses(for: lower).map { $0.lowercased() }.filter(words.contains)
-        return (ranked + words.filter { !ranked.contains($0) }, ranked.count)
+        guard token.count >= 2, token.count <= 24, !token.contains("'"), !Self.markedLetters(language).isEmpty else { return ([], 0) }
+        // One keystroke asks for the same word up to three times (space's fix, the strip, a
+        // partner's turn): the last few answers are kept for the dictionary that gave them.
+        if let hit = Self.markedCache.first(where: { $0.checker === checker && $0.language == language && $0.lower == lower }) {
+            return hit.result
+        }
+        var result: (words: [String], ranked: Int) = ([], 0)
+        if !dictionaryTakesAnything {
+            // On another language's keys (a bilingual partner) every word typed is tried, so fewer.
+            let limit = layoutLanguage == language ? 256 : 48
+            let words = Self.markedSpellings(of: lower, language: language, limit: limit).filter { checker.isWordValid($0) }
+            if words.count > 1 {
+                let ranked = checker.guesses(for: lower).map { $0.lowercased() }.filter(words.contains)
+                result = (ranked + words.filter { !ranked.contains($0) }, ranked.count)
+            } else {
+                result = (words, 0)
+            }
+        }
+        Self.markedCache.insert(MarkedAnswer(checker: checker, language: language, lower: lower, result: result), at: 0)
+        if Self.markedCache.count > 8 { Self.markedCache.removeLast() }
+        return result
     }
+
+    private struct MarkedAnswer {
+        weak var checker: TextChecking?
+        let language: KeyboardLanguage
+        let lower: String
+        let result: (words: [String], ranked: Int)
+    }
+
+    private static var markedCache: [MarkedAnswer] = []
 
     /// Whether this language's dictionary takes a made-up word: then it is no dictionary at all.
     var dictionaryTakesAnything: Bool {
@@ -118,10 +143,11 @@ extension AutocorrectEngine {
 
     /// The strip's word with this language's own letters put back on `token` when space doesn't
     /// put one in: a word that is one too without them ("ze" offers "że", "sad" "sąd"), or one
-    /// of several that fit. Never put in by space.
+    /// of several that fit. Never put in by space. Not while typing on another language's keys
+    /// (a bilingual partner): checking every prefix there doubled English's per-letter time
+    /// beside French, and space still puts the partner's letters back.
     func suggestedMarkedWord(for token: String) -> String? {
-        guard !Self.markedLetters(language).isEmpty, restoredMarkedWord(for: token) == nil else { return nil }
-        return markedWords(for: token).words.first
+        layoutLanguage == language ? markedWords(for: token).words.first : nil
     }
 
     /// `ownReplacement` with bilingual autocorrect's partner chosen but without a working
