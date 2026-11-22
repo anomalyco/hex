@@ -1397,6 +1397,7 @@ Selected mode                            // replaces Global's rewrite and transf
   -> Labs > Rewrite by voice's phrase          // Labs off, or no phrase, processes as before
      -> one spoken instruction replaces the rewrite, with the mode's model and deadline (labs.md)
   -> OpenCode transformation             // optional provider-backed rewrite; an unset model is Hex's ranked pick, shown Automatic
+  -> Dictation style                     // Labs › Dictation style on: Polished, Casual, Notes, or Verbatim, after the rewrite and before transformations (labs.md)
   -> Transformations                     // ordered text chain
   -> Paste or Send
 

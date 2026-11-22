@@ -768,6 +768,18 @@ pub(super) const KEYS: &[Key] = &[
          \"Sent from Hex\" by default, and empty adds nothing",
     ),
     key(
+        "labs.dictation_style",
+        Kind::Bool,
+        "Labs: every normal dictation is written as Polished, Casual, Notes, or Verbatim \
+         (labs.dictation_style_choice), like the iPhone app, without an AI model",
+    ),
+    key(
+        "labs.dictation_style_choice",
+        Kind::Choice(&["polished", "casual", "notes", "verbatim"]),
+        "Labs: the style every normal dictation is written as while Labs › Dictation style \
+         is on; polished by default",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",

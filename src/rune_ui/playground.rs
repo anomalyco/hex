@@ -158,6 +158,7 @@ const PATHS: &[(&str, &str)] = &[
     ("output-open", "Window/Output/App rule open"),
     ("output-trust", "Window/Output/Trust prompt"),
     ("output-empty", "Window/Output/Empty"),
+    ("output-style", "Window/Output/Dictation style"),
     ("modes", "Window/Modes/Modes"),
     ("modes-global", "Window/Modes/Global mode"),
     ("modes-picker", "Window/Modes/App picker"),

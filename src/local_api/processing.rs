@@ -173,7 +173,7 @@ pub(crate) fn dictation_processor(
             .unwrap_or_else(|error| error.into_inner())
             .clone();
         modes
-            .process_cancellable(
+            .process_api_cancellable(
                 raw,
                 language,
                 &crate::dictation::context::ContextSnapshot::default(),
@@ -201,7 +201,7 @@ pub(crate) fn profiles_processor(
 ) -> Processor {
     Arc::new(move |raw, language, cancelled| {
         let context = crate::dictation::context::ContextSnapshot::default();
-        let mut processed = crate::dictation::config::dictation_profiles().process_cancellable(
+        let mut processed = crate::dictation::config::dictation_profiles().process_api_cancellable(
             raw,
             language,
             &context,

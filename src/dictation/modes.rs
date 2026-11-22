@@ -71,6 +71,24 @@ impl ModeRuntime {
         processed.apply_transformations(transformations, context, cancelled, source);
         processed
     }
+
+    /// The local API's `process=global`: the same Global steps, without
+    /// Labs › Dictation style, which belongs to a dictation's own paste.
+    pub fn process_api_cancellable(
+        &self,
+        raw_text: &str,
+        language: &str,
+        context: &crate::dictation::context::ContextSnapshot,
+        transformations: &crate::personal_commands::TransformationClient,
+        cancelled: &AtomicBool,
+        source: crate::dictation::processor::Source,
+    ) -> Processed {
+        let mut processed = self
+            .profiles
+            .process_api_cancellable(raw_text, language, context, cancelled, source);
+        processed.apply_transformations(transformations, context, cancelled, source);
+        processed
+    }
 }
 
 /// The live mode runtime and transformation client a listener shares with

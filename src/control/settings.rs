@@ -1230,6 +1230,39 @@ mod tests {
             get(&change.settings, "labs.appearance_theme").unwrap()[0].value,
             Value::String("dark".into())
         );
+        let change = apply(&settings, "labs.dictation_style", "on", &rules()).unwrap();
+        assert!(change.settings.labs.dictation_style);
+        assert_eq!(
+            change.settings.labs.dictation_style_choice,
+            crate::app_settings::DictationStyle::Polished,
+            "polished is the default"
+        );
+        let change = apply(
+            &change.settings,
+            "labs.dictation_style_choice",
+            "notes",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(
+            change.settings.labs.dictation_style_choice,
+            crate::app_settings::DictationStyle::Notes
+        );
+        assert_eq!(
+            get(&change.settings, "labs.dictation_style_choice").unwrap()[0].value,
+            Value::String("notes".into())
+        );
+        assert_eq!(
+            apply(
+                &change.settings,
+                "labs.dictation_style_choice",
+                "song",
+                &rules()
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
         let change = apply(&settings, "ui_language", "none", &rules()).unwrap();
         assert_eq!(change.settings.ui_language, None);
         let change = apply(

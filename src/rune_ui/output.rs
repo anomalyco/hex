@@ -9,14 +9,15 @@ use rune::{El, TextEdit, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, TextInput};
 
 use super::controls::{
-    ButtonKind, CardRow, DESCRIPTION, METRICS, Paint, PushSize, button, card, folding, note, page,
-    raised, status_dot,
+    ButtonKind, CardRow, Choice, DESCRIPTION, METRICS, Paint, PushSize, button, card, folding,
+    note, page, raised, select_sized, setting_row, status_dot,
 };
 use super::icons::MIC;
 use super::lists::{Tone, tone_tag};
 use super::modes::{application_icon, monogram};
+use super::settings::toggle_menu;
 use super::spark::{Spark, spark};
-use super::{ShortcutTarget, Ui};
+use super::{Menu, ShortcutTarget, Ui};
 use crate::app_settings::DictationMode;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::dictation::text_replacements::ReplacementSet;
@@ -192,12 +193,17 @@ fn preview(mode: &DictationMode, input: &str) -> String {
 // ---------------------------------------------------------------------------
 // View
 
-pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool) -> El {
+pub(super) fn pane(ui: &Ui, p: Paint, reduced: bool, layer: &mut Vec<El>) -> El {
     let processing = &ui.settings.dictation_processing;
     let mut content = page("output-content")
         .children(trust_card(ui, p))
-        .child(agent_card(ui, p, reduced))
-        .child(every_dictation(ui, p, &processing.default_mode));
+        .child(agent_card(ui, p, reduced));
+    // Labs › Dictation style writes every dictation after the corrections
+    // and any rewrite, before the transformations below.
+    if ui.settings.labs.dictation_style {
+        content = content.child(dictation_style(ui, p, layer));
+    }
+    content = content.child(every_dictation(ui, p, &processing.default_mode));
     #[cfg(target_os = "linux")]
     if ui.settings.labs.typed_text {
         content = content.child(typed_text(ui, p));
@@ -372,6 +378,53 @@ fn every_dictation(ui: &Ui, p: Paint, mode: &DictationMode) -> El {
         tr("Every dictation"),
         tr("Runs top to bottom"),
         rows,
+    )
+}
+
+/// Labs › Dictation style: which of the iPhone app's four styles every
+/// dictation is written as. The row is here only while the lab is on.
+fn dictation_style(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    use crate::app_settings::DictationStyle;
+    let current = ui.settings.labs.dictation_style_choice;
+    let choices = DictationStyle::ALL
+        .into_iter()
+        .map(|style| Choice {
+            label: tr(style.name()).to_owned(),
+            detail: Some(tr(style.hint()).to_owned()),
+            selected: style == current,
+            choose: Box::new(move |ui| {
+                ui.open = None;
+                ui.update(|settings| settings.labs.dictation_style_choice = style);
+            }),
+        })
+        .collect();
+    let control = select_sized(
+        p,
+        "dictation-style-choice",
+        tr("Style"),
+        tr(current.name()),
+        None,
+        ui.open == Some(Menu::Pick("dictation-style")),
+        choices,
+        |ui| toggle_menu(ui, Menu::Pick("dictation-style")),
+        layer,
+        200.0,
+    );
+    labeled(
+        p,
+        "dictation-style",
+        tr("Dictation style"),
+        tr("After the rewrite"),
+        vec![
+            setting_row(
+                p,
+                "dictation-style-row",
+                tr("Style"),
+                Some(tr(current.hint())),
+                control,
+            )
+            .into(),
+        ],
     )
 }
 

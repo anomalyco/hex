@@ -30,7 +30,9 @@
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
-use crate::app_settings::{AppSettings, AppearanceTheme, CapsLockLight, LabsSettings};
+use crate::app_settings::{
+    AppSettings, AppearanceTheme, CapsLockLight, DictationStyle, LabsSettings,
+};
 
 mod card;
 mod catalog;
@@ -184,6 +186,7 @@ impl Feature {
             Self::VoicePrompt => settings.labs.voice_prompt,
             Self::StopPhrase => settings.labs.stop_phrase,
             Self::Signature => settings.labs.signature,
+            Self::DictationStyle => settings.labs.dictation_style,
             Self::HoldThroughKeys => settings.labs.hold_through_keys,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::DropTranscribe => settings.labs.drop_transcribe,
@@ -272,6 +275,7 @@ impl Feature {
             &mut labs.voice_prompt,
             &mut labs.stop_phrase,
             &mut labs.signature,
+            &mut labs.dictation_style,
             &mut labs.hold_through_keys,
             &mut labs.copy_capture_zip,
             &mut labs.drop_transcribe,
@@ -371,6 +375,7 @@ impl Feature {
             Self::VoicePrompt => settings.labs.voice_prompt = on,
             Self::StopPhrase => settings.labs.stop_phrase = on,
             Self::Signature => settings.labs.signature = on,
+            Self::DictationStyle => settings.labs.dictation_style = on,
             Self::HoldThroughKeys => settings.labs.hold_through_keys = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::DropTranscribe => settings.labs.drop_transcribe = on,
@@ -530,6 +535,11 @@ static STOP_PHRASE: AtomicBool = AtomicBool::new(false);
 /// and [`apply`].
 static SIGNATURE: AtomicBool = AtomicBool::new(false);
 
+/// Labs › Dictation style's switch, set beside [`STATE`] like
+/// [`SIGNATURE`]: the state word is full, so this lab has its own atomic,
+/// written by [`state`] and [`apply`].
+static DICTATION_STYLE: AtomicBool = AtomicBool::new(false);
+
 /// Labs › Copy a capture as one file's switch, set beside [`STATE`] like
 /// [`SCREEN_VOCABULARY`]: a written capture copies as one zip file.
 static COPY_CAPTURE_ZIP: AtomicBool = AtomicBool::new(false);
@@ -599,6 +609,11 @@ static STOP_PHRASE_TEXT: LazyLock<RwLock<String>> =
 static SIGNATURE_TEXT: LazyLock<RwLock<String>> =
     LazyLock::new(|| RwLock::new(crate::dictation::signature::DEFAULT_TEXT.to_owned()));
 
+/// The style each normal dictation is written as, set beside [`STATE`] by
+/// [`state`] and [`apply`], read only while [`DICTATION_STYLE`] is on.
+static DICTATION_STYLE_CHOICE: LazyLock<RwLock<DictationStyle>> =
+    LazyLock::new(|| RwLock::new(DictationStyle::Polished));
+
 fn on(bit: u64) -> bool {
     state() & bit != 0
 }
@@ -622,6 +637,7 @@ fn state() -> u64 {
                 VOICE_PROMPT.store(voice_prompt_enabled(&saved), Ordering::Release);
                 STOP_PHRASE.store(stop_phrase_enabled(&saved), Ordering::Release);
                 SIGNATURE.store(signature_enabled(&saved), Ordering::Release);
+                DICTATION_STYLE.store(dictation_style_enabled(&saved), Ordering::Release);
                 COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(&saved), Ordering::Release);
                 COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(&saved), Ordering::Release);
                 K_QUANT_MODELS.store(k_quant_models_enabled(&saved), Ordering::Release);
@@ -636,6 +652,7 @@ fn state() -> u64 {
                 store_voice_prompt_phrase(&saved.voice_prompt_phrase);
                 store_stop_phrase_text(&saved.stop_phrase_text);
                 store_signature_text(&saved.signature_text);
+                store_dictation_style_choice(saved.dictation_style_choice);
             }
             STATE.load(Ordering::Acquire)
         }
@@ -692,6 +709,14 @@ fn stop_phrase_enabled(settings: &LabsSettings) -> bool {
 /// managed lock; the state word has no bit for it.
 fn signature_enabled(settings: &LabsSettings) -> bool {
     settings.signature && Feature::Signature.shipped() && Feature::Signature.managed().is_none()
+}
+
+/// Whether `settings` turn on Labs › Dictation style in this build, before
+/// its managed lock; the state word has no bit for it.
+fn dictation_style_enabled(settings: &LabsSettings) -> bool {
+    settings.dictation_style
+        && Feature::DictationStyle.shipped()
+        && Feature::DictationStyle.managed().is_none()
 }
 
 /// Whether `settings` turn on Labs › Copy a capture as one file in this build,
@@ -823,6 +848,14 @@ fn store_signature_text(signature: &str) {
         .unwrap_or_else(|error| error.into_inner()) = accepted.to_owned();
 }
 
+/// Records the style each normal dictation is written as. An unknown value
+/// never reaches here (serde rejects it on load).
+fn store_dictation_style_choice(style: DictationStyle) {
+    *DICTATION_STYLE_CHOICE
+        .write()
+        .unwrap_or_else(|error| error.into_inner()) = style;
+}
+
 /// Whether the main window draws dark: the OS's appearance, unless Labs ›
 /// Appearance is on and names one. Resolved for each view, so System keeps
 /// following the OS live. Overlay windows (the HUD, capsules, live text) keep
@@ -851,6 +884,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     VOICE_PROMPT.store(voice_prompt_enabled(settings), Ordering::Release);
     STOP_PHRASE.store(stop_phrase_enabled(settings), Ordering::Release);
     SIGNATURE.store(signature_enabled(settings), Ordering::Release);
+    DICTATION_STYLE.store(dictation_style_enabled(settings), Ordering::Release);
     COPY_CAPTURE_ZIP.store(copy_capture_zip_enabled(settings), Ordering::Release);
     COPY_DICTATION_AUDIO.store(copy_dictation_audio_enabled(settings), Ordering::Release);
     K_QUANT_MODELS.store(k_quant_models_enabled(settings), Ordering::Release);
@@ -865,6 +899,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     store_voice_prompt_phrase(&settings.voice_prompt_phrase);
     store_stop_phrase_text(&settings.stop_phrase_text);
     store_signature_text(&settings.signature_text);
+    store_dictation_style_choice(settings.dictation_style_choice);
     // Labs › Pause from menu bar: turning it off resumes at once, without
     // waiting for the menu to refresh; the menu row hides itself there.
     crate::shortcut_pause::reconcile(pause_menu());
@@ -1316,6 +1351,32 @@ mod tests {
         assert_eq!(
             Feature::for_settings_key("labs.signature_text"),
             Some(Feature::Signature)
+        );
+    }
+
+    #[test]
+    fn dictation_style_is_its_own_atomic_and_carries_its_choice() {
+        let labs = LabsSettings::default();
+        assert!(!dictation_style_enabled(&labs));
+        assert_eq!(labs.dictation_style_choice, DictationStyle::Polished);
+        let on = LabsSettings {
+            dictation_style: true,
+            dictation_style_choice: DictationStyle::Casual,
+            ..LabsSettings::default()
+        };
+        assert!(dictation_style_enabled(&on));
+        assert!(Feature::DictationStyle.on_this_os());
+        assert_eq!(Feature::DictationStyle.added(), 20261122);
+        assert_eq!(Feature::DictationStyle.audience(), Audience::Everyone);
+        assert_eq!(Feature::DictationStyle.group(), Group::Output);
+        assert_eq!(
+            Feature::DictationStyle.settings_key(),
+            "labs.dictation_style"
+        );
+        assert_eq!(Feature::DictationStyle.name(), "dictation-style");
+        assert_eq!(
+            Feature::for_settings_key("labs.dictation_style_choice"),
+            Some(Feature::DictationStyle)
         );
     }
 

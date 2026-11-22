@@ -89,7 +89,8 @@ impl Feature {
             | Self::VocabularyFiles
             | Self::AnnotateAgentTools
             | Self::AnnotateAgentInstall
-            | Self::Signature => Audience::Everyone,
+            | Self::Signature
+            | Self::DictationStyle => Audience::Everyone,
         }
     }
 
@@ -161,6 +162,7 @@ impl Feature {
             | Self::AnnotateAgentTools
             | Self::AnnotateAgentInstall
             | Self::Signature => 20261121,
+            Self::DictationStyle => 20261122,
         }
     }
 
@@ -195,6 +197,9 @@ impl Feature {
         }
         if key == "labs.signature_text" {
             return Some(Self::Signature);
+        }
+        if key == "labs.dictation_style_choice" {
+            return Some(Self::DictationStyle);
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
@@ -314,7 +319,8 @@ impl Feature {
             | Self::VocabularyFiles
             | Self::AnnotateAgentTools
             | Self::AnnotateAgentInstall
-            | Self::Signature => EVERY,
+            | Self::Signature
+            | Self::DictationStyle => EVERY,
         }
     }
 
@@ -400,6 +406,7 @@ impl Feature {
             Self::AnnotateAgentTools => "annotate-agent-tools",
             Self::AnnotateAgentInstall => "annotate-agent-install",
             Self::Signature => "signature",
+            Self::DictationStyle => "dictation-style",
         }
     }
 
@@ -485,6 +492,7 @@ impl Feature {
             Self::AnnotateAgentTools => "labs.annotate_agent_tools",
             Self::AnnotateAgentInstall => "labs.annotate_agent_install",
             Self::Signature => "labs.signature",
+            Self::DictationStyle => "labs.dictation_style",
         }
     }
 
