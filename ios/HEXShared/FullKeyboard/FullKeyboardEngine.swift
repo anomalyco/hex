@@ -282,6 +282,7 @@ final class FullKeyboardEngine {
         forgetTypingContext()
         tokenTaps.removeAll()
         swipedWord = nil
+        swipeRetries.forget()
         finishedWord = nil
         autocorrect.forgetCorrection()
         adaptiveTouch?.beginSession()
@@ -323,6 +324,7 @@ final class FullKeyboardEngine {
     func forgetTextAroundKeys() {
         forgetTypingContext()
         swipedWord = nil
+        swipeRetries.forget()
     }
 
     func refreshAutoCapitalization() {
@@ -869,6 +871,7 @@ final class FullKeyboardEngine {
         // unless its experiment asks for one character at a time, as anywhere else.
         let swiped = swipedWord
         swipedWord = nil
+        swipeRetries.willDelete(letterOf: takesSwipeBack && deletesSwipedWordsLetterByLetter ? swiped : nil)
         if takesSwipeBack, !deletesSwipedWordsLetterByLetter, let swiped, deleteSwipedWord(swiped) { return }
         let before = textBefore
         learning?.willErase(word: AutocorrectEngine.currentToken(in: before))
@@ -1292,6 +1295,8 @@ final class FullKeyboardEngine {
     // MARK: - Swipe typing (Settings › Keyboard › Swipe typing; SwipeTyping.swift)
 
     private(set) var swipedWord: SwipedWord?
+    /// Words just taken back after swipes typed them, which the next swipe there skips.
+    let swipeRetries = SwipeRetries()
     /// Settings › Experiments › Delete swiped words letter by letter (off by default): delete
     /// right after a swipe acts as an ordinary delete and takes one character, instead of the
     /// whole word and the space the swipe added before it (`deleteBackward`). Its record still
@@ -1317,7 +1322,7 @@ final class FullKeyboardEngine {
     /// that may be offered.
     func showSwipePreview(_ words: [String]) {
         guard isSwiping else { return }
-        let next = swipeReadings(words).first.map { swipeCased($0, capital: swipeCapital) }
+        let next = swipeRetries.reordered(swipeReadings(words), before: typingContext).first.map { swipeCased($0, capital: swipeCapital) }
         guard next != swipePreview else { return }
         swipePreview = next
         refreshSuggestions()
@@ -1333,7 +1338,7 @@ final class FullKeyboardEngine {
         swipePreview = nil
         // The finger came up off a key: a quick tap on the strip's lower half next is a key.
         lastKeyTouchAt = clock()
-        let readings = swipeReadings(words)
+        let readings = swipeRetries.typing(swipeReadings(words), before: typingContext)
         if let log = typingLog {
             log.ui("swipe_end", [
                 TypingLogField("points", .int(points)),
@@ -1441,6 +1446,7 @@ final class FullKeyboardEngine {
         for _ in 0..<swiped.inserted.count {
             target.deleteBackward()
         }
+        swipeRetries.tookBack(swiped)
         tokenTaps.removeAll()
         lastSpaceAt = nil
         didEdit()
