@@ -174,6 +174,11 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         for (code in 1 until continuations.size) if (continuations[code] > 0)
             mass[if (code in keyed) code else model.bases[code]] += continuations[code]
         val total = mass.sum()
+        // Right after an elided article or pronoun ("l", "qu"), the apostrophe key is the likeliest: the
+        // books split the commonest elisions off ("l'", "d'"), so the word list can't say so itself.
+        val elided = token != null && token.lowercase() in ELISIONS[model.language].orEmpty() &&
+            before.dropLast(token.length).lastOrNull().let { boundary(it) }
+        if (elided && model.apostrophe != 0) mass[model.apostrophe] = maxOf(mass[model.apostrophe], total)
         fun odds(c: Char) = model.code(c.lowercaseChar()).takeIf { it != 0 }?.let { kotlin.math.ln(mass[it] + total * 1e-4) }
         var best = hit
         var bestScore = odds(hit) ?: return hit
@@ -295,7 +300,8 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     // (`ContextWords`); a word typed with its own apostrophe never gets here.
     private fun revision(text: String, next: String): String? {
         if (!ContextWords.decides(model.language) || text.isEmpty() || (model.language == "en" && text.length < 2)) return null
-        if (text == text.uppercase() && text != text.lowercase() && !text.startsWith("I'")) return null
+        // Typed in capitals, left alone; one capital letter is a sentence's start ("E andato" -> "È andato").
+        if (text.length >= 2 && text == text.uppercase() && text != text.lowercase() && !text.startsWith("I'")) return null
         val rest = before.dropLast(text.length + 1)
         val prev = previousWord(rest).takeIf { it.isNotEmpty() }
         val choice = ContextWords.choice(model, text, prev, next.substringBefore(' ').lowercase(), startsSentence(rest)) ?: return null

@@ -494,6 +494,12 @@ class NeverSuggestTest {
         val it = layout("it")
         assertEquals("non è esagerato ", word("it").typed(it, "non e esagerato "))
         assertEquals("il vostro indirizzo è cambiato ", word("it").typed(it, "il vostro indirizzo e cambiato "))
+        // At a sentence's start, its capital and all, once the next word says so.
+        val e = word("it"); e.reset("")
+        val p = it.centres.getValue('e'); e.letter("E", p.x, p.y, it)
+        e.finish(' ', KeyPoint(183.93, 234.5), it)
+        e.reset("E "); for (c in "andato") e.tap(it, c)
+        assertEquals(Correction("E andato", "È andato"), e.finish(' ', KeyPoint(183.93, 234.5), it))
         assertEquals("pane e burro ", word("it").typed(it, "pane e burro "))
     }
 
