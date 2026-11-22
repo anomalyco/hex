@@ -579,10 +579,10 @@ never at a launch by itself.
     elided forms such as "c'est") and byte-identical to
     `android/app/src/main/assets/typing/fr.hextm` (its `SHA256SUMS` hash). On the held-out
     French replay (2,000 Tatoeba sentences typed on AZERTY, scored as
-    `android/benchmark/typing/quality-gate.py` does) it makes 78.7% fewer word errors than
-    the raw taps (37.4% with `UITextChecker` alone), changes 0.10% of correctly typed words
-    (0.56%) and restores 86.9% of the accents left out where the plain spelling is no word
-    (70.2%). Canada's and Switzerland's French don't read it yet (`fr-CA`, `fr-CH`).
+    `android/benchmark/typing/quality-gate.py` does) it makes 76.4% fewer word errors than
+    the raw taps (35.3% with `UITextChecker` alone), changes 0.10% of correctly typed words
+    (0.56%) and restores 81.1% of the accents left out where the plain spelling is in neither
+    the model nor `fr.valid` (78.7%), short of the gate's 85%. Canada's and Switzerland's French don't read it yet (`fr-CA`, `fr-CH`).
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
     Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
     Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
