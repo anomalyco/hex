@@ -1086,10 +1086,10 @@ never at a launch by itself.
   upright, starting as far in from the screen's side as Apple's. Folded, the cover
   screen was measured beside Apple's keyboard on a Duo: its keycaps start 18.5 pt in
   (54.5 px of 1375 at 2.95 px per point), and row 4 stands on row 3's columns: 123
-  from the edge to a gap before z, the globe on z, space from x on to return (Apple's
-  stops at n, before its dictation key), and return from a gap after m to the edge. A
-  Hex key beside space takes m's column, where Apple's dictation key is. The unfolded
-  postures are measured in the simulator.
+  from the edge to a gap before z, the globe on z (without it, space starts there),
+  space up to return, and return from a gap after m to the edge. A Hex key right of
+  space takes m's column, where Apple's dictation key is; left of space it follows the
+  globe and emoji. The unfolded postures are measured in the simulator.
 - **Number row (full keyboard, iPhone):** Settings › Keyboard › Number row (off by default,
   `settings.keyboardNumberRow`, App Group) puts 1 to 0 in a row of their own above row 1, in
   every language and posture, upright and turned. Off, nothing changes. On, the keyboard

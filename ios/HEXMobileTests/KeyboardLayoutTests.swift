@@ -138,8 +138,9 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// The iPhone Duo (iOS 27.2 simulator): Apple's row pitch for each screen, keycaps starting
-    /// as far in from the screen's side as Apple's, and keys filling the width.
+    /// The iPhone Duo: Apple's row pitch for each screen, keycaps starting as far in from the
+    /// screen's side as Apple's, and keys filling the width (folded measured on a device, the
+    /// iOS 27.2 simulator for the unfolded screens).
     func testDuoKeysMatchApplesRowsAndEdges() {
         let cases: [(KeyboardLayout, windowInset: CGFloat, pitch: CGFloat, appleEdge: CGFloat)] = [
             // Folded, Apple's keys start 18.5 pt in from the 466 pt cover screen: Hex's start so
