@@ -613,6 +613,7 @@ struct ExperimentsSettingsPage: View {
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var twoThumbSelection = FullKeyboardSettings().twoThumbSelection
+    @State private var deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
     @State private var hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
@@ -704,6 +705,15 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsDivider()
 
+                // Off by default: delete right after a swipe takes one letter, as anywhere else.
+                SettingsToggleRow(
+                    title: String(localized: "Delete swiped words letter by letter"),
+                    detail: String(localized: "Right after a swipe, delete takes one letter at a time instead of the whole word."),
+                    isOn: $deletesSwipedWordsLetterByLetter
+                )
+
+                SettingsDivider()
+
                 // Off by default: the strip above the keys hides its words, not itself.
                 SettingsToggleRow(
                     title: String(localized: "Hide word suggestions"),
@@ -754,6 +764,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: twoThumbSelection) { _, enabled in
             FullKeyboardSettings().twoThumbSelection = enabled
         }
+        .onChange(of: deletesSwipedWordsLetterByLetter) { _, enabled in
+            FullKeyboardSettings().deletesSwipedWordsLetterByLetter = enabled
+        }
         .onChange(of: hideWordSuggestions) { _, enabled in
             FullKeyboardSettings().hideWordSuggestions = enabled
         }
@@ -780,6 +793,7 @@ struct ExperimentsSettingsPage: View {
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
             emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
             twoThumbSelection = FullKeyboardSettings().twoThumbSelection
+            deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
             hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
             learnPerLanguage = TypingJournalSettings().learnsPerLanguage
             multilingualParakeet = MultilingualParakeetSettings().isEnabled

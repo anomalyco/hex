@@ -48,6 +48,7 @@ struct FullKeyboardSettings {
         static let emoji = "experiments.emoji"
         static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
         static let swipeTyping = "experiments.swipeTyping"
+        static let swipeDeleteLetterByLetter = "experiments.swipeDeleteLetterByLetter"
         static let twoThumbSelection = "experiments.twoThumbSelection"
         static let hideWordSuggestions = "experiments.hideWordSuggestions"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
@@ -192,6 +193,17 @@ struct FullKeyboardSettings {
     var swipeTyping: Bool {
         get { defaults?.object(forKey: Key.swipeTyping) as? Bool ?? true }
         nonmutating set { defaults?.set(newValue, forKey: Key.swipeTyping) }
+    }
+
+    /// Settings › Experiments › Delete swiped words letter by letter: delete right after a swipe
+    /// acts as anywhere else and takes one character, instead of the whole swiped word and the
+    /// space the swipe added before it (`FullKeyboardEngine.deleteBackward`). The swipe's record
+    /// clears with that delete, as with any delete, so what remains types like ordinary text.
+    /// Off by default, like every experiment. Stored as
+    /// `experiments.swipeDeleteLetterByLetter`; off, delete takes the whole word back as before.
+    var deletesSwipedWordsLetterByLetter: Bool {
+        get { defaults?.object(forKey: Key.swipeDeleteLetterByLetter) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.swipeDeleteLetterByLetter) }
     }
 
     /// Settings › Keyboard › Hex key: Right (false, the default) or Left. Left puts the Hex key

@@ -2891,7 +2891,8 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Adaptive touch, German spatial autocorrect, ABC under the emoji key,
-│   Two-thumb selection, Hide word suggestions, Learn each language separately
+│   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions,
+│   Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2943,6 +2944,12 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   normal trackpad lift. Delete and Cut call the host's delete once per Character, so a
 │   host that removes one code point per call (some Devanagari and Thai clusters) can leave
 │   fragments. Off, a second finger is ignored exactly as before.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
+├── Delete swiped words letter by letter (off by default, `experiments.swipeDeleteLetterByLetter`):
+│   right after a swipe, delete acts as anywhere else and takes one character, instead of the
+│   whole swiped word and the space the swipe added before it (#2321). The swipe's record
+│   clears with that delete, as with any delete, so what remains types like ordinary text.
+│   Off, delete takes the whole word back as before.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Hide word suggestions (off by default, `experiments.hideWordSuggestions`): the full
 │   keyboard's strip keeps its height, the Hex key, Undo, status, notices and the Paste chip,

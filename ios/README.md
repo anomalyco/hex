@@ -586,8 +586,11 @@ never at a launch by itself.
     swipe types " There"), and a name the dictionary only knows capitalised is
     capitalised. The strip then offers the next three readings, the likeliest in the
     centre; tapping one puts it in the word's place. Until anything else changes the
-    text, delete takes the whole word back (with the space it added) and space never
-    autocorrects it. As on Apple's keyboard (watched on iOS 27.2), a space stays pending
+    text, delete takes the whole word back (with the space it added), unless Settings ›
+    Experiments › Delete swiped words letter by letter is on
+    (`experiments.swipeDeleteLetterByLetter`, off by default), which makes delete act as
+    anywhere else and take one letter at a time; space never autocorrects it. As on Apple's
+    keyboard (watched on iOS 27.2), a space stays pending
     after the word: a tapped letter, digit, opening mark or symbol goes in after a space
     ("hello" then w-o-r-l-d types "hello world", "(" types "hello ("), while
     `, . ! ? ; : ) ] } ' - /` go against the word ("hello,") and take that space; shift you
@@ -685,8 +688,8 @@ never at a launch by itself.
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
     Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
-    German spatial autocorrect, ABC under the emoji key, Two-thumb selection, Hide word
-    suggestions, and Multilingual model (Parakeet).
+    German spatial autocorrect, ABC under the emoji key, Two-thumb selection, Delete swiped
+    words letter by letter, Hide word suggestions, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`

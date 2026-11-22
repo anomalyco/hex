@@ -2570,6 +2570,32 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(field.text, "hell people ", "only right after the swipe; the space a tap brought stays")
     }
 
+    /// Settings › Experiments › Delete swiped words letter by letter (off by default): right
+    /// after a swipe, delete acts as anywhere else and takes one character, instead of the
+    /// whole word and the space the swipe added before it (#2321).
+    func testDeleteSwipedWordsLetterByLetterTakesOneCharacterAtATime() throws {
+        let (field, plane) = try swipeKeyboard()
+        plane.engine.deletesSwipedWordsLetterByLetter = true
+        swipe("hello", on: plane)
+        swipe("world", on: plane)
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "hello worl", "one letter, not the word and the space before it")
+        XCTAssertNil(plane.engine.swipedWord, "the swipe's record goes with the deleted letter")
+        tap(.delete, on: plane)
+        XCTAssertEqual(field.text, "hello wor", "and one at a time after it")
+    }
+
+    /// The experiment's switch reaches the keyboard from the App Group, and the test puts it
+    /// back so no other test sees it on.
+    func testTheDeleteSwipedWordsLetterByLetterSettingReachesTheKeyboard() {
+        let settings = FullKeyboardSettings()
+        let wasOn = settings.deletesSwipedWordsLetterByLetter
+        settings.deletesSwipedWordsLetterByLetter = true
+        defer { settings.deletesSwipedWordsLetterByLetter = wasOn }
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+        XCTAssertTrue(view.engine.deletesSwipedWordsLetterByLetter)
+    }
+
     func testTheStripOffersTheSwipesOtherReadingsInItsWordsPlace() throws {
         let (field, plane) = try swipeKeyboard("a")
         swipe("of", on: plane)

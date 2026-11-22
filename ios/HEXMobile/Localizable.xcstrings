@@ -1038,6 +1038,16 @@
         }
       }
     },
+    "Delete swiped words letter by letter" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "逐字删除滑行键入的词语"
+          }
+        }
+      }
+    },
     "Dictate" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2343,6 +2353,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "右侧"
+          }
+        }
+      }
+    },
+    "Right after a swipe, delete takes one letter at a time instead of the whole word." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滑行键入后，删除键逐字删除，而不是删除整个词语。"
           }
         }
       }

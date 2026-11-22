@@ -2000,6 +2000,19 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "experiments.hideWordSuggestions") as? Bool, true)
     }
 
+    /// The experiment is off until its switch is turned on, and it keeps its App Group key.
+    func testDeleteSwipedWordsLetterByLetterIsOffByDefaultAndKeepsItsAppGroupKey() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+
+        XCTAssertFalse(settings.deletesSwipedWordsLetterByLetter)
+        settings.deletesSwipedWordsLetterByLetter = true
+        XCTAssertTrue(FullKeyboardSettings(defaults: defaults).deletesSwipedWordsLetterByLetter)
+        XCTAssertEqual(defaults.object(forKey: "experiments.swipeDeleteLetterByLetter") as? Bool, true)
+    }
+
     /// Testers who turned the full keyboard experiment off chose the dictation bar and keep
     /// it; those who never touched it (unset) get the full keyboard.
     func testExplicitlyOffKeepsTheDictationBar() throws {
