@@ -1029,11 +1029,12 @@ final class FullKeyboardView: UIView {
         morph.layer.cornerRadius = start.height / 2
         morph.alpha = appearing ? 0.6 : 1
         morph.isHidden = false
+        // No bounce: the recording bar and the live words share one spring family.
         UIView.animate(
-            withDuration: 0.34,
-            delay: 0,
-            usingSpringWithDamping: 0.82,
+            springDuration: 0.34,
+            bounce: 0,
             initialSpringVelocity: 0,
+            delay: 0,
             options: [.beginFromCurrentState, .allowUserInteraction]
         ) {
             self.morph.frame = end
@@ -1041,7 +1042,7 @@ final class FullKeyboardView: UIView {
             if appearing { self.morph.alpha = 1 }
         }
         guard !appearing else { return }
-        UIView.animate(withDuration: 0.12, delay: 0.24, options: [.allowUserInteraction]) {
+        UIView.animate(springDuration: 0.15, bounce: 0, initialSpringVelocity: 0, delay: 0.22, options: [.allowUserInteraction]) {
             self.morph.alpha = 0
         } completion: { _ in
             if !self.showsRecording {
@@ -1054,7 +1055,7 @@ final class FullKeyboardView: UIView {
         shown.forEach { $0.isHidden = false }
         let globeHidden = engine.layout.key(.globe) == nil
         let accentHidden = engine.activeAccentMenu == nil
-        let duration = window == nil ? 0 : 0.18
+        let duration = window == nil ? 0 : 0.2
         if duration == 0 {
             shown.forEach { $0.alpha = 1 }
             hidden.forEach {
@@ -1066,7 +1067,7 @@ final class FullKeyboardView: UIView {
             after?()
             return
         }
-        UIView.animate(withDuration: duration, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+        UIView.animate(springDuration: duration, bounce: 0, initialSpringVelocity: 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
             shown.forEach { $0.alpha = 1 }
             hidden.forEach { $0.alpha = 0 }
         } completion: { _ in
