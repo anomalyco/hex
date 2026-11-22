@@ -997,7 +997,11 @@ never at a launch by itself.
   its ñ key in both, and the swipe switches the language they autocorrect and dictate in
   (black box, iOS 27.2 simulator: Spanish added to Apple's English keyboard has no ñ key and
   English's long presses; English added to its Spanish keyboard keeps the ñ key and
-  Spanish's). Apple and Gboard switch with a long press on the globe, but a Face ID
+  Spanish's). English and Deutsch together are its "English & German" keyboard the same way
+  (iOS 27.2 and 26.5 simulators): German added to the English keyboard is QWERTY with
+  English's long presses, English added to the German keyboard keeps its layout, QWERTZ –
+  Deutsch's ü ö ä keys or, on QWERTZ, ten keys a row with ä ö ü and ß held. Apple and
+  Gboard switch with a long press on the globe, but a Face ID
   iPhone shows no globe in a third-party keyboard and Hex's space-bar slide is its cursor
   trackpad, so this follows SwiftKey: with two or more languages the cursor slides once the
   space bar was held still for 0.35 s (the hold that starts Apple's trackpad, below), a slide

@@ -2247,6 +2247,29 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(AccentCatalog.options(for: "n", uppercase: false, language: .spanish), ["n", "ń"])
     }
 
+    /// English and Deutsch chosen together are Apple's bilingual English & German keyboard the
+    /// same way (TestFlight build 128: Apple's "DE EN" on QWERTZ showed ten keys a row, Hex's
+    /// Deutsch eleven). German leading on its QWERTZ: ten keys a row for both, ä ö ü and ß held
+    /// right after their letters, as Apple's (iOS 27.2 and 26.5 simulators).
+    func testEnglishAndGermanTypeOnTheFirstOnesKeys() {
+        func layout(_ chosen: [KeyboardLanguage], _ current: KeyboardLanguage) -> KeyboardLanguage {
+            KeyboardLanguageList.resolve(chosen: chosen, stored: current, automatic: .english).layout
+        }
+        XCTAssertEqual(layout([.german, .english], .english), .german, "English on German's keys")
+        XCTAssertEqual(layout([.german, .english], .german), .german)
+        XCTAssertEqual(layout([.english, .german], .german), .english, "Deutsch on English's keys")
+        XCTAssertEqual(layout([.german], .german), .german)
+        XCTAssertEqual(layout([.german, .spanish], .spanish), .spanish, "no English beside them")
+        XCTAssertEqual(layout([.german, .spanish, .english], .spanish), .spanish, "Spanish's pair leads with Spanish")
+
+        XCTAssertEqual(KeyboardLanguage.german.letterRows(.qwertz).map { $0.joined() }, ["qwertzuiop", "asdfghjkl", "yxcvbnm"])
+        let holds = KeyboardLanguage.german.letterHolds(on: .qwertz)
+        XCTAssertEqual(holds["a"], ["a", "ä", "à", "á", "â", "æ", "ã", "å", "ā"])
+        XCTAssertEqual(holds["o"], ["o", "ö", "ô", "ò", "ó", "õ", "œ", "ø", "ō"])
+        XCTAssertEqual(holds["u"], ["u", "ü", "û", "ù", "ú", "ū"])
+        XCTAssertEqual(holds["s"], ["s", "ß", "ś", "š"])
+    }
+
     /// While the keyboard switches between two or more languages, Automatic dictates in the
     /// one it shows (TestFlight build 56: Spanish dictation came out "incomprehensible"),
     /// in the iPhone's region; a language picked by hand, one keyboard language, or an iPhone
