@@ -2546,8 +2546,30 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertFalse(keyboards.isSuperseded(2))
         XCTAssertFalse(keyboards.isOverAnother(2))
 
+        // When the host shows again, UIKit calls viewWillAppear on buried keyboards in order:
+        // willAppear keeps already-superseded ones in place so they skip mounting.
+        keyboards.appeared(3, in: field)
+        keyboards.appeared(4, in: field)
+        XCTAssertTrue(keyboards.willAppear(2, in: nil))
+        XCTAssertTrue(keyboards.willAppear(3, in: field))
+        XCTAssertFalse(keyboards.willAppear(4, in: field))
+        XCTAssertFalse(keyboards.willAppear(6, in: field), "a new keyboard is not superseded")
+        XCTAssertTrue(keyboards.isSuperseded(4))
+
+        // On dismiss and reshow, UIKit clears onScreen in viewWillDisappear, loads a fresh
+        // controller (7) with a new field UUID, then calls viewWillAppear on buried ones first.
+        for keyboard in [2, 3, 4, 6] { keyboards.disappeared(keyboard) }
+        XCTAssertTrue(keyboards.willAppear(2, in: field, under: 7))
+        XCTAssertTrue(keyboards.willAppear(6, in: field, under: 7))
+        XCTAssertFalse(keyboards.willAppear(7, in: UUID()))
+        XCTAssertTrue(keyboards.isSuperseded(2))
+        XCTAssertTrue(keyboards.isSuperseded(6))
+        XCTAssertFalse(keyboards.isSuperseded(7))
+        keyboards.disappeared(7)
+        XCTAssertFalse(keyboards.isSuperseded(6), "restorable once 7 leaves")
+
         // The app closes and iOS frees them all: the next keyboard is clear again.
-        keyboards.disappeared(2)
+        for keyboard in [2, 3, 4, 6] { keyboards.disappeared(keyboard) }
         keyboards.appeared(5, in: other)
         XCTAssertFalse(keyboards.isOverAnother(5))
     }

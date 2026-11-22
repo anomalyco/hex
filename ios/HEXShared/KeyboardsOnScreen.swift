@@ -22,6 +22,9 @@ nonisolated struct KeyboardsOnScreen: Equatable, Sendable {
         let keyboard: Int
         /// The field the keyboard is in, nil until UIKit names it.
         var field: UUID?
+        /// A newly loaded keyboard this buried one reappeared underneath when its host reshowed
+        /// with a fresh `documentIdentifier`.
+        var under: Int?
     }
 
     /// In the order they appeared.
@@ -33,6 +36,23 @@ nonisolated struct KeyboardsOnScreen: Equatable, Sendable {
     mutating func appeared(_ keyboard: Int, in field: UUID?) {
         entries.removeAll { $0.keyboard == keyboard }
         entries.append(Entry(keyboard: keyboard, field: field))
+    }
+
+    /// Registers `keyboard` as `viewWillAppear` runs, keeping an already-superseded keyboard in
+    /// place (or marking a previously superseded one as sitting under `preparingKeyboard`, which
+    /// UIKit loads before calling `viewWillAppear` on buried controllers during a reshow).
+    /// Returns true when `keyboard` is superseded and should skip mounting.
+    mutating func willAppear(_ keyboard: Int, in field: UUID?, under preparingKeyboard: Int? = nil) -> Bool {
+        if let index = entries.firstIndex(where: { $0.keyboard == keyboard }) {
+            if let field { entries[index].field = field }
+            if let preparingKeyboard, preparingKeyboard != keyboard { entries[index].under = preparingKeyboard }
+            if isSuperseded(keyboard) || preparingKeyboard != nil { return true }
+        } else if let preparingKeyboard, preparingKeyboard != keyboard {
+            entries.append(Entry(keyboard: keyboard, field: field, under: preparingKeyboard))
+            return true
+        }
+        appeared(keyboard, in: field)
+        return false
     }
 
     /// UIKit named `keyboard`'s field, or it moved to another. Nothing for a keyboard off screen.
@@ -58,9 +78,11 @@ nonisolated struct KeyboardsOnScreen: Equatable, Sendable {
     /// Whether a later keyboard is currently on screen in `keyboard`'s own named field: `keyboard`
     /// sits underneath it and can retire its surface until no later keyboard remains in that field.
     func isSuperseded(_ keyboard: Int) -> Bool {
-        guard let index = entries.firstIndex(where: { $0.keyboard == keyboard }),
-              let field = entries[index].field else { return false }
-        return entries[(index + 1)...].contains { $0.field == field }
+        guard let index = entries.firstIndex(where: { $0.keyboard == keyboard }) else { return false }
+        let entry = entries[index]
+        return entries[(index + 1)...].contains { later in
+            (entry.field != nil && later.field == entry.field) || later.keyboard == entry.under
+        }
     }
 }
 

@@ -69,6 +69,9 @@ final class KeyboardViewController: UIInputViewController {
     /// Retired while a newer Hex keyboard sits over this one in the same field (`KeyboardsOnScreen`):
     /// keeps listening and restores its surface if the newer one goes away.
     private var isRetired = false
+    private var wasSuperseded = false
+    private var restoreScheduled = false
+    private static var preparingKeyboardID: Int?
     /// This appearance hasn't yet checked Settings › Keyboard › Auto-start, which waits until
     /// its keys are up (and UIKit has named the field).
     private var autoStartPending = false
@@ -127,6 +130,7 @@ final class KeyboardViewController: UIInputViewController {
         // iOS frees a keyboard it never said disappeared without another word.
         let id = keyboardID
         Task { @MainActor in
+            if KeyboardViewController.preparingKeyboardID == id { KeyboardViewController.preparingKeyboardID = nil }
             KeyboardViewController.onScreen.disappeared(id)
             KeyboardViewController.inputViews.removeValue(forKey: id)?.view?.unmountHexViews()
         }
@@ -134,6 +138,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
+        Self.preparingKeyboardID = keyboardID
         reportFullAccess(force: true)
         // Before any typing log starts: the keyboard may update before Hex is opened.
         TypingLogSettings().turnOffOnce()
@@ -145,6 +150,12 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
+        let preparing = wasSuperseded && Self.preparingKeyboardID != keyboardID ? Self.preparingKeyboardID : nil
+        if Self.preparingKeyboardID == keyboardID { Self.preparingKeyboardID = nil }
+        if Self.onScreen.willAppear(keyboardID, in: currentDocument, under: preparing) {
+            retireSupersededKeyboard()
+            return
+        }
         reportFullAccess(force: true)
         isRetired = false
         autoStartPending = true
@@ -156,7 +167,6 @@ final class KeyboardViewController: UIInputViewController {
         mountSurface()
         fullKeyboard?.prepareForField()
         isShown = true
-        Self.onScreen.appeared(keyboardID, in: currentDocument)
         updateBackdrop()
         beginTypingLogSession(trigger: "appear")
         handOffNumericPadIfNeeded()
@@ -166,6 +176,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        guard !isRetired else { return }
         // iOS holds back touches near the screen's side edges in a keyboard's window while it
         // waits to see whether they start a system gesture: on an iPhone they reached the keys
         // about 80 ms late (Record typing logs), so q, a, p, l, shift and delete lagged and
@@ -342,6 +353,7 @@ final class KeyboardViewController: UIInputViewController {
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         if isShown || isRetired { Self.onScreen.moved(keyboardID, to: currentDocument) }
+        guard !isRetired else { return }
         updateKeyboardTraits()
         followTypingLogField()
         fullKeyboard?.textDidChange()
@@ -575,7 +587,16 @@ final class KeyboardViewController: UIInputViewController {
             return
         }
         if isRetired, !Self.onScreen.isSuperseded(keyboardID) {
-            restoreRetiredKeyboard()
+            guard !restoreScheduled else { return }
+            restoreScheduled = true
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.restoreScheduled = false
+                guard self.isRetired, !Self.onScreen.isSuperseded(self.keyboardID) else { return }
+                self.restoreRetiredKeyboard()
+                self.updateBackdrop()
+            }
+            return
         }
         guard isShown else { return }
         if Self.onScreen.isOverAnother(keyboardID) {
@@ -626,6 +647,7 @@ final class KeyboardViewController: UIInputViewController {
         fullKeyboard?.engine.commitHangulComposition()
         isShown = false
         isRetired = true
+        wasSuperseded = true
         launchWork.forEach { $0.cancel() }
         launchWork = []
         localDictation.keyboardWillHide()
