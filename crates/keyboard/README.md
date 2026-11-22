@@ -21,11 +21,13 @@ model reader and Swipe typing's decoder. Tune those here, not in Swift.
 
 ## Setup
 
-Install [rustup](https://rustup.rs): in this folder it uses the toolchain, components and
-targets `rust-toolchain.toml` pins (`rustup toolchain install` fetches them ahead). iOS's
-build (`ios/scripts/build-keyboard-core.sh`, HEXKeyboard's first build phase) and Android's
-debug build find rustup's cargo in `CARGO_HOME` (by default `~/.cargo`); Android also needs
-`cargo install cargo-ndk`.
+Install rustup ([rustup.rs](https://rustup.rs) or `brew install rustup`): in this folder it
+uses the toolchain, components and targets `rust-toolchain.toml` pins (`rustup toolchain
+install` fetches them ahead). iOS's build (`ios/scripts/build-keyboard-core.sh`, HEXKeyboard's
+first build phase), Xcode Cloud's `ci_post_clone.sh` and Android's debug build find it the same
+way (`tools/rustup-env.sh`): on PATH, in `CARGO_HOME` (by default `~/.cargo`), or Homebrew's
+(`opt/rustup/bin` or `bin` under `HOMEBREW_PREFIX`), taking only a cargo that runs the pinned
+toolchain here. Android also needs `cargo install cargo-ndk`.
 
 ```sh
 cd crates/keyboard
