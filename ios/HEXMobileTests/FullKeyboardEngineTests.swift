@@ -1528,8 +1528,8 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNotNil(engine.layout.key(.character("ü")))
     }
 
-    /// Spatial autocorrect has English and Spanish models only: Italian falls back to the
-    /// dictionary engine in Italian, never to the English model.
+    /// Spatial autocorrect has English, Spanish and French models only: Italian falls back to
+    /// the dictionary engine in Italian, never to the English model, and French reads its own.
     func testSpatialAutocorrectNeverUsesAnotherLanguagesModel() {
         let settings = FullKeyboardSettings()
         let wasOn = settings.spatialAutocorrect
@@ -1541,9 +1541,13 @@ final class FullKeyboardEngineTests: XCTestCase {
         view.languageOverride = .italian
         XCTAssertEqual(view.engine.autocorrect.language, .italian)
         XCTAssertNil(view.engine.autocorrect.decoder)
-        // Nor do Russian, Serbian (Latin) and French; nor do English's or Spanish's
-        // next-letter odds move French targets (AZERTY's letters aren't theirs).
-        for language in [KeyboardLanguage.russian, .ukrainian, .greek, .polish, .romanian, .serbianLatin, .french, .frenchCanadian, .frenchSwiss] {
+        // Nor do Russian, Serbian (Latin), and Canada's and Switzerland's French, which have no
+        // model of their own yet; nor do English's or Spanish's next-letter odds move their
+        // targets. French (France) reads its own model, for the decoder and the letter odds.
+        view.languageOverride = .french
+        XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "fr")
+        XCTAssertEqual(view.engine.letterOdds?.language, "fr")
+        for language in [KeyboardLanguage.russian, .ukrainian, .greek, .polish, .romanian, .serbianLatin, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")

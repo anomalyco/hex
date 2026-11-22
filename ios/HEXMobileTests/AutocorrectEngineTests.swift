@@ -1335,6 +1335,38 @@ final class AutocorrectEngineTests: XCTestCase {
     /// Without it the Deutsch layout keeps the dictionary engine exactly as before: no word
     /// list either, so no letter odds, no model completions in the strip, and no partner model.
     /// English and Spanish never wait on the experiment.
+    /// French's own word list (`fr.valid`) is read in place and, beside its model, says what is a
+    /// word instead of the phone's dictionary: a real word outside the model counts, letters that
+    /// are no word don't even where iOS's dictionary takes any letters, and a missing system
+    /// dictionary doesn't switch the model off.
+    func testFrenchReadsItsOwnWordList() throws {
+        let list = try XCTUnwrap(HexWordList.bundled("fr"), "fr.valid is bundled")
+        XCTAssertTrue(list.contains("abaissait"))
+        XCTAssertFalse(list.contains("qzxjvkq"))
+        XCTAssertFalse(list.contains(""))
+        let model = try XCTUnwrap(TypingDecoderModel.bundled("fr"))
+        let checker = SystemTextChecker()
+        let autocorrect = AutocorrectEngine(checker: checker, learnedWords: LearnedWordsStore(defaults: defaults))
+        autocorrect.setLanguage(.french, available: [])
+        XCTAssertFalse(autocorrect.hasWords, "no dictionary and no model")
+        autocorrect.decoder = TypingDecoder(model: model)
+        XCTAssertTrue(autocorrect.hasWords, "the model needs no system dictionary")
+        XCTAssertNotNil(checker.ownWords)
+        for word in ["maison", "Maison", "c'est", "c\u{2019}est", "abaissait"] {
+            XCTAssertTrue(checker.isWordValid(word), word)
+        }
+        XCTAssertFalse(checker.isWordValid("qzxjvkq"), "only Hex's words count")
+        // fr.capitals, read in place too: a name the books nearly always capitalise is no word
+        // typed lowercase, and is one with its capital.
+        XCTAssertEqual(HexWordList.bundled("fr", "capitals")?.value(of: "paris"), 100)
+        XCTAssertFalse(checker.isWordValid("paris"))
+        XCTAssertTrue(checker.isWordValid("Paris"))
+        XCTAssertTrue(checker.isWordValid("marie"), "94%: also an ordinary word")
+        XCTAssertEqual(checker.guesses(for: "maisn"), [], "no English guesses for French words")
+        autocorrect.decoder = TypingDecoder(model: try XCTUnwrap(TypingDecoderModel.bundled("en")))
+        XCTAssertNil(checker.ownWords, "English ships no list")
+    }
+
     func testTheGermanTypingModelNeedsItsExperiment() {
         let settings = FullKeyboardSettings(defaults: defaults)
         XCTAssertFalse(settings.germanSpatialAutocorrect, "off by default")
@@ -1350,6 +1382,19 @@ final class AutocorrectEngineTests: XCTestCase {
         settings.spatialAutocorrect = true
         XCTAssertEqual(settings.typingModel(for: .english)?.language, "en")
         XCTAssertEqual(settings.typingModel(for: .spanish)?.language, "es")
+    }
+
+    /// French (France) reads taps with Android's French model (`fr.hextm`): the held-out gate's
+    /// critical cases (an accent left out goes back where the plain spelling is no word; "a"
+    /// typed right stays) and a slip on AZERTY's bottom row. Canada's and Switzerland's French
+    /// have no model of their own yet.
+    func testSpatialAutocorrectReadsFrenchWithItsModel() throws {
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertEqual(settings.typingModel(for: .french)?.language, "fr")
+        XCTAssertNil(settings.typingModel(for: .frenchCanadian), "no fr-CA model yet")
+        try useDecoder(.french)
+        for word in ["le", "cafe", "il", "a", "faim", "merxi", "vers", "paris"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "le café il a faim merci vers Paris ", "a name takes its capital from fr.capitals")
     }
 
     func testSpatialAutocorrectAddsSpanishAccents() throws {

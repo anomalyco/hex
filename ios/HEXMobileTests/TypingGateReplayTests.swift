@@ -18,6 +18,9 @@ final class TypingGateReplayTests: XCTestCase {
             let language: String
             let taps: [[Double]]
             let want: String
+            /// Typed with whatever case the keyboard's shift gives (the lowercase pass), not the
+            /// case `want` has.
+            let freeCase: Bool?
         }
         let width: Double
         let geometry: [String: [String: [Double]]]
@@ -90,7 +93,7 @@ final class TypingGateReplayTests: XCTestCase {
         for (i, tap) in item.taps.enumerated() {
             let ch = planned[i]
             let lower = String(ch).lowercased()
-            if ch.isLetter, engine.layout.layer == .letters, engine.isUppercase != ch.isUppercase {
+            if item.freeCase != true, ch.isLetter, engine.layout.layer == .letters, engine.isUppercase != ch.isUppercase {
                 press(try centre(.shift), id: 30_000 + i)
             }
             if tap == [-1, -1] {

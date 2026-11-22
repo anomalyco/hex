@@ -620,7 +620,7 @@ final class FullKeyboardView: UIView {
     }
 
     /// Settings › Keyboard › Spatial autocorrect (on by default): maps the layout language's
-    /// bundled model when the keyboard opens (English, Spanish, and German while its experiment
+    /// bundled model when the keyboard opens (English, Spanish, French, and German while its experiment
     /// in Settings › Experiments is on; others keep `UITextChecker`), and moves the keys'
     /// centres to where Learn how I type saw you tap. The same word list lets the likely next
     /// letter claim a few points of its neighbour's touch target whether or not Spatial

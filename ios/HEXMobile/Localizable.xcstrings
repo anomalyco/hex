@@ -2920,6 +2920,16 @@
         }
       }
     },
+    "English, Spanish and French only" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅限英语、西班牙语和法语"
+          }
+        }
+      }
+    },
     "English and Spanish only" : {
       "localizations" : {
         "zh-Hans" : {

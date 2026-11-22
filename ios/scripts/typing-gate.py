@@ -20,9 +20,14 @@ Inputs, as quality-gate.py builds them:
 - clean: each reference typed right at the key centres, a letter without a key of its own picked
   from its key's long-press menu, an apostrophe without a key from the 123 page;
 - accents: up to 500 references with a hold-only letter, typed with its substitute;
-- critical: the named cases, at the key centres.
+- critical: the named cases, at the key centres;
+- lowercase: each reference typed all lowercase at the key centres, the keyboard's shift left as
+  it is (it capitalises a sentence's start), for the capitals report below.
 Scoring is quality-gate.py's: word edits case-insensitively; correct words changed on the clean
 pass; accent words bucketed by whether the plain spelling is in the model or <lang>.valid.
+iOS also reports capitals, which the three numbers can't see as they ignore case: on the lowercase
+pass, of the reference words after a sentence's first with a capital (names, "I"), how many come
+out with it, and of those without, how many gain one. A report, not a threshold.
 Outputs also lose the . , ! ? ; : and quotes the engine may add, and ’ reads as '.
 """
 import argparse
@@ -127,6 +132,10 @@ def prepare(out, langs):
         for n, text in enumerate(accents):
             taps, want = centred(text.translate(shifted) + ' ', keys, holds, lang)
             items.append(dict(id=f'{lang}-accent-{n}', set='accent', language=lang, taps=taps, want=want, reference=text))
+        for n, (_, _, text, _, _) in enumerate(rows):
+            taps, want = centred(text.lower() + ' ', keys, holds, lang)
+            items.append(dict(id=f'{lang}-lower-{n}', set='lower', language=lang, taps=taps, want=want, reference=text,
+                              freeCase=True))
         for n, (name, typed, expected) in enumerate(cases[lang]):
             taps, want = centred(typed + ' ', keys, holds, lang)
             items.append(dict(id=f'{lang}-critical-{n}', set='critical', language=lang, taps=taps, want=want,
@@ -169,6 +178,12 @@ def words(text):
     return re.sub(r'[.,!?;:"\u00ab\u00bb]', ' ', text).split()
 
 
+def cased_words(text):
+    """`words`, keeping case."""
+    text = unicodedata.normalize('NFC', text.replace('\u2019', "'"))
+    return re.sub(r'[.,!?;:"\u00ab\u00bb]', ' ', text).split()
+
+
 def tally(hits, total):
     return dict(count=hits, total=total, percent=100 * hits / total if total else None)
 
@@ -196,6 +211,7 @@ def score(out, langs):
         total = raw = errors = changed = harm = opportunities = 0
         buckets = ('unambiguous', 'ambiguous', 'plain_known_target_unknown')
         totals, hits, critical = Counter(), Counter(), []
+        names = names_kept = plain = plain_capitalised = 0
         for item in mine:
             ref, hyp = item['reference'].lower().split(), words(outputs[item['id']])
             kind = item['set']
@@ -218,6 +234,19 @@ def score(out, langs):
                     bucket = buckets[0] if base not in lexicon else buckets[1] if w in lexicon else buckets[2]
                     totals[bucket] += 1
                     hits[bucket] += pos is not None and w == hyp[pos]
+            elif kind == 'lower':
+                cased = cased_words(outputs[item['id']])
+                words_ref = item['reference'].split()
+                low = [w.lower() for w in words_ref]
+                for k, (w, pos) in enumerate(zip(words_ref, align(low, [c.lower() for c in cased])[1])):
+                    if k == 0 or pos is None or cased[pos].lower() != w.lower():
+                        continue
+                    if w[0].isupper():
+                        names += 1
+                        names_kept += cased[pos][0].isupper()
+                    else:
+                        plain += 1
+                        plain_capitalised += cased[pos][0].isupper()
             else:
                 critical.append(dict(name=item['name'], expected=item['reference'], actual=outputs[item['id']].strip(),
                                      passed=ref == hyp))
@@ -238,15 +267,17 @@ def score(out, langs):
                             correct_changed=changed, correct_changed_percent=change_rate,
                             accent_restoration=restoration, unambiguous_status=status,
                             ambiguous_harm=tally(harm, opportunities), critical_cases=critical,
+                            capitals=dict(names=tally(names_kept, names), wrongly_capitalised=tally(plain_capitalised, plain)),
                             failed=failed, passed=not failed))
-    print('Lang   Noisy WER  Reduction   Changed  Unambig.  Ambig.  Harm   Critical  Gate')
+    print('Lang   Noisy WER  Reduction   Changed  Unambig.  Ambig.  Harm   Critical  Gate   Names kept  Capital added')
     rate = lambda m: '—' if m['percent'] is None else f"{m['percent']:.2f}%"
     for r in results:
         un = rate(r['accent_restoration']['unambiguous']) if r['unambiguous_status'] == 'scored' else r['unambiguous_status']
         print(f"{r['language']:4} {r['noisy_wer_percent']:9.2f}% {r['error_reduction_percent']:9.2f}%"
               f" {r['correct_changed_percent']:8.2f}% {un:>8} {rate(r['accent_restoration']['ambiguous']):>7}"
               f" {rate(r['ambiguous_harm']):>6} {sum(c['passed'] for c in r['critical_cases']):5}/{len(r['critical_cases'])}"
-              f"   {'PASS' if r['passed'] else 'FAIL'}")
+              f"   {'PASS' if r['passed'] else 'FAIL'}"
+              f"   {rate(r['capitals']['names']):>9} {rate(r['capitals']['wrongly_capitalised']):>13}")
     (out / 'typing-quality.json').write_text(json.dumps(dict(engine='ios-simulator', thresholds=limits, languages=results),
                                                          ensure_ascii=False, indent=2) + '\n')
     return int(any(not r['passed'] for r in results))

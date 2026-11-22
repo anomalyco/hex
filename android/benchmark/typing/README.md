@@ -40,6 +40,7 @@ It writes `ios/build/typing-gate/input.json`, then runs the opt-in `HEXMobileTes
 - **Correct words changed:** each reference is typed at the key centres. A letter without a key of its own is picked from its key's long-press menu, and an apostrophe without a key comes from the 123 page; French's apostrophe key (#2354) is tapped.
 - **Accents restored:** each reference is typed with `accent-keys.json`'s substitutes and bucketed by `<lang>.hextm` and `<lang>.valid` as on Android. iOS ships no `.valid` lists yet, so the Android ones are read.
 - **Critical cases:** typed at the key centres.
+- **Capitals (iOS report, no threshold):** the three numbers ignore case, so iOS also types each reference all lowercase at the key centres, leaving the keyboard's shift as it is (it capitalises a sentence's start). After a sentence's first word, it counts the reference words with a capital (names, "I") that come out with it (**names kept**), and the words without one that gain one (**capital added**).
 
 Outputs also drop the `. , ! ? ; :` and quotes the engine may add, and ’ reads as '. German reads its model as with its experiment on. Bokmål has no iOS model, so it types as the keyboard does without one. Simulator dictionaries aren't a phone's: iOS 27.2's `nb_NO` takes any letters for a word.
 

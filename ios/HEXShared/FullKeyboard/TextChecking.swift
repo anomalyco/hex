@@ -23,6 +23,11 @@ final class SystemTextChecker: TextChecking {
         self.language = language
     }
 
+    /// Hex's own words for the language Spatial autocorrect reads (`AutocorrectEngine.useOwnWords`):
+    /// while set, they alone say what is a word, and `UITextChecker`'s guesses and completions
+    /// count only while it is in that language (iOS may have no dictionary for it).
+    var ownWords: HexOwnWords?
+
     func useLanguage(_ code: String) {
         language = code
     }
@@ -49,6 +54,28 @@ final class SystemTextChecker: TextChecking {
     }
 
     func isWordValid(_ word: String) -> Bool {
+        guard let ownWords else { return systemKnows(word) }
+        guard ownWords.knows(word) else { return false }
+        // A word the books capitalise only part of the time ("tom", 94%: also a word) is a name
+        // where this language's own dictionary knows it only capitalised, as without Hex's lists;
+        // never from a dictionary that takes any letters for a word.
+        guard ownWords.mayBeName(word), speaksOwnLanguage, systemIsSound,
+              let first = word.first else { return true }
+        return !(systemKnows(first.uppercased() + word.dropFirst()) && !systemKnows(word))
+    }
+
+    /// Whether `UITextChecker`'s dictionary for its language tells words from other letters, once
+    /// per language (the iOS 27.2 simulator's `nb_NO` and `pl_PL` take "qzxjvkq").
+    private var systemIsSound: Bool {
+        if let known = soundness[language] { return known }
+        let sound = !systemKnows("qzxjvkq")
+        soundness[language] = sound
+        return sound
+    }
+
+    private var soundness: [String: Bool] = [:]
+
+    private func systemKnows(_ word: String) -> Bool {
         let ns = word as NSString
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return true }
@@ -62,7 +89,12 @@ final class SystemTextChecker: TextChecking {
         return misspelled.location == NSNotFound
     }
 
+    private var speaksOwnLanguage: Bool {
+        ownWords.map { language.hasPrefix($0.language) } ?? true
+    }
+
     func guesses(for word: String) -> [String] {
+        guard speaksOwnLanguage else { return [] }
         let ns = word as NSString
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return [] }
@@ -70,6 +102,7 @@ final class SystemTextChecker: TextChecking {
     }
 
     func completions(for prefix: String) -> [String] {
+        guard speaksOwnLanguage else { return [] }
         let ns = prefix as NSString
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return [] }
