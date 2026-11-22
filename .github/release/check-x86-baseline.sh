@@ -2,7 +2,7 @@
 # shellcheck disable=SC2034 # the patterns are read through ${!kind}
 # check-x86-baseline.sh <executable> <ggml lib>...: checks that an x86_64
 # release targets x86-64-v3 (Haswell and later; AVX2, BMI2, FMA, F16C) and
-# nothing beyond it. Hex checks for v3 at startup (src/cpu_floor.rs), so
+# nothing beyond it. Hex checks for v3 at startup (src/transcription/cpu_floor.rs), so
 # its own code and everything before that check stay baseline.
 #
 # - ggml's static CPU libraries must use AVX2 and FMA (the build really

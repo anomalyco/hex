@@ -1892,6 +1892,7 @@ Hex checks the release service            // maintain.updates
 ├── macOS location not replaceable (read-only, translocated, root-owned) -> Download update (DMG)
 ├── Package manager (pacman, Nix) -> its command, once it serves another version
 ├── Source build, test build -> never checks
+├── `HEX_X86_BASELINE=ivybridge` source build (2012 floor) -> source build: never checks; official artifacts target x86-64-v3
 └── Failure -> keep the running version, back off, Check for updates retries
 
 Check for updates pressed (footer, menu bar, app menu)   // maintain.update-feedback (#1120)

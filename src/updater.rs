@@ -261,7 +261,11 @@ impl Updater {
             Some(DesktopUpdateStatus::SourceBuild)
         } else if managed_by_policy() {
             Some(DesktopUpdateStatus::Managed)
-        } else if method == Method::Source {
+        // An `HEX_X86_BASELINE=ivybridge` source build targets an older processor
+        // than every published artifact, so it never takes one: installing it
+        // would leave a Hex that can't start. A source build never checks,
+        // downloads, or installs, and its footer says so.
+        } else if method == Method::Source || cfg!(hex_x86_ivybridge) {
             Some(DesktopUpdateStatus::SourceBuild)
         } else {
             None

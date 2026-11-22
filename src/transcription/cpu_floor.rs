@@ -5,17 +5,61 @@
 //! anything that could reach ggml; Hex's own Rust is compiled for the
 //! baseline x86-64, so this check itself runs anywhere.
 //!
+//! An opt-in source build can target Ivy Bridge (2012: SSE4.2, AVX, F16C)
+//! instead of x86-64-v3, with `HEX_X86_BASELINE=ivybridge` and the matching
+//! `TRANSCRIBE_CMAKE_ARGS` (`build.rs` refuses `HEX_X86_BASELINE=ivybridge`
+//! unless `TRANSCRIBE_CMAKE_ARGS` carries the matching flags; docs/linux.md
+//! and docs/windows.md). Such a build is not an official release, is slower on
+//! newer CPUs, and never self-updates.
+//!
 //! `--version` and `--help` stay available on any CPU: installers and the
 //! updater run `hex --version` to check what they install.
 
-pub const MESSAGE: &str = "Hex needs a 2013 or newer processor (Intel Haswell / AMD Excavator or later) with AVX2. This PC's processor isn't supported.";
+/// One build's CPU floor: the ggml features it requires and the message a
+/// processor below it shows.
+struct Floor {
+    features: &'static [&'static str],
+    message: &'static str,
+}
 
-/// Whether this processor has every x86-64-v3 feature ggml is built with.
+/// The official Linux and Windows x64 release floor, x86-64-v3.
+const V3: Floor = Floor {
+    features: &["avx2", "bmi2", "fma", "f16c"],
+    message: "Hex needs a 2013 or newer processor (Intel Haswell / AMD Excavator or later) with AVX2. This PC's processor isn't supported.",
+};
+
+/// `HEX_X86_BASELINE=ivybridge`: Ivy Bridge (2012) and newer, with AVX and F16C.
+const IVYBRIDGE: Floor = Floor {
+    features: &["sse4.2", "avx", "f16c"],
+    message: "Hex needs a 2012 or newer processor (Intel Ivy Bridge / AMD Piledriver or later) with AVX and F16C. This PC's processor isn't supported.",
+};
+
+/// The floor this build detects, both lists stay visible to the test below.
+const fn floor() -> &'static Floor {
+    if cfg!(hex_x86_ivybridge) {
+        &IVYBRIDGE
+    } else {
+        &V3
+    }
+}
+
+pub const MESSAGE: &str = floor().message;
+
+/// Whether this processor has every feature ggml is built with.
 pub fn supported() -> bool {
-    std::arch::is_x86_feature_detected!("avx2")
-        && std::arch::is_x86_feature_detected!("bmi2")
-        && std::arch::is_x86_feature_detected!("fma")
-        && std::arch::is_x86_feature_detected!("f16c")
+    floor().features.iter().all(|feature| detected(feature))
+}
+
+fn detected(feature: &str) -> bool {
+    match feature {
+        "sse4.2" => std::arch::is_x86_feature_detected!("sse4.2"),
+        "avx" => std::arch::is_x86_feature_detected!("avx"),
+        "avx2" => std::arch::is_x86_feature_detected!("avx2"),
+        "bmi2" => std::arch::is_x86_feature_detected!("bmi2"),
+        "fma" => std::arch::is_x86_feature_detected!("fma"),
+        "f16c" => std::arch::is_x86_feature_detected!("f16c"),
+        feature => unreachable!("unknown CPU floor feature `{feature}`"),
+    }
 }
 
 fn exempt(arguments: &[std::ffi::OsString]) -> bool {
@@ -95,6 +139,19 @@ fn show() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_release_floor_is_x86_64_v3_and_the_switch_drops_to_ivy_bridge() {
+        assert_eq!(V3.features, ["avx2", "bmi2", "fma", "f16c"].as_slice());
+        assert_eq!(IVYBRIDGE.features, ["sse4.2", "avx", "f16c"].as_slice());
+        assert!(V3.message.contains("AVX2"));
+        assert!(IVYBRIDGE.message.contains("F16C"));
+        assert_ne!(V3.message, IVYBRIDGE.message);
+        #[cfg(hex_x86_ivybridge)]
+        assert_eq!(floor().features, IVYBRIDGE.features);
+        #[cfg(not(hex_x86_ivybridge))]
+        assert_eq!(floor().features, V3.features);
+    }
 
     #[test]
     fn version_and_help_run_on_any_processor() {
