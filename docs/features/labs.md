@@ -2941,7 +2941,12 @@ editor
 │                                   Crop: a drag shades what's left out, a click clears it
 ├── ⌘Z            -> the text being typed, else the last mark, else the crop
 ├── Copy (⌘C)     -> the edited PNG on the clipboard
-├── Save (⌘S)     -> a new file in screenshots.folder; the first shot is never changed
+├── Save (⌘S)     -> the native save panel, above the editor, in the folder Save or Export
+│                    last saved to (screenshots.export_folder; screenshots.folder at first),
+│                    offering the shot's own name (PNG only); Cancel saves nothing and
+│                    changes nothing; a chosen path is written whole or not at all
+│                    (.partial-<name>, then renamed); choosing the shot's own file
+│                    replaces it and closes the editor, else the note says "Saved"
 ├── Send to…      -> a list of open OpenCode sessions (typing searches title, folder, id,
 │                    as Annotate's; ↑↓ Enter); the PNG goes to the session as an image,
 │                    with the words said over it as its text ("Screenshot" without any);
@@ -3076,6 +3081,11 @@ saves the plain movie.
 ```ts
 record shortcut  -> the toolbar (above); Area and Window use the same picker as a shot
 ├── recording    -> Annotate's capsule shows it recording, as any capture; talk to narrate
+│   └── Area or Window -> every display dims but what's recorded, outlined as the picker
+│                         outlined it (untinted), fading in once the screen records and out
+│                         at stop or cancel; a Window's hole follows the window as it moves,
+│                         as the movie does; click-through, never focused, left out of the
+│                         movie unless capture.show_overlays_in_recordings; Screen dims nothing
 ├── record shortcut again (or the capsule's stop) -> stops; the capsule folds unless it failed
 │                   ├── the movie saves itself: "Hex Recording 2026-11-04 at 14.03.22.mp4" in
 │                   │   screenshots.folder (the Desktop when unset), " (2)" on a clash, as a shot's
@@ -3097,7 +3107,11 @@ record shortcut  -> the toolbar (above); Area and Window use the same picker as 
                     ├── Copy (⌘C) -> the movie FILE on the clipboard (pastes as an attachment in
                     │               Slack, Messages, Finder): the saved movie itself when nothing was
                     │               cut at Original, else a copy in the temp folder's hex-screenshots
-                    ├── Export   -> another "Hex Recording … .mp4" in screenshots.folder
+                    ├── Export   -> the native save panel, above the editor, in the folder Export
+                    │               last saved to (screenshots.export_folder; screenshots.folder at
+                    │               first), offering the movie's own name, MPEG-4 only; Cancel
+                    │               exports nothing and changes nothing; the size and span go to
+                    │               the path chosen, and only then does the button show progress
                     └── Send to… -> a contact sheet of up to 4 frames in the span as the image,
                                     the span's words and "Screen recording (m:ss): <movie>" as text,
                                     the saved movie itself when nothing was cut at Original
@@ -3146,6 +3160,12 @@ an Annotate capture's movie  -> 1280 px long edge (2560 for a display), system H
 // check: a_full_quality_movie_records_hevc_at_the_size_asked, one_x_and_a_long_edge_take_the_smaller (crates/capture/src/capture/macos.rs)
 // check: an_export_estimate_follows_the_span_kept_and_the_size, a_recording_has_no_marks_and_copies_its_movie (editor/tests.rs)
 // check: playing_moves_the_playhead_through_the_span_and_stops_at_its_end (editor/tests.rs)
+// check: save_offers_the_recordings_own_name_and_a_cancel_changes_nothing, the_path_chosen_gets_the_recording (editor/tests.rs)
+// check: a_save_replaces_the_file_chosen_and_leaves_nothing_beside_it (screenshots/save.rs)
+// check: the_dim_waits_for_the_screen_and_ends_with_its_recording, only_an_area_or_a_window_is_dimmed (screenshots/dim.rs)
+// stills: HEX_CAPSULE_SNAPS writes recording-dim-{area,window}-{light,dark}.png (capture_capsule/tests/motion.rs);
+//         HEX_SCREENSHOT_SNAPS writes editor-recording-{saving,saved}-*.png (editor/tests.rs).
+//         Not observed on a real Mac: the save panel itself, and the dim over a real window being dragged
 // check: hevc_records_native_pixels_up_to_the_hardware_limit (crates/capture-core/src/plan.rs)
 // check: writes_a_tagged_hevc_movie_from_frames (crates/capture-core/src/video_writer.rs)
 ```

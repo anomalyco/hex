@@ -22,6 +22,8 @@ pub(crate) mod notch;
 pub(crate) mod picker;
 #[cfg(target_os = "macos")]
 pub(crate) mod playground;
+#[cfg(target_os = "macos")]
+pub(crate) mod recording_dim;
 pub(crate) mod surface;
 #[cfg(target_os = "macos")]
 pub(crate) mod toolbar;

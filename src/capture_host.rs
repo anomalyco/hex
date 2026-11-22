@@ -38,7 +38,7 @@ use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
-use std::sync::{Arc, LazyLock, Mutex, OnceLock, Weak};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -72,6 +72,7 @@ pub(crate) mod annotate_read;
 #[cfg_attr(target_os = "windows", allow(dead_code))]
 mod library;
 mod microphone;
+mod own_windows;
 pub(crate) use microphone::recording_level;
 #[cfg(target_os = "macos")]
 pub(crate) mod paste_source;
@@ -84,6 +85,11 @@ mod sink;
 mod timeline;
 mod wav_file;
 mod words;
+
+pub use own_windows::{
+    DIM_WINDOWS, OwnWindow, exclude_window, own_windows_recorded, record_own_windows,
+};
+use own_windows::{OWN_WINDOWS, OwnWindowIds, own_windows_of};
 
 pub use library::{
     explain as explain_capture, list as list_captures, send as send_capture, show as show_capture,
@@ -552,33 +558,6 @@ impl Host for HexHost {
     }
 }
 
-/// What a capture leaves out of its recording (every window Hex named) and
-/// looks through for clicks: the ink overlay, and the capsule's panel, which
-/// lets clicks through everywhere but its pill. Clicks on the pill never
-/// reach the engine ([`CapsulePill`]).
-fn own_windows_of(own: &OwnWindowIds) -> OwnWindows {
-    OwnWindows {
-        excluded: own.excluded(),
-        passthrough: [own.ink, own.capsule].into_iter().flatten().collect(),
-        recorded: Arc::clone(&OWN_WINDOWS_RECORDED),
-    }
-}
-
-/// `capture.show_overlays_in_recordings`: while set, a capture records every
-/// window of Hex's, its overlays included. A recording capture follows a
-/// change at once.
-static OWN_WINDOWS_RECORDED: LazyLock<Arc<AtomicBool>> = LazyLock::new(Arc::default);
-
-/// Lets captures record Hex's own windows, or leaves them out again.
-pub fn record_own_windows(recorded: bool) {
-    OWN_WINDOWS_RECORDED.store(recorded, Ordering::Release);
-}
-
-/// Whether screen recordings may show Hex's overlays, as last saved.
-pub fn own_windows_recorded() -> bool {
-    OWN_WINDOWS_RECORDED.load(Ordering::Acquire)
-}
-
 /// The capsule's pill `[x, y, w, h]` in its panel's points while it shows.
 static CAPSULE_PILL: Mutex<Option<[f32; 4]>> = Mutex::new(None);
 
@@ -661,74 +640,6 @@ fn on_pill(origin: [f64; 2], pill: [f32; 4], x: f64, y: f64) -> bool {
     let [px, py, pw, ph] = pill.map(f64::from);
     let (left, top) = (origin[0] + px, origin[1] + py);
     x >= left && x <= left + pw && y >= top && y <= top + ph
-}
-
-/// Hex's windows a capture leaves out of its recording, one per role. A
-/// capture reads them when it starts.
-static OWN_WINDOWS: Mutex<OwnWindowIds> = Mutex::new(OwnWindowIds {
-    capsule: None,
-    ink: None,
-    picker: None,
-});
-
-/// The window holding each [`OwnWindow`] role.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct OwnWindowIds {
-    capsule: Option<u32>,
-    ink: Option<u32>,
-    picker: Option<u32>,
-}
-
-impl OwnWindowIds {
-    /// Every window held, which a recording leaves out.
-    fn excluded(self) -> Vec<u32> {
-        let Self {
-            capsule,
-            ink,
-            picker,
-        } = self;
-        [capsule, ink, picker].into_iter().flatten().collect()
-    }
-}
-
-/// Which of Hex's windows a capture leaves out.
-#[derive(Clone, Copy, Debug)]
-pub enum OwnWindow {
-    /// A panel far larger than the pill: click-through but for the pill
-    /// ([`set_capsule_pill`]).
-    Capsule,
-    /// Click-through, so a click on it never counts as a click on Hex.
-    Ink,
-    /// The on-screen picker, hidden before the capture it starts records.
-    Picker,
-}
-
-/// Leaves `window` out of every later capture's recording, replacing the
-/// window that last held `role`. Rune makes the overlays' windows for each
-/// show (#1315), so one made while a capture records joins it too.
-pub fn exclude_window(role: OwnWindow, window: u32) {
-    let mut own = OWN_WINDOWS
-        .lock()
-        .unwrap_or_else(|error| error.into_inner());
-    *match role {
-        OwnWindow::Capsule => &mut own.capsule,
-        OwnWindow::Ink => &mut own.ink,
-        OwnWindow::Picker => &mut own.picker,
-    } = Some(window);
-    let joined = own_windows_of(&own);
-    drop(own);
-    let Some(source) = ink_source() else { return };
-    for (ids, list) in [
-        (&*source.telemetry.excluded_window_ids, joined.excluded),
-        (&source.telemetry.passthrough_window_ids, joined.passthrough),
-    ] {
-        let mut ids = ids.lock().unwrap_or_else(|error| error.into_inner());
-        for id in list {
-            if !ids.contains(&id) {
-                ids.push(id);
-            }
-        }
-    }
 }
 
 /// The engine's settings, from Hex rather than `~/.config/scrawl`. The
@@ -3955,23 +3866,27 @@ mod tests {
             layer,
             alpha: 1.0,
         };
-        let (ink, capsule, app) = (11, 12, 13);
+        let (ink, capsule, app, dim) = (11, 12, 13, 14);
         let windows = [
             window(ink, own, [0.0, 0.0, 1728.0, 1117.0], 26),
             window(capsule, own, [544.0, 0.0, 640.0, 424.0], 27),
+            window(dim, own, [0.0, 0.0, 1728.0, 1117.0], 26),
             window(app, own + 1, [0.0, 0.0, 1728.0, 1117.0], 0),
         ];
+        let mut dims = [None; DIM_WINDOWS];
+        dims[0] = Some(dim);
         let roles = OwnWindowIds {
             capsule: Some(capsule),
             ink: Some(ink),
             picker: None,
+            dims,
         };
         let OwnWindows {
             excluded,
             passthrough,
             ..
         } = own_windows_of(&roles);
-        assert_eq!(excluded, [capsule, ink]);
+        assert_eq!(excluded, [capsule, ink, dim]);
         let engine_says_hex = |x, y| {
             scrawl_capture::capture::on_own_window(
                 &windows,
@@ -3990,7 +3905,10 @@ mod tests {
         assert!(hex_takes(864.0, 36.0), "the pill");
         assert!(!hex_takes(600.0, 300.0), "the panel's empty part");
         assert!(!hex_takes(864.0, 100.0), "just under the pill");
-        assert!(!hex_takes(1500.0, 900.0), "under the ink overlay only");
+        assert!(
+            !hex_takes(1500.0, 900.0),
+            "under the ink overlay and a recording's dim only"
+        );
         assert_eq!(panel_origin(&windows, 99), None, "a panel not on screen");
     }
 

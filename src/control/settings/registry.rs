@@ -263,6 +263,12 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: the size the screenshot editor exports a recording at; original (the \
          default) copies it as recorded (macOS)",
     ),
+    optional(
+        "screenshots.export_folder",
+        Kind::Path,
+        "Labs: the folder the screenshot editor's Save panel last saved to; none starts it in \
+         screenshots.folder (macOS)",
+    ),
     key(
         "screenshots.record_kind",
         Kind::Choice(&["area", "window", "screen"]),

@@ -1386,6 +1386,7 @@ fn a_pick_that_goes_nowhere_brings_the_picker_back() {
 /// calm frames in `<folder>/frames/<script>-calm-<theme>/`.
 #[test]
 fn picker_stills_and_motion() {
+    recording_dim_stills();
     let snaps = std::env::var_os("HEX_CAPSULE_SNAPS").map(std::path::PathBuf::from);
     let motion = std::env::var_os("HEX_CAPSULE_MOTION").map(std::path::PathBuf::from);
     if snaps.is_none() && motion.is_none() {
@@ -1497,3 +1498,42 @@ fn picker_stills_and_motion() {
     }
     std::fs::write(folder.join("onscreen-report.txt"), report.join("\n") + "\n").unwrap();
 }
+
+/// `HEX_CAPSULE_SNAPS=<folder>` also writes the recording dim over the
+/// picker's desktop, as an area and a window record, light and dark: the
+/// picker's own dim and outline, untinted.
+#[cfg(target_os = "macos")]
+fn recording_dim_stills() {
+    use super::recording_dim::{self, DimState};
+    let Some(folder) = std::env::var_os("HEX_CAPSULE_SNAPS").map(std::path::PathBuf::from) else {
+        return;
+    };
+    let Ok(gpu) = rune::render::Gpu::try_new(rune::render::Gpu::instance(), None) else {
+        return;
+    };
+    std::fs::create_dir_all(&folder).unwrap();
+    let display = [0.0, 0.0, DISPLAY[0], DISPLAY[1]];
+    let window = picker::tests::windows()[0].frame;
+    for (name, kind, target) in [
+        ("recording-dim-area", picker::Kind::Area, [340.0, 200.0, 300.0, 180.0]),
+        ("recording-dim-window", picker::Kind::Window, window),
+    ] {
+        for dark in [false, true] {
+            let theme = if dark { "dark" } else { "light" };
+            let mut rt = crate::rune_ui::offscreen::runtime(
+                DimState::still(display, kind, target),
+                recording_dim::view,
+                (DISPLAY[0], DISPLAY[1]),
+                env(dark),
+                text(),
+            );
+            let (w, h) = ((DISPLAY[0] * 2.0) as u32, (DISPLAY[1] * 2.0) as u32);
+            let pixels = crate::rune_ui::offscreen::draw(&gpu, &mut rt, w, h);
+            rune::render::write_png(&folder.join(format!("{name}-{theme}.png")), w, h, &pixels)
+                .unwrap();
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+fn recording_dim_stills() {}

@@ -42,7 +42,7 @@ const AREA_EDGE: f32 = 0.5;
 const REACH: f32 = 8192.0;
 /// The target moving to the next window, growing, or closing.
 const MOVE: Spring = Spring::new(0.24, 0.0);
-const FADE: Spring = Spring::new(0.20, 0.0);
+pub(super) const FADE: Spring = Spring::new(0.20, 0.0);
 const BADGE_H: f32 = 22.0;
 const BADGE_PX: f32 = 8.0;
 /// Clear of the crosshair's arms.
@@ -1065,30 +1065,6 @@ pub(crate) fn view(s: &PickerState, cx: &mut Cx<PickerState>) -> El {
     if s.backdrop {
         root = root.child(desktop(p, s));
     }
-    let [x, y, tw, th] = scene.target;
-    let (radius, ring, ring_color, edge_color, tint) = match scene.kind {
-        Kind::Window => (
-            WINDOW_RADIUS,
-            WINDOW_RING,
-            k.alpha(k.c.border_focus, 0.93),
-            k.alpha(k.c.black, 0.0),
-            k.alpha(k.c.border_focus, TINT),
-        ),
-        Kind::Area | Kind::Screen => (
-            0.0,
-            AREA_RING,
-            k.alpha(k.c.white, 0.92),
-            k.alpha(k.c.black, AREA_EDGE),
-            k.alpha(k.c.white, 0.0),
-        ),
-        Kind::None => (
-            0.0,
-            AREA_RING,
-            k.alpha(k.c.white, 0.0),
-            k.alpha(k.c.black, 0.0),
-            k.alpha(k.c.white, 0.0),
-        ),
-    };
     let mut layer = el()
         .key("layer")
         .trace_name("picker")
@@ -1097,36 +1073,7 @@ pub(crate) fn view(s: &PickerState, cx: &mut Cx<PickerState>) -> El {
         .opacity(if scene.on { 1.0 } else { 0.0 })
         .opacity_motion(FADE)
         .motion(MOVE)
-        .child(
-            el().key("dim")
-                .trace_name("dim")
-                .absolute(x - REACH, y - REACH)
-                .size(tw + 2.0 * REACH, th + 2.0 * REACH)
-                .radius(radius + REACH)
-                .border(REACH, k.alpha(k.c.black, DIM))
-                .child(
-                    el().key("target")
-                        .trace_name("target")
-                        .absolute(REACH, REACH)
-                        .size(tw, th)
-                        .radius(radius)
-                        .fill(tint)
-                        .child(
-                            el().trace_name("edge")
-                                .absolute(-AREA_RING, -AREA_RING)
-                                .size(tw + 2.0 * AREA_RING, th + 2.0 * AREA_RING)
-                                .radius(radius + AREA_RING)
-                                .border(AREA_RING, edge_color)
-                                .child(
-                                    el().trace_name("ring")
-                                        .absolute(AREA_RING, AREA_RING)
-                                        .size(tw, th)
-                                        .radius(radius)
-                                        .border(ring, ring_color),
-                                ),
-                        ),
-                ),
-        );
+        .child(dim(p, scene.kind, scene.target, true));
     {
         let badge = &s.badge;
         let [bx, by, bw, bh] = badge.rect;
@@ -1186,6 +1133,66 @@ pub(crate) fn view(s: &PickerState, cx: &mut Cx<PickerState>) -> El {
     root
 }
 
+/// The dim around `target` (`[x, y, w, h]` in the overlay's points) and
+/// the outline `kind` gives it: one border reaching past every edge of the
+/// display, so it moves with the target in one piece. A window is tinted
+/// only while `tinted`, as the picker aims; the recording dim
+/// ([`super::recording_dim`]) draws the same hole and outline untinted.
+pub(super) fn dim(p: Paint, kind: Kind, [x, y, tw, th]: [f32; 4], tinted: bool) -> El {
+    let k = p.k;
+    let (radius, ring, ring_color, edge_color, tint) = match kind {
+        Kind::Window => (
+            WINDOW_RADIUS,
+            WINDOW_RING,
+            k.alpha(k.c.border_focus, 0.93),
+            k.alpha(k.c.black, 0.0),
+            k.alpha(k.c.border_focus, if tinted { TINT } else { 0.0 }),
+        ),
+        Kind::Area | Kind::Screen => (
+            0.0,
+            AREA_RING,
+            k.alpha(k.c.white, 0.92),
+            k.alpha(k.c.black, AREA_EDGE),
+            k.alpha(k.c.white, 0.0),
+        ),
+        Kind::None => (
+            0.0,
+            AREA_RING,
+            k.alpha(k.c.white, 0.0),
+            k.alpha(k.c.black, 0.0),
+            k.alpha(k.c.white, 0.0),
+        ),
+    };
+    el().key("dim")
+        .trace_name("dim")
+        .absolute(x - REACH, y - REACH)
+        .size(tw + 2.0 * REACH, th + 2.0 * REACH)
+        .radius(radius + REACH)
+        .border(REACH, k.alpha(k.c.black, DIM))
+        .child(
+            el().key("target")
+                .trace_name("target")
+                .absolute(REACH, REACH)
+                .size(tw, th)
+                .radius(radius)
+                .fill(tint)
+                .child(
+                    el().trace_name("edge")
+                        .absolute(-AREA_RING, -AREA_RING)
+                        .size(tw + 2.0 * AREA_RING, th + 2.0 * AREA_RING)
+                        .radius(radius + AREA_RING)
+                        .border(AREA_RING, edge_color)
+                        .child(
+                            el().trace_name("ring")
+                                .absolute(AREA_RING, AREA_RING)
+                                .size(tw, th)
+                                .radius(radius)
+                                .border(ring, ring_color),
+                        ),
+                ),
+        )
+}
+
 /// Scrawl's camera cursor: a dark disc with a camera on it.
 fn camera(p: Paint) -> El {
     let k = p.k;
@@ -1230,16 +1237,23 @@ fn camera(p: Paint) -> El {
 
 /// A plain desktop with the aim's windows on it, back to front.
 fn desktop(p: Paint, s: &PickerState) -> El {
-    let k = p.k;
-    let [w, h] = s.scene.size;
-    let mut desk = el().size(w, h).fill(k.c.layer_03);
     let Some(aim) = &s.aim else {
-        return desk;
+        return el()
+            .size(s.scene.size[0], s.scene.size[1])
+            .fill(p.k.c.layer_03);
     };
-    for window in aim.windows.iter().flatten().rev() {
+    desk(p, aim.display, aim.windows.as_deref().unwrap_or_default())
+}
+
+/// A plain desktop for stills: `display` (global points) with `windows`,
+/// front first.
+pub(super) fn desk(p: Paint, display: [f32; 4], windows: &[Window]) -> El {
+    let k = p.k;
+    let mut desk = el().size(display[2], display[3]).fill(k.c.layer_03);
+    for window in windows.iter().rev() {
         let [x, y, ww, wh] = window.frame;
         let mut pane = el()
-            .absolute(x - aim.display[0], y - aim.display[1])
+            .absolute(x - display[0], y - display[1])
             .size(ww, wh)
             .radius(WINDOW_RADIUS)
             .fill(k.c.bg_base)

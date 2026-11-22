@@ -14,6 +14,7 @@
 //! shortcut again stops; the recording then lands on the same card
 //! ([`recording`]).
 
+mod dim;
 pub(crate) mod narration;
 mod picker;
 mod recording;
@@ -100,6 +101,7 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
     let thumbnail = Thumbnail::install(app);
     toolbar::install(app);
     crate::rune_ui::screenshot_thumbnail::editor::install(app);
+    dim::install(app);
     let _ = OVERLAYS.set(Overlays { picker, thumbnail });
     crate::capture_host::on_clip_written(recording::written);
 }
@@ -265,6 +267,7 @@ fn picked(action: Action) {
         pick.record
     };
     if record {
+        dim::expect(target);
         let clip = crate::capture_host::CaptureControl::Command(
             crate::capture_host::CaptureCommand::Clip(target),
         );

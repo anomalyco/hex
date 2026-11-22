@@ -159,6 +159,68 @@ fn a_recording_has_no_marks_and_copies_its_movie() {
 }
 
 #[test]
+fn save_offers_the_recordings_own_name_and_a_cancel_changes_nothing() {
+    let mut editor = Editor {
+        clip: Some(clip()),
+        screen: [960.0, 640.0],
+        on: true,
+        ..Editor::default()
+    };
+    let dialog = editor.save_dialog();
+    let file_dialog::Target::Save { filters, file_name } = &dialog.target else {
+        panic!("a save panel");
+    };
+    assert_eq!(file_name, "recording.mp4");
+    assert_eq!(filters[0].extensions, ["mp4"]);
+    assert_eq!(
+        dialog.directory,
+        Some(crate::app_settings::screenshot_settings().export_folder())
+    );
+    let mut tx = Tx::default();
+    editor.save_to(Ok(None), &mut tx);
+    assert!(editor.on, "the editor stays open");
+    assert_eq!(editor.exporting, None, "nothing exports");
+    assert!(editor.note.is_none() && editor.failed.is_none());
+}
+
+#[test]
+fn a_shot_without_a_file_is_offered_a_new_screenshot_name() {
+    let editor = Editor::still(shot([64, 40], 2.0), [960.0, 640.0]);
+    let file_dialog::Target::Save { filters, file_name } = editor.save_dialog().target else {
+        panic!("a save panel");
+    };
+    assert!(file_name.starts_with("Hex Screenshot "), "{file_name}");
+    assert!(file_name.ends_with(".png"), "{file_name}");
+    assert_eq!(filters[0].extensions, ["png"]);
+}
+
+#[cfg(target_os = "macos")]
+#[test]
+fn the_path_chosen_gets_the_recording() {
+    let folder = std::env::temp_dir().join(format!("hex-editor-save-{}", std::process::id()));
+    std::fs::create_dir_all(&folder).unwrap();
+    let movie = folder.join("Hex Recording.mp4");
+    std::fs::write(&movie, b"movie").unwrap();
+    let mut recording = clip();
+    recording.movie = movie;
+    let mut editor = Editor {
+        clip: Some(recording),
+        screen: [960.0, 640.0],
+        on: true,
+        ..Editor::default()
+    };
+    let chosen = folder.join("Elsewhere").join("Kept.mp4");
+    let mut tx = Tx::default();
+    editor.save_to(Ok(Some(chosen.clone())), &mut tx);
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while !chosen.exists() && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert_eq!(std::fs::read(&chosen).unwrap(), b"movie");
+    std::fs::remove_dir_all(&folder).unwrap();
+}
+
+#[test]
 fn an_export_estimate_follows_the_span_kept_and_the_size() {
     use crate::app_settings::{ExportSize, RecordingQuality};
     let mut recording = clip();
@@ -805,8 +867,9 @@ fn editor_frames() {
 }
 
 /// `HEX_SCREENSHOT_SNAPS=<folder>` writes the editor open on a recording,
-/// light and dark: its bar's export size and estimate, and the same bar
-/// while a 1080p copy is 42% done.
+/// light and dark: its bar's export size and estimate, the same bar while
+/// a 1080p copy is 42% done, while a save to the path the save panel chose
+/// is, and once it's saved.
 #[test]
 fn recording_editor_snapshots() {
     use crate::app_settings::ExportSize;
@@ -821,13 +884,26 @@ fn recording_editor_snapshots() {
         return;
     };
     let size = (1280.0, 800.0);
-    for (slug, export_size, exporting) in [
-        ("editor-recording", ExportSize::Original, None),
-        ("editor-recording-1080p", ExportSize::P1080, None),
+    for (slug, export_size, exporting, note) in [
+        ("editor-recording", ExportSize::Original, None, None),
+        ("editor-recording-1080p", ExportSize::P1080, None, None),
         (
             "editor-recording-exporting",
             ExportSize::P1080,
             Some((Pressed::Copy, 0.42)),
+            None,
+        ),
+        (
+            "editor-recording-saving",
+            ExportSize::P1080,
+            Some((Pressed::Save, 0.42)),
+            None,
+        ),
+        (
+            "editor-recording-saved",
+            ExportSize::P1080,
+            None,
+            Some("Saved"),
         ),
     ] {
         for dark in [false, true] {
@@ -843,6 +919,7 @@ fn recording_editor_snapshots() {
                 on: true,
                 export_size,
                 exporting,
+                note: note.map(|note| (tr(note).into(), 0.0)),
                 ..Editor::default()
             };
             let env = rune::Env {

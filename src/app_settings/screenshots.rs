@@ -24,6 +24,9 @@ pub struct ScreenshotSettings {
     pub quality: RecordingQuality,
     /// The size the editor last exported a recording at.
     pub export_size: ExportSize,
+    /// The folder the editor's Save panel last saved to; `None` starts it
+    /// in [`Self::folder`].
+    pub export_folder: Option<PathBuf>,
     /// What the recording toolbar records, as last chosen.
     pub record_kind: RecordKind,
     /// The microphone a recording keeps: `none`, `default` (the one
@@ -44,6 +47,7 @@ impl Default for ScreenshotSettings {
             frame_rate: 30,
             quality: RecordingQuality::High,
             export_size: ExportSize::Original,
+            export_folder: None,
             record_kind: RecordKind::Area,
             record_microphone: RECORD_MICROPHONE_DEFAULT.into(),
             record_system_audio: false,
@@ -250,6 +254,15 @@ impl ScreenshotSettings {
         self.folder
             .clone()
             .unwrap_or_else(crate::app_paths::desktop_dir)
+    }
+
+    /// Where the editor's Save panel starts: the folder it last saved to,
+    /// while it's there, else [`Self::folder`].
+    pub fn export_folder(&self) -> PathBuf {
+        self.export_folder
+            .clone()
+            .filter(|folder| folder.is_dir())
+            .unwrap_or_else(|| self.folder())
     }
 
     /// A recording's frames a second: 60 when asked for more than 45,
