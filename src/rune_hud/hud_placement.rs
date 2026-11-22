@@ -10,8 +10,9 @@ use crate::rune_hud::dot_scope::Placement;
 /// The plate's gap under the menu bar: as close as it sits and still
 /// reads as its own thing.
 pub const TOP_OFFSET: f64 = 6.0;
-/// The plate's gap above the Dock or the screen's bottom edge.
-const BOTTOM_OFFSET: f64 = 24.0;
+/// The plate's gap above the Dock or the screen's bottom edge while Labs ›
+/// HUD height is off: the fixed gap Hex always had.
+pub const BOTTOM_OFFSET: f64 = crate::app_settings::HUD_BOTTOM_GAP_DEFAULT as f64;
 /// The space the in-bar plate leaves above and below itself.
 pub const BAR_INSET: f64 = 3.0;
 /// The in-bar plate's gap from the notch it sits beside.
@@ -178,11 +179,18 @@ pub struct Content {
     pub island_spread: f64,
 }
 
-/// Places `content` on `screen`. `bottom` puts Below above the Dock; the
-/// menu bar and the notch are always at the top. On a flat screen From the
-/// notch sits in the menu bar; on a notched screen In the menu bar sits
+/// Places `content` on `screen`. `bottom` puts Below above the Dock at
+/// `bottom_gap` points, clamped so the plate stays inside the visible frame;
+/// the menu bar and the notch are always at the top. On a flat screen From
+/// the notch sits in the menu bar; on a notched screen In the menu bar sits
 /// beside the notch, where the bar has room.
-pub fn place(placement: Placement, screen: &Screen, content: Content, bottom: bool) -> Placed {
+pub fn place(
+    placement: Placement,
+    screen: &Screen,
+    content: Content,
+    bottom: bool,
+    bottom_gap: f64,
+) -> Placed {
     let (window_width, window_height) = content.window;
     let (_, plate_height) = content.plate;
     let screen_top = screen.frame.top();
@@ -209,21 +217,30 @@ pub fn place(placement: Placement, screen: &Screen, content: Content, bottom: bo
     };
     match placement {
         Placement::Below if bottom => {
-            // The whole window stays on this screen. Its bottom edge sits on
-            // the visible bottom, and the plate moves down inside the window
-            // (positive center.y is y down) so its visible gap above the Dock
-            // or the screen's edge is unchanged. The window's transparent
-            // shadow padding can no longer cross onto a display below.
-            let plate_center = BOTTOM_OFFSET + plate_height / 2.0;
+            // The whole window stays on this screen, its bottom edge on the
+            // visible bottom until the chosen gap lifts the plate out of the
+            // window's lower shadow padding. The window then rises with it, so
+            // the plate's visible gap above the Dock or the screen's edge is
+            // exactly `bottom_gap` and the transparent padding never crosses
+            // onto a display below. The plate top also never goes above the
+            // visible frame's top, below the menu bar or the notch.
+            let gap = bottom_gap.clamp(0.0, (screen.visible.height - plate_height).max(0.0));
+            let plate_bottom = screen.visible.y + gap;
             // Keep the plate inside the window; only a plate as tall as the
             // window or taller is centred (the real 26 pt plate fits with
             // room to spare).
             let limit = ((window_height - plate_height) / 2.0).max(0.0);
-            let center = (window_height / 2.0 - plate_center).clamp(-limit, limit);
+            let window_bottom = screen
+                .visible
+                .y
+                .max(plate_bottom + plate_height - window_height);
+            let plate_middle = plate_bottom + plate_height / 2.0;
+            let center = (window_bottom + window_height - plate_middle - window_height / 2.0)
+                .clamp(-limit, limit);
             Placed {
                 top_left: (
                     screen.frame.mid_x() - window_width / 2.0,
-                    screen.visible.y + window_height,
+                    window_bottom + window_height,
                 ),
                 layout: Layout {
                     center: [0.0, center as f32],
@@ -433,7 +450,7 @@ mod tests {
             ..Screen::default()
         };
         let beside = |placement, screen: &Screen, bottom| {
-            let placed = place(placement, screen, CONTENT, bottom);
+            let placed = place(placement, screen, CONTENT, bottom, BOTTOM_OFFSET);
             beside_plate(&placed, screen, CONTENT, 4.0)
         };
         let plate = CONTENT.plate.1;
@@ -542,11 +559,11 @@ mod tests {
 
     #[test]
     fn below_hangs_6_points_under_the_menu_bar_or_above_the_dock() {
-        let placed = place(Placement::Below, &flat(), CONTENT, false);
+        let placed = place(Placement::Below, &flat(), CONTENT, false, BOTTOM_OFFSET);
         assert_eq!(plate(&placed), (-1280.0, 1416.0 - 6.0 - 13.0));
         assert!(!placed.over_menu_bar);
         assert_eq!(placed.layout, Layout::default());
-        let placed = place(Placement::Below, &notched(), CONTENT, true);
+        let placed = place(Placement::Below, &notched(), CONTENT, true, BOTTOM_OFFSET);
         assert_eq!(plate(&placed), (756.0, 70.0 + 24.0 + 13.0));
     }
 
@@ -570,7 +587,7 @@ mod tests {
             },
             ..Screen::default()
         };
-        let placed = place(Placement::Below, &screen, CONTENT, true);
+        let placed = place(Placement::Below, &screen, CONTENT, true, BOTTOM_OFFSET);
         assert_eq!(
             placed.top_left.1 - CONTENT.window.1,
             screen.visible.y,
@@ -611,7 +628,7 @@ mod tests {
             bar: 24.0,
             ..Screen::default()
         };
-        let placed = place(Placement::Below, &screen, CONTENT, true);
+        let placed = place(Placement::Below, &screen, CONTENT, true, BOTTOM_OFFSET);
         assert_eq!(placed.top_left.1 - CONTENT.window.1, screen.visible.y);
         assert_eq!(
             plate(&placed),
@@ -620,6 +637,104 @@ mod tests {
                 screen.visible.y + BOTTOM_OFFSET + CONTENT.plate.1 / 2.0,
             )
         );
+    }
+
+    #[test]
+    fn the_default_bottom_gap_places_exactly_as_before() {
+        for screen in [flat(), notched()] {
+            let placed = place(Placement::Below, &screen, CONTENT, true, BOTTOM_OFFSET);
+            assert_eq!(
+                placed.top_left.1,
+                screen.visible.y + CONTENT.window.1,
+                "the window's bottom stays on the visible bottom"
+            );
+            assert_eq!(
+                plate_span(&placed, CONTENT).1,
+                screen.visible.y + BOTTOM_OFFSET,
+                "the plate sits 24 pt above it"
+            );
+            assert_eq!(
+                f64::from(placed.layout.center[1]),
+                CONTENT.window.1 / 2.0 - (BOTTOM_OFFSET + CONTENT.plate.1 / 2.0)
+            );
+        }
+    }
+
+    #[test]
+    fn a_small_bottom_gap_sits_inside_the_window() {
+        let screen = notched();
+        let placed = place(Placement::Below, &screen, CONTENT, true, 14.0);
+        assert_eq!(
+            placed.top_left.1,
+            screen.visible.y + CONTENT.window.1,
+            "the window keeps its bottom on the visible bottom"
+        );
+        assert_eq!(
+            plate_span(&placed, CONTENT).1,
+            screen.visible.y + 14.0,
+            "the plate's bottom is exactly 14 pt above the visible bottom"
+        );
+    }
+
+    #[test]
+    fn a_tall_bottom_gap_raises_the_window_and_keeps_the_gap_exact() {
+        let screen = notched();
+        let placed = place(Placement::Below, &screen, CONTENT, true, 200.0);
+        let (top, bottom) = plate_span(&placed, CONTENT);
+        let window_bottom = placed.top_left.1 - CONTENT.window.1;
+        assert_eq!(bottom, screen.visible.y + 200.0, "the gap stays exact");
+        assert_eq!(
+            top,
+            window_bottom + CONTENT.window.1,
+            "the plate's top is the window's"
+        );
+        assert!(
+            window_bottom > screen.visible.y,
+            "the window rose off the visible bottom"
+        );
+        assert!(
+            placed.top_left.1 <= screen.visible.top(),
+            "and stays inside the visible frame"
+        );
+    }
+
+    #[test]
+    fn a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame() {
+        // A short visible frame, as with a very tall Dock: 400 pt would put
+        // the plate above the menu bar, so placement clamps it to the visible
+        // frame's height less the plate.
+        let screen = Screen {
+            visible: Rect {
+                y: 0.0,
+                height: 300.0,
+                ..notched().visible
+            },
+            ..notched()
+        };
+        let placed = place(Placement::Below, &screen, CONTENT, true, 400.0);
+        let (top, bottom) = plate_span(&placed, CONTENT);
+        assert_eq!(
+            top,
+            screen.visible.top(),
+            "the plate top reaches the visible top"
+        );
+        assert_eq!(bottom, screen.visible.top() - CONTENT.plate.1);
+        assert_eq!(placed.top_left.1, screen.visible.top());
+        assert!(placed.top_left.1 - CONTENT.window.1 >= screen.visible.y);
+    }
+
+    #[test]
+    fn a_bottom_gap_never_drops_the_window_below_the_visible_bottom() {
+        let screen = notched();
+        let most = screen.visible.height - CONTENT.plate.1;
+        for gap in [0.0, 14.0, 24.0, 102.0, 200.0, 400.0, 10_000.0] {
+            let placed = place(Placement::Below, &screen, CONTENT, true, gap);
+            let (top, bottom) = plate_span(&placed, CONTENT);
+            assert!(placed.top_left.1 - CONTENT.window.1 >= screen.visible.y);
+            assert!(placed.top_left.1 <= screen.visible.top());
+            assert_eq!(bottom, screen.visible.y + gap.min(most));
+            assert_eq!(top, bottom + CONTENT.plate.1);
+        }
     }
 
     #[test]
@@ -649,13 +764,13 @@ mod tests {
             visible: notched().frame,
             ..notched()
         };
-        let placed = place(Placement::Below, &fullscreen, CONTENT, false);
+        let placed = place(Placement::Below, &fullscreen, CONTENT, false, BOTTOM_OFFSET);
         assert_eq!(plate(&placed).1, 982.0 - 32.0 - 6.0 - 13.0);
     }
 
     #[test]
     fn the_menu_bar_centres_a_fitted_plate_in_a_flat_bar() {
-        let placed = place(Placement::MenuBar, &flat(), CONTENT, true);
+        let placed = place(Placement::MenuBar, &flat(), CONTENT, true, BOTTOM_OFFSET);
         assert_eq!(plate(&placed), (-1280.0, 1440.0 - 12.0));
         assert!((placed.layout.fit - 18.0 / 26.0).abs() < 1e-6);
         assert!(placed.over_menu_bar && placed.layout.island.is_none());
@@ -664,7 +779,13 @@ mod tests {
 
     #[test]
     fn the_menu_bar_sits_beside_a_notch() {
-        let placed = place(Placement::MenuBar, &notched(), CONTENT, false);
+        let placed = place(
+            Placement::MenuBar,
+            &notched(),
+            CONTENT,
+            false,
+            BOTTOM_OFFSET,
+        );
         assert!(placed.layout.anchor_left);
         let (left, y) = plate(&placed);
         assert_eq!(left, 756.0 + 92.5 + 10.0);
@@ -676,7 +797,7 @@ mod tests {
 
     #[test]
     fn the_notch_grows_an_island_and_a_flat_screen_uses_the_menu_bar() {
-        let placed = place(Placement::Notch, &notched(), CONTENT, true);
+        let placed = place(Placement::Notch, &notched(), CONTENT, true, BOTTOM_OFFSET);
         let island = placed.layout.island.expect("an island");
         assert_eq!(island.notch, [185.0, 32.0]);
         assert_eq!(island.top, -64.0, "the window hangs from the top edge");
@@ -686,14 +807,14 @@ mod tests {
             island_spread: 500.0,
             ..CONTENT
         };
-        let island = place(Placement::Notch, &notched(), wide, false)
+        let island = place(Placement::Notch, &notched(), wide, false, BOTTOM_OFFSET)
             .layout
             .island;
         assert_eq!(island.unwrap().width, 318.0, "never wider than the window");
         assert_eq!(plate(&placed), (756.0, 982.0 - 32.0 - ISLAND_PAD - 13.0));
         assert_eq!(
-            place(Placement::Notch, &flat(), CONTENT, false),
-            place(Placement::MenuBar, &flat(), CONTENT, false)
+            place(Placement::Notch, &flat(), CONTENT, false, BOTTOM_OFFSET),
+            place(Placement::MenuBar, &flat(), CONTENT, false, BOTTOM_OFFSET)
         );
         let pretend = flat().pretending_notch();
         let notch = pretend.notch().expect("a pretend notch");

@@ -857,6 +857,40 @@ mod tests {
     }
 
     #[test]
+    fn the_hud_height_gap_is_whole_points_in_range() {
+        let change = apply(
+            &AppSettings::default(),
+            "labs.hud_bottom_gap",
+            "120",
+            &rules(),
+        )
+        .unwrap();
+        assert_eq!(change.settings.labs.hud_bottom_gap, 120);
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "labs.hud_bottom_gap",
+                "401",
+                &rules()
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+        assert_eq!(
+            apply(
+                &AppSettings::default(),
+                "labs.hud_bottom_gap",
+                "-1",
+                &rules()
+            )
+            .unwrap_err()
+            .code,
+            "invalid-value"
+        );
+    }
+
+    #[test]
     fn a_microphone_linger_window_is_seconds_in_settings_json() {
         let settings = apply(
             &AppSettings::default(),

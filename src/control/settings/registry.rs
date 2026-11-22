@@ -590,6 +590,19 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: on a screen with a notch, the recording indicator grows out of the notch at either visible position; Hidden still hides it, and flat screens keep the Top or Bottom setting (macOS)",
     ),
     key(
+        "labs.hud_height",
+        Kind::Bool,
+        "Labs: with the HUD position Bottom, the plate sits labs.hud_bottom_gap points above the Dock or the screen's bottom edge, clamped so it stays under the menu bar or notch (macOS)",
+    ),
+    key(
+        "labs.hud_bottom_gap",
+        Kind::Integer {
+            min: 0,
+            max: crate::app_settings::HUD_BOTTOM_GAP_MAX as u64,
+        },
+        "Points the dictation HUD sits above the Dock or the screen's bottom edge at the Bottom position while Labs: HUD height is on; 24 by default, and 0 to 400 (macOS)",
+    ),
+    key(
         "labs.skip_pauses",
         Kind::Bool,
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",

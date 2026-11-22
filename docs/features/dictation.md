@@ -2988,15 +2988,24 @@ dictation::indicator::tests::top_capsule` covers the math only; placement over a
 fullscreen app on a notched Mac is not yet observed.
 
 At the bottom position the plate keeps its 24 pt gap above
-`visibleFrame.y` (`rune_hud::hud_placement::BOTTOM_OFFSET`). The whole 320 x 128
-pt window sits on that display, with `Layout.center` moving the plate inside it,
-so its transparent shadow padding never hangs onto a display below. The HUD is
+`visibleFrame.y` (`rune_hud::hud_placement::BOTTOM_OFFSET`), or the
+`labs.hud_bottom_gap` points (0–400, 24 by default) that Labs › HUD height
+chooses. The whole 320 x 128 pt window sits on that display, with
+`Layout.center` moving the plate inside it, so its transparent shadow padding
+never hangs onto a display below; a gap too tall for that padding raises the
+window with the plate pinned to its top, clamped under the menu bar or notch.
+The HUD is
 also pinned to the pointer screen's `NSScreenNumber` with a display-local rect;
 that resolves to the same frame as the global `Primary` rect, so the pin is
 consistency only, and `Primary` remains the fallback when the number is
-unavailable. Checks: `hud_placement::tests::the_bottom_window_stays_on_its_own_screen`
-and `hud_placement::tests::the_bottom_window_clears_a_dock` cover the pure
-geometry; the two-display panel is not yet observed.
+unavailable. Checks: `hud_placement::tests::the_bottom_window_stays_on_its_own_screen`,
+`hud_placement::tests::the_bottom_window_clears_a_dock`,
+`hud_placement::tests::the_default_bottom_gap_places_exactly_as_before`,
+`hud_placement::tests::a_small_bottom_gap_sits_inside_the_window`,
+`hud_placement::tests::a_tall_bottom_gap_raises_the_window_and_keeps_the_gap_exact`,
+and `hud_placement::tests::a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame`
+cover the pure geometry; the two-display panel and a raised gap on a Mac are
+not yet observed.
 
 ### Dot scope
 
