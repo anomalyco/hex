@@ -246,8 +246,11 @@ private enum HexKeySide: CaseIterable {
 /// words; Hex key, Right by default, under Languages),
 /// and haptics, which the dictation bar uses too. Below, Swipe typing, which says it needs
 /// the full keyboard while the dictation bar is chosen, and Emoji (on by default, with Clear
-/// emoji history while it's on), the bar's emoji key too.
+/// emoji history while it's on), the bar's emoji key too. The dictation bar and Haptics say
+/// they need Full Access, and say it isn't on yet until a keyboard with it has reported in.
 struct KeyboardSettingsPage: View {
+    /// `KeyboardSetupMonitor.fullAccessOn`.
+    let fullAccessOn: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var fullKeyboard = FullKeyboardSettings().isEnabled
     @State private var autoCapitalization = FullKeyboardSettings().autoCapitalization
@@ -279,13 +282,21 @@ struct KeyboardSettingsPage: View {
         return model.hasPrefix("iPad")
     }()
 
+    /// A row's detail for something that needs Full Access: the detail, or while Full Access
+    /// isn't on, that it isn't (as Swipe typing says it needs the full keyboard).
+    private func fullAccessNeed(_ detail: String) -> String {
+        fullAccessOn ? detail : String(localized: "Needs Full Access, which isn't on yet")
+    }
+
     var body: some View {
         SettingsPageScaffold(title: "Keyboard") {
             SettingsCard {
                 HStack(spacing: 12) {
                     SettingsRowLabel(
                         title: String(localized: "Keyboard"),
-                        detail: Self.runsOnPad ? String(localized: "On iPad, Hex shows the dictation bar") : nil
+                        detail: Self.runsOnPad
+                            ? String(localized: "On iPad, Hex shows the dictation bar")
+                            : fullKeyboard ? nil : fullAccessNeed(String(localized: "The dictation bar needs Full Access"))
                     )
                     Spacer(minLength: 8)
                     SettingsSegments(
@@ -390,7 +401,7 @@ struct KeyboardSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Haptics"),
-                    detail: String(localized: "A light tap as you press Hex's keys"),
+                    detail: fullAccessNeed(String(localized: "A tap as you press Hex's keys. Needs Full Access")),
                     isOn: $haptics
                 )
 

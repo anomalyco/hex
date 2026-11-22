@@ -60,6 +60,10 @@ final class KeyboardSetupMonitor {
                 keyboardAdded = true
                 fullAccess = .unconfirmed
                 microphone = .undetermined
+            case _ where args[idx + 1].contains("-noaccess"):
+                keyboardAdded = true
+                fullAccess = .off
+                microphone = .granted
             case "onboarding-tour":
                 let elapsed = OnboardingFixture.Tour.elapsed
                 keyboardAdded = elapsed >= OnboardingFixture.Tour.keyboardAdded
@@ -227,7 +231,7 @@ struct SetupSheet: View {
     private var fullAccessNote: String? {
         guard needsKeyboardCheck else { return nil }
         return monitor.fullAccess == .off
-            ? String(localized: "Turn on Allow Full Access in Settings.")
+            ? String(localized: "Turn on Allow Full Access in Settings for dictation, haptics and copy and paste in the keyboard.")
             : String(localized: "Switch to Hex below to confirm.")
     }
 
