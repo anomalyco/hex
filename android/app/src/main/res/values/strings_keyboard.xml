@@ -75,5 +75,5 @@
     <string name="keyboard_menu_more_value">"%1$s  ›"</string>
     <!-- Hex's settings › Keyboard. -->
     <string name="settings_auto_capitalisation">Auto-capitalisation</string>
-    <string name="settings_auto_capitalisation_detail">Capitalise the start of sentences</string>
+    <string name="settings_auto_capitalisation_detail">Capitalises the start of sentences</string>
 </resources>

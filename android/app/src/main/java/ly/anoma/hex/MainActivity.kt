@@ -32,12 +32,14 @@ import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.delay
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
 
@@ -56,6 +58,8 @@ class MainActivity : ComponentActivity() {
     private var phase by mutableStateOf(SpeechPhase.Idle)
     private var transcript by mutableStateOf("")
     private var notice by mutableStateOf<String?>(null)
+    /** Enable was tapped: back from Android's keyboard list with Hex on, the keyboard picker opens by itself. */
+    private var enabling = false
     private lateinit var capture: MicCapture
     private val changed = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) = refresh()
@@ -78,10 +82,10 @@ class MainActivity : ComponentActivity() {
                 BackHandler(page in 1..2) { go(page - 1) }
                 val model = ModelStore.state.collectAsState().value
                 if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.download(this) },
-                    phase, transcript, notice, ::dictate, capture::cancel, { go(it) },
+                    phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
                     { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) })
                 else SetupScreen(page, setup, ::go, ::askForMic,
-                    enable = { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
+                    enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     choose = { imm.showInputMethodPicker() }, model = model,
                     download = { ModelStore.download(this) })
             }
@@ -118,7 +122,19 @@ class MainActivity : ComponentActivity() {
         }
     }
     override fun onResume() { super.onResume(); refresh() }
-    override fun onWindowFocusChanged(hasFocus: Boolean) { super.onWindowFocusChanged(hasFocus); if (hasFocus) refresh() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) return
+        refresh()
+        // Android asks for two steps (turn Hex on, then pick it); this saves the second tap. Android only shows
+        // the picker to the window it already treats as focused, which it learns just after this call.
+        if (enabling && page == 1) {
+            enabling = false
+            if (setup.enabled && !setup.chosen) window.decorView.postDelayed({
+                if (hasWindowFocus() && page == 1 && !setup.chosen) imm.showInputMethodPicker()
+            }, 300)
+        }
+    }
     override fun onStop() { capture.cancel(); super.onStop() }
     override fun onDestroy() { capture.close(); contentResolver.unregisterContentObserver(changed); super.onDestroy() }
 }
@@ -144,14 +160,14 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
             Column(Modifier.widthIn(max = 520.dp).fillMaxWidth().fillMaxHeight().padding(horizontal = 24.dp)) {
                 Row(Modifier.fillMaxWidth().height(64.dp), verticalAlignment = Alignment.CenterVertically) {
                     if (page in 1..2) IconButton(onClick = { go(page - 1) }) {
-                        Icon(painterResource(R.drawable.ic_back), "Back", Modifier.size(22.dp))
+                        Icon(painterResource(R.drawable.ic_back), stringResource(R.string.back), Modifier.size(22.dp))
                     } else {
                         Icon(painterResource(R.drawable.hex_mark), null, Modifier.size(24.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Hex", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
+                        Text(stringResource(R.string.app_name), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold)
                     }
                     Spacer(Modifier.weight(1f))
-                    Text("Step " + (page + 1) + " of 3", color = colors.onSurfaceVariant,
+                    Text(stringResource(R.string.setup_step, page + 1, 3), color = colors.onSurfaceVariant,
                         style = MaterialTheme.typography.labelLarge)
                 }
                 Column(Modifier.weight(1f).fillMaxWidth().verticalScroll(rememberScrollState()),
@@ -161,20 +177,27 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                             Welcome()
                         }
                         1 -> {
+                            // Moves on by itself once the last row is done here, as iPhone Hex's setup does
+                            // (not when Back returns to a page that was already done).
+                            var wasReady by remember { mutableStateOf(setup.ready) }
+                            LaunchedEffect(setup.ready) {
+                                if (setup.ready && !wasReady) { delay(800); go(2) }
+                                wasReady = setup.ready
+                            }
                             Spacer(Modifier.height(26.dp))
-                            Heading("Set up Hex")
-                            Detail("Allow the microphone, then choose Hex as your keyboard.")
+                            Heading(stringResource(R.string.setup_title))
+                            Detail(stringResource(R.string.setup_detail))
                             Spacer(Modifier.height(24.dp))
                             Column(Modifier.fillMaxWidth().background(colors.surfaceVariant, RoundedCornerShape(16.dp))
                                 .padding(horizontal = 16.dp)) {
-                                SetupRow("Microphone", "For dictation", setup.mic,
-                                    if (setup.micNeedsSettings) "Settings" else "Allow", ask)
+                                SetupRow(stringResource(R.string.setup_microphone), stringResource(R.string.setup_microphone_detail), setup.mic,
+                                    stringResource(if (setup.micNeedsSettings) R.string.setup_settings else R.string.setup_allow), ask)
                                 HorizontalDivider(color = colors.outline)
-                                SetupRow("Hex keyboard", when {
-                                    setup.chosen -> "Current keyboard"
-                                    setup.enabled -> "Select Hex in the picker"
-                                    else -> "Turn on Hex in Settings"
-                                }, setup.chosen, if (setup.enabled) "Choose" else "Enable",
+                                SetupRow(stringResource(R.string.setup_keyboard), stringResource(when {
+                                    setup.chosen -> R.string.setup_keyboard_chosen
+                                    setup.enabled -> R.string.setup_keyboard_enabled
+                                    else -> R.string.setup_keyboard_off
+                                }), setup.chosen, stringResource(if (setup.enabled) R.string.setup_choose else R.string.setup_enable),
                                     if (setup.enabled) choose else enable)
                                 HorizontalDivider(color = colors.outline)
                                 ModelRow(model, download)
@@ -182,26 +205,26 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                         }
                         2 -> {
                             Spacer(Modifier.height(16.dp))
-                            Heading("Try the keyboard")
-                            Detail("Hold the Hex key, say a few words, then release.")
+                            Heading(stringResource(R.string.setup_try_title))
+                            Detail(stringResource(R.string.setup_try_detail))
                             Spacer(Modifier.height(20.dp))
                             val focus = remember { FocusRequester() }
                             OutlinedTextField(value = text, onValueChange = { text = it },
                                 modifier = Modifier.fillMaxWidth().focusRequester(focus),
-                                placeholder = { Text("Your words appear here") }, minLines = 2, maxLines = 4,
+                                placeholder = { Text(stringResource(R.string.setup_try_hint)) }, minLines = 2, maxLines = 4,
                                 shape = RoundedCornerShape(12.dp), keyboardOptions = KeyboardOptions(
                                     capitalization = KeyboardCapitalization.Sentences, imeAction = ImeAction.None))
                             val windowFocused = LocalWindowInfo.current.isWindowFocused
                             LaunchedEffect(windowFocused) {
                                 if (windowFocused) { focus.requestFocus(); keyboard?.show() }
                             }
-                            if (!setup.chosen) TextButton(onClick = choose) { Text("Choose Hex keyboard") }
+                            if (!setup.chosen) TextButton(onClick = choose) { Text(stringResource(R.string.setup_choose_hex)) }
                         }
                     }
                 }
                 if (page == 2 && text.isBlank()) {
                     TextButton(onClick = { keyboard?.hide(); go(3) }, modifier = Modifier.align(Alignment.End)) {
-                        Text("Skip for now")
+                        Text(stringResource(R.string.setup_skip))
                     }
                 } else {
                     Button(onClick = {
@@ -212,7 +235,7 @@ private fun SetupScreen(page: Int, setup: Setup, go: (Int) -> Unit, ask: () -> U
                         }
                     }, enabled = page != 1 || setup.ready, shape = RoundedCornerShape(14.dp),
                         modifier = Modifier.fillMaxWidth().height(52.dp)) {
-                        Text(listOf("Get started", "Continue", "Done")[page],
+                        Text(stringResource(listOf(R.string.setup_get_started, R.string.setup_continue, R.string.setup_done)[page]),
                             style = MaterialTheme.typography.titleMedium)
                     }
                 }
@@ -238,7 +261,7 @@ private fun SetupRow(title: String, note: String, ready: Boolean, action: String
             Text(title, fontWeight = FontWeight.Medium)
             Text(note, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
         }
-        if (ready) Text("Ready", color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
+        if (ready) Text(stringResource(R.string.setup_ready), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.labelLarge)
         else TextButton(onClick) { Text(action) }
     }
 }
@@ -246,39 +269,45 @@ private fun SetupRow(title: String, note: String, ready: Boolean, action: String
 @Composable private fun Welcome() {
     val colors = MaterialTheme.colorScheme
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-        Icon(painterResource(R.drawable.hex_mark), "Hex", Modifier.size(64.dp))
+        Icon(painterResource(R.drawable.hex_mark), stringResource(R.string.app_name), Modifier.size(64.dp))
         Spacer(Modifier.height(20.dp))
         Row(Modifier.height(28.dp).background(colors.surfaceVariant, RoundedCornerShape(50))
             .padding(horizontal = 12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(painterResource(R.drawable.ic_lock), null, Modifier.size(13.dp))
             Spacer(Modifier.width(6.dp))
-            Text("100% on device", fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+            Text(stringResource(R.string.setup_on_device), fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
         Spacer(Modifier.height(16.dp))
-        Text("Talk instead of type,\nin any app.", fontSize = 28.sp, lineHeight = 32.sp,
+        Text(stringResource(R.string.setup_welcome_title), fontSize = 28.sp, lineHeight = 32.sp,
             letterSpacing = (-0.4).sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center)
         Spacer(Modifier.height(12.dp))
-        Text("Hex uses the internet only to download its speech model (190 MB). Your voice and words stay on this device.",
+        Text(stringResource(R.string.setup_welcome_detail),
             modifier = Modifier.widthIn(max = 320.dp), color = colors.onSurfaceVariant,
             textAlign = TextAlign.Center, style = MaterialTheme.typography.bodyMedium)
     }
+}
+
+/** The speech model's state in a few words, the same in setup and in Dictation. */
+@Composable internal fun modelStatus(state: ModelStore.State) = when (state) {
+    ModelStore.State.Ready -> stringResource(R.string.model_ready)
+    ModelStore.State.Available -> stringResource(R.string.model_available)
+    ModelStore.State.Retry -> stringResource(R.string.model_stopped)
+    is ModelStore.State.Loading -> stringResource(R.string.model_loading, state.percent)
+}
+internal fun modelAction(state: ModelStore.State) = when (state) {
+    ModelStore.State.Available -> R.string.model_download
+    ModelStore.State.Retry -> R.string.model_try_again
+    else -> null
 }
 
 @Composable private fun ModelRow(state: ModelStore.State, download: () -> Unit) {
     Column(Modifier.fillMaxWidth().padding(vertical = 8.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.heightIn(min = 54.dp)) {
             Column(Modifier.weight(1f)) {
-                Text("Speech model", fontWeight = FontWeight.Medium)
-                Text(when (state) {
-                    ModelStore.State.Ready -> "Whisper small is ready"
-                    ModelStore.State.Available -> "Tiny works offline"
-                    ModelStore.State.Retry -> "Download interrupted. Tiny works offline."
-                    is ModelStore.State.Loading -> "Downloading · " + state.percent + "%"
-                }, color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
+                Text(stringResource(R.string.model_title), fontWeight = FontWeight.Medium)
+                Text(modelStatus(state), color = MaterialTheme.colorScheme.onSurfaceVariant, style = MaterialTheme.typography.bodySmall)
             }
-            if (state == ModelStore.State.Retry || state == ModelStore.State.Available) {
-                TextButton(onClick = download) { Text(if (state == ModelStore.State.Retry) "Retry" else "Download") }
-            }
+            modelAction(state)?.let { TextButton(onClick = download) { Text(stringResource(it)) } }
         }
         if (state is ModelStore.State.Loading) LinearProgressIndicator(progress = { state.percent / 100f },
             modifier = Modifier.fillMaxWidth(), trackColor = MaterialTheme.colorScheme.outline)
