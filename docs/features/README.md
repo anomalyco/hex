@@ -2454,7 +2454,8 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   ├── Another key joining the hold -> Its chord; the press cancels at once
 │   │   (Labs › Hold through other keys keeps a hold a second or more old)
 │   └── Another modifier the chord doesn't name -> Its chord too: cancels, and
-│       Toggle's press locks nothing; Alt's release goes unmasked (no 0xE8 tap)
+│       Toggle's press locks nothing; Alt's release goes unmasked, unless Hex
+│       swallowed a key of that chord (Paste Last's V re-arms the mask)
 ├── Microphone switched off in Settings › Privacy -> Onboarding Microphone row -> Allow opens it
 ├── Microphone -> System default or a saved device
 │   ├── Windows default input changes -> Switch once capture is idle // cpal's default-device report

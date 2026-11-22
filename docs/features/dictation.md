@@ -305,7 +305,8 @@ Windows modifier-only shortcut                           // dictate.windows-lone
   │   (the key reaches the app; locked and toggle captures keep recording)
   ├── A modifier the chord doesn't name joins -> Its chord too: Cancel at once,
   │   a Toggle press locks nothing, and Alt's release is the app's (no mask,
-  │   no 0xE8 tap), so Ctrl+Alt+V still fires Paste Last (#2278)
+  │   no 0xE8 tap), so Ctrl+Alt+V still fires Paste Last; if Hex swallows a key
+  │   of that chord (Paste Last's V), the mask comes back (#2278)
   │   (a modifier the chord names, like Ctrl of Ctrl+Alt, is part of it, in either order)
   ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
   │   -> No menu bar or Start menu; Share shortcut skips the mask
@@ -316,9 +317,11 @@ Windows modifier-only shortcut                           // dictate.windows-lone
 
 A modifier the chord does not name is a chord like any key: it cancels the
 hold (`names_modifier`), Toggle's press then locks nothing, and the shortcut's
-Alt release is the app's, with no mask key. So Left Alt on the way to
-Ctrl+Alt+V cancels a dictation and Paste Last still fires, and Alt+Shift
-switches the keyboard language. A modifier the chord names is part of it,
+Alt release is the app's, with no mask key — unless Hex swallowed a key of
+that chord, as Paste Last's V is, which re-arms the mask so the app never
+reads a lone Alt tap. So Left Alt on the way to Ctrl+Alt+V cancels a
+dictation and Paste Last still fires, and Alt+Shift switches the keyboard
+language. A modifier the chord names is part of it,
 whichever order the keys go down in. Labs › Hold through other keys keeps a
 hold a second or more old, as it does for keys.
 
@@ -346,6 +349,8 @@ discards it. Checks:
 `a_key_chord_on_altgr_is_not_alt_with_that_key`,
 `a_key_joining_a_held_modifier_ends_it_quietly_unless_it_records` in
 [windows/input.rs](../../src/windows/input.rs),
+`ctrl_after_alt_leaves_paste_last_to_fire` in
+[windows/input/tests/chords.rs](../../src/windows/input/tests/chords.rs),
 `left_control_bits_follow_the_hooks_and_heal_a_missed_release`,
 `a_typing_key_is_a_letter_a_digit_or_punctuation` in
 [windows/input/modifiers.rs](../../src/windows/input/modifiers.rs), and
