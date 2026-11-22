@@ -49,6 +49,7 @@ struct FullKeyboardSettings {
         static let emojiLettersUnderEmojiKey = "experiments.emojiLettersUnderEmojiKey"
         static let swipeTyping = "experiments.swipeTyping"
         static let twoThumbSelection = "experiments.twoThumbSelection"
+        static let hideWordSuggestions = "experiments.hideWordSuggestions"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
     }
@@ -170,6 +171,17 @@ struct FullKeyboardSettings {
     var twoThumbSelection: Bool {
         get { defaults?.object(forKey: Key.twoThumbSelection) as? Bool ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.twoThumbSelection) }
+    }
+
+    /// Settings › Experiments › Hide word suggestions: the strip above the keys stops showing
+    /// the words it suggests (typing and next-word suggestions, and the finished word's emoji)
+    /// while the Hex key, Undo, status, notices and the Paste chip stay. Autocorrect is
+    /// untouched: it reads the engine's own suggestions, so space still fixes a word with
+    /// nothing offered above it. Off by default. Stored as `experiments.hideWordSuggestions`;
+    /// off, the strip suggests exactly as it did.
+    var hideWordSuggestions: Bool {
+        get { defaults?.object(forKey: Key.hideWordSuggestions) as? Bool ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.hideWordSuggestions) }
     }
 
     /// Settings › Keyboard › Swipe typing: slide through a word's letters to type it, on the

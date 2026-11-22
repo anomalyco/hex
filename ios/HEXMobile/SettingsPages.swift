@@ -611,6 +611,7 @@ struct ExperimentsSettingsPage: View {
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var twoThumbSelection = FullKeyboardSettings().twoThumbSelection
+    @State private var hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
@@ -701,6 +702,15 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsDivider()
 
+                // Off by default: the strip above the keys hides its words, not itself.
+                SettingsToggleRow(
+                    title: String(localized: "Hide word suggestions"),
+                    detail: String(localized: "On the full keyboard, the bar above the keys stops showing suggested words. Autocorrect, the Hex key and Paste stay as they are."),
+                    isOn: $hideWordSuggestions
+                )
+
+                SettingsDivider()
+
                 // Off by default: one shared list of learned words and fixes, as before.
                 SettingsToggleRow(
                     title: String(localized: "Learn each language separately"),
@@ -742,6 +752,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: twoThumbSelection) { _, enabled in
             FullKeyboardSettings().twoThumbSelection = enabled
         }
+        .onChange(of: hideWordSuggestions) { _, enabled in
+            FullKeyboardSettings().hideWordSuggestions = enabled
+        }
         .onChange(of: learnPerLanguage) { _, enabled in
             TypingJournalSettings().learnsPerLanguage = enabled
         }
@@ -765,6 +778,7 @@ struct ExperimentsSettingsPage: View {
             germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
             emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
             twoThumbSelection = FullKeyboardSettings().twoThumbSelection
+            hideWordSuggestions = FullKeyboardSettings().hideWordSuggestions
             learnPerLanguage = TypingJournalSettings().learnsPerLanguage
             multilingualParakeet = MultilingualParakeetSettings().isEnabled
         }

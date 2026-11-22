@@ -3802,6 +3802,26 @@
           }
         }
       }
+    },
+    "Hide word suggestions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏词语建议"
+          }
+        }
+      }
+    },
+    "On the full keyboard, the bar above the keys stops showing suggested words. Autocorrect, the Hex key and Paste stay as they are." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在完整键盘上，按键上方的栏不再显示建议的词语。自动改正、Hex 键和粘贴保持原样。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

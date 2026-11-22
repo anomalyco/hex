@@ -2891,7 +2891,7 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Adaptive touch, German spatial autocorrect, ABC under the emoji key,
-│   Two-thumb selection, Learn each language separately
+│   Two-thumb selection, Hide word suggestions, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2943,6 +2943,13 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   normal trackpad lift. Delete and Cut call the host's delete once per Character, so a
 │   host that removes one code point per call (some Devanagari and Thai clusters) can leave
 │   fragments. Off, a second finger is ignored exactly as before.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
+├── Hide word suggestions (off by default, `experiments.hideWordSuggestions`): the full
+│   keyboard's strip keeps its height, the Hex key, Undo, status, notices and the Paste chip,
+│   but shows no words: not the typing and next-word suggestions, and not the finished word's
+│   emoji. Autocorrect is untouched: it reads `engine.suggestions` (`willAutoReplace`), which
+│   the switch never changes, so space still fixes a word with nothing offered above it. Off,
+│   the strip suggests exactly as it did.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed

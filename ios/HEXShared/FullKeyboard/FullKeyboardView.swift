@@ -106,6 +106,9 @@ final class FullKeyboardView: UIView {
     private let clipboard = KeyboardClipboardTracker()
     /// What the strip's Paste chip offers now.
     private var stripOffer: KeyboardClipboardOffer?
+    /// Settings › Experiments › Hide word suggestions: the strip keeps its height, chips,
+    /// status and notices but shows no words (`refreshStrip`).
+    private var hidesWordSuggestions = false
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     private var showsAllowPasteHint = false
     private var allowPasteHintHideWork: DispatchWorkItem?
@@ -246,6 +249,7 @@ final class FullKeyboardView: UIView {
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.trackpadSelectionState.enabled = FullKeyboardSettings().twoThumbSelection
+        hidesWordSuggestions = FullKeyboardSettings().hideWordSuggestions
         syncHexPlacement()
         refreshEmojiKey()
         syncSpatialAutocorrect()
@@ -489,6 +493,11 @@ final class FullKeyboardView: UIView {
         // Turned off mid-selection: end it now rather than let a thumb keep picking.
         if !selectionEnabled, engine.isSelectionActive {
             plane.cancelAllTouches()
+        }
+        let hidesSuggestions = FullKeyboardSettings().hideWordSuggestions
+        if hidesSuggestions != hidesWordSuggestions {
+            hidesWordSuggestions = hidesSuggestions
+            refreshStrip()
         }
         hapticStrength = FullKeyboardSettings().hapticStrength
         syncHexPlacement()
@@ -850,6 +859,12 @@ final class FullKeyboardView: UIView {
                     suggestions = emoji.count == 1 && words.count == 2 ? [words[0], emoji[0], words[1]] : emoji + words
                 }
             }
+        }
+        // The experiment hides the words, not the strip: Undo, Paste, status, notices and the
+        // Hex key keep their places, and an empty strip offers the clipboard as it does when no
+        // word is suggested. Autocorrect reads `engine.suggestions`, never this.
+        if hidesWordSuggestions {
+            suggestions = []
         }
         stripView.update(
             suggestions: suggestions,
