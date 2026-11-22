@@ -84,7 +84,12 @@ class KeyboardCoreTest {
         assertTrue(reading.texts.size in 1..5 && reading.scored >= reading.texts.size)
         val times = DoubleArray(points.size / 2) { it * 0.01 }
         assertEquals("hello", KeyboardCore.swipeRead(decoder, points, times, letters, xs, ys, 38.3, 54.0, "say", 3)!!.texts.first())
-        assertNull(KeyboardCore.swipeRead(decoder, points, DoubleArray(1), letters, xs, ys, 38.3, 54.0, null, 3))
+        // Times that aren't one per point are left out, as on iOS: the swipe reads as without them.
+        val untimed = KeyboardCore.swipeRead(decoder, points, null, letters, xs, ys, 38.3, 54.0, null, 3)!!
+        val mismatched = KeyboardCore.swipeRead(decoder, points, DoubleArray(1), letters, xs, ys, 38.3, 54.0, null, 3)!!
+        assertArrayEquals(untimed.texts, mismatched.texts)
+        assertArrayEquals(untimed.costs, mismatched.costs, 0.0)
+        assertEquals(untimed.scored, mismatched.scored)
         KeyboardCore.swipeFree(decoder)
     }
 }
