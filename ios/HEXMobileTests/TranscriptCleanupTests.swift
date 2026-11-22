@@ -747,6 +747,378 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(SpokenCleanupRules.spokenCounts(in: "Test one, 2, 3.", language: "fr-FR"), "Test one, 2, 3.")
     }
 
+    /// What Apple's SpeechTranscriber and Parakeet V2 wrote for 80 sentences with numbers
+    /// (macOS 27.2.1; macOS voices Samantha and Reed, and Ryan's cloned voice from ElevenLabs:
+    /// `experiments/2026-11-22-hex-numbers`), and what Hex writes from each in Polished with
+    /// Numbers as digits on (Clean up what I say off). Parakeet now and then writes a whole
+    /// sentence in words, most often in Ryan's voice; where the rule covers the kind, both
+    /// engines' text comes out the same. Text already in digits keeps its form ("2,400", "$4.99",
+    /// "3.30"), and the kinds left for later stay in words ("twelve fifty", "three to one").
+    func testSpokenNumbersReadTheSameFromEitherEngine() async throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let cleanup = CleanupTaggerSettings(defaults: defaults)
+        cleanup.isEnabled = false
+        let pipeline = DictationPipeline(
+            style: .polished, language: "en-US", formatLists: true, spokenPunctuation: true, numbersAsDigits: true
+        )
+        for (heard, written) in [
+            // 1, decimal: The ratio is five point five.
+            ("The ratio is 5.5.", "The ratio is 5.5."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("The ratio is five point five.", "The ratio is 5.5."), // Parakeet Ryan
+            // 2, decimal: Set the opacity to zero point two.
+            ("Set the opacity to 0.2.", "Set the opacity to 0.2."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("Set the opacity to zero point two.", "Set the opacity to 0.2."), // Parakeet Ryan
+            // 3, decimal: It weighs three point seven five kilos.
+            ("It weighs 3.75 kilos.", "It weighs 3.75 kilos."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("It weighs three point seven five kilos.", "It weighs 3.75 kilos."), // Parakeet Ryan
+            // 4, decimal: The rating went up to four point eight stars.
+            ("The rating went up to 4.8 stars.", "The rating went up to 4.8 stars."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("The rating went up to four point eight stars.", "The rating went up to 4.8 stars."), // Parakeet Ryan
+            // 5, count-small: I have two dogs and three cats.
+            ("I have two dogs and three cats.", "I have 2 dogs and 3 cats."), // Parakeet Samantha/Ryan
+            ("I have 2 dogs and 3 cats.", "I have 2 dogs and 3 cats."), // Apple Samantha/Ryan
+            // 6, count-small: We need one more chair.
+            ("We need one more chair.", "We need one more chair."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 7, count-small: Give me ten minutes.
+            ("Give me ten minutes.", "Give me 10 minutes."), // Parakeet Samantha/Ryan
+            ("Give me 10 minutes.", "Give me 10 minutes."), // Apple Samantha/Ryan
+            // 8, count: There were twenty five people at the party.
+            ("There were 25 people at the party.", "There were 25 people at the party."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("There were twenty five people at the party.", "There were 25 people at the party."), // Parakeet Ryan
+            // 9, count: Room three hundred and twelve is on the left.
+            ("Room 312 is on the left.", "Room 312 is on the left."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("Room three hundred and twelve is on the left.", "Room 312 is on the left."), // Parakeet Ryan
+            // 10, count: We sold two thousand four hundred units last month.
+            ("We sold 2,400 units last month.", "We sold 2,400 units last month."), // Parakeet Samantha/Ryan
+            ("We sold 2400 units last month.", "We sold 2400 units last month."), // Apple Samantha/Ryan
+            // 11, count: The town has fifteen thousand people.
+            ("The town has 15,000 people.", "The town has 15,000 people."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("The town has fifteen thousand people.", "The town has 15,000 people."), // Parakeet Ryan
+            // 12, count: About one point two million people live there.
+            ("About 1.2 million people live there.", "About 1.2 million people live there."), // Parakeet Samantha
+            ("About 1200000 people live there.", "About 1200000 people live there."), // Apple Samantha/Ryan
+            ("About one point two million people live there.", "About 1.2 million people live there."), // Parakeet Ryan
+            // 13, count: I walked eight thousand steps today.
+            ("I walked 8,000 steps today.", "I walked 8,000 steps today."), // Parakeet Samantha
+            ("I walked 8000 steps today.", "I walked 8000 steps today."), // Apple Samantha/Ryan
+            ("I walked eight thousand steps today.", "I walked 8000 steps today."), // Parakeet Ryan
+            // 14, year: She was born in nineteen ninety nine.
+            ("She was born in 1999.", "She was born in 1999."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("She was born in nineteen ninety nine.", "She was born in 1999."), // Parakeet Ryan
+            // 15, year: The plan for two thousand twenty six is ready.
+            ("The plan for 2026 is ready.", "The plan for 2026 is ready."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("The plan for twenty twenty six is ready.", "The plan for 2026 is ready."), // Parakeet Ryan
+            // 16, year: Back in twenty twenty, everything closed.
+            ("Back in 2020, everything closed.", "Back in 2020, everything closed."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 17, percent: The battery is at twenty percent.
+            ("The battery is at 20%.", "The battery is at 20%."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("The battery is at twenty percent.", "The battery is at 20%."), // Parakeet Ryan
+            // 18, percent: Sales grew by three point five percent.
+            ("Sales grew by 3.5%.", "Sales grew by 3.5%."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("Sales grew by three point five percent.", "Sales grew by 3.5%."), // Parakeet Ryan
+            // 19, percent: I'm one hundred percent sure.
+            ("I'm 100% sure.", "I'm 100% sure."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("I'm one hundred percent sure.", "I'm 100% sure."), // Parakeet Ryan
+            // 20, money: It costs five dollars.
+            ("It costs $5.", "It costs $5."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("It costs five dollars.", "It costs $5."), // Parakeet Ryan
+            // 21, money: The app is four ninety nine a month.
+            ("The app is $4.99 a month.", "The app is $4.99 a month."), // Parakeet Samantha/Reed/Ryan
+            ("The app is 499 a month.", "The app is 499 a month."), // Apple Samantha/Reed/Ryan
+            // 22, money: Can you lend me twenty bucks?
+            ("Can you lend me twenty bucks?", "Can you lend me 20 bucks?"), // Parakeet Samantha/Ryan
+            ("Can you lend me 20 bucks?", "Can you lend me 20 bucks?"), // Apple Samantha/Ryan
+            // 23, money: The rent is two thousand dollars.
+            ("The rent is $2,000.", "The rent is $2,000."), // Parakeet Samantha/Ryan
+            ("The rent is $2000.", "The rent is $2000."), // Apple Samantha/Ryan
+            // 24, money: The bill came to fifteen dollars and forty cents.
+            ("The bill came to $15.40.", "The bill came to $15.40."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("The bill came to fifteen dollars and forty cents.", "The bill came to $15.40."), // Parakeet Ryan
+            // 25, money: Lunch was twelve fifty.
+            ("Lunch was 12.50.", "Lunch was 12.50."), // Parakeet Samantha
+            ("Lunch was 1250.", "Lunch was 1250."), // Apple Samantha/Ryan
+            ("Lunch was twelve fifty.", "Lunch was twelve fifty."), // Parakeet Ryan
+            // 26, time: Let's meet at three thirty.
+            ("Let's meet at 3.30.", "Let's meet at 3.30."), // Parakeet Samantha/Reed/Ryan
+            ("Let's meet at 330.", "Let's meet at 330."), // Apple Samantha/Reed/Ryan
+            // 27, time: The call is at five P.M.
+            ("The call is at 5 p.m.", "The call is at 5 p.m."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 28, time: I'll be there at quarter past two.
+            ("I'll be there at quarter past two.", "I'll be there at quarter past two."), // Parakeet Samantha/Ryan, Apple Samantha
+            ("I'll be there at quarter past 2.", "I'll be there at quarter past 2."), // Apple Ryan
+            // 29, time: The train leaves at seven fifteen in the morning.
+            ("The train leaves at 7:15 in the morning.", "The train leaves at 7:15 in the morning."), // Parakeet Samantha
+            ("The train leaves at 7.15 in the morning.", "The train leaves at 7.15 in the morning."), // Apple Samantha/Ryan
+            ("The train leaves at seven fifteen in the morning.", "The train leaves at seven fifteen in the morning."), // Parakeet Ryan
+            // 30, time: Wake me up at six A.M. tomorrow.
+            ("Wake me up at 6 a.m. tomorrow.", "Wake me up at 6 a.m. Tomorrow."), // Parakeet Samantha, Apple Samantha
+            ("Wake me up at six AM to morrow.", "Wake me up at 6 AM to morrow."), // Parakeet Ryan
+            ("Wake me up at 6 AM tomorrow.", "Wake me up at 6 AM tomorrow."), // Apple Ryan
+            // 31, date: My birthday is November twenty second.
+            ("My birthday is November 22.", "My birthday is November 22."), // Parakeet Samantha
+            ("My birthday is November 22nd.", "My birthday is November 22nd."), // Apple Samantha/Ryan
+            ("My birthday is november twenty second.", "My birthday is november 22nd."), // Parakeet Ryan
+            // 32, date: The deadline is March third.
+            ("The deadline is March 3.", "The deadline is March 3."), // Parakeet Samantha
+            ("The deadline is March third.", "The deadline is March 3rd."), // Apple Samantha
+            ("The deadline is march third.", "The deadline is march third."), // Parakeet Ryan, Apple Ryan
+            // 33, date: We moved on the fourth of July.
+            ("We moved on the 4th of July.", "We moved on the 4th of July."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("We moved on the fourth of July.", "We moved on the 4th of July."), // Parakeet Ryan
+            // 34, ordinal: She finished first in the race.
+            ("She finished first in the race.", "She finished first in the race."), // Parakeet Samantha/Ryan
+            ("She finished 1st in the race.", "She finished 1st in the race."), // Apple Samantha/Ryan
+            // 35, ordinal: This is the third time I've asked.
+            ("This is the third time I've asked.", "This is the third time I've asked."), // Parakeet Samantha/Ryan
+            ("This is the 3rd time I've asked.", "This is the 3rd time I've asked."), // Apple Samantha/Ryan
+            // 36, ordinal: He lives on the twenty first floor.
+            ("He lives on the 21st floor.", "He lives on the 21st floor."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("He lives on the twenty first floor.", "He lives on the twenty first floor."), // Parakeet Ryan
+            // 37, digits: My number is five five five, one two three, four five six seven.
+            ("My number is 555-123-4567.", "My number is 555-123-4567."), // Parakeet Samantha/Reed, Apple Ryan
+            ("My number is 555 123-4567.", "My number is 555 123-4567."), // Apple Samantha/Reed
+            ("My number is five five five one two three four five six seven.", "My number is 555-123-4567."), // Parakeet Ryan
+            // 38, digits: The code is four seven two nine.
+            ("The code is 4729.", "The code is 4729."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("The code is four seven two nine.", "The code is 4729."), // Parakeet Ryan
+            // 39, digits: Call nine one one.
+            ("Call 911.", "Call 911."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 40, digits: My zip code is nine four one one zero.
+            ("My zip code is 94110.", "My zip code is 94110."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 41, measure: He's six foot two.
+            ("He's 6'2.", "He's 6'2."), // Parakeet Samantha
+            ("He's 6 foot two.", "He's 6 foot two."), // Apple Samantha/Ryan
+            ("He's six foot two.", "He's 6 foot two."), // Parakeet Ryan
+            // 42, measure: I ran ten miles yesterday.
+            ("I ran 10 miles yesterday.", "I ran 10 miles yesterday."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("I ran ten miles yesterday.", "I ran 10 miles yesterday."), // Parakeet Ryan
+            // 43, measure: I'm training for a five K.
+            ("I'm training for a 5K.", "I'm training for a 5K."), // Parakeet Samantha
+            ("I'm training for a 5 K.", "I'm training for a 5 K."), // Apple Samantha/Ryan
+            ("I'm training for a 5k.", "I'm training for a 5k."), // Parakeet Ryan
+            // 44, measure: It's seventy two degrees outside.
+            ("It's 72 degrees outside.", "It's 72 degrees outside."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("It's seventy two degrees outside.", "It's 72 degrees outside."), // Parakeet Ryan
+            // 45, measure: Add two cups of flour.
+            ("Add two cups of flour.", "Add 2 cups of flour."), // Parakeet Samantha/Ryan
+            ("Add 2 cups of flour.", "Add 2 cups of flour."), // Apple Samantha/Ryan
+            // 46, measure: The screen is six point one inches.
+            ("The screen is 6.1 inches.", "The screen is 6.1 inches."), // Parakeet Samantha, Apple Samantha
+            ("The screen is six point one inches.", "The screen is 6.1 inches."), // Parakeet Ryan
+            ("The screen is 6.one inches.", "The screen is 6.one inches."), // Apple Ryan
+            // 47, version: Update to iOS twenty seven point two.
+            ("Update to iOS 27.2.", "Update to iOS 27.2."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("Update to IOS twenty seven point two.", "Update to IOS 27.2."), // Parakeet Ryan
+            // 48, version: Have you tried GPT five yet?
+            ("Have you tried GPT-5 yet?", "Have you tried GPT-5 yet?"), // Parakeet Samantha
+            ("Have you tried GPT 5 yet?", "Have you tried GPT 5 yet?"), // Apple Samantha/Ryan
+            ("Have you tried GPT5 yet?", "Have you tried GPT5 yet?"), // Parakeet Ryan
+            // 49, version: I'm on version three point one point four.
+            ("I'm on version 3.1.4.", "I'm on version 3.1.4."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 50, version: The iPhone seventeen Pro is fast.
+            ("The iPhone 17 Pro is fast.", "The iPhone 17 Pro is fast."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 51, range: It takes five to ten minutes.
+            ("It takes 5 to 10 minutes.", "It takes 5 to 10 minutes."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("It takes five to ten minutes.", "It takes 5 to 10 minutes."), // Parakeet Ryan
+            // 52, range: Kids aged eight to twelve can join.
+            ("Kids aged 8 to 12 can join.", "Kids aged 8 to 12 can join."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("Kids aged eight to twelve can join.", "Kids aged eight to twelve can join."), // Parakeet Ryan
+            // 53, fraction: I'll be there in one and a half hours.
+            ("I'll be there in one and a half hours.", "I'll be there in one and a half hours."), // Parakeet Samantha/Reed/Ryan
+            ("I'll be there in one. 5 hours.", "I'll be there in one. 5 hours."), // Apple Samantha/Reed/Ryan
+            // 54, fraction: Two thirds of the team agreed.
+            ("Two-thirds of the team agreed.", "Two-thirds of the team agreed."), // Parakeet Samantha/Ryan
+            ("Two thirds of the team agreed.", "Two thirds of the team agreed."), // Apple Samantha/Ryan
+            // 55, fraction: Use half a cup of sugar.
+            ("Use half a cup of sugar.", "Use half a cup of sugar."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 56, negative: It's minus five degrees outside.
+            ("It's minus 5 degrees outside.", "It's minus 5 degrees outside."), // Parakeet Samantha
+            ("It's -5 degrees outside.", "It's -5 degrees outside."), // Apple Samantha/Ryan
+            ("It's minus five degrees outside.", "It's -5 degrees outside."), // Parakeet Ryan
+            // 57, negative: The balance is negative forty dollars.
+            ("The balance is negative $40.", "The balance is negative $40."), // Parakeet Samantha
+            ("The balance is -$40.", "The balance is -$40."), // Apple Samantha
+            ("The balance is negative forty dollars.", "The balance is -$40."), // Parakeet Ryan
+            ("The balance is -40.", "The balance is -40."), // Apple Ryan
+            // 58, score: The score was three to one.
+            ("The score was 3-1.", "The score was 3-1."), // Parakeet Samantha
+            ("The score was 3 to one.", "The score was 3 to one."), // Apple Samantha/Ryan
+            ("The score was three to one.", "The score was three to one."), // Parakeet Ryan
+            // 59, score: Test one, two, three.
+            ("Test 1, 2, 3.", "Test 1, 2, 3."), // Parakeet Samantha
+            ("Test one, 2, 3.", "Test 1, 2, 3."), // Apple Samantha
+            ("Test one, two, three.", "Test 1, 2, 3."), // Parakeet Ryan, Apple Ryan
+            // 60, word: One of them is broken.
+            ("One of them is broken.", "One of them is broken."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 61, word: No one came to the meeting.
+            ("No one came to the meeting.", "No one came to the meeting."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 62, word: That's the one I wanted.
+            ("That's the one I wanted.", "That's the one I wanted."), // Parakeet Samantha/Reed/Ryan, Apple Samantha/Reed/Ryan
+            // 63, word: For once, it worked.
+            ("For once, it worked.", "For once, it worked."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("For once it worked.", "For once it worked."), // Parakeet Ryan
+            // 64, word: To be honest, I won the game.
+            ("To be honest, I won the game.", "To be honest, I won the game."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 65, word: I want to go too.
+            ("I want to go too.", "I want to go too."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 66, word: Give me a second.
+            ("Give me a second.", "Give me a second."), // Parakeet Samantha/Ryan
+            ("Give me a 2nd.", "Give me a 2nd."), // Apple Samantha/Ryan
+            // 67, word: I ate breakfast at eight.
+            ("I ate breakfast at 8.", "I ate breakfast at 8."), // Parakeet Samantha, Apple Samantha/Ryan
+            ("I ate breakfast at eight.", "I ate breakfast at eight."), // Parakeet Ryan
+            // 68, word: We'll go through them one by one.
+            ("We'll go through them one by one.", "We'll go through them one by one."), // Parakeet Samantha/Ryan, Apple Samantha/Ryan
+            // 69, decimal: Use Opus five point five for that.
+            ("Use Opus 5.5 for that.", "Use Opus 5.5 for that."), // Parakeet Samantha/Reed/Ryan, Apple Ryan
+            ("Use opus 5.5 for that.", "Use opus 5.5 for that."), // Apple Samantha/Reed
+            // 70, decimal: Claude Opus five point five is out.
+            ("Claude Opus 5.5 is out.", "Claude Opus 5.5 is out."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("Claude Opus five point five is out.", "Claude Opus 5.5 is out."), // Parakeet Ryan
+            // 71, decimal: It's about five point five.
+            ("It's about 5.5.", "It's about 5.5."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("It's about five point five.", "It's about 5.5."), // Parakeet Ryan
+            // 72, decimal: Five point five.
+            ("5.5.", "5.5."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("Five point five", "5.5."), // Parakeet Ryan
+            // 73, decimal: Sonnet four point five is cheaper.
+            ("Sonnet 4.5 is cheaper.", "Sonnet 4.5 is cheaper."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("Sonnet four point five is cheaper.", "Sonnet 4.5 is cheaper."), // Parakeet Ryan
+            // 74, count: We shipped build one thirty this morning.
+            ("We shipped build 130 this morning.", "We shipped build 130 this morning."), // Parakeet Samantha/Reed, Apple Ryan
+            ("We ship build 130 this morning.", "We ship build 130 this morning."), // Apple Samantha/Reed
+            ("We shipped build one thirty this morning.", "We shipped build one thirty this morning."), // Parakeet Ryan
+            // 75, count-small: I need two more minutes.
+            ("I need two more minutes.", "I need 2 more minutes."), // Parakeet Samantha/Reed/Ryan
+            ("I need 2 more minutes.", "I need 2 more minutes."), // Apple Samantha/Reed/Ryan
+            // 76, count-small: There are three things to fix.
+            ("There are three things to fix.", "There are 3 things to fix."), // Parakeet Samantha/Reed/Ryan
+            ("There are 3 things to fix.", "There are 3 things to fix."), // Apple Samantha/Reed/Ryan
+            // 77, count-small: We have four options.
+            ("We have four options.", "We have 4 options."), // Parakeet Samantha/Reed/Ryan
+            ("We have 4 options.", "We have 4 options."), // Apple Samantha/Reed/Ryan
+            // 78, count-small: Wait five seconds.
+            ("Wait 5 seconds.", "Wait 5 seconds."), // Parakeet Samantha/Reed, Apple Samantha/Reed/Ryan
+            ("Wait five seconds.", "Wait 5 seconds."), // Parakeet Ryan
+            // 79, decimal: We also need, for the voice, numbers, like five point five and stuff like that with Parakeet.
+            ("We also need, for the voice, numbers, like 5.5 and stuff like that with Parakeet.", "We also need, for the voice, numbers, like 5.5 and stuff like that with Parakeet."), // Parakeet Samantha/Reed
+            ("We also need, for the voice, numbers, like 5.5 and stuff like that with parakeet.", "We also need, for the voice, numbers, like 5.5 and stuff like that with parakeet."), // Apple Samantha/Reed
+            ("We also need for the voice numbers like 5.5 and stuff like that with Parakeet.", "We also need for the voice numbers like 5.5 and stuff like that with Parakeet."), // Parakeet Ryan
+            ("We also need for the voice numbers, like 5.5 and stuff like that with parakeet.", "We also need for the voice numbers, like 5.5 and stuff like that with parakeet."), // Apple Ryan
+            // 80, decimal: Can you check whether the five point five model is faster than the four point five one, and send me the numbers by three thirty?
+            ("Can you check whether the 5.5 model is faster than the 4.5 one, and send me the numbers by 3.30?", "Can you check whether the 5.5 model is faster than the 4.5 one, and send me the numbers by 3.30?"), // Parakeet Samantha/Reed
+            ("Can you check whether the 5.5 model is faster than the 4.51 and send me the numbers by 330?", "Can you check whether the 5.5 model is faster than the 4.51 and send me the numbers by 330?"), // Parakeet Ryan, Apple Samantha/Reed/Ryan
+        ] {
+            let numbered = await CleanupTagger.cleanIfEnabled(
+                heard, style: .polished, language: "en-US", numbers: true, settings: cleanup
+            )
+            XCTAssertEqual(pipeline.format(numbered, language: "en-US"), written, heard)
+        }
+    }
+
+    func testSpokenNumbersBecomeDigits() {
+        for (heard, written) in [
+            ("At one point two people left.", "At one point 2 people left."),
+            ("Between five and ten minutes.", "Between 5 and 10 minutes."),
+            ("Two or three days.", "2 or 3 days."),
+            ("One to two hours.", "1 to 2 hours."),
+            ("Meet at seven fifteen pm.", "Meet at 7:15 pm."),
+            ("Seven oh five am.", "7:05 am."),
+            ("At five o'clock.", "At 5 o'clock."),
+            ("It's one mile away.", "It's 1 mile away."),
+            ("It costs one dollar.", "It costs $1."),
+            ("Five million dollars.", "$5 million."),
+            ("Two thousand and five.", "2005."),
+            ("May second.", "May 2nd."),
+            ("On the first of may.", "On the 1st of may."),
+            ("On September thirtieth.", "On September 30th."),
+            ("Five point five dollars.", "$5.50."),
+            ("Call five five five, one two three, four five six seven.", "Call 555-123-4567."),
+            ("Built in nineteen oh five.", "Built in 1905."),
+            ("It's minus one.", "It's -1."),
+            ("Ten minus five.", "10 minus five."),
+            ("Twenty-five people.", "25 people."),
+            ("Two hundred people.", "200 people."),
+            ("Three point five million.", "3.5 million."),
+            ("Twenty one guns.", "21 guns."),
+            ("Six feet.", "6 feet."),
+        ] {
+            XCTAssertEqual(SpokenNumbers.digits(in: heard, language: "en-US"), written, heard)
+        }
+    }
+
+    /// "one" alone, ordinals outside dates, fractions, and times, prices, ranges and scores
+    /// without a marker or unit stay as said for now, as do digits and other languages.
+    func testSpokenNumbersLeaveTheRestAsSaid() async throws {
+        for heard in [
+            "One of them is broken.",
+            "No one came to the meeting.",
+            "That's the one I wanted.",
+            "For once, it worked.",
+            "To be honest, I won the game.",
+            "I want to go too.",
+            "Give me a second.",
+            "We'll go through them one by one.",
+            "We need one more chair.",
+            "Use half a cup of sugar.",
+            "Two thirds of the team agreed.",
+            "I'll be there in one and a half hours.",
+            "She finished first in the race.",
+            "This is the third time I've asked.",
+            "Let's meet at three thirty.",
+            "The app is four ninety nine a month.",
+            "Lunch was twelve fifty.",
+            "The score was three to one.",
+            "Kids aged eight to twelve can join.",
+            "I ate breakfast at eight.",
+            "We shipped build one thirty this morning.",
+            "I work nine to five.",
+            "The five point plan.",
+            "Back in the nineteen nineties.",
+            "Just my two cents.",
+            "Ten to five.",
+            "One or two people came.",
+            "We sold 2,400 units.",
+            "The app is $4.99 a month.",
+            "Meet at 7:15.",
+            "He lives on the twenty first floor.",
+            "Have you tried GPT five yet?",
+            "The deadline is march third.",
+            "Two plus two equals four.",
+            "Five, six, seven.",
+            "Five five.",
+            "It's a two-way street.",
+            "Take a ten-minute break.",
+            "Quarter past two.",
+            "Twenty past six.",
+            "Two of us went.",
+            "Those two are fine.",
+            "The train leaves at seven fifteen.",
+            "Two dozen eggs.",
+            "A hundred people.",
+        ] {
+            XCTAssertEqual(SpokenNumbers.digits(in: heard, language: "en-US"), heard)
+        }
+        XCTAssertEqual(SpokenNumbers.digits(in: "Cinco punto cinco.", language: "es-ES"), "Cinco punto cinco.")
+        XCTAssertEqual(SpokenNumbers.digits(in: "The ratio is five point five.", language: "fr-FR"), "The ratio is five point five.")
+
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let cleanup = CleanupTaggerSettings(defaults: defaults)
+        cleanup.isEnabled = false
+        let heard = "The ratio is five point five."
+        let off = await CleanupTagger.cleanIfEnabled(heard, style: .polished, language: "en-US", settings: cleanup)
+        XCTAssertEqual(off, heard, "Numbers as digits off")
+        let verbatim = await CleanupTagger.cleanIfEnabled(
+            heard, style: .verbatim, language: "en-US", numbers: true, settings: cleanup
+        )
+        XCTAssertEqual(verbatim, heard, "Verbatim keeps the model's words")
+        XCTAssertTrue(DictationNumberSettings(defaults: defaults).isEnabled, "on by default")
+    }
+
     /// Every style but Verbatim keeps the address whole: no capital after its dots, none on
     /// it at a sentence start, and no full stop after an address said alone.
     func testStylesKeepAnAddressWhole() {

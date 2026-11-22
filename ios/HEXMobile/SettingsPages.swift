@@ -9,6 +9,7 @@ struct DictationSettingsPage: View {
     @State private var lowercase = DictationLowercaseSettings().isEnabled
     @State private var formatLists = DictationListSettings().isEnabled
     @State private var spokenPunctuation = DictationPunctuationSettings().isEnabled
+    @State private var numbersAsDigits = DictationNumberSettings().isEnabled
     @State private var endsWithPeriod = DictationPeriodSettings().isEnabled
     @State private var showsWhatISay = LiveDictationSettings().showsPreview
     @State private var typesAsISpeak = LiveDictationSettings().typesIntoField
@@ -65,6 +66,15 @@ struct DictationSettingsPage: View {
                     title: String(localized: "Spoken punctuation"),
                     detail: String(localized: "Say “comma” or “question mark”"),
                     isOn: $spokenPunctuation
+                )
+
+                SettingsDivider()
+
+                // Before Clean up what I say, on every path but Verbatim (`SpokenNumbers`).
+                SettingsToggleRow(
+                    title: String(localized: "Numbers as digits"),
+                    detail: String(localized: "“Five point five” becomes 5.5"),
+                    isOn: $numbersAsDigits
                 )
 
                 SettingsDivider()
@@ -192,6 +202,9 @@ struct DictationSettingsPage: View {
         .onChange(of: spokenPunctuation) { _, enabled in
             DictationPunctuationSettings().isEnabled = enabled
         }
+        .onChange(of: numbersAsDigits) { _, enabled in
+            DictationNumberSettings().isEnabled = enabled
+        }
         .onChange(of: endsWithPeriod) { _, enabled in
             DictationPeriodSettings().isEnabled = enabled
         }
@@ -207,6 +220,7 @@ struct DictationSettingsPage: View {
             lowercase = DictationLowercaseSettings().isEnabled
             formatLists = DictationListSettings().isEnabled
             spokenPunctuation = DictationPunctuationSettings().isEnabled
+            numbersAsDigits = DictationNumberSettings().isEnabled
             endsWithPeriod = DictationPeriodSettings().isEnabled
             showsWhatISay = LiveDictationSettings().showsPreview
             typesAsISpeak = LiveDictationSettings().typesIntoField

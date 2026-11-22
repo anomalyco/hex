@@ -1881,6 +1881,26 @@
         }
       }
     },
+    "Numbers as digits" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数字用阿拉伯数字"
+          }
+        }
+      }
+    },
+    "“Five point five” becomes 5.5" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“five point five”会写成 5.5"
+          }
+        }
+      }
+    },
     "Messages" : {
       "shouldTranslate" : false
     },

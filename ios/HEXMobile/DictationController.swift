@@ -54,6 +54,8 @@ final class DictationController {
         let formatLists: Bool
         /// Settings › Dictation › Spoken punctuation, read at start.
         let spokenPunctuation: Bool
+        /// Settings › Dictation › Numbers as digits, read at start.
+        let numbersAsDigits: Bool
         /// Settings › Dictation › End with a period, read at start.
         let endsWithPeriod: Bool
         /// Experiments › Hinglish, read at start.
@@ -89,6 +91,7 @@ final class DictationController {
     private let lowercaseSettings: DictationLowercaseSettings
     private let listSettings: DictationListSettings
     private let punctuationSettings: DictationPunctuationSettings
+    private let numberSettings: DictationNumberSettings
     private let periodSettings: DictationPeriodSettings
     private let hinglishSettings: HinglishSettings
     private let greeklishSettings: GreeklishSettings
@@ -240,6 +243,7 @@ final class DictationController {
         lowercaseSettings: DictationLowercaseSettings = DictationLowercaseSettings(),
         listSettings: DictationListSettings = DictationListSettings(),
         punctuationSettings: DictationPunctuationSettings = DictationPunctuationSettings(),
+        numberSettings: DictationNumberSettings = DictationNumberSettings(),
         periodSettings: DictationPeriodSettings = DictationPeriodSettings(),
         hinglishSettings: HinglishSettings = HinglishSettings(),
         greeklishSettings: GreeklishSettings = GreeklishSettings(),
@@ -265,6 +269,7 @@ final class DictationController {
         self.lowercaseSettings = lowercaseSettings
         self.listSettings = listSettings
         self.punctuationSettings = punctuationSettings
+        self.numberSettings = numberSettings
         self.periodSettings = periodSettings
         self.hinglishSettings = hinglishSettings
         self.greeklishSettings = greeklishSettings
@@ -755,6 +760,7 @@ final class DictationController {
         let lowercase = lowercaseSettings.isEnabled
         let formatLists = listSettings.isEnabled
         let spokenPunctuation = punctuationSettings.isEnabled
+        let numbersAsDigits = numberSettings.isEnabled
         let endsWithPeriod = periodSettings.isEnabled
         let hinglish = hinglishSettings.isEnabled
         let greeklish = greeklishSettings.isEnabled
@@ -810,6 +816,7 @@ final class DictationController {
                     lowercase: lowercase,
                     formatLists: formatLists,
                     spokenPunctuation: spokenPunctuation,
+                    numbersAsDigits: numbersAsDigits,
                     endsWithPeriod: endsWithPeriod,
                     hinglish: hinglish,
                     greeklish: greeklish,
@@ -908,6 +915,7 @@ final class DictationController {
                     lowercase: session.lowercase,
                     formatLists: session.formatLists,
                     spokenPunctuation: session.spokenPunctuation,
+                    numbersAsDigits: session.numbersAsDigits,
                     hinglish: session.hinglish,
                     greeklish: session.greeklish,
                     endsWithPeriod: session.endsWithPeriod

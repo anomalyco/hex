@@ -166,16 +166,20 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         style: DictationStyle,
         language: String? = nil,
         protectedTerms: [String] = [],
+        numbers: Bool = false,
         settings: CleanupTaggerSettings = CleanupTaggerSettings(),
         tagger: CleanupTagger = .shared
     ) async -> String {
         guard style != .verbatim, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             return text
         }
-        let text = SpokenCleanupRules.spokenCounts(
+        let counted = SpokenCleanupRules.spokenCounts(
             in: SpokenCleanupRules.spokenSymbols(in: text, language: language),
             language: language
         )
+        // Before the tagger, so a number in digits is a word it never removes outside a
+        // self-correction (`CleanupGuard`).
+        let text = numbers ? SpokenNumbers.digits(in: counted, language: language) : counted
         guard settings.isEnabled else { return text }
         guard SpeechLanguagePicker.isEnglish(language) else {
             return SpokenCleanupRules.clean(text, language: language)
