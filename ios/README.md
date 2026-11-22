@@ -1923,7 +1923,9 @@ The app shows these under Settings › Acknowledgements (`HEXMobile/Acknowledgem
   [Creative Commons Attribution 4.0 International](https://creativecommons.org/licenses/by/4.0/),
   downloaded as FluidInference's
   [Core ML conversion](https://huggingface.co/FluidInference/parakeet-tdt-0.6b-v2-coreml)
-  (CC BY 4.0, encoder weights at reduced precision), used unchanged.
+  (CC BY 4.0, encoder weights at reduced precision; revision `ee09c569`, each of its 21 files
+  checked against its size and SHA-256 in `ParakeetV2Files`, resumed from its `.partial`
+  and tried 4 times, 1, 2 and 4 s apart, as FluidAudio's download did), used unchanged.
 - **Parakeet Ultra:** Experiments › Multilingual model downloads
   [Parakeet Ultra](https://huggingface.co/moondream/parakeet-ultra) by Moondream, a
   post-training of NVIDIA's

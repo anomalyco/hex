@@ -1865,6 +1865,29 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
+    func testParakeetV2CountsAsDownloadedOnlyWithEveryPinnedFileAtItsSize() throws {
+        let files = FileManager.default
+        let folder = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? files.removeItem(at: folder) }
+        for file in ParakeetV2Files.files {
+            let url = folder.appendingPathComponent(file.path)
+            try files.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            XCTAssertTrue(files.createFile(atPath: url.path, contents: nil))
+            let handle = try FileHandle(forWritingTo: url)
+            try handle.truncate(atOffset: UInt64(file.size))
+            try handle.close()
+        }
+        XCTAssertTrue(ParakeetV2Files.isDownloaded(in: folder))
+        XCTAssertEqual(ParakeetV2Files.placedBytes(in: folder), ParakeetV2Files.totalBytes)
+
+        let encoder = folder.appendingPathComponent("Encoder.mlmodelc/weights/weight.bin")
+        try files.moveItem(at: encoder, to: encoder.appendingPathExtension("partial"))
+        XCTAssertFalse(ParakeetV2Files.isDownloaded(in: folder), "a folder with a partial file isn't a download")
+        XCTAssertEqual(ParakeetV2Files.placedBytes(in: folder), ParakeetV2Files.totalBytes - 445_187_200)
+        ParakeetV2Files.removeLeftovers(in: folder)
+        XCTAssertFalse(files.fileExists(atPath: encoder.appendingPathExtension("partial").path))
+    }
+
     func testAFileTheKeyboardDownloadedGetsItsNameOnlyOnceItsDigestMatches() throws {
         let files = FileManager.default
         let root = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
