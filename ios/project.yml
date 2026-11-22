@@ -164,6 +164,9 @@ targets:
       - HEXMobileTests
       - path: ../tests/fixtures/vocabulary/audio/term-hex-1.wav
         buildPhase: resources
+      # SwipeFixtureTests' golden readings, which crates/keyboard/core/tests/swipe_parity.rs reads too.
+      - path: ../crates/keyboard/core/tests/fixtures/swipe-parity.jsonl
+        buildPhase: resources
     dependencies:
       - target: HEXMobile
     settings:
