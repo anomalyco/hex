@@ -260,6 +260,31 @@ never at a launch by itself.
     or off). Other numbers stay ("Chapter one, two and three", "room 123", "test
     123 passed"). The tagger alone took a count in words for a self-correction
     ("Test one two three" became "Test three."); `CleanupGuard` keeps it.
+  - **Numbers as digits (Settings › Dictation, on by default; English, every style but
+    Verbatim):** numbers said in words are written in digits, as Apple's
+    `SpeechTranscriber` writes them, so every engine reads the same
+    (`SpokenNumbers`, run by `CleanupTagger.cleanIfEnabled` after Spoken counts and before
+    the tagger, so the tagger never removes a number in digits outside a self-correction).
+    Parakeet V2 now and then writes a whole sentence in words ("The ratio is five point
+    five.", "november twenty second"), mostly in a real voice: 53 of 80 test sentences in
+    Ryan's cloned voice against 11 of 80 in macOS voices (macOS 27.2.1,
+    `experiments/2026-11-22-hex-numbers`). It writes decimals ("5.5", "3.1.4", "1.2
+    million"), percentages ("20%"), numbers from ten up and compounds ("25", "312",
+    "15,000"; commas from 10,000, as Apple writes "8000"), years ("1999", "2026"), money
+    with "dollars" ("$5", "$15.40"), two to nine before a plural noun or unit ("2 dogs", "6
+    foot"), ranges ending in one ("5 to 10 minutes"), times with am, pm or o'clock ("6 am",
+    "7:15 pm"), ordinals in dates ("November 22nd", "the 4th of July"; "May" and "March"
+    only with a capital), three or more spoken digits ("4729", "555-123-4567"), and minus or
+    negative before a number ("-5", "-$40"). Text already in digits keeps its form ("2,400",
+    "$4.99"). Not yet: "one" alone ("one of them", "no one", "one more"), times and prices
+    without a marker ("three thirty", "four ninety nine", "twelve fifty"), ranges and scores
+    without a unit ("eight to twelve", "three to one"), fractions, ordinals outside dates
+    ("finished first", "twenty first floor", "a second"), small numbers before anything else
+    ("at eight", "GPT five"), and any run of number words that reads two ways ("one thirty").
+    Other languages keep their words: each needs its own number words, compounds (German
+    "fünfundzwanzig", French "quatre-vingt-dix") and separators ("5,5" and "15.000" in
+    German, French, Spanish, Italian and Dutch). `SpokenCleanupRulesTests` holds the 80
+    sentences as both engines wrote them in both voices.
   - **Mid-sentence dictation:** when the text before the cursor doesn't end a
     sentence (`.` `!` `?` `…` or a line break), the keyboard lowercases the
     dictation's first word, except "I" and its contractions, acronyms, words

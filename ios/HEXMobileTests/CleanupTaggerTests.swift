@@ -324,6 +324,31 @@ final class CleanupTaggerTests: XCTestCase {
         XCTAssertEqual(verbatim, "Test one, 2, 3.")
     }
 
+    /// Numbers as digits runs before the tagger, and cleans up the same: every hand-written
+    /// sentence comes out as without it, then in digits ("two, sorry, three tickets" is "3
+    /// tickets" either way).
+    func testNumbersInDigitsCleanUpTheSame() async throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = CleanupTaggerSettings(defaults: defaults)
+        settings.isEnabled = true
+        let tagger = CleanupTagger()
+        let fixture = try Self.load(HandwrittenFixture.self, "cleanup-tagger-handwritten")
+        var changed = 0
+        for item in fixture.cases {
+            let words = await CleanupTagger.cleanIfEnabled(
+                item.input, style: .polished, language: "en-US", settings: settings, tagger: tagger
+            )
+            let digits = await CleanupTagger.cleanIfEnabled(
+                item.input, style: .polished, language: "en-US", numbers: true, settings: settings, tagger: tagger
+            )
+            XCTAssertEqual(digits, SpokenNumbers.digits(in: words, language: "en-US"), "#\(item.id) \(item.input)")
+            if digits != words { changed += 1 }
+        }
+        XCTAssertGreaterThan(changed, 0, "the sentences with a count before a noun")
+    }
+
     func testDictationStartPreparesOnlyWhenOnAndNotForVerbatim() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

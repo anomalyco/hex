@@ -124,8 +124,9 @@ nonisolated struct GreeklishSettings {
 /// (`KeyboardLocalDictation`), so a style and Lowercase apply on every path.
 ///
 /// In order: Hinglish (Hindi in Latin letters, while that experiment is on) or Greeklish
-/// (Greek in Latin letters, while that one is on), learned fixes, custom vocabulary, Clean up
-/// what I say (`CleanupTagger.cleanIfEnabled`, which guards its own memory in the keyboard),
+/// (Greek in Latin letters, while that one is on), learned fixes, custom vocabulary, Numbers as
+/// digits and Clean up what I say (`CleanupTagger.cleanIfEnabled`, which guards its own memory
+/// in the keyboard),
 /// `refine` (Clean up with Apple Intelligence, only in the app), translation, the style
 /// (`TranscriptFormatter`, with Format lists' `SpokenLists` and Spoken punctuation's
 /// `SpokenPunctuation` inside it), the spellings again,
@@ -145,6 +146,9 @@ nonisolated struct DictationPipeline: Sendable {
     var formatLists = false
     /// Settings › Dictation › Spoken punctuation (`SpokenPunctuation`), inside the style.
     var spokenPunctuation = false
+    /// Settings › Dictation › Numbers as digits (`SpokenNumbers`), before Clean up what I say's
+    /// tagger, in every style but Verbatim.
+    var numbersAsDigits = false
     /// Experiments › Hinglish: Hindi is written in Latin letters before every other step, so
     /// learned fixes, vocabulary and the style see the Latin words.
     var hinglish = false
@@ -202,7 +206,8 @@ nonisolated struct DictationPipeline: Sendable {
             spelled,
             style: style,
             language: language,
-            protectedTerms: DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: corrections)
+            protectedTerms: DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: corrections),
+            numbers: numbersAsDigits
         )
         let refined = await refine?(tagged) ?? tagged
         let outcome = await DictationTranslator.translate(
