@@ -3,17 +3,19 @@ import CryptoKit
 import XCTest
 @testable import HEX
 
-/// Writes the swipe parity fixture the Rust port is checked against
-/// (`crates/keyboard/core/tests/swipe_parity.rs`): `SwipeParity`'s cases with what the Swift
-/// oracle (`SwipeDecoderOracle`) reads for each. Skipped unless asked for:
+/// Writes swipe parity fixtures (`crates/keyboard/core/tests/swipe_parity.rs`): `SwipeParity`'s
+/// cases with what the app's decoder (`SwipeDecoder`, the Rust core) reads for each. The
+/// committed fixture was written by the Swift decoder the core was ported from, and the core
+/// reads it bit for bit; export again only to record an intended change in the core. Skipped
+/// unless asked for:
 ///
 ///     xcodebuild test … -only-testing:HEXMobileTests/SwipeParityExportTests \
-///       TEST_RUNNER_HEX_SWIPE_PARITY_OUT=/tmp/swipe-parity.jsonl TEST_RUNNER_HEX_SWIPE_PARITY_COUNT=1000
+///       TEST_RUNNER_HEX_SWIPE_PARITY_OUT=/tmp/swipe-parity.jsonl TEST_RUNNER_HEX_SWIPE_PARITY_COUNT=800
 ///
 /// (`TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1` adds each read's time in nanoseconds.)
 ///
-/// JSON Lines: a header (generator version, the oracle's source commit, the models' SHA-256,
-/// the parameters), each context and layout, then one case per line. Numbers that must come
+/// JSON Lines: a header (generator version, the decoder, the models' SHA-256, the
+/// parameters), each context and layout, then one case per line. Numbers that must come
 /// through exactly are strings: a key's centre, a split layout's edges or a base time as
 /// Swift's shortest round-trip decimal, a cost as its IEEE 754 bits in 16 hex digits. The
 /// touches (as whole quarter points, x then y) and their times (as whole ticks,
@@ -24,9 +26,6 @@ import XCTest
 /// hashes it and the times bit for bit.
 @MainActor
 final class SwipeParityExportTests: XCTestCase {
-    /// The dev commit `SwipeDecoderOracle.swift` was copied from.
-    static let oracleCommit = "b719d45e5361ae04e220ec8b6822a40ea0dc1cd4"
-
     func testExportSwipeParityFixture() throws {
         let env = ProcessInfo.processInfo.environment
         guard let path = env["HEX_SWIPE_PARITY_OUT"], !path.isEmpty else {
@@ -50,11 +49,11 @@ final class SwipeParityExportTests: XCTestCase {
             let digest = SHA256.hash(data: try Data(contentsOf: url)).map { String(format: "%02x", $0) }.joined()
             models.append("\(JSONLines.string(language.rawValue)):\(JSONLines.string(digest))")
         }
-        let parameters = Mirror(reflecting: SwipeDecoderOracle.Parameters()).children.map {
+        let parameters = Mirror(reflecting: SwipeDecoder.Parameters()).children.map {
             "\(JSONLines.string($0.label ?? "")):\(JSONLines.string("\($0.value)"))"
         }
         out.line(
-            #"{"kind":"header","generator":\#(SwipeParity.generatorVersion),"oracle":\#(JSONLines.string(Self.oracleCommit)),"#
+            #"{"kind":"header","generator":\#(SwipeParity.generatorVersion),"decoder":"SwipeDecoder (the Rust core)","#
                 + #""count":\#(count),"models":{\#(models.joined(separator: ","))},"parameters":{\#(parameters.joined(separator: ","))}}"#
         )
         for setup in setups {
@@ -84,7 +83,7 @@ final class SwipeParityExportTests: XCTestCase {
         var nextID = 0
         var durations: [UInt64] = []
         for setup in setups {
-            let decoders = Dictionary(uniqueKeysWithValues: setup.contexts.map { ($0.id, Self.oracle($0, model: setup.model)) })
+            let decoders = Dictionary(uniqueKeysWithValues: setup.contexts.map { ($0.id, Self.decoder($0, model: setup.model)) })
             let keys = Dictionary(uniqueKeysWithValues: setup.layouts.map { ($0.id, $0.keys) })
             var generator = SwipeParityGenerator(setup, firstID: nextID)
             for _ in 0..<count {
@@ -108,7 +107,7 @@ final class SwipeParityExportTests: XCTestCase {
         out.flush()
         durations.sort()
         let median = durations[durations.count / 2], p95 = durations[durations.count * 95 / 100]
-        print("swipe parity: wrote \(durations.count) cases to \(path); oracle read median \(median / 1000) µs, p95 \(p95 / 1000) µs")
+        print("swipe parity: wrote \(durations.count) cases to \(path); read median \(median / 1000) µs, p95 \(p95 / 1000) µs")
     }
 
     /// The touches as whole quarter points, packed (`JSONLines.packed`): x and y of the first,
@@ -144,19 +143,6 @@ final class SwipeParityExportTests: XCTestCase {
     }
 
     /// The decoder `SwipeTyping.syncWords` makes for `context`.
-    static func oracle(_ context: SwipeParity.Context, model: TypingDecoderModel) -> SwipeDecoderOracle {
-        var decoder = SwipeDecoderOracle(model: model)
-        decoder.neverSuggest = TypingDecoder.NeverSuggest(context.blocked, model: model)
-        var extra = SwipeDecoderOracle.ExtraWords()
-        if model.language == KeyboardLanguage.english.rawValue {
-            extra.add(context.contractions, cost: { SwipeDecoderOracle.costOfContraction($0) }, model: model, contractions: true)
-        }
-        extra.add(context.ownWords, cost: SwipeDecoderOracle.ownWordCost, model: model)
-        decoder.extraWords = extra
-        return decoder
-    }
-
-    /// The decoder `SwipeTyping.syncWords` makes for `context`.
     static func decoder(_ context: SwipeParity.Context, model: TypingDecoderModel) -> SwipeDecoder {
         var decoder = SwipeDecoder(model: model)
         decoder.neverSuggest = TypingDecoder.NeverSuggest(context.blocked, model: model)
@@ -172,8 +158,8 @@ final class SwipeParityExportTests: XCTestCase {
     /// The same words as one list, as a decoder that takes them at once gets them.
     static func extraWords(_ context: SwipeParity.Context) -> [(text: String, cost: Double, contraction: Bool)] {
         let contractions = context.language == .english ? context.contractions : []
-        return contractions.map { ($0, SwipeDecoderOracle.costOfContraction($0), true) }
-            + context.ownWords.map { ($0, SwipeDecoderOracle.ownWordCost, false) }
+        return contractions.map { ($0, SwipeDecoder.costOfContraction($0), true) }
+            + context.ownWords.map { ($0, SwipeDecoder.ownWordCost, false) }
     }
 
     /// Where `TypingDecoderModel.bundled` maps the model from.

@@ -1,5 +1,5 @@
-//! The finger's path in pitches (`SwipeDecoder.Gesture`), where it turned or paused
-//! (`SwipeDecoder.evidence`), and how a word's keys account for that (`evidenceCost`).
+//! The finger's path in pitches (the Swift decoder's `Gesture`), where it turned or paused
+//! (`evidence`), and how a word's keys account for that (`evidenceCost`).
 
 use super::Parameters;
 use super::geometry::{Point, distance, max, min, normalized, resample, sort_by_less, squared};
