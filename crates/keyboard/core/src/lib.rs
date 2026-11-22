@@ -3,6 +3,7 @@
 //! crate (`hex-keyboard-ffi`) maps the model files.
 #![forbid(unsafe_code)]
 
+pub mod dictation;
 pub mod model;
 pub mod never_suggest;
 pub mod swipe;
