@@ -1419,23 +1419,35 @@ usually one) on the sentence's clock; y > 1 is the space bar, x 0.25…0.75 acro
 autocorrect reading each word on its space.
 
 Both report a line per source inside `TYPING-REPLAY … TYPING-REPLAY-END`: total words,
-words outside the decoder's dictionary (counted after keeping only ASCII a–z letters, so
-accented, hyphenated and numeric tokens count as outside; their share is its own number),
-and accuracy among the in-dictionary words (case-insensitive letters). Swipes report
-accuracy and typed-or-offered over the swipe attempts (`attempts`): gestures that became
-swipes, ones whose path left the key by a swipe's pitch and weren't promoted, and ones that
-read nothing. `all-words-accuracy` covers every in-dictionary word — taps included, a skipped
-gesture counted wrong — so one number matches what the person reading the field saw. `taps`
-and `taps-right` are the recordings whose path never leaves its key by a swipe's pitch: the
-keyboard types that key's letter, and the field keeps it, as for a person typing a one-letter
-word. `not-swipes` counts swipe attempts the plane never took as swipes or that read nothing;
-`skipped` counts gestures that began off the letter keys, and `clamped` the touches moved
-forward to the previous lift; unlike `taps` and `taps-right`, which count in-dictionary
-words, those three count every recorded touch, whatever its word. The decoder's own median
-and p90 milliseconds close the line, though a swipe's preview decode can overlap its timed
-final decode, so a `decode-ms` sample may include that overlap; the words are unaffected.
-`HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT` writes each sentence's intended
-and typed words (prefix both with `TEST_RUNNER_` too).
+words outside the dictionary and their share (a word is in the dictionary when the decoder's
+model has it or English's contractions in `AutocorrectEngine.englishContractions` do; the
+model lookup gets only the word's ASCII a–z letters and apostrophes, so accented, hyphenated
+and numeric tokens normally count as outside), and accuracy among the in-dictionary words.
+Scoring lowercases, straightens curly `’`, trims leading and trailing apostrophes, and keeps
+ASCII letters: a tap compares letters, and an apostrophe only when the recorded word has one;
+a swipe compares letters only. Taps report that as `accuracy` over every in-dictionary word and
+also `all-words-accuracy` over every word, so the gap between the two is what the
+out-of-dictionary words contribute. Swipes report `accuracy` and `typed-or-offered` over the
+swipe attempts (`attempts`): gestures that became swipes, ones whose path left the key by a
+swipe's pitch and weren't promoted, and ones that read nothing. They also report
+`in-dictionary-accuracy` over every in-dictionary word — taps included, a skipped gesture
+counted wrong — and `all-words-accuracy` over every word, which is the end-to-end number:
+what the person reading the field saw, with an out-of-dictionary word now able to count as
+right when the field has it. `taps` and `taps-right` are the recordings whose path never
+leaves its key by a swipe's pitch: the keyboard types that key's letter, and the field keeps
+it, as for a person typing a one-letter word. Tap mode keeps Swipe typing attached as the
+keyboard runs it, so a recorded tap whose samples drift can be promoted to a swipe;
+`read-as-swipes` counts the recorded taps the plane took that way. `not-swipes` counts swipe
+attempts the plane never took as swipes or that read nothing; `skipped` counts gestures that
+began off the letter keys, and `clamped` the touches moved forward to the previous lift;
+unlike `taps` and `taps-right`, which count in-dictionary words, those three count every
+recorded touch, and `read-as-swipes` also counts every delivered tap, whatever its word. A
+tap's words compare an apostrophe only when the recorded word has one; a swipe's by letters
+only, because a swipe's path runs over letter keys and cannot draw one. The decoder's own
+median and p90 milliseconds close the line, though a swipe's preview decode can overlap its
+timed final decode, so a `decode-ms` sample may include that overlap; the words are
+unaffected. `HEX_REPLAY_LIMIT` caps sentences per source; `HEX_REPLAY_OUT` writes each
+sentence's intended and typed words (prefix both with `TEST_RUNNER_` too).
 
 The test with no recording checks Hex's key geometry against the grid and runs clean
 gestures through the same mapping to type the right words; it cannot catch a converter that
