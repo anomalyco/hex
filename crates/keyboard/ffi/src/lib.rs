@@ -18,8 +18,8 @@ pub use model::{HkModel, hk_model_free, hk_model_open, hk_model_open_fd, hk_mode
 pub use swipe::{
     HkCandidate, HkExtraWord, HkKeyCentre, HkKeys, HkSwipeDecoder, HkSwipeParameters,
     HkSwipeReading, hk_swipe_contraction_cost, hk_swipe_cost_of_contraction,
-    hk_swipe_default_parameters, hk_swipe_free, hk_swipe_new, hk_swipe_own_word_cost,
-    hk_swipe_read, hk_swipe_reading_free,
+    hk_swipe_default_parameters, hk_swipe_english_contractions, hk_swipe_free, hk_swipe_new,
+    hk_swipe_own_word_cost, hk_swipe_read, hk_swipe_reading_free,
 };
 pub use typing::{
     HkIsWordValid, HkSwipeContext, HkSwipeTyped, HkSwipeWords, HkTextReplacement,

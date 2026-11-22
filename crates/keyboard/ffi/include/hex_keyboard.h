@@ -86,6 +86,10 @@ double hk_swipe_own_word_cost(void);
 /// commonest ("I'm", "don't") `base` - 1.5, common ones `base`, the rest `base` + 2. NULL or
 /// not UTF-8 is none of them: `base` + 2.
 double hk_swipe_cost_of_contraction(const char *word, double base);
+/// The English contractions Swipe typing reads as common words ("I'm", "don't", "we'll"), in
+/// order: `*count` of them, each a NUL-terminated string. Both stay valid while the library is
+/// loaded.
+const char *const *hk_swipe_english_contractions(size_t *count);
 
 /// A word read beside the model's: an English contraction or one of your own words.
 typedef struct {
