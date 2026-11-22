@@ -77,6 +77,8 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n ly.anoma.hex/.MainActivity
 ```
 
+Debug builds and the unit tests also build the keyboard's Rust core (`crates/keyboard`), so they need rustup ([rustup.rs](https://rustup.rs) or `brew install rustup`; it installs the toolchain `crates/keyboard/rust-toolchain.toml` pins, and is found as `crates/keyboard/README.md` says) and `cargo install cargo-ndk`. Release builds don't build or ship the core yet.
+
 On the headless Studio, start an ARM64 AVD with `-audio none -grpc 8566 -grpc-use-token`. [inject.py](benchmark/inject.py) uses the matching emulator discovery record and streams paced mono PCM16 into the guest microphone. Generate the bindings from the SDK emulator’s `lib/emulator_controller.proto` with `grpcio-tools`, then put them on `PYTHONPATH`. No recording or transcript is injected directly into the application.
 
 For the upload bundle, run `./gradlew :app:bundleRelease`. Release packaging requires a private properties file at `~/.config/hex-android/keystore.properties` or the path in `HEX_ANDROID_KEYSTORE_PROPERTIES`. It must contain `storeFile` (relative to that file, or absolute), `keyAlias`, `storePassword` and `keyPassword`. Release uses R8 and resource shrinking and never falls back to the debug key. Gradle writes `app/build/outputs/bundle/release/app-release.aab`.

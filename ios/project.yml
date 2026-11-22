@@ -16,6 +16,9 @@ settings:
     # The compiler finds the interface's strings for the String Catalogs (Localizable.xcstrings).
     SWIFT_EMIT_LOC_STRINGS: YES
     LOCALIZATION_PREFERS_STRING_CATALOGS: YES
+    # The keyboard's Rust core is built for arm64 only (build-keyboard-core.sh), and so is
+    # every simulator build: no Intel simulators.
+    "EXCLUDED_ARCHS[sdk=iphonesimulator*]": x86_64
 targets:
   HEXMobile:
     type: application
@@ -71,7 +74,10 @@ targets:
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: 9.0.0
         TARGETED_DEVICE_FAMILY: "1"
-        OTHER_LDFLAGS: $(inherited) -weak_framework FoundationModels
+        # libhex_keyboard.a, which HEXKeyboard (a dependency) builds, for HEXShared's code.
+        OTHER_LDFLAGS: $(inherited) -weak_framework FoundationModels -lhex_keyboard
+        LIBRARY_SEARCH_PATHS: $(inherited) $(PROJECT_DIR)/build/keyboard-core/$(PLATFORM_NAME)
+        SWIFT_INCLUDE_PATHS: $(inherited) $(PROJECT_DIR)/../crates/keyboard/ffi/include
         OTHER_SWIFT_FLAGS: $(inherited) -Xfrontend -disable-autolink-framework -Xfrontend FoundationModels
         PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile
         PRODUCT_NAME: HEX
@@ -91,6 +97,14 @@ targets:
     dependencies:
       # Experiments › Speech model in keyboard: Parakeet in the keyboard (KeyboardParakeet).
       - package: FluidAudio
+    # The keyboard core (libhex_keyboard.a) for both HEXKeyboard and HEXMobile.
+    preBuildScripts:
+      - name: Build the keyboard core
+        script: '"$PROJECT_DIR/scripts/build-keyboard-core.sh"'
+        # Cargo tracks the core's sources itself, so the phase runs every build.
+        basedOnDependencyAnalysis: false
+        outputFiles:
+          - $(PROJECT_DIR)/build/keyboard-core/$(PLATFORM_NAME)/libhex_keyboard.a
     info:
       path: HEXKeyboard/Info.plist
       properties:
@@ -110,7 +124,13 @@ targets:
     settings:
       base:
         APPLICATION_EXTENSION_API_ONLY: YES
+        # The keyboard core's script phase runs Cargo, which reads crates/keyboard and
+        # ~/.cargo and writes build/keyboard-core: more than a sandboxed script may touch.
+        ENABLE_USER_SCRIPT_SANDBOXING: NO
         CODE_SIGN_ENTITLEMENTS: HEXKeyboard/HEXKeyboard.entitlements
+        OTHER_LDFLAGS: $(inherited) -lhex_keyboard
+        LIBRARY_SEARCH_PATHS: $(inherited) $(PROJECT_DIR)/build/keyboard-core/$(PLATFORM_NAME)
+        SWIFT_INCLUDE_PATHS: $(inherited) $(PROJECT_DIR)/../crates/keyboard/ffi/include
         COREML_CODEGEN_LANGUAGE: None
         CODE_SIGN_STYLE: Automatic
         CURRENT_PROJECT_VERSION: 1
@@ -153,11 +173,15 @@ targets:
       - HEXMobileTests
       - path: ../tests/fixtures/vocabulary/audio/term-hex-1.wav
         buildPhase: resources
+      # SwipeFixtureTests' golden readings, which crates/keyboard/core/tests/swipe_parity.rs reads too.
+      - path: ../crates/keyboard/core/tests/fixtures/swipe-parity.jsonl
+        buildPhase: resources
     dependencies:
       - target: HEXMobile
     settings:
       base:
         BUNDLE_LOADER: $(TEST_HOST)
+        SWIFT_INCLUDE_PATHS: $(inherited) $(PROJECT_DIR)/../crates/keyboard/ffi/include
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: YES
         PRODUCT_BUNDLE_IDENTIFIER: anomaly.hex.mobile.tests

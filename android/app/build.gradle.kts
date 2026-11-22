@@ -142,6 +142,73 @@ val verifyTypingModels by tasks.registering {
 }
 tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
 
+// The keyboard's Rust core (crates/keyboard), debug builds only for now: libhex_keyboard.so
+// for the APK and a host build for the JVM unit tests. Release builds don't include it.
+// rustup's cargo, found as iOS's build-keyboard-core.sh finds it (crates/keyboard/tools/
+// rustup-env.sh: on PATH, in CARGO_HOME or ~/.cargo, or Homebrew's rustup), run from the crate
+// so its pinned toolchain (rust-toolchain.toml) is used; Cargo tracks the sources, so the tasks
+// always run. Cargo subcommands such as cargo-ndk come from CARGO_HOME/bin or PATH.
+val keyboardCrate = rootProject.file("../crates/keyboard")
+val cargoHomeBin = (System.getenv("CARGO_HOME")?.takeIf { it.isNotEmpty() }?.let(::File)
+    ?: File(System.getProperty("user.home"), ".cargo")).resolve("bin")
+/** The folder of rustup and its cargo (`find_rustup`), or null when there is none. */
+fun findRustup(): String? {
+    val lookup = ProcessBuilder(
+        "sh", "-c", ". \"\$1\" && find_rustup \"\$2\" && printf %s \"\$rustup_bin\"", "sh",
+        keyboardCrate.resolve("tools/rustup-env.sh").path, keyboardCrate.path,
+    ).redirectError(ProcessBuilder.Redirect.INHERIT).start()
+    val folder = lookup.inputStream.bufferedReader().readText()
+    return folder.takeIf { lookup.waitFor() == 0 && it.isNotEmpty() }
+}
+abstract class CargoBuild : Exec() {
+    @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
+}
+/**
+ * `cargo <arguments(output directory)>` for hex-keyboard-ffi with JNI, the output resolved as it
+ * runs; it fails first, saying what to install, without rustup's cargo or one of `tools` (cargo
+ * subcommands).
+ */
+fun CargoBuild.cargo(vararg tools: String, arguments: (File) -> List<String>) {
+    workingDir(keyboardCrate)
+    outputs.upToDateWhen { false }
+    doFirst {
+        val rustup = checkNotNull(findRustup()) {
+            "The keyboard core (crates/keyboard) needs rustup, whose cargo runs its pinned toolchain " +
+                "(on PATH, in $cargoHomeBin or Homebrew's): install rustup (https://rustup.rs, or brew install rustup)"
+        }
+        val path = listOf(rustup, cargoHomeBin.path, System.getenv("PATH").orEmpty()).joinToString(File.pathSeparator)
+        val missing = tools.filterNot { tool -> path.split(File.pathSeparator).any { File(it, tool).canExecute() } }
+        check(missing.isEmpty()) {
+            "The keyboard core (crates/keyboard) needs ${missing.joinToString(" and ")}: `cargo install cargo-ndk`"
+        }
+        environment("PATH", path)
+        executable(File(rustup, "cargo"))
+        args(arguments(outputDirectory.get().asFile))
+        args("--manifest-path", keyboardCrate.resolve("Cargo.toml").path, "-p", "hex-keyboard-ffi", "--features", "jni")
+    }
+}
+// Its output directory is the debug variant's (addGeneratedSourceDirectory below).
+val buildKeyboardCore by tasks.registering(CargoBuild::class) {
+    environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
+    cargo("cargo-ndk") { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
+}
+val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
+    outputDirectory.set(layout.buildDirectory.dir("rustHost"))
+    cargo {
+        environment("CARGO_TARGET_DIR", it.path)
+        listOf("build", "--release")
+    }
+}
+androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(buildKeyboardCore, CargoBuild::outputDirectory)
+}
+tasks.withType<Test>().matching { it.name == "testDebugUnitTest" }.configureEach {
+    dependsOn(buildHostKeyboardCore)
+    // KeyboardCore loads libhex_keyboard from here; KeyboardCoreTest opens a descriptor.
+    systemProperty("java.library.path", buildHostKeyboardCore.get().outputDirectory.get().dir("release").asFile.path)
+    jvmArgs("--add-opens", "java.base/java.io=ALL-UNNAMED")
+}
+
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
