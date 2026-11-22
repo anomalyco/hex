@@ -78,7 +78,7 @@ actor ParakeetTranscriber: LocalTranscribing {
     nonisolated let displayName = "Parakeet V2"
     let languageName = "English"
 
-    /// In the App Group (`SpeechModelStore`), so Experiments › Speech model in keyboard can load
+    /// In the App Group (`SpeechModelStore`), so Settings › Dictation › Speech model in keyboard can load
     /// it too; FluidAudio finds it by its repo's folder name.
     nonisolated static var cacheDirectory: URL {
         SpeechModelStore.root.appendingPathComponent(Repo.parakeetV2.folderName, isDirectory: true)
@@ -151,7 +151,7 @@ actor ParakeetTranscriber: LocalTranscribing {
         }
     }
 
-    /// The download, for the app's engine and for Experiments › Speech model in keyboard;
+    /// The download, for the app's engine and for Settings › Dictation › Speech model in keyboard;
     /// `progress` gets the share downloaded. Marks the folder complete once every file is there.
     nonisolated static func downloadModel(progress: @escaping @Sendable (Double) -> Void) async throws {
         let fraction = ProgressReading()

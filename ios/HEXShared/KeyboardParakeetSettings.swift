@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experiments › Speech model in keyboard, in the App Group so the keyboard reads it. On unless
+/// Settings › Dictation › Speech model in keyboard, in the App Group so the keyboard reads it. On unless
 /// the person turned it off. While it's on, the keyboard's own dictation transcribes with Hex's
 /// speech model (Parakeet V2 for English, Parakeet Ultra where Experiments › Multilingual model
 /// dictates) on the Neural Engine, without opening Hex, once the files are in the App Group and

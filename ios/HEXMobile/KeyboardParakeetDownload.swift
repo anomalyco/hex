@@ -3,7 +3,7 @@ import Network
 import Observation
 import SwiftUI
 
-/// Experiments › Speech model in keyboard: gets Parakeet V2 into the App Group for the keyboard,
+/// Settings › Dictation › Speech model in keyboard: gets Parakeet V2 into the App Group for the keyboard,
 /// with FluidAudio's download (each file resumes from its `.partial`), at launch, whenever Hex
 /// comes back to the front, on Wi-Fi coming back and once the keyboard measured its memory,
 /// until every file is there. By itself only where the keyboard would use it (`hold`);
@@ -137,6 +137,10 @@ final class KeyboardParakeetDownload {
         for key in [KeyboardParakeetSettings.enabledKey, KeyboardParakeetSettings.keyboardLimitKey, SpeechModelHomeCard.dismissedKey] {
             group?.removeObject(forKey: key)
         }
+        // English dictation, whatever the iPhone's language, so the card shows in every locale.
+        LanguageSettings().dictationLanguage = "en-US"
+        SpeechModelStore.clearComplete(ParakeetTranscriber.cacheDirectory)
+        KeyboardParakeetSettings().setKeyboardState(nil)
         switch scene {
         case "model-card-downloading":
             state = .downloading(0.42)
@@ -239,6 +243,8 @@ extension DictationController {
 /// keyboard's word stays only while fresh.
 struct KeyboardParakeetStatus: View {
     let download: KeyboardParakeetDownload
+    /// In a box of its own (Settings); Home's card draws the box around it instead.
+    var framed = true
 
     var body: some View {
         TimelineView(.periodic(from: .now, by: 2)) { context in
@@ -261,8 +267,8 @@ struct KeyboardParakeetStatus: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(14)
-                .background(Color.white.opacity(0.055), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .padding(framed ? 14 : 0)
+                .background(framed ? Color.white.opacity(0.055) : .clear, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
         }
     }
@@ -308,11 +314,13 @@ struct KeyboardParakeetStatus: View {
 }
 
 /// Home's card about Speech model in keyboard: what it is, then where its download stands in
-/// the status lines Settings › Experiments shows. Only where the keyboard would use it (the
-/// switch on, an iPhone that fits, none of the holds that mean it never will); once it's ready
-/// it can be dismissed, and a dismissed card never comes back.
+/// the status lines Settings › Dictation shows; a tap opens that page. Only where the keyboard
+/// would use it (the switch on, an iPhone that fits, none of the holds that mean it never
+/// will); once it's ready it can be dismissed, and a dismissed card never comes back.
 struct SpeechModelHomeCard: View {
     let download: KeyboardParakeetDownload
+    /// Opens Settings › Dictation, where the switch is.
+    let open: () -> Void
     @State private var dismissed = SpeechModelHomeCard.isDismissed()
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -364,6 +372,12 @@ struct SpeechModelHomeCard: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 4)
+                if !ready {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(HexTheme.textMuted)
+                        .frame(width: 28, height: 28)
+                }
                 if ready {
                     Button {
                         Self.dismiss()
@@ -379,7 +393,7 @@ struct SpeechModelHomeCard: View {
                     .accessibilityLabel("Dismiss")
                 }
             }
-            KeyboardParakeetStatus(download: download)
+            KeyboardParakeetStatus(download: download, framed: false)
                 .padding(.leading, 25)
         }
         .padding(14)
@@ -387,7 +401,11 @@ struct SpeechModelHomeCard: View {
             Color.white.opacity(0.055),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
+        .contentShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .onTapGesture(perform: open)
         .accessibilityElement(children: .contain)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction(named: Text("Dictation"), open)
         .accessibilityIdentifier("speech-model-card")
     }
 }

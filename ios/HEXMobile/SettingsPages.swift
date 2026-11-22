@@ -13,6 +13,8 @@ struct DictationSettingsPage: View {
     @State private var endsWithPeriod = DictationPeriodSettings().isEnabled
     @State private var showsWhatISay = LiveDictationSettings().showsPreview
     @State private var typesAsISpeak = LiveDictationSettings().typesIntoField
+    @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
+    private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
     /// Keep mic warm stays on the page once picked, even Off where it would hide.
     @State private var keepsWarmRow = false
 
@@ -87,6 +89,27 @@ struct DictationSettingsPage: View {
                 )
 
                 DictationLanguageRow(dictation: dictation)
+            }
+
+            // On unless turned off: the keyboard's own English dictation transcribes with Hex's own
+            // speech model once it's downloaded (by itself on Wi-Fi) and compiled in the keyboard;
+            // off, it keeps Apple's speech recognition. Beside the keyboard's live words, in a card
+            // of its own because its status line sits under it and it shows on every iOS.
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Speech model in keyboard"),
+                    detail: keyboardParakeetFits
+                        ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
+                        : String(localized: "Needs an iPhone with 6 GB of memory or more"),
+                    isOn: $keyboardParakeet
+                )
+                .disabled(!keyboardParakeetFits)
+
+                if keyboardParakeet {
+                    KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                }
             }
 
             // While the keyboard records by itself (iOS 26 and later): its live words.
@@ -214,6 +237,11 @@ struct DictationSettingsPage: View {
         .onChange(of: typesAsISpeak) { _, enabled in
             LiveDictationSettings().typesIntoField = enabled
         }
+        .onChange(of: keyboardParakeet) { _, enabled in
+            guard enabled != KeyboardParakeetSettings().isEnabled else { return }
+            KeyboardParakeetSettings().isEnabled = enabled
+            DictationController.shared.keyboardParakeetChanged()
+        }
         .onAppear {
             cleanupTagger = CleanupTaggerSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
@@ -224,6 +252,7 @@ struct DictationSettingsPage: View {
             endsWithPeriod = DictationPeriodSettings().isEnabled
             showsWhatISay = LiveDictationSettings().showsPreview
             typesAsISpeak = LiveDictationSettings().typesIntoField
+            keyboardParakeet = KeyboardParakeetSettings().isOn
         }
     }
 }
@@ -693,8 +722,6 @@ struct ExperimentsSettingsPage: View {
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
-    @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
-    private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
 
     var body: some View {
         switches
@@ -718,11 +745,6 @@ struct ExperimentsSettingsPage: View {
                 MultilingualParakeetSettings().isEnabled = enabled
                 // On: downloads beside the engine that dictates; off: stops and deletes it.
                 DictationController.shared.multilingualParakeetChanged()
-            }
-            .onChange(of: keyboardParakeet) { _, enabled in
-                guard enabled != KeyboardParakeetSettings().isEnabled else { return }
-                KeyboardParakeetSettings().isEnabled = enabled
-                DictationController.shared.keyboardParakeetChanged()
             }
             .onAppear { loadSettings() }
     }
@@ -1019,26 +1041,6 @@ struct ExperimentsSettingsPage: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
-
-        SettingsDivider()
-
-        // On unless turned off: the keyboard's own English dictation transcribes with Parakeet in
-        // the keyboard once downloaded (by itself on Wi-Fi) and compiled there; off, it keeps
-        // Apple's speech recognition.
-        SettingsToggleRow(
-            title: String(localized: "Speech model in keyboard"),
-            detail: keyboardParakeetFits
-                ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
-                : String(localized: "Needs an iPhone with 6 GB of memory or more"),
-            isOn: $keyboardParakeet
-        )
-        .disabled(!keyboardParakeetFits)
-
-        if keyboardParakeet {
-            KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-        }
     }
 
     /// Reads every switch back from its setting, when the page appears.
@@ -1066,7 +1068,6 @@ struct ExperimentsSettingsPage: View {
         joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
         learnPerLanguage = TypingJournalSettings().learnsPerLanguage
         multilingualParakeet = MultilingualParakeetSettings().isEnabled
-        keyboardParakeet = KeyboardParakeetSettings().isOn
     }
 
     private static var multilingualParakeetSize: String {
