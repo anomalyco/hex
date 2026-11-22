@@ -1714,6 +1714,77 @@ final class DictationControllerTests: XCTestCase {
         )
     }
 
+    func testSpeechModelInKeyboardIsOffByDefaultAndNeedsTheMemory() {
+        let settings = KeyboardParakeetSettings(defaults: defaults)
+        XCTAssertFalse(settings.isEnabled, "off by default: the keyboard keeps Apple's speech recognition")
+        XCTAssertFalse(settings.isTurnedOff, "never set: nothing to delete")
+        XCTAssertTrue(KeyboardParakeetSettings.fits(physicalMemory: Self.sixGB))
+        XCTAssertFalse(KeyboardParakeetSettings.fits(physicalMemory: Self.fourGB))
+        settings.setKeyboardState(.preparing, now: Date(timeIntervalSince1970: 100))
+        XCTAssertEqual(settings.keyboardState?.state, .preparing)
+        XCTAssertEqual(settings.keyboardState?.at, Date(timeIntervalSince1970: 100))
+        settings.setKeyboardState(nil)
+        XCTAssertNil(settings.keyboardState)
+    }
+
+    func testTheKeyboardLoadsParakeetOnlyWithTheRoomMeasuredOnAnIPhone() {
+        let mb = KeyboardParakeetBudget.megabyte
+        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit(multilingual: false), 96 * mb)
+        XCTAssertEqual(KeyboardParakeetBudget.requiredLimit(multilingual: true), 115 * mb)
+        // An iPhone 17 Pro's keyboard: a 177 MB limit, 33 MB used before Hex's keyboard records.
+        XCTAssertTrue(KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 33 * mb, available: 144 * mb))
+        XCTAssertTrue(KeyboardParakeetBudget.allowsLoad(multilingual: true, footprint: 33 * mb, available: 144 * mb))
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 33 * mb, available: 44 * mb),
+            "a 77 MB limit keeps Apple's speech recognition"
+        )
+        XCTAssertFalse(
+            KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 120 * mb, available: 50 * mb),
+            "too little left, whatever the limit"
+        )
+        XCTAssertTrue(KeyboardParakeetBudget.allowsTranscription(multilingual: false, footprint: 60 * mb, available: 117 * mb))
+        XCTAssertTrue(
+            KeyboardParakeetBudget.allowsTranscription(multilingual: false, footprint: 56 * mb, available: 121 * mb),
+            "Hex's keyboard recording on the iPhone 17 Pro"
+        )
+        XCTAssertFalse(KeyboardParakeetBudget.allowsTranscription(multilingual: true, footprint: 160 * mb, available: 17 * mb))
+        XCTAssertTrue(
+            KeyboardParakeetBudget.allowsLoad(multilingual: false, footprint: 20 * mb, available: 0),
+            "no limit where iOS sets none (the simulator)"
+        )
+    }
+
+    func testParakeetsFilesMoveIntoTheAppGroupRatherThanDownloadingAgain() throws {
+        XCTAssertEqual(ParakeetTranscriber.cacheDirectory.lastPathComponent, SpeechModelStore.parakeetV2Folder)
+        XCTAssertEqual(ParakeetTranscriber.cacheDirectory, SpeechModelStore.parakeetV2)
+        XCTAssertEqual(ParakeetUltraModel.directory, SpeechModelStore.parakeetUltra)
+        XCTAssertEqual(
+            SpeechModelStore.parakeetUltraFolder,
+            "parakeet-ultra-coreml-\(ParakeetUltraModel.revision.prefix(7))",
+            "the keyboard looks for Ultra under its pinned revision"
+        )
+        let files = FileManager.default
+        let root = files.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? files.removeItem(at: root) }
+        let old = root.appendingPathComponent("old")
+        let new = root.appendingPathComponent("group/new")
+        func partial(in folder: URL) throws {
+            try files.createDirectory(at: folder, withIntermediateDirectories: true)
+            try Data("w".utf8).write(to: folder.appendingPathComponent("weight.bin.partial"))
+        }
+        try partial(in: old)
+        SpeechModelStore.move(from: old, to: new, isComplete: { _ in false }, fileManager: files)
+        XCTAssertTrue(files.fileExists(atPath: new.appendingPathComponent("weight.bin.partial").path), "a download under way moves, partial file and all")
+        XCTAssertFalse(files.fileExists(atPath: old.path))
+        XCTAssertFalse(SpeechModelStore.isComplete(new))
+
+        SpeechModelStore.markComplete(new)
+        try partial(in: old)
+        SpeechModelStore.move(from: old, to: new, isComplete: { SpeechModelStore.isComplete($0) }, fileManager: files)
+        XCTAssertTrue(SpeechModelStore.isComplete(new), "a complete copy in the App Group stays")
+        XCTAssertFalse(files.fileExists(atPath: old.path), "and the old, partial one goes")
+    }
+
     func testTheMultilingualDownloadResumesFromItsPartialFileAndSaysItsBytes() async throws {
         let model = try UltraStubModel()
         defer { model.remove() }

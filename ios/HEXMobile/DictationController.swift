@@ -243,6 +243,8 @@ final class DictationController {
         languageSettings: LanguageSettings = LanguageSettings(),
         multilingualDownload: ParakeetUltraDownload? = nil
     ) {
+        // Before anything reads them: Parakeet's files live in the App Group now.
+        SpeechModelStore.moveLegacyDownloads()
         let resolvedBridge = keyboardBridge ?? KeyboardBridge()
         let resolvedAudio = audio ?? SystemAudioManager()
         let initialTranscriber = transcriber ?? ParakeetTranscriber()

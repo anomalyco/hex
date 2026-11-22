@@ -617,6 +617,8 @@ struct ExperimentsSettingsPage: View {
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
+    @State private var keyboardParakeet = KeyboardParakeetSettings().isEnabled
+    private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
 
     var body: some View {
         switches
@@ -640,6 +642,11 @@ struct ExperimentsSettingsPage: View {
                 MultilingualParakeetSettings().isEnabled = enabled
                 // On: downloads beside the engine that dictates; off: stops and deletes it.
                 DictationController.shared.multilingualParakeetChanged()
+            }
+            .onChange(of: keyboardParakeet) { _, enabled in
+                guard enabled != KeyboardParakeetSettings().isEnabled else { return }
+                KeyboardParakeetSettings().isEnabled = enabled
+                DictationController.shared.keyboardParakeetChanged()
             }
             .onAppear { loadSettings() }
     }
@@ -887,6 +894,25 @@ struct ExperimentsSettingsPage: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
+
+        SettingsDivider()
+
+        // Off by default: the keyboard's own dictation keeps Apple's speech recognition. On, it
+        // transcribes with Parakeet in the keyboard once downloaded and compiled there.
+        SettingsToggleRow(
+            title: String(localized: "Speech model in keyboard"),
+            detail: keyboardParakeetFits
+                ? String(localized: "\(KeyboardParakeetDownload.size) download. Until it's ready, the keyboard uses Apple's speech recognition.")
+                : String(localized: "Needs an iPhone with 6 GB of memory or more"),
+            isOn: $keyboardParakeet
+        )
+        .disabled(!keyboardParakeetFits)
+
+        if keyboardParakeet {
+            KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 12)
+        }
     }
 
     /// Reads every switch back from its setting, when the page appears.
@@ -910,6 +936,7 @@ struct ExperimentsSettingsPage: View {
         joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
         learnPerLanguage = TypingJournalSettings().learnsPerLanguage
         multilingualParakeet = MultilingualParakeetSettings().isEnabled
+        keyboardParakeet = KeyboardParakeetSettings().isEnabled
     }
 
     private static var multilingualParakeetSize: String {

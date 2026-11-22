@@ -203,6 +203,8 @@ final class KeyboardViewController: UIInputViewController {
         // keyboard does, and iOS gives up on a keyboard slow to draw.
         let autoStart = DispatchWorkItem { [weak self] in
             self?.autoStartDictationIfPending()
+            // Experiments › Speech model in keyboard: last, and it loads off the main thread.
+            if let self, self.isShown, self.hasFullAccess, !self.memoryWarned { KeyboardParakeet.shared.warmUp() }
         }
         launchWork = [lexicon, optional, autoStart]
         DispatchQueue.main.asyncAfter(deadline: .now() + KeyboardLaunchWork.afterFirstFrame, execute: lexicon)
@@ -1215,6 +1217,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         let multilingual = MultilingualParakeetSettings()
         let multilingualOpensHex = multilingual.keyboardOpensHex(language: multilingual.language())
+            && !KeyboardParakeet.shared.dictatesMultilingualHere
         let needsHex = !localDictation.isActive && (LanguageSettings().keyboardNeedsHex() || multilingualOpensHex)
         let available = localDictation.isActive || (!needsHex && localDictation.hasMemoryToStart)
         guard available != localDictationAvailable else { return }

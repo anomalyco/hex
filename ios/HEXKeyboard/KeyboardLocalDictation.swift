@@ -265,6 +265,7 @@ final class KeyboardLocalDictation {
     }
 
     func handleMemoryWarning() {
+        KeyboardParakeet.shared.handleMemoryWarning()
         guard !isActive else { return }
         let current = capture
         capture = nil
@@ -690,7 +691,7 @@ final class KeyboardLocalDictation {
         transcription = Task { [weak self] in
             let started = Date()
             do {
-                let (heard, language) = try await KeyboardSpeech.transcribe(url, hints: hints)
+                let (heard, language, engine) = try await KeyboardTranscription.transcribe(url, hints: hints, audioSeconds: seconds)
                 try? FileManager.default.removeItem(at: url)
                 let locale = language.identifier
                 let style = KeyboardBridge().style
@@ -734,9 +735,7 @@ final class KeyboardLocalDictation {
                 // Record typing logs keeps every step; nothing is kept while it is off.
                 let stages: DictationStages? = TypingLogSettings().isEnabled
                     ? DictationStages(
-                        engine: language.module == .dictation
-                            ? "Apple Speech (keyboard, DictationTranscriber)"
-                            : "Apple Speech (keyboard)",
+                        engine: engine,
                         locale: locale,
                         style: style.rawValue,
                         recordedMS: Int((seconds * 1000).rounded()),
@@ -1175,7 +1174,7 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 }
 
 @available(iOS 26.0, *)
-private enum KeyboardSpeech {
+enum KeyboardSpeech {
     enum Failure: HexDescribedError, NoSpeechError {
         case noLocale
         case empty

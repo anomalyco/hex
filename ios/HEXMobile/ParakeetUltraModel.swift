@@ -78,8 +78,14 @@ nonisolated enum ParakeetUltraModel {
     /// What the download weighs, about 632 MB.
     static let totalBytes: Int64 = files.reduce(0) { $0 + $1.size }
 
-    /// In the app's Application Support (the keyboard never reads it), out of backups.
+    /// In the App Group (`SpeechModelStore`), out of backups, so Experiments › Speech model in
+    /// keyboard can load it too.
     static var directory: URL {
+        SpeechModelStore.parakeetUltra
+    }
+
+    /// Where it was before it moved to the App Group (`SpeechModelStore.moveLegacyDownloads`).
+    static var legacyDirectory: URL {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         return support
             .appendingPathComponent("SpeechModels", isDirectory: true)
@@ -114,6 +120,7 @@ nonisolated enum ParakeetUltraModel {
         session: URLSession = .shared,
         progress: @escaping @Sendable (Int64) -> Void
     ) async throws {
+        SpeechModelStore.prepareRoot()
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         var folder = directory
         var values = URLResourceValues()
@@ -136,11 +143,15 @@ nonisolated enum ParakeetUltraModel {
             done += file.size
             progress(done)
         }
+        SpeechModelStore.markComplete(directory)
     }
 
-    /// Removes the download, partial files included.
+    /// Removes the download, partial files included, and any copy left where it was before.
     static func remove(from directory: URL = directory) {
         try? FileManager.default.removeItem(at: directory)
+        if directory == Self.directory, legacyDirectory != directory {
+            try? FileManager.default.removeItem(at: legacyDirectory)
+        }
     }
 
     /// Loads the four models as FluidAudio's v3 loader would (preprocessor on the CPU, the rest
