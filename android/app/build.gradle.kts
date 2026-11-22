@@ -72,6 +72,7 @@ android {
         versionCode = 5
         versionName = "0.2.2"
         ndk { abiFilters += "arm64-v8a" }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild.cmake {
             arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             targets += "hexspeech"
@@ -105,6 +106,10 @@ android {
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.
     sourceSets["main"].assets.srcDir(rootProject.file("play/policy"))
+    // The swipe parity fixture's reader, for the JVM test on the host core and the instrumented one on bionic's.
+    sourceSets["testDebug"].java.srcDir("src/swipeParity/java")
+    sourceSets["androidTest"].java.srcDir("src/swipeParity/java")
+    sourceSets["androidTest"].assets.srcDir(rootProject.file("../crates/keyboard/core/tests/fixtures"))
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -216,4 +221,6 @@ dependencies {
     // The keyboard's emoji panel (Apache 2.0): categories, recents and skin tones, all kept on the device.
     implementation("androidx.emoji2:emoji2-emojipicker:1.7.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
