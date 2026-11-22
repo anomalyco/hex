@@ -855,7 +855,7 @@ final class AutocorrectEngine {
               !learning.rejected.contains(lower),
               !learnedWords.contains(lower) else { return nil }
         guard isEnabled, hasDictionary, !Self.shorthandAllowlist.contains(lower) else { return nil }
-        guard let fix = cautiousReplacement(for: token) else { return nil }
+        guard let fix = checkingWholeWord({ cautiousReplacement(for: token) }) else { return nil }
         return (token, fix)
     }
 

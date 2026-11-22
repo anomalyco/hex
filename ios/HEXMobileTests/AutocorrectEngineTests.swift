@@ -720,6 +720,11 @@ final class AutocorrectEngineTests: XCTestCase {
         spanish.setLanguage(.spanish, available: ["es_ES"])
         XCTAssertNil(fix(spanish, "manana"), "Spanish keeps to its guesses")
         XCTAssertTrue(AutocorrectEngine.markedSpellings(of: "zazolc", language: .polish, limit: 100).isEmpty, "too many to try")
+        let few = AutocorrectEngine.markedSpellings(of: "zazolc", language: .polish, limit: 16, partial: true)
+        XCTAssertEqual(few.count, 16, "a letter typed tries the fewest marks first")
+        XCTAssertEqual(few.first, "żazolc")
+        XCTAssertEqual(AutocorrectEngine.markedSpellingCount(of: "zolw", language: .polish), 11)
+        XCTAssertEqual(Set(AutocorrectEngine.markedSpellings(of: "zolw", language: .polish)).count, 11)
     }
 
     /// Greek types with iOS's el dictionary, and a tonos or diaeresis left out is the cheapest

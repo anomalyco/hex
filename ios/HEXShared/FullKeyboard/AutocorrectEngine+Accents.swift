@@ -61,74 +61,113 @@ extension AutocorrectEngine {
     }
 
     /// Spellings of `lower` with marks added to letters typed plain (`markedLetters`), fewest
-    /// marks first; none when there are more than `limit` (a long word of marked vowels).
-    static func markedSpellings(of lower: String, language: KeyboardLanguage, limit: Int = 256) -> [String] {
+    /// marks first; none when there are more than `limit` (a long word of marked vowels), or
+    /// with `partial` the `limit` with the fewest marks. Made in that order, never more.
+    static func markedSpellings(of lower: String, language: KeyboardLanguage, limit: Int = 256, partial: Bool = false) -> [String] {
         let marks = markedLetters(language)
         let letters = Array(lower)
         let slots = letters.indices.filter { marks[letters[$0]] != nil }
-        let count = slots.reduce(1) { $0 * (marks[letters[$1]]!.count + 1) }
-        guard !slots.isEmpty, count - 1 <= limit else { return [] }
-        var spellings: [(word: String, marks: Int)] = []
-        for n in 1..<count {
-            var rest = n
-            var word = letters
-            var added = 0
-            for slot in slots {
-                let options = marks[letters[slot]]!
-                let pick = rest % (options.count + 1)
-                rest /= options.count + 1
-                if pick > 0 { word[slot] = options[pick - 1]; added += 1 }
+        guard !slots.isEmpty, partial || markedSpellingCount(of: lower, language: language) <= limit else { return [] }
+        var spellings: [String] = []
+        var word = letters
+        // Every spelling with exactly `left` more marks, on slots from `from` on.
+        func add(from: Int, left: Int) {
+            guard spellings.count < limit else { return }
+            if left == 0 { spellings.append(String(word)); return }
+            guard slots.count - from >= left else { return }
+            for i in from..<slots.count {
+                let slot = slots[i]
+                for option in marks[letters[slot]]! {
+                    word[slot] = option
+                    add(from: i + 1, left: left - 1)
+                    word[slot] = letters[slot]
+                    if spellings.count >= limit { return }
+                }
             }
-            spellings.append((String(word), added))
         }
-        return spellings.sorted { $0.marks < $1.marks }.map(\.word)
+        for count in 1...slots.count where spellings.count < limit { add(from: 0, left: count) }
+        return spellings
+    }
+
+    /// How many spellings `markedSpellings` would make of `lower` without a limit.
+    static func markedSpellingCount(of lower: String, language: KeyboardLanguage) -> Int {
+        let marks = markedLetters(language)
+        return lower.reduce(1) { $0 * ((marks[$1]?.count ?? 0) + 1) } - 1
     }
 
     /// The words of this language's dictionary that `token` spells once its own letters are put
-    /// back (`markedSpellings`, at most 48 tried for a partner), lowercase: those the dictionary's guesses list first, in their
+    /// back (`markedSpellings`), lowercase: those the dictionary's guesses list first, in their
     /// order, then the rest, fewest marks first. Empty without such letters, or when the
     /// dictionary takes any letters for a word (iOS lists Polish, Czech, Hungarian, Romanian and
-    /// Norwegian with no word data until their keyboard's data is on the iPhone: the iOS 27.2 simulator,
-    /// with or without Apple's keyboard for them), so a missing dictionary guesses nothing.
+    /// Norwegian with no word data until their keyboard's data is on the iPhone: the iOS 27.2
+    /// simulator, with or without Apple's keyboard for them), so a missing dictionary guesses
+    /// nothing. Space's fix (`checkingWholeWord`) tries up to 256 spellings, 48 for a partner;
+    /// each letter typed tries only the 8 with the fewest marks and leaves the ranking to space, as
+    /// French took 2.9 ms -> 7.5 ms a letter at the 95th percentile (iPhone 17 simulator) and up to
+    /// 252 lookups trying them all.
     /// `ranked`: how many come from the guesses.
     func markedWords(for token: String) -> (words: [String], ranked: Int) {
         let lower = token.lowercased()
         guard token.count >= 2, token.count <= 24, !token.contains("'"), !Self.markedLetters(language).isEmpty else { return ([], 0) }
+        let whole = Self.checksWholeWord
         // One keystroke asks for the same word up to three times (space's fix, the strip, a
-        // partner's turn): the last few answers are kept for the dictionary that gave them.
-        if let hit = Self.markedCache.first(where: { $0.checker === checker && $0.language == language && $0.lower == lower }) {
+        // partner's turn): the last few answers are kept for the dictionary that gave them. A
+        // letter's answer serves space only when it tried every spelling.
+        if let hit = Self.markedCache.first(where: {
+            $0.checker === checker && $0.language == language && $0.lower == lower && (!whole || $0.whole)
+        }) {
             return hit.result
         }
+        let letterLimit = 8
+        let covers = whole || Self.markedSpellingCount(of: lower, language: language) <= letterLimit
         var result: (words: [String], ranked: Int) = ([], 0)
         if !dictionaryTakesAnything {
-            // On another language's keys (a bilingual partner) every word typed is tried, so fewer.
-            let limit = layoutLanguage == language ? 256 : 48
-            let words = Self.markedSpellings(of: lower, language: language, limit: limit).filter { checker.isWordValid($0) }
-            if words.count > 1 {
+            let limit = whole ? (layoutLanguage == language ? 256 : 48) : letterLimit
+            let words = Self.markedSpellings(of: lower, language: language, limit: limit, partial: !whole).filter { checker.isWordValid($0) }
+            // Ranking by the guesses, a slow call, waits for space's fix.
+            if words.count > 1, whole {
                 let ranked = checker.guesses(for: lower).map { $0.lowercased() }.filter(words.contains)
                 result = (ranked + words.filter { !ranked.contains($0) }, ranked.count)
             } else {
                 result = (words, 0)
             }
         }
-        Self.markedCache.insert(MarkedAnswer(checker: checker, language: language, lower: lower, result: result), at: 0)
+        let answer = MarkedAnswer(checker: checker, language: language, lower: lower, whole: covers, result: result)
+        Self.markedCache.insert(answer, at: 0)
         if Self.markedCache.count > 8 { Self.markedCache.removeLast() }
         return result
     }
+
+    /// Runs `body` (space's fix) trying every marked spelling of the word, not only a letter's few.
+    func checkingWholeWord<T>(_ body: () -> T) -> T {
+        Self.checksWholeWord = true
+        defer { Self.checksWholeWord = false }
+        return body()
+    }
+
+    private static var checksWholeWord = false
 
     private struct MarkedAnswer {
         weak var checker: TextChecking?
         let language: KeyboardLanguage
         let lower: String
+        /// Every spelling space would try was tried.
+        let whole: Bool
         let result: (words: [String], ranked: Int)
     }
 
     private static var markedCache: [MarkedAnswer] = []
 
     /// Whether this language's dictionary takes a made-up word: then it is no dictionary at all.
+    /// Asked once per dictionary and language.
     var dictionaryTakesAnything: Bool {
-        checker.isWordValid("qzxjvkq")
+        if let known = Self.takesAnything.first(where: { $0.checker === checker && $0.language == language }) { return known.answer }
+        let answer = checker.isWordValid("qzxjvkq")
+        Self.takesAnything = [(checker, language, answer)] + Self.takesAnything.filter { $0.checker != nil }.prefix(3)
+        return answer
     }
+
+    private static var takesAnything: [(checker: TextChecking?, language: KeyboardLanguage, answer: Bool)] = []
 
     /// What space puts in for `token` typed without its language's own letters ("zolw" ->
     /// "żółw", "prosze" -> "proszę", "sa" -> "są"), from the dictionary alone: only when the
@@ -142,12 +181,15 @@ extension AutocorrectEngine {
     }
 
     /// The strip's word with this language's own letters put back on `token` when space doesn't
-    /// put one in: a word that is one too without them ("ze" offers "że", "sad" "sąd"), or one
-    /// of several that fit. Never put in by space. Not while typing on another language's keys
-    /// (a bilingual partner): checking every prefix there doubled English's per-letter time
-    /// beside French, and space still puts the partner's letters back.
+    /// put one in: one of several that fit, or for a two-letter word that is one too without
+    /// them, its marked twin ("ze" offers "że", "ou" "où"); longer words the dictionary knows as
+    /// typed aren't looked at, which kept each letter's lookups down. Never put in by space. Not
+    /// while typing on another language's keys (a bilingual partner): checking every prefix there
+    /// doubled English's per-letter time beside French, and space still puts the partner's
+    /// letters back.
     func suggestedMarkedWord(for token: String) -> String? {
-        layoutLanguage == language ? markedWords(for: token).words.first : nil
+        guard layoutLanguage == language, token.count <= 2 || !knowsAsTyped(token) else { return nil }
+        return markedWords(for: token).words.first
     }
 
     /// `ownReplacement` with bilingual autocorrect's partner chosen but without a working
