@@ -29,6 +29,9 @@ pub struct RecoveringAudioInput {
     proven: bool,
     device_override: Option<String>,
     selected_device: Option<String>,
+    /// Whether dictation's stream should go through Apple's voice processing
+    /// (Labs › Voice isolation); a change applies at the next idle open.
+    voice_isolation: bool,
     active_revision: u64,
     recovery: MicrophoneRecovery,
     replacement: Option<Receiver<InputOpenResult>>,
@@ -73,6 +76,7 @@ impl RecoveringAudioInput {
             avoids_bluetooth: true,
             call_input: None,
             renegotiate_rate: false,
+            voice_processing: input.voice_isolation,
         })
         .and_then(|opened| match opened {
             Opened::Input(input) => Ok(*input),
@@ -109,6 +113,7 @@ impl RecoveringAudioInput {
             proven: false,
             device_override: device_override.map(str::to_owned),
             selected_device: selected_device.map(str::to_owned),
+            voice_isolation: crate::labs::voice_isolation(),
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
             replacement: None,
@@ -137,6 +142,8 @@ impl RecoveringAudioInput {
         let mut input = Self::closed(None, 0, selected_device);
         input.route_generation_source = route_generation;
         input.route_generation = route_generation();
+        // A test's opens follow its own requests, never the saved setting.
+        input.voice_isolation = false;
         input.opener = Arc::new(opener);
         input
     }
@@ -180,6 +187,23 @@ impl RecoveringAudioInput {
 
     pub fn request_recovery(&mut self) {
         self.recovery.request_stream_recovery(Instant::now());
+    }
+
+    /// Labs › Voice isolation: while `enabled`, the next open goes through
+    /// Apple's voice processing, and a stream of the other kind is replaced
+    /// once `capture_idle`. A capture in progress keeps its stream.
+    pub fn request_voice_isolation(&mut self, enabled: bool, capture_idle: bool) {
+        self.voice_isolation = enabled;
+        if !capture_idle || self.replacement.is_some() || self.recovery.blocks_audio() {
+            return;
+        }
+        let matches = self
+            .input
+            .as_ref()
+            .is_none_or(|input| input.voice_isolation == enabled);
+        if !matches && self.input.is_some() {
+            self.start_replacement();
+        }
     }
 
     /// A finished dictation was digital silence (#1122): reopen the stream and
@@ -453,12 +477,15 @@ impl RecoveringAudioInput {
             .recovery
             .target_revision
             .unwrap_or(self.active_revision);
-        // A failed stream is replaced even by the same device; a route or
-        // selection change keeps the open device when it resolves again.
+        // A failed stream is replaced even by the same device; a route,
+        // selection, or voice-isolation change keeps the open device only
+        // when it resolves to the same capture path.
         let keep = self
             .input
             .as_ref()
-            .filter(|_| !self.recovery.blocks_audio())
+            .filter(|input| {
+                !self.recovery.blocks_audio() && input.voice_isolation == self.voice_isolation
+            })
             .map(|input| input.device_name.clone());
         // A failed or silent stream lets go of the device before its
         // replacement opens, so the replacement starts cold, as at launch. A
@@ -474,6 +501,7 @@ impl RecoveringAudioInput {
             avoids_bluetooth: true,
             call_input: None,
             renegotiate_rate: self.recovery.take_renegotiation(),
+            voice_processing: self.voice_isolation,
         };
         self.route_generation = (self.route_generation_source)();
         let opener = self.opener.clone();

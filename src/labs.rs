@@ -189,6 +189,7 @@ impl Feature {
             Self::Signature => settings.labs.signature,
             Self::DictationStyle => settings.labs.dictation_style,
             Self::HudHeight => settings.labs.hud_height,
+            Self::VoiceIsolation => settings.labs.voice_isolation,
             Self::HoldThroughKeys => settings.labs.hold_through_keys,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::DropTranscribe => settings.labs.drop_transcribe,
@@ -279,6 +280,7 @@ impl Feature {
             &mut labs.signature,
             &mut labs.dictation_style,
             &mut labs.hud_height,
+            &mut labs.voice_isolation,
             &mut labs.hold_through_keys,
             &mut labs.copy_capture_zip,
             &mut labs.drop_transcribe,
@@ -380,6 +382,7 @@ impl Feature {
             Self::Signature => settings.labs.signature = on,
             Self::DictationStyle => settings.labs.dictation_style = on,
             Self::HudHeight => settings.labs.hud_height = on,
+            Self::VoiceIsolation => settings.labs.voice_isolation = on,
             Self::HoldThroughKeys => settings.labs.hold_through_keys = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::DropTranscribe => settings.labs.drop_transcribe = on,
@@ -449,7 +452,10 @@ const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
 /// Bottom, on the bit Vocabulary in meeting notes left free.
 const HUD_HEIGHT: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
-// 1 << 28 is free (Meeting finished event graduated).
+/// Dictation's microphone opens through Apple's voice processing, so Control
+/// Center's Mic Mode can offer Voice Isolation (macOS), on the bit Meeting
+/// finished event left free.
+const VOICE_ISOLATION: u64 = 1 << 28;
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
 const SCREENSHOTS: u64 = 1 << 30;
 const ANNOTATE_REPLAY: u64 = 1 << 31;
@@ -1082,6 +1088,11 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
         (Feature::HudHeight, settings.hud_height, HUD_HEIGHT),
         (
+            Feature::VoiceIsolation,
+            settings.voice_isolation,
+            VOICE_ISOLATION,
+        ),
+        (
             Feature::KeepMicrophoneOpen,
             settings.keep_microphone_open,
             KEEP_MICROPHONE_OPEN,
@@ -1705,6 +1716,36 @@ mod tests {
         assert_eq!(
             Feature::for_settings_key("labs.hud_bottom_gap"),
             Some(Feature::HudHeight)
+        );
+    }
+
+    #[test]
+    fn voice_isolation_is_its_own_bit_and_off_by_default() {
+        assert_eq!(VOICE_ISOLATION, 1 << 28);
+        let mut labs = LabsSettings::default();
+        assert!(!labs.voice_isolation);
+        assert_eq!(encode_where(&labs, |_| true) & VOICE_ISOLATION, 0);
+        labs.voice_isolation = true;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & VOICE_ISOLATION, 0);
+        assert_eq!(state & NOTCH_INDICATOR, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(
+            Feature::VoiceIsolation.on_this_os(),
+            cfg!(target_os = "macos")
+        );
+        assert_eq!(Feature::VoiceIsolation.added(), 20261122);
+        assert_eq!(Feature::VoiceIsolation.audience(), Audience::Everyone);
+        assert_eq!(Feature::VoiceIsolation.group(), Group::Dictation);
+        assert_eq!(
+            Feature::VoiceIsolation.settings_key(),
+            "labs.voice_isolation"
+        );
+        assert_eq!(Feature::VoiceIsolation.name(), "voice-isolation");
+        assert_eq!(
+            Feature::for_settings_key("labs.voice_isolation"),
+            Some(Feature::VoiceIsolation)
         );
     }
 

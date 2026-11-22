@@ -106,6 +106,64 @@ fn a_default_change_switches_only_while_capture_is_idle() {
     assert_eq!(input.device_name(), "MacBook Pro Microphone");
 }
 
+#[test]
+fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
+    let opens = Arc::new(Mutex::new(Vec::new()));
+    let keeps = Arc::new(Mutex::new(Vec::new()));
+    let recorded_opens = opens.clone();
+    let recorded_keeps = keeps.clone();
+    let mut input =
+        RecoveringAudioInput::with_opener_for_test(None, test_route_generation, move |request| {
+            recorded_opens
+                .lock()
+                .unwrap()
+                .push(request.voice_processing);
+            recorded_keeps.lock().unwrap().push(request.keep.clone());
+            if request.keep.as_deref() == Some("USB Mic") {
+                return Ok(Opened::Unchanged {
+                    selection: Selection::InUse,
+                });
+            }
+            let mut opened = named_input("USB Mic");
+            opened.voice_isolation = request.voice_processing;
+            Ok(Opened::Input(Box::new(opened)))
+        });
+    input.finish_initial_open(Ok(named_input("USB Mic")), Instant::now());
+    assert!(!input.voice_isolation);
+
+    // A flip while a capture runs changes no stream and opens nothing.
+    input.request_voice_isolation(true, false);
+    assert!(input.voice_isolation);
+    assert!(!input.is_opening());
+    assert!(opens.lock().unwrap().is_empty());
+    assert!(!input.input.as_ref().unwrap().voice_isolation);
+
+    // Idle, the same device reopens through voice processing rather than
+    // being kept as unchanged.
+    input.request_voice_isolation(true, true);
+    assert!(input.is_opening());
+    assert!(matches!(
+        settle(&mut input, true),
+        RecoveringAudioInputEvent::Reopened
+    ));
+    assert_eq!(*opens.lock().unwrap(), vec![true]);
+    assert_eq!(*keeps.lock().unwrap(), vec![None]);
+    assert!(input.input.as_ref().unwrap().voice_isolation);
+
+    // Asking for the path already open changes nothing.
+    input.request_voice_isolation(true, true);
+    assert!(!input.is_opening());
+
+    // Off reopens the raw stream.
+    input.request_voice_isolation(false, true);
+    assert!(matches!(
+        settle(&mut input, true),
+        RecoveringAudioInputEvent::Reopened
+    ));
+    assert_eq!(*opens.lock().unwrap(), vec![true, false]);
+    assert!(!input.input.as_ref().unwrap().voice_isolation);
+}
+
 /// An input saved as "USB Mic" that opens once `connected` is set and
 /// until then stands in with "ALEX PODS" for the given reason.
 fn standing_in(

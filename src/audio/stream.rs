@@ -43,6 +43,9 @@ pub struct AudioInput {
     /// Whether this input stands in for the saved microphone until it can
     /// be opened again.
     pub selection: Selection,
+    /// Whether this input was asked to open through Apple's voice processing
+    /// (Labs › Voice isolation); the raw stream stands in when it can't.
+    pub voice_isolation: bool,
     pub(super) stream_errors: Receiver<String>,
     pub(super) watch_service_restarts: bool,
     pub(super) restart_generation: u64,
@@ -116,6 +119,7 @@ impl AudioInput {
                 device_name: "Test microphone".into(),
                 uid: None,
                 selection: Selection::InUse,
+                voice_isolation: false,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
@@ -154,6 +158,7 @@ impl AudioInput {
             avoids_bluetooth: true,
             call_input: None,
             renegotiate_rate: false,
+            voice_processing: false,
         })? {
             Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => unreachable!("nothing to keep"),
@@ -169,18 +174,28 @@ impl AudioInput {
             .iter()
             .position(|name| name.to_lowercase().contains(&query_lower))
             .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
-        Self::open_device(devices[index].clone(), names[index].clone(), false, false)
+        Self::open_device(
+            devices[index].clone(),
+            names[index].clone(),
+            false,
+            false,
+            false,
+        )
     }
 
     /// Opens `device`. `follows_default` marks cpal's default-input handle,
     /// whose Windows stream reports a default change as invalidation while
     /// it keeps running on the old device. `renegotiate_rate` makes the
     /// device change its sample rate before the stream opens (#1575).
+    /// `voice_processing` opens it through Apple's voice processing instead
+    /// (Labs › Voice isolation), falling back to the raw stream when the
+    /// engine refuses.
     pub(super) fn open_device(
         device: Device,
         device_name: String,
         follows_default: bool,
         renegotiate_rate: bool,
+        voice_processing: bool,
     ) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
@@ -189,12 +204,46 @@ impl AudioInput {
         // Taken before the stream runs, so CoreAudio's real-time thread reads
         // an initialized clock.
         overloads::start_clock();
-        let started = input_format::start_stream_with_fallback(
-            &device,
-            &device_name,
-            follows_default.then(|| device_name.clone()),
-            renegotiate_rate,
-        )?;
+        #[cfg(target_os = "macos")]
+        let voice_processed = if voice_processing {
+            match uid.as_deref() {
+                Some(uid) => Some(input_format::start_voice_processing(uid, &device_name)),
+                None => {
+                    tracing::warn!(
+                        device = %device_name,
+                        "voice processing needs the microphone's uid; opening it normally"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "macos"))]
+        let voice_processed = {
+            let _ = voice_processing;
+            None::<Result<input_format::StartedStream>>
+        };
+        let open_raw = || {
+            input_format::start_stream_with_fallback(
+                &device,
+                &device_name,
+                follows_default.then(|| device_name.clone()),
+                renegotiate_rate,
+            )
+        };
+        let started = match voice_processed {
+            Some(Ok(started)) => started,
+            Some(Err(error)) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    device = %device_name,
+                    "voice processing would not start; opening the microphone normally"
+                );
+                open_raw()?
+            }
+            None => open_raw()?,
+        };
 
         Ok(Self {
             _stream: Some(started.stream),
@@ -203,6 +252,7 @@ impl AudioInput {
             device_name,
             uid,
             selection: Selection::InUse,
+            voice_isolation: voice_processing,
             stream_errors: started.stream_errors,
             watch_service_restarts: true,
             restart_generation,

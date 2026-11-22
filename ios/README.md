@@ -1066,6 +1066,13 @@ never at a launch by itself.
   Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
   "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
   language rather than a guess. Custom vocabulary works in any language.
+- **Voice isolation (Settings › Experiments › Voice isolation):** Off by default
+  (`experiments.voiceIsolation`, App Group). While on, the app records in
+  `AVAudioSession`'s `.voiceChat` mode instead of `.measurement`, so Control
+  Center's Mic Mode menu can offer Voice Isolation while Hex records, and
+  in-keyboard dictation asks `getUserMedia` for echo cancellation and noise
+  suppression (automatic gain stays off). Other audio may be lowered while
+  recording. With it off, both record exactly as before.
 - **Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+):**
   Off by default (`experiments.twoLanguageDictation`, App Group). While on, and while
   dictation uses Apple Speech's `SpeechTranscriber`, one recording is read twice: in the

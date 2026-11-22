@@ -84,6 +84,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Keep mic open after dictating no labs.keep_microphone_open + labs.keep_microphone_open_seconds (30/60/180/300/1800, default 60)
 │                                        with Turn off the mic when not dictating on, the microphone stays open for that
 │                                        long after a capture, so the next dictation starts at once
+├── Voice isolation no    labs.voice_isolation            (macOS) dictation's microphone opens through Apple's voice
+│                                        processing, so Control Center's Mic Mode can offer Voice Isolation and background
+│                                        noise is reduced; meetings, captures, the level meter, the local API's host
+│                                        audio, and named opens stay on the raw cpal path; an open stream is replaced only while capture is
+│                                        idle, and a failed voice-processing open falls back to normal capture
+│                                        // checks: voice_isolation_is_its_own_bit_and_off_by_default (labs.rs);
+│                                        // a_voice_isolation_change_reopens_only_while_capture_is_idle (audio/recovering/tests.rs);
+│                                        // not run on a Mac, and no hardware confirmed Control Center offers the mode for Hex
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
 ├── Signature       no    labs.signature + labs.signature_text ("Sent from Hex", every OS)
 │                                        every normal dictation pastes with the signature on its own line at the end, and
@@ -743,6 +751,41 @@ last free bit and the window lives in its own atomic, both written by
 [linux/dictation/silence.rs](../../src/linux/dictation/silence.rs). The Labs
 page goldens were regenerated for the new card. Not yet observed on a real
 Mac, Windows PC, or Linux desktop: no capture has been run with the lab on.
+
+Voice isolation (`voice-isolation`, macOS only): while on, dictation's warm
+microphone opens through Apple's voice processing instead of cpal's raw
+input stream, so Control Center's Mic Mode can offer Voice Isolation for Hex
+and background noise is reduced. `OpenRequest` gains
+`voice_processing`, true only from `RecoveringAudioInput` while
+`labs::voice_isolation()` is on; meetings, Annotate captures, the microphone
+level meter (`open_dictation_input`), `open_named_input`,
+`open_meeting_input`, the local API's host-audio and stream transcription
+(which never opens a microphone), and every other OS stay on the cpal path.
+The Swift bridge (`src/voice_processing.swift`) resolves the cpal device's
+UID to a CoreAudio device
+(`kAudioHardwarePropertyTranslateUIDToDevice`), sets
+`kAudioOutputUnitProperty_CurrentDevice` on the input node's audio unit,
+enables `setVoiceProcessingEnabled(true)`, connects the input through a
+silent main mixer to the output (voice processing is duplex), and taps mono
+float samples with `AVAudioTime.hostTime`; Rust converts the Mach ticks with
+`CaptureInstant::from_mach_ticks` and feeds the same chunk and Hex
+Microphone channels a cpal stream does. If the engine won't build or start
+(an unusable device, no output, a refused format), the open logs and falls
+back to `start_stream_with_fallback`, so dictation still records. A gate
+change is applied by `DictationAudio::reconcile_input` only while nothing
+records and no capture sink holds the microphone; the same device is then
+reopened on the other path rather than kept as unchanged, and a change
+during a capture waits for it to end. Off, every open is byte-for-byte the
+existing cpal path. macOS may lower other audio while the duplex unit runs
+(advanced ducking at the minimum level, as Apple's call apps do), and a
+Bluetooth headset may switch to its call profile. Not verified on hardware:
+no Mac has run this path, and Control Center's Mic Mode has not been seen to
+offer Voice Isolation for Hex. Checks:
+`voice_isolation_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs) and
+`a_voice_isolation_change_reopens_only_while_capture_is_idle` in
+[audio/recovering/tests.rs](../../src/audio/recovering/tests.rs). The macOS
+Labs goldens were regenerated for the new card.
 
 Restore shortcut default (`restore-shortcut-default`, issue 613) graduated:
 Paste last dictation's row always offers Reset when its shortcut isn't the

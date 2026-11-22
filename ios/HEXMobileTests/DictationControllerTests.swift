@@ -3563,6 +3563,44 @@ final class AudioSessionSetupTests: XCTestCase {
         XCTAssertEqual(session.calls.filter { if case .category = $0 { true } else { false } }.count, 2)
     }
 
+    /// Experiments › Voice isolation: on, Hex records in `.voiceChat` mode, whose voice
+    /// processing puts Voice Isolation in Control Center's Mic Mode; off, `.measurement`
+    /// exactly as before. The options stay today's either way, and the category (with the
+    /// mode) is still set only when it changes.
+    func testVoiceIsolationRecordsInVoiceChatModeAndOffKeepsMeasurement() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = VoiceIsolationSettings(defaults: defaults)
+
+        let offSession = FakeAudioSession()
+        try SystemAudioManager(session: offSession, voiceIsolation: settings)
+            .configureAudioSession(recordingFrom: .automatic)
+        XCTAssertEqual(offSession.mode, .measurement, "off keeps today's mode")
+        XCTAssertEqual(
+            offSession.calls.first,
+            .category(.playAndRecord, .measurement, [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker])
+        )
+
+        settings.isEnabled = true
+        let onSession = FakeAudioSession()
+        let audio = SystemAudioManager(session: onSession, voiceIsolation: settings)
+        try audio.configureAudioSession(recordingFrom: .automatic)
+        XCTAssertEqual(onSession.mode, .voiceChat)
+        guard case .category(.playAndRecord, .voiceChat, let options)? = onSession.calls.first else {
+            return XCTFail("the category and mode are set together")
+        }
+        XCTAssertTrue(options.contains(.mixWithOthers), "the experiment keeps today's options")
+        XCTAssertFalse(options.contains(.duckOthers))
+
+        try audio.configureAudioSession(recordingFrom: nil)
+        XCTAssertEqual(
+            onSession.calls.filter { if case .category = $0 { true } else { false } }.count,
+            1,
+            "the category isn't set again while the mode stays the same"
+        )
+    }
+
     func testRecordingMixesWithOtherAppsAudioWhateverTheMicrophone() throws {
         let choices: [MicrophoneChoice?] = [nil] + MicrophoneChoice.allCases.map { $0 }
         for choice in choices {
@@ -3681,6 +3719,32 @@ final class AudioSessionSetupTests: XCTestCase {
             .active(true, []),
             .active(false, .notifyOthersOnDeactivation),
         ])
+    }
+}
+
+final class VoiceIsolationSettingsTests: XCTestCase {
+    /// Off by default, and turned on in the shared App Group so the keyboard reads it too.
+    func testVoiceIsolationIsOffByDefaultAndPersists() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertFalse(VoiceIsolationSettings(defaults: defaults).isEnabled)
+        XCTAssertNil(defaults.object(forKey: "experiments.voiceIsolation"), "reading writes nothing")
+
+        VoiceIsolationSettings(defaults: defaults).isEnabled = true
+        XCTAssertEqual(defaults.object(forKey: "experiments.voiceIsolation") as? Bool, true)
+        XCTAssertTrue(VoiceIsolationSettings(defaults: defaults).isEnabled)
+    }
+
+    func testTheLaunchArgumentTurnsVoiceIsolationOn() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = VoiceIsolationSettings(defaults: defaults)
+        settings.applyLaunchArguments([VoiceIsolationSettings.launchArgument])
+        XCTAssertTrue(settings.isEnabled)
     }
 }
 

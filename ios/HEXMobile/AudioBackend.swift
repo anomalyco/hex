@@ -133,6 +133,7 @@ private final class RecorderCaptureAdapter: NSObject, ActiveAudioCapture, AVAudi
 @MainActor
 final class SystemAudioManager: AudioManaging {
     private let session: any AudioSessionControlling
+    private let voiceIsolation: VoiceIsolationSettings
     private var engine = AVAudioEngine()
     private var tapInstalled = false
     nonisolated(unsafe) private var observers: [NSObjectProtocol] = []
@@ -144,8 +145,12 @@ final class SystemAudioManager: AudioManaging {
         engine.isRunning
     }
 
-    init(session: any AudioSessionControlling = AVAudioSession.sharedInstance()) {
+    init(
+        session: any AudioSessionControlling = AVAudioSession.sharedInstance(),
+        voiceIsolation: VoiceIsolationSettings = VoiceIsolationSettings()
+    ) {
         self.session = session
+        self.voiceIsolation = voiceIsolation
         installNotifications()
     }
 
@@ -264,14 +269,20 @@ final class SystemAudioManager: AudioManaging {
     /// at its end. The hardware keeps its own rate: the recorder writes 16 kHz itself, and the
     /// keepalive taps whatever format the hardware reports.
     ///
+    /// Experiments › Voice isolation is the one exception to `.measurement`: with it on the
+    /// session records in `.voiceChat` mode, whose voice processing makes iOS offer Voice
+    /// Isolation in Control Center's Mic Mode while Hex records. Off, the mode and every option
+    /// are exactly as before, so Hex records as it always has.
+    ///
     /// The category is set only when it changes: on iOS 27 setting it again, even unchanged,
     /// while Hex is in the background asks iOS to interrupt others, which it refuses there
     /// ("can't stop others because it is in the background"), so a warm session's dictation
     /// failed with "Another app is using audio" (cannotInterruptOthers, TestFlight build 129).
     func configureAudioSession(recordingFrom choice: MicrophoneChoice?) throws {
         let options = MicrophoneRoute.categoryOptions(allowingBluetooth: choice?.allowsBluetooth ?? false)
-        if session.category != .playAndRecord || session.mode != .measurement || session.categoryOptions != options {
-            try session.setCategory(.playAndRecord, mode: .measurement, options: options)
+        let mode: AVAudioSession.Mode = voiceIsolation.isEnabled ? .voiceChat : .measurement
+        if session.category != .playAndRecord || session.mode != mode || session.categoryOptions != options {
+            try session.setCategory(.playAndRecord, mode: mode, options: options)
         }
         try session.setActive(true, options: [])
         let inputs = session.microphones

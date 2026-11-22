@@ -460,7 +460,11 @@ final class KeyboardLocalDictation {
                     self.startPending = nil
                     self.otherAudioAtStart = self.otherAudioAtStart || otherAudio
                     // Without a name to ask for, every choice but Bluetooth asks for the iPhone's own.
-                    capture.start(microphone: input?.name, builtInFallback: microphone != .bluetooth)
+                    capture.start(
+                        microphone: input?.name,
+                        builtInFallback: microphone != .bluetooth,
+                        voiceIsolation: VoiceIsolationSettings().isEnabled
+                    )
                 }
             }
         }
@@ -979,12 +983,17 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
 
     private var microphone: String?
     private var builtInFallback = true
+    private var voiceIsolation = false
 
     /// Records from the input labelled `microphone` (`KeyboardLocalDictation.microphone(for:)`),
     /// else, with `builtInFallback`, the iPhone's own microphone, else WebKit's default.
-    func start(microphone: String?, builtInFallback: Bool) {
+    /// With `voiceIsolation` (Experiments › Voice isolation) the page asks WebKit for echo
+    /// cancellation and noise suppression, as iOS's voice processing does; off it asks for
+    /// neither, exactly as before.
+    func start(microphone: String?, builtInFallback: Bool, voiceIsolation: Bool) {
         self.microphone = microphone
         self.builtInFallback = builtInFallback
+        self.voiceIsolation = voiceIsolation
         guard isLoaded else {
             startWhenLoaded = true
             return
@@ -993,7 +1002,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         let label = microphone
             .flatMap { try? JSONEncoder().encode($0) }
             .flatMap { String(data: $0, encoding: .utf8) } ?? "null"
-        webView.evaluateJavaScript("hexStart(\(label), \(builtInFallback))")
+        webView.evaluateJavaScript("hexStart(\(label), \(builtInFallback), \(voiceIsolation))")
     }
 
     func attach(to host: UIView) {
@@ -1030,7 +1039,11 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         onEvent?(.loaded)
         if startWhenLoaded {
             startWhenLoaded = false
-            start(microphone: microphone, builtInFallback: builtInFallback)
+            start(
+                microphone: microphone,
+                builtInFallback: builtInFallback,
+                voiceIsolation: voiceIsolation
+            )
         }
     }
 
@@ -1084,6 +1097,8 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
       if (c) c.close().catch(() => {});
     };
     const base = { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: false };
+    // Experiments › Voice isolation: WebKit's own voice processing, like iOS's voice modes.
+    const isolated = { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: false };
     // The input named `label`, else (with `builtIn`) the iPhone's own. Labels stay empty
     // until this page has had the microphone once.
     async function chosenMicrophone(label, builtIn) {
@@ -1092,20 +1107,21 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
         || (builtIn && inputs.find((d) => /iphone|ipad|built-in/i.test(d.label)));
       return found ? found.deviceId : null;
     }
-    async function hexStart(label, builtIn) {
+    async function hexStart(label, builtIn, voiceIsolation) {
       if (running) return;
       running = true;
       // A hexStop while this start waits (a slide off the Hex key right after touch-down)
       // makes it stale: it releases what it opened instead of going on.
       const start = ++generation;
       const stale = () => start !== generation;
+      const audio = voiceIsolation ? isolated : base;
       let s = null, c = null;
       try {
         const choosing = !!label || builtIn;
         let id = choosing ? await chosenMicrophone(label, builtIn) : null;
         if (stale()) return;
         const listed = Date.now();
-        s = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...base, deviceId: { exact: id } } : base });
+        s = await navigator.mediaDevices.getUserMedia({ audio: id ? { ...audio, deviceId: { exact: id } } : audio });
         if (stale()) return release(s);
         const opened = Date.now();
         if (choosing && !id) {
@@ -1113,7 +1129,7 @@ private final class KeyboardWebCapture: NSObject, WKNavigationDelegate, WKUIDele
           if (stale()) return release(s);
           if (id && s.getAudioTracks()[0].getSettings().deviceId !== id) {
             s.getTracks().forEach((t) => t.stop());
-            s = await navigator.mediaDevices.getUserMedia({ audio: { ...base, deviceId: { exact: id } } });
+            s = await navigator.mediaDevices.getUserMedia({ audio: { ...audio, deviceId: { exact: id } } });
             if (stale()) return release(s);
           }
         }

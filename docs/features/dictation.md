@@ -988,6 +988,27 @@ Whole-clip run starts -> labs::skip_pauses()        // dictate.skip-pauses
 
 Details and checks in [labs.md](labs.md).
 
+### Voice Isolation (Labs, macOS)
+
+With Labs › Voice isolation on (`labs.voice_isolation`, off by default),
+dictation's microphone opens through Apple's voice processing instead of
+cpal's raw input stream, so macOS Control Center's Mic Mode can offer Voice
+Isolation for Hex:
+
+```ts
+Dictation stream opens -> labs::voice_isolation()
+├── Off -> cpal's raw input stream, exactly as before
+├── On -> AVAudioEngine's input node with setVoiceProcessingEnabled(true)
+│   ├── Voice processing starts -> mono float tap carries CaptureInstant::from_mach_ticks
+│   └── It refuses -> log, then the same cpal open as Off
+└── Gate changes while idle -> the stream reopens on the other path;
+    during a capture -> waits until nothing records
+Never: meetings, Annotate captures, the level meter, the local API's host
+audio, open_named_input, or another OS
+```
+
+Details and checks in [labs.md](labs.md).
+
 **Fixed November 3, 2026 (issue 1194):** a clip longer than the model's
 window (Cohere's 35 s) is transcribed in chunks, and a chunk that was only
 silence (a locked dictation left waiting before the words) went to the model

@@ -608,6 +608,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a dictation transcribed as a whole clip hears only the start and end of each long pause, so slow computers paste sooner (Linux and Windows)",
     ),
     key(
+        "labs.voice_isolation",
+        Kind::Bool,
+        "Labs: dictation's microphone opens through Apple's voice processing, so Control Center's Mic Mode can offer Voice Isolation and background noise is reduced; meetings, captures, and the level meter stay on normal capture (macOS)",
+    ),
+    key(
         "labs.screenshots",
         Kind::Bool,
         "Labs: screenshots.hotkey (command+shift+4) drags out an area or, after space, picks a window; the PNG is copied and saved to screenshots.folder (macOS)",

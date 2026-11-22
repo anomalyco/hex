@@ -24,7 +24,7 @@ use rune::{El, Icon, TextEdit, Tx, row, text};
 pub(super) use self::store::{page, search_field, tabs};
 use super::controls::{self, Paint};
 use super::icons::{
-    BOOK, CALENDAR, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MOUSE, PANEL, SPARKLES, TERMINAL,
+    BOOK, CALENDAR, CAMERA, CLOCK, FOLDER, GLOBE, KEYBOARD, MIC, MOUSE, PANEL, SPARKLES, TERMINAL,
     TIMER, WAVE,
 };
 use super::sidebar::{NAV_ROW_GAP, NAV_ROW_HEIGHT, VOICE_FILTER_ICON};
@@ -812,6 +812,11 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::ApiTimestamps, None));
     rows.push(row(Feature::SpeakersOnly, None));
     rows.push(row(Feature::KeepMicrophoneOpen, Some(&TIMER)));
+    // macOS opens dictation's microphone through Apple's voice processing, so
+    // Control Center's Mic Mode can offer Voice Isolation.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(Feature::VoiceIsolation, Some(&MIC)));
+    }
     let ultra_locked = Feature::ParakeetUltra.managed().is_none()
         && Feature::ParakeetUltra.off_refusal(&ui.settings).is_some();
     let ultra = row(Feature::ParakeetUltra, None);
@@ -1037,6 +1042,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::StopPhrase => "lab-stop-phrase",
         Feature::Signature => "lab-signature",
         Feature::HudHeight => "lab-hud-height",
+        Feature::VoiceIsolation => "lab-voice-isolation",
         Feature::HoldThroughKeys => "lab-hold-through-keys",
         Feature::ModesEditor => "lab-modes-editor",
         Feature::DropTranscribe => "lab-drop-transcribe",

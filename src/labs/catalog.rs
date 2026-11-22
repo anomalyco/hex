@@ -91,7 +91,8 @@ impl Feature {
             | Self::AnnotateAgentInstall
             | Self::Signature
             | Self::DictationStyle
-            | Self::HudHeight => Audience::Everyone,
+            | Self::HudHeight
+            | Self::VoiceIsolation => Audience::Everyone,
         }
     }
 
@@ -165,6 +166,7 @@ impl Feature {
             | Self::Signature => 20261121,
             Self::DictationStyle => 20261122,
             Self::HudHeight => 20261122,
+            Self::VoiceIsolation => 20261122,
         }
     }
 
@@ -282,7 +284,8 @@ impl Feature {
             | Self::MoreDictationShortcuts
             | Self::CalendarMenu
             | Self::CalendarSelectAll
-            | Self::PasteLastPicker => MACOS,
+            | Self::PasteLastPicker
+            | Self::VoiceIsolation => MACOS,
             Self::CleanUpWithAppleIntelligence => MACOS,
             Self::NeutralVoice => MACOS,
             Self::CopyOnly => MACOS_WINDOWS,
@@ -414,6 +417,7 @@ impl Feature {
             Self::Signature => "signature",
             Self::DictationStyle => "dictation-style",
             Self::HudHeight => "hud-height",
+            Self::VoiceIsolation => "voice-isolation",
         }
     }
 
@@ -501,6 +505,7 @@ impl Feature {
             Self::Signature => "labs.signature",
             Self::DictationStyle => "labs.dictation_style",
             Self::HudHeight => "labs.hud_height",
+            Self::VoiceIsolation => "labs.voice_isolation",
         }
     }
 

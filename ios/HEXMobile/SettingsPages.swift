@@ -671,6 +671,7 @@ struct ExperimentsSettingsPage: View {
     @State private var hinglish = HinglishSettings().isEnabled
     @State private var greeklish = GreeklishSettings().isEnabled
     @State private var twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
+    @State private var voiceIsolation = VoiceIsolationSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var adaptiveTouch = AdaptiveTouchSettings().isEnabled
@@ -742,6 +743,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: twoLanguageDictation) { _, enabled in
                 TwoLanguageDictationSettings().isEnabled = enabled
+            }
+            .onChange(of: voiceIsolation) { _, enabled in
+                VoiceIsolationSettings().isEnabled = enabled
             }
             .onChange(of: adaptiveTouch) { _, enabled in
                 AdaptiveTouchSettings().isEnabled = enabled
@@ -815,6 +819,15 @@ struct ExperimentsSettingsPage: View {
             title: String(localized: "Two-language dictation"),
             detail: String(localized: "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase."),
             isOn: $twoLanguageDictation
+        )
+
+        SettingsDivider()
+
+        // Off by default: Hex records in measurement mode, as it always has.
+        SettingsToggleRow(
+            title: String(localized: "Voice isolation"),
+            detail: String(localized: "Records through Apple's voice processing so you can pick Voice Isolation in Control Center's Mic Mode. May lower other audio while recording."),
+            isOn: $voiceIsolation
         )
 
         SettingsDivider()
@@ -1046,6 +1059,7 @@ struct ExperimentsSettingsPage: View {
         hinglish = HinglishSettings().isEnabled
         greeklish = GreeklishSettings().isEnabled
         twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
+        voiceIsolation = VoiceIsolationSettings().isEnabled
         appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
         cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         adaptiveTouch = AdaptiveTouchSettings().isEnabled

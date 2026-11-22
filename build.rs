@@ -65,6 +65,10 @@ fn main() {
     // AVFoundation decodes an imported meeting's audio into a 16 kHz WAV.
     compile_swift_bridge("meeting_import", "HEXMeetingImportBridge", &[]);
     println!("cargo:rustc-link-lib=framework=AudioToolbox");
+    // Labs › Voice isolation runs dictation's microphone through Apple's
+    // voice processing, an AVAudioEngine duplex unit on the chosen device.
+    compile_swift_bridge("voice_processing", "HEXVoiceProcessingBridge", &[]);
+    println!("cargo:rustc-link-lib=framework=CoreAudio");
     // FoundationModels exists only on macOS 26 and later. Weak-link it, and
     // drop the object's strong autolink entry, so Hex still launches on older
     // systems and reports Apple Intelligence as unavailable.

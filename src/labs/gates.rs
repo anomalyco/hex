@@ -284,6 +284,14 @@ pub fn hud_bottom_gap() -> f64 {
     }
 }
 
+/// Dictation's microphone opens through Apple's voice processing, so Control
+/// Center's Mic Mode can offer Voice Isolation (macOS; read as each dictation
+/// stream opens, and when an idle one may be replaced).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn voice_isolation() -> bool {
+    on(VOICE_ISOLATION) && Feature::VoiceIsolation.on_this_os()
+}
+
 /// A paste on a Wayland desktop without data-control (GNOME) snapshots and
 /// restores the clipboard through an already running XWayland (Linux; read
 /// as each paste starts).
