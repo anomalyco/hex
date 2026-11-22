@@ -1384,6 +1384,33 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(settings.typingModel(for: .spanish)?.language, "es")
     }
 
+    /// Settings › Experiments › Swipe typing in more languages (off by default): English and
+    /// Spanish swipe as ever, and on every other language with a typing model swipes too.
+    /// German still waits on its own model (Spatial autocorrect and the German experiment),
+    /// and a language without one keeps a drag as a slide to another key.
+    func testSwipeTypingInMoreLanguagesWidensTheLayoutsThatSwipe() {
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertFalse(settings.swipeMoreLanguages, "off by default")
+        XCTAssertTrue(settings.swipesIn(.english))
+        XCTAssertTrue(settings.swipesIn(.spanish))
+        XCTAssertFalse(settings.swipesIn(.french), "off, French keeps a drag as a slide to another key")
+        XCTAssertFalse(settings.swipesIn(.polish))
+        XCTAssertFalse(settings.swipesIn(.german))
+
+        settings.swipeMoreLanguages = true
+        XCTAssertTrue(settings.swipesIn(.english))
+        XCTAssertTrue(settings.swipesIn(.spanish))
+        XCTAssertTrue(settings.swipesIn(.french), "French (France) reads its own model")
+        XCTAssertTrue(settings.swipesIn(.polish))
+        XCTAssertFalse(settings.swipesIn(.italian), "no Italian model, so no swipe")
+        XCTAssertFalse(settings.swipesIn(.frenchCanadian), "no fr-CA model yet")
+        XCTAssertFalse(settings.swipesIn(.german), "German needs its model first")
+        settings.germanSpatialAutocorrect = true
+        XCTAssertTrue(settings.swipesIn(.german), "with Spatial autocorrect and its experiment on")
+        settings.spatialAutocorrect = false
+        XCTAssertFalse(settings.swipesIn(.german), "Spatial autocorrect off turns it off again")
+    }
+
     /// French (France) reads taps with Android's French model (`fr.hextm`): the held-out gate's
     /// critical cases (an accent left out goes back where the plain spelling is no word; "a"
     /// typed right stays) and a slip on AZERTY's bottom row. Canada's and Switzerland's French

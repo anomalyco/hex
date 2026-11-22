@@ -294,6 +294,7 @@ enum SettingsSnapshotFixture {
         keyboard.haptics = true
         keyboard.emoji = true
         keyboard.swipeTyping = true
+        keyboard.swipeMoreLanguages = on
         let emojiUsage = EmojiUsageStore()
         emojiUsage.clear()
         if on {

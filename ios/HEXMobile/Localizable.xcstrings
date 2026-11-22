@@ -3573,6 +3573,26 @@
         }
       }
     },
+    "Swipe typing in more languages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多语言的滑行键入"
+          }
+        }
+      }
+    },
+    "French, Polish and German too" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "也包括法语、波兰语和德语"
+          }
+        }
+      }
+    },
     "ABC under the emoji key" : {
       "localizations" : {
         "zh-Hans" : {

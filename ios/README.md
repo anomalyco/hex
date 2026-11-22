@@ -769,7 +769,7 @@ never at a launch by itself.
     so a rule change renders without streaming again, and applies the caps after counting.
     Off, Deutsch keeps the dictionary engine exactly as before: no decoder, no word list for
     the letter odds or model completions, and no model for a bilingual partner. Swipe typing
-    stays English and Spanish only.
+    reads German only while its model is on, Swipe typing in more languages included.
   - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
     (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
     letter key, on this device, and Spatial autocorrect's decoder and the strip read your
@@ -826,10 +826,13 @@ never at a launch by itself.
   - **Swipe typing (Settings › Keyboard › Swipe typing):** On by default (stored as
     `experiments.swipeTyping` from when it was an experiment off by default: unset or true
     is on, false off, so testers who turned it off keep it off), for the
-    English and Spanish layouts only (every other layout keeps a drag as a slide to
-    another key) and off under VoiceOver. A touch that goes down on a letter and travels
-    more than a key's pitch (width plus gap) is a swipe (`SwipeTyping`): its key no longer
-    types, a light trail (a shape layer, the last 0.45 s of the path) follows the finger,
+    English and Spanish layouts (every other layout keeps a drag as a slide to
+    another key), and with Settings › Experiments › Swipe typing in more languages on
+    (`experiments.swipeMoreLanguages`, off by default) for every language with a typing
+    model too: French (France), Polish, and German while Spatial autocorrect and German
+    spatial autocorrect are on. Off under VoiceOver. A touch that goes down on a letter and
+    travels more than a key's pitch (width plus gap) is a swipe (`SwipeTyping`): its key
+    no longer types, a light trail (a shape layer, the last 0.45 s of the path) follows the finger,
     and the strip shows what the path reads as so far, decoded off the main thread at most
     every 70 ms. Lifting types the best reading after a space, unless the text before
     ends in a space, a line break, an attachment (U+FFFC: a shared link's card in Messages,
@@ -939,11 +942,11 @@ never at a launch by itself.
   - **Experiments:** Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
-    below the switch), German spatial autocorrect, Korean keyboard (두벌식), Dvorak punctuation
-    keys, Comma and period keys, Quick accents, ABC under the emoji key, Keyboard themes (its
-    Theme menu below the switch while it's on), Two-thumb selection, Delete swiped words
-    letter by letter, Hide word suggestions, Join the keyboard when unfolded, and Multilingual
-    model (Parakeet).
+    below the switch), German spatial autocorrect, Swipe typing in more languages, Korean
+    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, ABC
+    under the emoji key, Keyboard themes (its Theme menu below the switch while it's on),
+    Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Join
+    the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`

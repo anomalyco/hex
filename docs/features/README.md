@@ -2908,10 +2908,10 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   `AppleSpeechAssetReservationsTests`); no physical iPhone run checks either deadline.
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
-│   Korean keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents,
-│   ABC under the emoji key, Keyboard themes (Black, White, Navy, Forest, Ember), Two-thumb
-│   selection, Delete swiped words letter by letter, Hide word suggestions, Join the
-│   keyboard when unfolded, Learn each language separately
+│   Swipe typing in more languages, Korean keyboard (두벌식), Dvorak punctuation keys, Comma
+│   and period keys, Quick accents, ABC under the emoji key, Keyboard themes (Black, White,
+│   Navy, Forest, Ember), Two-thumb selection, Delete swiped words letter by letter, Hide
+│   word suggestions, Join the keyboard when unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2989,6 +2989,13 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   normal trackpad lift. Delete and Cut call the host's delete once per Character, so a
 │   host that removes one code point per call (some Devanagari and Thai clusters) can leave
 │   fragments. Off, a second finger is ignored exactly as before.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
+├── Swipe typing in more languages (off by default, `experiments.swipeMoreLanguages`): with
+│   Settings › Keyboard › Swipe typing on, a swipe reads the layout language's own word list
+│   wherever one is bundled, not only English and Spanish: also French (France), Polish, and
+│   German while Spatial autocorrect and German spatial autocorrect are on. A language with
+│   no typing model keeps a drag as a slide to another key. Off, only English and Spanish
+│   swipe, exactly as before.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Delete swiped words letter by letter (off by default, `experiments.swipeDeleteLetterByLetter`):
 │   right after a swipe, delete acts as anywhere else and takes one character, instead of the
