@@ -703,8 +703,9 @@ never at a launch by itself.
   - **Experiments:** Hinglish (Hindi in Latin letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Korean keyboard (두벌식), ABC under the
-    emoji key, Two-thumb selection, Delete swiped words letter by letter, Hide word
-    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
+    emoji key, Keyboard themes (its Theme menu below the switch while it's on), Two-thumb
+    selection, Delete swiped words letter by letter, Hide word suggestions, Join the
+    keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -713,7 +714,11 @@ never at a launch by itself.
   its page's switches to the App Group: off by default, on with `-on`; switches that are
   on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
   `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
-  opens Record typing logs' consent dialog.
+  opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
+  Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`
+  picks the theme the full keyboard draws;
+  the dictation bar keeps the system look, and iOS draws its own strip above or below
+  a third-party keyboard, which a theme can't color.
 - **Dictation language (Settings › Dictation › Dictation language, iOS 26+):** Automatic by
   default: the first of the iPhone's preferred languages (then its region's
   locale, then US English) that Apple Speech transcribes, so a Norwegian iPhone

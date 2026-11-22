@@ -131,3 +131,33 @@ final class KeyboardBackdropView: UIView {
         return path
     }
 }
+
+/// A theme's own opaque panel, in the glass panel's place: the panel behind a third-party
+/// keyboard has 26 pt circular top corners and a 1 pt rim (KeyboardBackdropView has the
+/// measurements), so a theme colours that same rectangle, rounded the same way and inside the
+/// same rim. Filling the keyboard's whole rect instead would draw square corners over the app
+/// beside them: the "panel inside iOS's panel" the material used to be.
+@MainActor
+final class KeyboardThemePanelView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        isAccessibilityElement = false
+        backgroundColor = .clear
+        // No theme draws until one is chosen: Automatic is the keyboard exactly as it was.
+        isHidden = true
+        layer.cornerCurve = .circular
+        // The panel's top corners only; its bottom runs to the keyboard's, where iOS clips it.
+        layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Places the panel in a keyboard of `bounds`: the glass panel's own frame and corner
+    /// radius, 1 pt inside its rim (`KeyboardBackdropView.frame(in:)`, `cornerRadius(in:)`).
+    func place(in bounds: CGRect) {
+        frame = KeyboardBackdropView.frame(in: bounds)
+        layer.cornerRadius = KeyboardBackdropView.cornerRadius(in: bounds)
+    }
+}

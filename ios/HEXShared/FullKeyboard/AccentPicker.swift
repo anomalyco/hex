@@ -386,7 +386,9 @@ final class AccentCalloutView: UIView {
         context.setFillColor(palette.bubbleFill.cgColor)
         context.fillPath()
         context.restoreGState()
-        if palette.isDark {
+        // The system cutout's lightening gradient only makes sense on the system look;
+        // a theme paints its own flat bubble.
+        if palette.theme == .automatic, palette.isDark {
             // Apple's dark callout lightens toward its bottom, as its key pop-up does.
             context.saveGState()
             context.addPath(pill.cgPath)
