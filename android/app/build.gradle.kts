@@ -142,8 +142,8 @@ val verifyTypingModels by tasks.registering {
 }
 tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
 
-// The keyboard's Rust core (crates/keyboard), debug builds only for now: libhex_keyboard.so
-// for the APK and a host build for the JVM unit tests. Release builds don't include it.
+// The keyboard's Rust core (crates/keyboard): libhex_keyboard.so for every variant's APK and a
+// host build for the JVM unit tests.
 // rustup's cargo, found as iOS's build-keyboard-core.sh finds it (crates/keyboard/tools/
 // rustup-env.sh: on PATH, in CARGO_HOME or ~/.cargo, or Homebrew's rustup), run from the crate
 // so its pinned toolchain (rust-toolchain.toml) is used; Cargo tracks the sources, so the tasks
@@ -187,11 +187,6 @@ fun CargoBuild.cargo(vararg tools: String, arguments: (File) -> List<String>) {
         args("--manifest-path", keyboardCrate.resolve("Cargo.toml").path, "-p", "hex-keyboard-ffi", "--features", "jni")
     }
 }
-// Its output directory is the debug variant's (addGeneratedSourceDirectory below).
-val buildKeyboardCore by tasks.registering(CargoBuild::class) {
-    environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
-    cargo("cargo-ndk") { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
-}
 val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
     outputDirectory.set(layout.buildDirectory.dir("rustHost"))
     cargo {
@@ -199,8 +194,13 @@ val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
         listOf("build", "--release")
     }
 }
-androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
-    variant.sources.jniLibs?.addGeneratedSourceDirectory(buildKeyboardCore, CargoBuild::outputDirectory)
+// One per variant, its output directory the variant's (addGeneratedSourceDirectory); always optimised.
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    val build = tasks.register<CargoBuild>("build${variant.name.replaceFirstChar(Char::uppercase)}KeyboardCore") {
+        environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
+        cargo("cargo-ndk") { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
+    }
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(build, CargoBuild::outputDirectory)
 }
 tasks.withType<Test>().matching { it.name == "testDebugUnitTest" }.configureEach {
     dependsOn(buildHostKeyboardCore)

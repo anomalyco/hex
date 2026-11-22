@@ -1,10 +1,9 @@
 package ly.anoma.hex.typing
 
 /**
- * The keyboard's Rust core (`crates/keyboard`, `libhex_keyboard.so`), in debug builds only
- * while it's proven against the Kotlin it will replace; nothing calls it yet. Handles are
- * `Long`s, 0 for none; each `*Open*`/`*New` is released by its `*Free`. Any thread may use
- * an open handle.
+ * The keyboard's Rust core (`crates/keyboard`, `libhex_keyboard.so`). Handles are `Long`s, 0 for
+ * none; each `*Open*`/`*New` is released by its `*Free`. Any thread may use an open handle.
+ * `proguard-rules.pro` keeps its names and what the native code makes.
  */
 object KeyboardCore {
     init {
