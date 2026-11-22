@@ -2891,9 +2891,10 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 └── Not yet: custom caption
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
-│   Hinglish, Adaptive touch, German spatial autocorrect, Korean keyboard (두벌식), ABC
-│   under the emoji key, Two-thumb selection, Delete swiped words letter by letter, Hide
-│   word suggestions, Join the keyboard when unfolded, Learn each language separately
+│   Hinglish, Two-language dictation, Adaptive touch, German spatial autocorrect,
+│   Korean keyboard (두벌식), ABC under the emoji key, Two-thumb selection, Delete
+│   swiped words letter by letter, Hide word suggestions, Join the keyboard when
+│   unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -3001,6 +3002,27 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   what Hex learned erases the shared list and every language's; off, everything is the
 │   one shared list and learning it was before. Unit tests only: no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
+├── Two-language dictation (off by default, `experiments.twoLanguageDictation`, iOS 26+):
+│   while Apple Speech dictates with `SpeechTranscriber`, one recording is read twice, in
+│   the language dictation resolved and in the first other keyboard language
+│   (`LanguageSettings.keyboardLanguages`, mapped with `dictationLanguage(for:)`) whose
+│   `SpeechTranscriber` model is installed and not set aside as failing; nothing downloads
+│   for it. Each reading keeps its timed runs (characters, timing, transcription
+│   confidence), and `TwoLanguageMerger` cuts both at the earlier of two word ends within
+│   150 ms, scores a reading by its confidence-weighted seconds clipped to each segment, and
+│   chooses a reading per segment with a 0.35 s cost per language change (ties to the
+│   primary). A seam word is dropped only when its span overlaps the last kept word's by half
+│   the shorter one. A switch keeps the runs' own characters and adds a space only when
+│   neither side has whitespace; when the second language wins nothing, the primary's
+│   original text is used unchanged, so CJK and Thai spacing, punctuation and untimed runs
+│   stay as Apple gave them. The text runs through the same pipeline with the primary
+│   language. No installed second language, a failed second analyzer, or no timed words in
+│   either reading dictates as before; a primary reading that finished silent reports empty
+│   so the caller throws its no-speech error without transcribing again; off, the path is
+│   unchanged.
+│   The app, keyboard, widgets, and tests built on a macOS 26 GitHub runner with 33 tests
+│   passing (run 45005571072, the latest observed verification); nothing is measured on an
+│   iPhone.
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after
 │   formatting

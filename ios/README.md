@@ -700,11 +700,11 @@ never at a launch by itself.
   - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
     learned below the switch), and under **Advanced**, Record typing logs (off
     by default) with its Typing logs viewer while it's on.
-  - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
-    Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
-    German spatial autocorrect, Korean keyboard (두벌식), ABC under the emoji key, Two-thumb
-    selection, Delete swiped words letter by letter, Hide word suggestions, Join the keyboard
-    when unfolded, and Multilingual model (Parakeet).
+  - **Experiments:** Hinglish (Hindi in Latin letters), Two-language dictation,
+    Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
+    below the switch), German spatial autocorrect, Korean keyboard (두벌식), ABC under the
+    emoji key, Two-thumb selection, Delete swiped words letter by letter, Hide word
+    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -781,6 +781,40 @@ never at a launch by itself.
   Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
   "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
   language rather than a guess. Custom vocabulary works in any language.
+- **Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+):**
+  Off by default (`experiments.twoLanguageDictation`, App Group). While on, and while
+  dictation uses Apple Speech's `SpeechTranscriber`, one recording is read twice: in the
+  language dictation resolved (unchanged) and in the first other language in Settings ›
+  Keyboard › Languages whose base language differs from it, mapped by the same rule the
+  keyboard-follow language uses (`LanguageSettings.dictationLanguage(for:)`). Both must
+  resolve to `SpeechTranscriber`, and the second language's model must already be installed
+  (`AssetInventory.status`): dictation never downloads for it, and a language whose
+  `SpeechTranscriber` model was set aside as failing is skipped. Two `SpeechAnalyzer`s
+  read the same WAV, each with its own `AVAudioFile`, prepared with
+  `prepareToAnalyze(in: nil)` before starting, and a `SpeechTranscriber(locale:`,
+  `transcriptionOptions: [], reportingOptions: [],`
+  `attributeOptions: [.audioTimeRange, .transcriptionConfidence])`; both get custom
+  vocabulary's contextual strings. Each final result's timed runs give the merge its words
+  (the run's own characters, leading whitespace included, start, end, confidence), and a
+  run without letters or without a time range keeps its characters on the word before it.
+  `TwoLanguageMerger` cuts both readings at the earlier of two word ends within 150 ms,
+  scores each reading in a segment by its confidence-weighted seconds clipped to the
+  segment, and picks a reading per segment with a two-state Viterbi that charges 0.35 s of
+  confident audio for each language change, ties going to the primary. A word the new
+  reading starts with is dropped only when it repeats the last word kept, case and
+  punctuation aside, and the two spans overlap by at least half of the shorter one. The
+  winning runs are joined with their own characters, inserting one space at a language
+  change only when neither side has whitespace there. Whenever the second language wins no
+  piece, the primary's original text is used unchanged, so Chinese, Thai, punctuation and
+  untimed runs are exactly as Apple gave them. The text then runs through the same pipeline
+  with the primary language. No second installed language, a second analyzer that throws,
+  or no timed words in either reading dictates exactly as before; a primary reading that
+  finished without hearing anything reports empty so its caller throws its own no-speech
+  error without transcribing again; with the switch off no two-language work starts.
+  `TwoLanguageMergeTests` cover the merge and the run extraction. The app, keyboard,
+  widgets, and tests built on a macOS 26 GitHub runner with 33 tests passing (run
+  45005571072, the latest observed verification); nothing here has been measured on an
+  iPhone, and the simulator can't transcribe.
 - **Switching the dictation language in the keyboard (iOS 26+, Full Access):**
   the dictation bar shows the language beside the style ("Norsk ⌄") and opens a
   tray of chips; the full keyboard's Hex key menu has a Language row with its

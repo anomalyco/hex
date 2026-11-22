@@ -1079,6 +1079,22 @@ private enum KeyboardSpeech {
         }
         let speech = AppleSpeechModule(language)
 
+        // Experiments › Two-language dictation: the same recording read by a second installed
+        // language too, merged word by word; the pipeline still runs as the primary language.
+        let twoLanguage = TwoLanguageDictationSettings()
+        if twoLanguage.isEnabled,
+           let pair = await AppleSpeechTwoLanguage.usablePair(for: language),
+           let merged = await AppleSpeechTwoLanguage.transcribe(
+               url,
+               pair: pair,
+               vocabulary: hints,
+               lingeringModels: false
+           ) {
+            guard !merged.text.isEmpty else { throw Failure.empty }
+            log.write("two-language \(pair.secondary.identifier(.bcp47)) won=\(merged.winner.rawValue) \(KeyboardProbeLog.memory())")
+            return (merged.text, language)
+        }
+
         let analyzer = SpeechAnalyzer(
             modules: [speech.module],
             options: SpeechAnalyzer.Options(priority: .userInitiated, modelRetention: .whileInUse)

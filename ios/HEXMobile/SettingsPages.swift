@@ -597,6 +597,7 @@ struct PrivacySettingsPage: View {
 struct ExperimentsSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hinglish = HinglishSettings().isEnabled
+    @State private var twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var adaptiveTouch = AdaptiveTouchSettings().isEnabled
@@ -620,6 +621,15 @@ struct ExperimentsSettingsPage: View {
                     title: String(localized: "Hinglish (Hindi in Latin letters)"),
                     detail: String(localized: "Adds Hinglish to dictation languages"),
                     isOn: $hinglish
+                )
+
+                SettingsDivider()
+
+                // Off by default: dictation keeps the one language it resolved.
+                SettingsToggleRow(
+                    title: String(localized: "Two-language dictation"),
+                    detail: String(localized: "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase."),
+                    isOn: $twoLanguageDictation
                 )
 
                 SettingsDivider()
@@ -773,6 +783,9 @@ struct ExperimentsSettingsPage: View {
         .onChange(of: hinglish) { _, enabled in
             HinglishSettings().isEnabled = enabled
         }
+        .onChange(of: twoLanguageDictation) { _, enabled in
+            TwoLanguageDictationSettings().isEnabled = enabled
+        }
         .onChange(of: adaptiveTouch) { _, enabled in
             AdaptiveTouchSettings().isEnabled = enabled
             refreshAdaptiveTouchStatus()
@@ -809,6 +822,7 @@ struct ExperimentsSettingsPage: View {
         }
         .onAppear {
             hinglish = HinglishSettings().isEnabled
+            twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
             appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
             cleanupAvailability = AppleIntelligenceCleanupAvailability.current
             adaptiveTouch = AdaptiveTouchSettings().isEnabled
