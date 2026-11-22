@@ -153,6 +153,60 @@ final class VocabularySpellingTests: XCTestCase {
     }
 }
 
+/// Engines write a name's commonest spelling (TestFlight build 130: "I added the name 'Stacey'
+/// but it keeps coming back and says Stacy"). The heard words are what Apple Speech and
+/// Parakeet V2 wrote on the Mac Studio for these names.
+final class SoundAlikeSpellingTests: XCTestCase {
+    private func spell(_ terms: [String], _ text: String, language: String = "en-US") -> String {
+        SoundAlikeSpelling.apply(terms, to: text, language: language)
+    }
+
+    func testWritesTheListedSpellingOfANameHeardAnotherWay() {
+        let names = ["Stacey", "Jon", "Katherine", "Sara", "Kris", "Aimee", "Bryan", "Rachael", "Meghan", "Phillip"]
+        XCTAssertEqual(spell(names, "Can you send the invoice to Stacy tomorrow?"), "Can you send the invoice to Stacey tomorrow?")
+        XCTAssertEqual(spell(names, "Stacy and John are coming over tonight."), "Stacey and Jon are coming over tonight.")
+        XCTAssertEqual(spell(names, "We're going to Catherine's party."), "We're going to Katherine's party.")
+        XCTAssertEqual(spell(names, "I borrowed Sarah’s car."), "I borrowed Sara’s car.")
+        XCTAssertEqual(spell(names, "Chris sent over the designs."), "Kris sent over the designs.")
+        XCTAssertEqual(spell(names, "Thanks, Amy, that helped."), "Thanks, Aimee, that helped.")
+        XCTAssertEqual(spell(names, "Brian booked it with Rachel and Megan."), "Bryan booked it with Rachael and Meghan.")
+        XCTAssertEqual(spell(names, "Philip is late."), "Phillip is late.")
+    }
+
+    /// Sounding alike without the same folded spelling counts only inside a sentence, where a
+    /// capital means a name, and not right after another capital (a title).
+    func testSoundsAlikeOnlyInsideASentence() {
+        XCTAssertEqual(spell(["Geoff"], "Let's invite Jeff to the dinner."), "Let's invite Geoff to the dinner.")
+        XCTAssertEqual(spell(["Vercel"], "We deploy the site on Versal."), "We deploy the site on Vercel.")
+        XCTAssertEqual(spell(["Geoff"], "Jeff fixed the printer."), "Jeff fixed the printer.")
+        XCTAssertEqual(spell(["Geoff"], "Done. Jeff fixed it."), "Done. Jeff fixed it.")
+        XCTAssertEqual(spell(["Studio"], "We read A Study in Scarlet."), "We read A Study in Scarlet.")
+    }
+
+    func testLeavesOtherWordsAlone() {
+        XCTAssertEqual(spell(["Marc"], "I mark the spot."), "I mark the spot.", "lowercase words are never names")
+        XCTAssertEqual(spell(["Jon"], "Join us. Jen and Jan came."), "Join us. Jen and Jan came.")
+        XCTAssertEqual(spell(["Aimee"], "Aim higher. Am I late?"), "Aim higher. Am I late?")
+        XCTAssertEqual(spell(["Rune"], "Run the tests."), "Run the tests.")
+        XCTAssertEqual(spell(["Sara", "Sarah"], "Sarah and Sara met."), "Sarah and Sara met.", "both are listed")
+        XCTAssertEqual(spell(["kubectl", "Al"], "Ask Cubectl and Al."), "Ask Cubectl and Al.", "lowercase and short terms")
+        XCTAssertEqual(spell(["Stacey"], "STACY said hi."), "STACY said hi.", "all capitals")
+        XCTAssertEqual(spell(["Stacey"], "Stacy hat angerufen.", language: "de-DE"), "Stacy hat angerufen.", "English only")
+    }
+
+    func testTwoTermsThatFitEquallyLeaveTheWordAsHeard() {
+        XCTAssertEqual(spell(["Stacey", "Stacie"], "Ask Stacy."), "Ask Stacy.")
+    }
+
+    @MainActor
+    func testDictationPipelineSpellsASoundAlikeName() async {
+        let pipeline = DictationPipeline(style: .verbatim, language: "en-US", vocabulary: ["Stacey"])
+        let stages = await pipeline.run("I had lunch with stacy and Stacy.")
+        XCTAssertEqual(stages.spelled, "I had lunch with stacy and Stacey.")
+        XCTAssertEqual(stages.formatted, "I had lunch with stacy and Stacey.")
+    }
+}
+
 final class CustomVocabularySettingsTests: XCTestCase {
     func testIsOffByDefaultAndPersistsTerms() {
         let suite = "CustomVocabularySettingsTests-\(UUID().uuidString)"

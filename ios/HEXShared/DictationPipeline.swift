@@ -201,7 +201,7 @@ nonisolated struct DictationPipeline: Sendable {
             : romanizesGreek ? GreeklishRomanizer.romanize(spoken)
             : spoken
         let fixed = DictationCorrections.apply(corrections, to: translatesLatin ? spoken : heard)
-        let spelled = VocabularySpelling.apply(vocabulary, to: fixed)
+        let spelled = SoundAlikeSpelling.apply(vocabulary, to: VocabularySpelling.apply(vocabulary, to: fixed), language: language)
         let tagged = await CleanupTagger.cleanIfEnabled(
             spelled,
             style: style,
