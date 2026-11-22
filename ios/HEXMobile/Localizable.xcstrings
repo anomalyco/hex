@@ -4210,6 +4210,66 @@
           }
         }
       }
+    },
+    "Speech model in keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘内语音模型"
+          }
+        }
+      }
+    },
+    "%@ download. Until it's ready, the keyboard uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需下载 %@。准备好之前，键盘使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "Getting ready in the keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在键盘中准备"
+          }
+        }
+      }
+    },
+    "Ready in the keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已可在键盘中使用"
+          }
+        }
+      }
+    },
+    "The keyboard can't use it right now, so it uses Apple's speech recognition." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘暂时无法使用它，因此使用 Apple 的语音识别。"
+          }
+        }
+      }
+    },
+    "Downloaded. The keyboard gets it ready the next time it opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已下载。键盘下次打开时会准备好它。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

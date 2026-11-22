@@ -16,6 +16,7 @@ struct HEXMobileApp: App {
         GreeklishSettings().applyLaunchArguments()
         TwoLanguageDictationSettings().applyLaunchArguments()
         MultilingualParakeetSettings().applyLaunchArguments()
+        KeyboardParakeetSettings().applyLaunchArguments()
         SettingsSnapshotFixture.applyDefaults()
     }
 
@@ -66,6 +67,8 @@ struct HEXMobileApp: App {
                     } else if phase == .active {
                         dictation.endStaleLiveActivities()
                         dictation.appBecameActive()
+                        // Experiments › Speech model in keyboard: picks its download up.
+                        dictation.startKeyboardParakeetDownloadIfWanted()
                     }
                 }
             }
