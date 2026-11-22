@@ -306,10 +306,12 @@ struct KeyboardSettingsPage: View {
     @State private var numberRow = FullKeyboardSettings().numberRow
     @State private var autocorrect = FullKeyboardSettings().autocorrect
     @State private var spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
+    @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
     @State private var suggestSwearWords = FullKeyboardSettings().suggestSwearWords
     @State private var keyPopups = FullKeyboardSettings().keyPopups
     @State private var haptics = FullKeyboardSettings().haptics
     @State private var swipeTyping = FullKeyboardSettings().swipeTyping
+    @State private var swipeMoreLanguages = FullKeyboardSettings().swipeMoreLanguages
     @State private var emoji = FullKeyboardSettings().emoji
     @State private var emojiHistoryEmpty = EmojiUsageStore().isEmpty
     @State private var hapticStrength = FullKeyboardSettings().hapticStrength
@@ -320,6 +322,17 @@ struct KeyboardSettingsPage: View {
     /// the row needs it (as Swipe typing says it needs the full keyboard).
     private var fullAccessNeed: String? {
         fullAccessOn ? nil : String(localized: "Needs Full Access")
+    }
+
+    /// Swipe typing's detail: the layouts that swipe. Settings › Experiments › Swipe typing in
+    /// more languages adds French and Polish, and German while its model is on (German spatial
+    /// autocorrect and Spatial autocorrect).
+    private var swipeLanguages: String {
+        guard swipeMoreLanguages else { return String(localized: "English and Spanish only") }
+        guard spatialAutocorrect, germanSpatialAutocorrect else {
+            return String(localized: "English, Spanish, French and Polish")
+        }
+        return String(localized: "English, Spanish, French, Polish and German")
     }
 
     var body: some View {
@@ -475,9 +488,7 @@ struct KeyboardSettingsPage: View {
             SettingsCard {
                 SettingsToggleRow(
                     title: String(localized: "Swipe typing"),
-                    detail: fullKeyboard
-                        ? String(localized: "English and Spanish only")
-                        : String(localized: "Needs the full keyboard"),
+                    detail: fullKeyboard ? swipeLanguages : String(localized: "Needs the full keyboard"),
                     isOn: $swipeTyping
                 )
 
@@ -543,10 +554,12 @@ struct KeyboardSettingsPage: View {
             numberRow = FullKeyboardSettings().numberRow
             autocorrect = FullKeyboardSettings().autocorrect
             spatialAutocorrect = FullKeyboardSettings().spatialAutocorrect
+            germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
             suggestSwearWords = FullKeyboardSettings().suggestSwearWords
             keyPopups = FullKeyboardSettings().keyPopups
             haptics = FullKeyboardSettings().haptics
             swipeTyping = FullKeyboardSettings().swipeTyping
+            swipeMoreLanguages = FullKeyboardSettings().swipeMoreLanguages
             emoji = FullKeyboardSettings().emoji
             emojiHistoryEmpty = EmojiUsageStore().isEmpty
             hapticStrength = FullKeyboardSettings().hapticStrength
@@ -664,6 +677,7 @@ struct ExperimentsSettingsPage: View {
     @State private var adaptiveTouchStatus = AdaptiveTouchStatus.sessionOnly
     @State private var confirmingTouchReset = false
     @State private var germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+    @State private var swipeMoreLanguages = FullKeyboardSettings().swipeMoreLanguages
     @State private var koreanKeyboard = FullKeyboardSettings().koreanKeyboard
     @State private var dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
     @State private var commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
@@ -738,6 +752,9 @@ struct ExperimentsSettingsPage: View {
         toggles
             .onChange(of: germanSpatialAutocorrect) { _, enabled in
                 FullKeyboardSettings().germanSpatialAutocorrect = enabled
+            }
+            .onChange(of: swipeMoreLanguages) { _, enabled in
+                FullKeyboardSettings().swipeMoreLanguages = enabled
             }
             .onChange(of: koreanKeyboard) { _, enabled in
                 FullKeyboardSettings().koreanKeyboard = enabled
@@ -851,6 +868,16 @@ struct ExperimentsSettingsPage: View {
             title: String(localized: "German spatial autocorrect"),
             detail: String(localized: "Needs Spatial autocorrect"),
             isOn: $germanSpatialAutocorrect
+        )
+
+        SettingsDivider()
+
+        // Off by default: only English and Spanish swipe, and any other language's drag stays
+        // a slide to another key.
+        SettingsToggleRow(
+            title: String(localized: "Swipe typing in more languages"),
+            detail: String(localized: "French and Polish, and German with German spatial autocorrect"),
+            isOn: $swipeMoreLanguages
         )
 
         SettingsDivider()
@@ -1011,6 +1038,7 @@ struct ExperimentsSettingsPage: View {
         adaptiveTouch = AdaptiveTouchSettings().isEnabled
         refreshAdaptiveTouchStatus()
         germanSpatialAutocorrect = FullKeyboardSettings().germanSpatialAutocorrect
+        swipeMoreLanguages = FullKeyboardSettings().swipeMoreLanguages
         koreanKeyboard = FullKeyboardSettings().koreanKeyboard
         dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
         commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys

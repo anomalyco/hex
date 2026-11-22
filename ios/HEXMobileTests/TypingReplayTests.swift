@@ -548,7 +548,7 @@ final class TypingReplayTests: XCTestCase {
         engine.autocorrect.decoder = settings.spatialAutocorrect ? TypingDecoder(model: words) : nil
         engine.configureForField()
         let plane = KeyboardKeyPlaneView(engine: engine)
-        if settings.swipeTyping, engine.language.supportsSwipeTyping {
+        if settings.swipeTyping, settings.swipesIn(engine.language) {
             plane.swipe = SwipeTyping(engine: engine, model: words)
             // SwipeTyping's clock runs from the recorded time plus the real time since the
             // last sample: preview throttling sees the recorded gaps, and its own

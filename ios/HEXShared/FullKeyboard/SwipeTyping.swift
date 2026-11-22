@@ -3,8 +3,9 @@ import UIKit
 
 /// Settings › Keyboard › Swipe typing: slide from a letter through the letters of a word and lift,
 /// and the word goes in, as with Apple's QuickPath and Gboard's glide typing. English and
-/// Spanish layouts only (the languages with a typing model); every other layout keeps a drag
-/// as a slide to another key.
+/// Spanish, and with Settings › Experiments › Swipe typing in more languages on every layout
+/// with a typing model (French (France), Polish, and German while its model is chosen); every
+/// other layout keeps a drag as a slide to another key.
 ///
 /// A touch on a letter key becomes a swipe once it travels more than a key's pitch from
 /// where it went down: the key no longer types, a light trail follows the finger, and the
@@ -283,8 +284,9 @@ final class SwipeTyping {
 }
 
 extension KeyboardLanguage {
-    /// Swipe typing reads only the layouts with a typing model; elsewhere a drag stays a
-    /// slide to another key.
+    /// Swipe typing's default layouts, English and Spanish. Another language swipes too with a
+    /// typing model when Settings › Experiments › Swipe typing in more languages is on
+    /// (`FullKeyboardSettings.swipesIn`); elsewhere a drag stays a slide to another key.
     var supportsSwipeTyping: Bool { self == .english || self == .spanish }
 }
 

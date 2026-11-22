@@ -3381,6 +3381,69 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.swipe?.model.language, "es")
     }
 
+    /// Settings › Experiments › Swipe typing in more languages (off by default): on, a swipe
+    /// works in every language with a typing model, not only English and Spanish; off, French
+    /// keeps a drag as a slide to another key, as before.
+    func testSwipeTypingInMoreLanguagesFollowsTheLanguageSwitch() {
+        let settings = FullKeyboardSettings()
+        let wasMore = settings.swipeMoreLanguages
+        defer { settings.swipeMoreLanguages = wasMore }
+        let languages = LanguageSettings(defaults: defaults)
+        languages.keyboardLanguages = [.english, .french, .polish]
+
+        settings.swipeMoreLanguages = false
+        let off = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        off.swipeOverride = true
+        off.languageOverride = .french
+        XCTAssertNil(off.plane.swipe, "off, French keeps a drag as a slide to another key")
+
+        settings.swipeMoreLanguages = true
+        let on = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        on.languageSettings = languages
+        on.swipeOverride = true
+        XCTAssertEqual(on.engine.language, .english)
+        XCTAssertEqual(on.plane.swipe?.model.language, "en")
+        on.switchLanguage(by: 1)
+        XCTAssertEqual(on.engine.language, .french)
+        XCTAssertEqual(on.plane.swipe?.model.language, "fr")
+        on.switchLanguage(by: 1)
+        XCTAssertEqual(on.engine.language, .polish)
+        XCTAssertEqual(on.plane.swipe?.model.language, "pl")
+    }
+
+    /// German's swipe still waits on its own model: Swipe typing in more languages adds it only
+    /// with Spatial autocorrect and German spatial autocorrect on, as Spatial autocorrect does.
+    func testSwipeTypingInMoreLanguagesKeepsGermansModelGate() {
+        let settings = FullKeyboardSettings()
+        let wasMore = settings.swipeMoreLanguages
+        let wasSpatial = settings.spatialAutocorrect
+        let wasGerman = settings.germanSpatialAutocorrect
+        defer {
+            settings.swipeMoreLanguages = wasMore
+            settings.spatialAutocorrect = wasSpatial
+            settings.germanSpatialAutocorrect = wasGerman
+        }
+        settings.swipeMoreLanguages = true
+        settings.spatialAutocorrect = true
+        settings.germanSpatialAutocorrect = false
+        let withoutGerman = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        withoutGerman.swipeOverride = true
+        withoutGerman.languageOverride = .german
+        XCTAssertNil(withoutGerman.plane.swipe, "the German experiment is off")
+
+        settings.germanSpatialAutocorrect = true
+        let german = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        german.swipeOverride = true
+        german.languageOverride = .german
+        XCTAssertEqual(german.plane.swipe?.model.language, "de")
+
+        settings.spatialAutocorrect = false
+        let withoutSpatial = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        withoutSpatial.swipeOverride = true
+        withoutSpatial.languageOverride = .german
+        XCTAssertNil(withoutSpatial.plane.swipe, "Spatial autocorrect is off")
+    }
+
     /// The input mode's language (`UIInputViewController.primaryLanguage`), which Apple
     /// documents as superseding the Info.plist's en-US: the keyboard reports the language
     /// resolved before the controller attaches, and each space-bar switch.

@@ -768,8 +768,8 @@ never at a launch by itself.
     counts under `scripts/.build-german-capitals`, keeps their merged per-token counts there
     so a rule change renders without streaming again, and applies the caps after counting.
     Off, Deutsch keeps the dictionary engine exactly as before: no decoder, no word list for
-    the letter odds or model completions, and no model for a bilingual partner. Swipe typing
-    stays English and Spanish only.
+    the letter odds or model completions, and no model for a bilingual partner. Off, swipe
+    typing never reads German, even with Swipe typing in more languages on.
   - **Adaptive touch (Settings › Experiments › Adaptive touch):** Off by default
     (`experiments.adaptiveTouch`). The keyboard learns where you land on each physical
     letter key, on this device, and Spatial autocorrect's decoder and the strip read your
@@ -826,10 +826,13 @@ never at a launch by itself.
   - **Swipe typing (Settings › Keyboard › Swipe typing):** On by default (stored as
     `experiments.swipeTyping` from when it was an experiment off by default: unset or true
     is on, false off, so testers who turned it off keep it off), for the
-    English and Spanish layouts only (every other layout keeps a drag as a slide to
-    another key) and off under VoiceOver. A touch that goes down on a letter and travels
-    more than a key's pitch (width plus gap) is a swipe (`SwipeTyping`): its key no longer
-    types, a light trail (a shape layer, the last 0.45 s of the path) follows the finger,
+    English and Spanish layouts (every other layout keeps a drag as a slide to
+    another key), and with Settings › Experiments › Swipe typing in more languages on
+    (`experiments.swipeMoreLanguages`, off by default) for every language with a typing
+    model too: French (France), Polish, and German while Spatial autocorrect and German
+    spatial autocorrect are on. Off under VoiceOver. A touch that goes down on a letter and
+    travels more than a key's pitch (width plus gap) is a swipe (`SwipeTyping`): its key
+    no longer types, a light trail (a shape layer, the last 0.45 s of the path) follows the finger,
     and the strip shows what the path reads as so far, decoded off the main thread at most
     every 70 ms. Lifting types the best reading after a space, unless the text before
     ends in a space, a line break, an attachment (U+FFFC: a shared link's card in Messages,
@@ -886,6 +889,16 @@ never at a launch by itself.
     2026-11-20-hex-swipe-typing, results/2026-11-21). Record typing logs keeps a swipe's
     touch moves and a `swipe_end` line (points, decode time, readings) for fitting it to
     real fingers.
+    Known gaps in these languages:
+    - A word with ß (German) or œ/æ (French) has no key, so a swipe drops it from its
+      candidates ("groß", "Straße", "cœur").
+    - A swiped German noun goes in lowercase: the noun capitalisation applies to tapped
+      words only.
+    - French and Polish have no language-specific never-suggest rows (only the shared
+      ones), so a swipe's top reading isn't filtered for language-specific offensive
+      words there.
+    - The decoder's parameters are tuned on English and Spanish, so French, Polish and
+      German accuracy is unmeasured.
   - **Record typing logs (Settings › Privacy › Advanced › Record typing logs):** Off by default,
     and apart from Learn how I type. A one-time migration (`migrations.typingLogsOff.v1` in the
     App Group, `TypingLogSettings.turnOffOnce`, run by the app and the keyboard at launch)
@@ -939,11 +952,11 @@ never at a launch by itself.
   - **Experiments:** Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
-    below the switch), German spatial autocorrect, Korean keyboard (두벌식), Dvorak punctuation
-    keys, Comma and period keys, Quick accents, ABC under the emoji key, Keyboard themes (its
-    Theme menu below the switch while it's on), Two-thumb selection, Delete swiped words
-    letter by letter, Hide word suggestions, Join the keyboard when unfolded, and Multilingual
-    model (Parakeet).
+    below the switch), German spatial autocorrect, Swipe typing in more languages, Korean
+    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, ABC
+    under the emoji key, Keyboard themes (its Theme menu below the switch while it's on),
+    Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Join
+    the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`

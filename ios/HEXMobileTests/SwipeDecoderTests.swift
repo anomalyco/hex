@@ -2,10 +2,10 @@ import CoreGraphics
 import XCTest
 @testable import HEX
 
-/// Swipe typing's decoder (`SwipeDecoder`) on the bundled English and Spanish models, with
-/// swipes drawn through Hex's own key geometry. It has its own file because the decoder reads
-/// a path without the keys' engine and its fixtures are paths; how the keys type a swipe is
-/// in FullKeyboardEngineTests.
+/// Swipe typing's decoder (`SwipeDecoder`) on the bundled English, Spanish, French, German
+/// and Polish models, with swipes drawn through Hex's own key geometry. It has its own file
+/// because the decoder reads a path without the keys' engine and its fixtures are paths; how
+/// the keys type a swipe is in FullKeyboardEngineTests.
 @MainActor
 final class SwipeDecoderTests: XCTestCase {
     private func decoder(_ language: KeyboardLanguage, swearing: Bool = false) throws -> (SwipeDecoder, TypingDecoder.Keys) {
@@ -51,6 +51,16 @@ final class SwipeDecoderTests: XCTestCase {
             XCTAssertEqual(read(word, es, keys).first, word)
         }
         XCTAssertEqual(Set(read("esta", es, keys).prefix(2)), ["esta", "está"], "one path, both readings")
+    }
+
+    /// Settings › Experiments › Swipe typing in more languages reads French (France), German
+    /// and Polish on their own layouts too: an accented letter is read on its base letter's
+    /// key, and French's AZERTY and German's QWERTZ are the keys as drawn.
+    func testFrenchGermanAndPolishSwipesReadTheirWords() throws {
+        for (language, word) in [(KeyboardLanguage.french, "bonjour"), (.german, "hallo"), (.polish, "dzień")] {
+            let (decoder, keys) = try decoder(language)
+            XCTAssertTrue(read(word, decoder, keys).prefix(2).contains(word), "\(language): \(word)")
+        }
     }
 
     /// Google Books splits "don't" into "do n't", so the model barely counts it: the decoder
