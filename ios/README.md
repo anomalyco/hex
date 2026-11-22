@@ -276,7 +276,16 @@ never at a launch by itself.
     "7:15 pm"), ordinals in dates ("November 22nd", "the 4th of July"; "May" and "March"
     only with a capital), three or more spoken digits ("4729", "555-123-4567"), and minus or
     negative before a number ("-5", "-$40"). Text already in digits keeps its form ("2,400",
-    "$4.99"). Not yet: "one" alone ("one of them", "no one", "one more"), times and prices
+    "$4.99"). All of a number converts or none of it ("a hundred and fifty" 150, "one point
+    twenty one" 1.21, "one in ten people" 1 in 10, "five to ten percent" 5 to 10%, "five foot
+    six" 5 foot 6, "oh four seven two" 0472 mid-sentence); arithmetic stays as said ("ten
+    minus five is five"), as do "two to three hundred" and "one or two hundred". A number the
+    engine capitalised as a name stays: mid-sentence or with a capital inside, before another
+    capitalised word ("I love Twenty One Pilots", "Ten Thousand Villages", "Fifty Shades"), but
+    "Area fifty one", "Forever Twenty One" and "Twenty people came" convert. Custom vocabulary
+    and learned words are never converted (`protectedTerms`, matched word by word without
+    case): adding "Five Guys" or "Twenty One Pilots" keeps them, the fix for brands the engine
+    writes in lower case, which no rule can tell from a count. Not yet: "one" alone ("one of them", "no one", "one more"), times and prices
     without a marker ("three thirty", "four ninety nine", "twelve fifty"), ranges and scores
     without a unit ("eight to twelve", "three to one"), fractions, ordinals outside dates
     ("finished first", "twenty first floor", "a second"), small numbers before anything else

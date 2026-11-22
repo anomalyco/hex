@@ -179,7 +179,9 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         )
         // Before the tagger, so a number in digits is a word it never removes outside a
         // self-correction (`CleanupGuard`).
-        let text = numbers ? SpokenNumbers.digits(in: counted, language: language) : counted
+        let text = numbers
+            ? SpokenNumbers.digits(in: counted, language: language, protectedTerms: protectedTerms)
+            : counted
         guard settings.isEnabled else { return text }
         guard SpeechLanguagePicker.isEnglish(language) else {
             return SpokenCleanupRules.clean(text, language: language)

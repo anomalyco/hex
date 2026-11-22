@@ -39,9 +39,17 @@ nonisolated struct DictationNumberSettings {
 /// - ranges ending in a plural noun or unit ("five to ten minutes"), times with "am", "pm" or
 ///   "o'clock" ("six am", "seven fifteen pm" 7:15), ordinals in dates ("November twenty second"
 ///   November 22nd, "the fourth of July"), three or more spoken digits ("four seven two nine"
-///   4729; ten as 555-123-4567), and "minus" or "negative" before a number (-5, -$40).
+///   4729, "oh four seven two" 0472 mid-sentence; ten as 555-123-4567), and "minus" or
+///   "negative" before a number (-5, -$40).
 ///
-/// What stays as said, for now: "one" alone ("one of them", "no one"), times and prices without
+/// All of a number goes into digits or none of it: "a hundred and fifty" is 150, "one point twenty
+/// one" 1.21, "one in ten" 1 in 10, "five foot six" 5 foot 6, never "a hundred and 50".
+///
+/// What stays as said: a number the engine capitalised as a name, mid-sentence or with a capital
+/// inside, before another capitalised word ("Twenty One Pilots", "Fifty Shades", "Ten Thousand
+/// Villages"); custom vocabulary and learned words (`protectedTerms`), the person's fix for
+/// names the engine writes in lower case ("five guys"); arithmetic ("ten minus five is five");
+/// and, for now, "one" alone ("one of them", "no one"), times and prices without
 /// a marker ("three thirty", "four ninety nine", "twelve fifty"), ranges and scores without a
 /// unit ("eight to twelve", "three to one"), fractions ("two thirds", "one and a half"),
 /// ordinals outside dates ("finished first", "the twenty first floor", "a second"), small
@@ -49,9 +57,11 @@ nonisolated struct DictationNumberSettings {
 /// number words that could be read two ways ("one thirty", "seven fifteen"). Other languages are
 /// left as they are.
 nonisolated enum SpokenNumbers {
-    static func digits(in text: String, language: String?) -> String {
+    /// `protectedTerms` (custom vocabulary and learned words) stay as said wherever they match,
+    /// whatever their case: someone who adds "Five Guys" or "Seven Eleven" keeps it.
+    static func digits(in text: String, language: String?, protectedTerms: [String] = []) -> String {
         guard SpeechLanguagePicker.isEnglish(language), !text.isEmpty else { return text }
-        let tokens = tokenize(text)
+        let tokens = protect(tokenize(text), terms: protectedTerms)
         guard tokens.contains(where: { isNumberish($0) || isOrdinal($0.word) }) else { return text }
         var edits: [(range: Range<String.Index>, text: String)] = []
         var index = 0
@@ -85,6 +95,10 @@ nonisolated enum SpokenNumbers {
         let core: String
         let trail: String
         let hasDigit: Bool
+        /// First in the text, or after "." "!" "?" ":" or a line break.
+        let startsSentence: Bool
+        /// Inside a protected term.
+        var protected = false
         var word: String { core.lowercased() }
         /// Nothing but the word: no mark after it ends the number.
         var open: Bool { trail.isEmpty }
@@ -101,6 +115,11 @@ nonisolated enum SpokenNumbers {
             var end = index
             while end < text.endIndex, !text[end].isWhitespace { end = text.index(after: end) }
             let chunk = text[index..<end]
+            let startsSentence: Bool = {
+                guard let previous = tokens.last else { return true }
+                if text[previous.range.upperBound..<index].contains(where: \.isNewline) { return true }
+                return previous.trail.last.map { ".!?…:".contains($0) } ?? false
+            }()
             let lead = chunk.prefix { !$0.isLetter && !$0.isNumber }
             let rest = chunk.dropFirst(lead.count)
             let core = String(rest.reversed().drop { !$0.isLetter && !$0.isNumber }.reversed())
@@ -109,11 +128,35 @@ nonisolated enum SpokenNumbers {
                 lead: String(lead),
                 core: core,
                 trail: String(rest.dropFirst(core.count)),
-                hasDigit: chunk.contains(where: \.isNumber)
+                hasDigit: chunk.contains(where: \.isNumber),
+                startsSentence: startsSentence
             ))
             index = end
         }
         return tokens
+    }
+
+    /// Marks the tokens of every match of a term, compared word by word without case or marks
+    /// ("seven-eleven" matches "Seven Eleven").
+    private static func protect(_ tokens: [Token], terms: [String]) -> [Token] {
+        func words(_ text: String) -> [String] {
+            text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        }
+        var flat: [(word: String, token: Int)] = []
+        for (index, token) in tokens.enumerated() {
+            for word in words(token.core) { flat.append((word, index)) }
+        }
+        var result = tokens
+        for term in terms {
+            let wanted = words(term)
+            guard !wanted.isEmpty, wanted.count <= flat.count,
+                  wanted.contains(where: { kind($0) != nil || ordinals[$0] != nil || $0 == "oh" }) else { continue }
+            for start in 0...(flat.count - wanted.count)
+            where (0..<wanted.count).allSatisfy({ flat[start + $0].word == wanted[$0] }) {
+                for offset in 0..<wanted.count { result[flat[start + offset].token].protected = true }
+            }
+        }
+        return result
     }
 
     private enum Outcome {
@@ -207,7 +250,7 @@ nonisolated enum SpokenNumbers {
     }
 
     private static func isNumberish(_ token: Token) -> Bool {
-        !token.hasDigit && kind(token.word) != nil
+        !token.hasDigit && !token.protected && kind(token.word) != nil
     }
 
     private static func isOrdinal(_ word: String) -> Bool {
@@ -218,7 +261,7 @@ nonisolated enum SpokenNumbers {
 
     /// A single digit in a run or after "point": "oh" too.
     private static func spokenDigit(_ token: Token) -> Int? {
-        guard !token.hasDigit else { return nil }
+        guard !token.hasDigit, !token.protected else { return nil }
         return token.word == "oh" ? 0 : digitWords[token.word]
     }
 
@@ -226,7 +269,7 @@ nonisolated enum SpokenNumbers {
 
     private static func match(_ t: [Token], at i: Int) -> Outcome {
         let token = t[i]
-        guard !token.hasDigit else { return .none }
+        guard !token.hasDigit, !token.protected else { return .none }
         // "November twenty second", "July fourth": "May" and "March" only with a capital.
         if months.contains(token.word), token.open,
            !["may", "march"].contains(token.word) || token.core.first?.isUppercase == true,
@@ -249,6 +292,26 @@ nonisolated enum SpokenNumbers {
         return number(t, at: i, forced: false)
     }
 
+    /// "a hundred" or "a thousand" that a number goes on from: "a hundred and fifty" is 150.
+    private static func leadsScale(_ t: [Token], _ i: Int) -> Bool {
+        t[i].word == "a" && t[i].open && i + 2 < t.count && t[i + 1].open && !t[i + 1].protected
+            && !t[i + 1].hasDigit && ["hundred", "thousand"].contains(t[i + 1].word)
+    }
+
+    /// A number the engine capitalised mid-sentence, or with a capital on a later word even at a
+    /// sentence start: with a capitalised word after it, a name ("Twenty One Pilots", "Fifty
+    /// Shades", "Eleven Labs", "Ten Thousand Villages"). "Twenty people" at a sentence start
+    /// can't be told from a title, so it is a number.
+    private static func isName(_ t: [Token], from i: Int, to end: Int) -> Bool {
+        func capitalised(_ token: Token) -> Bool {
+            token.core.first?.isUppercase == true && token.core != token.core.uppercased()
+        }
+        guard t[i].core.first?.isUppercase == true, end + 1 < t.count, t[end + 1].core.first?.isUppercase == true,
+              !t[i].startsSentence || (i < end && t[(i + 1)...end].contains(where: capitalised)) else { return false }
+        let next = t[end + 1].word
+        return next != "i" && !next.hasPrefix("i'") && !next.hasPrefix("i’")
+    }
+
     private static func followsNumber(_ t: [Token], _ i: Int) -> Bool {
         guard i > 0, t[i - 1].open else { return false }
         return t[i - 1].hasDigit || isNumberish(t[i - 1])
@@ -256,13 +319,13 @@ nonisolated enum SpokenNumbers {
 
     /// A day said as an ordinal, 1st to 31st: "third", "twenty second", "thirty-first".
     private static func ordinal(_ t: [Token], at j: Int) -> (text: String, end: Int)? {
-        guard j < t.count, !t[j].hasDigit else { return nil }
+        guard j < t.count, !t[j].hasDigit, !t[j].protected else { return nil }
         let word = t[j].word
         var value: Int?
         var end = j
         if let single = ordinals[word] {
             value = single
-        } else if let tens = tensWords[word], t[j].open, j + 1 < t.count, !t[j + 1].hasDigit,
+        } else if let tens = tensWords[word], t[j].open, j + 1 < t.count, !t[j + 1].hasDigit, !t[j + 1].protected,
                   let unit = ordinals[t[j + 1].word], unit < 10 {
             value = tens + unit
             end = j + 1
@@ -289,7 +352,12 @@ nonisolated enum SpokenNumbers {
     /// Three or more digits said one by one: "four seven two nine" 4729, "nine one one" 911,
     /// and ten (with or without commas between groups of 3, 3 and 4) as 555-123-4567.
     private static func digitRun(_ t: [Token], at i: Int) -> Outcome? {
-        guard t[i].word != "oh", let first = spokenDigit(t[i]), !followsNumber(t, i) else { return nil }
+        // "oh" leads a run only mid-sentence and in lower case ("the code is oh four seven two"),
+        // never "Oh, one more thing"; a run right after such an "Oh" stays in words.
+        let leadingOh = t[i].word == "oh"
+        if leadingOh, t[i].startsSentence || t[i].core != "oh" || !t[i].open { return nil }
+        if !leadingOh, i > 0, t[i - 1].word == "oh", t[i - 1].open { return .skip(clusterEnd(t, from: i)) }
+        guard let first = spokenDigit(t[i]), !followsNumber(t, i) else { return nil }
         var digits = [first]
         var groups: [Int] = []
         var group = 1
@@ -305,6 +373,7 @@ nonisolated enum SpokenNumbers {
         }
         groups.append(group)
         guard digits.count >= 3 else { return nil }
+        if leadingOh, groups.count > 1 { return nil }
         if t[end].open, end + 1 < t.count {
             // "seven oh five am" is a time.
             if isMeridiem(t[end + 1]) { return nil }
@@ -378,17 +447,18 @@ nonisolated enum SpokenNumbers {
     }
 
     private static func cardinal(_ t: [Token], at i: Int) -> Cardinal? {
-        guard i < t.count, isNumberish(t[i]) else { return nil }
+        guard i < t.count, isNumberish(t[i]) || leadsScale(t, i) else { return nil }
         var parsed: Cardinal
         if let year = year(t, at: i) {
             parsed = year
         } else {
+            let fromA = leadsScale(t, i)
             var total = 0
-            var current = 0
-            var last = Last.none
-            var words = 0
+            var current = fromA ? 1 : 0
+            var last = fromA ? Last.unit : Last.none
+            var words = fromA ? 1 : 0
             var end = i
-            var j = i
+            var j = fromA ? i + 1 : i
             var hasScale = false
             var lastBig: (value: Int, word: String)?
             var bigScales = 0
@@ -446,6 +516,8 @@ nonisolated enum SpokenNumbers {
                 if zero || !token.open { break }
             }
             guard words > 0 else { return nil }
+            // "a hundred" alone stays: "a hundred percent", "a hundred dollars".
+            if fromA, end <= i + 1 { return nil }
             parsed = Cardinal(value: total + current, end: end, words: words, hasScale: hasScale)
             parsed.bigScale = last == .big ? lastBig : nil
             parsed.bigScales = bigScales
@@ -456,6 +528,12 @@ nonisolated enum SpokenNumbers {
         // thirty", "four ninety nine", "twenty twenty five hundred".
         if t[parsed.end].open, parsed.end + 1 < t.count, isNumberish(t[parsed.end + 1]) { parsed.ambiguous = true }
         if followsNumber(t, i), !t[i - 1].hasDigit { parsed.ambiguous = true }
+        // The rest of a number we didn't take whole: "… hundred and fifty", "… point twenty one".
+        if i >= 2, t[i - 1].open, t[i - 2].open, !t[i - 2].hasDigit, !t[i - 2].protected,
+           (t[i - 1].word == "and" && (t[i - 2].word == "hundred" || bigWords[t[i - 2].word] != nil))
+            || (t[i - 1].word == "point" && kind(t[i - 2].word) != nil) {
+            parsed.ambiguous = true
+        }
         return parsed
     }
 
@@ -509,11 +587,18 @@ nonisolated enum SpokenNumbers {
         while j + 1 < t.count, t[end].open, t[j].word == "point", t[j].open, !t[j].hasDigit {
             var digits = ""
             var k = j + 1
-            while k < t.count, let digit = spokenDigit(t[k]) {
-                digits += String(digit)
-                end = k
-                k += 1
-                if !t[end].open { break }
+            if let pair = twoDigits(t, at: k) {
+                // "one point twenty one" is 1.21.
+                digits = pair.text
+                end = pair.end
+                k = pair.end + 1
+            } else {
+                while k < t.count, let digit = spokenDigit(t[k]) {
+                    digits += String(digit)
+                    end = k
+                    k += 1
+                    if !t[end].open { break }
+                }
             }
             guard !digits.isEmpty else { break }
             text += "." + digits
@@ -530,8 +615,25 @@ nonisolated enum SpokenNumbers {
         return (text, end, ambiguous)
     }
 
+    /// "twenty one", "fifteen", "forty" after "point".
+    private static func twoDigits(_ t: [Token], at k: Int) -> (text: String, end: Int)? {
+        guard k < t.count, !t[k].hasDigit, !t[k].protected else { return nil }
+        switch kind(t[k].word) {
+        case let .teen(value)?, let .tensUnit(value)?:
+            return (String(value), k)
+        case let .tens(value)?:
+            if t[k].open, k + 1 < t.count, !t[k + 1].hasDigit, !t[k + 1].protected,
+               case let .digit(unit)? = kind(t[k + 1].word), unit > 0 {
+                return (String(value + unit), k + 1)
+            }
+            return (String(value), k)
+        default:
+            return nil
+        }
+    }
+
     private static func number(_ t: [Token], at i: Int, forced: Bool) -> Outcome {
-        guard i < t.count, isNumberish(t[i]) else { return .none }
+        guard i < t.count, isNumberish(t[i]) || leadsScale(t, i) else { return .none }
         if let time = clockTime(t, at: i) { return time }
         guard let number = cardinal(t, at: i) else { return .none }
         if number.ambiguous { return .skip(clusterEnd(t, from: i)) }
@@ -550,7 +652,30 @@ nonisolated enum SpokenNumbers {
         // Digits right beside it: the model already wrote this number its way.
         if open, t[next].hasDigit { return .skip(end) }
         if i > 0, t[i - 1].open, t[i - 1].hasDigit { return .skip(end) }
+        if !forced, isName(t, from: i, to: end) { return .skip(end) }
         let plain = !isDecimal && !number.isYear && !number.hasScale
+        // "ten minus five is five": arithmetic stays as said, whole.
+        if open, !forced, ["minus", "plus", "times", "over", "equals"].contains(t[next].word), t[next].open,
+           next + 1 < t.count, isNumberish(t[next + 1]) {
+            var last = clusterEnd(t, from: next + 1)
+            // …and its result: "ten times two is twenty".
+            if t[last].open, last + 2 < t.count, ["is", "equals", "makes"].contains(t[last + 1].word), t[last + 1].open,
+               isNumberish(t[last + 2]) {
+                last = clusterEnd(t, from: last + 2)
+            }
+            return .skip(last)
+        }
+        // "one in ten people", "eight out of ten", "nine times out of ten": with the second
+        // number in digits, the first goes too.
+        if open, !forced, plain, let second = ratioSecond(t, after: end),
+           case let .edit(first, _, _) = Self.number(t, at: second, forced: false), first == second {
+            return .edit(i, end, lead + text)
+        }
+        // "five foot six": inches after a height in digits.
+        if !forced, plain, number.value <= 11, i >= 2, ["foot", "feet"].contains(t[i - 1].word), t[i - 1].open,
+           t[i - 2].open, t[i - 2].hasDigit || height(t, at: i - 2) {
+            return .edit(i, end, lead + text + t[end].trail)
+        }
         if open {
             let word = t[next].word
             if word == "percent" { return .edit(i, next, lead + text + "%" + t[next].trail) }
@@ -586,6 +711,27 @@ nonisolated enum SpokenNumbers {
         return .skip(end)
     }
 
+    /// Where the second number of "one in ten", "eight out of ten", "nine times out of ten" starts.
+    private static func ratioSecond(_ t: [Token], after end: Int) -> Int? {
+        func word(_ k: Int) -> String? { k < t.count && t[k].open ? t[k].word : nil }
+        var k = end + 1
+        if word(k) == "times" { k += 1 }
+        if word(k) == "in", k == end + 1 {
+            k += 1
+        } else if word(k) == "out", word(k + 1) == "of" {
+            k += 2
+        } else {
+            return nil
+        }
+        return k < t.count && isNumberish(t[k]) ? k : nil
+    }
+
+    /// The feet of a height said in words: "five" in "five foot six".
+    private static func height(_ t: [Token], at k: Int) -> Bool {
+        guard let feet = cardinal(t, at: k), !feet.ambiguous, feet.end == k, let value = feet.single else { return false }
+        return value >= 2
+    }
+
     /// "five to ten minutes", "two or three days", "between five and ten minutes": the first
     /// number goes into digits with the second, which its own rule writes, only when a plural
     /// noun or unit follows. Without one it may be a score, a time or "nine to five", so both
@@ -602,8 +748,16 @@ nonisolated enum SpokenNumbers {
             secondEnd = point.end
             secondPlain = false
         }
-        guard secondPlain else { return nil }
-        let unitAfter = t[secondEnd].open && isCountNoun(t, secondEnd + 1)
+        // "from zero to one hundred": a second number that is plainly a number takes the first.
+        guard secondPlain else {
+            // "two to three hundred" and "one or two hundred" mean hundreds: both stay as said.
+            let endsWithScale = t[secondEnd].word == "hundred" || bigWords[t[secondEnd].word] != nil
+            if word == "past" || (endsWithScale && (word == "or" || first.value >= 2)) { return .skip(secondEnd) }
+            return .edit(i, end, text)
+        }
+        let after = secondEnd + 1 < t.count && t[secondEnd].open ? t[secondEnd + 1].word : ""
+        let percent = after == "percent" || (after == "per" && secondEnd + 2 < t.count && t[secondEnd + 2].word == "cent")
+        let unitAfter = t[secondEnd].open && (isCountNoun(t, secondEnd + 1) || percent)
         if word == "past" || !unitAfter || (word == "or" && first.single == 1) { return .skip(secondEnd) }
         return .edit(i, end, text)
     }
