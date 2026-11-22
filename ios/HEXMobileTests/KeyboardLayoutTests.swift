@@ -2130,6 +2130,11 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(automatic("pl_PL"), .polish)
         XCTAssertEqual(automatic(nil, modes: ["emoji", "pl_PL", "en-US"]), .polish)
         XCTAssertEqual(automatic(nil, preferred: ["pl-PL", "en-US"]), .polish)
+        // Hex's own input mode is `mul` (Info.plist), so it never stands for English: Hex listed
+        // above Apple's AZERTY on a French iPhone, before Hex wrote a dictation language or
+        // without Full Access, typed QWERTY when it said en-US (TestFlight build 140).
+        XCTAssertEqual(automatic(nil, modes: ["mul", "fr_FR", "emoji"], preferred: ["fr-FR"]), .french)
+        XCTAssertEqual(automatic(nil, modes: ["mul", "emoji"], preferred: ["fr-FR"]), .french)
         XCTAssertEqual(automatic("ro-RO", modes: ["en-US"]), .romanian)
         XCTAssertEqual(automatic("ro_RO"), .romanian)
         XCTAssertEqual(automatic("el-GR", modes: ["en-US"]), .greek)
@@ -2353,6 +2358,11 @@ final class KeyboardLayoutTests: XCTestCase {
             KeyboardLanguage.suggested(inputModes: ["pl_PL", "emoji"], preferred: ["pl-PL", "en-US"]),
             [.polish, .english]
         )
+        XCTAssertEqual(
+            KeyboardLanguage.suggested(inputModes: ["fr_FR", "emoji", "mul"], preferred: ["fr-FR"]),
+            [.french],
+            "Hex's own input mode isn't English on this iPhone"
+        )
         XCTAssertEqual(KeyboardLanguage.polish.dictationLanguage(supported: supported + ["pl-PL"], preferred: ["pl-PL"]), "pl-PL")
         XCTAssertEqual(KeyboardLanguage.polish.dictationLanguage(supported: [], preferred: []), "pl-PL", "not listed yet")
         XCTAssertEqual(KeyboardLanguage.polish.displayName, "Polski")
@@ -2443,7 +2453,7 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     /// The input mode's language (`UIInputViewController.primaryLanguage`) is BCP 47 and
-    /// supersedes the Info.plist's en-US, so each layout names the language the host's
+    /// supersedes the Info.plist's `mul`, so each layout names the language the host's
     /// spelling and autocorrection follow.
     func testEachLanguageNamesItsInputMode() {
         XCTAssertEqual(KeyboardLanguage.english.inputModeLanguage, "en-US")
