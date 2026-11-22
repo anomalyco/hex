@@ -421,15 +421,28 @@ final class DictationController {
 
     // MARK: - Standalone & System Actions
 
-    func performPrimaryAction() {
+    /// Home's button sets the model up (Set up) rather than dictating: no model yet, or a
+    /// failure that left none ready. A microphone or transcription failure with the model
+    /// still ready dictates again, as home's Ready says it can.
+    var primaryActionPreparesModel: Bool {
         switch phase {
-        case .modelRequired, .failed:
+        case .modelRequired: true
+        case .failed: !isModelReady
+        default: false
+        }
+    }
+
+    func performPrimaryAction() {
+        if primaryActionPreparesModel {
             prepareModel()
-        case .ready:
+            return
+        }
+        switch phase {
+        case .ready, .failed:
             startRecording(copyToPasteboard: false)
         case .recording:
             finishRecording()
-        case .preparingModel, .requestingPermission, .transcribing:
+        case .modelRequired, .preparingModel, .requestingPermission, .transcribing:
             break
         }
     }

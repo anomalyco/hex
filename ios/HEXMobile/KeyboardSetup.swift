@@ -385,14 +385,11 @@ struct SetupSheet: View {
             }
         }
         if dictation.isModelReady {
-            // "Norwegian Bokmål · Apple": the language it really transcribes, short enough
-            // for the row.
+            // "Norwegian Bokmål": the language it really transcribes, never the engine.
             let code = Locale(identifier: dictation.transcriptionLanguageID).language.languageCode?.identifier ?? "en"
-            let language = Locale.current.localizedString(forLanguageCode: code).map {
+            return Locale.current.localizedString(forLanguageCode: code).map {
                 $0.prefix(1).uppercased() + $0.dropFirst()
             } ?? dictation.transcriptionLanguage
-            let engine = dictation.engineName == "Apple Speech" ? "Apple" : dictation.engineName
-            return "\(language) · \(engine)"
         }
         switch dictation.phase {
         case .preparingModel:

@@ -2197,6 +2197,44 @@ final class DictationControllerTests: XCTestCase {
         controller.cancelCurrentJob()
     }
 
+    /// Home after a microphone that didn't start, with the model still ready: the button is
+    /// Dictate (as home's Ready says), not Set up, and a tap records instead of loading the
+    /// model again.
+    func testHomeDictatesAgainAfterAMicrophoneFailureWithTheModelReady() async throws {
+        let audio = FakeAudioManager()
+        let transcriber = ControlledTranscriber()
+        let controller = DictationController(
+            audio: audio,
+            keyboardBridge: KeyboardBridge(defaults: defaults),
+            transcriber: transcriber,
+            transcriberFactory: { transcriber },
+            now: { 53_000 },
+            autoPrepareOnInit: false
+        )
+        XCTAssertTrue(controller.primaryActionPreparesModel, "no model yet: Set up")
+        controller.prepareModel()
+        try await settle()
+        XCTAssertFalse(controller.primaryActionPreparesModel)
+
+        audio.captureShouldThrow = true
+        controller.performPrimaryAction()
+        try await settle()
+        XCTAssertEqual(controller.phase, .failed("Hex couldn't start the microphone. Try again."))
+        XCTAssertTrue(controller.isModelReady)
+        XCTAssertFalse(controller.primaryActionPreparesModel, "Dictate, not Set up")
+
+        audio.captureShouldThrow = false
+        controller.performPrimaryAction()
+        try await settle()
+        XCTAssertEqual(controller.phase, .recording)
+        controller.cancelCurrentJob()
+
+        // A failed model with none ready still sets up.
+        controller.isModelReady = false
+        controller.phase = .failed("The speech model isn't ready. Try again.")
+        XCTAssertTrue(controller.primaryActionPreparesModel)
+    }
+
     /// A warm session's microphone failed for a keyboard's dictation (another app held it):
     /// Hex stays marked failed, and ignored every start the keyboard sent until it was opened,
     /// while its snapshot kept saying so to every keyboard. The failure carries when it
