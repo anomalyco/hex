@@ -183,8 +183,8 @@ pub(crate) struct OfflineGgufSession {
     /// What this model streams with, and the tuning it was probed for. Its
     /// tuning stays unset until a probe ran past this session's gates.
     streaming: StreamCache,
-    /// The Parakeet chunk menus the file carries, read when a tuning needs
-    /// them; `None` until then, and when a model has none.
+    /// The Parakeet chunk menus the file carries, read when a tuning or the
+    /// first stream needs them; `None` until then, and when a model has none.
     stream_menus: Option<StreamMenus>,
     /// Whether `stream_menus` was read, so a lab turned on later reads the
     /// header lazily instead of on every load.

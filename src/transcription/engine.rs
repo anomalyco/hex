@@ -1753,7 +1753,7 @@ mod tests {
     }
 
     /// As above, with `slack` samples of speech the stream may leave before
-    /// its text starts, as a model whose first-word time lags its audio gets.
+    /// its text starts, for a model whose first-word time lags its audio.
     fn finish_with_opening_slack(
         clip: &[f32],
         head_ignored: usize,
@@ -1864,8 +1864,8 @@ mod tests {
         // An illustrative late first-word timestamp: speech at 220-860 ms and
         // text at 1280 ms is a 1,060 ms lag, just past the top of the measured
         // 100-1000 ms range. With no pre-roll to exclude, this is a stream
-        // that lost nothing, as the measured production lines did; the 400 ms
-        // slack refused it.
+        // that lost nothing, as the logged production lines suggest; the
+        // 400 ms slack refused it.
         let mut clip = vec![0.0; 3_520]; // 220 ms
         clip.extend(tone(10_240)); // speech, 220-860 ms
         clip.extend(vec![0.0; 6_720]); // pause to the text, 860-1280 ms

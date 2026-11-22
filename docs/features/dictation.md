@@ -2156,11 +2156,13 @@ timestamp lags its audio: the first word's `t0` landed about 100–1,000 ms afte
 its detected speech onset (most 440–1,000 ms), and the whole-clip run reported
 the same value within one 80 ms frame. A capture with no pre-roll head, as
 duck/mute/pause behaviors and "Release microphone while idle" cold opens
-leave, therefore reported openings the stream never lost: "text starts at
-1280 ms but 560 ms of speech precedes it, from 220 to 860 ms". A stream whose
-model runs Parakeet's buffered chunk menus (Unified English, and an import with
-the same menus) now gets 1.2 s of opening slack, which refused none of the 20
-measured runs where 400 ms refused 6. Every other streaming model, including
+leave, therefore produced refusals consistent with a stream that lost nothing,
+such as "text starts at 1280 ms but 560 ms of speech precedes it, from 220 to
+860 ms"; the production logs record the refusal and the speech positions, not
+the stream's text. A stream whose model runs Parakeet's buffered chunk menus
+(Unified English, and an import with the same menus) now gets 1.2 s of opening
+slack, which refused none of the 20 measured runs where 400 ms refused 6.
+Every other streaming model, including
 Nemotron 3.5's cache-aware stream, keeps 400 ms. The trailing check is
 unchanged. Measured offline on the real Unified English Q8_0 model through
 transcribe.cpp on the CPU, over clean 16 kHz WAVs, in 20 runs with speech
@@ -2168,7 +2170,11 @@ starting at 0, 450 ms, and 1 s: the stream's opening words matched the
 whole-clip text in every run, including speech starting at sample 0. The
 stream's chunk and lookahead geometry was not varied. What it gives up: a lost
 opening of up to about 1.5 s of speech before the text's start now goes
-undetected, about 0.8 s more than the 400 ms slack let through. Checks:
+undetected, about 0.8 s more than the 400 ms slack let through. Still open:
+when the speaker waits about a second before talking, some streams still start
+their text about 3 s after the speech began and fall back to the whole clip,
+so the pasted text stays complete. That is not explained by the measured
+timestamp lag, which was measured only on the CPU. Checks:
 `parakeets_late_first_word_time_is_not_a_lost_opening`,
 `parakeets_opening_slack_still_refuses_a_lost_opening`, and
 `parakeets_opening_slack_edge_is_one_frame` (synthetic tones, a fake stream).
