@@ -297,10 +297,11 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeRead(
         };
         let read = |env: &mut JNIEnv| -> Option<Reading> {
             let points = doubles(env, &points).ok()?;
+            // Times count only one per point, as on iOS (the core's reader takes them so too).
             let times = if times.is_null() {
                 None
             } else {
-                Some(doubles(env, &times).ok()?)
+                Some(doubles(env, &times).ok()?).filter(|t| t.len() * 2 == points.len())
             };
             let (letters, xs, ys) = (
                 ints(env, &key_letters).ok()?,
