@@ -234,6 +234,9 @@ impl Feature {
             Self::DictationStyle => {
                 "Write each dictation as Polished, Casual, Notes, or Verbatim after the corrections and rewrite and before transformations; Dictate without processing, Voice Action, meetings, and the local API are left alone"
             }
+            Self::HudHeight => {
+                "Choose how high the dictation HUD sits above the Dock or the screen's bottom edge when its position is Bottom (labs.hud_bottom_gap, macOS)"
+            }
         }
     }
 }

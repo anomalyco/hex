@@ -350,7 +350,13 @@ impl Hud {
             return;
         };
         let content = content(0.0);
-        let placed = hud_placement::place(Default::default(), &screen, content, false);
+        let placed = hud_placement::place(
+            Default::default(),
+            &screen,
+            content,
+            false,
+            hud_placement::BOTTOM_OFFSET,
+        );
         let (top, _) = hud_placement::plate_span(&placed, content);
         set_live_text(Spot::Global {
             x: (screen.frame.x + screen.frame.width / 2.0) as f32,
@@ -385,6 +391,7 @@ impl Hud {
                 &metrics,
                 content,
                 self.position == IndicatorPosition::Bottom,
+                crate::labs::hud_bottom_gap(),
             )
         });
         set_live_text(live_text_beside(&placed, &metrics, content, primary_top));

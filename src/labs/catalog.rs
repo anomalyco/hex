@@ -90,7 +90,8 @@ impl Feature {
             | Self::AnnotateAgentTools
             | Self::AnnotateAgentInstall
             | Self::Signature
-            | Self::DictationStyle => Audience::Everyone,
+            | Self::DictationStyle
+            | Self::HudHeight => Audience::Everyone,
         }
     }
 
@@ -163,6 +164,7 @@ impl Feature {
             | Self::AnnotateAgentInstall
             | Self::Signature => 20261121,
             Self::DictationStyle => 20261122,
+            Self::HudHeight => 20261122,
         }
     }
 
@@ -200,6 +202,9 @@ impl Feature {
         }
         if key == "labs.dictation_style_choice" {
             return Some(Self::DictationStyle);
+        }
+        if key == "labs.hud_bottom_gap" {
+            return Some(Self::HudHeight);
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
@@ -266,6 +271,7 @@ impl Feature {
             | Self::RecentDictations
             | Self::HideMenuBarIcon
             | Self::NotchIndicator
+            | Self::HudHeight
             | Self::Screenshots
             | Self::CapsLockDictation
             | Self::DoubleTapModifiers
@@ -407,6 +413,7 @@ impl Feature {
             Self::AnnotateAgentInstall => "annotate-agent-install",
             Self::Signature => "signature",
             Self::DictationStyle => "dictation-style",
+            Self::HudHeight => "hud-height",
         }
     }
 
@@ -493,6 +500,7 @@ impl Feature {
             Self::AnnotateAgentInstall => "labs.annotate_agent_install",
             Self::Signature => "labs.signature",
             Self::DictationStyle => "labs.dictation_style",
+            Self::HudHeight => "labs.hud_height",
         }
     }
 

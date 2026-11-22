@@ -246,6 +246,20 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // checks: calendar_select_all_is_its_own_switch_and_macos_only (labs.rs);
 │                                        // the_select_all_calendars_lab_saves_every_calendar_at_once (rune_ui/tests/panes.rs)
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
+├── HUD height      no    labs.hud_height              (macOS) with the HUD position Bottom, the plate keeps labs.hud_bottom_gap points (0–400, 24 by
+│                                        default) above the Dock or the screen's bottom edge; a gap of 24 pt or less keeps the
+│                                        window's bottom on the visible bottom, and a larger gap raises the window by gap − 24;
+│                                        the plate only moves up inside it once the raised window would reach the visible top
+│                                        (a gap above the visible height minus 104 pt), which within 0–400 only happens on
+│                                        a very short visible frame; placement clamps the plate under the menu bar or notch;
+│                                        off, the fixed 24 pt is exactly as before
+│                                        // checks: hud_height_is_its_own_bit_and_off_by_default (labs.rs);
+│                                        // the_default_bottom_gap_places_exactly_as_before, a_small_bottom_gap_sits_inside_the_window,
+│                                        // a_tall_bottom_gap_raises_the_window_and_keeps_the_gap_exact,
+│                                        // a_gap_that_reaches_the_visible_top_keeps_the_plate_inside,
+│                                        // a_raised_bottom_gap_works_on_a_display_below_the_primary,
+│                                        // a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame,
+│                                        // a_bottom_gap_never_drops_the_window_below_the_visible_bottom (rune_hud/hud_placement.rs)
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
@@ -2908,6 +2922,40 @@ with `HEX_HUD_EARS=1` and `rune_hud_frames`. Not yet observed: a real
 dictation through the ears on a Mac with the lab on (`hex dev hud` drives
 them in a debug build), and the failure glyph, which no render covers yet; the
 row renders only in macOS builds, so no golden changes.
+
+HUD height (`hud-height`, macOS only): at the Bottom position, how far
+above `visibleFrame.y` (the Dock's top or the screen's edge) the plate
+sits. `labs.hud_bottom_gap` is 0–400 points with 24 by default, so
+`hex settings set labs.hud_bottom_gap 40` raises it and 0 puts it on the
+edge; the card's slider, `{} pt` readout, and one-point Lower and Raise
+buttons set the same value. The gate, `labs::hud_bottom_gap()`, is read
+each time the HUD is placed (`Hud::place_on_pointer_screen` in
+[rune_hud/macos.rs](../../src/rune_hud/macos.rs)), so a change applies
+from the next dictation. A gap of 24 pt or less keeps the window's bottom
+on the visible bottom and moves `Layout.center` (24 pt is exactly the old
+placement); a larger gap raises the window by gap − 24 with the plate at
+its usual offset inside it, keeping its shadow padding, so the visible gap
+stays exact. The plate only moves up inside the window once the raised
+window would reach the visible top (a gap above the visible height minus
+104 pt), which within 0–400 only happens on a very short visible frame.
+Placement clamps the gap so the plate's top never passes the visible
+frame's top, below the menu bar or notch, and the window never crosses
+below the visible bottom. Top, Off, HUD Lab's menu bar and
+notch placements, and Linux and Windows are unchanged. Linux and Windows
+have no row, `hex labs on hud-height` doesn't know it there, and
+`hex settings set labs.hud_height` answers `unsupported` (as any
+`labs.` switch for another OS now does). Checks:
+`the_default_bottom_gap_places_exactly_as_before`,
+`a_small_bottom_gap_sits_inside_the_window`,
+`a_tall_bottom_gap_raises_the_window_and_keeps_the_gap_exact`,
+`a_gap_that_reaches_the_visible_top_keeps_the_plate_inside`,
+`a_raised_bottom_gap_works_on_a_display_below_the_primary`,
+`a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame`, and
+`a_bottom_gap_never_drops_the_window_below_the_visible_bottom` in
+[rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);
+`hud_height_is_its_own_bit_and_off_by_default` in
+[labs.rs](../../src/labs.rs). Not yet observed: a real dictation at a
+raised gap on a Mac, and the card's controls with every language.
 
 Screenshots (`screenshots`, macOS only, group Annotate): for people who
 miss CleanShot's ⌘⇧4. While on, the shortcut (`screenshots.hotkey`,

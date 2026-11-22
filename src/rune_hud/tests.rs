@@ -187,7 +187,13 @@ fn place_on(
     {
         return placed;
     }
-    crate::rune_hud::hud_placement::place(tuning.placement, screen, content, false)
+    crate::rune_hud::hud_placement::place(
+        tuning.placement,
+        screen,
+        content,
+        false,
+        crate::rune_hud::hud_placement::BOTTOM_OFFSET,
+    )
 }
 
 /// What the screen shows behind the window.

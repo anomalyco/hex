@@ -851,6 +851,17 @@
       ],
       "summary": "Format every dictation as Polished, Casual, Notes, or Verbatim, like the iPhone app, without an AI model",
       "title": "Dictation style"
+    },
+    {
+      "added": "2026-11-22",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "hud-height",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Choose how high the dictation HUD sits above the Dock when it's at the bottom",
+      "title": "HUD height"
     }
   ]
 }

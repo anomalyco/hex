@@ -31,7 +31,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{LazyLock, RwLock};
 
 use crate::app_settings::{
-    AppSettings, AppearanceTheme, CapsLockLight, DictationStyle, LabsSettings,
+    AppSettings, AppearanceTheme, CapsLockLight, DictationStyle, HUD_BOTTOM_GAP_DEFAULT,
+    HUD_BOTTOM_GAP_MAX, LabsSettings,
 };
 
 mod card;
@@ -187,6 +188,7 @@ impl Feature {
             Self::StopPhrase => settings.labs.stop_phrase,
             Self::Signature => settings.labs.signature,
             Self::DictationStyle => settings.labs.dictation_style,
+            Self::HudHeight => settings.labs.hud_height,
             Self::HoldThroughKeys => settings.labs.hold_through_keys,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip,
             Self::DropTranscribe => settings.labs.drop_transcribe,
@@ -276,6 +278,7 @@ impl Feature {
             &mut labs.stop_phrase,
             &mut labs.signature,
             &mut labs.dictation_style,
+            &mut labs.hud_height,
             &mut labs.hold_through_keys,
             &mut labs.copy_capture_zip,
             &mut labs.drop_transcribe,
@@ -376,6 +379,7 @@ impl Feature {
             Self::StopPhrase => settings.labs.stop_phrase = on,
             Self::Signature => settings.labs.signature = on,
             Self::DictationStyle => settings.labs.dictation_style = on,
+            Self::HudHeight => settings.labs.hud_height = on,
             Self::HoldThroughKeys => settings.labs.hold_through_keys = on,
             Self::CopyCaptureZip => settings.labs.copy_capture_zip = on,
             Self::DropTranscribe => settings.labs.drop_transcribe = on,
@@ -441,7 +445,9 @@ const FASTER_LIVE_TEXT: u64 = 1 << 23;
 // Kept only for the state-word encoding; no gate reads it.
 const VOCABULARY_FILES: u64 = 1 << 24;
 const GNOME_CLIPBOARD_RESTORE: u64 = 1 << 25;
-// 1 << 26 is free (Vocabulary in meeting notes graduated).
+/// Labs › HUD height: the plate's gap above the Dock when the position is
+/// Bottom, on the bit Vocabulary in meeting notes left free.
+const HUD_HEIGHT: u64 = 1 << 26;
 const NOTCH_INDICATOR: u64 = 1 << 27;
 // 1 << 28 is free (Meeting finished event graduated).
 const GNOME_MEETING_CAPSULES: u64 = 1 << 29;
@@ -506,6 +512,10 @@ static STATE: AtomicU64 = AtomicU64::new(0);
 /// [`STATE`]: 0 turns it off. The one free bit above holds the switch; the
 /// window itself has no room in the word.
 static MICROPHONE_LINGER_SECONDS: AtomicU64 = AtomicU64::new(0);
+
+/// Labs › HUD height's gap in points above the Dock, set beside [`STATE`]
+/// like [`MICROPHONE_LINGER_SECONDS`]: the word has no room for it.
+static HUD_BOTTOM_GAP: AtomicU64 = AtomicU64::new(HUD_BOTTOM_GAP_DEFAULT as u64);
 
 /// Labs › Words on screen's switch, set beside [`STATE`] like [`SCREEN_VOCABULARY`]:
 /// that lab reads the focused window once per dictation.
@@ -630,6 +640,7 @@ fn state() -> u64 {
                 // between them sees the switch on with no window, which reads
                 // as off, and the next read is right.
                 MICROPHONE_LINGER_SECONDS.store(linger_seconds(&saved), Ordering::Release);
+                HUD_BOTTOM_GAP.store(hud_gap_points(&saved), Ordering::Release);
                 SCREEN_VOCABULARY.store(screen_vocabulary_enabled(&saved), Ordering::Release);
                 LEARN_FROM_CORRECTIONS
                     .store(learn_from_corrections_enabled(&saved), Ordering::Release);
@@ -658,6 +669,11 @@ fn state() -> u64 {
         }
         state => state,
     }
+}
+
+/// The HUD bottom gap a saved setting names, clamped to the offered range.
+fn hud_gap_points(settings: &LabsSettings) -> u64 {
+    u64::from(settings.hud_bottom_gap.min(HUD_BOTTOM_GAP_MAX))
 }
 
 /// The window a saved setting holds, in seconds; 0 when it's off.
@@ -878,6 +894,7 @@ pub(crate) fn apply(settings: &LabsSettings) {
     // after both is right.
     STATE.store(encode(settings), Ordering::Release);
     MICROPHONE_LINGER_SECONDS.store(linger_seconds(settings), Ordering::Release);
+    HUD_BOTTOM_GAP.store(hud_gap_points(settings), Ordering::Release);
     SCREEN_VOCABULARY.store(screen_vocabulary_enabled(settings), Ordering::Release);
     LEARN_FROM_CORRECTIONS.store(learn_from_corrections_enabled(settings), Ordering::Release);
     CURSOR_CONTEXT.store(cursor_context_enabled(settings), Ordering::Release);
@@ -1063,6 +1080,7 @@ fn encode_where(settings: &LabsSettings, reaches: impl Fn(Feature) -> bool) -> u
             ANNOTATE_POINTER_SCREEN,
         ),
         (Feature::Screenshots, settings.screenshots, SCREENSHOTS),
+        (Feature::HudHeight, settings.hud_height, HUD_HEIGHT),
         (
             Feature::KeepMicrophoneOpen,
             settings.keep_microphone_open,
@@ -1652,6 +1670,42 @@ mod tests {
         let state = encode_where(&labs, |_| true);
         assert_ne!(state & NOTCH_INDICATOR, 0);
         assert_eq!(state >> MINUTES_SHIFT, 24 * 60);
+    }
+
+    #[test]
+    fn hud_height_is_its_own_bit_and_off_by_default() {
+        assert_eq!(HUD_HEIGHT, 1 << 26);
+        let mut labs = LabsSettings::default();
+        assert!(!labs.hud_height);
+        assert_eq!(
+            labs.hud_bottom_gap,
+            crate::app_settings::HUD_BOTTOM_GAP_DEFAULT
+        );
+        assert_eq!(encode_where(&labs, |_| true) & HUD_HEIGHT, 0);
+        labs.hud_height = true;
+        labs.hud_bottom_gap = 120;
+        labs.unload_idle_minutes = 24 * 60;
+        let state = encode_where(&labs, |_| true);
+        assert_ne!(state & HUD_HEIGHT, 0);
+        assert_eq!(state & GNOME_CLIPBOARD_RESTORE, 0);
+        assert_eq!((state >> MINUTES_SHIFT) & MINUTES_MASK, 24 * 60);
+        assert_eq!(hud_gap_points(&labs), 120);
+        // A hand-edited gap above the offered range is clamped at placement.
+        labs.hud_bottom_gap = u16::MAX;
+        assert_eq!(
+            hud_gap_points(&labs),
+            u64::from(crate::app_settings::HUD_BOTTOM_GAP_MAX)
+        );
+        assert_eq!(Feature::HudHeight.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::HudHeight.added(), 20261122);
+        assert_eq!(Feature::HudHeight.audience(), Audience::Everyone);
+        assert_eq!(Feature::HudHeight.group(), Group::Dictation);
+        assert_eq!(Feature::HudHeight.settings_key(), "labs.hud_height");
+        assert_eq!(Feature::HudHeight.name(), "hud-height");
+        assert_eq!(
+            Feature::for_settings_key("labs.hud_bottom_gap"),
+            Some(Feature::HudHeight)
+        );
     }
 
     #[test]

@@ -88,6 +88,7 @@ impl Feature {
             Self::AnnotateAgentInstall => "Install agent skill from Annotate",
             Self::Signature => "Signature",
             Self::DictationStyle => "Dictation style",
+            Self::HudHeight => "HUD height",
         }
     }
 
@@ -319,6 +320,9 @@ impl Feature {
             Self::Signature => "Add a line to the end of each dictation, such as \"Sent from Hex\"",
             Self::DictationStyle => {
                 "Format every dictation as Polished, Casual, Notes, or Verbatim, like the iPhone app, without an AI model"
+            }
+            Self::HudHeight => {
+                "Choose how high the dictation HUD sits above the Dock when it's at the bottom"
             }
         }
     }

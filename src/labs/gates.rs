@@ -263,6 +263,27 @@ pub fn notch_indicator() -> bool {
     on(NOTCH_INDICATOR) && Feature::NotchIndicator.on_this_os()
 }
 
+/// Labs › HUD height: with the HUD position Bottom, its plate keeps a chosen
+/// gap above the Dock or the screen's edge (macOS; read each time the HUD is
+/// placed).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn hud_height() -> bool {
+    on(HUD_HEIGHT) && Feature::HudHeight.on_this_os()
+}
+
+/// The plate's gap above the Dock or the screen's bottom edge at the Bottom
+/// position: Labs › HUD height's saved points, or the fixed 24 pt while the
+/// lab is off (macOS; read each time the HUD is placed).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn hud_bottom_gap() -> f64 {
+    let _ = state();
+    if hud_height() {
+        HUD_BOTTOM_GAP.load(Ordering::Acquire) as f64
+    } else {
+        crate::rune_hud::hud_placement::BOTTOM_OFFSET
+    }
+}
+
 /// A paste on a Wayland desktop without data-control (GNOME) snapshots and
 /// restores the clipboard through an already running XWayland (Linux; read
 /// as each paste starts).
