@@ -205,6 +205,9 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     var modifierLetterRatio: CGFloat?
     /// The iPad keyboard these metrics are for (`KeyboardMetrics.pad`); nil on an iPhone.
     var pad: KeyboardPadPlacement?
+    /// Docked on an iPad, the width of a cell in a held key's accent menu, as Apple's is there
+    /// (`AccentMenu.padArrangement`); nil elsewhere, where a cell is the held key's width.
+    var accentCellWidth: CGFloat?
 
     /// The suggestion strip is Apple's predictive bar from the top of its suggestion pill down.
     /// Apple's bar is 44 pt from its panel's edge, the pill around a suggested word starts 6 pt
@@ -348,11 +351,14 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// the keyboard and its own band below, and Hex is Apple's floating keyboard: the strip as
     /// its 44 pt bar, then the same rows and the same 271 pt.
     static func pad(_ placement: KeyboardPadPlacement, orientation: KeyboardOrientation) -> KeyboardMetrics {
-        func docked(side: CGFloat, gap: CGFloat, keyHeight: CGFloat, rowGap: CGFloat, stripBottom: CGFloat, keysBottom: CGFloat) -> KeyboardMetrics {
+        func docked(
+            side: CGFloat, gap: CGFloat, keyHeight: CGFloat, rowGap: CGFloat, stripBottom: CGFloat, keysBottom: CGFloat, accentCell: CGFloat
+        ) -> KeyboardMetrics {
             KeyboardMetrics(
                 side: side, gap: gap, rowGap: rowGap, keyHeight: keyHeight,
                 stripTop: padClearance, stripHeight: insetStripHeight, stripBottom: stripBottom,
-                keysTop: 0, keysBottom: keysBottom, cornerRadius: keyCornerRadius, pad: placement
+                keysTop: 0, keysBottom: keysBottom, cornerRadius: keyCornerRadius, pad: placement,
+                accentCellWidth: accentCell
             )
         }
         let landscape = orientation == .landscape
@@ -369,19 +375,21 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
                 modifierLetterRatio: 1.375, pad: placement
             )
         // Row 4 ends 28 pt above the screen (portrait) and 29.8 pt (landscape): 64.5 and 85.8 pt pitches.
+        // Apple's accent cells there: 30 and 46.5 pt on the mini, 31 and 43.5 on the 11-inch,
+        // 34.5 and 45.5 on the 13-inch.
         case .docked(.mini):
             return landscape
-                ? docked(side: 7, gap: 14, keyHeight: 74.67, rowGap: 11.17, stripBottom: 11, keysBottom: 9.83)
-                : docked(side: 6, gap: 12, keyHeight: 55.5, rowGap: 9, stripBottom: 8, keysBottom: 8)
+                ? docked(side: 7, gap: 14, keyHeight: 74.67, rowGap: 11.17, stripBottom: 11, keysBottom: 9.83, accentCell: 46.5)
+                : docked(side: 6, gap: 12, keyHeight: 55.5, rowGap: 9, stripBottom: 8, keysBottom: 8, accentCell: 30)
         case .docked(.medium):
             return landscape
-                ? docked(side: 15, gap: 14, keyHeight: 73.67, rowGap: 12.17, stripBottom: 11, keysBottom: 10.83)
-                : docked(side: 9, gap: 10, keyHeight: 55.5, rowGap: 9, stripBottom: 8, keysBottom: 8)
+                ? docked(side: 15, gap: 14, keyHeight: 73.67, rowGap: 12.17, stripBottom: 11, keysBottom: 10.83, accentCell: 43.5)
+                : docked(side: 9, gap: 10, keyHeight: 55.5, rowGap: 9, stripBottom: 8, keysBottom: 8, accentCell: 31)
         // Row 4 ends 23.8 pt and 24 pt above the screen: 68.2 and 88 pt pitches.
         case .docked(.large):
             return landscape
-                ? docked(side: 5, gap: 10, keyHeight: 79, rowGap: 9, stripBottom: 9, keysBottom: 4)
-                : docked(side: 3.5, gap: 7, keyHeight: 61.17, rowGap: 7, stripBottom: 7, keysBottom: 3.83)
+                ? docked(side: 5, gap: 10, keyHeight: 79, rowGap: 9, stripBottom: 9, keysBottom: 4, accentCell: 45.5)
+                : docked(side: 3.5, gap: 7, keyHeight: 61.17, rowGap: 7, stripBottom: 7, keysBottom: 3.83, accentCell: 34.5)
         }
     }
 
@@ -459,7 +467,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
-            modifierLetterRatio: modifierLetterRatio, pad: pad
+            modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth
         )
     }
 
@@ -477,7 +485,7 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
             stripTop: stripTop, stripHeight: stripHeight, stripBottom: stripBottom,
             keysTop: keysTop, keysBottom: keysBottom, cornerRadius: cornerRadius,
             bottomRowTrim: bottomRowTrim, bottomRowReturnColumn: bottomRowReturnColumn,
-            modifierLetterRatio: modifierLetterRatio, pad: pad
+            modifierLetterRatio: modifierLetterRatio, pad: pad, accentCellWidth: accentCellWidth
         )
     }
 
