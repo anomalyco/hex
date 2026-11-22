@@ -10,6 +10,8 @@ struct DictationSettingsPage: View {
     @State private var formatLists = DictationListSettings().isEnabled
     @State private var spokenPunctuation = DictationPunctuationSettings().isEnabled
     @State private var endsWithPeriod = DictationPeriodSettings().isEnabled
+    /// Keep mic warm stays on the page once picked, even Off where it would hide.
+    @State private var keepsWarmRow = false
 
     var body: some View {
         SettingsPageScaffold(title: "Dictation") {
@@ -106,24 +108,28 @@ struct DictationSettingsPage: View {
             }
 
             SettingsCard {
-                HStack(spacing: 12) {
-                    SettingsRowLabel(title: String(localized: "Keep mic warm"))
-                    Spacer(minLength: 8)
-                    SettingsSegments(
-                        items: WarmSessionDuration.allCases,
-                        selected: dictation.warmDuration,
-                        label: \.shortLabel,
-                        onSelect: { duration in
-                            withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
-                                dictation.selectWarmDuration(duration)
+                // Hidden where the keyboard dictates by itself and it would say Off.
+                if keepsWarmRow || dictation.showsKeepMicWarm {
+                    HStack(spacing: 12) {
+                        SettingsRowLabel(title: String(localized: "Keep mic warm"))
+                        Spacer(minLength: 8)
+                        SettingsSegments(
+                            items: WarmSessionDuration.allCases,
+                            selected: dictation.warmDuration,
+                            label: \.shortLabel,
+                            onSelect: { duration in
+                                keepsWarmRow = true
+                                withAnimation(HexMotion.settleAnimation(reduceMotion: reduceMotion)) {
+                                    dictation.selectWarmDuration(duration)
+                                }
                             }
-                        }
-                    )
-                }
-                .padding(.horizontal, 16)
-                .frame(minHeight: 50)
+                        )
+                    }
+                    .padding(.horizontal, 16)
+                    .frame(minHeight: 50)
 
-                SettingsDivider()
+                    SettingsDivider()
+                }
 
                 // With a car, headset or headphones connected (`MicrophoneRoute`).
                 HStack(spacing: 12) {

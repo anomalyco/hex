@@ -780,6 +780,9 @@ final class KeyboardViewController: UIInputViewController {
         }
         viewModel.onOpenURL = { [weak self] url in
             guard let self else { return }
+            if url == self.viewModel.coldStartURL, let reason = self.opensHexFor {
+                KeyboardSelfDictation().recordHandedToHex(reason)
+            }
             ContainingAppOpener.open(url, from: self)
         }
 
@@ -1185,6 +1188,8 @@ final class KeyboardViewController: UIInputViewController {
 
     /// Whether the Dictate and Hex keys dictate in the keyboard; nil until first decided.
     private var localDictationAvailable: Bool?
+    /// Why Dictate opens Hex while it can't dictate here, recorded as it does (`KeyboardSelfDictation`).
+    private var opensHexFor: KeyboardSelfDictation.Reason?
     private var lastAvailabilityNote: TimeInterval = 0
 
     /// In-keyboard dictation (iOS 26) needs memory for its capture web view and recording
@@ -1209,6 +1214,7 @@ final class KeyboardViewController: UIInputViewController {
             && !KeyboardParakeet.shared.dictatesMultilingualHere
         let needsHex = !localDictation.isActive && (LanguageSettings().keyboardNeedsHex() || multilingualOpensHex)
         let available = localDictation.isActive || (!needsHex && localDictation.hasMemoryToStart)
+        opensHexFor = available ? nil : multilingualOpensHex ? .multilingual : needsHex ? .speechModel : .memory
         guard available != localDictationAvailable else { return }
         // Noted at most every 5 s, as the footprint can hover at the line.
         let now = Date().timeIntervalSince1970
@@ -1223,6 +1229,7 @@ final class KeyboardViewController: UIInputViewController {
         localDictationAvailable = available
         viewModel.onLocalDictateTap = available ? { [weak self] in
             guard let self else { return }
+            KeyboardSelfDictation().clearHandedToHex()
             self.localDictation.start(
                 in: self.view,
                 microphone: self.bridge.microphone,

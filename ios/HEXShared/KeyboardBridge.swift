@@ -473,6 +473,7 @@ struct KeyboardBridge {
         static let modelInstalled = "model.installed"
         static let snapshot = "keyboard.snapshot"
         static let warmDuration = "settings.warmDuration"
+        static let warmDurationReviewed = "settings.warmDuration.reviewedForKeyboardDictation"
         static let style = "settings.dictationStyle"
         static let microphone = "settings.microphone"
         /// Before Settings › Microphone: true allowed Bluetooth microphones (Always use iPhone
@@ -526,16 +527,49 @@ struct KeyboardBridge {
         defaults?.set(installed, forKey: Key.modelInstalled)
     }
 
+    /// Keep mic warm as chosen, else what this iPhone needs: Off where the keyboard dictates by
+    /// itself, 15 minutes where Dictate opens Hex (`KeyboardSelfDictation`). Worked out on each
+    /// read, never stored, so it follows the keyboard.
     var warmDuration: WarmSessionDuration {
         get {
             guard let raw = defaults?.string(forKey: Key.warmDuration),
                   let parsed = WarmSessionDuration(rawValue: raw) else {
-                return .fifteenMinutes
+                return defaultWarmDuration()
             }
             return parsed
         }
         nonmutating set {
             defaults?.set(newValue.rawValue, forKey: Key.warmDuration)
+        }
+    }
+
+    func defaultWarmDuration(
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        now: Date = Date()
+    ) -> WarmSessionDuration {
+        keyboardDictatesItself(osMajorVersion: osMajorVersion, now: now) ? .off : .fifteenMinutes
+    }
+
+    func keyboardDictatesItself(
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        now: Date = Date()
+    ) -> Bool {
+        KeyboardSelfDictation(defaults: defaults).dictatesItself(osMajorVersion: osMajorVersion, now: now)
+    }
+
+    /// Once, on iOS 26 or later: a stored 15 minutes, which tapping the default to warm the mic
+    /// also stored, is taken for not chosen where the keyboard dictates by itself, so it reads
+    /// Off. Off, 5 minutes and 1 hour stay as chosen.
+    func reviewWarmDurationForKeyboardDictation(
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        now: Date = Date()
+    ) {
+        guard osMajorVersion >= KeyboardSelfDictation.firstVersion,
+              defaults?.bool(forKey: Key.warmDurationReviewed) == false else { return }
+        defaults?.set(true, forKey: Key.warmDurationReviewed)
+        if defaults?.string(forKey: Key.warmDuration) == WarmSessionDuration.fifteenMinutes.rawValue,
+           keyboardDictatesItself(osMajorVersion: osMajorVersion, now: now) {
+            defaults?.removeObject(forKey: Key.warmDuration)
         }
     }
 

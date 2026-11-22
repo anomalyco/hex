@@ -770,6 +770,98 @@ final class KeyboardBridgeTests: XCTestCase {
             message: nil
         )
     }
+
+    /// Keep mic warm defaults to Off where the keyboard dictates by itself, else to 15 minutes:
+    /// before iOS 26, and while the keyboard hands its dictations to Hex. A choice stays.
+    func testKeepMicWarmDefaultFollowsWhetherTheKeyboardDictatesItself() {
+        let suiteName = "hex.tests.warmDefault.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        let record = KeyboardSelfDictation(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off)
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 27, now: now), .off)
+        for version in [18, 25] {
+            XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: version, now: now), .fifteenMinutes, "iOS \(version)")
+        }
+
+        record.recordHandedToHex(.memory, at: now.addingTimeInterval(-3_600))
+        XCTAssertEqual(record.handedToHex?.reason, .memory)
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "short of memory an hour ago")
+        XCTAssertEqual(
+            bridge.defaultWarmDuration(osMajorVersion: 26, now: now.addingTimeInterval(KeyboardSelfDictation.recentWindow)),
+            .off,
+            "a week on"
+        )
+        record.clearHandedToHex()
+        XCTAssertNil(record.handedToHex)
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "the keyboard dictated by itself again")
+
+        let languages = LanguageSettings(defaults: defaults)
+        languages.markKeyboardNeedsHex(at: now)
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "no speech model in the keyboard")
+        languages.clearKeyboardNeedsHex()
+
+        languages.chooseDictationLanguage("nl-NL")
+        let multilingual = MultilingualParakeetSettings(defaults: defaults)
+        multilingual.isEnabled = true
+        multilingual.isModelReady = true
+        if MultilingualParakeetSettings.fits() {
+            XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .fifteenMinutes, "only Hex loads the multilingual model")
+        }
+        KeyboardParakeetSettings(defaults: defaults).isEnabled = true
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off, "Speech model in keyboard loads it there")
+        multilingual.isEnabled = false
+
+        bridge.warmDuration = .oneHour
+        XCTAssertEqual(bridge.warmDuration, .oneHour)
+        bridge.warmDuration = .off
+        record.recordHandedToHex(.memory)
+        XCTAssertEqual(bridge.warmDuration, .off, "Off chosen stays Off")
+    }
+
+    /// An install from before the default followed the keyboard: a stored 15 minutes (tapping
+    /// the default to warm the mic stored it) reads as not chosen, once, on iOS 26 where the
+    /// keyboard dictates by itself. 5 minutes, 1 hour and Off stay.
+    func testAStoredFifteenMinutesIsReviewedOnceWhereTheKeyboardDictatesItself() {
+        let suiteName = "hex.tests.warmReview.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let bridge = KeyboardBridge(defaults: defaults)
+        let now = Date(timeIntervalSince1970: 2_000_000_000)
+
+        bridge.warmDuration = .fifteenMinutes
+        bridge.reviewWarmDurationForKeyboardDictation(osMajorVersion: 25, now: now)
+        XCTAssertEqual(bridge.warmDuration, .fifteenMinutes, "iOS 25 needs it, and isn't reviewed")
+        bridge.reviewWarmDurationForKeyboardDictation(osMajorVersion: 26, now: now)
+        XCTAssertNil(defaults.string(forKey: "settings.warmDuration"))
+        XCTAssertEqual(bridge.defaultWarmDuration(osMajorVersion: 26, now: now), .off)
+
+        bridge.warmDuration = .fifteenMinutes
+        bridge.reviewWarmDurationForKeyboardDictation(osMajorVersion: 26, now: now)
+        XCTAssertEqual(bridge.warmDuration, .fifteenMinutes, "once: a 15 minutes picked since stays")
+
+        for kept in [WarmSessionDuration.off, .fiveMinutes, .oneHour] {
+            let suite = "hex.tests.warmReview.\(UUID().uuidString)"
+            let other = UserDefaults(suiteName: suite)!
+            defer { other.removePersistentDomain(forName: suite) }
+            let otherBridge = KeyboardBridge(defaults: other)
+            otherBridge.warmDuration = kept
+            otherBridge.reviewWarmDurationForKeyboardDictation(osMajorVersion: 26, now: now)
+            XCTAssertEqual(otherBridge.warmDuration, kept)
+        }
+
+        let suite = "hex.tests.warmReview.\(UUID().uuidString)"
+        let short = UserDefaults(suiteName: suite)!
+        defer { short.removePersistentDomain(forName: suite) }
+        let shortBridge = KeyboardBridge(defaults: short)
+        shortBridge.warmDuration = .fifteenMinutes
+        KeyboardSelfDictation(defaults: short).recordHandedToHex(.memory, at: now)
+        shortBridge.reviewWarmDurationForKeyboardDictation(osMajorVersion: 26, now: now)
+        XCTAssertEqual(shortBridge.warmDuration, .fifteenMinutes, "the keyboard needs Hex here")
+    }
 }
 
 /// The keyboard's quick dictation-language switch.
