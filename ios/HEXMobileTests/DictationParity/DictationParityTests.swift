@@ -1,10 +1,14 @@
 import Foundation
 import XCTest
+@testable import HEX
 
-/// Exports the dictation rules' golden cases for the Rust port's parity test
-/// (crates/keyboard/core/tests/dictation_parity.rs), from the oracle copies of today's Swift
-/// in this folder. Off unless asked: xcodebuild passes `TEST_RUNNER_`-prefixed variables to
-/// the test with the prefix stripped.
+/// Exports the dictation rules' cases as JSON Lines: the committed fixture
+/// (crates/keyboard/core/tests/fixtures/dictation-parity.jsonl, which the Rust core's tests and
+/// `DictationGoldenTests` replay) and larger exports for the core's parity test. The outputs are
+/// what the shipped rules give, the keyboard core through the Swift API; the fixture was first
+/// written from copies of the Swift rules before the core (dev 93db6ad7), and refreshing it
+/// re-baselines on purpose (crates/keyboard/README.md). Off unless asked: xcodebuild passes
+/// `TEST_RUNNER_`-prefixed variables to the test with the prefix stripped.
 ///
 ///     TEST_RUNNER_HEX_DICTATION_PARITY_OUT=/tmp/dictation-parity.jsonl \
 ///     TEST_RUNNER_HEX_DICTATION_PARITY_COUNT=150000 \
@@ -76,7 +80,7 @@ struct ParityCases {
             cases.generated(&random)
         }
     }
-    static let styles = DictationStyleOracle.allCases
+    static let styles = DictationStyle.allCases
     static let dictionary: [String] = ["the", "hello", "world", "black", "that's", "it", "and", "see", "you",
                                        "great", "sounds", "good", "hola", "i", "okay", "ok", "is", "a", "send"]
 
@@ -104,9 +108,9 @@ struct ParityCases {
         }
         for language in ParityLanguage.all {
             write("lowercases_continuations", language: language, ["out": lowercasesContinuations(language)])
-            write("supports", language: language, ["out": SpokenCleanupRulesOracle.supports(language.identifier)])
+            write("supports", language: language, ["out": SpokenCleanupRules.supports(language.identifier)])
             write("filler_pattern", language: language,
-                  ["out": TranscriptFormatterOracle.fillerPattern(for: language.identifier) as Any? ?? NSNull()])
+                  ["out": TranscriptFormatter.fillerPattern(for: language.identifier) as Any? ?? NSNull()])
         }
     }
 
@@ -132,30 +136,30 @@ struct ParityCases {
         let identifier = language.identifier
         switch kind {
         case 0: write("spoken_punctuation", text, language: language,
-                      SpokenPunctuationOracle.format(text, language: identifier))
-        case 1: write("spoken_lists", text, language: language, SpokenListsOracle.format(text, language: identifier))
+                      SpokenPunctuation.format(text, language: identifier))
+        case 1: write("spoken_lists", text, language: language, SpokenLists.format(text, language: identifier))
         case 2: write("cleanup_rules", text, language: language,
-                      SpokenCleanupRulesOracle.clean(text, language: identifier))
+                      SpokenCleanupRules.clean(text, language: identifier))
         case 3:
             guard !Self.crashesSpokenSymbols(text) else { return }
             write("spoken_symbols", text, language: language,
-                  SpokenCleanupRulesOracle.spokenSymbols(in: text, language: identifier))
+                  SpokenCleanupRules.spokenSymbols(in: text, language: identifier))
         case 4: write("spoken_counts", text, language: language,
-                      SpokenCleanupRulesOracle.spokenCounts(in: text, language: identifier))
-        case 5: write("french_spacing", text, language: language, FrenchSpacingOracle.apply(text, language: identifier))
+                      SpokenCleanupRules.spokenCounts(in: text, language: identifier))
+        case 5: write("french_spacing", text, language: language, FrenchSpacing.apply(text, language: identifier))
         case 6:
-            let words = CleanupTaggerOracle.words(in: text)
+            let words = CleanupTagger.words(in: text)
             let deletes = words.map { _ in random.chance(0.3) }
             write("reconstruct", language: ParityLanguage(identifier: nil), [
                 "words": words, "deletes": deletes,
-                "out": CleanupReconstructionOracle.reconstruct(words, deletes: deletes),
+                "out": CleanupReconstruction.reconstruct(words, deletes: deletes),
             ])
         case 7:
             let before: String? = random.chance(0.15) ? nil : ParityGenerator.context(&random)
             let after: String? = random.chance(0.4) ? nil : ParityGenerator.context(&random)
             let checks = random.chance(0.5)
             let dictionary = Set(Self.dictionary)
-            var fields: [String: Any] = ["text": text, "out": TranscriptFormatterOracle.insertionText(
+            var fields: [String: Any] = ["text": text, "out": TranscriptFormatter.insertionText(
                 for: text, beforeContext: before, afterContext: after, isWord: checks ? { dictionary.contains($0) } : nil)]
             if let before { fields["before"] = before }
             if let after { fields["after"] = after }
@@ -163,25 +167,25 @@ struct ParityCases {
             write("insertion", language: ParityLanguage(identifier: nil), fields)
         case 8:
             write("starts_sentence", language: ParityLanguage(identifier: nil),
-                  ["text": text, "out": TranscriptFormatterOracle.startsSentence(after: text)])
+                  ["text": text, "out": TranscriptFormatter.startsSentence(after: text)])
         case 9:
             let dictionary = Set(Self.dictionary)
             write("dropping_final_full_stop", text, language: ParityLanguage(identifier: nil),
-                  TranscriptFormatterOracle.droppingFinalFullStop(text))
+                  TranscriptFormatter.droppingFinalFullStop(text))
             write("continuing_sentence", language: ParityLanguage(identifier: nil), [
                 "text": text, "words": Self.dictionary,
-                "out": TranscriptFormatterOracle.continuingSentence(text, isWord: { dictionary.contains($0) }),
+                "out": TranscriptFormatter.continuingSentence(text, isWord: { dictionary.contains($0) }),
             ])
         case 10:
             write("words", language: ParityLanguage(identifier: nil),
-                  ["text": text, "out": CleanupTaggerOracle.words(in: text)])
+                  ["text": text, "out": CleanupTagger.words(in: text)])
             write("characters", language: ParityLanguage(identifier: nil), [
                 "text": text,
                 "out": text.map { ParityUnicode.characterFlags($0) + ":\($0.unicodeScalars.count)" },
             ])
         case 11:
             // `folding` of each word, as the rules fold them (SpokenPunctuation, SpokenLists).
-            for word in CleanupTaggerOracle.words(in: text).prefix(8) {
+            for word in CleanupTagger.words(in: text).prefix(8) {
                 write("fold", language: ParityLanguage(identifier: nil), [
                     "text": word, "out": word.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil),
                 ])
@@ -189,20 +193,20 @@ struct ParityCases {
         default:
             guard !Self.crashesSpokenSymbols(text) else { return }
             // The cleanup steps as Clean up what I say runs them without the tagger.
-            let symbols = SpokenCleanupRulesOracle.spokenSymbols(in: text, language: identifier)
-            let counted = SpokenCleanupRulesOracle.spokenCounts(in: symbols, language: identifier)
-            write("cleanup_chain", text, language: language, SpokenCleanupRulesOracle.clean(counted, language: identifier))
+            let symbols = SpokenCleanupRules.spokenSymbols(in: text, language: identifier)
+            let counted = SpokenCleanupRules.spokenCounts(in: symbols, language: identifier)
+            write("cleanup_chain", text, language: language, SpokenCleanupRules.clean(counted, language: identifier))
         }
     }
 
-    /// Whether `spokenSymbols` would trap on `text`: two addresses back to back ("a at sign
-    /// b.com at sign c.com") make edits that overlap, and `text[cursor..<start]` traps. Two
-    /// symbol names in a text skip it, which covers every such case.
+    /// Whether `spokenSymbols` could trap on `text` (`SpokenCleanupRules.overlappingAddresses`):
+    /// two addresses back to back ("a at sign b.com at sign c.com"). Two symbol names in a text
+    /// skip it, which covers every such case.
     static func crashesSpokenSymbols(_ text: String) -> Bool {
-        let words = CleanupTaggerOracle.words(in: text).map { $0.lowercased() }
+        let words = CleanupTagger.words(in: text).map { $0.lowercased() }
         var names = 0
         for (index, word) in words.enumerated() {
-            let bare = SpokenCleanupRulesOracle.bare(word)
+            let bare = SpokenCleanupRules.bare(word)
             if bare.hasPrefix("at-sign") { names += 1 }
             if word == "at", index + 1 < words.count,
                words[index + 1].hasPrefix("sign") || words[index + 1] == "the" { names += 1 }
@@ -210,18 +214,18 @@ struct ParityCases {
         return names >= 2
     }
 
-    private mutating func format(_ text: String, style: DictationStyleOracle, language: ParityLanguage, flags: Int) {
+    private mutating func format(_ text: String, style: DictationStyle, language: ParityLanguage, flags: Int) {
         let lists = flags & 1 != 0, punctuation = flags & 2 != 0, period = flags & 4 == 0
         var fields: [String: Any] = ["text": text, "style": style.rawValue, "lists": lists, "punct": punctuation,
                                      "period": period]
-        fields["out"] = TranscriptFormatterOracle.format(text, style: style, language: language.identifier,
+        fields["out"] = TranscriptFormatter.format(text, style: style, language: language.identifier,
                                                          lists: lists, punctuation: punctuation, endsWithPeriod: period)
         write("format", language: language, fields)
     }
 
     private func lowercasesContinuations(_ language: ParityLanguage) -> Any {
         guard let identifier = language.identifier else { return NSNull() }
-        return TranscriptFormatterOracle.lowercasesContinuations(in: identifier)
+        return TranscriptFormatter.lowercasesContinuations(in: identifier)
     }
 
     private mutating func write(_ op: String, _ text: String, language: ParityLanguage, _ out: String) {

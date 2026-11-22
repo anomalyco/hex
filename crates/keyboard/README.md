@@ -17,7 +17,9 @@ This is its own Cargo workspace with its own `Cargo.lock` and pinned toolchain
 
 Pieces move here one at a time from the Swift keyboard (`ios/HEXShared/FullKeyboard`), each
 proven identical to the Swift it replaces before iOS switches to it. Today: the typing
-model reader and Swipe typing's decoder. Tune those here, not in Swift.
+model reader, Swipe typing's decoder, and dictation's text rules (`core/src/dictation`: the
+styles, Format lists, Spoken punctuation, Clean up's rules and spoken symbols and counts,
+French spacing). Tune those here, not in Swift.
 
 ## Setup
 
@@ -61,3 +63,42 @@ cd ../crates/keyboard && cargo test --release --test swipe_parity -- --nocapture
 
 `TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1` adds each read's time; a larger count makes a larger
 file for `HEX_SWIPE_PARITY`.
+
+## Dictation's text rules
+
+`core/src/dictation` gives what iOS's Swift rules gave, byte for byte; iOS calls it through
+`hk_dictation_*` (`ios/HEXShared/DictationCore.swift` and the Swift API kept in
+`TranscriptFormatter.swift`, `SpokenLists.swift`, `SpokenPunctuation.swift`,
+`SpokenCleanupRules.swift`, `CleanupReconstruction.swift`, `FrenchSpacing.swift`). The proof:
+
+- `core/tests/fixtures/dictation-parity.jsonl` (about 3,900 cases, 1 MB), first written from
+  copies of the Swift rules (dev 93db6ad7), replayed by `core/tests/dictation_parity.rs`, by
+  `ffi/tests/dictation_api.rs` through the C interface, and by iOS's `DictationGoldenTests`
+  through the shipped Swift API.
+- Larger exports: `HEX_DICTATION_PARITY=/tmp/dictation-parity.jsonl cargo test --release`.
+- iOS's Unicode data, per scalar: `HEX_DICTATION_UNICODE=/tmp/dictation-unicode.tsv cargo
+  test --release`. The tables in `core/src/dictation/unicode_generated.rs` come from the same
+  dump (`core/tools/dictation_unicode_tables.py`).
+
+Both files come from `HEXMobileTests/DictationParityTests` in the simulator (`ios/`):
+
+```sh
+TEST_RUNNER_HEX_DICTATION_PARITY_OUT=/tmp/dictation-parity.jsonl \
+TEST_RUNNER_HEX_DICTATION_UNICODE_OUT=/tmp/dictation-unicode.tsv \
+xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+  -destination 'platform=iOS Simulator,name=<simulator>' \
+  -only-testing:HEXMobileTests/DictationParityTests
+```
+
+`TEST_RUNNER_HEX_DICTATION_PARITY_COUNT` (default 600, the committed fixture's) sets how
+many transcripts are generated; from 100,000 every test string also runs through every style,
+setting and language. `_SEED` picks other transcripts.
+
+Refreshing the fixture: the exporter writes what the shipped rules give, so after an
+intentional change to a rule, change the core, run the export with the default count, copy
+the file over `core/tests/fixtures/dictation-parity.jsonl`, and review its diff: every changed
+line is a behaviour change. With a new iOS (new Unicode data), export the Unicode dump too, run
+`python3 core/tools/dictation_unicode_tables.py /tmp/dictation-unicode.tsv` and the Unicode
+test. New test strings come in with `python3 ios/HEXMobileTests/DictationParity/make_corpus.py`,
+which also reads the rules' words from the core; it changes the generated transcripts, so
+refresh the fixture after it.

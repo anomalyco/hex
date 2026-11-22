@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Writes ParityCorpus.generated.swift: every string literal in the dictation tests (the parity
-exporter's corpus) and the words the rules themselves know (its generator's vocabulary).
+exporter's corpus) and the words the rules themselves know (its generator's vocabulary, read
+from the keyboard core's tables). Rerunning it changes the generated transcripts, so refresh the
+fixture after (crates/keyboard/README.md).
 
     python3 ios/HEXMobileTests/DictationParity/make_corpus.py
 """
@@ -20,12 +22,16 @@ TESTS = [
     "DictationControllerTests.swift",
     "FullKeyboardEngineTests.swift",
 ]
+# The rules' words, in the keyboard core (Rust string literals read as Swift's do).
 RULES = [
-    "SpokenPunctuation.swift",
-    "SpokenLists.swift",
-    "SpokenCleanupRules.swift",
-    "TranscriptFormatter.swift",
-    "CleanupReconstruction.swift",
+    "punctuation/tables.rs",
+    "lists_tables.rs",
+    "cleanup.rs",
+    "symbols.rs",
+    "formatter.rs",
+    "casual.rs",
+    "notes.rs",
+    "reconstruct.rs",
 ]
 # Interpolations the dictation tests use, as their values.
 VARIABLES = {"nbsp": " ", "thin": " "}
@@ -136,7 +142,8 @@ def main():
     words = []
     seen = set()
     for name in RULES:
-        for text in literals(open(os.path.join(IOS, "HEXShared", name), encoding="utf-8").read()):
+        path = os.path.join(IOS, "..", "crates", "keyboard", "core", "src", "dictation", name)
+        for text in literals(open(path, encoding="utf-8").read()):
             text = text.strip()
             if text and len(text) <= 40 and text not in seen and "\\" not in text:
                 seen.add(text)
