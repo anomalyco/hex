@@ -13,7 +13,7 @@ struct OnboardingModel: Equatable {
     var stage: Stage
     /// The language it's for, in Hex's interface language ("English").
     var language: String
-    /// What Hex's own model is doing ("Optimizing for this iPhone… about a minute"), while it
+    /// What Hex's own model is doing ("Optimizing for this iPhone, about a minute"), while it
     /// prepares.
     var detail: String?
     /// Whether Hex downloads a model for it: not for Apple's on-device recognizer before iOS 26,
