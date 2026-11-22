@@ -2173,8 +2173,8 @@ Unified English Q8_0 model through transcribe.cpp on the CPU, over clean
 16 kHz WAVs, in 20 runs with speech starting at 0, 450 ms, and 1 s: the
 stream's opening words matched the whole-clip text in every run, including
 speech starting at sample 0. The stream's chunk and lookahead geometry was not
-varied. What the slack excuses: detected speech within 1.2 s before the text's
-start. A buffered stream also gets a span rule with both conditions: at
+varied. What the slack excuses: mostly detected speech within 1.2 s before the
+text's start. A buffered stream also gets a span rule with both conditions: at
 least 100 ms of speech detected more than 400 ms before the text, and detected
 speech that starts 1.5 s or more before the text. When both hold the stream is
 refused, however sparse the earlier frames are and however much dense speech
@@ -2186,7 +2186,10 @@ streams actually lost their opening is unknown, as the production logs do not
 record the stream's text and the lag was measured only on the CPU. The cost is
 more fallbacks: an early click or breath more than ~1.5 s before the text,
 with normal speech after it, now transcribes the whole clip, which costs
-latency only. Checks:
+latency only. The residual risk: a stream that lost up to about 1 s of
+opening, with nothing detected earlier than 1.5 s before its text, is now
+pasted; without the stream's text, that cannot be told apart from the normal
+timestamp lag. Checks:
 `parakeets_late_first_word_time_is_not_a_lost_opening`,
 `parakeets_measured_lags_are_not_lost_openings`,
 `parakeets_sparse_opening_spanning_1800_ms_is_refused`,

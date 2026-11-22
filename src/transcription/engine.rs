@@ -2028,14 +2028,15 @@ mod tests {
                 3_300,
                 PARAKEET_OPENING_SLACK_SAMPLES,
             );
-            assert_eq!(
-                result
-                    .as_ref()
-                    .is_err_and(|reason| reason
+            if refused {
+                assert!(
+                    result.as_ref().is_err_and(|reason| reason
                         .contains("speech from 400 ms precedes it and spans 1400 ms")),
-                refused,
-                "{frames}: {result:?}"
-            );
+                    "{frames}: {result:?}"
+                );
+            } else {
+                assert_eq!(result, Ok(format!("streamed {}", clip.len())), "{frames}");
+            }
         }
     }
 
@@ -2055,13 +2056,20 @@ mod tests {
                 3_300,
                 PARAKEET_OPENING_SLACK_SAMPLES,
             );
-            assert_eq!(
-                result.as_ref().is_err_and(|reason| {
-                    reason.contains("speech from") && reason.contains("spans 300 ms")
-                }),
-                refused,
-                "{speech_start_ms}: {result:?}"
-            );
+            if refused {
+                assert!(
+                    result.as_ref().is_err_and(|reason| {
+                        reason.contains("speech from") && reason.contains("spans 300 ms")
+                    }),
+                    "{speech_start_ms}: {result:?}"
+                );
+            } else {
+                assert_eq!(
+                    result,
+                    Ok(format!("streamed {}", clip.len())),
+                    "{speech_start_ms}"
+                );
+            }
         }
     }
 

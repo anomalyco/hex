@@ -412,6 +412,10 @@ impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
                 && early_first.is_some_and(|first| {
                     covered.saturating_sub(first - frame) >= UNTRANSCRIBED_SPEECH_SAMPLES
                 });
+            // For a buffered stream the count rule implies the span rule: the
+            // frames it counted also end before the old edge, and their first
+            // one already opens the required span. So the count check only
+            // chooses the message; every other stream has no span rule.
             if untranscribed >= UNTRANSCRIBED_SPEECH_SAMPLES
                 && let Some(first) = first
             {
