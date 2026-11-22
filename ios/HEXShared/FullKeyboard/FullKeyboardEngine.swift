@@ -148,6 +148,12 @@ final class FullKeyboardEngine {
     var joinsUnfoldedKeyboard = false {
         didSet { if joinsUnfoldedKeyboard != oldValue { rebuildLayout(cause: "join_unfolded") } }
     }
+    /// Settings › Experiments › Dvorak punctuation keys (off by default): English's Dvorak
+    /// letters gain comma and period on row 1 and a semicolon by the space bar, which type
+    /// `<`, `>` and `:` with shift.
+    var dvorakPunctuation = false {
+        didSet { if dvorakPunctuation != oldValue { rebuildLayout(cause: "dvorak_punctuation") } }
+    }
     /// Whether the keys have the number row's band: its switch is on and this is an iPhone (the
     /// iPad keeps Apple's rows; `KeyboardMetrics.for`).
     var hasNumberRow: Bool { showsNumberRow && pad == nil }
@@ -901,7 +907,10 @@ final class FullKeyboardEngine {
             return
         }
         spaceBeforeNextWord(character)
-        var text = layerState.layer == .letters && shift.isUppercase ? key.shifted ?? character.uppercased() : character
+        // The Dvorak punctuation keys' symbols follow a shift you pressed, or caps lock, not
+        // auto-capitalization; the docked iPad's two-symbol keys have always followed both.
+        let shifted = layout.metrics.pad?.isDocked == true || shift.isUserShift ? key.shifted : nil
+        var text = layerState.layer == .letters && shift.isUppercase ? shifted ?? character.uppercased() : character
         if layerState.layer == .letters {
             shift.didType()
         }
@@ -1436,6 +1445,7 @@ final class FullKeyboardEngine {
             pad: pad,
             numberRow: hasNumberRow,
             joinsUnfoldedKeyboard: joinsUnfoldedKeyboard,
+            dvorakPunctuation: dvorakPunctuation,
             availableHeight: availableHeight
         )
         autocorrect.setKeys(layout.language, letters: layout.letters)

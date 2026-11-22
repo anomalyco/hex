@@ -1168,6 +1168,16 @@
         }
       }
     },
+    "Dvorak punctuation keys" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dvorak 标点键"
+          }
+        }
+      }
+    },
     "Edited" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3019,6 +3029,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在听写语言中加入 Greeklish"
+          }
+        }
+      }
+    },
+    "Adds comma, period and semicolon keys to the English Dvorak keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为英文 Dvorak 键盘添加逗号、句号和分号键。"
           }
         }
       }

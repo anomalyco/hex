@@ -703,10 +703,10 @@ never at a launch by itself.
   - **Experiments:** Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
-    below the switch), German spatial autocorrect, Korean keyboard (두벌식), ABC under the
-    emoji key, Keyboard themes (its Theme menu below the switch while it's on), Two-thumb
-    selection, Delete swiped words letter by letter, Hide word suggestions, Join the
-    keyboard when unfolded, and Multilingual model (Parakeet).
+    below the switch), German spatial autocorrect, Korean keyboard (두벌식), Dvorak punctuation
+    keys, ABC under the emoji key, Keyboard themes (its Theme menu below the switch while
+    it's on), Two-thumb selection, Delete swiped words letter by letter, Hide word
+    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1052,7 +1052,15 @@ never at a launch by itself.
   A Ä À…, O Ö…, U Ü…; Spanish QWERTY: N Ñ Ń). Apple's Dvorak is P Y F G C R L and delete,
   A O E U I D H T N S from the edge, shift and Q J K X B M W V Z, on keys narrowed so that
   row fits (38.3 pt pitch on a 402 pt iPhone); split on the Duo it keeps delete on row 3
-  (Apple's split Dvorak unobserved). Kept per language in the App Group
+  (Apple's split Dvorak unobserved). Settings › Experiments › Dvorak punctuation keys (off by
+  default, `experiments.dvorakPunctuation`) puts `,` and `.` ahead of P on row 1, whose nine keys
+  narrow to start at the left margin and end at the same delete key, puts `;` just left of the
+  space bar where it can give up a letter's width, and types `<`, `>` and `:` with a shift you
+  press or caps lock (auto-capitalization leaves the comma); on the split Duo the two
+  punctuation keys join only the left half, on a pitch narrowed so it keeps its right edge (its
+  top-row keys are narrower), and `;` takes from the left space bar. A URL or email field keeps its
+  own `.` key instead of row 1's. Off, every layout is key for key the one it was. Kept per
+  language in the App Group
   (`settings.keyboardLanguages.layouts`, `LanguageSettings.letterLayout(for:)`); unset,
   not offered, or unreadable (an iPhone that keeps the App Group from a keyboard without
   Full Access), a language types on its own layout. Spatial autocorrect, the touch decoder,
