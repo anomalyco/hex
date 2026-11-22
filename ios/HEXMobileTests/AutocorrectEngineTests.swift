@@ -1416,6 +1416,30 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Zorbix zorbix ", "a slip in a name from Contacts, and the name typed right")
     }
 
+    /// X: "it refuses to capitalize I's in sentences". "i", "im", "ill", "ive" and "id" took
+    /// their capital on space, but "i'm", "i'll", "i've" and "i'd" typed with the apostrophe
+    /// stayed lowercase, with smart quotes too (their ’ ends a token). Auto-capitalization off
+    /// adds no capital, as for "i".
+    func testPronounContractionsTypedWithTheirApostropheTakeTheirCapital() {
+        func type(_ text: String) {
+            for ch in text {
+                if ch == "'" {
+                    tap(.layerSwitch(.numbers))
+                    tap(.character("'"))
+                    if engine.layout.layer != .letters { tap(.layerSwitch(.letters)) }
+                } else {
+                    typeWord(String(ch))
+                }
+            }
+        }
+        type("so i'm in and i'd go ")
+        target.smartQuotesType = .default
+        type("i'll say i've ")
+        engine.autoCapitalizes = false
+        type("i'm ")
+        XCTAssertEqual(target.text, "so I'm in and I'd go I\u{2019}ll say I\u{2019}ve i\u{2019}m ")
+    }
+
     /// Record typing logs: a word of someone's own in capitals ("DONT", from Contacts or one Hex
     /// learned) was read for a lowercase slip and put in by space. The strip offers it; space
     /// puts in the next reading that clears the margin ("don't") or leaves what was typed.

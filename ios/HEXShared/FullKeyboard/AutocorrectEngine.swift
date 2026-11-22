@@ -846,7 +846,7 @@ final class AutocorrectEngine {
         // Your own text replacement comes first, as on Apple's keyboard: before the chat
         // shorthand Hex leaves alone ("brb"), with Autocorrect off or no dictionary, and
         // however often you kept the shortcut.
-        if let replaced = textReplacement(before: beforeInput) { return (replaced.typed, replaced.replacement) }
+        if let replaced = textReplacement(before: beforeInput) ?? pronounCapital(before: beforeInput) { return (replaced.typed, replaced.replacement) }
         guard let token = Self.currentToken(in: beforeInput) else { return nil }
         self.beforeInput = beforeInput
         partner?.beforeInput = beforeInput
