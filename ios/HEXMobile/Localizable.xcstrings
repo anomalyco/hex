@@ -2127,6 +2127,26 @@
         }
       }
     },
+    "New speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新的语音模型"
+          }
+        }
+      }
+    },
+    "Downloads in Hex on Wi-Fi" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Hex 中通过 Wi-Fi 下载"
+          }
+        }
+      }
+    },
     "Open Hex to download %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2273,6 +2293,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "粘贴时不再询问"
+          }
+        }
+      }
+    },
+    "New: Hex's own speech model" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新功能：Hex 自带的语音模型"
+          }
+        }
+      }
+    },
+    "English dictation, right in the keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "英文听写，直接在键盘里完成。"
           }
         }
       }

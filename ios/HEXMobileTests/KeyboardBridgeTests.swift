@@ -892,6 +892,81 @@ final class KeyboardBridgeTests: XCTestCase {
         shortBridge.reviewWarmDurationForKeyboardDictation(osMajorVersion: 26, now: now)
         XCTAssertEqual(shortBridge.warmDuration, .fifteenMinutes, "the keyboard needs Hex here")
     }
+
+    /// The keyboard's New speech model notice: only where the keyboard would dictate with Hex's
+    /// model and it isn't downloaded, at most once a day and three times, never after Open Hex.
+    func testTheNewSpeechModelNoticeShowsOnlyWhereItHelpsAndNotOften() throws {
+        let suite = "anomaly.hex.tests.model-notice"
+        for name in [suite, suite + ".unmeasured", suite + ".small", suite + ".opened"] {
+            UserDefaults(suiteName: name)?.removePersistentDomain(forName: name)
+        }
+        let settings = KeyboardParakeetSettings(defaults: UserDefaults(suiteName: suite))
+        settings.recordKeyboardLimit(177 * KeyboardParakeetBudget.megabyte)
+        func awaits(_ settings: KeyboardParakeetSettings, english: Bool = true, other: Bool = false, downloaded: Bool = false) -> Bool {
+            KeyboardParakeetNotice.modelAwaitsDownload(settings: settings, english: english, otherEngine: other, downloaded: downloaded)
+        }
+        XCTAssertTrue(awaits(settings), "English, the switch on, an iPhone and a keyboard with the memory, not downloaded")
+        XCTAssertFalse(awaits(settings, downloaded: true), "downloaded")
+        XCTAssertFalse(awaits(settings, english: false), "not English")
+        XCTAssertFalse(awaits(settings, other: true), "Two-language dictation or the multilingual model")
+        let small = KeyboardParakeetSettings(defaults: UserDefaults(suiteName: suite + ".small"))
+        small.recordKeyboardLimit(100 * KeyboardParakeetBudget.megabyte)
+        XCTAssertFalse(awaits(small), "a phone whose keyboard can't use it")
+        XCTAssertFalse(awaits(KeyboardParakeetSettings(defaults: UserDefaults(suiteName: suite + ".unmeasured"))), "a keyboard not measured yet")
+        settings.isEnabled = false
+        XCTAssertFalse(awaits(settings), "switched off")
+
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(identifier: "UTC")!
+        let day = Date(timeIntervalSince1970: 1_795_000_000)
+        let notice = KeyboardParakeetNotice(defaults: UserDefaults(suiteName: suite))
+        XCTAssertTrue(notice.mayShow(now: day, calendar: utc))
+        notice.recordShown(now: day, calendar: utc)
+        XCTAssertFalse(notice.mayShow(now: day.addingTimeInterval(3_600), calendar: utc), "the same day twice")
+        XCTAssertTrue(notice.mayShow(now: day.addingTimeInterval(86_400), calendar: utc))
+        notice.recordShown(now: day.addingTimeInterval(86_400), calendar: utc)
+        notice.recordShown(now: day.addingTimeInterval(3 * 86_400), calendar: utc)
+        XCTAssertFalse(notice.mayShow(now: day.addingTimeInterval(9 * 86_400), calendar: utc), "three showings in all")
+        let opened = KeyboardParakeetNotice(defaults: UserDefaults(suiteName: suite + ".opened"))
+        opened.recordOpened()
+        XCTAssertFalse(opened.mayShow(now: day, calendar: utc), "never again once Hex was opened from it")
+    }
+
+    /// The notice opens Hex, starting nothing, and never shows in a password or one-time-code
+    /// field.
+    @MainActor
+    func testTheModelNoticeOpensHexAndNeverShowsInAPasswordField() throws {
+        let group = try XCTUnwrap(UserDefaults(suiteName: KeyboardBridge.appGroup))
+        let keys = [KeyboardParakeetNotice.shownKey, KeyboardParakeetNotice.dayKey, KeyboardParakeetNotice.openedKey]
+        keys.forEach { group.removeObject(forKey: $0) }
+        defer { keys.forEach { group.removeObject(forKey: $0) } }
+        let model = KeyboardViewModel()
+        model.configureFixture(snapshot: .offline, now: 10_000)
+        var opened: [URL] = []
+        model.onOpenURL = { opened.append($0) }
+        func keyboard(_ target: FixtureTextTarget) -> FullKeyboardView {
+            let view = FullKeyboardView(model: model, target: target)
+            view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+            view.layoutIfNeeded()
+            view.offerModelNotice(awaitsDownload: true)
+            return view
+        }
+        let password = FixtureTextTarget(text: "")
+        password.isSecureTextEntry = true
+        XCTAssertNil(keyboard(password).modelNotice)
+        let code = FixtureTextTarget(text: "")
+        code.textContentType = .oneTimeCode
+        XCTAssertNil(keyboard(code).modelNotice)
+        XCTAssertEqual(group.integer(forKey: KeyboardParakeetNotice.shownKey), 0, "not counted where it didn't show")
+
+        let view = keyboard(FixtureTextTarget(text: ""))
+        XCTAssertEqual(view.modelNotice, KeyboardStripNotice(title: "New speech model", detail: "Downloads in Hex on Wi-Fi", button: "Open Hex"))
+        view.stripView.onOpenNotice?()
+        XCTAssertEqual(opened, [KeyboardParakeetNotice.opensHex])
+        XCTAssertNil(KeyboardLaunchRequest(url: KeyboardParakeetNotice.opensHex), "Hex opens as it is: no page, no session")
+        XCTAssertNil(view.modelNotice, "gone once tapped")
+        XCTAssertFalse(KeyboardParakeetNotice().mayShow(now: Date().addingTimeInterval(7 * 86_400)), "and never again")
+    }
 }
 
 /// The keyboard's quick dictation-language switch.

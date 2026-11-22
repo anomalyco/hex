@@ -629,6 +629,8 @@ class FixtureTextTarget: KeyboardTextTarget {
     var enablesReturnKeyAutomatically: Bool? = false
     var smartQuotesType: UITextSmartQuotesType?
     var smartDashesType: UITextSmartDashesType?
+    var isSecureTextEntry: Bool?
+    var textContentType: UITextContentType?
     var selectedText: String?
     var documentIdentifier: UUID?
     /// Simulates a host whose window reports no text after the cursor.

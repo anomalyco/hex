@@ -173,6 +173,7 @@ final class KeyboardViewController: UIInputViewController {
         // about 80 ms late (Record typing logs), so q, a, p, l, shift and delete lagged and
         // could land after the next key. Apple's own keyboard has no such delay.
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        fullKeyboard?.offerModelNotice()
         // Onboarding's practice tells Hex's keyboard on screen from another one, or iOS's
         // dictation, by these.
         bridge.recordKeyboardShown(at: Date().timeIntervalSince1970)
@@ -205,7 +206,7 @@ final class KeyboardViewController: UIInputViewController {
         // keyboard does, and iOS gives up on a keyboard slow to draw.
         let autoStart = DispatchWorkItem { [weak self] in
             self?.autoStartDictationIfPending()
-            // Experiments › Speech model in keyboard: last, and it loads off the main thread.
+            // Settings › Dictation › Speech model in keyboard: last, and it loads off the main thread.
             if let self, self.isShown, self.hasFullAccess, !self.memoryWarned { KeyboardParakeet.shared.warmUp() }
         }
         launchWork = [lexicon, optional, autoStart]
