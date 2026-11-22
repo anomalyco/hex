@@ -117,8 +117,8 @@ final class LiveDictationPreviewView: UIView {
         guard total > characters else { return (settled, tentative) }
         let full = settled + tentative
         var start = full.index(full.startIndex, offsetBy: total - characters)
-        // From the next word's start, so no word shows cut.
-        if let space = full[start...].firstIndex(where: \.isWhitespace) {
+        // From a word's start, so no word shows cut.
+        if !full[full.index(before: start)].isWhitespace, let space = full[start...].firstIndex(where: \.isWhitespace) {
             start = full[space...].firstIndex(where: { !$0.isWhitespace }) ?? start
         }
         let dropped = full.distance(from: full.startIndex, to: start)
