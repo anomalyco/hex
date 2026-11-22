@@ -24,3 +24,21 @@ cd crates/keyboard
 cargo test
 cargo clippy --all-targets -- -D warnings
 ```
+
+Swipe typing's decoder reads every swipe as the Swift decoder it was ported from
+(`SwipeDecoderOracle`, kept in `ios/HEXMobileTests/SwipeParity` until iOS switches): the same
+candidates in the same order, with costs equal bit for bit. `core/tests/swipe_parity.rs`
+checks the committed `core/tests/fixtures/swipe-parity.jsonl` (800 swipes per language) and,
+with `HEX_SWIPE_PARITY=<file>`, a larger export. To export one (the simulator writes to the
+Mac's `/tmp`):
+
+```sh
+cd ios && xcodegen generate
+TEST_RUNNER_HEX_SWIPE_PARITY_OUT=/tmp/hex-swipe-parity-100k.jsonl \
+TEST_RUNNER_HEX_SWIPE_PARITY_COUNT=100000 TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1 \
+  xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+  -destination 'platform=iOS Simulator,name=<simulator>' SWIFT_OPTIMIZATION_LEVEL=-O \
+  -only-testing:HEXMobileTests/SwipeParityExportTests
+cd ../crates/keyboard
+HEX_SWIPE_PARITY=/tmp/hex-swipe-parity-100k.jsonl cargo test --release --test swipe_parity -- --nocapture
+```
