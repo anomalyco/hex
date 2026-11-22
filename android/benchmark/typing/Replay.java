@@ -99,6 +99,8 @@ public final class Replay {
     // French AZERTY's apostrophe key on the letter rows, which the keyboard reads as it reads the letters.
     static KeyPoint apostropheKey;
     static Map<Character,Double> near(KeyGrid grid, char hit, double x, double y) {
+        // KeyPlaneView.likelier: a shifted label uses the same cell, with shifted neighbours.
+        boolean shifted=Character.isUpperCase(hit); hit=Character.toLowerCase(hit);
         Map<Character,Double> out = new HashMap<>();
         if (cells != null) {
             // As KeyPlaneView.likelier: the distance from the touch to each other letter's cell, in dp.
@@ -107,7 +109,7 @@ public final class Replay {
                 double[] c = e.getValue();
                 double dx = Math.max(Math.max(c[0] - x, 0), x - c[2]), dy = Math.max(Math.max(c[1] - y, 0), y - c[3]);
                 double d = Math.hypot(dx, dy) / density;
-                if (d < TypingWord.REACH) out.put(e.getKey(), d);
+                if (d < TypingWord.REACH) out.put(shifted ? Character.toUpperCase(e.getKey()) : e.getKey(), d);
             }
             return out;
         }
@@ -118,7 +120,7 @@ public final class Replay {
             KeyPoint c = e.getValue();
             double dx = Math.max(0, Math.abs(x - c.getX()) - grid.getPitchX() / 2), dy = Math.max(0, Math.abs(y - c.getY()) - grid.getPitchY() / 2);
             double d = Math.sqrt(dx * dx + dy * dy);
-            if (d < TypingWord.REACH) out.put(e.getKey(), d);
+            if (d < TypingWord.REACH) out.put(shifted ? Character.toUpperCase(e.getKey()) : e.getKey(), d);
         }
         return out;
     }
@@ -209,7 +211,7 @@ public final class Replay {
                     else if(points!=null) {
                         String[] xy=points[i].split(","); x=Double.parseDouble(xy[0]); y=Double.parseDouble(xy[1]);
                     } else {
-                        KeyPoint p=grid.getCentres().get(key);
+                        KeyPoint p=grid.getCentres().get(Character.toLowerCase(key));
                         if(key==' ') { KeyRect space=grid.getSpace(); p=new KeyPoint((space.getLeft()+space.getRight())/2,space.getCentreY()); }
                         if(key=='\'') p=apostropheKey;
                         explicit=p==null && Character.isLetter(key); // IME long-press choice: w.explicit, no spatial evidence

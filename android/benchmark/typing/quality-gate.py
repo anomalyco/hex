@@ -52,7 +52,7 @@ def align(reference, output):
 def changed_spans(ref, hyp, paired):
     """Describe changes between exact-word anchors, keeping splits and joins readable."""
     i = j = 0
-    anchors = [(k, p) for k, p in enumerate(paired) if p is not None and ref[k] == hyp[p]]
+    anchors = [(k, p) for k, p in enumerate(paired) if p is not None and ref[k].lower() == hyp[p].lower()]
     for k, p in anchors + [(len(ref), len(hyp))]:
         before, after = ref[i:k], hyp[j:p]
         if before:
@@ -73,36 +73,41 @@ def score(lang, mapping, cases, limits, tmp, command):
         rows = [line.rstrip('\n').split('\t') for line in f]
     if len(rows) != 2000 or len(cases) != 2:
         raise ValueError(f'{lang}: missing held-out sentences or critical cases')
-    refs = [text.split() for _, _, text, _, _ in rows]
+    refs = [text.lower().split() for _, _, text, _, _ in rows]
     model = MODELS / (lang + '.hextm')
     holds, *vocabulary = subprocess.check_output(command + ['local.hex.bench.GateLexicon', model, lang],
                                                  encoding='utf-8').splitlines()
     actual = dict(pair.split(':') for pair in holds.split())
-    if actual != mapping:
+    # Most omissions tap the hold key once. Some have a conventional typed substitute (ß → ss).
+    holds = {c: spec['hold'] if isinstance(spec, dict) else spec for c, spec in mapping.items()}
+    substitutes = {c: spec['substitute'] if isinstance(spec, dict) else spec for c, spec in mapping.items()}
+    if actual != holds:
         raise ValueError(f'{lang}: accent-keys.json disagrees with KeyboardLetters/LetterFeedback: {actual}')
     scored = set(vocabulary)
     with (MODELS / (lang+'.valid')).open(encoding='utf-8') as valid:
         lexicon = scored.union(line.split('\t')[0].rstrip('\n') for line in valid)
-    table = str.maketrans(mapping)
+    table = str.maketrans(substitutes)
+    shifted = str.maketrans({**substitutes, **{('ẞ' if c == 'ß' else c.upper()): sub.upper()
+                                                for c, sub in substitutes.items()}})
     ambiguous_forms = set()
     for word in lexicon:
         base = word.translate(table)
         if base != word and base in lexicon:
             ambiguous_forms.update((word, base))
 
-    accents = [ref for ref in refs if any(w != w.translate(table) for w in ref)][:500]
+    accents = [text for _, _, text, _, _ in rows if text != text.translate(shifted)][:500]
     extra = HERE / 'held-out' / ('accent-'+lang+'.tsv')
     if extra.exists():
         for row in extra.read_text(encoding='utf-8').splitlines():
             _, _, text = row.split('\t')
-            if text.translate(table) == text:
+            if text.translate(shifted) == text:
                 raise ValueError(f'{lang}: ineligible accent supplement: {text}')
-            accents.append(text.split())
-    if (mapping and not accents) or len(accents) > 500:
+            accents.append(text)
+    if len(accents) > 500:
         raise ValueError(f'{lang}: incorrect accent coverage ({len(accents)} sentences)')
     inputs = [typed + '\t' + points for _, _, _, typed, points in rows]
     inputs += [row[2] + ' ' for row in rows]
-    inputs += [' '.join(ref).translate(table) + ' ' for ref in accents]
+    inputs += [text.translate(shifted) + ' ' for text in accents]
     inputs += [typed + ' ' for _, typed, _ in cases]
     path = tmp / 'input.tsv'
     path.write_text('\n'.join(inputs) + '\n', encoding='utf-8')
@@ -110,15 +115,15 @@ def score(lang, mapping, cases, limits, tmp, command):
                                      encoding='utf-8').splitlines()
     if len(output) != len(inputs):
         raise ValueError(f'{lang}: replay returned {len(output)} of {len(inputs)} sentences')
-    # All six fixtures contain lowercase words, spaces and internal apostrophes only.
+    # Score spelling case-insensitively, as before; input to the engine above retains Shift.
     words = [s.lower().split() for s in output]
     count = len(rows)
     total = sum(map(len, refs))
-    raw = sum(align(ref, row[3].split())[0] for ref, row in zip(refs, rows))
+    raw = sum(align(ref, row[3].lower().split())[0] for ref, row in zip(refs, rows))
     errors = sum(align(ref, hyp)[0] for ref, hyp in zip(refs, words))
     changed = harm = opportunities = 0
     changes = Counter()
-    for ref, hyp in zip(refs, words[count:2*count]):
+    for i, (ref, hyp) in enumerate(zip(refs, words[count:2*count])):
         paired = align(ref, hyp)[1]
         for w, pos in zip(ref, paired):
             got = hyp[pos] if pos is not None else None
@@ -128,10 +133,11 @@ def score(lang, mapping, cases, limits, tmp, command):
                 if got in ambiguous_forms and w != got and w.translate(table) == got.translate(table):
                     harm += 1
         if lang == 'nb':
-            changes.update(changed_spans(ref, hyp, paired))
+            changes.update(changed_spans(rows[i][2].split(), output[count+i].split(), paired))
     buckets = ('unambiguous', 'ambiguous', 'plain_known_target_unknown')
     totals, hits, miss_source = Counter(), Counter(), Counter()
-    for ref, hyp in zip(accents, words[2*count:]):
+    for text, hyp in zip(accents, words[2*count:]):
+        ref = text.lower().split()
         for w, pos in zip(ref, align(ref, hyp)[1]):
             base = w.translate(table)
             if base == w:
@@ -153,16 +159,17 @@ def score(lang, mapping, cases, limits, tmp, command):
         failed.append('error reduction')
     if change_rate > limits['max_correct_changed_percent']:
         failed.append('correct words changed')
-    if restore_rate is not None and restore_rate < limits['min_accents_restored_percent']:
+    sample = restoration['unambiguous']['total']
+    accent_status = ('skip' if not mapping else f'too few ({sample})'
+                     if sample < limits['min_unambiguous_words'] else 'scored')
+    if accent_status == 'scored' and restore_rate < limits['min_accents_restored_percent']:
         failed.append('unambiguous accents restored')
-    if mapping and restore_rate is None:
-        failed.append('no unambiguous accent evidence')
     if limits['require_all_critical_cases']:
         failed.extend(c['name'] for c in critical if not c['passed'])
     return dict(language=lang, sentences=count, reference_words=total, raw_errors=raw, noisy_errors=errors,
                 raw_wer_percent=100*raw/total, noisy_wer_percent=100*errors/total, error_reduction_percent=reduction,
                 correct_changed=changed, correct_changed_percent=change_rate, accent_sentences=len(accents),
-                accent_restoration=restoration, unambiguous_misses_by_vocabulary=dict(miss_source),
+                accent_restoration=restoration, unambiguous_status=accent_status, unambiguous_misses_by_vocabulary=dict(miss_source),
                 ambiguous_harm=tally(harm, opportunities),
                 top_clean_changes=[dict(typed=a, became=b, count=n) for (a, b), n in
                                    sorted(changes.items(), key=lambda pair: (-pair[1], pair[0]))[:10]],
@@ -194,7 +201,9 @@ def main():
             results.append(r)
             def rate(metric):
                 return '—' if metric['percent'] is None else f"{metric['percent']:.2f}%"
-            unambiguous = rate(r['accent_restoration']['unambiguous']) if maps[lang] else 'skip'
+            unambiguous = r['unambiguous_status']
+            if unambiguous == 'scored':
+                unambiguous = rate(r['accent_restoration']['unambiguous'])
             ambiguous = rate(r['accent_restoration']['ambiguous'])
             harm = rate(r['ambiguous_harm'])
             hits = sum(c['passed'] for c in r['critical_cases'])

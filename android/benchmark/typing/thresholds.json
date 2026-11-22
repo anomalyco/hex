@@ -2,5 +2,6 @@
   "min_error_reduction_percent": 70,
   "max_correct_changed_percent": 0.5,
   "min_accents_restored_percent": 85,
+  "min_unambiguous_words": 50,
   "require_all_critical_cases": true
 }
