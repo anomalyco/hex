@@ -23,22 +23,26 @@ Default language: English (United States). Store category: **Tools**. No account
 
 ## Release candidate
 
-`ly.anoma.hex` · 0.1.0 (version code 1) · Android 12+ · arm64-v8a. These are the existing package ID and version; this is the first local upload candidate. No store registration or rating is assumed.
+`ly.anoma.hex` · 0.2.0 (version code 3) · Android 12+ · arm64-v8a. The first open-testing release, built from `dev` at `bbebfa75` plus the version bump (#2286). 0.1.1 (version code 2) is on internal testing.
 
-| Size | Bytes |
-| --- | ---: |
-| Upload-signed AAB | 41,192,298 |
-| Estimated initial device download, bundletool 1.18.3 | 38,337,704 |
-| Separate one-time Whisper small download | 190,085,487 |
+| Size | 0.2.0 bytes | 0.1.0 bytes |
+| --- | ---: | ---: |
+| Upload-signed AAB | 47,950,821 | 41,192,298 |
+| Estimated initial device download, bundletool 1.18.3 | 44,440,314 | 38,337,704 |
+| Separate one-time Whisper small download | 190,085,487 | 190,085,487 |
 
-Bundletool reported the same minimum and maximum for the actual API 36 arm64-v8a, en-US, 440 dpi device spec and for the API 31 emulator. The model downloaded by Get started is not part of the initial store estimate. A smaller multilingual model is included in the app. AAB SHA-256: `904d5e2b045e003e5be9beacb71839b174101c247677624530a448d9d6a5d171`.
+Bundletool reported the same minimum and maximum for an API 36 arm64-v8a, en-US, 440 dpi device spec and for an API 31, 420 dpi one. The model downloaded by Get started is not part of the initial store estimate. A smaller multilingual model is included in the app. AAB SHA-256: `465d077ad7dde0a2cf625de9f1219fea478176377792d0069d66c150849184c1`.
 
 **Policy checks on the signed bundle:**
 
-- Targets API 36, the [new phone-app requirement](https://developer.android.com/google/play/requirements/target-sdk) effective August 31, 2026. R8 and the resource shrinker ran. The release DEX has no Android log calls; the native Hex diagnostic, coroutine debug-probe resource and benchmark receiver are absent.
-- The merged manifest requests only `RECORD_AUDIO` (user-started dictation) and `INTERNET` (the one model download). `BIND_INPUT_METHOD` protects the bound IME; it is not a requested permission. The system resolves its settings to `ly.anoma.hex.MainActivity`. No foreground service is declared or started.
-- The external editor’s input connection received **zero context reads** during typing, deletion and a dictation attempt in text, visible, web and numeric password fields. Two literal writes and one deletion reached each field; none offered a suggestion or started the microphone. The same trace detected ten context reads and three suggestions in an ordinary field.
-- All seven ELF load segments in `libhexspeech.so` and `libandroidx.graphics.path.so` are 16 KB aligned. BundleConfig requests 16 KB packaging, both stored split-APK entries are on 16 KB boundaries, and the arm64 split passed `zipalign -c -P 16 4`. The release ran dictation on a guest with 16,384-byte pages.
+- Targets API 36, the [new phone-app requirement](https://developer.android.com/google/play/requirements/target-sdk) effective August 31, 2026. R8 and the resource shrinker ran, and the bundle is signed with the upload key. The release DEX has no reference to `android.util.Log`; typing and dictating a sentence on both emulators left none of its words in logcat.
+- The merged manifest requests only `RECORD_AUDIO` (user-started dictation) and `INTERNET` (the one model download). `BIND_INPUT_METHOD` protects the bound IME; it is not a requested permission.
+- The external editor’s input connection received **zero context reads** while typing, deleting and pressing the Hex key in text, visible, web and numeric password fields on API 36 and API 31. Only literal writes reached each field, the strip said “Dictation off in password fields” and the microphone stayed off. The same trace counted twelve context reads, and the microphone started, in an ordinary field.
+- All seven ELF load segments in `libhexspeech.so` and `libandroidx.graphics.path.so` are 16 KB aligned. BundleConfig requests 16 KB page alignment, and the arm64 and master splits passed `zipalign -c -P 16 4`. The release ran dictation on a guest with 16,384-byte pages.
+
+**Emulator checks of this bundle** (installed from the AAB with bundletool, no phone): on API 36 and API 31 the first run downloaded and verified the model, then in airplane mode “teh” became “the” in another app, an emoji came from the emoji panel, the number pad typed, the phone pad opened, French turned “jai” into “J’ai”, all six typing models offered suggestions, words and shortcuts from Android’s personal dictionary were used, TalkBack’s explore-by-touch typed letters (API 31’s image has no TalkBack, so it was copied from the API 36 image), the licences and privacy pages opened, and one sentence was dictated through the emulator microphone. No crash or ANR. On API 36, installing 0.2.0 over a signed 0.1.1 kept the speech model, the style, the dictation language, the keyboard settings and the selected keyboard.
+
+**Known issue:** on Android 16 (API 36) the model download stops 5 to 6 seconds after Hex goes to the background, for example while you turn on the keyboard in Settings, and the partial file is deleted; a trip of 1 to 3 seconds survives. Setup then offers Retry. It does not happen on API 31.
 
 ## Device matrix
 
