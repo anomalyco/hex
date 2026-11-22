@@ -334,8 +334,8 @@ impl OfflineGgufSession {
         StreamTuning::for_model(self.architecture == "parakeet", StreamTuning::current())
     }
 
-    /// Reads the model's chunk menus once, when a tuning needs them: a load
-    /// with the lab off never opens the header for them.
+    /// Reads the model's chunk menus once, when a tuning or the first stream
+    /// needs them: a load with the lab off opens the header only then.
     fn read_menus(&mut self) {
         if self.stream_menus_read {
             return;

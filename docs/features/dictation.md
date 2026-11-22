@@ -2153,8 +2153,8 @@ measured on a real model or microphone.
 **Fixed November 22, 2026 (opening slack, Unified English):** the opening
 check used the trailing check's 400 ms slack, but Unified English's first-word
 timestamp lags its audio: the first word's `t0` landed about 100–1,000 ms after
-its acoustic onset (most 440–1,000 ms), and the whole-clip run reported the
-same value within one 80 ms frame. A capture with no pre-roll head, as
+its detected speech onset (most 440–1,000 ms), and the whole-clip run reported
+the same value within one 80 ms frame. A capture with no pre-roll head, as
 duck/mute/pause behaviors and "Release microphone while idle" cold opens
 leave, therefore reported openings the stream never lost: "text starts at
 1280 ms but 560 ms of speech precedes it, from 220 to 860 ms". A stream whose
