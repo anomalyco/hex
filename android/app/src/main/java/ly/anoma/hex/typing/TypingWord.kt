@@ -37,6 +37,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         set(value) {
             if (value != field) { field = value; decision = null }
         }
+    /** Settings › Keyboard › Auto-capitalisation (iOS AutocorrectEngine.addsCapitals). Off, nothing adds a
+     * capital you didn't type: "i" stays "i", "monday" "monday", German nouns as typed, the strip and its
+     * predictions lowercase; your own words and shortcuts keep theirs. */
+    var addsCapitals = true
     /** Starts a word after `before`. The word a space just finished stays revisable only when
      * `before` is still the text it left; an empty `before` keeps it for the next call. */
     fun reset(before: String = "") {
@@ -73,10 +77,10 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
                 }
             }
         }.orEmpty()
-        val upper = capitalize ?: startsSentence(text)
+        val upper = addsCapitals && (capitalize ?: startsSentence(text))
         val out = ArrayList<String>(3)
         for (w in words) {
-            val shown = if (upper) w.replaceFirstChar { it.uppercase() } else displayed(w)
+            val shown = if (upper) w.replaceFirstChar { it.uppercase() } else if (addsCapitals) displayed(w) else w.lowercase()
             if (out.none { it.equals(shown, ignoreCase = true) }) out.add(shown)
             if (out.size == 3) break
         }
@@ -108,7 +112,9 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val lower = token.lowercase()
         val showTyped = fix != null || blocked(token) || knows(lower)
         val size = if (showTyped) 2 else 3
-        fun add(s: String) {
+        val lowered = !addsCapitals && token.none { it.isUpperCase() }
+        fun add(word: String) {
+            val s = if (lowered && decoder.personal?.owns(word) != true) word.lowercase() else word
             if (pool.size < size && !s.equals(token, ignoreCase = true) && pool.none { it.equals(s, ignoreCase = true) } &&
                 !blocked(s)) pool.add(s)
         }
@@ -206,6 +212,11 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
     private fun cased(s: String) = if (token.firstOrNull()?.isUpperCase() == true) s.replaceFirstChar { it.uppercase() } else s
     /** What space puts in place of the word alone, or null. */
     fun replacement(): String? {
+        val fix = withCapitals() ?: return null
+        if (addsCapitals || token.any { it.isUpperCase() } || decoder.personal?.owns(fix) == true) return fix
+        return fix.lowercase().takeIf { it != token }
+    }
+    private fun withCapitals(): String? {
         if (token.isEmpty()) return null
         val personal = decoder.personal
         personal?.shortcut(token)?.let { return it }
@@ -288,7 +299,8 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         val rest = before.dropLast(text.length + 1)
         val prev = previousWord(rest).takeIf { it.isNotEmpty() }
         val choice = ContextWords.choice(model, text, prev, next.substringBefore(' ').lowercase(), startsSentence(rest)) ?: return null
-        return choice.takeUnless { model.neverSuggest.blocks(it.lowercase(), suggestSwearWords, model.context(prev.orEmpty())) }
+        if (model.neverSuggest.blocks(choice.lowercase(), suggestSwearWords, model.context(prev.orEmpty()))) return null
+        return if (addsCapitals || text.first().isUpperCase()) choice else choice.lowercase().takeIf { it != text }
     }
 
     private fun knows(spelling: String) = spelling.lowercase().let {

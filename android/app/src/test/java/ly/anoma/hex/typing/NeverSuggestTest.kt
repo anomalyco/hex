@@ -534,4 +534,35 @@ class NeverSuggestTest {
         for (c in "volvere") es.tap(layout("es"), c)
         assertEquals("volveré", es.replacement())
     }
+
+    // iOS: Auto-capitalisation off (Settings › Keyboard), autocorrect adds no capital you didn't type;
+    // your own words and a capital you typed keep theirs.
+    @Test fun autoCapitalisationOffAddsNoCapitals() {
+        val g = layout("en")
+        val on = word()
+        val off = word().also { it.addsCapitals = false }
+        for ((typed, capitalised, plain) in listOf(Triple("i", "I", null), Triple("im", "I'm", "i'm"), Triple("monday", "Monday", null))) {
+            for ((w, expected) in listOf(on to capitalised, off to plain)) {
+                w.reset("so "); for (c in typed) w.tap(g, c)
+                assertEquals(typed, expected, w.replacement())
+            }
+        }
+        assertEquals("I think I'd help ", on.typed(g, "i think id help "))
+        assertEquals("i think i'd help ", off.typed(g, "i think id help "))
+        assertEquals(listOf("I", "The", "I'm"), on.predictions(""))
+        assertTrue(off.predictions("").toString(), off.predictions("").none { it != it.lowercase() })
+        off.reset(""); for (c in "mon") off.tap(g, c)
+        assertTrue(off.strip().toString(), off.strip().none { it.text != it.text.lowercase() })
+        off.reset("so "); off.letter("M", g.centres.getValue('m').x, g.centres.getValue('m').y, g); for (c in "onday") off.tap(g, c)
+        assertNull("a capital you typed stays", off.replacement())
+        personal(off, listOf("GitHub"))
+        off.reset("so "); for (c in "github") off.tap(g, c)
+        assertEquals("GitHub", off.replacement())
+        val de = layout("de")
+        for ((w, expected) in listOf(word("de") to "Haus", word("de").also { it.addsCapitals = false } to null)) {
+            w.reset("das "); for (c in "haus") w.tap(de, c)
+            assertEquals(expected, w.replacement())
+        }
+    }
+
 }
