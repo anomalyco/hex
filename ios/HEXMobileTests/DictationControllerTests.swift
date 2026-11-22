@@ -1872,6 +1872,18 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(hold(free: nil), "space iOS doesn't report doesn't hold it")
     }
 
+    func testTheKeyboardsSpeechModelNeverDownloadsByItselfOverCellular() {
+        func unmetered(satisfied: Bool = true, expensive: Bool = false, constrained: Bool = false, cellular: Bool = false) -> Bool {
+            KeyboardParakeetDownload.isUnmetered(satisfied: satisfied, expensive: expensive, constrained: constrained, cellular: cellular)
+        }
+        XCTAssertTrue(unmetered(), "Wi-Fi, or a VPN over Wi-Fi")
+        XCTAssertFalse(unmetered(satisfied: false), "no connection")
+        XCTAssertFalse(unmetered(expensive: true), "a personal hotspot, or cellular as iOS usually prices it")
+        XCTAssertFalse(unmetered(constrained: true), "Low Data Mode")
+        XCTAssertFalse(unmetered(cellular: true), "5G that iOS calls not expensive under Allow More Data on 5G")
+        XCTAssertFalse(unmetered(expensive: true, cellular: true), "ordinary cellular")
+    }
+
     func testParakeetsFilesMoveIntoTheAppGroupRatherThanDownloadingAgain() throws {
         XCTAssertEqual(ParakeetTranscriber.cacheDirectory.lastPathComponent, SpeechModelStore.parakeetV2Folder)
         XCTAssertEqual(ParakeetTranscriber.cacheDirectory, SpeechModelStore.parakeetV2)
