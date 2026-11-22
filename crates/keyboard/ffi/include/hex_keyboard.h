@@ -225,6 +225,14 @@ uint8_t hk_swipe_needs_space(const char *before);
 uint8_t hk_swipe_is_slid_tap(const double *points, size_t point_count, double pitch,
                              const char *key, const char *first_reading);
 
+/// Nonzero when `word` (a reading, as the model spells it) is one the dictionary knows only
+/// with a capital: a name, day or place ("monday").
+uint8_t hk_swipe_reads_as_name(const HkSwipeWords *words, const char *word,
+                               HkIsWordValid is_word_valid, void *context);
+/// Nonzero when `word` begins and ends on `letter`'s key ("lol" on "l"): its first and last
+/// letters, lowercased, without their accents.
+uint8_t hk_swipe_starts_and_ends_with(const char *word, const char *letter);
+
 #ifdef __cplusplus
 }
 #endif

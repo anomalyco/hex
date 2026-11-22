@@ -23,8 +23,9 @@ pub use swipe::{
 };
 pub use typing::{
     HkIsWordValid, HkSwipeContext, HkSwipeTyped, HkSwipeWords, HkTextReplacement,
-    hk_swipe_is_slid_tap, hk_swipe_needs_space, hk_swipe_rank, hk_swipe_typed, hk_swipe_typed_free,
-    hk_swipe_words_free, hk_swipe_words_new,
+    hk_swipe_is_slid_tap, hk_swipe_needs_space, hk_swipe_rank, hk_swipe_reads_as_name,
+    hk_swipe_starts_and_ends_with, hk_swipe_typed, hk_swipe_typed_free, hk_swipe_words_free,
+    hk_swipe_words_new,
 };
 
 /// `HK_ABI_VERSION` in `include/hex_keyboard.h`.

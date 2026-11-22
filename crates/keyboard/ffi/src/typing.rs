@@ -388,3 +388,38 @@ pub unsafe extern "C" fn hk_swipe_is_slid_tap(
         u8::from(typing::is_slid_tap(&path, pitch, key, first_reading))
     })
 }
+
+/// # Safety
+/// `words` is NULL or live; `word` NULL or NUL-terminated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hk_swipe_reads_as_name(
+    words: *const HkSwipeWords,
+    word: *const c_char,
+    is_word_valid: HkIsWordValid,
+    context: *mut c_void,
+) -> u8 {
+    guard(0, || {
+        // SAFETY: NULL or live, NULL or NUL-terminated, as the caller promises.
+        let (Some(words), Some(word)) = (unsafe { words.as_ref() }, unsafe { utf8(word) }) else {
+            return 0;
+        };
+        let mut check = checker(is_word_valid, context);
+        u8::from(words.words.reads_as_name(word, &mut check))
+    })
+}
+
+/// # Safety
+/// `word` and `letter` are NULL or NUL-terminated.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hk_swipe_starts_and_ends_with(
+    word: *const c_char,
+    letter: *const c_char,
+) -> u8 {
+    guard(0, || {
+        // SAFETY: NULL or NUL-terminated, as the caller promises.
+        let (Some(word), Some(letter)) = (unsafe { utf8(word) }, unsafe { utf8(letter) }) else {
+            return 0;
+        };
+        u8::from(typing::starts_and_ends_with(word, letter))
+    })
+}
