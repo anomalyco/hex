@@ -21,8 +21,8 @@ internal class PersonalWords(private val model: TypingModel, words: Collection<S
     private val codes: Array<ByteArray>
     private val texts: Array<String>
     private val lookup = HashMap<String, Int>()
-    // Lowercase shortcut -> phrase as stored.
-    private val shortcuts = shortcuts.mapKeys { it.key.lowercase() }
+    /** Your text replacements: lowercase shortcut -> phrase as stored (Swipe typing's too). */
+    val shortcuts = shortcuts.mapKeys { it.key.lowercase() }
 
     init {
         val byCodes = LinkedHashMap<String, Pair<ByteArray, String>>()
