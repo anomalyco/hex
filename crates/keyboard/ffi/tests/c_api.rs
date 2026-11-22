@@ -559,6 +559,8 @@ fn types_a_swipe_through_the_c_interface() {
         assert_eq!(hk_swipe_needs_space(open.as_ptr()), 0);
         assert_eq!(hk_swipe_needs_space(before.as_ptr()), 1);
         assert_eq!(hk_swipe_needs_space(ptr::null()), 0);
+        let attachment = CString::new("Look \u{FFFC}").unwrap();
+        assert_eq!(hk_swipe_needs_space(attachment.as_ptr()), 0);
         let (l, lol, a, r#as) = (
             CString::new("l").unwrap(),
             CString::new("lol").unwrap(),

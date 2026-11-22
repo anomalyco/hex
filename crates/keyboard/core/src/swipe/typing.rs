@@ -400,7 +400,9 @@ fn alternatives(
     out
 }
 
-/// Whether a swiped word needs a space before it after `before`, as Apple's keyboard adds one.
+/// Whether a swiped word needs a space before it after `before`, as Apple's keyboard adds one:
+/// not after nothing, a space, a line break, an attachment (U+FFFC: a link's card or a picture
+/// in the text) or opening punctuation.
 pub fn needs_space(before: Option<&str>) -> bool {
     const OPENING: [&str; 14] = [
         "(", "[", "{", "<", "\u{AB}", "\u{2039}", "\u{201C}", "\u{2018}", "\u{201E}", "\u{BF}",
@@ -414,7 +416,7 @@ pub fn needs_space(before: Option<&str>) -> bool {
     let Some(&last) = chars.last() else {
         return false;
     };
-    if is_whitespace(last) || is_newline(last) || opening(last) {
+    if is_whitespace(last) || is_newline(last) || same(last, "\u{FFFC}") || opening(last) {
         return false;
     }
     if same(last, "\"") || same(last, "'") {

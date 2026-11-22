@@ -95,7 +95,7 @@ enum SwipeRules {
         "", "Hello", "hello", "Hi.", "Hi!", "ok?", "end;", "x", "word", " ", "  ", "\t", "\n", "\r\n", "\u{A0}", "\u{3000}",
         "(", "[", "{", "<", "«", "‹", "“", "‘", "„", "¿", "¡", "@", "#", "/", "\"", "'", "”", "’", ")", "]", "é", "e\u{301}",
         "👍", "👍🏽", "Τι;", "5", "#tag", "omw", "my ad2", "(omw", "hi,omw", "xomw", ".", "...", "\u{2028}", "Dr.", "a\"",
-        " \"", "(\"", "x'", " '", "\n\"", "\u{301}", "ty", "Tx", "TX", "said \"",
+        " \"", "(\"", "x'", " '", "\n\"", "\u{301}", "ty", "Tx", "TX", "said \"", "\u{FFFC}", "Look \u{FFFC}",
     ]
 
     /// A key a point hits: its character (nil for one with none), and which key it is.
