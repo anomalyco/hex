@@ -706,6 +706,7 @@ final class KeyboardLocalDictation {
                     formatLists: DictationListSettings().isEnabled,
                     spokenPunctuation: DictationPunctuationSettings().isEnabled,
                     hinglish: HinglishSettings().isEnabled,
+                    greeklish: GreeklishSettings().isEnabled,
                     endsWithPeriod: DictationPeriodSettings().isEnabled
                 )
                 let steps = await pipeline.run(heard, translationSource: language.locale.language)

@@ -597,6 +597,7 @@ struct PrivacySettingsPage: View {
 struct ExperimentsSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hinglish = HinglishSettings().isEnabled
+    @State private var greeklish = GreeklishSettings().isEnabled
     @State private var twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
@@ -627,6 +628,9 @@ struct ExperimentsSettingsPage: View {
         }
         .onChange(of: hinglish) { _, enabled in
             HinglishSettings().isEnabled = enabled
+        }
+        .onChange(of: greeklish) { _, enabled in
+            GreeklishSettings().isEnabled = enabled
         }
         .onChange(of: twoLanguageDictation) { _, enabled in
             TwoLanguageDictationSettings().isEnabled = enabled
@@ -681,6 +685,14 @@ struct ExperimentsSettingsPage: View {
             title: String(localized: "Hinglish (Hindi in Latin letters)"),
             detail: String(localized: "Adds Hinglish to dictation languages"),
             isOn: $hinglish
+        )
+
+        SettingsDivider()
+
+        SettingsToggleRow(
+            title: String(localized: "Greeklish (Greek in Latin letters)"),
+            detail: String(localized: "Adds Greeklish to dictation languages"),
+            isOn: $greeklish
         )
 
         SettingsDivider()
@@ -853,6 +865,7 @@ struct ExperimentsSettingsPage: View {
     /// Reads every switch back from its setting, when the page appears.
     private func loadSettings() {
         hinglish = HinglishSettings().isEnabled
+        greeklish = GreeklishSettings().isEnabled
         twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
         appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
         cleanupAvailability = AppleIntelligenceCleanupAvailability.current

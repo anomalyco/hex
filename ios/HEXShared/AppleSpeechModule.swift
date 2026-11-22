@@ -61,12 +61,14 @@ nonisolated enum AppleSpeechLanguages {
         return (await DictationTranscriber.supportedLocales).isEmpty
     }
 
-    /// Every language either module transcribes, sorted by name (Hindi as Hinglish while that
-    /// experiment is on). Records the list for the keyboard's language switch.
+    /// Every language either module transcribes, sorted by name (Hindi as Hinglish and Greek as
+    /// Greeklish while those experiments are on). Records the list for the keyboard's language
+    /// switch.
     static func options(
         display: Locale = .current,
         settings: LanguageSettings = LanguageSettings(),
-        hinglish: HinglishSettings = HinglishSettings()
+        hinglish: HinglishSettings = HinglishSettings(),
+        greeklish: GreeklishSettings = GreeklishSettings()
     ) async -> [SpeechLanguageOption] {
         var identifiers: [String] = []
         var seen = Set<String>()
@@ -84,7 +86,8 @@ nonisolated enum AppleSpeechLanguages {
             .map {
                 SpeechLanguageOption(
                     id: $0,
-                    name: hinglish.name(for: $0) ?? SpeechLanguagePicker.displayName(for: $0, in: display)
+                    name: hinglish.name(for: $0) ?? greeklish.name(for: $0)
+                        ?? SpeechLanguagePicker.displayName(for: $0, in: display)
                 )
             }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }

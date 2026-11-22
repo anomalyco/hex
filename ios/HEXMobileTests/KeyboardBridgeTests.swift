@@ -972,6 +972,38 @@ final class DictationLanguageSwitchTests: XCTestCase {
         )
     }
 
+    /// Experiments › Greeklish offers Greek in the Hex key's language menu, named Greeklish,
+    /// the way Hinglish offers Hindi.
+    func testGreeklishOffersGreekByThatName() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let greeklish = GreeklishSettings(defaults: defaults)
+        let supported = self.supported + ["el-GR"]
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "el-GR", greeklish: greeklish), "Ελληνικά")
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(current: "de-DE", recent: ["he-IL"], preferred: ["en-US"], supported: supported),
+            ["de-DE", "he-IL", "en-US"]
+        )
+        greeklish.isEnabled = true
+        XCTAssertEqual(DictationLanguageSwitch.nativeName(for: "el-GR", greeklish: greeklish), "Greeklish")
+        XCTAssertEqual(
+            DictationLanguageSwitch.nativeNames(for: ["el-GR", "en-US"], greeklish: greeklish),
+            ["el-GR": "Greeklish", "en-US": "English"]
+        )
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(
+                current: "de-DE", recent: ["he-IL"], preferred: ["en-US"], supported: supported, greeklish: true
+            ),
+            ["de-DE", "he-IL", "el-GR", "en-US"]
+        )
+        XCTAssertEqual(
+            DictationLanguageSwitch.choices(current: nil, recent: [], preferred: ["en-US"], supported: ["en-US"], greeklish: true),
+            ["en-US"],
+            "not offered where Apple has no Greek"
+        )
+    }
+
     func testAChoiceMovesToTheFrontOfTheRecents() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

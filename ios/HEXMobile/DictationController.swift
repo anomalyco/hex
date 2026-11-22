@@ -58,6 +58,8 @@ final class DictationController {
         let endsWithPeriod: Bool
         /// Experiments › Hinglish, read at start.
         let hinglish: Bool
+        /// Experiments › Greeklish, read at start.
+        let greeklish: Bool
         let vocabularyTerms: [String]
         /// Learn how I type's dictation fixes, read at start; empty while it is off.
         let personalCorrections: [DictationCorrection]
@@ -89,6 +91,7 @@ final class DictationController {
     private let punctuationSettings: DictationPunctuationSettings
     private let periodSettings: DictationPeriodSettings
     private let hinglishSettings: HinglishSettings
+    private let greeklishSettings: GreeklishSettings
     private let typingJournalSettings: TypingJournalSettings
     private let learnedDictationCorrections: @MainActor (String?) -> [DictationCorrection]
     private let audio: any AudioManaging
@@ -229,6 +232,7 @@ final class DictationController {
         punctuationSettings: DictationPunctuationSettings = DictationPunctuationSettings(),
         periodSettings: DictationPeriodSettings = DictationPeriodSettings(),
         hinglishSettings: HinglishSettings = HinglishSettings(),
+        greeklishSettings: GreeklishSettings = GreeklishSettings(),
         typingJournalSettings: TypingJournalSettings = TypingJournalSettings(),
         learnedDictationCorrections: (@MainActor (String?) -> [DictationCorrection])? = nil,
         languageSettings: LanguageSettings = LanguageSettings(),
@@ -251,6 +255,7 @@ final class DictationController {
         self.punctuationSettings = punctuationSettings
         self.periodSettings = periodSettings
         self.hinglishSettings = hinglishSettings
+        self.greeklishSettings = greeklishSettings
         self.typingJournalSettings = typingJournalSettings
         self.learnedDictationCorrections = learnedDictationCorrections ?? { language in
             TypingJournal.storedDictationCorrections(settings: typingJournalSettings, language: language)
@@ -723,6 +728,7 @@ final class DictationController {
         let spokenPunctuation = punctuationSettings.isEnabled
         let endsWithPeriod = periodSettings.isEnabled
         let hinglish = hinglishSettings.isEnabled
+        let greeklish = greeklishSettings.isEnabled
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
         let vocabularyTerms = customVocabularySettings.activeTerms
@@ -777,6 +783,7 @@ final class DictationController {
                     spokenPunctuation: spokenPunctuation,
                     endsWithPeriod: endsWithPeriod,
                     hinglish: hinglish,
+                    greeklish: greeklish,
                     vocabularyTerms: vocabularyTerms,
                     personalCorrections: personalCorrections,
                     recognitionHints: recognitionHints,
@@ -873,6 +880,7 @@ final class DictationController {
                     formatLists: session.formatLists,
                     spokenPunctuation: session.spokenPunctuation,
                     hinglish: session.hinglish,
+                    greeklish: session.greeklish,
                     endsWithPeriod: session.endsWithPeriod
                 )
                 let stages = await pipeline.run(rawText) { tagged in

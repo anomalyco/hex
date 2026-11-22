@@ -1219,6 +1219,143 @@ final class HinglishRomanizerTests: XCTestCase {
 
 /// Settings › Dictation › Format lists. The English and Spanish inputs are what Apple Speech
 /// (SpeechTranscriber, macOS 27.2, Samantha and Paulina voices) wrote for spoken lists.
+/// Experiments › Greeklish: Greek dictation in Latin letters, by rule rather than a table.
+final class GreeklishRomanizerTests: XCTestCase {
+    func testDigraphs() {
+        let cases = [
+            "ου": "ou", "αι": "ai", "ει": "ei", "οι": "oi", "αυ": "av", "ευ": "ev",
+            "ουρανός": "ouranos", "παιδί": "paidi", "είμαι": "eimai",
+            "οικογένεια": "oikogeneia", "αυτοκίνητο": "avtokinito", "ευχαριστώ": "evcharisto",
+            "τζατζίκι": "tzatziki", "τσιγάρο": "tsigaro", "αγγελος": "angelos",
+        ]
+        for (greek, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(greek), latin, greek)
+        }
+    }
+
+    /// μπ, ντ and γκ are b, d and g at the start of a word and mp, nt and gk inside one.
+    func testWordInitialNasalClusters() {
+        let cases = [
+            "μπαμπάς": "bampas", "μπύρα": "byra", "Μπαμπάς": "Bampas",
+            "ντουλάπα": "doulapa", "πέντε": "pente", "Ντομάτα": "Domata",
+            "γκαράζ": "garaz", "αγκάλη": "agkali", "Γκρεμός": "Gremos",
+        ]
+        for (greek, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(greek), latin, greek)
+        }
+    }
+
+    func testAccentsAreRemoved() {
+        let cases = [
+            "καλημέρα": "kalimera", "Θα αργήσω": "Tha argiso", "Άλλος": "Allos",
+            "Έλα": "Ela", "Ήλιος": "Ilios", "Ίσως": "Isos", "Όλα": "Ola",
+            "Ύπνος": "Ypnos", "Ώρα": "Ora", "Αθήνα": "Athina",
+        ]
+        for (greek, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(greek), latin, greek)
+        }
+    }
+
+    /// A diaeresis marks a new vowel, so it never joins the digraph beside it: "οϋ" is "oy",
+    /// and "ουϊ" keeps its ϊ as i.
+    func testDiaeresisBlocksDigraphs() {
+        let cases = [
+            "αϊ": "ai", "οϊ": "oi", "οϋ": "oy", "ουϊ": "oui",
+            "προϋπόθεση": "proypothesi", "αϋπνία": "aypnia", "Μάϊος": "Maios",
+        ]
+        for (greek, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(greek), latin, greek)
+        }
+    }
+
+    func testCasingFollowsTheGreekWord() {
+        let cases = [
+            "Θα": "Tha", "ΘΑ": "THA", "ΚΑΛΗΜΕΡΑ": "KALIMERA", "Καλημέρα": "Kalimera",
+            "καλημέρα": "kalimera", "ΟΔΟΣ": "ODOS", "Σ": "S", "Θα ΠΑΩ": "Tha PAO",
+        ]
+        for (greek, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(greek), latin, greek)
+        }
+    }
+
+    func testGreekPunctuation() {
+        XCTAssertEqual(GreeklishRomanizer.romanize("Τι κάνεις\u{037E}"), "Ti kaneis?")
+        XCTAssertEqual(GreeklishRomanizer.romanize("Τι κάνεις;"), "Ti kaneis;")
+        XCTAssertEqual(GreeklishRomanizer.romanize("Ναι\u{0387} όχι"), "Nai; ochi")
+        XCTAssertEqual(GreeklishRomanizer.romanize("Καλημέρα, κόσμε!"), "Kalimera, kosme!")
+    }
+
+    func testLeavesNonGreekUntouched() {
+        let cases = [
+            "Το meeting είναι στις 5": "To meeting einai stis 5",
+            "café Μάτι 🎉": "café Mati 🎉",
+            "Hello, world!": "Hello, world!",
+            "": "",
+        ]
+        for (text, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(text), latin, text)
+        }
+    }
+
+    /// Greeklish runs first, only for Greek and only while the experiment is on; what was heard
+    /// is kept in Latin to learn from.
+    @MainActor
+    func testStylesApplyToGreeklish() async {
+        var pipeline = DictationPipeline(style: .verbatim, language: "el-GR", greeklish: true)
+        var stages = await pipeline.run("Θα αργήσω 10 λεπτά")
+        XCTAssertEqual(stages.heard, "Tha argiso 10 lepta")
+        XCTAssertEqual(stages.formatted, "Tha argiso 10 lepta")
+
+        pipeline.greeklish = false
+        stages = await pipeline.run("Θα αργήσω")
+        XCTAssertEqual(stages.heard, "Θα αργήσω", "off: Greek as Apple wrote it")
+        XCTAssertEqual(stages.formatted, "Θα αργήσω")
+
+        let english = await DictationPipeline(style: .verbatim, language: "en-US", greeklish: true).run("Καλημέρα")
+        XCTAssertEqual(english.formatted, "Καλημέρα", "only Greek")
+
+        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let settings = GreeklishSettings(defaults: defaults)
+        XCTAssertFalse(settings.isEnabled, "off by default")
+        XCTAssertNil(settings.name(for: "el-GR"))
+        settings.applyLaunchArguments([GreeklishSettings.launchArgument])
+        XCTAssertTrue(GreeklishSettings(defaults: defaults).isEnabled)
+        XCTAssertEqual(settings.name(for: "el-GR"), "Greeklish")
+        XCTAssertEqual(settings.name(for: "el"), "Greeklish")
+        XCTAssertNil(settings.name(for: "en-US"))
+    }
+
+    /// Apple translates Greek from Greek letters, not Greeklish: a Greek dictation going into
+    /// English is translated from what Apple Speech wrote, and one that goes in as spoken is
+    /// still Greeklish.
+    @MainActor
+    func testGreeklishTranslatesFromGreekScript() async {
+        let translation = DictationTranslationSettings()
+        let wasEnabled = translation.isEnabled, wasTarget = translation.targetLanguage, wasFailure = translation.lastFailure
+        defer {
+            translation.isEnabled = wasEnabled
+            translation.targetLanguage = wasTarget
+            translation.lastFailure = wasFailure
+        }
+        translation.isEnabled = true
+        translation.targetLanguage = "en"
+        let heard = "Θα αργήσω"
+        let stub = StubTranslator()
+        stub.replies = [.success("I'll be late")]
+        var pipeline = DictationPipeline(style: .verbatim, language: "el-GR", greeklish: true)
+        pipeline.translationEngine = stub.engine
+        var stages = await pipeline.run(heard)
+        XCTAssertEqual(stub.inputs, [heard])
+        XCTAssertEqual(stages.formatted, "I'll be late")
+        XCTAssertEqual(stages.heard, "Tha argiso", "learning still compares Latin words")
+
+        stub.status = .supported
+        stages = await pipeline.run(heard)
+        XCTAssertEqual(stages.formatted, "Tha argiso", "as spoken, in Greeklish")
+        XCTAssertEqual(stages.translationFailure?.fix, "Download Greek in Settings")
+    }
+}
+
 final class SpokenListsTests: XCTestCase {
     private func lists(_ text: String, _ language: String = "en-US") -> String {
         SpokenLists.format(text, language: language)
