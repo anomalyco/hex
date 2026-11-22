@@ -2147,6 +2147,76 @@
         }
       }
     },
+    "Ask" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "询问"
+          }
+        }
+      }
+    },
+    "Choose Allow in Settings so Paste doesn't ask every time." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“设置”中选择“允许”，粘贴时就不再每次询问。"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭"
+          }
+        }
+      }
+    },
+    "In Settings, choose Paste from Other Apps › Allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“设置”中选择“从其他App粘贴 › 允许”。"
+          }
+        }
+      }
+    },
+    "Paste from Other Apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从其他App粘贴"
+          }
+        }
+      }
+    },
+    "Paste from Other Apps › Allow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从其他App粘贴 › 允许"
+          }
+        }
+      }
+    },
+    "Paste without asking" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴时不再询问"
+          }
+        }
+      }
+    },
     "Settings › Apps › Hex › Paste from Other Apps › Allow" : {
       "localizations" : {
         "zh-Hans" : {

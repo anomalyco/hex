@@ -17,6 +17,7 @@ extension FullKeyboardView {
         engine.performTrackpadSelectionAction(action) { [weak self] text in
             guard let self, self.model.hasFullAccess else { return }
             UIPasteboard.general.string = text
+            self.clipboard.markOwnedCopy()
         }
         refreshStrip()
     }

@@ -311,7 +311,16 @@ never at a launch by itself.
     beside Hex, it switches to the next keyboard; elsewhere (Emoji or another
     third-party keyboard on, where that switch lands on them about half the
     time) a tap opens iOS's keyboard list, as the globe's hold does, to pick
-    Apple's. It needs no Full Access, which only Paste does.
+    Apple's. It needs no Full Access, which only Paste does. When iOS prompts
+    Allow Paste (read ≥ 0.3 s) or refuses a paste read, the strip shows a
+    tappable two-line notice (`Paste without asking` / `Paste from Other Apps ›
+    Allow` with a **Settings** chip that routes through
+    `hex-dictation://keyboard/paste-settings` straight into `Settings › Apps ›
+    Hex`), and Hex records `keyboard.clipboard.allowPastePrompted` in the App
+    Group so Home, Settings › Keyboard, and Setup surface the same one-tap Open
+    Settings banner once iOS has created that row. A later fast cross-app paste
+    (ignoring Hex's own copies via `markOwnedCopy`) or tapping dismiss clears
+    it.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly

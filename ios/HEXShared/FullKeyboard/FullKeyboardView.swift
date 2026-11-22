@@ -187,6 +187,10 @@ final class FullKeyboardView: UIView {
         stripView.onOpenNotice = { [weak self] in
             guard let self else { return }
             self.keyFeedback()
+            if self.showsAllowPasteHint {
+                self.openPasteSettingsFromHint()
+                return
+            }
             if let word = self.vocabularyOffer {
                 self.addToVocabulary(word)
                 return
@@ -880,8 +884,6 @@ final class FullKeyboardView: UIView {
         // dictation needs shows only once the Hex key is tapped (`showFullAccessHint`).
         let status: String? = if model.hasFullAccess, model.stagePhase == .failed {
             model.statusMessage
-        } else if showsAllowPasteHint {
-            KeyboardClipboardTracker.allowPasteHint
         } else {
             nil
         }
@@ -899,10 +901,7 @@ final class FullKeyboardView: UIView {
         }
         stripOffer = clipboardOffer
         var suggestions = engine.suggestions
-        if showsAllowPasteHint, status != nil {
-            // The pasted text's last word would otherwise hide where to stop Allow Paste.
-            suggestions = []
-        } else if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
+        if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
             if lastDictation != nil || status != nil || clipboardOffer != nil {
                 suggestions = []
             } else {
@@ -930,7 +929,7 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: vocabularyNotice ?? translationNotice
+            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice
         )
     }
 

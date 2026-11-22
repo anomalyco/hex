@@ -304,6 +304,15 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(decoded.transcript, "hi")
     }
 
+    func testPasteSettingsLaunchOpensAPageWithoutAHandoff() {
+        let request = KeyboardLaunchRequest.pasteSettings
+        XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/paste-settings")
+        XCTAssertEqual(KeyboardLaunchRequest(url: request.url), request)
+        XCTAssertTrue(request.opensPage)
+        XCTAssertNil(request.requestedAt)
+        XCTAssertFalse(request.isHandoffExpired(at: 1_000_000))
+    }
+
     func testTranslationSettingsLaunchOpensAPageWithoutAHandoff() {
         let request = KeyboardLaunchRequest.translationSettings
         XCTAssertEqual(request.url.absoluteString, "hex-dictation://keyboard/translation")

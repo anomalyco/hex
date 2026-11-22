@@ -61,6 +61,9 @@ extension FullKeyboardView {
         }
         keyFeedback()
         clipboard.markPasted()
+        if !pointsToSetting && readDuration < KeyboardClipboardTracker.askedReadDuration {
+            clipboard.recordSilentPaste(pasteboard: pasteboard)
+        }
         typingLog?.edit("paste", [TypingLogField("inserted", .string(text))])
         engine.commitHangulComposition()
         engine.forgetTextAroundKeys()
@@ -72,9 +75,14 @@ extension FullKeyboardView {
         onTextEdit?()
     }
 
-    /// For a few seconds after a paste iOS asked about (or refused), the strip says where
-    /// to stop it asking: Settings › Apps › Hex › Paste from Other Apps › Allow.
-    private func showAllowPasteHint() {
+    /// Two-line notice with a Settings chip after iOS asks Allow Paste or refuses a read.
+    var allowPasteNotice: KeyboardStripNotice? {
+        showsAllowPasteHint ? KeyboardClipboardTracker.allowPasteNotice : nil
+    }
+
+    /// For a few seconds after a paste iOS asked about (or refused), the strip offers a
+    /// Settings chip pointing straight to Paste from Other Apps › Allow.
+    func showAllowPasteHint() {
         showsAllowPasteHint = true
         refreshStrip()
         UIAccessibility.post(notification: .announcement, argument: KeyboardClipboardTracker.allowPasteHintAnnouncement)
@@ -82,6 +90,12 @@ extension FullKeyboardView {
         let work = DispatchWorkItem { [weak self] in self?.hideAllowPasteHint() }
         allowPasteHintHideWork = work
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.allowPasteHintDuration, execute: work)
+    }
+
+    /// Opens Hex to jump straight to iOS Settings › Apps › Hex.
+    func openPasteSettingsFromHint() {
+        hideAllowPasteHint()
+        model.onOpenURL?(KeyboardLaunchRequest.pasteSettings.url)
     }
 
     /// Typing takes the strip back before the hint's time is up.

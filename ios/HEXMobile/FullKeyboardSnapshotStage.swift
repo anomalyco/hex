@@ -333,6 +333,8 @@ private struct FullKeyboardFixture: UIViewRepresentable {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
             switch state {
+            case "paste-notice":
+                view.showAllowPasteHint()
             case "pressed":
                 view.debugPress("g")
             case "accents":
