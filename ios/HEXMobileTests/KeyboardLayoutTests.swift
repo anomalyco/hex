@@ -54,13 +54,14 @@ final class KeyboardLayoutTests: XCTestCase {
 
     func testPortraitHeightFollowsApplesKeyPlaneAndLandscapeIs204Points() {
         for width in portraitWidths {
-            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 247, "width \(width)")
+            XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
         }
-        // 46 pt of strip, then 4 rows: 43 pt on a 54 pt pitch with row 4 4 pt short (17, 17 Pro),
-        // 42 pt on 54 pt and 4 pt under (SE), 45 pt on 56 pt and 7 pt under (Air, Pro Max).
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 247)
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 254)
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .large), 266)
+        // Apple's 44 pt bar and 8 pt to row 1, then 4 rows: 43 pt on a 54 pt pitch with row 4 4 pt
+        // short (17, 17 Pro), 42 pt on 54 pt and 4 pt under (SE), 45 pt on 56 pt and 7 pt under
+        // (Air, Pro Max). Each is Apple's keyboard's height above iOS's globe band.
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 260)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .large), 272)
         XCTAssertEqual(KeyboardLayout.height(for: .landscape), 204)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 375, height: 667)), .homeButton)
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 402, height: 874)), .regular)
@@ -69,18 +70,23 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(KeyboardPhoneSize.current(screenSize: CGSize(width: 956, height: 440)), .large)
     }
 
-    /// Where iOS gives the keyboard a shorter view than it asked for (Spotlight, iOS 27.3), every
-    /// row fits inside it under the same strip; at full height nothing moves.
+    /// Where iOS gives the keyboard a shorter view than it asked for (Spotlight, iOS 27.3), Apple's
+    /// bar gives up its 6 pt over the old 38 pt strip first, and the rows fit the rest; at full
+    /// height nothing moves.
     func testRowsFitAViewShorterThanAskedFor() {
         for size in [KeyboardPhoneSize.regular, .large, .homeButton] {
             let full = KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size)
             XCTAssertEqual(KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: full.totalHeight), full)
             XCTAssertEqual(KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: 0), full)
+            // Up to 6 pt short, only the bar gives: every key keeps its size and its place on screen.
+            let barOnly = KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: full.totalHeight - 6)
+            XCTAssertEqual(barOnly.keys.filter { $0.row >= 0 }.map { $0.frame.offsetBy(dx: 0, dy: 6) }, full.keys.filter { $0.row >= 0 }.map(\.frame), "\(size)")
+            XCTAssertEqual(barOnly.stripFrame.height, KeyboardMetrics.stripBarHeight, "\(size)")
             let height = full.totalHeight - 20
             let short = KeyboardLayout(width: 375, showsEmoji: true, phoneSize: size, availableHeight: height)
             XCTAssertEqual(short.totalHeight, height, accuracy: 0.01, "\(size)")
-            XCTAssertEqual(short.stripFrame, full.stripFrame)
-            XCTAssertEqual(short.key(.character("q"))?.frame.minY, full.key(.character("q"))?.frame.minY)
+            XCTAssertEqual(short.stripFrame.height, full.stripFrame.height - 6)
+            XCTAssertEqual(short.key(.character("q"))?.frame.minY, full.key(.character("q")).map { $0.frame.minY - 6 })
             XCTAssertEqual(short.keys.count, full.keys.count)
             for key in short.keys where key.row >= 0 {
                 XCTAssertLessThanOrEqual(key.frame.maxY, height + 0.01, "\(size) \(key.label)")
@@ -92,10 +98,9 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// The strip is Apple's predictive bar from its suggestion pill's top down on every iPhone
-    /// held upright: 38 pt (Apple's 44 pt bar less the 6 pt above its pill), then Apple's 8 pt to
-    /// row 1, which starts 46 pt down. Its pills are 28 pt, on the words' line. Turned: 42 pt,
-    /// row 1 at 50 pt, as Apple's. On the Duo folded and
+    /// The strip is Apple's prediction bar on every iPhone: 44 pt, then Apple's 8 pt to row 1
+    /// upright (52 pt down) and 6 pt turned (50 pt down). Its pills are Apple's 38 pt bubble, on the
+    /// words' line. On the Duo folded and
     /// upright it is 32 pt and the same gap (row 1 at 40 pt, as Apple's); elsewhere on the Duo,
     /// Apple's whole 44 pt bar right on the keys.
     func testStripIsPinnedInEveryOrientationAndPosture() {
@@ -105,7 +110,7 @@ final class KeyboardLayoutTests: XCTestCase {
                 let m = KeyboardMetrics.for(orientation, posture: posture)
                 XCTAssertEqual(m.stripTop, 0, "\(posture) \(orientation)")
                 let cover = posture == .cover && orientation == .portrait
-                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (38, 46, 28) : (42, 50, 36)
+                let phone: (CGFloat, CGFloat, CGFloat) = orientation == .portrait ? (44, 52, 38) : (44, 50, 38)
                 let expected = posture == .phone ? phone : cover ? (32, 40, 31) : (44, 44, 36)
                 XCTAssertEqual(m.stripHeight, expected.0, "\(posture) \(orientation)")
                 XCTAssertEqual(m.stripArea, expected.1, "\(posture) \(orientation)")
@@ -120,19 +125,19 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
-    /// On an iPhone held upright nothing in the strip touches the keyboard's top edge, which is
-    /// the panel's edge whenever iOS draws nothing above the keyboard (an iPhone 17 Pro's Safari
-    /// form, iOS 27.2): the words are on Apple's line, 26 pt above row 1 and 20 pt down, the
-    /// small chip and the pills are even around that line, and the pills start 6 pt down, as
-    /// Apple's pill does below its panel's edge.
+    /// On an iPhone the strip is Apple's prediction bar (iOS 26.5 and 27.2, light and dark,
+    /// upright and turned): its top is the keyboard's top edge, the words are on Apple's line
+    /// 25 pt down, the bubble behind a pending word is Apple's 38 pt capsule from 6 pt down to the
+    /// bar's bottom, and the pills share it.
     func testPhoneStripKeepsItsContentOffTheTopEdgeAndOnApplesLine() {
-        for size in [KeyboardPhoneSize.regular, .homeButton, .large] {
-            let m = KeyboardMetrics.phonePortrait(size)
-            XCTAssertEqual(m.stripHeight, KeyboardMetrics.stripBarHeight, "\(size)")
-            XCTAssertEqual(m.stripArea - m.stripTextCenter, 26, "\(size): the words' line above row 1")
-            XCTAssertEqual(m.stripTextCenter, 20, "\(size): the words' line below the top edge")
-            XCTAssertEqual(m.stripChipHeight, 18, "\(size)")
-            XCTAssertEqual(m.stripTextCenter - m.stripChipHeight / 2, 11, "\(size): above the chip")
+        for (size, orientation) in [(KeyboardPhoneSize.regular, KeyboardOrientation.portrait), (.homeButton, .portrait), (.large, .portrait), (.regular, .landscape)] {
+            let m = KeyboardMetrics.for(orientation, phoneSize: size)
+            XCTAssertTrue(m.appleBar, "\(size)")
+            XCTAssertEqual(m.stripHeight, KeyboardMetrics.appleBarHeight, "\(size)")
+            XCTAssertEqual(m.stripArea - m.stripTextCenter, orientation == .portrait ? 27 : 25, "\(size): the words' line above row 1")
+            XCTAssertEqual(m.stripTextCenter, 25, "\(size): the words' line below the top edge")
+            XCTAssertEqual(m.stripChipHeight, 38, "\(size)")
+            XCTAssertEqual(m.stripTextCenter - m.stripChipHeight / 2, 6, "\(size): above the bubble")
             XCTAssertEqual(m.stripInset, 6, "\(size): above a pill")
             XCTAssertEqual(m.stripInset + m.stripPillHeight / 2, m.stripTextCenter, "\(size): pills on the line")
             XCTAssertLessThanOrEqual(m.stripInset + m.stripPillHeight, m.stripHeight, "\(size): pills inside the strip")
@@ -143,7 +148,7 @@ final class KeyboardLayoutTests: XCTestCase {
         }
         let layout = KeyboardLayout(width: 402)
         let hex = layout.key(.hex)!
-        XCTAssertEqual(hex.frame.minY, 6, accuracy: 0.001)
+        XCTAssertEqual(hex.frame.minY, 11, accuracy: 0.001, "the 28 pt mark on the words' line")
         XCTAssertEqual(hex.hitFrame.minY, 0, accuracy: 0.001, "the room above the mark still presses the key")
         // Where the words centre in the strip, the band is the whole strip and nothing moved.
         for m in [KeyboardMetrics.landscape, KeyboardMetrics.for(.portrait, posture: .cover), KeyboardMetrics.for(.portrait, posture: .unfoldedTall)] {
@@ -330,7 +335,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(proMax.letterWidth, (440 - 13 - 54) / 10, accuracy: 0.001)
         let q = proMax.key(.character("q"))!
         XCTAssertEqual(q.frame.minX, 6.5, accuracy: 0.001)
-        XCTAssertEqual(q.frame.minY, 46, accuracy: 0.001)
+        XCTAssertEqual(q.frame.minY, 52, accuracy: 0.001)
         XCTAssertEqual(q.frame.height, 45)
         XCTAssertEqual(proMax.key(.character("a"))!.frame.minY - q.frame.minY, 56, accuracy: 0.001)
         XCTAssertEqual(proMax.totalHeight - proMax.key(.space)!.frame.maxY, 7, accuracy: 0.001)
@@ -555,26 +560,31 @@ final class KeyboardLayoutTests: XCTestCase {
         let layout = KeyboardLayout(width: 402)
         let hex = layout.key(.hex)!
         XCTAssertEqual(hex.row, -1)
-        XCTAssertEqual(hex.frame.maxX, 402 - layout.metrics.side, accuracy: 0.001)
+        // Centred in its 59 pt cell, as Apple's writing tools icon is in its own at the other end.
+        XCTAssertEqual(hex.frame.midX, 402 - 29.5, accuracy: 0.001)
         XCTAssertEqual(hex.frame.midY, layout.metrics.stripTextCenter, accuracy: 0.001)
+        XCTAssertEqual(layout.stripFrame.maxX, 402 - 59, accuracy: 0.001)
+        XCTAssertEqual(hex.hitFrame.minX, layout.stripFrame.maxX, accuracy: 0.001, "the key takes its whole cell")
         XCTAssertLessThanOrEqual(layout.stripFrame.maxX, hex.frame.minX)
     }
 
-    /// Apple's slots are thirds of the keyboard (dividers end at 134 and 268 pt on a 402 pt
-    /// iPhone); the Hex key takes its room from the slot beside it, on either side.
+    /// Apple's bar is its icon's 59 pt cell and three equal cells in the rest; Hex's is its key's
+    /// 59 pt cell at its own end and thirds of the rest (114.33 pt on a 402 pt iPhone), on either
+    /// side.
     func testSuggestionSlotsAreThirdsOfTheBarLessTheHexKey() {
         let right = KeyboardLayout(width: 402)
         let slots = right.stripSlotFrames
-        for (x, expected) in zip(slots.map(\.minX), [0, 134, 268] as [CGFloat]) { XCTAssertEqual(x, expected, accuracy: 0.001) }
-        XCTAssertEqual(slots[0].maxX, 134, accuracy: 0.001)
-        XCTAssertEqual(slots[1].maxX, 268, accuracy: 0.001)
+        let third = (402 - 59) / 3.0
+        for (x, expected) in zip(slots.map(\.minX), [0, third, 2 * third] as [CGFloat]) { XCTAssertEqual(x, expected, accuracy: 0.001) }
+        XCTAssertEqual(slots[0].maxX, third, accuracy: 0.001)
+        XCTAssertEqual(slots[1].maxX, 2 * third, accuracy: 0.001)
         XCTAssertEqual(slots[2].maxX, right.stripFrame.maxX, accuracy: 0.001)
         XCTAssertTrue(slots.allSatisfy { $0.minY == right.stripFrame.minY && $0.height == right.stripFrame.height })
 
         let left = KeyboardLayout(width: 402, hexPlacement: .stripLeading)
         let mirrored = left.stripSlotFrames
         XCTAssertEqual(mirrored[0].minX, left.stripFrame.minX, accuracy: 0.001)
-        for (x, expected) in zip(mirrored.map(\.maxX), [134, 268, 402] as [CGFloat]) { XCTAssertEqual(x, expected, accuracy: 0.001) }
+        for (x, expected) in zip(mirrored.map(\.maxX), [59 + third, 59 + 2 * third, 402] as [CGFloat]) { XCTAssertEqual(x, expected, accuracy: 0.001) }
 
         for layout in everyPortraitLayout() + landscapeLayouts() + duoLayouts() {
             let frames = layout.stripSlotFrames
@@ -593,7 +603,7 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertTrue(layout.hexOnLeading)
         XCTAssertFalse(right.hexOnLeading)
         XCTAssertEqual(hex.row, -1)
-        XCTAssertEqual(hex.frame.minX, layout.metrics.side, accuracy: 0.001)
+        XCTAssertEqual(hex.frame.midX, 29.5, accuracy: 0.001)
         XCTAssertEqual(hex.frame.size, right.key(.hex)!.frame.size)
         XCTAssertGreaterThanOrEqual(layout.stripFrame.minX, hex.frame.maxX)
         XCTAssertEqual(layout.stripFrame.maxX, 402, accuracy: 0.001)
@@ -1270,16 +1280,22 @@ final class KeyboardLayoutTests: XCTestCase {
         let ios18 = layouts()
         KeyboardLanguage.systemMajorVersion = 26
         let ios26 = layouts()
+        // Rows counted from the view's bottom, where iOS keeps a keyboard; 18 and 25 keep the 38 pt
+        // strip (Apple's bar there is unmeasured), so only the strip differs from 27's.
+        func keysFromBottom(_ layout: KeyboardLayout) -> [CGRect] {
+            layout.keys.filter { $0.row >= 0 }.map { $0.frame.offsetBy(dx: 0, dy: -layout.totalHeight) }
+        }
         for (name, layout) in today {
-            XCTAssertEqual(older[name]!.keys, layout.keys, "\(name): 25 draws 27's keys")
-            XCTAssertEqual(ios18[name]!.keys, layout.keys, "\(name): 18 draws 27's keys")
-            XCTAssertEqual(older[name]!.totalHeight, layout.totalHeight, name)
+            XCTAssertEqual(keysFromBottom(older[name]!), keysFromBottom(layout), "\(name): 25 draws 27's rows")
+            XCTAssertEqual(keysFromBottom(ios18[name]!), keysFromBottom(layout), "\(name): 18 draws 27's rows")
+            XCTAssertEqual(ios18[name]!.keys, older[name]!.keys, name)
+            XCTAssertFalse(older[name]!.metrics.appleBar, name)
         }
         for name in ["17 Pro", "Pro Max", "17 Pro turned"] {
             XCTAssertNotEqual(ios26[name]!.keys, today[name]!.keys, "\(name): 26 differs")
         }
         let heights: [String: (CGFloat, CGFloat)] = [
-            "17 Pro": (247, 254), "12": (247, 254), "Pro Max": (266, 264), "SE": (254, 254),
+            "17 Pro": (253, 260), "12": (253, 260), "Pro Max": (272, 270), "SE": (260, 260),
             "17 Pro turned": (204, 187.33), "Pro Max turned": (204, 187.33), "SE turned": (206, 206),
         ]
         for (name, (before, after)) in heights {
@@ -2444,7 +2460,7 @@ final class KeyboardLayoutTests: XCTestCase {
             XCTAssertNil(layout.key(.dismiss), describe(layout))
             XCTAssertNil(layout.metrics.pad, describe(layout))
         }
-        XCTAssertEqual(KeyboardLayout(width: 402).metrics, .portrait)
+        XCTAssertEqual(KeyboardLayout(width: 402).metrics, KeyboardMetrics.portrait.withAppleBar(turned: false))
     }
 
     func testPadTargetsTileTheKeyAreaAndKeycapsNeverOverlap() {
@@ -2522,10 +2538,10 @@ final class KeyboardLayoutTests: XCTestCase {
     func testNumberRowOffLeavesEveryKeyOnApplesRows() {
         for width in portraitWidths {
             XCTAssertEqual(KeyboardLayout(width: width, numberRow: false), KeyboardLayout(width: width))
-            XCTAssertEqual(KeyboardLayout(width: width, numberRow: false).totalHeight, 247)
+            XCTAssertEqual(KeyboardLayout(width: width, numberRow: false).totalHeight, 253)
         }
         XCTAssertEqual(KeyboardMetrics.for(.portrait).numberRowHeight, 0)
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: false), 247)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: false), 253)
         for placement in [KeyboardPadPlacement.docked(.mini), .docked(.large), .floating] {
             let width: CGFloat = placement == .floating ? 320 : 744
             XCTAssertEqual(
@@ -2541,7 +2557,7 @@ final class KeyboardLayoutTests: XCTestCase {
     /// 17 Pro, 34 pt turned) and every other key keeps its place counted from the bottom, which
     /// is where iOS keeps a keyboard, so the strip moves up with the keyboard's top.
     func testNumberRowGrowsTheKeyboardUpwardAndLeavesEveryOtherKeyInPlace() {
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: true), 247 + 45.9, accuracy: 0.001)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: true), 253 + 45.9, accuracy: 0.001)
         XCTAssertEqual(KeyboardLayout.height(for: .landscape, numberRow: true), 204 + 34, accuracy: 0.001)
         XCTAssertEqual(KeyboardMetrics.for(.portrait, numberRow: true).numberRowHeight, 34.9, accuracy: 0.001)
         for (on, off, numbers) in numberRowLayouts() {
@@ -2653,8 +2669,8 @@ final class KeyboardLayoutTests: XCTestCase {
                 let height = full.totalHeight - 20
                 let short = KeyboardLayout(width: width, orientation: orientation, showsEmoji: true, phoneSize: size, numberRow: true, availableHeight: height)
                 XCTAssertEqual(short.totalHeight, height, accuracy: 0.01, "\(size) \(orientation)")
-                XCTAssertEqual(short.stripFrame, full.stripFrame)
-                XCTAssertEqual(short.key(.character("1"))?.frame.minY, full.key(.character("1"))?.frame.minY)
+                XCTAssertEqual(short.stripFrame.height, full.stripFrame.height - 6, "Apple's bar gives up its 6 pt first")
+                XCTAssertEqual(short.key(.character("1"))?.frame.minY, full.key(.character("1")).map { $0.frame.minY - 6 })
                 XCTAssertLessThan(short.metrics.numberRowHeight, full.metrics.numberRowHeight)
                 XCTAssertEqual(
                     short.metrics.numberRowHeight / short.metrics.keyHeight,

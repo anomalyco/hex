@@ -3,10 +3,11 @@ import UIKit
 /// The 3-slot top bar above the keys, drawn as Apple's iOS 26 predictive bar is (measured in
 /// the iOS 27.2 simulator): SF 17 pt regular in muted ink, slots a third of the keyboard wide,
 /// 1 × 24 pt dividers ending on the thirds, and a pending autocorrection as a full-slot
-/// capsule with the divider beside it hidden. On an iPhone held upright the strip is Apple's
-/// bar from its pill's top down (38 pt), with the words and dividers on Apple's line, 20 pt
-/// below the keyboard's top edge (`KeyboardMetrics.stripTextCenter`), and a small chip around
-/// a word instead of the capsule. The centred
+/// capsule with the dividers beside it hidden. On an iPhone the strip is Apple's whole 44 pt
+/// bar (`KeyboardMetrics.appleBar`): words, dividers and the cell-wide 38 pt bubble on Apple's
+/// line, 25 pt below the keyboard's top edge (`KeyboardMetrics.stripTextCenter`). Before it was
+/// measured (iOS 18) it is the bar from its pill's top down (38 pt), with a small chip around a
+/// word instead of the capsule. The centred
 /// `Undo dictation` chip or a status message replaces the slots when needed.
 @MainActor
 final class KeyboardStripView: UIView {
@@ -41,6 +42,18 @@ final class KeyboardStripView: UIView {
             setNeedsDisplay()
         }
     }
+    /// The strip is Apple's bar (`KeyboardMetrics.appleBar`): a pending word gets Apple's bubble,
+    /// its cell's width, and the dividers beside it hide, as Apple's do.
+    var appleBar = false {
+        didSet {
+            guard appleBar != oldValue else { return }
+            for button in slotButtons { button.fillsCell = appleBar }
+            setNeedsDisplay()
+        }
+    }
+    /// The Hex key has a cell of its own at the strip's end (Apple's bar): a divider stands
+    /// between it and the slot beside it, as between Apple's icon and its first cell.
+    var dividerBesideHex = false { didSet { if dividerBesideHex != oldValue { setNeedsDisplay() } } }
     /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
     var pillInset: CGFloat = 0.5 {
         didSet {
@@ -426,10 +439,18 @@ final class KeyboardStripView: UIView {
         palette.stripDivider.setFill()
         // Only between two filled slots: nothing to show, no dividers (as Apple's bar in a
         // field it offers nothing for).
-        let filled = Set(Self.slots(for: currentSuggestions))
+        let slots = Self.slots(for: currentSuggestions)
+        let filled = Set(slots)
+        // Apple's bar hides both dividers beside its bubble (a pending autocorrection or a revert).
+        let bubbled: Set<Int> = appleBar ? Set(zip(currentSuggestions, slots).filter { $0.0.willAutoReplace || $0.0.kind == .revert }.map(\.1)) : []
         for (index, slot) in currentSlotFrames.prefix(2).enumerated()
-        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) && !(reverting && index == 0) {
+        where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) && !(reverting && index == 0)
+            && !bubbled.contains(index) && !bubbled.contains(index + 1) {
             UIRectFill(CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH))
+        }
+        let besideHex = hexOnLeading ? 0 : 2
+        if dividerBesideHex, filled.contains(besideHex), !bubbled.contains(besideHex) {
+            UIRectFill(CGRect(x: hexOnLeading ? 0 : bounds.width - 1, y: y, width: 1, height: lineH))
         }
     }
 
@@ -457,6 +478,8 @@ final class KeyboardStripView: UIView {
         var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
         var textCenterY: CGFloat? { didSet { if textCenterY != oldValue { setNeedsDisplay() } } }
         var chipHeight: CGFloat? { didSet { if chipHeight != oldValue { setNeedsDisplay() } } }
+        /// Apple's bar: the bubble fills the slot across, from `pillInset` down `chipHeight`.
+        var fillsCell = false { didSet { if fillsCell != oldValue { setNeedsDisplay() } } }
         /// Room the Logging mark takes at the slot's outer end: the word centres in the rest.
         var leadingRoom: CGFloat = 0 { didSet { if leadingRoom != oldValue { setNeedsDisplay() } } }
         var trailingRoom: CGFloat = 0 { didSet { if trailingRoom != oldValue { setNeedsDisplay() } } }
@@ -624,7 +647,8 @@ final class KeyboardStripView: UIView {
                 let chipH = chipHeight ?? max(22, bounds.height - 2 * pillInset)
                 let chipW = min(bounds.width, textW + arrowRoom + 2 * Self.chipPadding)
                 let midY = textCenterY ?? bounds.height * 0.5
-                let chip = CGRect(
+                // Apple's bubble (iOS 26.5 and 27.2): the whole cell across, a capsule on the line.
+                let chip = fillsCell ? CGRect(x: 0, y: midY - chipH / 2, width: bounds.width, height: chipH) : CGRect(
                     x: max(0, min(bounds.width - chipW, incoming.origin.x - (chipW - textW - arrowRoom) / 2)),
                     y: midY - chipH / 2,
                     width: chipW,
@@ -816,5 +840,101 @@ final class TypingLogMarkView: UIView {
         super.layoutSubviews()
         dot.frame = CGRect(x: 0, y: (bounds.height - Self.dotSize) / 2, width: Self.dotSize, height: Self.dotSize)
         label.frame = CGRect(x: Self.dotSize + Self.gap, y: 0, width: max(0, bounds.width - Self.dotSize - Self.gap), height: bounds.height)
+    }
+}
+
+/// The strip's geometry: Apple's prediction bar on an iPhone (`appleBar`), the 38 pt strip before
+/// it was measured, and the Duo's and iPad's bars.
+nonisolated extension KeyboardMetrics {
+    /// The suggestion strip is Apple's predictive bar from the top of its suggestion pill down.
+    /// Apple's bar is 44 pt from its panel's edge, the pill around a suggested word starts 6 pt
+    /// down, and row 1's keycaps start about 8 pt under the bar (51.7 pt down, iPhone 17 Pro,
+    /// iOS 27.2). So the strip is 38 pt, then the same 8 pt gap, and row 1 starts 46 pt down.
+    /// iOS 26 and later draw about 17 pt of their own panel above a third-party keyboard in some
+    /// presentations and nothing in others (Hex, Gboard and SwiftKey alike on an iPhone 17 Pro,
+    /// iOS 27.2: Notes has it, a Safari form's first focus doesn't), and a keyboard can't tell
+    /// which, so the strip carries its own room above the words. It was 27 pt, the part of
+    /// Apple's bar below that band: without the band the words sat 9 pt under the keyboard's top
+    /// edge and a chip touched it. Everything the strip shows (suggestions, Undo dictation, the
+    /// Full Access hint, the recording bar, the emoji panel's top row, the Logging mark) lives in
+    /// those 38 pt, centred on the words' line (`stripTextCenter`).
+    static let stripBarHeight: CGFloat = 38
+    static let stripGap: CGFloat = 8
+    /// On the iPhone Duo iOS sets the keyboard in a platter with its own band above, and the
+    /// strip is Apple's whole 44 pt bar, right on the keys.
+    static let insetStripHeight: CGFloat = 44
+    /// The Duo folded and upright: iOS's band there is 8.7 pt and Apple's keycaps start 48.7 pt
+    /// below the panel's edge (iOS 27.2), so the strip is 32 pt with the iPhone's 8 pt gap.
+    static let coverStripHeight: CGFloat = 32
+
+    /// How far below the strip's top its pills (the Hex key, the recording bar) start: they
+    /// centre on the words' line, 6 pt down in the phone's portrait strip, in the Duo's 44 pt
+    /// bar 4 pt.
+    var stripInset: CGFloat { stripTextCenter - stripPillHeight / 2 }
+    /// Apple's pill starts 6 pt below its panel's edge (iOS 27.2, iPhone 17 Pro); Hex's pills
+    /// start as far below the keyboard's own top edge, which is the panel's edge whenever iOS
+    /// draws nothing above the keyboard.
+    static let barPillTop: CGFloat = 6
+    /// The pills' height. In the phone's portrait strip, even above and below the words' line
+    /// from `barPillTop` down (28 pt), inside the strip. Elsewhere it's the strip less half a
+    /// point above and below, at most 36 pt.
+    var stripPillHeight: CGFloat {
+        if appleBar { return min(Self.appleBubbleHeight, 2 * min(stripTextCenter, stripHeight - stripTextCenter)) }
+        guard stripHeight == Self.stripBarHeight else { return min(stripHeight - 1, 36) }
+        return 2 * min(stripTextCenter - Self.barPillTop, stripHeight - stripTextCenter)
+    }
+
+    /// Where the strip's words, dividers, chips and Hex mark centre. Apple's words sit midway
+    /// between the panel's edge and row 1's keycaps (25.3 pt down, keycaps at 52 pt, iPhone 17
+    /// Pro, iOS 27.2), so in the phone's portrait strip they're 26 pt above row 1, 20 pt below
+    /// the keyboard's top edge. Elsewhere the strip is Apple's bar and they centre in it.
+    static let barTextAboveKeys: CGFloat = 26
+    var stripTextCenter: CGFloat {
+        if appleBar { return stripHeight - Self.appleBarTextAboveBottom }
+        return stripHeight == Self.stripBarHeight ? stripHeight + stripBottom - Self.barTextAboveKeys : stripHeight / 2
+    }
+    /// A suggestion's chip (an autocorrection, a pressed word, a revert) and the dividers: in
+    /// the phone's portrait strip a small chip around the word, 18 pt, even above and below the
+    /// words' line (not Apple's slot-wide 38 pt pill). Elsewhere the pill height.
+    static let barChipHeight: CGFloat = 18
+    var stripChipHeight: CGFloat {
+        !appleBar && stripHeight == Self.stripBarHeight ? Self.barChipHeight : stripPillHeight
+    }
+
+    /// Apple's prediction bar, measured beside Hex on iOS 26.5 and 27.2 (iPhone 17 Pro, Air, 17 Pro
+    /// Max and SE, upright and turned, light and dark, black box): 44 pt from the keyboard's top
+    /// edge on every iPhone, row 1's keycaps 8 pt under it upright and 6 pt turned. Its words, its
+    /// dividers and the bubble behind a pending autocorrection all centre 25 pt down (19 pt above
+    /// the bar's bottom); the bubble fills its cell from 6 pt down to the bar's bottom, a 38 pt
+    /// capsule, and the dividers are 1 × 24 pt, hidden beside the bubble.
+    static let appleBarHeight: CGFloat = 44
+    static let appleBarTurnedGap: CGFloat = 6
+    static let appleBarTextAboveBottom: CGFloat = 19
+    static let appleBubbleHeight: CGFloat = 38
+    /// Apple's bar leads with a 59 pt cell for its writing tools icon, then a divider, then three
+    /// equal cells (iPhone 17 Pro Max, iOS 27.2.1, a TestFlight tester's screenshot; the simulator
+    /// shows no icon). Hex's key takes that cell at its own end of the bar.
+    static let appleIconCellWidth: CGFloat = 59
+    /// Hex's key in Apple's bar keeps the 44 × 28 pt mark it had in the 38 pt strip.
+    static let barHexKeyHeight: CGFloat = 28
+    /// Apple's bar was measured on iOS 26 and 27 (`KeyboardLanguage.systemMajorVersion`); iOS 18
+    /// is unmeasured (no simulator runtime) and keeps the 38 pt strip it always had.
+    static var appleBarIsMeasured: Bool { KeyboardLanguage.systemMajorVersion >= 26 }
+
+    /// These metrics with Apple's prediction bar for a strip: 44 pt, then 8 pt to row 1 upright or
+    /// 6 pt turned. Upright the keyboard grows 6 pt upward (rows stay put) and its top edge is
+    /// Apple's; turned it was already Apple's height (42 + 8 pt), and only the strip changes.
+    func withAppleBar(turned: Bool) -> KeyboardMetrics {
+        var m = rebuilt(stripHeight: Self.appleBarHeight, stripBottom: turned ? Self.appleBarTurnedGap : Self.stripGap)
+        m.appleBar = true
+        return m
+    }
+    /// The tallest band of the strip that is even above and below the words' line, from the
+    /// strip's top: what fills the strip (the Full Access hint, the emoji panel's top row, the
+    /// emoji search field) centres in it, so it sits on the line too. The whole strip where the
+    /// words centre in it.
+    var stripLineBand: (top: CGFloat, height: CGFloat) {
+        let half = min(stripTextCenter, stripHeight - stripTextCenter)
+        return (stripTextCenter - half, 2 * half)
     }
 }

@@ -238,7 +238,9 @@ struct FullKeyboardSnapshotStage: View {
                 .padding(.bottom, 10)
             FullKeyboardFixture(state: state, draft: draft, darkKeyboard: darkApp || darkField)
                 .frame(height: KeyboardLayout.height(for: .portrait, numberRow: FullKeyboardSettings().numberRow)
-                    + (state == "emoji-search" ? KeyboardMetrics.portrait.stripHeight : 0))
+                    + (state == "emoji-search" ? KeyboardMetrics.for(.portrait).stripHeight : 0)
+                    // `--short-by 20`: a view shorter than the keyboard asks for, as iOS gives in Spotlight.
+                    - (Self.argument(after: "--short-by").flatMap(Double.init).map { CGFloat($0) } ?? 0))
                 .background(Color(uiColor: backdrop).ignoresSafeArea(edges: .bottom))
         }
         .background(canvas.ignoresSafeArea())
@@ -367,6 +369,28 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 view.engine.touchEnded(id: 903, at: center(of: .shift, in: view))
             case "inserted":
                 view.didInsertDictation("should be home by 7:30. Start without me.")
+            // The bar's other states, set on the strip directly: a revert, Paste, Paste dictation,
+            // Code from Messages (with and without a copied code) and the two-thumb selection.
+            case "strip-revert":
+                view.stripView.update(suggestions: [
+                    KeyboardSuggestion(displayText: "teh", replacement: "teh", kind: .revert),
+                    KeyboardSuggestion(displayText: "then", replacement: "then", kind: .secondary),
+                    KeyboardSuggestion(displayText: "tech", replacement: "tech", kind: .secondary),
+                ], showsUndo: false, statusText: nil)
+            case "strip-two":
+                view.stripView.update(suggestions: [
+                    KeyboardSuggestion(displayText: "\u{201C}lol\u{201D}", replacement: "lol", kind: .keepLiteral),
+                    KeyboardSuggestion(displayText: "lot", replacement: "lot", kind: .secondary),
+                ], showsUndo: false, statusText: nil)
+            case "strip-paste":
+                view.stripView.update(suggestions: [], showsUndo: false, statusText: nil, clipboard: .paste)
+            case "strip-paste-dictation":
+                view.stripView.update(suggestions: [], showsUndo: false, statusText: nil, clipboard: .dictation)
+            case "strip-code":
+                view.stripView.update(suggestions: [], showsUndo: false, statusText: nil, clipboard: .code(canPaste: true))
+            case "strip-selection":
+                view.stripView.isHidden = true
+                view.selectionStrip.update(TrackpadSelectionSession.Presentation(phase: .actions, before: "Running 10 ", selected: "min late", after: ", home by"), canUseClipboard: true)
             case "emoji":
                 view.debugOpenEmoji()
             case "emoji-search":
