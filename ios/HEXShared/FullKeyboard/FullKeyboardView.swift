@@ -199,6 +199,10 @@ final class FullKeyboardView: UIView {
             self.typingLog?.ui("next_keyboard")
             self.hostController?.advanceToNextInputMode()
         }
+        stripView.onKeyboardListTouch = { [weak self] chip, event in
+            if event.touches(for: chip)?.first?.phase == .began { self?.typingLog?.ui("keyboard_list") }
+            self?.inputModeListTouch(chip, with: event, holdsBackTap: true)
+        }
         selectionStrip.onAction = { [weak self] action in self?.selectionAction(action) }
 
         globeButton.accessibilityLabel = "Next keyboard"
@@ -1427,14 +1431,19 @@ final class FullKeyboardView: UIView {
     }
 
     @objc private func globeTouch(_ sender: UIButton, with event: UIEvent) {
+        inputModeListTouch(sender, with: event, holdsBackTap: engine.posture.splitsKeyboard)
+    }
+
+    /// Code from Messages, where the next keyboard could be Emoji or another third-party one,
+    /// holds back its tap the same way, so a tap opens the list and the person picks Apple's.
+    private func inputModeListTouch(_ sender: UIButton, with event: UIEvent, holdsBackTap: Bool) {
         guard let controller = hostController else { return }
         if let touch = event.touches(for: sender)?.first {
             let onKey = sender.bounds.contains(touch.location(in: sender))
             if touch.phase == .began { globeTouchLeftKey = false }
             if touch.phase == .moved, !onKey { globeTouchLeftKey = true }
             guard Self.passesGlobeTouch(
-                phase: touch.phase, onKey: onKey, leftKey: globeTouchLeftKey,
-                appleKeyboardSplits: engine.posture.splitsKeyboard
+                phase: touch.phase, onKey: onKey, leftKey: globeTouchLeftKey, appleKeyboardSplits: holdsBackTap
             ) else { return }
         }
         controller.handleInputModeList(from: sender, with: event)

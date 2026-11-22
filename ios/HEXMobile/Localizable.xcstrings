@@ -4270,6 +4270,16 @@
           }
         }
       }
+    },
+    "Shows your keyboards: pick Apple's, where iOS offers codes from Messages and Mail" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示你的键盘：选择 Apple 的键盘，iOS 会在那里提供来自“信息”和“邮件”的验证码"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

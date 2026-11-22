@@ -17,8 +17,10 @@ enum KeyboardClipboardOffer: Equatable {
     /// An empty field that expects a code (`KeyboardClipboardTracker.expectsCode`) with Apple's
     /// keyboard among the user's keyboards: paste a copied code, or switch to it so iOS can
     /// offer a code from Messages or Mail (only Apple's keyboard receives those; a third-party
-    /// keyboard gets nothing, not even the system's suggestion above it).
-    case code(canPaste: Bool)
+    /// keyboard gets nothing, not even the system's suggestion above it). `opensList`: the chip
+    /// opens iOS's keyboard list, where a switch to the next keyboard could land elsewhere
+    /// (`KeyboardInputModes.route`).
+    case code(canPaste: Bool, opensList: Bool = false)
     /// A finished dictation the keyboard didn't insert by itself
     /// (`KeyboardViewModel.offeredDictation`); it never touches the clipboard.
     case dictation
@@ -27,8 +29,11 @@ enum KeyboardClipboardOffer: Equatable {
 /// The user's keyboards, from `UITextInputMode.activeInputModes`, which a keyboard extension
 /// sees in Settings › General › Keyboard › Keyboards order. On iOS 27.2 a third-party keyboard is
 /// a `UIKeyboardExtensionInputMode` and Apple's are `UIKeyboardInputMode`; Emoji's language is
-/// `emoji`. `advanceToNextInputMode` from Hex skips Emoji when Apple's keyboard is on, in
-/// either order (simulator, black box).
+/// `emoji`. `advanceToNextInputMode` from Hex on a number pad lands on Apple's keyboard whenever
+/// one is on: Emoji and other third-party keyboards don't take number pads. On any other field it
+/// lands on Emoji or another third-party keyboard about half the time when one is in the list, in
+/// any order (simulator, black box, TestFlight build 126); iOS's keyboard list
+/// (`handleInputModeList`) lands where the person picks.
 enum KeyboardInputModes {
     struct Mode: Equatable {
         var primaryLanguage: String?
@@ -45,6 +50,29 @@ enum KeyboardInputModes {
         modes.contains { mode in
             !["emoji", "dictation"].contains(mode.primaryLanguage) && !mode.className.contains("Extension")
         }
+    }
+
+    /// How Code from Messages reaches Apple's keyboard.
+    enum Route: Equatable {
+        /// A switch to the next keyboard always lands on Apple's.
+        case next
+        /// It could land on Emoji or another third-party keyboard: iOS's keyboard list instead,
+        /// where the person picks Apple's.
+        case list
+    }
+
+    @MainActor
+    static func route(numberPad: Bool, _ modes: [UITextInputMode] = UITextInputMode.activeInputModes) -> Route? {
+        route(modes.map { Mode(primaryLanguage: $0.primaryLanguage, className: NSStringFromClass(type(of: $0))) }, numberPad: numberPad)
+    }
+
+    /// Nil without Apple's keyboard. The next keyboard is always Apple's on a number pad, and
+    /// elsewhere only when Emoji and other third-party keyboards are off.
+    static func route(_ modes: [Mode], numberPad: Bool) -> Route? {
+        guard hasAppleKeyboard(modes) else { return nil }
+        if numberPad { return .next }
+        let onlyApple = !modes.contains { $0.primaryLanguage == "emoji" } && modes.filter { $0.className.contains("Extension") }.count <= 1
+        return onlyApple ? .next : .list
     }
 }
 
@@ -82,10 +110,12 @@ struct KeyboardClipboardTracker {
     }
 
     /// Only in an empty field, as Apple's keyboard offers a recent copy (iOS 27.2): once
-    /// something is typed the strip goes back to suggestions. `hasAppleKeyboard` is asked only
-    /// where a code is expected: without Apple's keyboard the next keyboard is Emoji or another
-    /// third-party one (or there is none), which gets no code, so Code from Messages would do
-    /// nothing (TestFlight build 56). `canSwitchKeyboard` is false where Apple's keyboard is
+    /// something is typed the strip goes back to suggestions. `appleKeyboardRoute` is asked only
+    /// where a code is expected, given whether the field is a number pad: Code from Messages shows
+    /// only with Apple's keyboard on (Emoji or another third-party keyboard gets no code,
+    /// TestFlight build 56), and opens the keyboard list where the next keyboard could be one of
+    /// those (TestFlight build 126). It needs no Full Access, which only Paste does.
+    /// `canSwitchKeyboard` is false where Apple's keyboard is
     /// split (the Duo unfolded and upright, or not known yet): iOS 27.2's switch to the next
     /// keyboard can end the app being typed in there (`FullKeyboardView.passesGlobeTouch`), so
     /// only Paste is offered and the globe's list leads to Apple's keyboard.
@@ -96,17 +126,17 @@ struct KeyboardClipboardTracker {
         fieldIsEmpty: Bool,
         hasFullAccess: Bool,
         canSwitchKeyboard: Bool = true,
-        hasAppleKeyboard: () -> Bool = { KeyboardInputModes.hasAppleKeyboard() },
+        appleKeyboardRoute: (_ numberPad: Bool) -> KeyboardInputModes.Route? = { KeyboardInputModes.route(numberPad: $0) },
         pasteboard: UIPasteboard = .general,
         now: Date = Date()
     ) -> KeyboardClipboardOffer? {
+        guard fieldIsEmpty else { return nil }
         // Without Full Access a keyboard can't use the clipboard at all.
-        guard hasFullAccess, fieldIsEmpty else { return nil }
-        let fresh = hasFreshCopy(pasteboard: pasteboard, now: now)
+        let fresh = hasFullAccess && hasFreshCopy(pasteboard: pasteboard, now: now)
         if canSwitchKeyboard,
            Self.expectsCode(textContentType: textContentType, keyboardType: keyboardType, autocorrectionType: autocorrectionType),
-           hasAppleKeyboard() {
-            return .code(canPaste: fresh)
+           let route = appleKeyboardRoute(Self.isNumberPad(keyboardType)) {
+            return .code(canPaste: fresh, opensList: route == .list)
         }
         return fresh ? .paste : nil
     }
@@ -122,10 +152,14 @@ struct KeyboardClipboardTracker {
         autocorrectionType: UITextAutocorrectionType?
     ) -> Bool {
         guard textContentType == .oneTimeCode else { return false }
-        switch keyboardType {
-        case .numberPad, .asciiCapableNumberPad, .decimalPad, .phonePad, .numbersAndPunctuation: return true
-        default: return autocorrectionType == .yes || autocorrectionType == .no
-        }
+        if isNumberPad(keyboardType) || keyboardType == .numbersAndPunctuation { return true }
+        return autocorrectionType == .yes || autocorrectionType == .no
+    }
+
+    /// The pads where the switch to the next keyboard passes over Emoji and other third-party
+    /// keyboards (iOS 27.2 simulator).
+    static func isNumberPad(_ keyboardType: UIKeyboardType?) -> Bool {
+        [.numberPad, .asciiCapableNumberPad, .decimalPad, .phonePad].contains(keyboardType)
     }
 
     /// What the Paste chip inserts, in one read: text, else a link. Reading `string` and then
