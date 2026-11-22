@@ -1054,11 +1054,14 @@ never at a launch by itself.
   (automatic picks them for `fr-CA` and `fr-CH`, AZERTY for any other French, Belgium
   included), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
   held е, ъ on a held ь), Українська (the standard Ukrainian ЙЦУКЕН, ДСТУ 4862:2007, in the
-  rows the iOS 27.2 simulator's own Ukrainian keyboard shows: 12, 12 and 10 keys,
+  rows the iPhone's own Ukrainian keyboard shows on the iOS it runs on, because Apple changed
+  them in iOS 27: from iOS 27 (27.0 and 27.2 simulators) 12, 12 and 10 keys,
   `йцукенгшщзхї`, `фівапролджєʼ`, `ячсмитьбюґ`, with ʼ the U+02BC apostrophe Ukrainian
-  spells with; as the system keyboard's long-press options were observed, only ʼ offers
-  anything, the other apostrophes (' ’ ‘ and the backtick), and ₴, which the system keyboard
-  offers on its held currency key, is held on $; no ы, э, ъ or ё), Polski (QWERTY, as the
+  spells with, and only ʼ offers anything when held, the other apostrophes (' ’ ‘ and the
+  backtick); before iOS 27 (26.2 to 26.5 simulators) Russian's 11, 11 and 9, `йцукенгшщзх`,
+  `фівапролджє`, `ячсмитьбю`, every letter the two share on Russian's key, ї on a held і and
+  ґ on a held г. On both the 123 and #+= pages' apostrophe key is ʼ, held like the letter, and
+  ₴, which the system keyboard offers on its held currency key, is held on $; no ы, э, ъ or ё), Polski (QWERTY, as the
   standard Polish layout is, on the English letters; it matches the system keyboard's
   observed long-press options: Polish's own letter right after the base on A, C, E, L, N, O,
   S and Z, so ą ć ę ł ń ó ś ż, with ź after ż, and nothing on U, I or Y; its currency key
@@ -1103,7 +1106,7 @@ never at a launch by itself.
   only the letters: shift, delete and the bottom row keep their English sizes,
   and row 3's letters sit centred between shift and delete. Russian's nine-letter row 3
   wouldn't fit beside them, so there shift and delete narrow instead, as on Apple's;
-  Ukrainian's twelve-key rows leave them one letter wide, as on Apple's. Long-press options
+  Ukrainian's rows (twelve keys from iOS 27, Russian's before it) leave them one letter wide, as on Apple's. Long-press options
   match each language's system keyboard and its observed long-press options (iOS 27.2
   simulator: every letter, 123 and #+= key held for about 3 s with a real touch, the
   callout read from the accessibility tree; `KeyboardLanguage.letterHolds` and

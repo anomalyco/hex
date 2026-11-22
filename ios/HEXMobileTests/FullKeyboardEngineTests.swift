@@ -603,6 +603,62 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(view.plane.spaceLabel, "English")
     }
 
+    /// On iOS 26 Ukrainian is the system keyboard's eleven-key rows: ї comes from a held і, ґ
+    /// from a held г, and ʼ from the 123 page, which goes back to the letters after it, as
+    /// Apple's does; Russian ⇄ Ukrainian on the space bar keeps every shared letter in place.
+    func testUkrainianOnIOS26TypesHeldLettersAndThePagesApostrophe() {
+        let running = KeyboardLanguage.systemMajorVersion
+        defer { KeyboardLanguage.systemMajorVersion = running }
+        KeyboardLanguage.systemMajorVersion = 26
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.russian, .ukrainian]
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 390, height: 262)
+        view.layoutIfNeeded()
+        let russian = view.engine.layout
+        XCTAssertEqual(view.engine.language, .russian)
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .ukrainian)
+        for key in russian.keys where key.character != nil && key.character != "ы" && key.character != "э" {
+            XCTAssertEqual(view.engine.layout.key(key.kind)?.frame, key.frame, key.label)
+        }
+        var id = 300
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func hold(_ character: String, pick: String) {
+            let key = view.engine.layout.key(.character(character))!
+            id += 1
+            view.engine.touchBegan(id: id, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
+            XCTAssertTrue(view.engine.openAccentMenuIfEligible(forTouch: id), character)
+            guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
+                return XCTFail("\(character): no \(pick)")
+            }
+            let cell = menu.cellFrames[index]
+            view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
+            view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
+        }
+        tap(.character("п"))
+        tap(.layerSwitch(.numbers))
+        tap(.character("\u{02BC}"))
+        XCTAssertEqual(view.engine.layout.layer, .letters, "back to the letters after ʼ")
+        for character in ["я", "т", "ь"] { tap(.character(character)) }
+        tap(.space)
+        hold("і", pick: "ї")
+        hold("г", pick: "ґ")
+        XCTAssertEqual(field.text, "пʼять їґ")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .russian)
+        XCTAssertEqual(view.engine.layout.keys.map(\.frame), russian.keys.map(\.frame))
+    }
+
     /// Settings › Keyboard › Languages with English and Greek: the space bar says "Ελληνικά", the
     /// keys are the system Greek keyboard's, and its typing rules are the system keyboard's as
     /// observed: ´ after a vowel accents it (ϊ´ is ΐ) and after anything else types ´, σ types
