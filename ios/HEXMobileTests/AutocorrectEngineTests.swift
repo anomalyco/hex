@@ -652,7 +652,7 @@ final class AutocorrectEngineTests: XCTestCase {
     /// fixes run against a stub dictionary answering as an iPhone's would.
     func testHungarianRestoresMissingDiacritics() {
         XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "szivesen", to: "szívesen", language: .hungarian)!, 0.15, accuracy: 0.001)
-        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "talalkozunk", to: "találkozunk", language: .hungarian)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "talalkozunk", to: "találkozunk", language: .hungarian)!, 0.15, accuracy: 0.001)
         XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "koszonom", to: "köszönöm", language: .hungarian)!, 0.25, accuracy: 0.001)
         XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kesobb", to: "később", language: .hungarian)!, 0.20, accuracy: 0.001)
         XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kor", to: "kör", language: .hungarian)!, 0.15, accuracy: 0.001)

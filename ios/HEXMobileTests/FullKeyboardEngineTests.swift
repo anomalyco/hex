@@ -855,6 +855,12 @@ final class FullKeyboardEngineTests: XCTestCase {
             guard let menu = view.engine.activeAccentMenu, let index = menu.options.firstIndex(of: pick) else {
                 return XCTFail("\(character): no \(pick)")
             }
+            // The Hungarian pill is anchored on the key's own option, so a nine-option key
+            // (e's é è ê ë ě ė ę ē) is pushed in from the edge and its cell can already sit
+            // under the finger when it opens. Sliding from the highlighted base cell to the
+            // picked one is the move that selects it; the cell under the finger is no move.
+            let base = menu.cellFrames[menu.selectedIndex]
+            view.engine.touchMoved(id: id, to: CGPoint(x: base.midX, y: base.midY))
             let cell = menu.cellFrames[index]
             view.engine.touchMoved(id: id, to: CGPoint(x: cell.midX, y: cell.midY))
             view.engine.touchEnded(id: id, at: CGPoint(x: cell.midX, y: cell.midY))
