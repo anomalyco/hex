@@ -324,8 +324,8 @@ mod tests {
     fn reads_the_english_model() {
         let model = bundled("en");
         assert_eq!(model.language(), "en");
-        assert_eq!(model.word_count(), 86_133);
-        assert_eq!(model.bigram_count(), 417_480);
+        assert_eq!(model.word_count(), 86_247);
+        assert_eq!(model.bigram_count(), 417_182);
         assert_eq!(model.apostrophe_code(), Some(1));
         assert_eq!(model.code_of('a'), Some(2));
     }

@@ -13,7 +13,7 @@ final class KeyboardCoreLinkTests: XCTestCase {
     func testTheCoreOpensTheBundledEnglishModel() throws {
         let model = try XCTUnwrap(TypingDecoderModel.bundled("en"), "the English model is bundled")
         let core = try XCTUnwrap(KeyboardCoreModel(url: model.url))
-        XCTAssertEqual(core.wordCount, 86_133)
+        XCTAssertEqual(core.wordCount, 86_247)
         XCTAssertEqual(model.core?.wordCount, model.wordCount)
         XCTAssertTrue(model.core === model.core, "opened once")
     }

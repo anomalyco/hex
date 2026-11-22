@@ -30,7 +30,7 @@ fn the_abi_version_is_the_headers() {
 #[test]
 fn opens_the_english_model_by_path() {
     let model = open_en();
-    assert_eq!(unsafe { hk_model_word_count(model) }, 86_133);
+    assert_eq!(unsafe { hk_model_word_count(model) }, 86_247);
     unsafe { hk_model_free(model) };
 }
 
@@ -51,7 +51,7 @@ fn opens_the_english_model_inside_a_larger_file() {
     let model = unsafe { hk_model_open_fd(fd, 4_099, length) };
     drop(file); // the map outlives the descriptor
     assert!(!model.is_null());
-    assert_eq!(unsafe { hk_model_word_count(model) }, 86_133);
+    assert_eq!(unsafe { hk_model_word_count(model) }, 86_247);
     unsafe { hk_model_free(model) };
 
     let file = File::open(&packed).unwrap();

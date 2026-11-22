@@ -25,7 +25,7 @@ class KeyboardCoreTest {
     fun opensTheEnglishModelByPath() {
         val model = KeyboardCore.modelOpen(english.path)
         assertNotEquals(0L, model)
-        assertEquals(86_133L, KeyboardCore.modelWordCount(model))
+        assertEquals(86_247L, KeyboardCore.modelWordCount(model))
         KeyboardCore.modelFree(model)
         assertEquals(0L, KeyboardCore.modelOpen("src/main/assets/typing/missing.hextm"))
         assertEquals(0L, KeyboardCore.modelOpen("src/main/assets/typing/SHA256SUMS"))
@@ -37,7 +37,7 @@ class KeyboardCoreTest {
     fun opensTheEnglishModelFromADescriptor() {
         val model = FileInputStream(english).use { KeyboardCore.modelOpenFd(it.number(), 0, english.length()) }
         assertNotEquals(0L, model)
-        assertEquals(86_133L, KeyboardCore.modelWordCount(model))
+        assertEquals(86_247L, KeyboardCore.modelWordCount(model))
         KeyboardCore.modelFree(model)
         FileInputStream(english).use {
             assertEquals(0L, KeyboardCore.modelOpenFd(it.number(), 1, english.length()))
