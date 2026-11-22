@@ -769,7 +769,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         view.switchLanguage(by: 1)
         XCTAssertEqual(view.engine.language, .polish)
         XCTAssertEqual(view.plane.spaceLabel, "Polski")
-        XCTAssertNil(view.engine.autocorrect.decoder, "no Polish typing model: the dictionary engine")
+        XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "pl", "Polish reads its own typing model")
         XCTAssertEqual(settings.keyboardDictationLanguage(), "pl-PL")
         XCTAssertEqual(picked, [], "Automatic already follows")
         var id = 400
@@ -1543,11 +1543,13 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(view.engine.autocorrect.decoder)
         // Nor do Russian, Serbian (Latin), and Canada's and Switzerland's French, which have no
         // model of their own yet; nor do English's or Spanish's next-letter odds move their
-        // targets. French (France) reads its own model, for the decoder and the letter odds.
-        view.languageOverride = .french
-        XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, "fr")
-        XCTAssertEqual(view.engine.letterOdds?.language, "fr")
-        for language in [KeyboardLanguage.russian, .ukrainian, .greek, .polish, .romanian, .serbianLatin, .frenchCanadian, .frenchSwiss] {
+        // targets. French (France) and Polish read their own models, for the decoder and the letter odds.
+        for (language, code) in [(KeyboardLanguage.french, "fr"), (.polish, "pl")] {
+            view.languageOverride = language
+            XCTAssertEqual(view.engine.autocorrect.decoder?.model.language, code)
+            XCTAssertEqual(view.engine.letterOdds?.language, code)
+        }
+        for language in [KeyboardLanguage.russian, .ukrainian, .greek, .romanian, .serbianLatin, .frenchCanadian, .frenchSwiss] {
             view.languageOverride = language
             XCTAssertEqual(view.engine.autocorrect.language, language)
             XCTAssertNil(view.engine.autocorrect.decoder, "\(language)")

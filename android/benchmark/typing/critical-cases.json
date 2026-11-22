@@ -4,5 +4,6 @@
   "de": [["restore transposed dank", "vielen dnak", "vielen dank"], ["keep adverb schon", "schon gut", "schon gut"]],
   "nb": [["restore doubled consonant", "tusen takkk", "tusen takk"], ["keep article en", "jeg har en bok", "jeg har en bok"]],
   "fr": [["restore café", "le cafe", "le café"], ["keep verb a", "il a faim", "il a faim"]],
-  "it": [["restore caffè", "un caffe", "un caffè"], ["keep conjunction e", "pane e vino", "pane e vino"]]
+  "it": [["restore caffè", "un caffe", "un caffè"], ["keep conjunction e", "pane e vino", "pane e vino"]],
+  "pl": [["restore żółw", "to jest zolw", "to jest żółw"], ["keep correct words", "nie mam czasu", "nie mam czasu"], ["keep a name", "bartek ma kota", "bartek ma kota"], ["restore że", "wiem ze tak", "wiem że tak"], ["keep ze, restore the rest", "ide ze szkoly", "idę ze szkoły"]]
 }
