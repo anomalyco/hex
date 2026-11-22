@@ -30,6 +30,7 @@ use self::clip::Clip;
 use self::export::{Export, deliver, load_sessions};
 use self::marks::{Mark, Rect, Tool};
 use crate::app_settings::ExportSize;
+use crate::desktop::file_dialog;
 use crate::desktop::i18n::{tr, tr_fill};
 use crate::rune_ui::capture_capsule::surface::CHIP_H;
 pub(crate) use narration::Narration;
@@ -92,7 +93,8 @@ struct SendList {
 #[derive(Clone, Debug)]
 enum Out {
     Copy,
-    Save,
+    /// To the file the save panel chose.
+    Save(PathBuf),
     Send(Dest),
 }
 
@@ -108,7 +110,7 @@ impl Out {
     fn pressed(&self) -> Pressed {
         match self {
             Self::Copy => Pressed::Copy,
-            Self::Save => Pressed::Save,
+            Self::Save(_) => Pressed::Save,
             Self::Send(_) => Pressed::Send,
         }
     }
@@ -166,6 +168,8 @@ pub(crate) struct Editor {
     /// An export that failed: its note stays beside Retry until the next
     /// export.
     failed: Option<Out>,
+    /// The save panel Save opened, until it answers.
+    saving: Option<file_dialog::Pending>,
     on: bool,
     leaving: Option<f64>,
     /// The shot flying from its card and back, when a card opened it.
@@ -484,6 +488,92 @@ impl Editor {
         true
     }
 
+    /// The file the editor opened: the shot's, or the recording's movie.
+    fn source(&self) -> Option<&std::path::Path> {
+        match &self.clip {
+            Some(clip) => Some(&clip.movie),
+            None => self.file.as_deref(),
+        }
+    }
+
+    /// The save panel Save and ⌘S open: the opened file's own name, in the
+    /// folder Save last went to, else the screenshots folder.
+    fn save_dialog(&self) -> file_dialog::Dialog {
+        let settings = crate::app_settings::screenshot_settings();
+        let recording = self.clip.is_some();
+        let (label, extensions): (&str, &'static [&'static str]) = if recording {
+            ("MPEG-4 movie", &["mp4"])
+        } else {
+            ("PNG image", &["png"])
+        };
+        let file_name = self
+            .source()
+            .and_then(std::path::Path::file_name)
+            .map_or_else(
+                || unsaved_name(&settings.folder()),
+                |name| name.to_string_lossy().into_owned(),
+            );
+        file_dialog::Dialog {
+            title: tr(if recording { "Export" } else { "Save" }).to_owned(),
+            target: file_dialog::Target::Save {
+                filters: vec![file_dialog::Filter {
+                    label: label.to_owned(),
+                    extensions,
+                }],
+                file_name,
+            },
+            directory: Some(settings.export_folder()),
+        }
+    }
+
+    /// Save: asks where with the native save panel, above the editor.
+    /// Nothing is written, and the button shows no progress, until a path
+    /// is chosen; a panel already open stays the one.
+    fn choose_save(&mut self, tx: &mut Tx) {
+        self.finish_typing();
+        self.send = None;
+        tx.animated();
+        if !self.on || self.saving.is_some() || self.exporting.is_some() {
+            return;
+        }
+        if self.picture().is_none() {
+            return;
+        }
+        let dialog = self.save_dialog();
+        let overlay = self.overlay.clone();
+        self.saving = Some(file_dialog::open_over_overlays(dialog, move || {
+            if let Some(overlay) = &overlay {
+                overlay.update(Editor::save_answered);
+            }
+        }));
+    }
+
+    /// The save panel closed: takes its answer back to the editor.
+    fn save_answered(&mut self, tx: &mut Tx) {
+        let Some(choice) = self.saving.as_ref().and_then(file_dialog::Pending::poll) else {
+            return;
+        };
+        self.saving = None;
+        self.keys();
+        self.save_to(choice, tx);
+    }
+
+    /// The panel's answer: a path gets the edited shot or the span kept;
+    /// a cancel leaves everything as it was.
+    fn save_to(&mut self, choice: file_dialog::Choice, tx: &mut Tx) {
+        if !self.on {
+            return;
+        }
+        match choice {
+            Ok(Some(path)) => self.deliver(Out::Save(path), tx),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(%error, "could not open the save panel");
+                self.note(tr("Couldn't save").to_owned(), tx);
+            }
+        }
+    }
+
     /// The edited shot, to `out`, on its own thread. A send waits for a
     /// dictation still going.
     fn deliver(&mut self, out: Out, tx: &mut Tx) {
@@ -533,7 +623,7 @@ impl Editor {
                     Ok(()) => {
                         let note = match &out {
                             Out::Copy => tr("Copied").to_owned(),
-                            Out::Save => tr("Saved").to_owned(),
+                            Out::Save(path) => return saved(&overlay, path, None),
                             Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
                         };
                         overlay.update(move |s, tx| s.note(note, tx));
@@ -612,7 +702,9 @@ impl Editor {
                     Ok(()) => {
                         let note = match &out {
                             Out::Copy => tr("Movie copied").to_owned(),
-                            Out::Save => tr("Saved").to_owned(),
+                            Out::Save(path) => {
+                                return saved(&overlay, path, Some(generation));
+                            }
                             Out::Send(dest) => tr_fill("Sent to {}", &dest.name),
                         };
                         overlay.update(move |s, tx| {
@@ -661,6 +753,42 @@ impl Editor {
     }
 }
 
+/// A save to `path` is written: the panel starts in its folder next time,
+/// and the note says so. Saved over the file the editor opened, that file
+/// now holds what the editor shows, so the editor closes rather than let a
+/// second save draw the marks or cut the span again. A recording's
+/// `generation` drops the answer once another is open.
+fn saved(overlay: &OverlayHandle<Editor>, path: &std::path::Path, generation: Option<u64>) {
+    #[cfg(target_os = "macos")]
+    if let Some(folder) = path.parent().map(std::path::Path::to_path_buf) {
+        crate::rune_ui::capture_capsule::toolbar::remember("export folder", move |settings| {
+            settings.export_folder = Some(folder.clone());
+        });
+    }
+    let path = path.to_path_buf();
+    overlay.update(move |s, tx| {
+        if generation.is_some_and(|generation| generation != s.generation) {
+            return;
+        }
+        s.exporting = None;
+        if s.source() == Some(path.as_path()) {
+            s.close(tx);
+        } else {
+            s.note(tr("Saved").to_owned(), tx);
+        }
+    });
+}
+
+/// The name a shot with no file of its own is offered under.
+fn unsaved_name(folder: &std::path::Path) -> String {
+    #[cfg(target_os = "macos")]
+    let path = crate::screenshots::save::free_path(folder, crate::screenshots::save::Stamp::now());
+    #[cfg(not(target_os = "macos"))]
+    let path = folder.join("Hex Screenshot.png");
+    path.file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
+}
+
 /// What the editor says when an export to `out` failed with `error`.
 fn export_failure(error: &anyhow::Error, out: &Out) -> String {
     if error.downcast_ref::<export::MarksNotDrawn>().is_some() {
@@ -668,7 +796,7 @@ fn export_failure(error: &anyhow::Error, out: &Out) -> String {
     }
     match out {
         Out::Copy => tr("Couldn't copy").to_owned(),
-        Out::Save => tr("Couldn't save").to_owned(),
+        Out::Save(_) => tr("Couldn't save").to_owned(),
         Out::Send(_) => tr("Couldn't send").to_owned(),
     }
 }
@@ -721,7 +849,7 @@ fn on_key(s: &mut Editor, key: &KeyEvent, tx: &mut Tx) -> bool {
         return true;
     }
     if key.is_command('s') {
-        s.deliver(Out::Save, tx);
+        s.choose_save(tx);
         return true;
     }
     if let Some((_, typed)) = &mut s.typing {

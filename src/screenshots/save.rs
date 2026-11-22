@@ -106,6 +106,23 @@ pub(crate) fn write(folder: &Path, png: &[u8]) -> anyhow::Result<PathBuf> {
     Ok(path)
 }
 
+/// Writes `png` to `path`, replacing what's there only once it's whole:
+/// it goes to a hidden sibling first, so a failed write never leaves half
+/// a picture, or loses the file it was replacing.
+pub(crate) fn write_to(path: &Path, png: &[u8]) -> anyhow::Result<()> {
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow::anyhow!("{} names no file", path.display()))?;
+    let partial = path.with_file_name(format!(".partial-{}", name.to_string_lossy()));
+    let written = std::fs::write(&partial, png)
+        .and_then(|()| std::fs::rename(&partial, path))
+        .map_err(anyhow::Error::from);
+    if written.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    written
+}
+
 /// Puts the image on the clipboard, and the file with it when there is
 /// one, so a paste into a chat gets the picture and a paste into Finder
 /// the file.
@@ -201,6 +218,21 @@ mod tests {
         std::fs::create_dir_all(&folder).unwrap();
         std::fs::write(folder.join(file_name(AT, 1)), b"").unwrap();
         assert_eq!(free_path(&folder, AT), folder.join(file_name(AT, 2)));
+        std::fs::remove_dir_all(&folder).unwrap();
+    }
+
+    #[test]
+    fn a_save_replaces_the_file_chosen_and_leaves_nothing_beside_it() {
+        let folder = std::env::temp_dir().join(format!("hex-save-to-{}", std::process::id()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let path = folder.join(file_name(AT, 1));
+        std::fs::write(&path, b"before").unwrap();
+        write_to(&path, b"after").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"after");
+        let left: Vec<_> = std::fs::read_dir(&folder).unwrap().collect();
+        assert_eq!(left.len(), 1, "no partial file stays");
+        // A folder that isn't there fails, and writes nothing.
+        assert!(write_to(&folder.join("gone").join("shot.png"), b"x").is_err());
         std::fs::remove_dir_all(&folder).unwrap();
     }
 

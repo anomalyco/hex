@@ -300,19 +300,39 @@ pub fn owned_window_at(
 /// Reads the on-screen window list (front to back) from the window server.
 #[cfg(target_os = "macos")]
 pub fn raw_windows() -> Vec<RawWindow> {
+    use core_graphics::window::{
+        kCGNullWindowID, kCGWindowListExcludeDesktopElements, kCGWindowListOptionOnScreenOnly,
+    };
+    listed(
+        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
+        kCGNullWindowID,
+    )
+}
+
+/// Where window `id` is now, in global top-left points, asking the window
+/// server for that one window alone: cheap enough to follow a window as
+/// it's dragged. `None` once it's gone.
+#[cfg(target_os = "macos")]
+pub fn window_bounds(id: u32) -> Option<[f64; 4]> {
+    use core_graphics::window::kCGWindowListOptionIncludingWindow;
+    listed(kCGWindowListOptionIncludingWindow, id)
+        .into_iter()
+        .find(|window| window.id == id)
+        .map(|window| window.bounds)
+}
+
+#[cfg(target_os = "macos")]
+fn listed(
+    option: core_graphics::window::CGWindowListOption,
+    relative_to: core_graphics::window::CGWindowID,
+) -> Vec<RawWindow> {
     use core_foundation::base::{CFType, TCFType};
     use core_foundation::dictionary::{CFDictionary, CFDictionaryRef};
     use core_foundation::number::CFNumber;
     use core_foundation::string::CFString;
-    use core_graphics::window::{
-        copy_window_info, kCGNullWindowID, kCGWindowListExcludeDesktopElements,
-        kCGWindowListOptionOnScreenOnly,
-    };
+    use core_graphics::window::copy_window_info;
 
-    let Some(list) = copy_window_info(
-        kCGWindowListOptionOnScreenOnly | kCGWindowListExcludeDesktopElements,
-        kCGNullWindowID,
-    ) else {
+    let Some(list) = copy_window_info(option, relative_to) else {
         return Vec::new();
     };
     let key = CFString::from_static_string;

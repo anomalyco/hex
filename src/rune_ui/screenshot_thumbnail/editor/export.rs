@@ -169,15 +169,7 @@ pub(super) fn deliver(out: &Out, png: &[u8], words: &str) -> anyhow::Result<()> 
     use crate::screenshots::save;
     match out {
         Out::Copy => save::copy(png, None),
-        Out::Save => {
-            let folder = crate::app_settings::screenshot_settings().folder();
-            let written = save::write(&folder, png);
-            match &written {
-                Ok(_) => crate::screenshots::clear_save_error(),
-                Err(error) => crate::screenshots::record_save_error(&folder, error),
-            }
-            written.map(|_| ())
-        }
+        Out::Save(path) => save::write_to(path, png),
         Out::Send(dest) => {
             let folder = std::env::temp_dir().join("hex-screenshots");
             let path = save::write(&folder, png)?;
@@ -218,20 +210,8 @@ impl ClipExport {
                 let movie = self.written(progress)?;
                 save::copy_saved(&movie, true)
             }
-            Out::Save => {
-                let folder = crate::app_settings::screenshot_settings().folder();
-                let written = super::clip::write_span(
-                    &self.movie,
-                    self.trim,
-                    self.shrink,
-                    &save::recording_path(&folder),
-                    progress,
-                );
-                match &written {
-                    Ok(()) => crate::screenshots::clear_save_error(),
-                    Err(error) => crate::screenshots::record_save_error(&folder, error),
-                }
-                written
+            Out::Save(path) => {
+                super::clip::write_span(&self.movie, self.trim, self.shrink, path, progress)
             }
             Out::Send(dest) => {
                 let movie = self.written(progress)?;

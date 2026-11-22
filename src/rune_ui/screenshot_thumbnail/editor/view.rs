@@ -336,7 +336,7 @@ fn toolbar(p: Paint, s: &Editor, w: f32) -> El {
         k,
         Button::new(pressed_label(s, Pressed::Save, save))
             .variant(ButtonVariant::Ghost)
-            .on_press_tx(|s: &mut Editor, tx| s.deliver(Out::Save, tx)),
+            .on_press_tx(|s: &mut Editor, tx| s.choose_save(tx)),
     ))
     .child(push(
         k,
