@@ -1008,7 +1008,7 @@ final class KeyboardViewController: UIInputViewController {
     // MARK: - The dictation bar's emoji panel
 
     /// The full keyboard's emoji panel in place of the dictation bar, at the full keyboard's
-    /// height (the bar's 146 pt can't hold its grid); its ABC key goes back to the bar. No
+    /// height (the bar's 146 pt can't hold its grid); its back key (in place of ABC) goes back to the bar. No
     /// search: its query is typed on letter keys the bar doesn't have.
     private func openBarEmojiPanel() {
         guard barEmojiPanel == nil, fullKeyboard == nil, let surface else { return }
@@ -1024,6 +1024,7 @@ final class KeyboardViewController: UIInputViewController {
         panel.palette = FullKeyboardPalette(isDark: FullKeyboardPalette.isDark(traits: traitCollection))
         panel.showsKeyPopups = FullKeyboardSettings().keyPopups
         panel.showsSearch = false
+        panel.returnsToBar = true
         panel.onKeyDown = { [weak self] in self?.viewModel.onKeyFeedback?() }
         panel.onSelectionStep = { [weak self] in self?.viewModel.onKeyFeedback?() }
         panel.onInsert = { [weak self, weak panel] text, entry, source in

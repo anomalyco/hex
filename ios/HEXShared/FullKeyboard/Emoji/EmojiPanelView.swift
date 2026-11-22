@@ -38,6 +38,16 @@ final class EmojiPanelView: UIView, UICollectionViewDataSource, UICollectionView
     /// The delete key is still held: how long, for repeat and word delete.
     var onDeleteRepeat: ((TimeInterval) -> Void)?
     var onLetters: (() -> Void)?
+    /// On the dictation bar, which has no letter keys, the ABC key goes back to the bar: it
+    /// shows the bar's back chevron (More languages' "Back") instead of ABC.
+    var returnsToBar = false {
+        didSet {
+            guard returnsToBar != oldValue else { return }
+            lettersKey.title = returnsToBar ? nil : "ABC"
+            lettersKey.symbol = returnsToBar ? "chevron.left" : nil
+            lettersKey.accessibilityLabel = returnsToBar ? String(localized: "Back") : "Letters"
+        }
+    }
     var onSearch: (() -> Void)?
     /// The search button, whose search the letter keys type into: the dictation bar, which has
     /// none, hides it and the suggestions take its room.

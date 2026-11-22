@@ -813,6 +813,72 @@ final class SpokenCleanupRulesTests: XCTestCase {
         ])
     }
 
+    /// TestFlight build 121 (zh): "too many periods in the middle of phrases". Real output of
+    /// Apple's SpeechTranscriber (zh-CN, macOS 27.2, the module Hex uses for Chinese) for
+    /// spoken sentences with pauses, as `SpeechSegments.joined` joins its results, and what
+    /// Hex inserts in each style. Hex adds no full stop inside, never a Latin ".", drops the
+    /// spaces the model puts before "，" and beside Latin words and numbers, and puts "，" where
+    /// a pause cut the dictation without a mark. A "。" the model itself wrote mid-phrase stays.
+    func testChineseDictationsKeepTheirClausesAndGainNoPeriods() {
+        let heard: [(segments: [String], polished: String)] = [
+            (["我今天下午想去超市买点水果和牛奶 ，然后回家做饭。"], "我今天下午想去超市买点水果和牛奶，然后回家做饭。"),
+            (["明天的会议改到 3点 ，你记得通知一下产品部的同事。"], "明天的会议改到3点，你记得通知一下产品部的同事。"),
+            (["这个问题我觉得主要是因为服务器的配置不对 ，所以才会一直报错。"], "这个问题我觉得主要是因为服务器的配置不对，所以才会一直报错。"),
+            (["你到家了吗 ？我刚下班 ，大概七点能到。"], "你到家了吗？我刚下班，大概七点能到。"),
+            (["周末我们去爬山吧 ，天气预报说星期六是晴天。"], "周末我们去爬山吧，天气预报说星期六是晴天。"),
+            (["我用 iPhone拍了几张照片 ，等一下发给你。"], "我用iPhone拍了几张照片，等一下发给你。"),
+            (["谢谢你昨天帮我搬家 ，真的辛苦了 ，改天请你吃饭。"], "谢谢你昨天帮我搬家，真的辛苦了，改天请你吃饭。"),
+            (["我们下周二上午 10:00在公司楼下的咖啡厅见面。"], "我们下周二上午10:00在公司楼下的咖啡厅见面。"),
+            // Long pauses: Apple cuts the dictation into results.
+            (["这个问题我觉得主要是因为服务器的配置不对。", "所以才会一直报错"], "这个问题我觉得主要是因为服务器的配置不对。所以才会一直报错。"),
+            (["那个文件我已经发到你的邮箱了 ，你看一下。", "有没有问题"], "那个文件我已经发到你的邮箱了，你看一下。有没有问题。"),
+            (["其实我一直在想", "要不要换一份工作", "但是现在的同事都挺好的。我也舍不得走"],
+             "其实我一直在想，要不要换一份工作，但是现在的同事都挺好的。我也舍不得走。"),
+            (["我们下周二上午 10点。在公司楼下的咖啡厅见面。", "到时候我把合同带过去"],
+             "我们下周二上午10点。在公司楼下的咖啡厅见面。到时候我把合同带过去。"),
+            (["我觉得这个方案还可以就是预算有点高。"], "我觉得这个方案还可以就是预算有点高。"),
+        ]
+        for (segments, polished) in heard {
+            let joined = SpeechSegments.joined(segments)
+            let written = TranscriptFormatter.format(joined, style: .polished, language: "zh-CN")
+            XCTAssertEqual(written, polished, segments.joined(separator: " | "))
+            XCTAssertFalse(written.contains("."), "never a Latin full stop: \(written)")
+            XCTAssertEqual(
+                written.filter { $0 == "。" }.count,
+                joined.filter { $0 == "。" }.count + (joined.last == "。" ? 0 : 1),
+                "only the final 。 is Hex's: \(written)"
+            )
+            XCTAssertEqual(
+                TranscriptFormatter.format(joined, style: .casual, language: "zh-CN"),
+                polished.count(where: { "。？！".contains($0) }) <= 3 && polished.hasSuffix("。")
+                    ? String(polished.dropLast()) : polished
+            )
+            XCTAssertEqual(
+                TranscriptFormatter.format(joined, style: .polished, language: "zh-CN", endsWithPeriod: false),
+                polished.hasSuffix("。") ? String(polished.dropLast()) : polished
+            )
+        }
+        // Verbatim keeps the model's words and spaces.
+        XCTAssertEqual(
+            TranscriptFormatter.format("我用 iPhone拍了几张照片 ，等一下发给你。", style: .verbatim, language: "zh-CN"),
+            "我用 iPhone拍了几张照片 ，等一下发给你。"
+        )
+        // Japanese: the same spaces go; a cut takes "、".
+        XCTAssertEqual(
+            TranscriptFormatter.format(SpeechSegments.joined(["明日は 10時に", "駅で会いましょう"]), style: .polished, language: "ja-JP"),
+            "明日は10時に、駅で会いましょう。"
+        )
+        // Latin words keep their spaces inside Chinese, and other languages are untouched.
+        XCTAssertEqual(
+            TranscriptFormatter.format("我在看 New York Times 的文章", style: .polished, language: "zh-CN"),
+            "我在看New York Times的文章。"
+        )
+        XCTAssertEqual(SpeechSegments.joined(["See you at ten.", " Bring the notes."]), "See you at ten. Bring the notes.")
+        XCTAssertEqual(SpeechSegments.joined(["Hola", " qué tal"]), "Hola qué tal")
+        XCTAssertEqual(TranscriptFormatter.format("ich komme um 10 Uhr", style: .polished, language: "de-DE"), "Ich komme um 10 Uhr.")
+        XCTAssertEqual(TranscriptFormatter.format("on se voit à 10 h", style: .polished, language: "fr-FR"), "On se voit à 10 h.")
+    }
+
     /// Polished writes full sentences: "I", a capital and an ending for each paragraph, in
     /// Chinese with "。" (never a second mark after one).
     func testPolishedWritesFullSentences() {
@@ -824,6 +890,10 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(TranscriptFormatter.format("Shopping list:", style: .polished), "Shopping list:")
         XCTAssertEqual(TranscriptFormatter.format("好的，明天见。", style: .polished, language: "zh-CN"), "好的，明天见。")
         XCTAssertEqual(TranscriptFormatter.format("好的，明天见", style: .polished, language: "zh-CN"), "好的，明天见。")
+        // A Chinese sentence ending in a Latin word or a number still takes "。", never ".".
+        XCTAssertEqual(TranscriptFormatter.format("我用的是iPhone", style: .polished, language: "zh-CN"), "我用的是iPhone。")
+        XCTAssertEqual(TranscriptFormatter.format("会议改到 3", style: .polished, language: "zh-CN"), "会议改到3。")
+        XCTAssertEqual(TranscriptFormatter.format("OK see you", style: .polished, language: "zh-CN"), "OK see you.")
         // "i" is English only.
         XCTAssertEqual(TranscriptFormatter.format("i ragazzi", style: .polished, language: "it-IT"), "I ragazzi.")
         XCTAssertEqual(TranscriptFormatter.format("dimmi i nomi", style: .polished, language: "it-IT"), "Dimmi i nomi.")

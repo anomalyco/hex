@@ -73,22 +73,24 @@ nonisolated enum TranscriptFormatter {
         guard !trimmed.isEmpty else { return "" }
         let fillers = fillerPattern(for: language)
         let english = SpeechLanguagePicker.isEnglish(language)
+        let unspaced = writesWithoutSpaces(language)
+        func cleaned() -> String {
+            let stripped = stripStandaloneFillers(in: trimmed, fillers: fillers)
+            return spoken(unspaced ? closingUnspacedGaps(in: stripped) : stripped, lists, punctuation, language)
+        }
 
         switch style {
         case .verbatim:
             return collapseHorizontalSpaces(in: trimmed)
 
         case .polished:
-            let cleaned = spoken(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, punctuation, language)
-            return polishSentences(cleaned, english: english)
+            return polishSentences(cleaned(), english: english, unspaced: unspaced)
 
         case .casual:
-            let cleaned = spoken(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, punctuation, language)
-            return casualMessage(cleaned, english: english)
+            return casualMessage(cleaned(), english: english)
 
         case .notes:
-            let cleaned = spoken(stripStandaloneFillers(in: trimmed, fillers: fillers), lists, punctuation, language)
-            return formatNotes(cleaned, english: english)
+            return formatNotes(cleaned(), english: english)
         }
     }
 
@@ -103,6 +105,11 @@ nonisolated enum TranscriptFormatter {
     /// between it and a word before it, and, mid-sentence, a lowercase first word
     /// (`continuingSentence`). `isWord` says whether a lowercase word is in the dictation
     /// language's dictionary; nil leaves the case alone.
+    ///
+    /// No space goes where either side is written without spaces (`isUnspacedScript`: Chinese,
+    /// Japanese, full-width punctuation): "今天|很好" takes "天气" as "今天天气很好", and
+    /// "我用|拍照" takes "iPhone" as "我用iPhone拍照", as Apple's Chinese keyboard and its
+    /// Chinese dictation write them. Korean spaces its words, so Hangul is spaced as Latin is.
     static func insertionText(
         for formatted: String,
         beforeContext: String?,
@@ -116,6 +123,15 @@ nonisolated enum TranscriptFormatter {
             output = continuingSentence(output, isWord: isWord)
         }
 
+        // A Chinese or Japanese dictation inserted into a sentence that goes on after the cursor
+        // loses the "。" its style ended it with: "我想|去超市" takes "如果天气好。" as
+        // "我想如果天气好去超市", and "买点水果。" before "，然后" never makes "。，". A whole
+        // sentence put between two ("我到了。|你在哪里") keeps it.
+        if output.hasSuffix("。"), let next = afterContext?.first, !next.isWhitespace, isUnspacedScript(next),
+           Self.unspacedClosers.contains(next) || !startsSentence(after: beforeContext) {
+            output.removeLast()
+        }
+
         if beforeContext?.last?.isWhitespace ?? true {
             // Never a second space after the one already there.
             output = String(output.drop { $0 == " " || $0 == "\t" })
@@ -124,6 +140,8 @@ nonisolated enum TranscriptFormatter {
                 && !output.hasPrefix(" ")
                 && !output.hasPrefix("\n")
                 && !isClosingPunctuation(output.first)
+                && !isUnspacedScript(lastChar)
+                && !(output.first.map(isUnspacedScript) ?? false)
             if needsLeadingSpace {
                 output = " " + output
             }
@@ -134,6 +152,8 @@ nonisolated enum TranscriptFormatter {
                 && !isClosingPunctuation(firstChar)
                 && !output.hasSuffix("\n")
                 && !output.hasSuffix(" ")
+                && !isUnspacedScript(firstChar)
+                && !(output.last.map(isUnspacedScript) ?? false)
             if needsTrailingSpace {
                 output += " "
             }
@@ -150,9 +170,69 @@ nonisolated enum TranscriptFormatter {
         for character in before.reversed() {
             if character.isNewline { return true }
             if character.isWhitespace || "\"”’')]»".contains(character) { continue }
-            return ".!?…。".contains(character)
+            return ".!?…。！？".contains(character)
         }
         return true
+    }
+
+    /// Whether `character` belongs to text written without spaces between words: Han
+    /// (Chinese, and Japanese kanji), hiragana, katakana, bopomofo, and the CJK and full-width
+    /// punctuation and forms ("，" "。" "「" "（"). Not Hangul: Korean puts spaces between words.
+    static func isUnspacedScript(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first?.value else { return false }
+        switch scalar {
+        case 0x3000...0x303F, // CJK symbols and punctuation: "、" "。" "「" "」" and the ideographic space
+             0x3040...0x30FF, // hiragana, katakana
+             0x3100...0x312F, 0x31A0...0x31BF, // bopomofo
+             0x31F0...0x31FF, // katakana phonetic extensions
+             0x3400...0x4DBF, // CJK extension A
+             0x4E00...0x9FFF, // CJK unified ideographs
+             0xF900...0xFAFF, // CJK compatibility ideographs
+             0xFE10...0xFE1F, 0xFE30...0xFE4F, // vertical and CJK compatibility forms
+             0xFF00...0xFF60, // full-width ASCII forms: "，" "！" "？" "：" "（" "）"
+             0xFF61...0xFF9F, // half-width katakana and its punctuation
+             0x20000...0x3134F: // CJK extensions B to G
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// The languages written without spaces between words, whose dictations lose the spaces
+    /// Apple's speech model puts beside Chinese characters (`closingUnspacedGaps`).
+    static func writesWithoutSpaces(_ language: String?) -> Bool {
+        guard let language else { return false }
+        let code = Locale(identifier: language).language.languageCode?.identifier ?? language
+        return ["zh", "ja", "yue", "wuu", "cmn"].contains(code)
+    }
+
+    /// `text` without a space that has Chinese or Japanese on either side (a character, or
+    /// full-width punctuation). Apple's `SpeechTranscriber` writes "牛奶 ，然后" and "我用 iPhone拍了";
+    /// its `DictationTranscriber` (the iOS keyboard's dictation) writes "牛奶，然后" and
+    /// "我用iPhone拍了". Spaces between two Latin words ("New York") stay.
+    static func closingUnspacedGaps(in text: String) -> String {
+        let chars = Array(text)
+        var result: [Character] = []
+        result.reserveCapacity(chars.count)
+        var index = 0
+        while index < chars.count {
+            let ch = chars[index]
+            guard ch == " " || ch == "\t" else {
+                result.append(ch)
+                index += 1
+                continue
+            }
+            var end = index
+            while end < chars.count, chars[end] == " " || chars[end] == "\t" { end += 1 }
+            let before = result.last
+            let after = end < chars.count ? chars[end] : nil
+            let unspaced = (before.map(isUnspacedScript) ?? false) || (after.map(isUnspacedScript) ?? false)
+            if !unspaced || before == nil || after == nil || before!.isNewline || after!.isNewline {
+                result.append(contentsOf: chars[index..<end])
+            }
+            index = end
+        }
+        return String(result)
     }
 
     /// German and Luxembourgish capitalize every noun, and their dictionaries accept nouns in
@@ -175,6 +255,11 @@ nonisolated enum TranscriptFormatter {
         guard isWord(word.lowercased()) else { return text }
         return first.lowercased() + text.dropFirst()
     }
+
+    /// Full-width marks that close or continue a clause, before which a dictation's "。" goes.
+    private static let unspacedClosers: Set<Character> = [
+        "，", "。", "！", "？", "、", "；", "：", "」", "』", "）", "】", "》", "〉", "…", "—", "．", "｡", "､",
+    ]
 
     private static func isClosingPunctuation(_ character: Character?) -> Bool {
         guard let character else { return false }
@@ -212,7 +297,7 @@ nonisolated enum TranscriptFormatter {
         return collapseHorizontalSpaces(in: stripped)
     }
 
-    private static func polishSentences(_ text: String, english: Bool) -> String {
+    private static func polishSentences(_ text: String, english: Bool, unspaced: Bool) -> String {
         guard !text.isEmpty else { return "" }
         var normalized = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
         if english {
@@ -225,16 +310,19 @@ nonisolated enum TranscriptFormatter {
         // Every paragraph ends as a sentence does, a Chinese or Japanese one with "。".
         return normalized
             .components(separatedBy: "\n")
-            .map(endingSentence)
+            .map { endingSentence($0, unspaced: unspaced) }
             .joined(separator: "\n")
     }
 
     /// `line` with a full stop unless it already ends a sentence (or a list's colon), is
-    /// empty, or is a lone address ("john@gmail.com"), which is no sentence to end.
-    private static func endingSentence(_ line: String) -> String {
+    /// empty, or is a lone address ("john@gmail.com"), which is no sentence to end. A
+    /// Chinese or Japanese line takes "。" even when it ends in a Latin word or a number
+    /// ("我用的是iPhone。"), in a dictation in that language (`unspaced`).
+    private static func endingSentence(_ line: String, unspaced: Bool = false) -> String {
         guard let last = line.last, !sentenceClosers.contains(last) else { return line }
         if line.contains("@"), !line.contains(where: \.isWhitespace) { return line }
-        return line + (usesIdeographicFullStop(last) ? "。" : ".")
+        let ideographic = usesIdeographicFullStop(last) || (unspaced && line.contains(where: usesIdeographicFullStop))
+        return line + (ideographic ? "。" : ".")
     }
 
     /// `line` without the full stop that ends it ("." "。" "．" "｡", before any closing quotes or
