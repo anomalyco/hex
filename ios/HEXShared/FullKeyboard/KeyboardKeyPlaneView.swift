@@ -126,7 +126,7 @@ final class KeyboardKeyPlaneView: UIView {
                 let fill = pressed.contains(key.kind) ? palette.keyHeldFill : palette.keyFill
                 context.fillKeycap(frame, fill: fill, shadow: palette.keyShadow, radius: radius)
                 guard showGlyphs() else { continue }
-                if let upper = key.shifted, let lower = key.character {
+                if let upper = key.shifted, let lower = key.character, layout.metrics.pad?.isDocked == true {
                     // The docked iPad's two-symbol keys: the shifted one over the one typed, as Apple's.
                     let font = UIFont.systemFont(ofSize: 18, weight: .regular)
                     let half = labelFrame.height / 2

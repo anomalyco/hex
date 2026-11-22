@@ -123,6 +123,76 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.shift.state, .locked)
     }
 
+    /// Settings › Experiments › Dvorak punctuation keys: on English's Dvorak letters the three
+    /// keys type `<`, `>` and `:` while shift is on, their keycaps and pop-ups read so, one-shot
+    /// shift turns off after one as it does for a letter, and caps lock keeps them shifted.
+    func testDvorakPunctuationTypesShiftedSymbols() throws {
+        engine.width = 402
+        engine.letterLayout = .dvorak
+        XCTAssertNil(engine.layout.key(.character(",")), "off: Apple's seven-letter row 1")
+        engine.dvorakPunctuation = true
+        XCTAssertEqual(engine.layout.letters, .dvorak)
+        let comma = try XCTUnwrap(engine.layout.key(.character(",")))
+        let period = try XCTUnwrap(engine.layout.key(.character(".")))
+        let semicolon = try XCTUnwrap(engine.layout.key(.character(";")))
+        XCTAssertEqual(comma.shifted, "<")
+        XCTAssertEqual(period.shifted, ">")
+        XCTAssertEqual(semicolon.shifted, ":")
+        XCTAssertEqual(comma.row, 0)
+        XCTAssertEqual(period.row, 0)
+        XCTAssertEqual(semicolon.row, 3)
+        XCTAssertEqual(engine.keycapLabel(for: comma), ",")
+        XCTAssertEqual(engine.displayLabel(for: comma), ",")
+        XCTAssertEqual(engine.keycapLabel(for: semicolon), ";")
+        tap(.shift)
+        XCTAssertEqual(engine.keycapLabel(for: comma), "<")
+        XCTAssertEqual(engine.displayLabel(for: comma), "<")
+        XCTAssertEqual(engine.keycapLabel(for: period), ">")
+        XCTAssertEqual(engine.displayLabel(for: period), ">")
+        XCTAssertEqual(engine.keycapLabel(for: semicolon), ":")
+        XCTAssertEqual(engine.displayLabel(for: semicolon), ":")
+        tap(.character(","))
+        XCTAssertEqual(target.text, "<")
+        XCTAssertEqual(engine.shift.state, .off, "one-shot, as after a letter")
+        XCTAssertEqual(engine.keycapLabel(for: comma), ",")
+        tap(.character("."))
+        tap(.character(";"))
+        XCTAssertEqual(target.text, "<.;")
+        tap(.shift)
+        now += 0.1
+        tap(.shift)
+        XCTAssertEqual(engine.shift.state, .locked)
+        tap(.character(","))
+        tap(.character("."))
+        tap(.character(";"))
+        XCTAssertEqual(target.text, "<.;<>:")
+        XCTAssertEqual(engine.shift.state, .locked, "caps lock stays on")
+        XCTAssertEqual(engine.keycapLabel(for: semicolon), ":")
+        // The narrower row 1 is its own key plane for Adaptive touch: what it learns stays there.
+        let punctuation = try XCTUnwrap(AdaptiveTouchGeometry(layout: engine.layout)).key
+        engine.dvorakPunctuation = false
+        XCTAssertNotEqual(try XCTUnwrap(AdaptiveTouchGeometry(layout: engine.layout)).key, punctuation)
+    }
+
+    /// Settings › Experiments › Dvorak punctuation keys: a URL or email field already has its own
+    /// `.` key on the bottom row, so its Dvorak row 1 stays Apple's rather than have two keys
+    /// that type the same character, while the semicolon still joins the space bar.
+    func testDvorakPunctuationKeepsFieldsOwnPeriodKey() throws {
+        engine.width = 402
+        engine.letterLayout = .dvorak
+        engine.dvorakPunctuation = true
+        for keyboardType in [UIKeyboardType.URL, .emailAddress] {
+            target.keyboardType = keyboardType
+            engine.configureForField()
+            XCTAssertNotEqual(engine.layout.field, .text, "\(keyboardType.rawValue)")
+            XCTAssertEqual(engine.layout.keys.filter { $0.kind == .character(".") }.count, 1, "the field's own . only")
+            XCTAssertNil(engine.layout.key(.character(",")), "row 1 stays Apple's")
+            XCTAssertEqual(engine.layout.key(.character("."))?.row, 3)
+            XCTAssertEqual(engine.layout.key(.character(";"))?.shifted, ":")
+            XCTAssertEqual(engine.layout.key(.character(";"))?.row, 3)
+        }
+    }
+
     func testHoldNumbersSlideToADigitAndLetGo() {
         down(1, .layerSwitch(.numbers))
         XCTAssertEqual(engine.layout.layer, .numbers)

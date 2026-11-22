@@ -63,6 +63,9 @@ struct FullKeyboardSettings {
     /// Simulator scenes pass `--join-unfolded-keyboard on` (or `off`) for Settings ›
     /// Experiments › Join the keyboard when unfolded.
     static let joinUnfoldedKeyboardLaunchArgument = "--join-unfolded-keyboard"
+    /// Simulator scenes pass `--experiment-dvorak-punctuation` for Settings › Experiments ›
+    /// Dvorak punctuation keys.
+    static let dvorakPunctuationLaunchArgument = "--experiment-dvorak-punctuation"
 
     private enum Key {
         static let fullKeyboard = "experiments.fullKeyboard"
@@ -87,6 +90,7 @@ struct FullKeyboardSettings {
         static let numberRow = "settings.keyboardNumberRow"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
+        static let dvorakPunctuation = "experiments.dvorakPunctuation"
     }
 
     private let defaults: UserDefaults?
@@ -301,6 +305,14 @@ struct FullKeyboardSettings {
         nonmutating set { defaults?.set(newValue, forKey: Key.joinKeyboardWhenUnfolded) }
     }
 
+    /// Settings › Experiments › Dvorak punctuation keys (off by default): English's Dvorak
+    /// letters gain comma and period on row 1, ahead of P, and a semicolon left of the space
+    /// bar, which type `<`, `>` and `:` with shift. Stored as `experiments.dvorakPunctuation`.
+    var dvorakPunctuation: Bool {
+        get { defaults?.bool(forKey: Key.dvorakPunctuation) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.dvorakPunctuation) }
+    }
+
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.
     /// When switching by default.
     var dictationBarAutoStart: DictationBarAutoStart {
@@ -323,7 +335,8 @@ struct FullKeyboardSettings {
     /// `--experiment-keyboard-themes` for Keyboard themes and `--keyboard-theme <raw>` for
     /// the theme it draws,
     /// `--hex-key left|right` for the Hex key's side, `--number-row on|off` for the number row,
-    /// and `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded.
+    /// `--join-unfolded-keyboard on|off` for the joined keyboard on the Duo unfolded, and
+    /// `--experiment-dvorak-punctuation` for the Dvorak punctuation keys.
     func applyLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
         if arguments.contains(Self.launchArgument) {
             isEnabled = true
@@ -340,6 +353,9 @@ struct FullKeyboardSettings {
         }
         if arguments.contains(Self.emojiLettersLaunchArgument) {
             emojiLettersUnderEmojiKey = true
+        }
+        if arguments.contains(Self.dvorakPunctuationLaunchArgument) {
+            dvorakPunctuation = true
         }
         if arguments.contains(Self.keyboardThemesLaunchArgument) {
             keyboardThemesEnabled = true

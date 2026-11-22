@@ -848,6 +848,192 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(layout.hitTest(CGPoint(x: 10, y: p.midY))?.kind, .character("p"), "the space left of P is P's")
     }
 
+    /// Settings › Experiments › Dvorak punctuation keys, off (or on with the letters it doesn't
+    /// touch, or on a docked iPad): every layout is the one it was, key for key.
+    func testDvorakPunctuationOffLeavesEveryLayoutAlone() {
+        for width in portraitWidths {
+            for layer in layers {
+                for field in fields {
+                    for letters in [KeyboardLetterLayout.qwerty, .dvorak] {
+                        for globe in [false, true] {
+                            XCTAssertEqual(
+                                KeyboardLayout(width: width, layer: layer, field: field, showsGlobe: globe, language: .english, letters: letters),
+                                KeyboardLayout(width: width, layer: layer, field: field, showsGlobe: globe, language: .english, letters: letters, dvorakPunctuation: false),
+                                "\(width) \(layer) \(field) \(letters) globe \(globe)"
+                            )
+                        }
+                    }
+                }
+            }
+        }
+        // The experiment touches English's Dvorak letters only, and never a docked iPad.
+        let qwerty = KeyboardLayout(width: 402, language: .english)
+        XCTAssertEqual(KeyboardLayout(width: 402, language: .english, dvorakPunctuation: true).keys, qwerty.keys)
+        for pad in [KeyboardPadPlacement.docked(.mini), .docked(.medium), .docked(.large), .floating] {
+            for orientation in [KeyboardOrientation.portrait, .landscape] {
+                let off = KeyboardLayout(width: 402, orientation: orientation, language: .english, letters: .dvorak, pad: pad)
+                let on = KeyboardLayout(width: 402, orientation: orientation, language: .english, letters: .dvorak, pad: pad, dvorakPunctuation: true)
+                if pad == .floating {
+                    XCTAssertNotEqual(on.keys, off.keys, "a floating iPad draws the iPhone's rows, so it takes them")
+                } else {
+                    XCTAssertEqual(on.keys, off.keys, "docked, Apple's own rows")
+                    XCTAssertFalse(on.dvorakPunctuation)
+                }
+            }
+        }
+    }
+
+    /// Settings › Experiments › Dvorak punctuation keys, on: comma and period come before P on
+    /// row 1, which starts at the left margin on a pitch no wider than row 3's, and delete keeps
+    /// its keycap and place; rows 2 and 3 and the bottom row's other keys don't move.
+    func testDvorakPunctuationPutsCommaAndPeriodBeforeP() throws {
+        let cases: [(CGFloat, KeyboardOrientation, KeyboardPosture, CGFloat)] = [
+            (320, .portrait, .phone, 0), (375, .portrait, .phone, 0), (402, .portrait, .phone, 0),
+            (440, .portrait, .phone, 0), (667, .landscape, .phone, 0), (874, .landscape, .phone, 0),
+            (956, .landscape, .phone, 60), (452, .portrait, .cover, 7), (655, .portrait, .unfoldedTall, 7),
+        ]
+        for (width, orientation, posture, inset) in cases {
+            let off = KeyboardLayout(
+                width: width, orientation: orientation, posture: posture, windowInset: inset,
+                language: .english, letters: .dvorak
+            )
+            let on = KeyboardLayout(
+                width: width, orientation: orientation, posture: posture, windowInset: inset,
+                language: .english, letters: .dvorak, dvorakPunctuation: true
+            )
+            let label = "\(width)pt \(orientation) \(posture)"
+            XCTAssertEqual(letters(on, row: 0).joined(), ",.pyfgcrl", label)
+            for letterRow in 1...2 {
+                XCTAssertEqual(
+                    on.keys.filter { $0.row == letterRow && $0.character != nil }.map(\.frame),
+                    off.keys.filter { $0.row == letterRow && $0.character != nil }.map(\.frame),
+                    "\(label): row \(letterRow + 1) stays put"
+                )
+            }
+            XCTAssertEqual(on.key(.delete)?.frame, off.key(.delete)?.frame, "\(label): delete keeps its keycap")
+            XCTAssertEqual(on.key(.shift)?.frame, off.key(.shift)?.frame, label)
+            let row = on.keys.filter { $0.row == 0 }.sorted { $0.frame.minX < $1.frame.minX }
+            let comma = try XCTUnwrap(row.first)
+            XCTAssertEqual(comma.kind, .character(","), label)
+            XCTAssertEqual(comma.shifted, "<", label)
+            XCTAssertEqual(try XCTUnwrap(on.key(.character("."))).shifted, ">", label)
+            XCTAssertEqual(comma.frame.minX, inset + on.metrics.side, accuracy: 0.01, "\(label): the row starts at the left margin")
+            let delete = try XCTUnwrap(on.key(.delete))
+            XCTAssertEqual(try XCTUnwrap(row.last).frame.maxX, delete.frame.minX - on.metrics.gap, accuracy: 0.01, "\(label): the row ends where it did")
+            let p = try XCTUnwrap(on.key(.character("p"))).frame
+            let y = try XCTUnwrap(on.key(.character("y"))).frame
+            let a = try XCTUnwrap(on.key(.character("a"))).frame
+            let o = try XCTUnwrap(on.key(.character("o"))).frame
+            XCTAssertLessThanOrEqual(y.minX - p.minX, o.minX - a.minX + 0.001, "\(label): no wider than row 3's pitch")
+            let space = try XCTUnwrap(on.key(.space)).frame
+            XCTAssertEqual(space.maxX, try XCTUnwrap(off.key(.space)).frame.maxX, accuracy: 0.01, "\(label): space ends where it did")
+            for key in off.keys where key.row == 3 && key.kind != .space {
+                XCTAssertEqual(on.keys.first { $0.kind == key.kind }?.frame, key.frame, "\(label) \(key.label)")
+            }
+        }
+    }
+
+    /// Settings › Experiments › Dvorak punctuation keys, on the Duo's split keyboard: comma and
+    /// period go before P on the left half, whose pitch narrows to keep its right edge, the
+    /// right half stays exactly where it was, and the semicolon takes its width from the left
+    /// space bar, which keeps ending where it did.
+    func testDvorakPunctuationOnTheSplitDuo() throws {
+        let off = KeyboardLayout(width: 801, posture: .unfoldedWide, windowInset: 75, language: .english, letters: .dvorak)
+        let on = KeyboardLayout(
+            width: 801, posture: .unfoldedWide, windowInset: 75,
+            language: .english, letters: .dvorak, dvorakPunctuation: true
+        )
+        XCTAssertTrue(on.isSplit)
+        XCTAssertEqual(on.split, off.split, "the halves keep their edges")
+        func half(_ layout: KeyboardLayout, _ row: Int, right: Bool) -> String {
+            layout.keys.filter { $0.row == row && ($0.frame.midX > layout.split!.middle) == right }
+                .sorted { $0.frame.minX < $1.frame.minX }.compactMap(\.character).joined()
+        }
+        XCTAssertEqual(half(off, 0, right: false), "pyfg")
+        XCTAssertEqual(half(on, 0, right: false), ",.pyfg", "its own keys, g shared as before")
+        XCTAssertEqual(half(on, 0, right: true), "gcrl", "the right half doesn't move")
+        XCTAssertEqual(half(on, 0, right: true), half(off, 0, right: true))
+        XCTAssertEqual(half(on, 1, right: false), half(off, 1, right: false))
+        XCTAssertEqual(half(on, 2, right: true), half(off, 2, right: true))
+        let leftRow = on.keys.filter { $0.row == 0 && $0.frame.midX < on.split!.middle }.sorted { $0.frame.minX < $1.frame.minX }
+        XCTAssertEqual(try XCTUnwrap(leftRow.first).frame.minX, 75 + on.metrics.side, accuracy: 0.01, "at the left margin")
+        XCTAssertEqual(try XCTUnwrap(leftRow.last).frame.maxX, try XCTUnwrap(off.split).leftEdge, accuracy: 0.01, "the half's right edge")
+        let leftSpace = try XCTUnwrap(on.keys.first { $0.row == 3 && $0.kind == .space && $0.frame.midX < on.split!.middle })
+        let offLeftSpace = try XCTUnwrap(off.keys.first { $0.row == 3 && $0.kind == .space })
+        let semicolon = try XCTUnwrap(on.key(.character(";")))
+        XCTAssertEqual(semicolon.frame.maxX + on.metrics.gap, leftSpace.frame.minX, accuracy: 0.01, "just left of space")
+        XCTAssertEqual(leftSpace.frame.maxX, offLeftSpace.frame.maxX, accuracy: 0.01, "space still ends where it did")
+        XCTAssertEqual(semicolon.shifted, ":")
+    }
+
+    /// The semicolon reaches every bottom row the experiment builds: iPhone portrait and turned,
+    /// the Duo folded, unfolded, joined and split, a floating iPad and every field. It sits just
+    /// left of the space bar, taking its width from it, only where the bar holds a letter-wide
+    /// key and a space besides; and every key is its own kind, inside the keyboard, and its
+    /// midpoint hits itself.
+    func testDvorakPunctuationFitsTheSemicolonIntoEveryBottomRow() throws {
+        let shapes: [(CGFloat, KeyboardOrientation, KeyboardPosture, CGFloat, KeyboardPhoneSize, KeyboardPadPlacement?, Bool)] = [
+            (320, .portrait, .phone, 0, .regular, nil, false),
+            (375, .portrait, .phone, 0, .homeButton, nil, false),
+            (402, .portrait, .phone, 0, .regular, nil, false),
+            (440, .portrait, .phone, 0, .large, nil, false),
+            (667, .landscape, .phone, 0, .regular, nil, false),
+            (874, .landscape, .phone, 0, .regular, nil, false),
+            (956, .landscape, .phone, 60, .regular, nil, false),
+            (452, .portrait, .cover, 7, .regular, nil, false),
+            (655, .portrait, .unfoldedTall, 7, .regular, nil, false),
+            (801, .portrait, .unfoldedWide, 75, .regular, nil, false),
+            (801, .portrait, .unfoldedWide, 75, .regular, nil, true),
+            (320, .portrait, .phone, 0, .regular, .floating, false),
+        ]
+        var cases: [(KeyboardLayout, KeyboardLayout)] = []
+        for (width, orientation, posture, inset, phoneSize, pad, joins) in shapes {
+            for field in fields {
+                for (globe, emoji) in [(false, false), (true, true)] {
+                    func layout(_ punctuation: Bool) -> KeyboardLayout {
+                        KeyboardLayout(
+                            width: width, orientation: orientation, field: field, showsGlobe: globe,
+                            showsEmoji: emoji, language: .english, letters: .dvorak, posture: posture,
+                            windowInset: inset, phoneSize: phoneSize, pad: pad,
+                            joinsUnfoldedKeyboard: joins, dvorakPunctuation: punctuation
+                        )
+                    }
+                    cases.append((layout(false), layout(true)))
+                }
+            }
+        }
+        for (off, on) in cases {
+            let label = describe(on) + " globe=\(on.showsGlobe) emoji=\(on.showsEmoji) joins=\(on.joinsUnfoldedKeyboard)"
+            let offSpace = try XCTUnwrap(off.keys.first { $0.row == 3 && $0.kind == .space })
+            let wideEnough = offSpace.frame.width >= 2 * off.letterWidth + off.metrics.gap
+            if let semicolon = on.key(.character(";")) {
+                XCTAssertTrue(wideEnough, "\(label): no room for a semicolon")
+                let space = try XCTUnwrap(on.key(.space))
+                XCTAssertEqual(semicolon.frame.maxX + on.metrics.gap, space.frame.minX, accuracy: 0.001, "\(label): just left of space")
+                XCTAssertEqual(space.frame.maxX, offSpace.frame.maxX, accuracy: 0.001, "\(label): space ends where it did")
+                XCTAssertEqual(semicolon.frame.width, off.letterWidth, accuracy: 0.001, "\(label): a letter wide")
+                XCTAssertEqual(semicolon.frame.height, space.frame.height, accuracy: 0.001, label)
+                XCTAssertEqual(semicolon.shifted, ":", label)
+            } else {
+                XCTAssertFalse(wideEnough, "\(label): the space bar had room")
+            }
+            for kind in [KeyKind.character(","), .character("."), .character(";")] {
+                XCTAssertLessThanOrEqual(on.keys.filter { $0.kind == kind }.count, 1, "\(label): two \(kind) keys")
+            }
+            // A split layout shares its middle letters (g and v) by design; elsewhere every
+            // character key is its own.
+            if !on.isSplit {
+                let characters = on.keys.compactMap(\.character)
+                XCTAssertEqual(Set(characters).count, characters.count, "\(label): two keys type \(characters)")
+            }
+            let bounds = CGRect(x: 0, y: 0, width: on.width, height: on.totalHeight).insetBy(dx: -0.001, dy: -0.001)
+            for key in on.keys {
+                XCTAssertTrue(bounds.contains(key.frame), "\(label) \(key.label)")
+                XCTAssertEqual(on.hitTest(CGPoint(x: key.frame.midX, y: key.frame.midY))?.kind, key.kind, "\(label) \(key.label)")
+            }
+        }
+    }
+
     /// Settings › Keyboard › Languages › Layout is kept per language in the App Group; a language
     /// never set, or set to one it doesn't offer, types on its own, as without the App Group.
     func testTheLayoutIsKeptPerLanguageWithItsOwnAsTheFallback() {
@@ -2850,5 +3036,19 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertEqual(defaults.object(forKey: "experiments.joinKeyboardWhenUnfolded") as? Bool, true)
         settings.applyLaunchArguments(["HEX", FullKeyboardSettings.joinUnfoldedKeyboardLaunchArgument, "off"])
         XCTAssertFalse(settings.joinsKeyboardWhenUnfolded)
+    }
+
+    /// Settings › Experiments › Dvorak punctuation keys is off by default, keeps its App Group
+    /// key, and `--experiment-dvorak-punctuation` turns it on.
+    func testDvorakPunctuationIsOffByDefault() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertFalse(settings.dvorakPunctuation)
+        XCTAssertFalse(FullKeyboardSettings(defaults: nil).dvorakPunctuation, "without the App Group")
+        settings.applyLaunchArguments(["HEX", FullKeyboardSettings.dvorakPunctuationLaunchArgument])
+        XCTAssertTrue(settings.dvorakPunctuation)
+        XCTAssertEqual(defaults.object(forKey: "experiments.dvorakPunctuation") as? Bool, true)
     }
 }

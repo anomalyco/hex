@@ -271,6 +271,7 @@ final class FullKeyboardView: UIView {
         syncHexPlacement()
         syncNumberRow()
         syncJoinsUnfoldedKeyboard()
+        syncDvorakPunctuation()
         refreshEmojiKey()
         syncSpatialAutocorrect()
         refreshLanguageSignals()
@@ -567,6 +568,7 @@ final class FullKeyboardView: UIView {
         syncHexPlacement()
         syncNumberRow()
         syncJoinsUnfoldedKeyboard()
+        syncDvorakPunctuation()
         refreshEmojiKey()
         let wantsAutocorrect = FullKeyboardSettings().autocorrect
         if engine.autocorrect.isEnabled != wantsAutocorrect {
