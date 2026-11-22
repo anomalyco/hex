@@ -40,6 +40,7 @@ final class DeleteWordSwipe {
             changed = true
         }
         while deleted.count > wanted, let text = deleted.popLast() {
+            engine.commitHangulComposition()
             engine.typingLog?.edit("insert", [
                 TypingLogField("inserted", .string(text)),
                 TypingLogField("src", .string("delete_swipe_restore")),
@@ -68,6 +69,9 @@ final class DeleteWordSwipe {
     }
 
     private func deleteWord() -> Bool {
+        // A word delete writes the field directly: it ends any Hangul run first. A finger's
+        // jitter before the first word must not, so this is here, not in `move`.
+        engine.commitHangulComposition()
         guard let before = engine.target.documentContextBeforeInput,
               let count = Self.wordLength(before: before) else { return false }
         let text = String(before.suffix(count))

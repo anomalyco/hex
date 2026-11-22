@@ -1,68 +1,6 @@
 import QuartzCore
 import UIKit
 
-/// The text field the keys type into. `UITextDocumentProxy` in the keyboard; a fake in tests.
-@MainActor
-protocol KeyboardTextTarget: AnyObject {
-    var documentContextBeforeInput: String? { get }
-    var documentContextAfterInput: String? { get }
-    var hasText: Bool { get }
-    var autocapitalizationType: UITextAutocapitalizationType? { get }
-    var autocorrectionType: UITextAutocorrectionType? { get }
-    var keyboardType: UIKeyboardType? { get }
-    var returnKeyType: UIReturnKeyType? { get }
-    var enablesReturnKeyAutomatically: Bool? { get }
-    var keyboardAppearance: UIKeyboardAppearance? { get }
-    var textContentType: UITextContentType? { get }
-    var isSecureTextEntry: Bool? { get }
-    var smartQuotesType: UITextSmartQuotesType? { get }
-    var smartDashesType: UITextSmartDashesType? { get }
-    var selectedText: String? { get }
-    /// `UITextDocumentProxy.documentIdentifier`: the field, where UIKit names it.
-    var documentIdentifier: UUID? { get }
-    func insertText(_ text: String)
-    func deleteBackward()
-    func adjustTextPosition(byCharacterOffset offset: Int)
-}
-
-extension KeyboardTextTarget {
-    var autocorrectionType: UITextAutocorrectionType? { .default }
-    var enablesReturnKeyAutomatically: Bool? { false }
-    var textContentType: UITextContentType? { nil }
-    var isSecureTextEntry: Bool? { nil }
-    var selectedText: String? { nil }
-    var documentIdentifier: UUID? { nil }
-    func adjustTextPosition(byCharacterOffset offset: Int) {}
-}
-
-@MainActor
-final class DocumentProxyTextTarget: KeyboardTextTarget {
-    let proxy: () -> UITextDocumentProxy?
-
-    init(_ proxy: @escaping () -> UITextDocumentProxy?) {
-        self.proxy = proxy
-    }
-
-    var documentContextBeforeInput: String? { proxy()?.documentContextBeforeInput }
-    var hasText: Bool { proxy()?.hasText ?? false }
-    var autocapitalizationType: UITextAutocapitalizationType? { proxy()?.autocapitalizationType }
-    var autocorrectionType: UITextAutocorrectionType? { proxy()?.autocorrectionType }
-    var keyboardType: UIKeyboardType? { proxy()?.keyboardType }
-    var returnKeyType: UIReturnKeyType? { proxy()?.returnKeyType }
-    var enablesReturnKeyAutomatically: Bool? { proxy()?.enablesReturnKeyAutomatically }
-    var keyboardAppearance: UIKeyboardAppearance? { proxy()?.keyboardAppearance }
-    var textContentType: UITextContentType? { proxy()?.textContentType ?? nil }
-    var isSecureTextEntry: Bool? { proxy()?.isSecureTextEntry }
-    var selectedText: String? { proxy()?.selectedText }
-    var documentIdentifier: UUID? {
-        guard let proxy = proxy() else { return nil }
-        return TypingLogTraits.documentIdentifier(of: proxy)
-    }
-    func insertText(_ text: String) { proxy()?.insertText(text) }
-    func deleteBackward() { proxy()?.deleteBackward() }
-    func adjustTextPosition(byCharacterOffset offset: Int) { proxy()?.adjustTextPosition(byCharacterOffset: offset) }
-}
-
 /// Everything the keys do, apart from drawing: multitouch with rollover, shift, pages,
 /// long-press accents, spacebar cursor trackpad, cautious autocorrect, double-space period,
 /// auto-capitalization and accelerating delete. Touches are identified by any stable integer
@@ -96,7 +34,7 @@ final class FullKeyboardEngine {
     private(set) var touches: [Int: ActiveTouch] = [:]
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
-    private var lastSpaceAt: TimeInterval?
+    var lastSpaceAt: TimeInterval?
     /// The text before the cursor just after a suggestion typed its word and a space (or held
     /// it, `spacePending`). A space typed next, while the text is still that, is swallowed.
     var suggestionSpaceBefore: String?
@@ -107,10 +45,12 @@ final class FullKeyboardEngine {
     private(set) var lastKeyTouchAt: TimeInterval?
     /// Two-thumb selection: the switch, the range picked, and the Dictate waiting on its words.
     var trackpadSelectionState = TrackpadSelectionState()
+    /// Settings › Experiments › Korean keyboard (두벌식): its switch and composing run.
+    var korean = KoreanKeyboardState()
 
     /// Where each letter of the word being typed was tapped (nil for one that came another
     /// way, such as an accent), for Spatial autocorrect.
-    private var tokenTaps: [CGPoint?] = []
+    var tokenTaps: [CGPoint?] = []
     /// Spatial autocorrect: where you tend to tap each letter, from its centre (Learn how I type).
     var tapOffsets: [Character: CGVector] = [:] {
         didSet { if tapOffsets != oldValue { syncDecoderKeys() } }
@@ -215,6 +155,7 @@ final class FullKeyboardEngine {
     var language: KeyboardLanguage = .english {
         didSet {
             guard language != oldValue else { return }
+            commitHangulComposition()
             cancelAllTouches()
             autocorrect.setLanguage(language)
             rebuildLayout(cause: "language")
@@ -288,7 +229,8 @@ final class FullKeyboardEngine {
 
     /// What the field asks for, or no automatic capitals with Auto-capitalization off.
     var autoCapitalizationMode: AutoCapitalization.Mode {
-        autoCapitalizes ? AutoCapitalization.Mode(target.autocapitalizationType) : .none
+        guard language != .korean, autoCapitalizes else { return .none }
+        return AutoCapitalization.Mode(target.autocapitalizationType)
     }
 
     /// The key whose balloon shows: the newest character still held, or the one a 123, #+= or
@@ -318,6 +260,7 @@ final class FullKeyboardEngine {
             layerState.reset(to: .numbers)
         }
         shift.reset()
+        korean.reset()
         lastSpaceAt = nil
         suggestionSpaceBefore = nil
         forgetTypingContext()
@@ -336,6 +279,7 @@ final class FullKeyboardEngine {
 
     /// Call after the text or the cursor changed outside these keys.
     func textDidChange() {
+        commitHangulIfHostMoved()
         lastSpaceAt = nil
         // The host's report may be an echo of the keys' own insert, or still lag it: either
         // leaves the text as the keys left it (`typingContext`, `SwipedWord.before`).
@@ -472,6 +416,7 @@ final class FullKeyboardEngine {
 
     /// Types an emoji from the emoji panel: no spacing or autocorrect around it.
     func insertEmoji(_ text: String, source: String) {
+        commitHangulComposition()
         adaptiveTouch?.forget()
         learning?.didFinish(word: AutocorrectEngine.currentToken(in: textBefore), language: autocorrect.language.rawValue)
         insert(text, source: source)
@@ -557,6 +502,7 @@ final class FullKeyboardEngine {
         case .delete:
             deleteBackward()
         case .layerSwitch(let next):
+            commitHangulComposition()
             touch.returnLayer = layerState.layer
             layerState.switchTo(next)
             if next == .letters { shift.reset() }
@@ -703,6 +649,7 @@ final class FullKeyboardEngine {
     /// The trackpad moved the cursor `offset` UTF-16 units: what the keys knew of the text
     /// by the old cursor no longer holds. No haptic per character, as on Apple's.
     func trackpadMovedCursor(by offset: Int) {
+        commitHangulComposition()
         forgetTypingContext()
         tokenTaps.removeAll()
         finishedWord = nil
@@ -775,6 +722,7 @@ final class FullKeyboardEngine {
                 typeSpace(at: CGPoint(x: layout.unsplitX(touch.startPoint.x), y: touch.startPoint.y))
             }
         case .returnKey:
+            commitHangulComposition()
             if target.enablesReturnKeyAutomatically == true && !target.hasText {
                 typingLog?.edit("return", [
                     TypingLogField("returnKeyType", .string(TypingLogTraits.name(target.returnKeyType ?? .default))),
@@ -876,6 +824,7 @@ final class FullKeyboardEngine {
     /// keyboard does (black box, iOS 27.2), and the strip then offers what you typed
     /// (`offeringRevert`); Adaptive touch keeps the word's taps for that revert.
     func deleteBackward(takesSwipeBack: Bool = true, source: String = "key") {
+        if deleteHangulBackward() { return }
         // The held space is a boundary question that deletes nothing: ask it before forgetting
         // what Hex typed, and keep the record when it answers, as the text has not changed.
         if takesSwipeBack, dropsHeldSpace() { return }
@@ -908,6 +857,7 @@ final class FullKeyboardEngine {
     }
 
     func deleteWordBackward() {
+        commitHangulComposition()
         forgetTypingContext()
         swipedWord = nil
         adaptiveTouch?.forget()
@@ -944,6 +894,10 @@ final class FullKeyboardEngine {
     /// `down`: where a tap's finger went down, for Adaptive touch (nil for a slide from shift).
     private func commitCharacter(_ key: KeyboardKey, at point: CGPoint, down: CGPoint? = nil) {
         guard let character = key.character else { return }
+        if typeHangul(character) {
+            shift.didTypeOneShot()
+            return
+        }
         spaceBeforeNextWord(character)
         var text = layerState.layer == .letters && shift.isUppercase ? key.shifted ?? character.uppercased() : character
         if layerState.layer == .letters {
@@ -1175,6 +1129,7 @@ final class FullKeyboardEngine {
 
     /// `point` is where the space bar was tapped, as on the unsplit keyboard.
     private func typeSpace(at point: CGPoint? = nil) {
+        commitHangulComposition()
         // Space never autocorrects a swiped word: it is a reading, not a typo.
         let afterSwipe = swipedWord != nil
         swipedWord = nil
@@ -1255,6 +1210,7 @@ final class FullKeyboardEngine {
 
     /// `source` names the edit in typing logs; nil when the caller writes its own line.
     func insert(_ text: String, source: String?, at point: CGPoint? = nil) {
+        commitHangulComposition()
         swipedWord = nil
         // Anything but the next word's letters ends the chance to revise the word before.
         if !(text.count == 1 && (text.first?.isLetter == true || text == "'")) {

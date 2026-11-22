@@ -1749,8 +1749,9 @@ final class FullKeyboardEngineTests: XCTestCase {
                 return true
             }
             // Russian and Ukrainian have no Latin letters: press their own а and hold their own
-            // е (Ukrainian's ʼ, its only key with long-press options); Greek its α and ε.
-            let first = language == .greek ? "α" : language.isLatin ? "a" : "а"
+            // е (Ukrainian's ʼ, its only key with long-press options); Greek its α and ε; Korean
+            // its ㅂ (Hangul holds nothing).
+            let first = language == .korean ? "ㅂ" : language == .greek ? "α" : language.isLatin ? "a" : "а"
             for (id, kind) in [KeyKind.character(first), .space, .delete].enumerated() {
                 let key = view.engine.layout.key(kind)!
                 let sample = TypingLogTouchSample(point: CGPoint(x: key.frame.midX, y: key.frame.midY), timestamp: 0)
@@ -1766,15 +1767,17 @@ final class FullKeyboardEngineTests: XCTestCase {
             case .romanian: "s"
             case .czech: "r"
             case .greek: "ε"
+            case .korean: "ㅂ"
             default: "e"
             }
             view.debugHoldAccent(held, selectIndex: 1)
             counts[language] = asked
         }
         XCTAssertGreaterThanOrEqual(counts[.english] ?? 0, 4, "three keys and an accent step")
-        for language in KeyboardLanguage.allCases {
+        for language in KeyboardLanguage.allCases where language != .korean {
             XCTAssertEqual(counts[language], counts[.english], "\(language.rawValue) haptics")
         }
+        XCTAssertEqual(counts[.korean] ?? 0, 3, "three keys, and no held accents")
     }
 
     /// TestFlight: "Cannot hear the iOS typing sound when using your keyboard." Every key asks
@@ -3110,34 +3113,6 @@ private final class TraitField: KeyboardTextTarget {
     var hasText: Bool { !text.isEmpty }
     func insertText(_ inserted: String) { text += inserted }
     func deleteBackward() { if !text.isEmpty { text.removeLast() } }
-}
-
-/// A host whose proxy lags `insertText`: `documentContextBeforeInput` keeps returning what it
-/// had before the last insert (`behind`), nothing (`nothing`) or an empty string
-/// (`empty`), as web views and some composers do, while the text takes every insert.
-@MainActor
-private final class LaggingField: FixtureTextTarget {
-    enum Lag: CaseIterable {
-        case behind, nothing, empty
-    }
-
-    var lag: Lag = .behind
-    private var reported: String?
-
-    override var documentContextBeforeInput: String? {
-        switch lag {
-        case .behind: return reported
-        case .nothing: return nil
-        case .empty: return ""
-        }
-    }
-
-    override func insertText(_ inserted: String) {
-        // What the host reports before this insert is what it keeps reporting after it,
-        // except that one that is a single insert behind reports the text before this one.
-        reported = lag == .behind ? super.documentContextBeforeInput : documentContextBeforeInput
-        super.insertText(inserted)
-    }
 }
 
 /// A host whose proxy keeps reporting `stale` until it is cleared, as one that has not caught

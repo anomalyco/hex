@@ -233,6 +233,7 @@ final class KeyboardViewController: UIInputViewController {
         Self.onScreen.disappeared(keyboardID)
         launchWork.forEach { $0.cancel() }
         launchWork = []
+        fullKeyboard?.engine.commitHangulComposition()
         closeBarEmojiPanel()
         // A dictation under way finishes without the keyboard, and the next one delivers it.
         localDictation.keyboardWillHide()
@@ -321,6 +322,13 @@ final class KeyboardViewController: UIInputViewController {
         observeDictationEdits(fromKeys: false)
         noteHostTextChange()
         handOffNumericPadIfNeeded()
+    }
+
+    /// The cursor moved or a selection changed: a Hangul run that is no longer right before
+    /// the cursor commits, as its text is already in the field.
+    override func selectionDidChange(_ textInput: UITextInput?) {
+        super.selectionDidChange(textInput)
+        fullKeyboard?.engine.commitHangulIfHostMoved()
     }
 
     // MARK: - Record typing logs
@@ -963,6 +971,7 @@ final class KeyboardViewController: UIInputViewController {
     ) {
         // A two-thumb Dictate's words replace the range it picked, if the field still shows
         // it; either way, the context below is read after that, so spacing sees the result.
+        fullKeyboard?.engine.commitHangulComposition()
         fullKeyboard?.applyPendingSelectionDictation()
         let context = editContext
         let insertion = TranscriptFormatter.insertionText(

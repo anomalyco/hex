@@ -53,6 +53,7 @@ extension FullKeyboardView {
         guard emojiPanel == nil, !showsRecording else { return }
         let started = CACurrentMediaTime()
         guard let library = loadEmojiLibrary() else { return }
+        engine.commitHangulComposition()
         typingLog?.ui("emoji_open")
         dismissStyleMenu()
         plane.cancelAllTouches()
@@ -103,6 +104,8 @@ extension FullKeyboardView {
     }
 
     func insertEmoji(_ text: String, entry: Int, source: String) {
+        // An emoji ends a Hangul run, whether the keys search emoji first or not.
+        engine.commitHangulComposition()
         if routedTarget.isSearching {
             // The keys type into the search; the emoji goes into the field.
             suspendedTypingLog?.edit("insert", [

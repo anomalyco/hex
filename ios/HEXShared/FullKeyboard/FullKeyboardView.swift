@@ -531,6 +531,7 @@ final class FullKeyboardView: UIView {
         if engine.adaptiveTouch !== adaptive {
             engine.adaptiveTouch = adaptive
         }
+        engine.korean.isEnabled = FullKeyboardSettings().koreanKeyboard
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
@@ -683,6 +684,7 @@ final class FullKeyboardView: UIView {
     /// Hex inserted a dictation between `before` and `after`; offer to take it back until the
     /// next edit, or until it can't be found from the cursor.
     func didInsertDictation(_ text: String, before: String = "", after: String = "") {
+        engine.commitHangulComposition()
         lastDictation = DictationUndo(text: text, before: before, after: after)
         engine.clearPendingSelectionDictation()
         refreshStrip()
@@ -693,28 +695,6 @@ final class FullKeyboardView: UIView {
         engine.forgetTextAroundKeys()
         engine.textDidChange()
         refreshReturnKey()
-    }
-
-    /// Fixtures: show a key held down.
-    func debugPress(_ character: String) {
-        guard let key = engine.layout.key(.character(character)) else { return }
-        engine.touchBegan(id: -1, at: CGPoint(x: key.frame.midX, y: key.frame.midY))
-    }
-
-    /// Fixtures: show a key's accent callout with `option` selected.
-    func debugHoldAccent(_ character: String, selecting option: String) {
-        debugHoldAccent(character)
-        guard let index = engine.activeAccentMenu?.options.firstIndex(of: option) else { return }
-        engine.debugSelectAccent(index)
-    }
-
-    /// Fixtures: show a key's long-press accent callout.
-    func debugHoldAccent(_ character: String, selectIndex: Int? = nil) {
-        guard let key = engine.layout.key(.character(character)) else { return }
-        let center = CGPoint(x: key.frame.midX, y: key.frame.midY)
-        engine.touchBegan(id: -2, at: center)
-        _ = engine.openAccentMenuIfEligible(forTouch: -2)
-        if let selectIndex { engine.debugSelectAccent(selectIndex) }
     }
 
     // MARK: - Layout
@@ -1368,6 +1348,7 @@ final class FullKeyboardView: UIView {
     }
 
     private func undoDictation() {
+        engine.commitHangulComposition()
         guard let undo = lastDictation else { return }
         let text = undo.text
         let before = engine.target.documentContextBeforeInput ?? ""

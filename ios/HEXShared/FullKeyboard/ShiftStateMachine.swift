@@ -73,6 +73,15 @@ nonisolated struct ShiftStateMachine: Equatable, Sendable {
         lastTapDown = nil
     }
 
+    /// Call after a key in a layout without capitals (Hangul) commits: shift is one key's,
+    /// and a lock lifts with it.
+    mutating func didTypeOneShot() {
+        didType()
+        if state == .locked {
+            state = .off
+        }
+    }
+
     /// Auto-capitalization after an edit or a field change. Leaves caps lock and a held shift alone.
     mutating func refreshAutoCapitalization(_ shouldCapitalize: Bool) {
         guard state != .locked, !isHeld else { return }

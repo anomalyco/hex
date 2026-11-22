@@ -62,6 +62,7 @@ extension FullKeyboardView {
         keyFeedback()
         clipboard.markPasted()
         typingLog?.edit("paste", [TypingLogField("inserted", .string(text))])
+        engine.commitHangulComposition()
         engine.forgetTextAroundKeys()
         engine.target.insertText(text)
         engine.textDidChange()

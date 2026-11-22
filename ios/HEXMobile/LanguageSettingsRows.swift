@@ -243,7 +243,7 @@ struct KeyboardLanguagesPage: View {
 
     var body: some View {
         let onPhone = suggested.filter { !chosen.contains($0) }
-        let others = KeyboardLanguage.allCases.filter { !chosen.contains($0) && !onPhone.contains($0) }
+        let others = KeyboardLanguage.selectable().filter { !chosen.contains($0) && !onPhone.contains($0) }
         List {
             Section {
                 LanguageChoiceRow(
