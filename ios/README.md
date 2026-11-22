@@ -544,7 +544,21 @@ never at a launch by itself.
     (`requestSupplementaryLexicon`), never Hex's list. After
     transcription, matching words are rewritten to the listed spelling across
     case, spaces, tabs, a single hyphen, and possessive apostrophes, before
-    cleanup and again after formatting, so a style cannot undo a spelling. The
+    cleanup and again after formatting, so a style cannot undo a spelling. In
+    English, a name heard with another spelling then takes the listed one
+    (`SoundAlikeSpelling`; every engine writes a name's commonest spelling, so
+    TestFlight build 130's "Stacey" kept coming back "Stacy"): a word the engine
+    capitalized that reads the same as a listed term of three or more letters
+    starting with a capital, once interchangeable spellings are evened out (ph
+    and f; a hard c, k and ck; chr and kr; a soft c and s; ae and e; a leading
+    ai and a; a final y, ey, ie, ee and i; any other y and i; a silent h;
+    doubled letters), takes the term ("Stacy" → "Stacey", "John" → "Jon",
+    "Catherine's" → "Katherine's", "Amy" → "Aimee"). Inside a sentence, and not
+    right after another capitalized word, it may instead sound the same by a
+    Metaphone-style key (its consonants with voicing kept, first vowel sound,
+    vowel ending and vowel groups) and be at most two edits away ("Jeff" →
+    "Geoff", "Versal" → "Vercel"). Lowercase words, words in capitals, listed
+    words and two equally close terms stay as heard. The
     listed spelling is kept exactly, even at a sentence start (an all-lowercase
     term stays lowercase), and a term that spells its own boundaries ("iPhone 7",
     "X-ray") matches those boundaries exactly. A word that carries its own
@@ -2004,7 +2018,11 @@ dataset's download and its `convert.py` command.
 - **Apple Speech hint:** Custom vocabulary's contextual strings are best effort
   and unverified on a physical iPhone. Apple documents contextual strings only
   for `DictationTranscriber`; Hex sets them on both modules, and Parakeet's
-  batch path gets no hint.
+  batch path gets no hint. On macOS 27.2.1 `SpeechTranscriber`'s text didn't
+  change with them (0 of 126 clips of names and terms), and
+  `DictationTranscriber` wrote the listed spelling in 28 of 132 places against
+  4 without them, so for English on a recent iPhone `SoundAlikeSpelling` is
+  what writes a name the listed way.
 - **Dictation languages:** `SpeechLanguagePickerTests` cover the picking rule
   and `DictationControllerTests` a language change during a dictation, Automatic
   following the keyboard's language, and Spanish never reaching Parakeet. The
