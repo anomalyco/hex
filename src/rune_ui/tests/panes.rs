@@ -2020,6 +2020,9 @@ fn platform_goldens() {
     check_golden("meetings-delete", false, PANE_SIZE);
     check_golden("meetings-rename", true, PANE_SIZE);
     check_golden("meetings-empty", false, PANE_SIZE);
+    check_golden("meetings-calls", true, PANE_SIZE);
+    check_golden("meetings-calls", false, PANE_SIZE);
+    check_golden("meetings-calls-empty", true, PANE_SIZE);
 }
 
 #[test]
