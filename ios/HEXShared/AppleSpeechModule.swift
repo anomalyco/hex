@@ -206,19 +206,61 @@ nonisolated enum AppleSpeechModule {
         }
     }
 
-    /// The final results joined, once the analyzer has finished the file.
+    /// The final results joined (`SpeechSegments.joined`), once the analyzer has finished the file.
     func finalText() async throws -> String {
-        var transcript = AttributedString()
+        var segments: [String] = []
         switch self {
         case .speech(let transcriber):
             for try await result in transcriber.results where result.isFinal {
-                transcript += result.text
+                segments.append(String(result.text.characters))
             }
         case .dictation(let transcriber):
             for try await result in transcriber.results where result.isFinal {
-                transcript += result.text
+                segments.append(String(result.text.characters))
             }
         }
-        return String(transcript.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+        return SpeechSegments.joined(segments)
+    }
+}
+
+/// How one dictation's final results become its transcript.
+nonisolated enum SpeechSegments {
+    /// `segments` back to back, as Apple writes them, except between two in Chinese or
+    /// Japanese where the first ends without a mark: `SpeechTranscriber` cuts a Chinese
+    /// dictation at a pause of about 1.5 s or more and leaves the cut unpunctuated
+    /// ("其实我一直在想" + "要不要换一份工作"), which back to back reads as one run-on clause.
+    /// A comma goes there ("，", or "、" beside kana), the mark Apple's
+    /// `DictationTranscriber` writes for the same pause. Never a full stop: a pause is no
+    /// sentence end.
+    static func joined(_ segments: [String]) -> String {
+        var transcript = ""
+        for segment in segments {
+            if let last = transcript.last(where: { !$0.isWhitespace }),
+               let first = segment.first(where: { !$0.isWhitespace }),
+               isWritten(last), isWritten(first) {
+                transcript = String(transcript.reversed().drop(while: \.isWhitespace).reversed())
+                let kana = (transcript + segment).contains(where: isKana)
+                transcript += kana ? "、" : "，"
+                transcript += String(segment.drop(while: \.isWhitespace))
+            } else {
+                transcript += segment
+            }
+        }
+        return transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// A Chinese or Japanese character, not punctuation.
+    private static func isWritten(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first?.value else { return false }
+        return (0x3041...0x30FF).contains(scalar) && scalar != 0x30FB // kana, not "・"
+            || (0x3400...0x4DBF).contains(scalar)
+            || (0x4E00...0x9FFF).contains(scalar)
+            || (0xF900...0xFAFF).contains(scalar)
+            || (0x20000...0x3134F).contains(scalar)
+    }
+
+    private static func isKana(_ character: Character) -> Bool {
+        guard let scalar = character.unicodeScalars.first?.value else { return false }
+        return (0x3041...0x30FA).contains(scalar)
     }
 }

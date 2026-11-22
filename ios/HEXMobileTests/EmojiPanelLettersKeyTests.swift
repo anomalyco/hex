@@ -95,6 +95,19 @@ final class EmojiPanelLettersKeyTests: XCTestCase {
         }
     }
 
+    /// TestFlight build 121 (zh): on the dictation bar the panel's ABC went back to the bar,
+    /// not to letters. There it is a back key; the full keyboard's panel keeps ABC.
+    func testDictationBarPanelShowsBackNotABC() throws {
+        let library = try XCTUnwrap(EmojiLibrary.load(language: "en", bundle: Bundle(for: FullKeyboardView.self)))
+        let panel = EmojiPanelView(library: library, usage: EmojiUsageStore(defaults: defaults))
+        XCTAssertNotNil(panel.subviews.first { $0.accessibilityLabel == "Letters" })
+        panel.returnsToBar = true
+        let back = try XCTUnwrap(panel.subviews.compactMap { $0 as? PanelKeyButton }.first { $0.accessibilityLabel == String(localized: "Back") })
+        XCTAssertNil(back.title)
+        XCTAssertEqual(back.symbol, "chevron.left")
+        XCTAssertNil(panel.subviews.first { $0.accessibilityLabel == "Letters" })
+    }
+
     /// The panel a fixture or the dictation bar shows alone has no emoji key behind it
     /// (`emojiKeyFrame` stays nil), so ABC stays at the leading end.
     func testStandalonePanelKeepsTheLeadingEnd() throws {

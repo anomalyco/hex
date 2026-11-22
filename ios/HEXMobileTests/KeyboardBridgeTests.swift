@@ -593,6 +593,46 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(TranscriptFormatter.insertionText(for: ", right", beforeContext: "Okay", afterContext: nil), ", right")
     }
 
+    /// TestFlight build 121 (zh): "a dictation inserted mid-sentence gets a space before and
+    /// after; Chinese between Chinese needs none". Chinese, Japanese and full-width marks take
+    /// no space on either side; Korean and Latin text are spaced as before.
+    func testDictationIntoChineseTextTakesNoSpaces() {
+        func insert(_ text: String, _ before: String?, _ after: String?) -> String {
+            TranscriptFormatter.insertionText(for: text, beforeContext: before, afterContext: after, isWord: { _ in true })
+        }
+        // Between two Han characters.
+        XCTAssertEqual(insert("天气", "今天", "很好"), "天气")
+        XCTAssertEqual(insert("我们明天去公园", "我觉得", "你说呢"), "我们明天去公园")
+        // After a full-width comma, before a full-width period.
+        XCTAssertEqual(insert("然后回家做饭", "我想去超市，", "。"), "然后回家做饭")
+        XCTAssertEqual(insert("买点水果", "我想去超市", "。"), "买点水果")
+        XCTAssertEqual(insert("你好", "他说：「", "」"), "你好")
+        // Han beside a Latin word or a number: none, as Apple's Chinese keyboard and dictation write it.
+        XCTAssertEqual(insert("iPhone", "我用", "拍照"), "iPhone")
+        XCTAssertEqual(insert("拍照", "我用iPhone", "了"), "拍照")
+        XCTAssertEqual(insert("三点", "会议改到 3", "开"), "三点")
+        // At the start and the end of the field.
+        XCTAssertEqual(insert("你好。", nil, nil), "你好。")
+        XCTAssertEqual(insert("你好。", "", "我是小王"), "你好。")
+        XCTAssertEqual(insert("我是小王。", "你好。", nil), "我是小王。")
+        // A selection replaced: the text on either side of it.
+        XCTAssertEqual(insert("后天", "我们", "见"), "后天")
+        // Japanese.
+        XCTAssertEqual(insert("ありがとう", "本当に", "ございます"), "ありがとう")
+        // A sentence that goes on after the cursor never gets the dictation's "。" inside it.
+        XCTAssertEqual(insert("如果天气好。", "我想", "去超市"), "如果天气好")
+        XCTAssertEqual(insert("买点水果。", "我想去超市", "，然后回家"), "买点水果")
+        XCTAssertEqual(insert("买点水果。", "我想去超市", "。"), "买点水果")
+        XCTAssertEqual(insert("等一下。", "我到了。", "你在哪里"), "等一下。", "a sentence between two keeps its 。")
+        XCTAssertEqual(insert("等一下。", "我到了。", nil), "等一下。")
+        XCTAssertEqual(insert("等一下？", "我想", "去超市"), "等一下？", "a question keeps its mark")
+        XCTAssertEqual(insert("black.", "the quick", "fox"), " black. ", "Latin text as before")
+        // Korean spaces its words; Latin text is spaced as before.
+        XCTAssertEqual(insert("감사합니다", "정말", "여러분"), " 감사합니다 ")
+        XCTAssertEqual(insert("brown", "the quick", "fox"), " brown ")
+        XCTAssertEqual(insert("Café", "Vamos al", "ahora"), " café ")
+    }
+
     func testDictationDictionaryFollowsTheDictationLanguage() {
         let available = ["en_US", "nb", "de_DE", "fr_FR", "es"]
         XCTAssertEqual(KeyboardLanguage.spellCheckLanguage(forDictation: "nb-NO", available: available), "nb")
