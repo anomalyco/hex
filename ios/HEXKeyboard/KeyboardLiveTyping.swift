@@ -58,7 +58,7 @@ final class KeyboardLiveTyping {
     /// as it was before them is returned for its spacing. Nil when nothing was typed, or the
     /// field changed (the words stay and the text goes in at the cursor).
     func handOver() -> DictationEditTracker.Context? {
-        guard let typing else { return nil }
+        guard let typing = typing ?? resumeLeftover() else { return nil }
         self.typing = nil
         let typed = !typing.typed.isEmpty
         guard typing.takeBack(), typed else {
@@ -72,6 +72,27 @@ final class KeyboardLiveTyping {
             after: after,
             hasText: !(typing.base ?? "").isEmpty || !(after ?? "").isEmpty
         )
+    }
+
+    /// The words an earlier keyboard left when it hid (`LiveDictationSettings.leftover`), for
+    /// the held text that replaces them, within the time it is offered.
+    private func resumeLeftover() -> LiveFieldTyping? {
+        let settings = LiveDictationSettings()
+        guard let left = settings.leftover else { return nil }
+        settings.leftover = nil
+        guard Date().timeIntervalSince1970 - left.at < KeyboardSnapshot.resultOfferWindow else { return nil }
+        let resumed = LiveFieldTyping(resuming: left.text, in: target)
+        KeyboardProbeLog.shared.write("live: words left by a hidden keyboard \(resumed == nil ? "no longer in the field" : "replaced")")
+        return resumed
+    }
+
+    /// The keyboard hides mid-dictation: the words come out where the app still takes edits, and
+    /// are noted for the held text to replace where it doesn't (one gone to the background).
+    func keyboardWillHide() {
+        if let typing, !typing.stopped, !typing.typed.isEmpty {
+            LiveDictationSettings().leftover = (typing.typed, Date().timeIntervalSince1970)
+        }
+        cancel()
     }
 
     /// Cancelled, failed, nothing heard, or the keyboard hiding: the live words come out.

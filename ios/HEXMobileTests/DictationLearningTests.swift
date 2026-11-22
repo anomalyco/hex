@@ -590,6 +590,18 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertEqual(moved.text, "Hi there")
     }
 
+    func testWordsLeftByAHiddenKeyboardAreReplacedOnlyWhereTheFieldStillEndsWithThem() throws {
+        let field = FixtureTextTarget(text: "Note: Hey, I'm running")
+        let resumed = try XCTUnwrap(LiveFieldTyping(resuming: " Hey, I'm running", in: field))
+        XCTAssertEqual(resumed.base, "Note:")
+        XCTAssertTrue(resumed.takeBack())
+        XCTAssertEqual(field.text, "Note:", "the held text then goes in as if they were never typed")
+
+        XCTAssertNil(LiveFieldTyping(resuming: " Hey, I'm running", in: FixtureTextTarget(text: "Hey, I'm running late")))
+        let quoted = FixtureTextTarget(text: "I\u{2019}m late")
+        XCTAssertNotNil(LiveFieldTyping(resuming: "I'm late", in: quoted), "a host's smart apostrophe is still the word typed")
+    }
+
     func testAHostThatReportsNothingIsNeverRevised() throws {
         let field = LaggingField(text: "Hello")
         field.lag = .nothing

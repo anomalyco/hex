@@ -53,6 +53,8 @@ final class KeyboardLiveDictation {
     static func start(sampleRate: Double, text: LiveDictationText?) -> KeyboardLiveDictation? {
         guard let text else { return nil }
         let settings = LiveDictationSettings()
+        // Words an earlier keyboard left are another dictation's: never replaced by this one's.
+        if settings.leftover != nil { settings.leftover = nil }
         guard settings.wantsLiveWords else { return nil }
         let available = os_proc_available_memory()
         guard available == 0 || available >= headroomNeeded else {

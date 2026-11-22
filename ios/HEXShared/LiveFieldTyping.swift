@@ -31,6 +31,16 @@ final class LiveFieldTyping {
         base = before
     }
 
+    /// Words typed in an earlier keyboard that hid before the dictation went in, resumed while
+    /// the text before the cursor still ends with them, for `takeBack`.
+    init?(resuming typed: String, in target: KeyboardTextTarget) {
+        guard !typed.isEmpty, (target.selectedText ?? "").isEmpty, let before = target.documentContextBeforeInput,
+              SmartPunctuation.plain(before).hasSuffix(SmartPunctuation.plain(typed)) else { return nil }
+        self.target = target
+        base = String(before.dropLast(typed.count))
+        self.typed = typed
+    }
+
     static func mayType(secure: Bool?, content: UITextContentType?, selected: String?) -> Bool {
         secure != true && !(content.map(privateContent.contains) ?? false) && (selected ?? "").isEmpty
     }

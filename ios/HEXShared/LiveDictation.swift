@@ -120,6 +120,7 @@ final class LiveDictationText: ObservableObject {
 nonisolated struct LiveDictationSettings {
     static let previewKey = "settings.liveDictationPreview"
     static let typingKey = "settings.liveDictationTyping"
+    static let leftoverKey = "liveDictation.leftover"
 
     private let defaults: UserDefaults?
 
@@ -139,4 +140,22 @@ nonisolated struct LiveDictationSettings {
 
     /// Either switch needs live words while recording.
     var wantsLiveWords: Bool { showsPreview || typesIntoField }
+
+    /// The words Type as I speak typed in a field whose keyboard hid before the dictation went
+    /// in (an app gone to the background takes no edits), and when: the held text replaces them
+    /// where the field still ends with them. A new dictation clears them.
+    var leftover: (text: String, at: TimeInterval)? {
+        get {
+            guard let stored = defaults?.dictionary(forKey: Self.leftoverKey),
+                  let text = stored["text"] as? String, let at = stored["at"] as? Double else { return nil }
+            return (text, at)
+        }
+        nonmutating set {
+            if let newValue {
+                defaults?.set(["text": newValue.text, "at": newValue.at], forKey: Self.leftoverKey)
+            } else {
+                defaults?.removeObject(forKey: Self.leftoverKey)
+            }
+        }
+    }
 }
