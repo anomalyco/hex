@@ -3191,6 +3191,18 @@ final class FullKeyboardEngineTests: XCTestCase {
         swipe(["two"], on: plane)
         XCTAssertEqual(field.text, "so two", "the only reading still goes in")
 
+        // On an iPhone (TestFlight), at the start of an empty field the re-swipe still typed "two". A
+        // real iPhone reports nothing before the cursor there (nil), where these fields report "".
+        @MainActor final class ReportsNothingWhenEmpty: FixtureTextTarget {
+            override var documentContextBeforeInput: String? { super.documentContextBeforeInput.flatMap { $0.isEmpty ? nil : $0 } }
+        }
+        let (empty, blank) = try swipeKeyboard(target: ReportsNothingWhenEmpty())
+        swipe(readings, on: blank)
+        tap(.delete, on: blank)
+        XCTAssertNil(empty.documentContextBeforeInput)
+        swipe(readings, on: blank)
+        XCTAssertEqual(empty.text, "yep", "at the start of an empty field too")
+
         let (letters, keys) = try swipeKeyboard("so")
         keys.engine.deletesSwipedWordsLetterByLetter = true
         swipe(readings, on: keys)
