@@ -169,9 +169,10 @@ that attempt's letter taps split at the reference's words; a record whose twin i
 stays one run of letters. The stderr line counts how many sentences were split either way
 and how many ran together.
 
-`--set test` is every phone test condition, including the no-space and swipe-for-space
-conditions and records whose words ran together, so its number is not comparable to a sample
-of only normal-space sentences.
+`--set test` keeps every phone test condition the default filters keep (they drop
+`eyesfree_exp1`'s blindfolded condition, `eyesfree_exp2`, and the small/tiny keyboards),
+including the no-space and swipe-for-space conditions and records whose words ran together, so
+its number is not comparable to a sample of only normal-space sentences.
 
 ## Tap Typing with Touch Sensing Images
 

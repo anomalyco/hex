@@ -1,3 +1,4 @@
+import Foundation
 import QuartzCore
 import UIKit
 import XCTest
@@ -54,26 +55,28 @@ private let replayDefaultGestureGap: TimeInterval = 0.5
 /// words, the words the dictionary lacks and their share (a word is in the dictionary when the
 /// decoder's model has it or English's contraction list does; the model lookup gets only the
 /// word's ASCII a–z letters and apostrophes, so accented, hyphenated and numeric tokens
-/// normally count as outside), and accuracy among the in-dictionary words. Scoring lowercases
-/// and straightens curly apostrophes: a tap compares letters, digits and apostrophes, a swipe
-/// only letters. Taps report that as `accuracy` over every in-dictionary word and also
-/// `all-words-accuracy` over every word. Swipes report `accuracy` over the swipe attempts (`attempts`: the gestures that became swipes, the ones whose path left its key by a
-/// swipe's pitch and weren't promoted, and the ones that read nothing), `typed-or-offered`
-/// over those attempts, `in-dictionary-accuracy` over every in-dictionary word, and
-/// `all-words-accuracy` over every word — a skipped gesture is wrong in both, so the all-words
-/// number is what the person reading the field would see. They also report the tap recordings
-/// (`taps`, and how many of those left their word in the field, `taps-right`: a path that never
-/// leaves its key by a swipe's pitch is a tap, and the keyboard types its letter), the swipe
-/// attempts this keyboard missed (`not-swipes`), the gestures that began off the letter keys
-/// (`skipped`), the touches moved forward to the previous lift (`clamped`), and the decoder's
-/// own median and p90 milliseconds. Taps also report `read-as-swipes`: tap mode keeps Swipe
-/// typing attached as the keyboard runs it, so a recorded tap whose samples drift can be
-/// promoted to a swipe, and this counts the recorded taps the plane took that way. `taps` and
-/// `taps-right` count in-dictionary words only; `not-swipes`, `skipped` and `clamped`
-/// count every recorded touch, in the dictionary or not, and `read-as-swipes` also counts
-/// every delivered tap, whatever its word. A swipe's words compare by letters only, because a
-/// swipe's path cannot draw an apostrophe; taps keep it. `HEX_REPLAY_LIMIT` caps sentences per
-/// source and `HEX_REPLAY_OUT` writes each sentence's intended and typed words as JSON.
+/// normally count as outside), and accuracy among the in-dictionary words. Scoring lowercases,
+/// straightens curly apostrophes, trims leading and trailing ones, and keeps ASCII letters: a
+/// tap compares letters and apostrophes, a swipe only letters. Taps report that as `accuracy`
+/// over every in-dictionary word and also `all-words-accuracy` over every word. Swipes report
+/// `accuracy` over the swipe attempts (`attempts`: the gestures that became swipes, the ones
+/// whose path left its key by a swipe's pitch and weren't promoted, and the ones that read
+/// nothing), `typed-or-offered` over those attempts, `in-dictionary-accuracy` over every
+/// in-dictionary word, and `all-words-accuracy` over every word — a skipped gesture is wrong in
+/// both, so the all-words number is what the person reading the field would see. They also
+/// report the tap recordings (`taps`, and how many of those left their word in the field,
+/// `taps-right`: a path that never leaves its key by a swipe's pitch is a tap, and the keyboard
+/// types its letter), the swipe attempts this keyboard missed (`not-swipes`), the gestures
+/// that began off the letter keys (`skipped`), the touches moved forward to the previous lift
+/// (`clamped`), and the decoder's own median and p90 milliseconds. Taps also report
+/// `read-as-swipes`: tap mode keeps Swipe typing attached as the keyboard runs it, so a
+/// recorded tap whose samples drift can be promoted to a swipe, and this counts the recorded
+/// taps the plane took that way. `taps` and `taps-right` count in-dictionary words only;
+/// `not-swipes`, `skipped` and `clamped` count every recorded touch, in the dictionary or
+/// not, and `read-as-swipes` also counts every delivered tap, whatever its word. A swipe's
+/// words compare by letters only, because a swipe's path cannot draw an apostrophe; taps keep
+/// it. `HEX_REPLAY_LIMIT` caps sentences per source and `HEX_REPLAY_OUT` writes each
+/// sentence's intended and typed words as JSON.
 @MainActor
 final class TypingReplayTests: XCTestCase {
     /// English's own letter rows, for the in-memory gestures: row 2 starts half a column in
@@ -235,9 +238,12 @@ final class TypingReplayTests: XCTestCase {
     func testContractionsKeepTheirApostrophesAndStayInTheDictionary() {
         XCTAssertEqual(Self.replayKey("Don’t"), "don't")
         XCTAssertEqual(Self.replayKey("we'll"), "we'll")
+        XCTAssertEqual(Self.replayKey("'hello'"), "hello")
+        XCTAssertEqual(Self.replayKey("dogs'"), "dogs")
         XCTAssertEqual(Self.swipeKey("don't"), "dont")
         XCTAssertTrue(isInDictionary("don't"))
         XCTAssertTrue(isInDictionary("we'll"))
+        XCTAssertTrue(isInDictionary("'hello'"))
         XCTAssertEqual(align(["don't"], ["dont"]), [nil] as [Int?])
         XCTAssertEqual(align(["don't", "we'll"], ["don't", "we'll"]), [0, 1] as [Int?])
     }
@@ -554,31 +560,27 @@ final class TypingReplayTests: XCTestCase {
     }
 
     private func isInDictionary(_ word: String) -> Bool {
-        let key = Self.dictionaryKey(word)
+        let key = Self.replayKey(word)
         guard !key.isEmpty else { return false }
         return model.index(of: key) != nil || Self.englishContractionKeys.contains(key)
     }
 
-    /// The scoring key: lowercase, curly apostrophes straightened, letters, digits and
-    /// apostrophes kept. Apostrophes matter for a tap, where the keyboard can type one.
+    /// The scoring and dictionary key: lowercase, curly apostrophes straightened, leading and
+    /// trailing apostrophes trimmed, ASCII letters and inner apostrophes kept. Apostrophes
+    /// matter for a tap, where the keyboard can type one.
     private static func replayKey(_ word: String) -> String {
         let straight = word
             .replacingOccurrences(of: "\u{2018}", with: "'")
             .replacingOccurrences(of: "\u{2019}", with: "'")
             .lowercased()
-        return String(straight.filter { $0.isLetter || $0.isNumber || $0 == "'" })
+        let letters = straight.filter { ($0.isASCII && $0.isLetter) || $0 == "'" }
+        return letters.trimmingCharacters(in: CharacterSet(charactersIn: "'"))
     }
 
-    /// The dictionary's key: the scoring key without anything the model cannot spell. Its
-    /// words are ASCII, so accented, hyphenated and numeric tokens normally count as outside.
-    private static func dictionaryKey(_ word: String) -> String {
-        String(replayKey(word).filter { ($0.isASCII && $0.isLetter) || $0 == "'" })
-    }
-
-    /// A swipe's key: letters only. Its path runs over letter keys and cannot draw an
+    /// A swipe's key: ASCII letters only. Its path runs over letter keys and cannot draw an
     /// apostrophe, so the decoder may spell a contraction with or without one.
     private static func swipeKey(_ word: String) -> String {
-        String(replayKey(word).filter { $0.isLetter })
+        String(replayKey(word).filter { $0.isASCII && $0.isLetter })
     }
 
     /// `AutocorrectEngine.englishContractions` as scoring keys, so a recorded "don't" is in
