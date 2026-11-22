@@ -3815,17 +3815,28 @@ fn whats_new_lists_the_newest_offered_labs() {
     let mut rt = runtime("mac-settings", true, (980.0, 2600.0));
     let newest = newest_offered_lab(&rt.state);
     tap(&mut rt, "nav-whats-new");
-    let mut buttons: Vec<String> = rt
+    let buttons: Vec<String> = rt
         .elements()
         .into_iter()
         .filter_map(|element| element.key)
         .filter_map(|key| key.strip_prefix("open-lab-").map(str::to_string))
         .collect();
     assert_eq!(buttons.first().map(String::as_str), Some(newest));
-    assert!(buttons.len() <= 8, "at most eight labs: {buttons:?}");
-    buttons.sort();
-    buttons.dedup();
-    for lab in buttons {
+    assert_eq!(
+        buttons.len(),
+        labs::offered_labs(&rt.state).len().min(8),
+        "every offered lab up to eight: {buttons:?}"
+    );
+    let mut unique = buttons.clone();
+    unique.sort();
+    unique.dedup();
+    assert_eq!(
+        buttons.len(),
+        unique.len(),
+        "no two labs share a button: {buttons:?}"
+    );
+    assert!(rt.find("open-sounds").is_some(), "sounds stays");
+    for lab in unique {
         assert!(
             rt.find(&format!("highlight-{lab}")).is_some(),
             "{lab}'s row has its own key"

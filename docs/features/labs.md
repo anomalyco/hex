@@ -410,7 +410,8 @@ Settings › Labs                          // labs.page, a store (labs/store.rs)
 │   // appearances, typed and linked searches, restored cards, retained focus and typing;
 │   // observed failing without the clear callback and passing with it; no AppKit window
 │   // every_group_has_a_feature_and_round_trips_its_id (labs/group.rs);
-│   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link
+│   // goldens mac-labs (light, dark), windows-labs, linux-labs, mac-labs-link,
+│   // rune-whats-new and rune-whats-new-newest (light, dark)
 ├── Card -> neutral icon tile, name with New / Dev tags on one line, up to two lines of description, a switch;
 │   pressing the card itself does nothing (there is no drawer)
 │   ├── The switch (key lab-<id>) -> flips the lab, saved at once
@@ -452,7 +453,9 @@ hex settings set labs.live_text true     // macOS: through the running Hex
 Checks: `rune_ui::deep_link` tests (parser, query, every feature's link reads
 back); the labs store tests in tests/panes.rs (links, card toggles, a lab's own settings on its card, the stable build's missing Dev labs,
 filters, ⌘F, a lone card's width, group folds and each OS's groups) and the
-`mac-labs`, `mac-labs-link`, `windows-labs`, and `linux-labs` goldens (Linux).
+`mac-labs`, `mac-labs-link`, `windows-labs`, and `linux-labs` goldens (Linux);
+`rune-whats-new` and `rune-whats-new-newest` (light and dark) move too, since
+the feed lists every new lab.
 Scenes: `mac-labs`, `mac-labs-on`, `mac-labs-category`, `mac-labs-search`,
 `mac-labs-settings`, `mac-labs-screenshots`, `mac-labs-link`, `windows-labs`, `linux-labs`. Not yet observed: the store in a running
 Hex.
@@ -2039,7 +2042,8 @@ at 500 ms, 1 s, and 5 s, the release while the key is down, and off);
 `hold_through_keys_is_its_own_bit_and_macos_and_windows_only` in
 [labs.rs](../../src/labs.rs). The regenerated goldens that changed against
 `origin/dev` are `mac-labs` and `mac-labs-link` (light and dark),
-`windows-labs` (light), and `whats-new-yolo` (light and dark). Not yet
+`windows-labs` (light), and `whats-new-yolo` (light and dark; since replaced
+by `whats-new-newest`). Not yet
 observed: a real keyboard on either OS.
 
 Sort and filter models (`picker-sort-filter`, issue 645, every OS): while
