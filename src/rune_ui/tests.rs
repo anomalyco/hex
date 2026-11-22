@@ -3754,27 +3754,48 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
+/// The lab What's new lists first: the newest offered lab, tie-broken by
+/// its place in the registry, as the feed sorts it.
+fn newest_offered_lab(ui: &Ui) -> &'static str {
+    labs::offered_labs(ui)
+        .into_iter()
+        .max_by_key(|(feature, _)| {
+            (
+                feature.added(),
+                crate::labs::Feature::ALL
+                    .iter()
+                    .position(|known| known == feature)
+                    .unwrap_or(0),
+            )
+        })
+        .expect("the fixture offers a lab")
+        .0
+        .name()
+}
+
 #[test]
 fn whats_new_opens_controls_without_changing_them() {
     let _goldens = Goldens::collect();
     for dark in [true, false] {
-        for (key, scene) in [
-            (None, "whats-new"),
-            (Some("open-lab-dictation-style"), "whats-new-newest"),
-            (Some("open-sounds"), "whats-new-sounds"),
-        ] {
+        for scene in ["whats-new", "whats-new-newest", "whats-new-sounds"] {
             let mut rt = runtime("mac-settings", dark, PANE_SIZE);
+            let newest = newest_offered_lab(&rt.state);
             let before = serde_json::to_value(&rt.state.settings).unwrap();
             tap(&mut rt, "nav-whats-new");
             assert_eq!(rt.state.pane, Pane::WhatsNew);
-            if let Some(key) = key {
+            if scene != "whats-new" {
+                let key = if scene == "whats-new-newest" {
+                    format!("open-lab-{newest}")
+                } else {
+                    "open-sounds".to_owned()
+                };
                 // The feed is taller than the window; reach the oldest entry
                 // before pressing it.
-                scroll_into_view(&mut rt, key, "whats-new-scroll");
-                tap(&mut rt, key);
-                if key == "open-lab-dictation-style" {
+                scroll_into_view(&mut rt, &key, "whats-new-scroll");
+                tap(&mut rt, &key);
+                if scene == "whats-new-newest" {
                     assert!(
-                        rt.state.labs_open && rt.find("lab-card-dictation-style").is_some(),
+                        rt.state.labs_open && rt.find(&format!("lab-card-{newest}")).is_some(),
                         "the newest lab's card opens"
                     );
                 } else {
@@ -3792,29 +3813,26 @@ fn whats_new_opens_controls_without_changing_them() {
 #[test]
 fn whats_new_lists_the_newest_offered_labs() {
     let mut rt = runtime("mac-settings", true, (980.0, 2600.0));
+    let newest = newest_offered_lab(&rt.state);
     tap(&mut rt, "nav-whats-new");
-    let mut labs: Vec<String> = rt
+    let mut buttons: Vec<String> = rt
         .elements()
         .into_iter()
         .filter_map(|element| element.key)
         .filter_map(|key| key.strip_prefix("open-lab-").map(str::to_string))
         .collect();
-    assert!(
-        labs.iter().any(|lab| lab == "dictation-style"),
-        "the newest lab: {labs:?}"
-    );
-    assert!(labs.len() <= 8, "at most eight labs: {labs:?}");
-    assert_eq!(labs.first().map(String::as_str), Some("dictation-style"));
-    labs.sort();
-    labs.dedup();
-    for lab in labs {
+    assert_eq!(buttons.first().map(String::as_str), Some(newest));
+    assert!(buttons.len() <= 8, "at most eight labs: {buttons:?}");
+    buttons.sort();
+    buttons.dedup();
+    for lab in buttons {
         assert!(
             rt.find(&format!("highlight-{lab}")).is_some(),
             "{lab}'s row has its own key"
         );
     }
-    tap(&mut rt, "open-lab-dictation-style");
-    assert!(rt.state.labs_open && rt.find("lab-card-dictation-style").is_some());
+    tap(&mut rt, &format!("open-lab-{newest}"));
+    assert!(rt.state.labs_open && rt.find(&format!("lab-card-{newest}")).is_some());
 }
 
 /// Collects every golden mismatch in a test and fails once at the end, so
