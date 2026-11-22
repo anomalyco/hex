@@ -40,9 +40,12 @@ Use `TEST_RUNNER_HEX_TAP_REPLAY` for a tap recording.
 
 The report line’s fields are described in
 [`ios/README.md`](../../README.md#replaying-real-typing): swipes report `attempts` (the
-decoder’s denominator, missed attempts included), `all-words-accuracy` (every in-dictionary
-word, taps included and skipped gestures wrong), `taps`/`taps-right` (recordings that are
-taps), `not-swipes`, `skipped` and `clamped`.
+decoder’s denominator, missed attempts included), `in-dictionary-accuracy` (every
+in-dictionary word, taps included and skipped gestures wrong), `all-words-accuracy` (every
+word, out-of-dictionary ones included), `taps`/`taps-right` (recordings that are taps),
+`not-swipes`, `skipped` and `clamped`; taps report `accuracy` (in-dictionary words),
+`all-words-accuracy` (every word), `read-as-swipes` (recorded taps the plane promoted to
+swipes) and `clamped`.
 
 ## FUTO swipe
 
@@ -165,6 +168,10 @@ has words is segmented by the tap counts of its force-aligned `*_word` twin, whi
 that attempt's letter taps split at the reference's words; a record whose twin is missing
 stays one run of letters. The stderr line counts how many sentences were split either way
 and how many ran together.
+
+`--set test` is every phone test condition, including the no-space and swipe-for-space
+conditions and records whose words ran together, so its number is not comparable to a sample
+of only normal-space sentences.
 
 ## Tap Typing with Touch Sensing Images
 

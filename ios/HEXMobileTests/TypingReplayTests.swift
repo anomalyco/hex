@@ -51,21 +51,29 @@ private let replayDefaultGestureGap: TimeInterval = 0.5
 /// x spans 0.25…0.75 across the recorded space bar and keeps its fraction along Hex's own.
 ///
 /// Both report a line per source between `TYPING-REPLAY` and `TYPING-REPLAY-END`: total
-/// words, the words the decoder's dictionary lacks and their share (the check keeps only ASCII
-/// a–z letters, so accented, hyphenated and numeric tokens count as outside), and accuracy
-/// among the words it has. Taps report it over every in-dictionary word. Swipes report it over
-/// the swipe attempts (`attempts`: the gestures that became swipes, the ones whose path left
-/// its key by a swipe's pitch and weren't promoted, and the ones that read nothing) and also
-/// as an `all-words-accuracy` over every in-dictionary word, taps included and a skipped
-/// gesture counted wrong — what the person reading the field would see. They also report the
-/// tap recordings (`taps`, and how many of those left their word in the field, `taps-right`:
-/// a path that never leaves its key by a swipe's pitch is a tap, and the keyboard types its
-/// letter), the swipe attempts this keyboard missed (`not-swipes`), the gestures that began
-/// off the letter keys (`skipped`), the touches moved forward to the previous lift
-/// (`clamped`), and the decoder's own median and p90 milliseconds. `taps` and `taps-right`
-/// count in-dictionary words only; `not-swipes`, `skipped` and `clamped` count every
-/// recorded touch, in the dictionary or not. `HEX_REPLAY_LIMIT` caps sentences per source and
-/// `HEX_REPLAY_OUT` writes each sentence's intended and typed words as JSON.
+/// words, the words the dictionary lacks and their share (a word is in the dictionary when the
+/// decoder's model has it or English's contraction list does; the model lookup gets only the
+/// word's ASCII a–z letters and apostrophes, so accented, hyphenated and numeric tokens
+/// normally count as outside), and accuracy among the in-dictionary words. Scoring lowercases
+/// and straightens curly apostrophes: a tap compares letters, digits and apostrophes, a swipe
+/// only letters. Taps report that as `accuracy` over every in-dictionary word and also
+/// `all-words-accuracy` over every word. Swipes report `accuracy` over the swipe attempts (`attempts`: the gestures that became swipes, the ones whose path left its key by a
+/// swipe's pitch and weren't promoted, and the ones that read nothing), `typed-or-offered`
+/// over those attempts, `in-dictionary-accuracy` over every in-dictionary word, and
+/// `all-words-accuracy` over every word — a skipped gesture is wrong in both, so the all-words
+/// number is what the person reading the field would see. They also report the tap recordings
+/// (`taps`, and how many of those left their word in the field, `taps-right`: a path that never
+/// leaves its key by a swipe's pitch is a tap, and the keyboard types its letter), the swipe
+/// attempts this keyboard missed (`not-swipes`), the gestures that began off the letter keys
+/// (`skipped`), the touches moved forward to the previous lift (`clamped`), and the decoder's
+/// own median and p90 milliseconds. Taps also report `read-as-swipes`: tap mode keeps Swipe
+/// typing attached as the keyboard runs it, so a recorded tap whose samples drift can be
+/// promoted to a swipe, and this counts the recorded taps the plane took that way. `taps` and
+/// `taps-right` count in-dictionary words only; `not-swipes`, `skipped` and `clamped`
+/// count every recorded touch, in the dictionary or not, and `read-as-swipes` also counts
+/// every delivered tap, whatever its word. A swipe's words compare by letters only, because a
+/// swipe's path cannot draw an apostrophe; taps keep it. `HEX_REPLAY_LIMIT` caps sentences per
+/// source and `HEX_REPLAY_OUT` writes each sentence's intended and typed words as JSON.
 @MainActor
 final class TypingReplayTests: XCTestCase {
     /// English's own letter rows, for the in-memory gestures: row 2 starts half a column in
@@ -221,6 +229,19 @@ final class TypingReplayTests: XCTestCase {
         XCTAssertEqual(align(["a", "lot", "of", "fun"], ["a", "lo", "t", "of", "fun"]), split)
     }
 
+    /// Scoring keeps apostrophes, and a recorded contraction stays in the dictionary even when
+    /// the decoder's own model splits it. A swipe compares its letters, since its path cannot
+    /// draw the apostrophe.
+    func testContractionsKeepTheirApostrophesAndStayInTheDictionary() {
+        XCTAssertEqual(Self.replayKey("Don’t"), "don't")
+        XCTAssertEqual(Self.replayKey("we'll"), "we'll")
+        XCTAssertEqual(Self.swipeKey("don't"), "dont")
+        XCTAssertTrue(isInDictionary("don't"))
+        XCTAssertTrue(isInDictionary("we'll"))
+        XCTAssertEqual(align(["don't"], ["dont"]), [nil] as [Int?])
+        XCTAssertEqual(align(["don't", "we'll"], ["don't", "we'll"]), [0, 1] as [Int?])
+    }
+
     // MARK: - Swipes
 
     private struct SwipeResult {
@@ -366,11 +387,11 @@ final class TypingReplayTests: XCTestCase {
         let missed = attempted && !wasSwipe && travelled
         let notSwiped = missed || (wasSwipe && typed.isEmpty)
 
-        let key = Self.replayKey(intended)
+        let key = Self.swipeKey(intended)
         let inDictionary = isInDictionary(intended)
-        let right = couldReadAddedWord && inDictionary && !key.isEmpty && Self.replayKey(typed) == key
+        let right = couldReadAddedWord && !key.isEmpty && Self.swipeKey(typed) == key
         let offered = wasSwipe && inDictionary && !key.isEmpty && engine.suggestions.contains {
-            let replacement = Self.replayKey($0.replacement)
+            let replacement = Self.swipeKey($0.replacement)
             return !replacement.isEmpty && replacement == key
         }
         return SwipeResult(
@@ -444,6 +465,11 @@ final class TypingReplayTests: XCTestCase {
                         plane.moved(id: index + 1, sample: TypingLogTouchSample(point: sample.point, timestamp: sample.time))
                     }
                     setNow(lift.time)
+                    // Tap mode keeps Swipe typing attached, as the keyboard runs it: a recorded
+                    // tap whose samples drift can be promoted before its lift.
+                    if plane.swipe?.owns(index + 1) ?? false {
+                        report.readAsSwipes += 1
+                    }
                     plane.ended(id: index + 1, sample: TypingLogTouchSample(point: lift.point, timestamp: lift.time))
                     previousLift = lift.time
                     drainMainQueue()
@@ -462,7 +488,7 @@ final class TypingReplayTests: XCTestCase {
                     let key = Self.replayKey(intended)
                     let typed = matches[index].map { typedWords[$0] } ?? ""
                     let inDictionary = isInDictionary(intended)
-                    let right = inDictionary && !key.isEmpty && Self.replayKey(typed) == key
+                    let right = !key.isEmpty && Self.replayKey(typed) == key
                     report.words.append(
                         ReplayWord(intended: intended, typed: typed, inDictionary: inDictionary, right: right, offered: false)
                     )
@@ -528,14 +554,38 @@ final class TypingReplayTests: XCTestCase {
     }
 
     private func isInDictionary(_ word: String) -> Bool {
-        let letters = Self.replayKey(word)
-        guard !letters.isEmpty else { return false }
-        return model.index(of: letters) != nil
+        let key = Self.dictionaryKey(word)
+        guard !key.isEmpty else { return false }
+        return model.index(of: key) != nil || Self.englishContractionKeys.contains(key)
     }
 
+    /// The scoring key: lowercase, curly apostrophes straightened, letters, digits and
+    /// apostrophes kept. Apostrophes matter for a tap, where the keyboard can type one.
     private static func replayKey(_ word: String) -> String {
-        String(word.lowercased().filter { $0.isASCII && $0.isLetter })
+        let straight = word
+            .replacingOccurrences(of: "\u{2018}", with: "'")
+            .replacingOccurrences(of: "\u{2019}", with: "'")
+            .lowercased()
+        return String(straight.filter { $0.isLetter || $0.isNumber || $0 == "'" })
     }
+
+    /// The dictionary's key: the scoring key without anything the model cannot spell. Its
+    /// words are ASCII, so accented, hyphenated and numeric tokens normally count as outside.
+    private static func dictionaryKey(_ word: String) -> String {
+        String(replayKey(word).filter { ($0.isASCII && $0.isLetter) || $0 == "'" })
+    }
+
+    /// A swipe's key: letters only. Its path runs over letter keys and cannot draw an
+    /// apostrophe, so the decoder may spell a contraction with or without one.
+    private static func swipeKey(_ word: String) -> String {
+        String(replayKey(word).filter { $0.isLetter })
+    }
+
+    /// `AutocorrectEngine.englishContractions` as scoring keys, so a recorded "don't" is in
+    /// the dictionary even where the decoder's model splits contractions.
+    private static let englishContractionKeys: Set<String> = Set(
+        AutocorrectEngine.englishContractions.map { replayKey($0) }
+    )
 
     // MARK: - In-memory gestures
 
@@ -831,7 +881,8 @@ private struct ReplayWord {
     var intended: String
     var typed: String
     var inDictionary: Bool
-    /// The field has the intended word (or, for a tap, its letter).
+    /// The field has the intended word: its letters and apostrophes for a tap, its letters for
+    /// a swipe, whose path cannot draw an apostrophe. Independent of the dictionary.
     var right: Bool
     var offered: Bool
     /// The gesture became a swipe, so the decoder read this word.
@@ -854,14 +905,20 @@ private struct ReplayReport {
     var skipped = 0
     /// Touches moved forward because their recording began before the previous one lifted.
     var clamped = 0
+    /// Recorded taps the plane read as swipes: tap mode keeps Swipe typing attached, so a
+    /// recorded tap whose samples drift can be promoted.
+    var readAsSwipes = 0
     var decodeTimes: [Double] = []
     var output: [ReplayOutput.Sentence] = []
 
     var outOfDictionary: Int { words.filter { !$0.inDictionary }.count }
     var inDictionary: Int { words.count - outOfDictionary }
     /// Every in-dictionary word the field got right, taps included and a skipped gesture counted
-    /// wrong: the one end-to-end number, what the person reading the field would see.
+    /// wrong.
     var typedRight: Int { words.filter { $0.inDictionary && $0.right }.count }
+    /// Every word the field got right, in the dictionary or not: the all-words denominator is
+    /// `words.count`.
+    var wordsRight: Int { words.filter(\.right).count }
     /// The in-dictionary words whose gesture was a swipe attempt — one the plane promoted, one
     /// it should have promoted, or one that read nothing: the decoder's own denominator.
     var attempts: Int { words.filter { $0.inDictionary && $0.attempt }.count }
@@ -880,14 +937,17 @@ private struct ReplayReport {
         if mode == "swipe" {
             line += " attempts=\(attempts) accuracy=\(percent(attemptsRight, of: attempts))%"
             line += " typed-or-offered=\(percent(attemptsOrOffered, of: attempts))%"
-            line += " all-words-accuracy=\(percent(typedRight, of: inDictionary))%"
+            line += " in-dictionary-accuracy=\(percent(typedRight, of: inDictionary))%"
+            line += " all-words-accuracy=\(percent(wordsRight, of: words.count))%"
             line += " taps=\(taps) taps-right=\(tapsRight)"
             line += " not-swipes=\(notSwipes) skipped=\(skipped) clamped=\(clamped)"
             let median = String(format: "%.2f", percentile(decodeTimes, 0.5))
             let p90 = String(format: "%.2f", percentile(decodeTimes, 0.9))
             line += " decode-ms-median=\(median) decode-ms-p90=\(p90)"
         } else {
-            line += " accuracy=\(percent(typedRight, of: inDictionary))% clamped=\(clamped)"
+            line += " accuracy=\(percent(typedRight, of: inDictionary))%"
+            line += " all-words-accuracy=\(percent(wordsRight, of: words.count))%"
+            line += " read-as-swipes=\(readAsSwipes) clamped=\(clamped)"
         }
         return line
     }
