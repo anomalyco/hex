@@ -1148,6 +1148,13 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
                 TranscriptionDevice::Gpu,
                 TranscriptionDevice::Cpu,
             ][index];
+            // Re-picking Auto or GPU is the retry the note offers, even when
+            // the setting already says GPU; the retry decides whether this
+            // launch registered the CPU alone (#662).
+            #[cfg(target_os = "windows")]
+            if device != TranscriptionDevice::Cpu {
+                crate::transcription::local_transcriber::retry_gpu_start();
+            }
             if ui.settings.transcription_device != device {
                 ui.update(|settings| settings.transcription_device = device);
             }
@@ -1170,6 +1177,15 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
     // Launched on CPU, Hex loaded no GPU driver (#1253).
     let restart_note = (ui.live() && crate::transcription::local_transcriber::gpu_after_restart())
         .then(|| tr("Turns on when Hex restarts").to_owned());
+    // The last two launches crashed starting the GPU. Re-picking Auto or GPU
+    // retries, even though the setting may already say GPU (#662).
+    let crash_note = (ui.live()
+        && device != TranscriptionDevice::Cpu
+        && crate::transcription::gpu_health::crash_fallback())
+    .then(|| {
+        tr("Hex crashed twice starting the GPU, so speech runs on the CPU. Choose Auto or GPU to try it again.")
+            .to_owned()
+    });
     // This process fell back after the GPU ran out of memory (#1984). The
     // record is not saved, so it goes away when a GPU loads again or Hex
     // restarts.
@@ -1182,18 +1198,21 @@ fn speech_engine_row(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> CardRow {
                 &[("device", failure.device.as_str())],
             )
         });
-    let note = vulkan_note.or(restart_note).or(out_of_memory_note).or_else(|| {
-        failed.map(|failure| {
-            tr_named(
-                if failure.slow {
-                    "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
-                } else {
-                    "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again."
-                },
-                &[("device", failure.device.as_str())],
-            )
-        })
+    let failed_note = failed.map(|failure| {
+        tr_named(
+            if failure.slow {
+                "Auto uses the CPU because it runs speech faster than {device}. Choose GPU to use it anyway."
+            } else {
+                "Auto uses the CPU because {device} stopped responding. Choose GPU to try it again."
+            },
+            &[("device", failure.device.as_str())],
+        )
     });
+    let note = vulkan_note
+        .or(restart_note)
+        .or(crash_note)
+        .or(out_of_memory_note)
+        .or(failed_note);
     icon_row(
         p,
         "speech-engine",

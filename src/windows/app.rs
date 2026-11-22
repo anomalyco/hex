@@ -826,6 +826,10 @@ impl WindowsDesktopHost {
                 preparation_stage: preparation.stage,
                 selection: self.settings.transcription.clone(),
                 preparing: preparation.model,
+                // The listener shares its engine with this process, so its
+                // last finished command says where the model runs.
+                backend: crate::transcription::engine::TranscriptionEngine::shared()
+                    .and_then(|engine| engine.held_backend()),
             },
             update_status: self.updater.status(),
             update_notes: self.updater.notes(),

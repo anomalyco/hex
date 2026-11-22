@@ -1461,6 +1461,26 @@ mod tests {
     }
 
     #[test]
+    fn status_reads_the_speech_backend() {
+        let mut report = StatusReport::default();
+        report.model.backend = Some(crate::transcription::SpeechBackend {
+            kind: "vulkan".into(),
+            device: "AMD Radeon RX 9060 XT".into(),
+            crash_fallback: false,
+        });
+        assert!(human_status(&report).contains("Speech       Vulkan — AMD Radeon RX 9060 XT\n"));
+        report.model.backend = Some(crate::transcription::SpeechBackend {
+            kind: "cpu".into(),
+            device: "CPU".into(),
+            crash_fallback: true,
+        });
+        assert!(human_status(&report).contains("Speech       CPU (GPU start crashed twice)\n"));
+        // A stopped or unloaded model reports no device, so the line goes.
+        report.model.backend = None;
+        assert!(!human_status(&report).contains("Speech       "));
+    }
+
+    #[test]
     fn status_reports_labs_and_reads_older_replies_without_it() {
         let report = StatusReport {
             labs: vec!["live-text".into()],

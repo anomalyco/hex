@@ -1429,6 +1429,10 @@ impl LinuxDesktopHost {
                     .transcription_preparation
                     .as_ref()
                     .map(|preparation| preparation.model),
+                // The listener shares its engine with this process, so its
+                // last finished command says where the model runs.
+                backend: crate::transcription::engine::TranscriptionEngine::shared()
+                    .and_then(|engine| engine.held_backend()),
             },
             update_status,
             update_notes: self.updater.notes(),

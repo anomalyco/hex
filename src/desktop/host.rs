@@ -25,6 +25,10 @@ pub(crate) struct DesktopTranscriptionSnapshot {
     pub(crate) preparation_stage: Option<ModelPreparationStage>,
     pub(crate) selection: TranscriptionSelection,
     pub(crate) preparing: Option<TranscriptionModelId>,
+    /// Where the loaded model runs; `None` before a load and once it is
+    /// unloaded, and on macOS, which `hex status` leaves out.
+    #[serde(default)]
+    pub(crate) backend: Option<crate::transcription::SpeechBackend>,
 }
 
 /// What the listener card and `hex status` say the listener is doing, on

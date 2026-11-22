@@ -586,6 +586,7 @@ fn status(host: &dyn Host) -> Result<ControlReply, ControlError> {
                 .map(|model| model.as_str().into()),
             downloaded_bytes: state.transcription.downloaded_bytes,
             error: state.transcription.error.clone(),
+            backend: state.transcription.backend.clone(),
             ..ModelReport::saved(&settings.transcription)
         },
         features: FeatureReport {
@@ -628,6 +629,7 @@ mod tests {
         quits: Mutex<Vec<bool>>,
         dictations: Mutex<Vec<CaptureAction>>,
         history: Option<crate::history::History>,
+        backend: Option<crate::transcription::SpeechBackend>,
     }
 
     impl Host for FakeHost {
@@ -650,6 +652,7 @@ mod tests {
                     preparation_stage: None,
                     selection: Default::default(),
                     preparing: None,
+                    backend: self.backend.clone(),
                 },
                 update: DesktopUpdateStatus::Current,
                 window_open: false,
@@ -823,6 +826,22 @@ mod tests {
                 "ok"
             );
         }
+    }
+
+    #[test]
+    fn status_reports_the_published_speech_backend() {
+        let host = FakeHost {
+            backend: Some(crate::transcription::SpeechBackend {
+                kind: "vulkan".into(),
+                device: "AMD Radeon RX 9060 XT".into(),
+                crash_fallback: false,
+            }),
+            ..Default::default()
+        };
+        let ControlReply::Status(status) = ask(&host, ControlCommand::Status) else {
+            panic!("expected status");
+        };
+        assert_eq!(status.model.backend, host.backend);
     }
 
     #[test]

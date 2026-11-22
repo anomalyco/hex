@@ -2403,9 +2403,14 @@ Windows beta                             // x64 (Vulkan GPU) and ARM64 (CPU)
 │   Speech engine work as on Linux (#856)
 │   ├── A run that fails out of memory -> CPU for this process, said in
 │   │   Speech engine until Hex restarts (#1984; not run on Windows)
-│   └── A launch that crashed starting the GPU (gpu-start.pending left in the
-│       data folder, same version) -> CPU only, warned in process.log, until
-│       Hex updates or the file is deleted (#662; not run on Windows)
+│   ├── A launch that crashed starting the GPU (gpu-start.pending, a version
+│   │   and crashed attempts) -> the next launch retries once; a second crash
+│   │   keeps the CPU, warned in process.log, and Settings › Speech engine
+│   │   says "Choose Auto or GPU", which clears the marker and turns the GPU
+│   │   on at restart; an update deletes a marker from another build
+│   │   (#662; not run on Windows)
+│   └── hex status -> Speech names the loaded device ("Vulkan — …"), or "CPU
+│       (GPU start crashed twice)" after the marker forced the CPU
 ├── Hex app -> General, tray, HUD; Enabled = shortcut works in every app
 ├── HUD display -> the monitor under the pointer (GetCursorPos) at each capture
 │   start, inside that monitor's work area, at its own DPI (#486); while

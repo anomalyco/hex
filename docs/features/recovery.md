@@ -871,6 +871,33 @@ test: reproducing one needs a GPU and a model.
 A load-time out of memory stays the [`recover.gpu-full`](#degrade-only-the-failing-dependency)
 path, which keeps retrying in place.
 
+`recover.gpu-start-crash`: on Windows a launch that crashes while ggml starts
+a GPU cannot be caught, so `gpu-start.pending` spans that work (#662).
+
+```ts
+GPU start -> marker "<version> <crashed + 1>" written before the risky work
+  ├── start succeeds -> marker removed; a crash outside a GPU start is not counted
+  └── process crashes -> the next launch of the same build reads it
+      ├── crashed < 2 -> one automatic retry (a bare <version> from the first
+      │   format counts as one crash)
+      └── crashed >= 2 -> CPU only, warned in process.log and said in
+          Settings › Speech engine; re-picking Auto or GPU clears the marker
+          and says the GPU turns on at restart; an update deletes a marker
+          from another build
+```
+Source: `gpu_start_at`, `guarded_at`, and `gpu_guard` in
+[transcription/local_transcriber.rs](../../src/transcription/local_transcriber.rs);
+the row in [rune_ui/general.rs](../../src/rune_ui/general.rs), whose note comes
+from `crash_fallback` in [transcription/gpu_health.rs](../../src/transcription/gpu_health.rs).
+The loaded model's device is also in `hex status` (`model.backend`) and its
+Speech line, which says "CPU (GPU start crashed twice)" after the marker
+forced the CPU.
+Checks: `the_first_formats_bare_version_gets_one_retry`,
+`two_crashed_starts_keep_the_cpu`, and
+`every_guarded_scope_records_this_launchs_attempt` (marker rules only).
+Proof limit: not observed on a real Windows GPU-driver crash, and no test of
+the Settings row itself.
+
 `recover.command-pressure`: command recognition is best-effort; dictation
 audio is not.
 

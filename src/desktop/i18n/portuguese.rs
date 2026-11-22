@@ -428,6 +428,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Auto uses the CPU because {device} stopped responding. Choose GPU to try it again.", "O automático usa a CPU porque {device} parou de responder. Escolha GPU para tentar de novo."),
     ("Hex switched to the CPU because {device} failed during transcription (out of memory). Restart Hex to use the GPU again.", "O Hex passou para a CPU porque {device} falhou durante a transcrição (sem memória). Reinicie o Hex para usar a GPU de novo."),
     ("Hex uses the CPU because the graphics driver's Vulkan is missing or too old. Update the GPU driver to use the GPU.", "O Hex usa a CPU porque o driver gráfico não tem Vulkan ou tem uma versão antiga demais. Atualize o driver da GPU para usar a GPU."),
+    ("Hex crashed twice starting the GPU, so speech runs on the CPU. Choose Auto or GPU to try it again.", "O Hex travou duas vezes ao iniciar a GPU, então a fala roda na CPU. Escolha Auto ou GPU para tentar de novo."),
     ("Dictation HUD", "HUD de ditado"),
     ("Call recording", "Gravação de chamadas"),
     ("Check for updates", "Verificar atualizações"),

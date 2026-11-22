@@ -1098,6 +1098,7 @@ pub(super) fn fixture(shortcuts: DesktopShortcuts) -> Ui {
             preparation_stage: None,
             selection: ui.settings.transcription.clone(),
             preparing: None,
+            backend: None,
         },
         update_status: DesktopUpdateStatus::Current,
         update_notes: None,

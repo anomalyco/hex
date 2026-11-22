@@ -226,6 +226,23 @@ pub(crate) fn out_of_memory_fallback() -> Option<Failure> {
         .clone()
 }
 
+/// This launch registered the CPU alone because the GPU crashed twice
+/// starting for transcription (Windows' `gpu-start.pending`, #662). Only that
+/// process knows: Settings and `hex status` read it here.
+static CRASH_FALLBACK: AtomicBool = AtomicBool::new(false);
+
+/// Records that this launch runs the CPU because the GPU crashed twice
+/// starting. Only the Windows marker forces it.
+#[cfg(any(target_os = "windows", test))]
+pub(crate) fn set_crash_fallback() {
+    CRASH_FALLBACK.store(true, Ordering::Relaxed);
+}
+
+/// Whether this launch runs the CPU because the GPU crashed twice starting.
+pub(crate) fn crash_fallback() -> bool {
+    CRASH_FALLBACK.load(Ordering::Relaxed)
+}
+
 /// The GPUs ggml can run on, best first: discrete before integrated.
 pub(crate) fn gpus() -> Vec<Device> {
     let mut gpus = transcribe_cpp::devices()
@@ -388,6 +405,15 @@ mod tests {
         // remembered (#966): Settings names no failure.
         set_auto_on_cpu(false);
         assert_eq!(current(), None);
+    }
+
+    #[test]
+    fn a_crash_fallback_lasts_this_launch() {
+        // The marker forced this process onto the CPU: only a restart (or a
+        // GPU chosen in Settings) tries the GPU again (#662).
+        assert!(!crash_fallback());
+        set_crash_fallback();
+        assert!(crash_fallback());
     }
 
     #[test]

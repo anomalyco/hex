@@ -6,6 +6,9 @@ Agent or terminal                                  // control.cli; every OS
 │   OS can't do it -> unsupported at runtime, exit 1
 ├── hex status [--json] -> Listener, capture, meeting, model, features,
 │   permissions, window, update, version, pid, memory
+│   ├── Speech -> the loaded model's device ("Vulkan — AMD Radeon RX 9060 XT"),
+│   │   or "CPU (GPU start crashed twice)" after a Windows GPU-start
+│   │   crash; omitted before a load, once unloaded, and on macOS
 │   ├── Wayland listener -> its warning names a missing wl-copy before paste fails
 │   ├── Capture -> listener query: shortcut/CLI or SDK recording, including a
 │   │   pending microphone start and release tail, plus accepted output jobs
