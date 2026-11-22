@@ -1269,9 +1269,12 @@ never at a launch by itself.
   43 pt row 4 ends 4 pt below where iOS ends a third-party keyboard's view, so those 4 pt come
   out of all four rows alike: 42 pt keycaps with Apple's 11 pt gaps, row 1 on Apple's line and
   rows 2 to 4 1, 2 and 3 pt above Apple's, no row shorter than another; every bottom-row key
-  takes taps down to the view's bottom edge, and the gap between rows 3 and 4 is row 4's, as
-  on Apple's keyboard (whose space bar, 123 and return take taps up to 2.5 pt into row 3's
-  keycaps, iOS 27.2). Apple's space bar takes taps 13 pt below its
+  takes taps down to the view's bottom edge. The gap between rows 3 and 4 is the space bar's
+  across its width (row 3's keys whose middle is over it end at their keycaps), as on Apple's
+  keyboard, whose space bar takes taps up to 2.5 pt into row 3's keycaps (iOS 27.2); over 123,
+  emoji, return and the rest the gap splits, so a low m or delete above return never sends
+  return (Hex's rows sit 1 to 3 pt above Apple's, so a finger trained on Apple's lands lower on
+  Hex's row 3). Apple's space bar takes taps 13 pt below its
   keycap, down to its own key plane's end; the 17 pt under Hex's view belong to iOS's globe band
   and never reach a third-party keyboard. The 17 pt band iOS adds above a third-party
   keyboard in some fields (Notes, Spotlight, a re-tapped Safari field; on iOS 26 even a plain

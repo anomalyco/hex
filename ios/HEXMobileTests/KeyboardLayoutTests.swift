@@ -353,8 +353,9 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(pro.key(.space)!.frame.minY - proQ.frame.minY, 3 * 53, accuracy: 0.001)
         XCTAssertEqual(pro.key(.space)!.frame.height, 42)
         XCTAssertEqual(pro.key(.space)!.hitFrame.maxY, pro.totalHeight, accuracy: 0.001, "taps reach the view's bottom edge")
-        XCTAssertEqual(pro.key(.space)!.hitFrame.minY, pro.key(.character("v"))!.frame.maxY, accuracy: 0.001, "the gap above row 4 is row 4's")
-        XCTAssertEqual(pro.key(.character("v"))!.hitFrame.maxY, pro.key(.character("v"))!.frame.maxY, accuracy: 0.001)
+        let v = pro.key(.character("v"))!
+        XCTAssertEqual(pro.key(.space)!.gapHitFrame?.minY ?? 0, v.frame.maxY, accuracy: 0.001, "the gap over the space bar is the space bar's")
+        XCTAssertEqual(v.hitFrame.maxY, v.frame.maxY, accuracy: 0.001)
         XCTAssertEqual(pro.key(.space)!.frame.maxY, pro.totalHeight, accuracy: 0.001)
         XCTAssertEqual(pro.key(.shift)!.frame.maxX, 52, accuracy: 0.34)
         XCTAssertEqual(pro.key(.delete)!.frame.minX, 350, accuracy: 0.34)
@@ -467,7 +468,7 @@ final class KeyboardLayoutTests: XCTestCase {
                     x: CGFloat.random(in: 0..<layout.width, using: &generator),
                     y: CGFloat.random(in: area.minY..<area.maxY, using: &generator)
                 )
-                let hits = layout.keys.filter { $0.hitFrame.contains(point) }
+                let hits = layout.keys.filter { $0.takes(point) }
                 let inEmojiMargin = emojiSlot?.contains(point) == true && emoji?.hitFrame.contains(point) == false
                 XCTAssertEqual(hits.count, inEmojiMargin ? 0 : 1, "\(describe(layout)) at \(point): \(hits.map(\.label))")
             }
@@ -2814,6 +2815,37 @@ final class KeyboardLayoutTests: XCTestCase {
         }
     }
 
+    /// The gap between rows 3 and 4 is the space bar's only across its width (row 3's keys whose
+    /// middle is over the space bar end at their keycaps); over 123, emoji, return and the rest it
+    /// splits, so a tap just under m or delete above return stays m or delete (a low m sent
+    /// return in Ryan's logged taps). English, AZERTY with its apostrophe key, a twelve-key row.
+    func testTheGapAboveRowFourIsTheSpaceBarsOnlyOverTheSpaceBar() {
+        let layouts = [
+            KeyboardLayout(width: 402), KeyboardLayout(width: 440, phoneSize: .large),
+            KeyboardLayout(width: 375, showsGlobe: true, phoneSize: .homeButton),
+            KeyboardLayout(width: 874, orientation: .landscape, horizontalInset: 62),
+            KeyboardLayout(width: 402, language: .french), KeyboardLayout(width: 402, language: .ukrainian),
+            KeyboardLayout(width: 402, numberRow: true),
+        ]
+        for layout in layouts {
+            let space = layout.key(.space)!
+            for key in layout.keys where key.row == 2 {
+                let below = CGPoint(x: key.frame.midX, y: key.frame.maxY + 1)
+                let overSpace = key.frame.midX > space.frame.minX && key.frame.midX < space.frame.maxX
+                XCTAssertEqual(layout.hitTest(below)?.kind, overSpace ? .space : key.kind, "\(describe(layout)) under \(key.label)")
+            }
+            let gap = CGPoint(x: space.frame.midX, y: space.frame.minY - 1)
+            XCTAssertEqual(layout.hitTest(gap)?.kind, .space, describe(layout))
+            XCTAssertEqual(layout.hitTest(CGPoint(x: space.frame.midX, y: space.frame.minY - layout.metrics.rowGap + 0.5))?.kind, .space, describe(layout))
+        }
+        let pro = KeyboardLayout(width: 402)
+        let m = pro.key(.character("m"))!
+        XCTAssertEqual(pro.hitTest(CGPoint(x: m.frame.midX, y: m.frame.maxY + 1))?.kind, .character("m"), "above return")
+        let french = KeyboardLayout(width: 402, language: .french)
+        let delete = french.key(.delete)!
+        XCTAssertEqual(french.hitTest(CGPoint(x: delete.frame.midX, y: delete.frame.maxY + 1))?.kind, .delete, "AZERTY: delete above return")
+    }
+
     /// With the number row the touch targets still tile the keys with no gaps: the digits take
     /// the gap under the strip, as row 1 did, and row 1 starts halfway down the gap under them.
     /// On the 123 page the band stays (the keyboard keeps its height) and its row 1, the same
@@ -2838,11 +2870,9 @@ final class KeyboardLayoutTests: XCTestCase {
                     x: CGFloat.random(in: 0..<layout.width, using: &generator),
                     y: CGFloat.random(in: area.minY..<area.maxY, using: &generator)
                 )
-                let hits = layout.keys.filter { $0.hitFrame.contains(point) }
+                let hits = layout.keys.filter { $0.takes(point) }
                 let emoji = layout.key(.emoji)
-                // Row 4 starts at row 3's keycaps (the gap above it is row 4's, on the iPhone).
-                let rowFourTop = layout.metrics.pad == nil && !layout.isSplit ? layout.metrics.rowGap : layout.metrics.rowGap / 2
-                let inEmojiMargin = emoji.map { $0.row == 3 && !$0.hitFrame.contains(point) && point.y >= $0.frame.minY - rowFourTop
+                let inEmojiMargin = emoji.map { $0.row == 3 && !$0.hitFrame.contains(point) && point.y >= $0.frame.minY - layout.metrics.rowGap / 2
                     && point.x >= $0.frame.minX - layout.metrics.gap / 2 && point.x < $0.frame.maxX + layout.metrics.gap / 2 } ?? false
                 if !inEmojiMargin {
                     XCTAssertEqual(hits.count, 1, "\(describe(layout)) at \(point): \(hits.map(\.label))")
