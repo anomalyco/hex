@@ -1,0 +1,4 @@
+module HexKeyboardCore {
+    header "hex_keyboard.h"
+    export *
+}
