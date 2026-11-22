@@ -1,9 +1,33 @@
-//! Swipe typing: reads a finger's path across the letter keys as a word. A shape-matching
-//! decoder after SHARK2, ported line by line from `SwipeDecoder`
-//! (`ios/HEXShared/FullKeyboard/SwipeDecoder.swift`), which documents the method. Every
-//! reading is the Swift's: the same candidates in the same order, with costs equal bit for
-//! bit (`tests/swipe_parity.rs`), so the arithmetic keeps Swift's operation order, Swift's
-//! `min`/`max` and its stable sorts.
+//! Swipe typing: reads a finger's path across the letter keys as a word.
+//!
+//! A shape-matching decoder after SHARK2 (Kristensson and Zhai, 2004) and the template
+//! matching of Gboard's published gesture decoders, written for Hex:
+//! 1. The path is resampled to evenly spaced points in key pitches (a key's width plus a gap
+//!    across, a row's height plus a gap down), so a slip of half a key counts the same either
+//!    way.
+//! 2. Words come from the typing model's word list, which is sorted letter by letter: the
+//!    words starting on a key near where the finger went down are one range of it per letter.
+//!    Of those, only words ending on a key near where it lifted, with every key near the path
+//!    and an ideal path (the polyline through their keys' centres) about as long, are scored.
+//! 3. Each is scored on where its ideal path runs against the gesture (location: a quick
+//!    point-by-point pass, then dynamic time warping for the best few, which follows a finger
+//!    that hurries and slows), on its shape alone (both paths moved to one centre and size),
+//!    and on how near the finger went down and lifted to its first and last keys;
+//! 4. the best few also on how their keys account for where the finger turned and where it
+//!    slowed (the gesture's evidence, from the touches' times): a turn or a pause needs a key
+//!    of the word near it, and a key the word goes straight through needs a pause on it. A
+//!    straight stroke runs over the letters between its ends, so the path alone can't tell
+//!    "tired" from "tied" (one line from i to e) or "wire" from "write"; the finger slowing on
+//!    r can,
+//! 5. and weighed with the model's frequency of the word after the word before.
+//!
+//! Nothing is built ahead or kept: each swipe reads the memory-mapped model in place, so the
+//! decoder holds no memory between swipes.
+//!
+//! Ported line by line from the Swift `SwipeDecoder` (Hex for iOS's, before it called this):
+//! every reading is the Swift's, the same candidates in the same order with costs equal bit
+//! for bit (`tests/swipe_parity.rs`), so the arithmetic keeps Swift's operation order,
+//! Swift's `min`/`max` and its stable sorts. Tune it here.
 //!
 //! API contract shared by the FFI (`hex-keyboard-ffi`) and the port; the signatures change
 //! only by agreement.
@@ -28,46 +52,88 @@ use geometry::{
 };
 use gesture::{Gesture, evidence_cost};
 
-/// `SwipeDecoder.Parameters`, field for field, with the same defaults (lengths in key
-/// pitches, costs in nats); `SwipeDecoder.swift` documents each.
+/// How swipes are read: lengths in key pitches (a key's width plus a gap across, a row's
+/// height plus a gap down), costs in nats. Tuned on synthetic swipes of the autocorrect
+/// benchmark's held-out dev sentences (English and Spanish; clean, neat, typical and sloppy
+/// fingers; experiment folder 2026-11-20-hex-swipe-typing), never on its test sentences; the
+/// turn and pause parameters also on mined dev sets of words that share a path, with fingers
+/// that stop at every key, keep most of their speed through a straight-on key, or hesitate
+/// between keys. The C interface's `HkSwipeParameters` and Swift's `SwipeDecoder.Parameters`
+/// mirror it field for field.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Parameters {
+    /// Points the gesture and each word's ideal path are resampled to.
     pub samples: usize,
+    /// Keys this many pitches from where the finger went down (lifted) may start (end)
+    /// the word: the nearest few.
     pub start_radius: f64,
     pub end_radius: f64,
     pub max_start_keys: usize,
     pub max_end_keys: usize,
+    /// Every key of a word passes at most this far from the path (pitches).
     pub near_radius: f64,
+    /// How much shorter or longer than the gesture a word's ideal path may be.
     pub min_length_ratio: f64,
     pub max_length_ratio: f64,
+    /// How far from its first and last keys' centres a finger goes down and lifts: most
+    /// within the first spread, the rest (`stray`) within the wider second, so a near
+    /// miss costs much and a far one no more than the path's shape can make up.
     pub start_sigma: f64,
     pub end_sigma: f64,
     pub start_stray_sigma: f64,
     pub end_stray_sigma: f64,
     pub stray: f64,
+    /// Nats per mean squared pitch between the paths, and per mean squared distance
+    /// between their shapes (each scaled to a unit box).
     pub location_weight: f64,
     pub shape_weight: f64,
+    /// Weight of the word model's cost, -ln P(word | word before).
     pub lm_weight: f64,
+    /// Words of the quick pass the aligned pass scores again.
     pub shortlist: usize,
+    /// Past this many words, only the likeliest by how near their keys lie to the path
+    /// (and their frequency) get the quick pass, which keeps a long, loose swipe fast.
     pub prefilter: usize,
+    /// How far (a share of the samples) the aligned pass may run ahead or behind.
     pub band: f64,
+    /// The shortest path read as a swipe (pitches).
     pub minimum_length: f64,
+    /// A contraction ("I'm") whose first word ("I") never follows the word before in the
+    /// model's pairs costs this much more: those first words follow thousands of words, so
+    /// a missing pair is evidence against it ("with us in", not "with us I'm").
     pub contraction_missing_pair: f64,
+    // Where the finger turned or slowed (`Evidence`): the keys of the word read must
+    // account for them, in order.
+    /// The path is read for turns and pauses every this many pitches.
     pub evidence_step: f64,
+    /// A turn is the change of direction between this much path before a point and after it:
+    /// none under `turn_from` degrees, full evidence from `turn_full`.
     pub turn_window: f64,
     pub turn_from: f64,
     pub turn_full: f64,
+    /// A pause is time spent per pitch over this much path each side, against the swipe's
+    /// median: none under `dwell_from` times the median, full evidence from `dwell_full`.
     pub dwell_window: f64,
     pub dwell_from: f64,
     pub dwell_full: f64,
+    /// Weaker turns and pauses are ignored, and of two nearer than `evidence_spacing`
+    /// (pitches along the path) only the stronger counts; none counts this near either end,
+    /// which the first and last keys account for.
     pub evidence_floor: f64,
     pub evidence_spacing: f64,
     pub evidence_guard: f64,
+    /// How far a key may lie from the turn or pause it accounts for (pitches): a spread,
+    /// and the farthest.
     pub evidence_sigma: f64,
     pub evidence_reach: f64,
+    /// Nats for a full-strength turn or pause no key of the word accounts for (the finger
+    /// slowed on a letter the word lacks), for a key the word goes straight through with
+    /// no pause there (only when the path has times), and for a key the word turns at
+    /// without a turn or pause there.
     pub unexplained_cost: f64,
     pub straight_key_cost: f64,
     pub corner_key_cost: f64,
+    /// A word's key it turns at by less than this (degrees) is one it goes straight through.
     pub straight_angle: f64,
 }
 
