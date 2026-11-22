@@ -13,7 +13,10 @@ use std::path::Path;
 use std::ptr;
 
 use hex_keyboard_core::swipe::typing::{self as core_typing, SwipeContext, SwipeWords, Typed};
-use hex_keyboard_core::swipe::{Candidate, ExtraWord, Reading};
+use hex_keyboard_core::swipe::{
+    CONTRACTION_COST, Candidate, ENGLISH_CONTRACTIONS, ExtraWord, OWN_WORD_COST, Reading,
+    cost_of_contraction,
+};
 use jni::JNIEnv;
 use jni::objects::{
     JBooleanArray, JDoubleArray, JIntArray, JObject, JObjectArray, JPrimitiveArray, JString, JValue,
@@ -392,6 +395,15 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeRead(
 //
 //     external fun swipeNeedsSpace(before: String?): Boolean
 //
+//     /** The cost of English contraction `word` (any case), as `hk_swipe_cost_of_contraction` with the core's base. */
+//     external fun swipeCostOfContraction(word: String): Double
+//
+//     /** The cost of one of your own words. */
+//     external fun swipeOwnWordCost(): Double
+//
+//     /** The English contractions Swipe typing reads as common words, in iOS's order. */
+//     external fun swipeEnglishContractions(): Array<String>
+//
 //     /** `points` interleaves (x, y); `key` is the character of the key it went down and lifted on. */
 //     external fun swipeIsSlidTap(points: DoubleArray, pitch: Double, key: String?, firstReading: String?): Boolean
 //
@@ -651,4 +663,50 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeIsSlidTap(
         ))
     });
     settled(&mut env, slid)
+}
+
+/// `hk_swipe_cost_of_contraction` with the core's base; a null or unreadable word is no
+/// contraction.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeCostOfContraction(
+    mut env: JNIEnv,
+    _this: JObject,
+    word: JString,
+) -> jdouble {
+    let none = CONTRACTION_COST + 2.0;
+    let cost = guard(none, || {
+        optional_string(&mut env, &word)
+            .flatten()
+            .map_or(none, |word| cost_of_contraction(&word, CONTRACTION_COST))
+    });
+    settled(&mut env, cost)
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeOwnWordCost(
+    _env: JNIEnv,
+    _this: JObject,
+) -> jdouble {
+    OWN_WORD_COST
+}
+
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeEnglishContractions(
+    mut env: JNIEnv,
+    _this: JObject,
+) -> jobject {
+    let words = guard(ptr::null_mut(), || {
+        let array = (|| -> Result<JObject> {
+            let count = ENGLISH_CONTRACTIONS.len() as jint;
+            let array = env.new_object_array(count, "java/lang/String", JObject::null())?;
+            for (i, word) in (0..count).zip(ENGLISH_CONTRACTIONS) {
+                let text = env.new_string(word)?;
+                env.set_object_array_element(&array, i, &text)?;
+                env.delete_local_ref(text)?;
+            }
+            Ok(array.into())
+        })();
+        array.map_or(ptr::null_mut(), JObject::into_raw)
+    });
+    settled(&mut env, words)
 }

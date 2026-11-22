@@ -625,3 +625,20 @@ fn types_a_swipe_through_the_c_interface() {
         hk_swipe_words_free(words);
     }
 }
+
+#[test]
+fn the_english_contractions_come_through_the_c_interface() {
+    let mut count = 0usize;
+    let words = unsafe { hk_swipe_english_contractions(&mut count) };
+    assert!(!words.is_null());
+    let words: Vec<&str> = unsafe { std::slice::from_raw_parts(words, count) }
+        .iter()
+        .map(|&w| unsafe { CStr::from_ptr(w) }.to_str().unwrap())
+        .collect();
+    assert_eq!(words, hex_keyboard_core::swipe::ENGLISH_CONTRACTIONS);
+    assert_eq!(words[..3], ["I'd", "I'll", "I'm"]);
+    assert_eq!(
+        unsafe { hk_swipe_english_contractions(ptr::null_mut()) },
+        unsafe { hk_swipe_english_contractions(&mut count) }
+    );
+}
