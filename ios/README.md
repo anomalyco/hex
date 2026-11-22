@@ -1191,7 +1191,15 @@ never at a launch by itself.
   under it upright (6 pt turned), so row 1's keycaps start 52 pt down (50 turned), the keys
   stay on Apple's rows, and where iOS adds nothing above the keyboard Hex is exactly as tall
   as Apple's keyboard: 253 pt on an iPhone 17 or 17 Pro, 260 pt on an SE, 272 pt on an Air or
-  Pro Max (`KeyboardMetrics.withAppleBar`). The 17 pt band iOS adds above a third-party
+  Pro Max (`KeyboardMetrics.withAppleBar`). On an 844 to 874 pt iPhone from iOS 27 Apple's
+  43 pt row 4 ends 4 pt below where iOS ends a third-party keyboard's view, so those 4 pt come
+  out of all four rows alike: 42 pt keycaps with Apple's 11 pt gaps, row 1 on Apple's line and
+  rows 2 to 4 1, 2 and 3 pt above Apple's, no row shorter than another; every bottom-row key
+  takes taps down to the view's bottom edge, and the gap between rows 3 and 4 is row 4's, as
+  on Apple's keyboard (whose space bar, 123 and return take taps up to 2.5 pt into row 3's
+  keycaps, iOS 27.2). Apple's space bar takes taps 13 pt below its
+  keycap, down to its own key plane's end; the 17 pt under Hex's view belong to iOS's globe band
+  and never reach a third-party keyboard. The 17 pt band iOS adds above a third-party
   keyboard in some fields (Notes, Spotlight, a re-tapped Safari field; on iOS 26 even a plain
   first-focused text view) is an exception Hex doesn't design for: there Hex is 17 pt taller
   than Apple's. Inside the bar Hex draws what Apple's does: the words, SF 17 pt, centred 25 pt

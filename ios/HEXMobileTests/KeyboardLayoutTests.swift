@@ -56,8 +56,8 @@ final class KeyboardLayoutTests: XCTestCase {
         for width in portraitWidths {
             XCTAssertEqual(KeyboardLayout(width: width).totalHeight, 253, "width \(width)")
         }
-        // Apple's 44 pt bar and 8 pt to row 1, then 4 rows: 43 pt on a 54 pt pitch with row 4 4 pt
-        // short (17, 17 Pro), 42 pt on 54 pt and 4 pt under (SE), 45 pt on 56 pt and 7 pt under
+        // Apple's 44 pt bar and 8 pt to row 1, then 4 rows: 42 pt on a 53 pt pitch, Apple's 43 on 54
+        // less the 4 pt below the view shared out (17, 17 Pro), 42 pt on 54 pt and 4 pt under (SE), 45 pt on 56 pt and 7 pt under
         // (Air, Pro Max). Each is Apple's keyboard's height above iOS's globe band.
         XCTAssertEqual(KeyboardLayout.height(for: .portrait), 253)
         XCTAssertEqual(KeyboardLayout.height(for: .portrait, phoneSize: .homeButton), 260)
@@ -343,14 +343,18 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(proMax.key(.shift)!.frame.maxX, 56.67, accuracy: 0.34)
         XCTAssertEqual(proMax.key(.delete)!.frame.minX, 383.33, accuracy: 0.34)
 
-        // The 17 Pro: 43 pt keys on a 54 pt pitch, row 4 ending on the view's bottom edge, 4 pt
-        // short of Apple's (a third-party keyboard's view ends there); shift to 52, delete from 350.
+        // The 17 Pro: Apple's 43 pt keys on a 54 pt pitch end 4 pt below a third-party keyboard's
+        // view, so the 4 pt come out of the four rows alike: 42 pt keys with Apple's 11 pt gaps,
+        // row 4 ending on the view's bottom edge and as tall as the others; shift to 52, delete from 350.
         let pro = KeyboardLayout(width: 402)
         let proQ = pro.key(.character("q"))!
-        XCTAssertEqual(proQ.frame.height, 43)
-        XCTAssertEqual(pro.key(.character("a"))!.frame.minY - proQ.frame.minY, 54, accuracy: 0.001)
-        XCTAssertEqual(pro.key(.space)!.frame.minY - proQ.frame.minY, 3 * 54, accuracy: 0.001)
-        XCTAssertEqual(pro.key(.space)!.frame.height, 39)
+        XCTAssertEqual(proQ.frame.height, 42)
+        XCTAssertEqual(pro.key(.character("a"))!.frame.minY - proQ.frame.minY, 53, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.minY - proQ.frame.minY, 3 * 53, accuracy: 0.001)
+        XCTAssertEqual(pro.key(.space)!.frame.height, 42)
+        XCTAssertEqual(pro.key(.space)!.hitFrame.maxY, pro.totalHeight, accuracy: 0.001, "taps reach the view's bottom edge")
+        XCTAssertEqual(pro.key(.space)!.hitFrame.minY, pro.key(.character("v"))!.frame.maxY, accuracy: 0.001, "the gap above row 4 is row 4's")
+        XCTAssertEqual(pro.key(.character("v"))!.hitFrame.maxY, pro.key(.character("v"))!.frame.maxY, accuracy: 0.001)
         XCTAssertEqual(pro.key(.space)!.frame.maxY, pro.totalHeight, accuracy: 0.001)
         XCTAssertEqual(pro.key(.shift)!.frame.maxX, 52, accuracy: 0.34)
         XCTAssertEqual(pro.key(.delete)!.frame.minX, 350, accuracy: 0.34)
@@ -1317,9 +1321,9 @@ final class KeyboardLayoutTests: XCTestCase {
             }
         }
         let pro = rows(ios26["17 Pro"]!)
-        XCTAssertEqual(pro.map(\.0), [208, 154, 100, 46], "7 pt higher than today's 201, 147, 93, 39")
+        XCTAssertEqual(pro.map(\.0), [208, 154, 100, 46], "Apple's iOS 26 rows")
         XCTAssertEqual(pro.map(\.1), [165, 111, 57, 3], "row 4 whole, 3 pt above the bottom")
-        XCTAssertEqual(rows(today["17 Pro"]!).map(\.0), [201, 147, 93, 39])
+        XCTAssertEqual(rows(today["17 Pro"]!).map(\.0), [201, 148, 95, 42], "iOS 27: four 42 pt rows sharing Apple's 4 pt")
         XCTAssertEqual(rows(ios26["Pro Max"]!).map(\.0), [218, 162, 106, 50], "2 pt lower than today's 220")
         let turned = rows(ios26["17 Pro turned"]!)
         for (row, expected) in [(0, 137.33), (1, 102.0), (2, 66.67), (3, 31.33)] {
@@ -2553,13 +2557,13 @@ final class KeyboardLayoutTests: XCTestCase {
     }
 
     /// On, 1 to 0 sit above row 1 on the 123 page's digit columns, 0.85 of a letter row's pitch
-    /// tall with the row gap under them: the keyboard grows upward by that pitch (45.9 pt on a
+    /// tall with the row gap under them: the keyboard grows upward by that pitch (45.05 pt on a
     /// 17 Pro, 34 pt turned) and every other key keeps its place counted from the bottom, which
     /// is where iOS keeps a keyboard, so the strip moves up with the keyboard's top.
     func testNumberRowGrowsTheKeyboardUpwardAndLeavesEveryOtherKeyInPlace() {
-        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: true), 253 + 45.9, accuracy: 0.001)
+        XCTAssertEqual(KeyboardLayout.height(for: .portrait, numberRow: true), 253 + 0.85 * 53, accuracy: 0.001)
         XCTAssertEqual(KeyboardLayout.height(for: .landscape, numberRow: true), 204 + 34, accuracy: 0.001)
-        XCTAssertEqual(KeyboardMetrics.for(.portrait, numberRow: true).numberRowHeight, 34.9, accuracy: 0.001)
+        XCTAssertEqual(KeyboardMetrics.for(.portrait, numberRow: true).numberRowHeight, 0.85 * 53 - 11, accuracy: 0.001)
         for (on, off, numbers) in numberRowLayouts() {
             let m = on.metrics
             let pitch = KeyboardMetrics.numberRowPitchRatio * (m.keyHeight + m.rowGap)
@@ -2623,7 +2627,9 @@ final class KeyboardLayoutTests: XCTestCase {
                 )
                 let hits = layout.keys.filter { $0.hitFrame.contains(point) }
                 let emoji = layout.key(.emoji)
-                let inEmojiMargin = emoji.map { $0.row == 3 && !$0.hitFrame.contains(point) && point.y >= $0.frame.minY - layout.metrics.rowGap / 2
+                // Row 4 starts at row 3's keycaps (the gap above it is row 4's, on the iPhone).
+                let rowFourTop = layout.metrics.pad == nil && !layout.isSplit ? layout.metrics.rowGap : layout.metrics.rowGap / 2
+                let inEmojiMargin = emoji.map { $0.row == 3 && !$0.hitFrame.contains(point) && point.y >= $0.frame.minY - rowFourTop
                     && point.x >= $0.frame.minX - layout.metrics.gap / 2 && point.x < $0.frame.maxX + layout.metrics.gap / 2 } ?? false
                 if !inEmojiMargin {
                     XCTAssertEqual(hits.count, 1, "\(describe(layout)) at \(point): \(hits.map(\.label))")

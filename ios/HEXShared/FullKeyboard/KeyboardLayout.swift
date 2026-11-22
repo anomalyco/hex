@@ -237,14 +237,15 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
     /// iPhone portrait key geometry, as Apple's keyboard draws it beside Hex in the same field
     /// (iOS 27.2) on an 844 to 874 pt iPhone (17e, 17, 17 Pro): 43 pt keycaps on a 54 pt row
     /// pitch, row 1 on the same line on screen. Apple's row 4 ends 4 pt below where a
-    /// third-party keyboard's view ends, so Hex's row 4 keeps Apple's top edge and is 4 pt
-    /// shorter: 46 pt + 201 pt of keys (4 × 43 pt + 3 × 11 pt − 4 pt) = 247 pt. Hex drew iOS 26's
-    /// 45 pt keys on a 56 pt pitch with 5 pt under them, 11 to 17 pt above Apple's rows, so
-    /// fingers used to Apple's keyboard landed low on Hex's keys.
+    /// third-party keyboard's view ends, so those 4 pt come out of all four rows alike (Ryan's
+    /// call after two TestFlight testers found the space bar short, build 126): 42 pt keycaps
+    /// with Apple's 11 pt gaps, row 1's top on Apple's, rows 2 to 4 1, 2 and 3 pt above Apple's,
+    /// and row 4 ending on the view's bottom edge: 4 × 42 pt + 3 × 11 pt = 201 pt of keys under
+    /// the strip. (Row 4 used to keep Apple's top edge and be 4 pt shorter than the others.)
     static let portrait = KeyboardMetrics(
-        side: 6.5, gap: 6, rowGap: 11, keyHeight: 43,
+        side: 6.5, gap: 6, rowGap: 11, keyHeight: 42,
         stripTop: 0, stripHeight: stripBarHeight, stripBottom: stripGap,
-        keysTop: 0, keysBottom: 0, cornerRadius: keyCornerRadius, bottomRowTrim: 4
+        keysTop: 0, keysBottom: 0, cornerRadius: keyCornerRadius
     )
 
     /// Upright on iOS 26 (iPhone 12, 16 and 17 Pro, iOS 26.5, beside Hex in the same field): the
@@ -1202,8 +1203,11 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         var keys: [KeyboardKey] = []
         for row in (numberRow ? [numberRowIndex] : []) + Array(0..<4) {
             let rowKeys = drawn.filter { $0.row == row }.sorted { $0.frame.minX < $1.frame.minX }
-            let y0 = row == numberRowIndex || (row == 0 && !numberRow) ? top : rowY(row) - m.rowGap / 2
-            let y1 = row == 3 ? bottom : rowY(row == numberRowIndex ? 0 : row + 1) - m.rowGap / 2
+            // The gap between rows 3 and 4 is row 4's, as Apple's is (iOS 27.2: its space bar, 123
+            // and return take taps up to 2.5 pt into row 3's keycaps); the other gaps split.
+            func edge(_ r: Int) -> CGFloat { r == 3 && m.pad == nil ? rowY(3) - m.rowGap : rowY(r) - m.rowGap / 2 }
+            let y0 = row == numberRowIndex || (row == 0 && !numberRow) ? top : edge(row)
+            let y1 = row == 3 ? bottom : row == numberRowIndex ? rowY(0) - m.rowGap / 2 : edge(row + 1)
             for (i, item) in rowKeys.enumerated() {
                 let x0 = i == 0 ? 0 : (rowKeys[i - 1].frame.maxX + item.frame.minX) / 2
                 let x1 = i == rowKeys.count - 1 ? width : (item.frame.maxX + rowKeys[i + 1].frame.minX) / 2
