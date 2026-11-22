@@ -6,6 +6,7 @@ import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import ly.anoma.hex.R
+import ly.anoma.hex.label
 import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.Style
 import ly.anoma.hex.useInter
@@ -41,7 +42,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
         page = next; title(s(next.title)); body.removeAllViews(); scrollTo(0, 0)
         when (next) {
             Page.Home -> {
-                row(s(R.string.keyboard_menu_style), more(prefs.style.name)) { show(Page.Style) }
+                row(s(R.string.keyboard_menu_style), more(s(prefs.style.label))) { show(Page.Style) }
                 row(s(R.string.keyboard_menu_language), more(prefs.language?.label ?: s(R.string.keyboard_menu_automatic))) { show(Page.Language) }
                 if (prefs.translation && prefs.spoken == DictationLanguage.Spanish)
                     row(s(R.string.keyboard_menu_next_dictation),
@@ -61,7 +62,7 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
                 row(s(R.string.keyboard_menu_popups), onOff(f.popups)) { f.popups = !f.popups; show(next) }
                 row(s(R.string.keyboard_menu_haptics), onOff(f.haptics)) { f.haptics = !f.haptics; show(next) }
             }
-            Page.Style -> Style.entries.forEach { value -> row(value.name, if (prefs.style == value) chosen else "") {
+            Page.Style -> Style.entries.forEach { value -> row(s(value.label), if (prefs.style == value) chosen else "") {
                 prefs.style = value; home()
             } }
             Page.Language -> (listOf(null) + DictationLanguage.entries).forEach { value ->

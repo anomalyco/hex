@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.Manifest
+import android.content.Context
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.database.ContentObserver
@@ -25,6 +26,17 @@ import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingPreferences
 
 /** The input method: the editor's lifecycle, the views and dictation. Typing lives in [KeyboardEngine]. */
+/** Dictation's notes arrive from MicCapture as English sentences: the ones a person sees, in the phone's
+ * language (one not listed here shows as it is). */
+internal fun Context.speechNote(note: String?) = when (note) {
+    "Allow the microphone in Hex" -> getString(R.string.keyboard_hint_microphone)
+    "Microphone unavailable. Try again." -> getString(R.string.keyboard_note_microphone)
+    "Couldn’t transcribe. Try again." -> getString(R.string.keyboard_note_transcribe)
+    "No speech heard" -> getString(R.string.keyboard_note_no_speech)
+    "Speech model unavailable" -> getString(R.string.keyboard_note_model)
+    else -> note
+}
+
 class HexKeyboard : InputMethodService() {
     private var view: KeyboardView? = null
     private lateinit var capture: MicCapture
@@ -53,7 +65,7 @@ class HexKeyboard : InputMethodService() {
         getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.registerContentObserver(UserDictionary.Words.CONTENT_URI, true, dictionaryChanged)
         capture = MicCapture(LocalSpeech(applicationContext),
-            update = { phase, note -> view?.status(phase, note ?: idleHint()) },
+            update = { phase, note -> view?.status(phase, speechNote(note) ?: idleHint()) },
             meter = { view?.setLevel(it) }, insert = ::commitSpeech)
     }
     override fun onEvaluateFullscreenMode() = false

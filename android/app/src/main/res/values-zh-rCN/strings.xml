@@ -1,0 +1,100 @@
+<resources>
+    <!-- 简体中文。与 iPhone 版 Hex 相同的句子沿用其 Localizable.xcstrings 的译文；Android 自有的用语（如“应用”“复制”“点按”“个人字典”）按 Android 的习惯。 -->
+    <string name="back">返回</string>
+    <string name="full_keyboard">全键盘</string>
+
+    <string name="setup_step">第 %1$d 步，共 %2$d 步</string>
+    <string name="setup_on_device" formatted="false">100% 设备端处理</string>
+    <string name="setup_welcome_title">在任何应用中，\n用说话代替打字。</string>
+    <string name="setup_welcome_detail">Hex 只在下载语音模型（190 MB）时使用网络。你的声音和文字都保留在这台设备上。</string>
+    <string name="setup_get_started">开始使用</string>
+    <string name="setup_title">设置 Hex</string>
+    <string name="setup_detail">允许使用麦克风，然后选择 Hex 作为键盘。</string>
+    <string name="setup_microphone">麦克风</string>
+    <string name="setup_microphone_detail">让 Hex 能听见你</string>
+    <string name="setup_allow">允许</string>
+    <string name="setup_settings">设置</string>
+    <string name="setup_keyboard">Hex 键盘</string>
+    <string name="setup_keyboard_chosen">当前键盘</string>
+    <string name="setup_keyboard_enabled">在列表中选择 Hex</string>
+    <string name="setup_keyboard_off">在“设置”中打开 Hex</string>
+    <string name="setup_enable">打开</string>
+    <string name="setup_choose">选择</string>
+    <string name="setup_ready">就绪</string>
+    <string name="setup_continue">继续</string>
+    <string name="setup_try_title">试用键盘</string>
+    <string name="setup_try_detail">按住 Hex 键，说几句话，然后松开。</string>
+    <string name="setup_try_hint">你说的话会显示在这里</string>
+    <string name="setup_choose_hex">选择 Hex 键盘</string>
+    <string name="setup_skip">暂时跳过</string>
+    <string name="setup_done">完成</string>
+
+    <string name="model_title">语音模型</string>
+    <string name="model_ready">Whisper small，已在这台手机上</string>
+    <string name="model_available">正在使用较小的内置模型</string>
+    <string name="model_stopped">下载已停止。正在使用较小的内置模型。</string>
+    <string name="model_loading">正在下载 · %1$d%%</string>
+    <string name="model_download">下载</string>
+    <string name="model_try_again">再试一次</string>
+
+    <string name="home_ready">就绪</string>
+    <plurals name="home_finish_setup">
+        <item quantity="other">完成设置 · %d 步</item>
+    </plurals>
+    <string name="home_dictate">听写</string>
+    <string name="home_finish">完成听写</string>
+    <string name="home_transcribing">正在转录…</string>
+    <string name="home_cancel">取消</string>
+    <string name="home_copy">复制</string>
+    <string name="home_copied">已复制</string>
+    <string name="home_clear">清除</string>
+    <string name="home_keyboard_settings">键盘设置</string>
+    <string name="home_run_setup">重新运行设置</string>
+
+    <string name="settings_dictation">听写</string>
+    <string name="settings_keyboard">键盘</string>
+    <string name="settings_privacy">隐私</string>
+    <string name="settings_style">风格</string>
+    <string name="style_polished">精修</string>
+    <string name="style_casual">随意</string>
+    <string name="style_notes">笔记</string>
+    <string name="style_verbatim">逐字</string>
+    <string name="settings_automatic">自动</string>
+    <string name="settings_dictation_language">听写语言</string>
+    <string name="dictation_language_automatic_detail">跟随键盘布局，否则跟随手机语言</string>
+    <string name="dictation_lowercase">小写</string>
+    <string name="dictation_lowercase_detail">全部转为小写</string>
+    <string name="dictation_format_lists">整理列表</string>
+    <string name="dictation_format_lists_detail">说“first, second”或“bullet”即可分行列出</string>
+    <string name="dictation_spoken_punctuation">口述标点</string>
+    <string name="dictation_spoken_punctuation_detail">说“comma”或“question mark”即可输入标点</string>
+    <string name="dictation_end_with_period">句末加句号</string>
+    <string name="dictation_end_with_period_detail">关闭后去掉末尾的句号，保留问号和感叹号</string>
+    <string name="settings_translate">翻译我说的话</string>
+    <string name="settings_translate_detail">用西班牙语听写，以英语写出</string>
+    <string name="settings_clean">整理我说的话</string>
+    <string name="settings_clean_detail">去掉“嗯”、重复和改口的词</string>
+    <string name="dictation_vocabulary">自定词汇</string>
+    <string name="dictation_vocabulary_detail">按你的方式拼写名字和术语</string>
+    <string name="dictation_vocabulary_hint">每行一个名字或术语</string>
+    <string name="settings_keyboard_layout">键盘布局</string>
+    <string name="settings_layout_follows">跟随听写 · %1$s</string>
+    <string name="settings_layout_automatic_detail">跟随你的听写语言</string>
+    <string name="settings_autocorrect">自动改正</string>
+    <string name="settings_autocorrect_detail">按空格时修正拼写错误</string>
+    <string name="settings_spatial">按触点自动改正</string>
+    <string name="settings_spatial_detail">根据点按位置修正拼写错误</string>
+    <string name="settings_swear_words">在建议中显示脏话</string>
+    <string name="settings_swear_words_detail">绝不会建议歧视性词语</string>
+    <string name="settings_personal_dictionary">个人字典</string>
+    <string name="settings_personal_dictionary_detail">自动改正会保留并推荐的词</string>
+    <string name="settings_popups">字符预览</string>
+    <string name="settings_popups_detail">在手指上方显示字母</string>
+    <string name="settings_haptics">触感反馈</string>
+    <string name="settings_haptics_detail">按下 Hex 的按键时会有轻微触感</string>
+    <string name="settings_test_keyboard">测试键盘…</string>
+    <string name="settings_privacy_line">所有内容都保留在这台手机上</string>
+    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或输入的内容，也不保存任何按键记录或转录内容。</string>
+    <string name="settings_privacy_policy">隐私政策</string>
+    <string name="settings_licences">开源许可</string>
+</resources>
