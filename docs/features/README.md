@@ -3038,8 +3038,9 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
 ├── Quick accents (off by default, `experiments.quickAccents`): a held letter's callout opens
-│   on its main accent, the first variant after the key's own in the language's
-│   `letterHolds` (Spanish a → á, and Á with shift), found where the arrangement put it, so
+│   on the language's preferred accent (`KeyboardLanguage.quickAccentPrimaries`: Spanish o →
+│   ó, English e → é, Italian a → à, capitals via the callout's own mapping), else the first
+│   variant after the key's own where it has no entry, found where the arrangement put it, so
 │   letting go in place types it. The cell under the finger at opening (`accentOpenCell`) is
 │   remembered, so the preselection stands until the finger moves into another cell, where
 │   sliding picks that one as before; letting go far below still cancels, and another key

@@ -532,6 +532,23 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
+    /// Settings › Experiments › Quick accents: the accent a held letter picks first, where the
+    /// language has one clear most-used spelling rather than whatever the system callout lists
+    /// next to the key (`AccentCatalog.primaryVariant`). Lowercase base → lowercase variant; a
+    /// value a key doesn't actually hold is ignored and the callout's own next option stands.
+    var quickAccentPrimaries: [String: String] {
+        switch self {
+        case .english, .spanish, .portuguese:
+            ["a": "á", "e": "é", "i": "í", "o": "ó", "u": "ú"]
+        case .french, .frenchCanadian, .frenchSwiss:
+            ["e": "é"]
+        case .italian:
+            ["a": "à", "e": "è", "i": "ì", "o": "ò", "u": "ù"]
+        default:
+            [:]
+        }
+    }
+
     /// `letterHolds` on `letters`. A plain layout leaves out the keys the language's own has
     /// for its letters (German's ä ö ü, Spanish's ñ), and Apple's keyboard then holds each right
     /// after its base letter (iOS 27.0 simulator, German QWERTZ and QWERTY: A Ä À Á…, O Ö Ô…,

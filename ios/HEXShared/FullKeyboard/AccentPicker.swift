@@ -38,9 +38,11 @@ nonisolated enum AccentCatalog {
         return uppercase ? list.map(upper) : list
     }
 
-    /// Settings › Experiments › Quick accents: the first variant after the key's own in its
-    /// list (Spanish "a" → "á", and in capitals "A" → "Á"), in the callout's own spelling.
-    /// Nil when the key holds nothing else.
+    /// Settings › Experiments › Quick accents: the accent a held letter picks first, the
+    /// language's most-used one where it has a table for it (`quickAccentPrimaries`, Spanish
+    /// "o" → "ó"), else the first variant after the key's own in its list (German "a" → "à").
+    /// Capitals use the callout's own mapping, and a preferred accent the key doesn't hold falls
+    /// back the same way. Nil when the key holds nothing else.
     static func primaryVariant(
         for base: String,
         uppercase: Bool,
@@ -49,6 +51,10 @@ nonisolated enum AccentCatalog {
     ) -> String? {
         guard let options = options(for: base, uppercase: uppercase, language: language, letters: letters) else {
             return nil
+        }
+        if let preferred = language.quickAccentPrimaries[base.lowercased()] {
+            let shown = uppercase ? upper(preferred) : preferred
+            if options.contains(shown) { return shown }
         }
         return options.dropFirst().first
     }

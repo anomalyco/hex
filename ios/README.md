@@ -1572,9 +1572,10 @@ never at a launch by itself.
   accent menu (Apple's does after a hold).
 - **Quick accents (full keyboard, Settings › Experiments):** Off by default
   (`experiments.quickAccents`, App Group). Holding a letter opens its callout with the letter's
-  main accent selected — the first variant after the key's own in its language's holds
-  (`AccentCatalog.primaryVariant`: Spanish a → á, and Á with shift) — so letting go where the
-  finger landed types it. The cell under the finger when the callout opened is remembered
+  main accent selected — the language's preferred one (`KeyboardLanguage.quickAccentPrimaries`:
+  Spanish o → ó, English e → é, Italian a → à, and Á with shift), else the first variant after
+  the key's own in its holds (`AccentCatalog.primaryVariant`) — so letting go where the finger
+  landed types it. The cell under the finger when the callout opened is remembered
   (`accentOpenCell`), so the preselection stands until the finger moves into another cell,
   where sliding picks that one as before; letting go far below still cancels, and another key
   going down while the callout is held commits the preselection. Only letters: the 123 and

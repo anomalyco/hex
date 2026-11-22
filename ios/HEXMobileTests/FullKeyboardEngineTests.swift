@@ -495,23 +495,24 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.shift.state, .off)
     }
 
-    /// Settings › Experiments › Quick accents: a held letter's callout opens on its main accent
-    /// (Spanish A's á), so letting go where it opened types it, sliding into another cell still
-    /// picks that one, and another key going down commits the preselection too. Off, the key's
-    /// own stays selected, as before.
+    /// Settings › Experiments › Quick accents: a held letter's callout opens on its language's
+    /// preferred accent (Spanish O's ó, though the callout lists ö first), so letting go where
+    /// it opened types it, sliding into another cell still picks that one, and another key
+    /// going down commits the preselection too. Letting go far below still cancels. Off, the
+    /// key's own stays selected, as before.
     func testQuickAccentsOpensOnTheMainAccentAndTypesItOnRelease() {
         engine.language = .spanish
         XCTAssertFalse(FullKeyboardSettings(defaults: defaults).quickAccents, "off by default")
         engine.quickAccentsEnabled = true
 
-        down(1, .character("a"))
+        down(1, .character("o"))
         XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 1))
-        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "á", "the main accent, not the key's own")
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "ó", "o's preferred accent, not the callout's ö")
         // A finger that hasn't left the cell it opened over leaves the preselection alone.
-        engine.touchMoved(id: 1, to: point(.character("a")))
-        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "á")
-        up(1, .character("a"))
-        XCTAssertEqual(target.text, "á")
+        engine.touchMoved(id: 1, to: point(.character("o")))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "ó")
+        up(1, .character("o"))
+        XCTAssertEqual(target.text, "ó")
 
         // Sliding into another cell still picks it.
         down(2, .character("e"))
@@ -521,7 +522,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         let cell = menu.cellFrames[menu.options.firstIndex(of: "è")!]
         engine.touchMoved(id: 2, to: CGPoint(x: cell.midX, y: cell.midY))
         engine.touchEnded(id: 2, at: CGPoint(x: cell.midX, y: cell.midY))
-        XCTAssertEqual(target.text, "áè")
+        XCTAssertEqual(target.text, "óè")
 
         // Another key going down while the callout is held commits what it preselected.
         down(3, .character("a"))
@@ -529,7 +530,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         down(4, .character("b"))
         up(4, .character("b"))
         up(3, .character("a"))
-        XCTAssertEqual(target.text, "áèáb")
+        XCTAssertEqual(target.text, "óèáb")
 
         // Capitals use the callout's own uppercase mapping.
         tap(.shift)
@@ -537,23 +538,41 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 5))
         XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "Á")
         up(5, .character("a"))
-        XCTAssertEqual(target.text, "áèábÁ")
+        XCTAssertEqual(target.text, "óèábÁ")
 
         engine.quickAccentsEnabled = false
         down(6, .character("a"))
         XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 6))
         XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "a", "off: the key's own, as before")
         up(6, .character("a"))
-        XCTAssertEqual(target.text, "áèábÁa")
+        XCTAssertEqual(target.text, "óèábÁa")
+
+        // English e picks é too, though its callout lists ë first.
+        engine.language = .english
+        engine.quickAccentsEnabled = true
+        down(7, .character("e"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "é")
+        up(7, .character("e"))
+        XCTAssertEqual(target.text, "óèábÁaé")
+
+        // Letting go far below still cancels the preselection, typing nothing.
+        engine.language = .spanish
+        let o = point(.character("o"))
+        down(8, .character("o"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 8))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "ó")
+        engine.touchEnded(id: 8, at: CGPoint(x: o.x, y: o.y + FullKeyboardEngine.accentCancelDrop + 5))
+        XCTAssertNil(engine.activeAccentMenu)
+        XCTAssertEqual(target.text, "óèábÁaé")
 
         // The 123 page's held symbols keep the key's own selected.
-        engine.quickAccentsEnabled = true
         tap(.layerSwitch(.numbers))
-        down(7, .character("1"))
-        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        down(9, .character("1"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 9))
         XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "1")
-        up(7, .character("1"))
-        XCTAssertEqual(target.text, "áèábÁa1")
+        up(9, .character("1"))
+        XCTAssertEqual(target.text, "óèábÁaé1")
     }
 
     func testSpacebarTrackpadMovesCaretWithoutInsertingSpace() {

@@ -161,8 +161,8 @@ final class FullKeyboardEngine {
         didSet { if commaPeriodKeys != oldValue { rebuildLayout(cause: "comma_period_keys") } }
     }
     /// Settings › Experiments › Quick accents (off by default): a held letter's callout opens
-    /// on its main accent (`AccentCatalog.primaryVariant`, Spanish "a" → "á"), so letting go
-    /// types it; sliding into another cell still picks that one.
+    /// on its language's preferred accent (`AccentCatalog.primaryVariant`, Spanish "o" → "ó"),
+    /// so letting go types it; sliding into another cell still picks that one.
     var quickAccentsEnabled = false
     /// Whether the keys have the number row's band: its switch is on and this is an iPhone (the
     /// iPad keeps Apple's rows; `KeyboardMetrics.for`).
