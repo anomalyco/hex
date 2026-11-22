@@ -1872,6 +1872,28 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(hold(free: nil), "space iOS doesn't report doesn't hold it")
     }
 
+    func testHomesSpeechModelCardShowsOnlyWhereTheKeyboardWouldUseItAndStaysDismissed() {
+        func shows(enabled: Bool = true, fits: Bool = true, hold: KeyboardParakeetDownload.Hold? = nil, dismissed: Bool = false) -> Bool {
+            SpeechModelHomeCard.shows(enabled: enabled, fits: fits, hold: hold, dismissed: dismissed)
+        }
+        XCTAssertTrue(shows(), "downloading, downloaded or ready")
+        XCTAssertTrue(shows(hold: .notOnWiFi), "waiting says why")
+        XCTAssertTrue(shows(hold: .keyboardNotMeasured))
+        XCTAssertTrue(shows(hold: .needsSpace))
+        XCTAssertFalse(shows(enabled: false), "the switch turned off")
+        XCTAssertFalse(shows(fits: false), "under 6 GB")
+        XCTAssertFalse(shows(hold: .notEnglish))
+        XCTAssertFalse(shows(hold: .otherEngine))
+        XCTAssertFalse(shows(hold: .keyboardTooSmall))
+        XCTAssertFalse(shows(dismissed: true))
+        let suite = "speech-model-card-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(SpeechModelHomeCard.isDismissed(defaults))
+        SpeechModelHomeCard.dismiss(defaults)
+        XCTAssertTrue(SpeechModelHomeCard.isDismissed(UserDefaults(suiteName: suite)!), "dismissed stays dismissed")
+    }
+
     func testTheKeyboardsSpeechModelNeverDownloadsByItselfOverCellular() {
         func unmetered(satisfied: Bool = true, expensive: Bool = false, constrained: Bool = false, cellular: Bool = false) -> Bool {
             KeyboardParakeetDownload.isUnmetered(satisfied: satisfied, expensive: expensive, constrained: constrained, cellular: cellular)

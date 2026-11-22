@@ -78,7 +78,7 @@ nonisolated enum ParakeetUltraModel {
     /// What the download weighs, about 632 MB.
     static let totalBytes: Int64 = files.reduce(0) { $0 + $1.size }
 
-    /// In the App Group (`SpeechModelStore`), out of backups, so Experiments › Speech model in
+    /// In the App Group (`SpeechModelStore`), out of backups, so Settings › Dictation › Speech model in
     /// keyboard can load it too.
     static var directory: URL {
         SpeechModelStore.parakeetUltra

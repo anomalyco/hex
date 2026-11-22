@@ -16,7 +16,7 @@ dictation, iOS 26+): iOS refuses to record from a keyboard extension
 directly, so it captures through `getUserMedia` in a hidden `WKWebView`
 under Hex's microphone permission, writes a temporary WAV, and transcribes
 it on-device with Apple Speech, downloading the speech assets on first use
-(`HEXKeyboard/KeyboardLocalDictation.swift`), or, with Experiments › Speech model in
+(`HEXKeyboard/KeyboardLocalDictation.swift`), or, with Settings › Dictation › Speech model in
 keyboard on, with Parakeet on the Neural Engine in the keyboard's own process
 (`HEXKeyboard/KeyboardParakeet.swift`, below). With Full Access, the web view
 and its page load as the keyboard shows (unless memory is already short), without
@@ -463,7 +463,7 @@ never at a launch by itself.
     with v3's download). It is chosen only with 1.5 GB left to load it
     (`os_proc_available_memory`), and never again after a load that ended Hex
     (`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
-    turned off and on. Unless Experiments › Speech model in keyboard has it loaded in the
+    turned off and on. Unless Settings › Dictation › Speech model in keyboard has it loaded in the
     keyboard (below), the keyboard doesn't use it, so once Hex has it ready
     (`MultilingualParakeetSettings.isModelReady`, set after a load, cleared while it's
     missing, set aside or off) and it takes the dictation language, Dictate and the Hex
@@ -472,7 +472,7 @@ never at a launch by itself.
     mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
     pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
     on an iPhone are unmeasured.
-  - **Speech model in keyboard (Settings › Experiments › Speech model in keyboard, iOS
+  - **Speech model in keyboard (Settings › Dictation › Speech model in keyboard, iOS
     26+):** On unless the person turns it off, and disabled (shown off) on iPhones under
     6 GB (`KeyboardParakeetSettings`, in the App Group; a value stored by hand wins, so a
     switch turned off stays off). Off, nothing of it loads and the keyboard dictates exactly
@@ -492,7 +492,9 @@ never at a launch by itself.
     the builds where it was off by default) it downloads at once on any connection. Until
     then the row says what it waits for: "Downloads after you first use the Hex keyboard",
     "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
-    dictation". The keyboard's own dictation transcribes with Parakeet in
+    dictation". Home shows the same status under "New: Hex's own speech model" wherever the
+    keyboard would use it (`SpeechModelHomeCard`: the switch on, an iPhone that fits, English
+    and no other engine); once it's ready in the keyboard the card can be dismissed, for good. The keyboard's own dictation transcribes with Parakeet in
     the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
     V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
     dictates once its files are there, in which case Dictate and the Hex key stop opening
@@ -505,7 +507,7 @@ never at a launch by itself.
     keyboard only in the background role), and keeps it while its process lives, until a
     memory warning. Its first load compiles it for the Neural Engine in the keyboard's own
     Caches (17 s for V2, 12 s for Ultra on an iPhone 17 Pro); a dictation never waits for
-    that, and uses Apple's speech recognition exactly as with the experiment off whenever
+    that, and uses Apple's speech recognition exactly as with the switch off whenever
     the model isn't loaded, isn't on the Neural Engine (the keyboard's Neural Engine memory,
     else Core ML's compute plan before iOS 27), another transcription runs, the keyboard's
     memory limit (footprint plus `os_proc_available_memory`) is under 131 MB (V2 and Ultra
@@ -519,7 +521,7 @@ never at a launch by itself.
     again, or moved, compiles again, so the log calls a load "cold" by its time (5 s or
     more), and moving a legacy folder forgets the app's compile record for it
     (`ParakeetCompileRecord.forget`), so V2 says it's optimizing for this iPhone and Ultra
-    gets ready beside the engine that dictates. The Experiments row says what it's doing: downloading,
+    gets ready beside the engine that dictates. The Settings › Dictation row says what it's doing: downloading,
     downloaded, getting ready in the keyboard, ready, or that the keyboard can't use it now
     (`KeyboardParakeetSettings.keyboardState`, written by the keyboard). Each dictation logs
     its engine, the keyboard's limit, footprint before and at peak, load and transcription
@@ -533,7 +535,7 @@ never at a launch by itself.
     Neural Engine). A probe keyboard (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`)
     put 60 s of audio at 0.25–0.5 s; on the CPU, four chunks at once passed the limit
     there, so the keyboard never runs that. Linking FluidAudio into the keyboard grows its binary from
-    5.9 to 12.6 MB and, with the experiment off, its footprint at launch by about 0.2 MB
+    5.9 to 12.6 MB and, with the switch off, its footprint at launch by about 0.2 MB
     (writable data dyld fixes up), with no change to its first frame.
   - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by
     default. For every style but `Verbatim`, Hex's dictation cleanup tagger
@@ -969,7 +971,9 @@ never at a launch by itself.
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
   (before iOS has asked for the microphone), and
-  `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
+  `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`, and
+  `model-card-<waiting|downloading|ready>` (Home's speech model card, with English
+  dictation and no keyboard limit, so nothing downloads). Each settings scene writes
   its page's switches to the App Group: off by default, on with `-on`; switches that are
   on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
   `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`

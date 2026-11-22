@@ -18,10 +18,11 @@ extension DictationController {
         controller.isModelReady = true
 
         switch scene {
-        case "setup", "setup-sheet", "setup-sheet-microphone", "setup-sheet-noaccess", "paste-setting", _ where scene.hasPrefix("onboarding-") || scene.hasPrefix("settings-"):
+        case "setup", "setup-sheet", "setup-sheet-microphone", "setup-sheet-noaccess", "paste-setting", _ where scene.hasPrefix("onboarding-") || scene.hasPrefix("settings-") || scene.hasPrefix("model-card-"):
             controller.phase = .ready
             controller.warmDuration = .fifteenMinutes
             controller.keyboardSessionEnabled = false
+            if scene.hasPrefix("model-card-") { KeyboardParakeetDownload.shared.applyFixture(scene) }
 
         case "language-unavailable":
             // Russian picked by hand on an iPhone whose Apple Speech can't install it.
