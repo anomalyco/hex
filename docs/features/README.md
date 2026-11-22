@@ -2891,9 +2891,10 @@ Windows `hex app` -> one tray process, Rune window // dev.rune-ui-windows
 └── Not yet: custom caption
 iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
-│   Hinglish, Adaptive touch, German spatial autocorrect, Korean keyboard (두벌식), ABC
-│   under the emoji key, Two-thumb selection, Delete swiped words letter by letter, Hide
-│   word suggestions, Join the keyboard when unfolded, Learn each language separately
+│   Hinglish, Two-language dictation, Adaptive touch, German spatial autocorrect,
+│   Korean keyboard (두벌식), ABC under the emoji key, Two-thumb selection, Delete
+│   swiped words letter by letter, Hide word suggestions, Join the keyboard when
+│   unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -3001,6 +3002,20 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   what Hex learned erases the shared list and every language's; off, everything is the
 │   one shared list and learning it was before. Unit tests only: no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
+├── Two-language dictation (off by default, `experiments.twoLanguageDictation`, iOS 26+):
+│   while Apple Speech dictates with `SpeechTranscriber`, one recording is read twice, in
+│   the language dictation resolved and in the first other keyboard language
+│   (`LanguageSettings.keyboardLanguages`, mapped with `dictationLanguage(for:)`) whose
+│   `SpeechTranscriber` model is already installed; nothing downloads for it and no other
+│   language's reservation is released. Each reading keeps timed words with Apple Speech's
+│   transcription confidence, and `TwoLanguageMerger` cuts both where their word ends agree
+│   within 150 ms, chooses a reading per segment by duration-weighted confidence with a
+│   0.35 s cost per language change (ties to the primary), drops a seam word the new reading
+│   repeats, and joins the chosen words with spaces. The merged text runs through the same
+│   pipeline with the primary language. No second installed language, a failed reservation,
+│   an analyzer that throws, or no timed words from either reading dictates as before; off,
+│   the path is unchanged.
+│   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Custom vocabulary (off by default): a local list of up to 100 terms; every
 │   engine spells matched words the listed way before cleanup and again after
 │   formatting

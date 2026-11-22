@@ -4012,6 +4012,26 @@
           }
         }
       }
+    },
+    "Two-language dictation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "双语听写"
+          }
+        }
+      }
+    },
+    "Dictates in your first two keyboard languages at once and keeps the better one for each phrase." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "同时用你前两种键盘语言听写，并为每个短语保留更准确的那一种。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
