@@ -190,6 +190,7 @@ final class FullKeyboardView: UIView {
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
+        stripView.onDismissNotice = { [weak self] in self?.dismissModelNotice() }
         stripView.onOpenNotice = { [weak self] in
             guard let self else { return }
             self.keyFeedback()
