@@ -18,9 +18,10 @@ for arch in ${ARCHS:-arm64}; do
   fi
 done
 
-cargo_bin="${CARGO_HOME:-$HOME/.cargo}/bin"
-if [ ! -x "$cargo_bin/cargo" ] || [ ! -x "$cargo_bin/rustup" ]; then
-  echo "error: build-keyboard-core.sh: rustup's cargo isn't in $cargo_bin; install rustup (https://rustup.rs)" >&2
+# rustup's cargo, which follows the crate's pinned toolchain (rust-toolchain.toml).
+. "$(dirname "$0")/rustup-env.sh"
+if ! find_rustup; then
+  echo "error: build-keyboard-core.sh: no rustup on PATH, in ${CARGO_HOME:-~/.cargo}/bin or in Homebrew's ${HOMEBREW_PREFIX:-/opt/homebrew}; install rustup (https://rustup.rs, or brew install rustup)" >&2
   exit 1
 fi
 
@@ -37,7 +38,7 @@ mkdir -p "$out_dir/$PLATFORM_NAME"
 cd "$crate_dir"
 env -i \
   HOME="$HOME" \
-  PATH="$cargo_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
+  PATH="$rustup_bin:/usr/bin:/bin:/usr/sbin:/sbin" \
   ${DEVELOPER_DIR:+DEVELOPER_DIR="$DEVELOPER_DIR"} \
   ${CARGO_HOME:+CARGO_HOME="$CARGO_HOME"} \
   ${RUSTUP_HOME:+RUSTUP_HOME="$RUSTUP_HOME"} \
