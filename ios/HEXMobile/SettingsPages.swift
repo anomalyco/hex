@@ -826,7 +826,7 @@ struct ExperimentsSettingsPage: View {
         // Off by default: Hex records in measurement mode, as it always has.
         SettingsToggleRow(
             title: String(localized: "Voice isolation"),
-            detail: String(localized: "Records through Apple's voice processing so you can pick Voice Isolation in Control Center's Mic Mode. May lower other audio while recording."),
+            detail: String(localized: "Records with Apple's voice chat processing so Control Center's Mic Mode can offer Voice Isolation. May lower other audio while recording."),
             isOn: $voiceIsolation
         )
 

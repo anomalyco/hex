@@ -126,6 +126,7 @@ fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
             }
             let mut opened = named_input("USB Mic");
             opened.voice_isolation = request.voice_processing;
+            opened.voice_processing_active = request.voice_processing;
             Ok(Opened::Input(Box::new(opened)))
         });
     input.finish_initial_open(Ok(named_input("USB Mic")), Instant::now());
@@ -148,7 +149,9 @@ fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
     ));
     assert_eq!(*opens.lock().unwrap(), vec![true]);
     assert_eq!(*keeps.lock().unwrap(), vec![None]);
-    assert!(input.input.as_ref().unwrap().voice_isolation);
+    let opened = input.input.as_ref().unwrap();
+    assert!(opened.voice_isolation);
+    assert!(opened.voice_processing_active);
 
     // Asking for the path already open changes nothing.
     input.request_voice_isolation(true, true);
@@ -162,6 +165,62 @@ fn a_voice_isolation_change_reopens_only_while_capture_is_idle() {
     ));
     assert_eq!(*opens.lock().unwrap(), vec![true, false]);
     assert!(!input.input.as_ref().unwrap().voice_isolation);
+    assert!(!input.input.as_ref().unwrap().voice_processing_active);
+}
+
+#[test]
+fn a_failed_voice_processing_open_stays_raw_until_the_lab_is_toggled() {
+    let opens = Arc::new(Mutex::new(Vec::new()));
+    let recorded_opens = opens.clone();
+    let mut input =
+        RecoveringAudioInput::with_opener_for_test(None, test_route_generation, move |request| {
+            recorded_opens
+                .lock()
+                .unwrap()
+                .push((request.voice_processing, request.voice_processing_fallback));
+            let mut opened = named_input("USB Mic");
+            opened.voice_isolation = request.voice_processing;
+            // Voice processing is broken for this microphone: the open falls
+            // back to the raw stream every time it is tried.
+            opened.voice_processing_active = false;
+            Ok(Opened::Input(Box::new(opened)))
+        });
+
+    input.request_voice_isolation(true, true);
+    input.request_open();
+    assert!(matches!(
+        settle(&mut input, true),
+        RecoveringAudioInputEvent::Reopened
+    ));
+    assert_eq!(*opens.lock().unwrap(), vec![(true, false)]);
+    assert!(input.voice_isolation_fallback);
+    assert!(!input.input.as_ref().unwrap().voice_processing_active);
+
+    // The remembered failure keeps dictation on the raw stream without
+    // reopening it on every pass.
+    input.request_voice_isolation(true, true);
+    assert!(!input.is_opening());
+    input.request_open();
+    assert!(!input.is_opening());
+    assert_eq!(*opens.lock().unwrap(), vec![(true, false)]);
+
+    // Toggling the lab off and on forgets the failure and tries voice
+    // processing again.
+    input.request_voice_isolation(false, true);
+    assert!(matches!(
+        settle(&mut input, true),
+        RecoveringAudioInputEvent::Reopened
+    ));
+    input.request_voice_isolation(true, true);
+    assert!(matches!(
+        settle(&mut input, true),
+        RecoveringAudioInputEvent::Reopened
+    ));
+    assert_eq!(
+        *opens.lock().unwrap(),
+        vec![(true, false), (false, false), (true, false)]
+    );
+    assert!(input.voice_isolation_fallback);
 }
 
 /// An input saved as "USB Mic" that opens once `connected` is set and

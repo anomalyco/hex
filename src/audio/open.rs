@@ -38,6 +38,9 @@ pub(super) struct OpenRequest {
     /// on. Meetings, captures, the level meter, and other OSes keep the raw
     /// stream.
     pub(super) voice_processing: bool,
+    /// A remembered voice-processing failure for this microphone: open the
+    /// raw stream even though the lab is on (Labs › Voice isolation).
+    pub(super) voice_processing_fallback: bool,
 }
 
 impl OpenRequest {
@@ -262,6 +265,8 @@ pub(super) fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         // The fixture stands in for whichever capture path was asked for, so
         // the listener does not keep reopening it looking for the other one.
         input.voice_isolation = request.voice_processing;
+        input.voice_processing_active =
+            request.voice_processing && !request.voice_processing_fallback;
         return Ok(Opened::Input(input));
     }
     let host = cpal::default_host();
@@ -328,6 +333,7 @@ pub(super) fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
             follows_default,
             request.renegotiate_rate,
             request.voice_processing,
+            request.voice_processing_fallback,
         )?;
         input.selection = plan.selection;
         // The ALSA default cannot name another PipeWire source, so Linux
@@ -388,6 +394,7 @@ pub fn open_named_input(device: &str) -> Result<AudioInput> {
         call_input: None,
         renegotiate_rate: false,
         voice_processing: false,
+        voice_processing_fallback: false,
     })?;
     match opened {
         Opened::Input(input) if input.device_name == device => Ok(*input),
@@ -413,6 +420,7 @@ pub fn open_dictation_input(selected_device: Option<&str>) -> Result<AudioInput>
         call_input: None,
         renegotiate_rate: false,
         voice_processing: false,
+        voice_processing_fallback: false,
     })? {
         Opened::Input(input) => Ok(*input),
         Opened::Unchanged { .. } => Err(eyre!("nothing was open to keep")),
@@ -439,6 +447,7 @@ pub fn open_meeting_input(
         call_input: call_input.map(str::to_owned),
         renegotiate_rate,
         voice_processing: false,
+        voice_processing_fallback: false,
     })
 }
 

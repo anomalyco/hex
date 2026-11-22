@@ -32,6 +32,13 @@ pub struct RecoveringAudioInput {
     /// Whether dictation's stream should go through Apple's voice processing
     /// (Labs › Voice isolation); a change applies at the next idle open.
     voice_isolation: bool,
+    /// A voice-processing open or stream failed on this microphone: open the
+    /// raw stream until the lab is toggled or the selected microphone changes.
+    voice_isolation_fallback: bool,
+    /// This replacement is a silence recovery, which opens raw to renegotiate
+    /// the device's clock; its install must not remember a voice-processing
+    /// failure.
+    voice_isolation_skipped: bool,
     active_revision: u64,
     recovery: MicrophoneRecovery,
     replacement: Option<Receiver<InputOpenResult>>,
@@ -77,6 +84,7 @@ impl RecoveringAudioInput {
             call_input: None,
             renegotiate_rate: false,
             voice_processing: input.voice_isolation,
+            voice_processing_fallback: false,
         })
         .and_then(|opened| match opened {
             Opened::Input(input) => Ok(*input),
@@ -95,6 +103,7 @@ impl RecoveringAudioInput {
             Err(error) => {
                 let error = format!("{error:#}");
                 tracing::warn!(%error, "could not open dictation microphone at startup; retrying");
+                self.remember_voice_isolation_failure(&error);
                 self.outage.get_or_insert(Some(error));
                 self.recovery.request_stream_recovery(now);
                 self.recovery.failed(now);
@@ -114,6 +123,8 @@ impl RecoveringAudioInput {
             device_override: device_override.map(str::to_owned),
             selected_device: selected_device.map(str::to_owned),
             voice_isolation: crate::labs::voice_isolation(),
+            voice_isolation_fallback: false,
+            voice_isolation_skipped: false,
             active_revision: selection_revision,
             recovery: MicrophoneRecovery::default(),
             replacement: None,
@@ -144,6 +155,8 @@ impl RecoveringAudioInput {
         input.route_generation = route_generation();
         // A test's opens follow its own requests, never the saved setting.
         input.voice_isolation = false;
+        input.voice_isolation_fallback = false;
+        input.voice_isolation_skipped = false;
         input.opener = Arc::new(opener);
         input
     }
@@ -191,19 +204,51 @@ impl RecoveringAudioInput {
 
     /// Labs › Voice isolation: while `enabled`, the next open goes through
     /// Apple's voice processing, and a stream of the other kind is replaced
-    /// once `capture_idle`. A capture in progress keeps its stream.
+    /// once `capture_idle`. A capture in progress keeps its stream. Toggling
+    /// the lab forgets a remembered failure, so it is tried again.
     pub fn request_voice_isolation(&mut self, enabled: bool, capture_idle: bool) {
-        self.voice_isolation = enabled;
+        if enabled != self.voice_isolation {
+            self.voice_isolation = enabled;
+            self.voice_isolation_fallback = false;
+        }
         if !capture_idle || self.replacement.is_some() || self.recovery.blocks_audio() {
             return;
         }
-        let matches = self
+        let mismatched = self
             .input
             .as_ref()
-            .is_none_or(|input| input.voice_isolation == enabled);
-        if !matches && self.input.is_some() {
+            .is_some_and(|input| !self.open_input_matches(input));
+        if mismatched {
             self.start_replacement();
         }
+    }
+
+    /// Whether the wanted path is voice processing: the lab is on and this
+    /// microphone hasn't already failed it.
+    fn prefers_voice_processing(&self) -> bool {
+        self.voice_isolation && !self.voice_isolation_fallback
+    }
+
+    /// Whether `input` already runs on the path Hex wants now. The requested
+    /// path alone can say yes when voice processing quietly fell back to the
+    /// raw stream, so a remembered failure also checks what actually opened.
+    fn open_input_matches(&self, input: &AudioInput) -> bool {
+        input.voice_isolation == self.voice_isolation
+            && input.voice_processing_active == self.prefers_voice_processing()
+    }
+
+    /// A voice-processing open or stream failed for this microphone: remember
+    /// it so every later open stays raw until the lab is toggled or the
+    /// selected microphone changes, instead of reopening a broken engine.
+    fn remember_voice_isolation_failure(&mut self, reason: &str) {
+        if !self.voice_isolation || self.voice_isolation_fallback {
+            return;
+        }
+        self.voice_isolation_fallback = true;
+        tracing::warn!(
+            %reason,
+            "voice processing failed; using normal capture until Labs › Voice isolation is toggled or the microphone changes"
+        );
     }
 
     /// A finished dictation was digital silence (#1122): reopen the stream and
@@ -239,6 +284,20 @@ impl RecoveringAudioInput {
     /// Makes `input` the listener's microphone and the only stream feeding
     /// Hex Microphone, stopping the previous stream first.
     fn install(&mut self, input: AudioInput) {
+        self.install_after_open(input, false);
+    }
+
+    /// Installs a stream an open produced. `voice_isolation_skipped` marks the
+    /// raw silence-recovery open, whose raw stream is deliberate and not a
+    /// voice-processing failure to remember.
+    fn install_after_open(&mut self, input: AudioInput, voice_isolation_skipped: bool) {
+        if !voice_isolation_skipped && input.voice_isolation && !input.voice_processing_active {
+            let reason = format!(
+                "{} did not open through voice processing",
+                input.device_name
+            );
+            self.remember_voice_isolation_failure(&reason);
+        }
         self.retire_input();
         input.feed_hex_microphone(true);
         self.input = Some(input);
@@ -264,6 +323,7 @@ impl RecoveringAudioInput {
         self.first_delivery = None;
         self.proven = false;
         self.replacement = None;
+        self.voice_isolation_skipped = false;
         self.recovery.recovered();
         self.outage = None;
         self.retry_warning = None;
@@ -287,6 +347,7 @@ impl RecoveringAudioInput {
             return;
         }
         self.replacement = None;
+        self.voice_isolation_skipped = false;
         if self.input.is_none() {
             self.recovery.recovered();
         }
@@ -297,8 +358,10 @@ impl RecoveringAudioInput {
             return;
         }
         self.selected_device = selected_device.map(str::to_owned);
+        self.voice_isolation_fallback = false;
         if self.input.is_none() && !self.is_recovering() {
             let was_opening = self.replacement.take().is_some();
+            self.voice_isolation_skipped = false;
             self.active_revision = revision;
             self.recovery.recovered();
             if was_opening {
@@ -316,7 +379,7 @@ impl RecoveringAudioInput {
         capture_idle: bool,
     ) -> RecoveringAudioInputEvent {
         let now = Instant::now();
-        if let Some((opened_revision, result)) = self.poll_replacement() {
+        if let Some(((opened_revision, result), skipped)) = self.poll_replacement() {
             let target_revision = self
                 .recovery
                 .target_revision
@@ -348,7 +411,7 @@ impl RecoveringAudioInput {
                 Ok(Opened::Input(replacement))
                     if capture_idle || self.input.is_none() || self.recovery.blocks_audio() =>
                 {
-                    self.install(*replacement);
+                    self.install_after_open(*replacement, skipped);
                     self.active_revision = opened_revision;
                     // A failed stream keeps the backoff it grew until this
                     // one delivers steadily.
@@ -367,6 +430,9 @@ impl RecoveringAudioInput {
                     self.recovery.failed(now);
                 }
                 Err(error) => {
+                    if !skipped {
+                        self.remember_voice_isolation_failure(&error);
+                    }
                     if self.input.is_none() && !self.is_recovering() {
                         self.recovery.recovered();
                         return RecoveringAudioInputEvent::OpenFailed(error);
@@ -429,7 +495,15 @@ impl RecoveringAudioInput {
             AudioInputEvent::Timeout => RecoveringAudioInputEvent::Timeout,
             AudioInputEvent::StreamFailed(error) => {
                 let failed_at = Instant::now();
-                tracing::warn!(%error, device = %input.device_name, "microphone stream stopped; reopening it");
+                let voice_processing_failed =
+                    input.voice_isolation && input.voice_processing_active;
+                let device = input.device_name.clone();
+                tracing::warn!(%error, device = %device, "microphone stream stopped; reopening it");
+                if voice_processing_failed {
+                    let reason =
+                        format!("{device} stopped delivering audio through voice processing");
+                    self.remember_voice_isolation_failure(&reason);
+                }
                 if self.proven {
                     self.recovery.request_stream_recovery(failed_at);
                 } else {
@@ -479,13 +553,11 @@ impl RecoveringAudioInput {
             .unwrap_or(self.active_revision);
         // A failed stream is replaced even by the same device; a route,
         // selection, or voice-isolation change keeps the open device only
-        // when it resolves to the same capture path.
+        // when it already runs on the path Hex wants now.
         let keep = self
             .input
             .as_ref()
-            .filter(|input| {
-                !self.recovery.blocks_audio() && input.voice_isolation == self.voice_isolation
-            })
+            .filter(|input| !self.recovery.blocks_audio() && self.open_input_matches(input))
             .map(|input| input.device_name.clone());
         // A failed or silent stream lets go of the device before its
         // replacement opens, so the replacement starts cold, as at launch. A
@@ -493,6 +565,11 @@ impl RecoveringAudioInput {
         if self.recovery.blocks_audio() {
             self.retire_input();
         }
+        let renegotiate_rate = self.recovery.take_renegotiation();
+        // A silence recovery must change the device's rate before its stream
+        // opens; voice processing builds its own engine and cannot, so that
+        // one open stays raw and the next idle pass restores it.
+        self.voice_isolation_skipped = self.voice_isolation && renegotiate_rate;
         let request = OpenRequest {
             device_override: self.device_override.clone(),
             selected_device: self.selected_device.clone(),
@@ -500,8 +577,9 @@ impl RecoveringAudioInput {
             keep,
             avoids_bluetooth: true,
             call_input: None,
-            renegotiate_rate: self.recovery.take_renegotiation(),
+            renegotiate_rate,
             voice_processing: self.voice_isolation,
+            voice_processing_fallback: self.voice_isolation_fallback || renegotiate_rate,
         };
         self.route_generation = (self.route_generation_source)();
         let opener = self.opener.clone();
@@ -534,7 +612,8 @@ impl RecoveringAudioInput {
         }
     }
 
-    fn poll_replacement(&mut self) -> Option<InputOpenResult> {
+    fn poll_replacement(&mut self) -> Option<(InputOpenResult, bool)> {
+        let skipped = self.voice_isolation_skipped;
         let result = match self.replacement.as_ref()?.try_recv() {
             Ok(result) => result,
             Err(TryRecvError::Empty) => return None,
@@ -544,7 +623,8 @@ impl RecoveringAudioInput {
             ),
         };
         self.replacement = None;
-        Some(result)
+        self.voice_isolation_skipped = false;
+        Some((result, skipped))
     }
 }
 

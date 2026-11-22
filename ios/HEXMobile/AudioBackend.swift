@@ -270,9 +270,9 @@ final class SystemAudioManager: AudioManaging {
     /// keepalive taps whatever format the hardware reports.
     ///
     /// Experiments › Voice isolation is the one exception to `.measurement`: with it on the
-    /// session records in `.voiceChat` mode, whose voice processing makes iOS offer Voice
-    /// Isolation in Control Center's Mic Mode while Hex records. Off, the mode and every option
-    /// are exactly as before, so Hex records as it always has.
+    /// session records in `.voiceChat` mode, whose voice processing lets Control Center's Mic
+    /// Mode offer Voice Isolation while Hex records. Off, the mode and every option are exactly
+    /// as before, so Hex records as it always has.
     ///
     /// The category is set only when it changes: on iOS 27 setting it again, even unchanged,
     /// while Hex is in the background asks iOS to interrupt others, which it refuses there
@@ -281,7 +281,12 @@ final class SystemAudioManager: AudioManaging {
     func configureAudioSession(recordingFrom choice: MicrophoneChoice?) throws {
         let options = MicrophoneRoute.categoryOptions(allowingBluetooth: choice?.allowsBluetooth ?? false)
         let mode: AVAudioSession.Mode = voiceIsolation.isEnabled ? .voiceChat : .measurement
-        if session.category != .playAndRecord || session.mode != mode || session.categoryOptions != options {
+        // `.voiceChat` adds `.allowBluetoothHFP` itself, so comparing the raw
+        // options would see a change on every recording and set the category
+        // again — the TestFlight 129 background cannotInterruptOthers failure.
+        let implicit: AVAudioSession.CategoryOptions = mode == .voiceChat ? [.allowBluetoothHFP] : []
+        if session.category != .playAndRecord || session.mode != mode
+            || session.categoryOptions.subtracting(implicit) != options.subtracting(implicit) {
             try session.setCategory(.playAndRecord, mode: mode, options: options)
         }
         try session.setActive(true, options: [])

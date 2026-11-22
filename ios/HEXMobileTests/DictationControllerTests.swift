@@ -3527,8 +3527,11 @@ private final class FakeAudioSession: AudioSessionControlling {
         calls.append(.category(category, mode, options))
         self.category = category
         self.mode = mode
-        categoryOptions = options
-        allowsBluetooth = options.contains(.allowBluetoothHFP)
+        // iOS adds the active mode's implicit options: `.voiceChat` records
+        // Bluetooth hands-free itself, whether or not it was asked for.
+        let implicit: AVAudioSession.CategoryOptions = mode == .voiceChat ? [.allowBluetoothHFP] : []
+        categoryOptions = options.union(implicit)
+        allowsBluetooth = categoryOptions.contains(.allowBluetoothHFP)
     }
 
     func prefer(_ microphone: Microphone?) throws {
@@ -3564,9 +3567,10 @@ final class AudioSessionSetupTests: XCTestCase {
     }
 
     /// Experiments › Voice isolation: on, Hex records in `.voiceChat` mode, whose voice
-    /// processing puts Voice Isolation in Control Center's Mic Mode; off, `.measurement`
+    /// processing lets Control Center's Mic Mode offer Voice Isolation; off, `.measurement`
     /// exactly as before. The options stay today's either way, and the category (with the
-    /// mode) is still set only when it changes.
+    /// mode) is still set only when it changes, even though `.voiceChat` adds
+    /// `.allowBluetoothHFP` itself.
     func testVoiceIsolationRecordsInVoiceChatModeAndOffKeepsMeasurement() throws {
         let suite = "hex.tests.\(UUID().uuidString)"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
@@ -3592,12 +3596,16 @@ final class AudioSessionSetupTests: XCTestCase {
         }
         XCTAssertTrue(options.contains(.mixWithOthers), "the experiment keeps today's options")
         XCTAssertFalse(options.contains(.duckOthers))
+        XCTAssertTrue(
+            onSession.categoryOptions.contains(.allowBluetoothHFP),
+            "iOS adds hands-free Bluetooth itself in .voiceChat"
+        )
 
         try audio.configureAudioSession(recordingFrom: nil)
         XCTAssertEqual(
             onSession.calls.filter { if case .category = $0 { true } else { false } }.count,
             1,
-            "the category isn't set again while the mode stays the same"
+            "the implicit option doesn't set the category again while the mode stays the same"
         )
     }
 

@@ -59,15 +59,34 @@ fn main() {
         .expect("xcode-select is required to link ScreenCaptureKit");
     assert!(output.status.success(), "xcode-select -p failed");
     let developer_dir = String::from_utf8(output.stdout).expect("Xcode path must be UTF-8");
-    compile_swift_bridge("apple_speech", "HEXAppleSpeechBridge", &[]);
+    compile_swift_bridge("apple_speech", "HEXAppleSpeechBridge", &[], None);
     println!("cargo:rustc-link-lib=framework=AVFAudio");
     println!("cargo:rustc-link-lib=framework=Speech");
     // AVFoundation decodes an imported meeting's audio into a 16 kHz WAV.
-    compile_swift_bridge("meeting_import", "HEXMeetingImportBridge", &[]);
+    compile_swift_bridge("meeting_import", "HEXMeetingImportBridge", &[], None);
     println!("cargo:rustc-link-lib=framework=AudioToolbox");
     // Labs › Voice isolation runs dictation's microphone through Apple's
     // voice processing, an AVAudioEngine duplex unit on the chosen device.
-    compile_swift_bridge("voice_processing", "HEXVoiceProcessingBridge", &[]);
+    // Its Objective-C guard turns the exceptions AVAudioEngine raises for a
+    // refused graph into errors Swift can fall back from.
+    println!("cargo:rerun-if-changed=native/voice_processing_guard.m");
+    println!("cargo:rerun-if-changed=native/voice_processing_guard.h");
+    // Link the guard as an object beside the Swift object, so neither depends
+    // on a static archive's place in the linker's argument order.
+    for guard in cc::Build::new()
+        .file("native/voice_processing_guard.m")
+        .flag("-fobjc-arc")
+        .flag("-fblocks")
+        .compile_intermediates()
+    {
+        println!("cargo:rustc-link-arg={}", guard.display());
+    }
+    compile_swift_bridge(
+        "voice_processing",
+        "HEXVoiceProcessingBridge",
+        &[],
+        Some("native/voice_processing_guard.h"),
+    );
     println!("cargo:rustc-link-lib=framework=CoreAudio");
     // FoundationModels exists only on macOS 26 and later. Weak-link it, and
     // drop the object's strong autolink entry, so Hex still launches on older
@@ -76,9 +95,10 @@ fn main() {
         "apple_intelligence",
         "HEXAppleIntelligenceBridge",
         &["FoundationModels"],
+        None,
     );
     println!("cargo:rustc-link-arg=-Wl,-weak_framework,FoundationModels");
-    compile_swift_bridge("calendar", "HEXCalendarBridge", &[]);
+    compile_swift_bridge("calendar", "HEXCalendarBridge", &[], None);
     println!("cargo:rustc-link-lib=framework=EventKit");
     compile_permission_guide();
     println!("cargo:rustc-link-arg=-Wl,-rpath,/usr/lib/swift");
@@ -330,7 +350,12 @@ fn compile_permission_guide() {
         .compile("hex_permission_guide");
 }
 
-fn compile_swift_bridge(name: &str, module: &str, without_autolink: &[&str]) {
+fn compile_swift_bridge(
+    name: &str,
+    module: &str,
+    without_autolink: &[&str],
+    bridging_header: Option<&str>,
+) {
     let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
     let output_dir = PathBuf::from(std::env::var_os("OUT_DIR").unwrap());
     let source = manifest_dir.join(format!("src/{name}.swift"));
@@ -366,6 +391,13 @@ fn compile_swift_bridge(name: &str, module: &str, without_autolink: &[&str]) {
             "-Xfrontend",
             framework,
         ]);
+    }
+    if let Some(header) = bridging_header {
+        swift
+            .arg("-import-objc-header")
+            .arg(manifest_dir.join(header))
+            .arg("-Xcc")
+            .arg("-fblocks");
     }
     let status = swift
         .arg(&source)

@@ -44,8 +44,12 @@ pub struct AudioInput {
     /// be opened again.
     pub selection: Selection,
     /// Whether this input was asked to open through Apple's voice processing
-    /// (Labs › Voice isolation); the raw stream stands in when it can't.
+    /// (Labs › Voice isolation), whether or not it could; the reconcile
+    /// comparison reads this requested path, not the one that opened.
     pub voice_isolation: bool,
+    /// Whether Apple's voice processing actually opened this input; false
+    /// when the raw cpal stream stood in.
+    pub voice_processing_active: bool,
     pub(super) stream_errors: Receiver<String>,
     pub(super) watch_service_restarts: bool,
     pub(super) restart_generation: u64,
@@ -120,6 +124,7 @@ impl AudioInput {
                 uid: None,
                 selection: Selection::InUse,
                 voice_isolation: false,
+                voice_processing_active: false,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
@@ -159,6 +164,7 @@ impl AudioInput {
             call_input: None,
             renegotiate_rate: false,
             voice_processing: false,
+            voice_processing_fallback: false,
         })? {
             Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => unreachable!("nothing to keep"),
@@ -196,6 +202,7 @@ impl AudioInput {
         follows_default: bool,
         renegotiate_rate: bool,
         voice_processing: bool,
+        voice_processing_fallback: bool,
     ) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
@@ -205,7 +212,7 @@ impl AudioInput {
         // an initialized clock.
         overloads::start_clock();
         #[cfg(target_os = "macos")]
-        let voice_processed = if voice_processing {
+        let voice_processed = if voice_processing && !voice_processing_fallback {
             match uid.as_deref() {
                 Some(uid) => Some(input_format::start_voice_processing(uid, &device_name)),
                 None => {
@@ -221,7 +228,7 @@ impl AudioInput {
         };
         #[cfg(not(target_os = "macos"))]
         let voice_processed = {
-            let _ = voice_processing;
+            let _ = (voice_processing, voice_processing_fallback);
             None::<Result<input_format::StartedStream>>
         };
         let open_raw = || {
@@ -232,8 +239,12 @@ impl AudioInput {
                 renegotiate_rate,
             )
         };
+        let mut voice_processing_active = false;
         let started = match voice_processed {
-            Some(Ok(started)) => started,
+            Some(Ok(started)) => {
+                voice_processing_active = true;
+                started
+            }
             Some(Err(error)) => {
                 tracing::warn!(
                     error = format!("{error:#}"),
@@ -253,6 +264,7 @@ impl AudioInput {
             uid,
             selection: Selection::InUse,
             voice_isolation: voice_processing,
+            voice_processing_active,
             stream_errors: started.stream_errors,
             watch_service_restarts: true,
             restart_generation,
@@ -333,6 +345,7 @@ impl AudioInput {
             tracing::info!(
                 device = %self.device_name,
                 sample_rate = self.sample_rate,
+                voice_processing = self.voice_processing_active,
                 frames,
                 period_us = duration_for_frames(frames, self.sample_rate).as_micros() as u64,
                 "microphone stream opened"

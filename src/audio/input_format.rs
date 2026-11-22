@@ -185,6 +185,7 @@ pub(super) fn start_voice_processing(uid: &str, device_name: &str) -> Result<Sta
     tracing::info!(
         device = %device_name,
         sample_rate = started.sample_rate,
+        channels = started.channels,
         "opened the microphone through voice processing"
     );
     Ok(StartedStream {

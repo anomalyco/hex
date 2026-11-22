@@ -88,7 +88,8 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        processing, so Control Center's Mic Mode can offer Voice Isolation and background
 │                                        noise is reduced; meetings, captures, the level meter, the local API's host
 │                                        audio, and named opens stay on the raw cpal path; an open stream is replaced only while capture is
-│                                        idle, and a failed voice-processing open falls back to normal capture
+│                                        idle, and any voice-processing failure falls back to normal capture for that
+│                                        microphone until the lab is toggled or the selected microphone changes
 │                                        // checks: voice_isolation_is_its_own_bit_and_off_by_default (labs.rs);
 │                                        // a_voice_isolation_change_reopens_only_while_capture_is_idle (audio/recovering/tests.rs);
 │                                        // not run on a Mac, and no hardware confirmed Control Center offers the mode for Hex
@@ -755,9 +756,14 @@ Mac, Windows PC, or Linux desktop: no capture has been run with the lab on.
 Voice isolation (`voice-isolation`, macOS only): while on, dictation's warm
 microphone opens through Apple's voice processing instead of cpal's raw
 input stream, so Control Center's Mic Mode can offer Voice Isolation for Hex
-and background noise is reduced. `OpenRequest` gains
-`voice_processing`, true only from `RecoveringAudioInput` while
-`labs::voice_isolation()` is on; meetings, Annotate captures, the microphone
+and background noise is reduced. The voice-processed microphone stays open
+while dictation is idle, exactly like the raw warm microphone, so macOS's
+ducking applies whenever Hex is listening and not only while a dictation
+records; with General's Release microphone while idle on, it closes after a
+capture and the ducking ends with it. `OpenRequest` gains
+`voice_processing` (true only from `RecoveringAudioInput` while
+`labs::voice_isolation()` is on) and a remembered
+`voice_processing_fallback`; meetings, Annotate captures, the microphone
 level meter (`open_dictation_input`), `open_named_input`,
 `open_meeting_input`, the local API's host-audio and stream transcription
 (which never opens a microphone), and every other OS stay on the cpal path.
@@ -766,21 +772,32 @@ UID to a CoreAudio device
 (`kAudioHardwarePropertyTranslateUIDToDevice`), sets
 `kAudioOutputUnitProperty_CurrentDevice` on the input node's audio unit,
 enables `setVoiceProcessingEnabled(true)`, connects the input through a
-silent main mixer to the output (voice processing is duplex), and taps mono
-float samples with `AVAudioTime.hostTime`; Rust converts the Mach ticks with
+silent main mixer to the output (voice processing is duplex), and taps
+channel 0 at the bus rate in a standard Float32 non-interleaved format with
+`AVAudioTime.hostTime`; Rust converts the Mach ticks with
 `CaptureInstant::from_mach_ticks` and feeds the same chunk and Hex
-Microphone channels a cpal stream does. If the engine won't build or start
-(an unusable device, no output, a refused format), the open logs and falls
-back to `start_stream_with_fallback`, so dictation still records. A gate
-change is applied by `DictationAudio::reconcile_input` only while nothing
-records and no capture sink holds the microphone; the same device is then
-reopened on the other path rather than kept as unchanged, and a change
-during a capture waits for it to end. Off, every open is byte-for-byte the
-existing cpal path. macOS may lower other audio while the duplex unit runs
-(advanced ducking at the minimum level, as Apple's call apps do), and a
-Bluetooth headset may switch to its call profile. Not verified on hardware:
-no Mac has run this path, and Control Center's Mic Mode has not been seen to
-offer Voice Isolation for Hex. Checks:
+Microphone channels a cpal stream does. The bridge observes
+`AVAudioEngineConfigurationChange` and reports it to Rust through an error
+callback, and reads `kAudioOutputUnitProperty_CurrentDevice` back after
+start. Any voice-processing failure falls back to normal capture: an
+exception from the graph (the Objective-C `@try/@catch` guard in
+`native/voice_processing_guard.m`), a refused format, device, or start, a
+device that isn't the requested one after start, or a stream that stalls or
+fails. `RecoveringAudioInput` remembers that failure for the current
+microphone, so every later open uses the raw cpal stream without reopening
+the engine, until Labs › Voice isolation is toggled or the selected
+microphone changes. A silence recovery's renegotiating open is raw too. A
+gate change is applied by `DictationAudio::reconcile_input` only while
+nothing records and no capture sink holds the microphone; the same device
+is then reopened on the other path rather than kept as unchanged, and a
+change during a capture waits for it to end. Off, every open is
+byte-for-byte the existing cpal path. macOS may lower other audio while the
+duplex unit runs: advanced ducking lowers it only while speech is heard,
+and `.min` is the least ducking macOS offers. A Bluetooth headset may
+switch to its call profile. Not verified on hardware: no Mac has run this
+path; Control Center's Mic Mode offering Voice Isolation for Hex; the tap's
+latency against the 200 ms release tail; and a meeting sharing the
+microphone while dictation's voice-processed stream is open. Checks:
 `voice_isolation_is_its_own_bit_and_off_by_default` in
 [labs.rs](../../src/labs.rs) and
 `a_voice_isolation_change_reopens_only_while_capture_is_idle` in

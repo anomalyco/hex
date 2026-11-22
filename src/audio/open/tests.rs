@@ -173,6 +173,7 @@ fn a_meeting_keeps_the_bluetooth_default_a_call_uses() {
         call_input: None,
         renegotiate_rate: false,
         voice_processing: false,
+        voice_processing_fallback: false,
     };
     let target = |request: OpenRequest| {
         resolve_input(
