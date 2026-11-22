@@ -29,6 +29,8 @@ final class DeleteWordSwipe {
     /// is. True once the slide is active.
     @discardableResult
     func move(to x: CGFloat) -> Bool {
+        // A word delete writes the field directly: it ends any Hangul run first.
+        engine.commitHangulComposition()
         let wanted = max(0, Int(((startX - x) / step).rounded(.down)))
         if !isActive {
             guard wanted > 0 else { return false }

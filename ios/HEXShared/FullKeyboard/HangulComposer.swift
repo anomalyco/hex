@@ -222,7 +222,18 @@ nonisolated struct HangulComposer {
 nonisolated struct KoreanKeyboardState {
     var isEnabled = KoreanKeyboardExperiment.isEnabled
     var composer = HangulComposer()
+    /// The field's text after the cursor and the field itself when the run was last shown:
+    /// a cursor move to text that ends alike still has to commit the run.
+    var afterText: String? = nil
+    var documentIdentifier: UUID? = nil
     /// True while the field's text is being replaced, so its own change notifications don't
     /// look like a move somewhere else.
     var isUpdating = false
+
+    /// The run is in the field: forget it and what the host looked like around it.
+    mutating func reset() {
+        composer.reset()
+        afterText = nil
+        documentIdentifier = nil
+    }
 }

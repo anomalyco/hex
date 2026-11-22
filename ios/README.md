@@ -955,10 +955,13 @@ never at a launch by itself.
   syllable in the field (한, then delete to 하, ㅎ, nothing; ㅘ splits to ㅗ; 닭 + ㅗ → 달고,
   한 + ㅏ → 하나), the keyboard replacing only the run's changed characters through
   `deleteBackward`/`insertText` (no marked text). Space, return, punctuation, a page or
-  language switch, emoji, dictation, a cursor move or hiding the keyboard commits the run.
-  Korean has no accent holds, spelling dictionary, autocorrect, word suggestions or typing
-  model, and with the experiment off the language isn't listed, Automatic never picks it,
-  and a stored "ko" is ignored. Unit tests only (`HangulComposerTests`); no CI compiles the
+  language switch, emoji, dictation, paste, undo, a selection action, the delete-word swipe, a
+  cursor move or hiding the keyboard commits the run. The cursor check records the text after
+  the cursor and the field with the run and compares them, plus the host's selected text, so a
+  move to another place whose text before it ends alike commits too; a host that reports
+  neither is best-effort. Korean has no accent holds, spelling dictionary, autocorrect, word
+  suggestions or typing model, and with the experiment off the language isn't listed,
+  Automatic never picks it, and a stored "ko" is ignored. Unit tests only (`HangulComposerTests`); no CI compiles the
   iOS targets and no device run checks it.
 - **Layout per language (Settings › Keyboard › Languages › Layout):** each language the keys
   show (every chosen one, Automatic's while none is, and only the first of English and

@@ -971,6 +971,7 @@ final class KeyboardViewController: UIInputViewController {
     ) {
         // A two-thumb Dictate's words replace the range it picked, if the field still shows
         // it; either way, the context below is read after that, so spacing sees the result.
+        fullKeyboard?.engine.commitHangulComposition()
         fullKeyboard?.applyPendingSelectionDictation()
         let context = editContext
         let insertion = TranscriptFormatter.insertionText(

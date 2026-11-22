@@ -711,7 +711,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// The layout for a language identifier ("nb-NO", "no", "nn_NO", "es-MX", "sr-Latn-RS"),
     /// if any. Serbian only in Latin script: Hex has no Cyrillic Serbian layout. French follows
     /// Apple's keyboard for the region: QWERTY in Canada, QWERTZ in Switzerland, else AZERTY.
-    static func matching(_ identifier: String) -> KeyboardLanguage? {
+    static func matching(
+        _ identifier: String,
+        koreanEnabled: Bool = KoreanKeyboardExperiment.isEnabled
+    ) -> KeyboardLanguage? {
         let parts = identifier.lowercased()
             .split(whereSeparator: { $0 == "-" || $0 == "_" })
             .map(String.init)
@@ -735,7 +738,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "uk": return .ukrainian
         case "el": return .greek
         case "sr": return parts.contains("latn") ? .serbianLatin : nil
-        case "ko": return KoreanKeyboardExperiment.isEnabled ? .korean : nil
+        case "ko": return koreanEnabled ? .korean : nil
         default: return nil
         }
     }
@@ -743,15 +746,17 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// The languages Settings › Keyboard › Languages may offer: 한국어 only while its experiment
     /// is on, so off it is not listed, Automatic never picks it, and a stored "ko" is ignored
     /// (`LanguageSettings.keyboardLanguages`).
-    static var selectable: [KeyboardLanguage] {
-        allCases.filter { $0 != .korean || KoreanKeyboardExperiment.isEnabled }
+    static func selectable(
+        koreanEnabled: Bool = KoreanKeyboardExperiment.isEnabled
+    ) -> [KeyboardLanguage] {
+        allCases.filter { $0 != .korean || koreanEnabled }
     }
 
     /// The layouts of the iPhone's own keyboards, then of its preferred languages, in that
     /// order and once each: what Settings › Keyboard › Languages offers first.
     static func suggested(inputModes: [String], preferred: [String]) -> [KeyboardLanguage] {
         var seen = Set<KeyboardLanguage>()
-        return (inputModes + preferred).compactMap(matching).filter { seen.insert($0).inserted }
+        return (inputModes + preferred).compactMap { matching($0) }.filter { seen.insert($0).inserted }
     }
 
     /// Automatic follows the dictation language: its layout, or English for a language

@@ -4,7 +4,8 @@ import UIKit
 /// `HangulComposer` and the field shows the composing run by deleting the part that changed
 /// and inserting what it became. Nothing is marked text: a commit only forgets the run, which
 /// already sits in the host, so space, return, punctuation, a page or language switch, emoji,
-/// dictation, a cursor move or the keyboard hiding all leave the syllable in place.
+/// dictation, paste, undo, a selection action, a word delete, a cursor move or the keyboard
+/// hiding all leave the syllable in place.
 @MainActor
 extension FullKeyboardEngine {
     /// Whether the experiment is on and 한국어 is what types now.
@@ -18,17 +19,15 @@ extension FullKeyboardEngine {
             commitHangulComposition()
             return false
         }
+        // A host that moved under the run (a cursor move, a paste, another field's text)
+        // commits it; this jamo starts a new run where the cursor is now.
+        if !korean.composer.isEmpty, !hangulRunIsBeforeCursor() {
+            korean.reset()
+        }
         // A space the strip held for the next word goes in before its first jamo, as before
         // any other key.
         if spacePending {
             spaceBeforeNextWord(character)
-        }
-        // A host that changed under the run (a paste, another field's text) starts a new one
-        // rather than deleting text that is no longer the run.
-        let run = korean.composer.text
-        if !run.isEmpty,
-           !(textBefore ?? "").hasSuffix(run), !(typingContext ?? "").hasSuffix(run) {
-            korean.composer.reset()
         }
         let old = korean.composer.text
         let jamo = isUppercase ? HangulComposer.shifted(character) : character
@@ -39,12 +38,12 @@ extension FullKeyboardEngine {
     }
 
     /// Delete while composing takes the last jamo back one step (한 → 하 → ㅎ → nothing, and a
-    /// compound vowel or final splits). False with nothing composing, so delete acts as usual.
+    /// compound vowel or final splits). False with nothing composing, or when the cursor moved
+    /// away from the run, so delete acts as usual.
     func deleteHangulBackward() -> Bool {
         guard composesHangul, !korean.composer.isEmpty else { return false }
-        let run = korean.composer.text
-        guard (textBefore ?? "").hasSuffix(run) || (typingContext ?? "").hasSuffix(run) else {
-            korean.composer.reset()
+        guard hangulRunIsBeforeCursor() else {
+            korean.reset()
             return false
         }
         let old = korean.composer.text
@@ -53,22 +52,38 @@ extension FullKeyboardEngine {
         return true
     }
 
-    /// Space, return, punctuation, a page or language switch, emoji or dictation: the run is
-    /// already in the field, so a commit only forgets it.
+    /// Space, return, punctuation, a page or language switch, emoji or any path that writes
+    /// the field directly: the run is already in the field, so a commit only forgets it.
     func commitHangulComposition() {
         guard !korean.composer.isEmpty else { return }
-        korean.composer.reset()
+        korean.reset()
     }
 
-    /// A selection or cursor move: a run that is no longer right before the cursor (or is part
-    /// of a selection) is committed, as the text is already in the field.
+    /// A selection or cursor move: a run that is no longer right before the cursor is
+    /// committed, as the text is already in the field.
     func commitHangulIfHostMoved() {
         guard !korean.composer.isEmpty, !korean.isUpdating else { return }
-        guard (target.selectedText ?? "").isEmpty,
-              (typingContext ?? "").hasSuffix(korean.composer.text) else {
-            korean.composer.reset()
+        guard hangulRunIsBeforeCursor() else {
+            korean.reset()
             return
         }
+    }
+
+    /// Whether the run is still the field's at the cursor: no selection, the same field and
+    /// text after the cursor as when it was last shown, and its own text right before it. The
+    /// text after the cursor is what tells a move to another place whose text before it ends
+    /// alike from no move at all.
+    private func hangulRunIsBeforeCursor() -> Bool {
+        guard !korean.composer.isEmpty else { return false }
+        guard (target.selectedText ?? "").isEmpty else { return false }
+        // A field UIKit hasn't named yet matches any: losing or gaining a name is no move.
+        if let document = korean.documentIdentifier, let current = target.documentIdentifier,
+           document != current {
+            return false
+        }
+        guard target.documentContextAfterInput == korean.afterText else { return false }
+        let run = korean.composer.text
+        return (textBefore ?? "").hasSuffix(run) || (typingContext ?? "").hasSuffix(run)
     }
 
     /// Replaces the run's text in the field: only what changed since `old` is deleted, then
@@ -85,11 +100,15 @@ extension FullKeyboardEngine {
         } else if context.hasSuffix(old) {
             before = context
         } else {
-            korean.composer.reset()
+            korean.reset()
             return
         }
+        // Composing only edits before the cursor, so the text after it is the run's to keep.
+        let after = target.documentContextAfterInput
+        let document = target.documentIdentifier
         forgetTextAroundKeys()
         tokenTaps.removeAll()
+        lastSpaceAt = nil
         let oldCharacters = Array(old)
         let newCharacters = Array(new)
         var common = 0
@@ -108,6 +127,13 @@ extension FullKeyboardEngine {
         }
         if !inserted.isEmpty {
             target.insertText(inserted)
+        }
+        if korean.composer.isEmpty {
+            korean.afterText = nil
+            korean.documentIdentifier = nil
+        } else {
+            korean.afterText = after
+            korean.documentIdentifier = document
         }
         typingLog?.edit("insert", [
             TypingLogField("deleted", .string(String(oldCharacters[common...]))),

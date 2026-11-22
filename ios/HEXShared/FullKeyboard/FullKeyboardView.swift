@@ -684,6 +684,7 @@ final class FullKeyboardView: UIView {
     /// Hex inserted a dictation between `before` and `after`; offer to take it back until the
     /// next edit, or until it can't be found from the cursor.
     func didInsertDictation(_ text: String, before: String = "", after: String = "") {
+        engine.commitHangulComposition()
         lastDictation = DictationUndo(text: text, before: before, after: after)
         engine.clearPendingSelectionDictation()
         refreshStrip()
@@ -1347,6 +1348,7 @@ final class FullKeyboardView: UIView {
     }
 
     private func undoDictation() {
+        engine.commitHangulComposition()
         guard let undo = lastDictation else { return }
         let text = undo.text
         let before = engine.target.documentContextBeforeInput ?? ""

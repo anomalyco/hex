@@ -115,7 +115,12 @@ final class HangulKeyboardTests: XCTestCase {
     private var nextID = 1
 
     override func setUp() async throws {
-        target = FixtureTextTarget()
+        configure()
+    }
+
+    /// A field with `text` before the cursor (at its end) and the Korean keyboard on it.
+    private func configure(text: String = "") {
+        target = FixtureTextTarget(text: text)
         target.autocapitalizationType = UITextAutocapitalizationType.none
         engine = FullKeyboardEngine(target: target)
         engine.width = 393
@@ -179,6 +184,55 @@ final class HangulKeyboardTests: XCTestCase {
         XCTAssertEqual(target.text, "한 ", "delete takes the composing jamo, not the space")
     }
 
+    /// A cursor move to text whose end reads like the run commits it: the jamo starts a new
+    /// run where the cursor is now, and the old run stays as it was.
+    func testCursorMoveWithTheSameLastSyllableStartsANewRun() {
+        configure(text: "같이")
+        tap("ㅇ")
+        tap("ㅣ")
+        XCTAssertEqual(target.text, "같이이")
+        engine.target.adjustTextPosition(byCharacterOffset: -1)
+        tap("ㄴ")
+        XCTAssertEqual(target.text, "같이ㄴ이", "the run at the old cursor is untouched")
+    }
+
+    /// Delete after such a move takes the character at the cursor, never steps the old run
+    /// back (which would turn its 이 into ㅇ).
+    func testCursorMoveCommitsBeforeDelete() {
+        configure(text: "같이")
+        tap("ㅇ")
+        tap("ㅣ")
+        XCTAssertEqual(target.text, "같이이")
+        engine.target.adjustTextPosition(byCharacterOffset: -1)
+        engine.deleteBackward()
+        XCTAssertEqual(target.text, "같이", "delete takes the character before the cursor, not the old run")
+    }
+
+    /// A selection commits the run too: delete then acts on the host, not on the run.
+    func testSelectionCommitsBeforeDelete() {
+        tap("ㅇ")
+        tap("ㅣ")
+        XCTAssertEqual(target.text, "이")
+        target.selectedText = "이"
+        engine.deleteBackward()
+        XCTAssertEqual(target.text, "", "the host's delete, not deleteHangulBackward's stepping")
+    }
+
+    /// A jamo ends the space pair: space, a jamo, delete, space types two spaces, not ". ".
+    func testAJamoEndsTheDoubleSpacePair() {
+        engine.clock = { 100 }
+        tap("ㄱ")
+        tap("ㅏ")
+        XCTAssertEqual(target.text, "가")
+        tap(.space)
+        XCTAssertEqual(target.text, "가 ")
+        tap("ㅎ")
+        engine.deleteBackward()
+        XCTAssertEqual(target.text, "가 ")
+        tap(.space)
+        XCTAssertEqual(target.text, "가  ", "not '가. '")
+    }
+
     /// A page switch commits; punctuation then types as usual.
     func testPageSwitchCommits() {
         tap("ㅎ")
@@ -197,5 +251,45 @@ final class HangulKeyboardTests: XCTestCase {
         tap("ㅂ")
         XCTAssertEqual(target.text, "ㅂ")
         XCTAssertFalse(engine.isUppercase)
+    }
+}
+
+/// Settings › Experiments › Korean keyboard's language gating, with its flag in a test's own
+/// defaults and the pure helpers taking it directly.
+final class KoreanKeyboardGatingTests: XCTestCase {
+    private var suiteName: String!
+    private var defaults: UserDefaults!
+
+    override func setUp() async throws {
+        suiteName = "KoreanKeyboardGatingTests-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+    }
+
+    override func tearDown() async throws {
+        defaults.removePersistentDomain(forName: suiteName)
+    }
+
+    func testKoreanIsIgnoredWhileTheExperimentIsOff() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .korean]
+        settings.currentKeyboardLanguage = .korean
+        defaults.set(false, forKey: KoreanKeyboardExperiment.key)
+
+        XCTAssertEqual(settings.keyboardLanguages, [.english], "a stored ko is ignored")
+        XCTAssertNil(settings.currentKeyboardLanguage, "a stored ko is ignored")
+        XCTAssertNil(KeyboardLanguage.matching("ko-KR", koreanEnabled: false))
+        XCTAssertFalse(KeyboardLanguage.selectable(koreanEnabled: false).contains(.korean))
+    }
+
+    func testKoreanAppearsWhileTheExperimentIsOn() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .korean]
+        settings.currentKeyboardLanguage = .korean
+        defaults.set(true, forKey: KoreanKeyboardExperiment.key)
+
+        XCTAssertEqual(settings.keyboardLanguages, [.english, .korean])
+        XCTAssertEqual(settings.currentKeyboardLanguage, KeyboardLanguage.korean)
+        XCTAssertEqual(KeyboardLanguage.matching("ko-KR", koreanEnabled: true), KeyboardLanguage.korean)
+        XCTAssertTrue(KeyboardLanguage.selectable(koreanEnabled: true).contains(.korean))
     }
 }

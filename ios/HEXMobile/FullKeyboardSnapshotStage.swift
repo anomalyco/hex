@@ -595,6 +595,7 @@ class FixtureTextTarget: KeyboardTextTarget {
     var enablesReturnKeyAutomatically: Bool? = false
     var smartQuotesType: UITextSmartQuotesType?
     var smartDashesType: UITextSmartDashesType?
+    var selectedText: String?
     var documentIdentifier: UUID?
 
     init(text: String = "", appearance: UIKeyboardAppearance? = nil) {

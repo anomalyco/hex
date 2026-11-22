@@ -96,7 +96,7 @@ final class FullKeyboardEngine {
     private(set) var touches: [Int: ActiveTouch] = [:]
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
-    private var lastSpaceAt: TimeInterval?
+    var lastSpaceAt: TimeInterval?
     /// The text before the cursor just after a suggestion typed its word and a space (or held
     /// it, `spacePending`). A space typed next, while the text is still that, is swallowed.
     var suggestionSpaceBefore: String?
@@ -322,7 +322,7 @@ final class FullKeyboardEngine {
             layerState.reset(to: .numbers)
         }
         shift.reset()
-        korean.composer.reset()
+        korean.reset()
         lastSpaceAt = nil
         suggestionSpaceBefore = nil
         forgetTypingContext()

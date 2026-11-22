@@ -214,6 +214,7 @@ extension FullKeyboardEngine {
     /// cursor as any dictation would. True when the range was replaced.
     @discardableResult
     func applyPendingSelectionDictation() -> Bool {
+        commitHangulComposition()
         guard let pending = trackpadSelectionState.pendingDictation else { return false }
         trackpadSelectionState.pendingDictation = nil
         let reason: String?
@@ -319,6 +320,7 @@ extension FullKeyboardEngine {
 
     /// Move to the range's end and take its characters out one by one: a 👍🏽 is one.
     private func deleteSelectedRange(_ session: TrackpadSelectionSession, source: String) {
+        commitHangulComposition()
         let delta = session.endFromAnchor
         if delta != 0 {
             typingLog?.edit("cursor", [

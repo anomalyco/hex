@@ -27,6 +27,13 @@ nonisolated enum KoreanKeyboardExperiment {
     static var isEnabled: Bool {
         UserDefaults(suiteName: KeyboardBridge.appGroup)?.bool(forKey: key) ?? false
     }
+
+    /// The flag in a store a caller already owns (LanguageSettings' injected defaults), so a
+    /// test's own suite decides without touching the App Group.
+    static func isEnabled(in defaults: UserDefaults?) -> Bool {
+        guard let defaults else { return isEnabled }
+        return defaults.object(forKey: key) as? Bool ?? false
+    }
 }
 
 /// The full keyboard's switches in the shared App Group.
