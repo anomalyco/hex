@@ -776,9 +776,10 @@ never at a launch by itself.
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Korean keyboard (두벌식), Dvorak punctuation
-    keys, Comma and period keys, ABC under the emoji key, Keyboard themes (its Theme menu below
-    the switch while it's on), Two-thumb selection, Delete swiped words letter by letter, Hide
-    word suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
+    keys, Comma and period keys, Quick accents, ABC under the emoji key, Keyboard themes (its
+    Theme menu below the switch while it's on), Two-thumb selection, Delete swiped words
+    letter by letter, Hide word suggestions, Join the keyboard when unfolded, and Multilingual
+    model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1569,6 +1570,17 @@ never at a launch by itself.
   off the keys it types nothing and the page stays. Holding shift and sliding to a letter
   shows and types its capital. None of them is a swipe, and a slid-to key opens no
   accent menu (Apple's does after a hold).
+- **Quick accents (full keyboard, Settings › Experiments):** Off by default
+  (`experiments.quickAccents`, App Group). Holding a letter opens its callout with the letter's
+  main accent selected — the first variant after the key's own in its language's holds
+  (`AccentCatalog.primaryVariant`: Spanish a → á, and Á with shift) — so letting go where the
+  finger landed types it. The cell under the finger when the callout opened is remembered
+  (`accentOpenCell`), so the preselection stands until the finger moves into another cell,
+  where sliding picks that one as before; letting go far below still cancels, and another key
+  going down while the callout is held commits the preselection. Only letters: the 123 and
+  #+= pages' held symbols, and the mark keys ˇ and ʼ, keep the key's own selected. Off, the
+  callout opens on the key's own letter. Unit tests only (`FullKeyboardEngineTests`): no CI
+  compiles the iOS targets, and no physical iPhone run checks it.
 - **Emoji (Settings › Keyboard › Emoji, for the full keyboard):** On by default (stored as
   `experiments.emoji` from when it was an experiment off by default: unset or true is on,
   false off, so testers who turned it off keep it off). An emoji key

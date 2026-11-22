@@ -495,6 +495,67 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertEqual(engine.shift.state, .off)
     }
 
+    /// Settings › Experiments › Quick accents: a held letter's callout opens on its main accent
+    /// (Spanish A's á), so letting go where it opened types it, sliding into another cell still
+    /// picks that one, and another key going down commits the preselection too. Off, the key's
+    /// own stays selected, as before.
+    func testQuickAccentsOpensOnTheMainAccentAndTypesItOnRelease() {
+        engine.language = .spanish
+        XCTAssertFalse(FullKeyboardSettings(defaults: defaults).quickAccents, "off by default")
+        engine.quickAccentsEnabled = true
+
+        down(1, .character("a"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 1))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "á", "the main accent, not the key's own")
+        // A finger that hasn't left the cell it opened over leaves the preselection alone.
+        engine.touchMoved(id: 1, to: point(.character("a")))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "á")
+        up(1, .character("a"))
+        XCTAssertEqual(target.text, "á")
+
+        // Sliding into another cell still picks it.
+        down(2, .character("e"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 2))
+        let menu = try! XCTUnwrap(engine.activeAccentMenu)
+        XCTAssertEqual(menu.selectedOption, "é")
+        let cell = menu.cellFrames[menu.options.firstIndex(of: "è")!]
+        engine.touchMoved(id: 2, to: CGPoint(x: cell.midX, y: cell.midY))
+        engine.touchEnded(id: 2, at: CGPoint(x: cell.midX, y: cell.midY))
+        XCTAssertEqual(target.text, "áè")
+
+        // Another key going down while the callout is held commits what it preselected.
+        down(3, .character("a"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 3))
+        down(4, .character("b"))
+        up(4, .character("b"))
+        up(3, .character("a"))
+        XCTAssertEqual(target.text, "áèáb")
+
+        // Capitals use the callout's own uppercase mapping.
+        tap(.shift)
+        down(5, .character("a"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 5))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "Á")
+        up(5, .character("a"))
+        XCTAssertEqual(target.text, "áèábÁ")
+
+        engine.quickAccentsEnabled = false
+        down(6, .character("a"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 6))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "a", "off: the key's own, as before")
+        up(6, .character("a"))
+        XCTAssertEqual(target.text, "áèábÁa")
+
+        // The 123 page's held symbols keep the key's own selected.
+        engine.quickAccentsEnabled = true
+        tap(.layerSwitch(.numbers))
+        down(7, .character("1"))
+        XCTAssertTrue(engine.openAccentMenuIfEligible(forTouch: 7))
+        XCTAssertEqual(engine.activeAccentMenu?.selectedOption, "1")
+        up(7, .character("1"))
+        XCTAssertEqual(target.text, "áèábÁa1")
+    }
+
     func testSpacebarTrackpadMovesCaretWithoutInsertingSpace() {
         type("helo")
         let spaceStart = point(.space)

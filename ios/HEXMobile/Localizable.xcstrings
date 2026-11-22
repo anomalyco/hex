@@ -1188,6 +1188,26 @@
         }
       }
     },
+    "Quick accents" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快捷变音符号"
+          }
+        }
+      }
+    },
+    "Holding a letter selects its main accent, so letting go types it. Slide to pick another." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按住字母会选中它的主要变音符号，松开即输入。滑动可选择其他变音符号。"
+          }
+        }
+      }
+    },
     "Edited" : {
       "localizations" : {
         "zh-Hans" : {

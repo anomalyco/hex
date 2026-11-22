@@ -160,6 +160,10 @@ final class FullKeyboardEngine {
     var commaPeriodKeys = false {
         didSet { if commaPeriodKeys != oldValue { rebuildLayout(cause: "comma_period_keys") } }
     }
+    /// Settings › Experiments › Quick accents (off by default): a held letter's callout opens
+    /// on its main accent (`AccentCatalog.primaryVariant`, Spanish "a" → "á"), so letting go
+    /// types it; sliding into another cell still picks that one.
+    var quickAccentsEnabled = false
     /// Whether the keys have the number row's band: its switch is on and this is an iPhone (the
     /// iPad keeps Apple's rows; `KeyboardMetrics.for`).
     var hasNumberRow: Bool { showsNumberRow && pad == nil }
@@ -565,6 +569,7 @@ final class FullKeyboardEngine {
         }
         activeAccentTouchID = id
         accentOpenCell = activeAccentMenu?.index(for: touch.point)
+        preselectQuickAccent(for: base)
         typingLog?.ui("accent_open", [
             TypingLogField("id", .int(id)),
             TypingLogField("key", .string(TypingLogger.keyID(touch.key.kind))),
@@ -582,6 +587,23 @@ final class FullKeyboardEngine {
         accentOpenCell = nil
         onSelectionStep?()
         onChange?()
+    }
+
+    /// Settings › Experiments › Quick accents: opens the callout on the held letter's main
+    /// accent. Letters on the letters page only, so the 123 and #+= pages' held symbols and the
+    /// mark keys ˇ and ʼ keep the key's own. `accentOpenCell` still holds the cell under the
+    /// finger at opening, so only a slide into another cell changes the selection; a lift in
+    /// place types the accent.
+    private func preselectQuickAccent(for base: String) {
+        guard quickAccentsEnabled, layerState.layer == .letters,
+              base.first?.isLetter == true, base.uppercased() != base,
+              var menu = activeAccentMenu,
+              let primary = AccentCatalog.primaryVariant(
+                  for: base, uppercase: isUppercase, language: layout.language, letters: layout.letters
+              ),
+              let index = menu.options.firstIndex(of: primary) else { return }
+        menu.selectedIndex = index
+        activeAccentMenu = menu
     }
 
     /// The callout's selection for a finger at `point` (`accentOpenCell`).

@@ -95,6 +95,7 @@ struct FullKeyboardSettings {
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
         static let commaPeriodKeys = "experiments.commaPeriodKeys"
+        static let quickAccents = "experiments.quickAccents"
     }
 
     private let defaults: UserDefaults?
@@ -324,6 +325,15 @@ struct FullKeyboardSettings {
     var commaPeriodKeys: Bool {
         get { defaults?.bool(forKey: Key.commaPeriodKeys) ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.commaPeriodKeys) }
+    }
+
+    /// Settings › Experiments › Quick accents: a held letter's callout opens on its main accent,
+    /// the first variant after the key's own (Spanish "a" → "á"), so letting go types it.
+    /// Sliding still picks another, and the 123 and #+= pages' held symbols are unchanged. Off
+    /// by default, like every experiment. Stored as `experiments.quickAccents`.
+    var quickAccents: Bool {
+        get { defaults?.bool(forKey: Key.quickAccents) ?? false }
+        nonmutating set { defaults?.set(newValue, forKey: Key.quickAccents) }
     }
 
     /// Settings › Keyboard › Auto-start: when the dictation bar starts dictating by itself.

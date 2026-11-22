@@ -38,6 +38,21 @@ nonisolated enum AccentCatalog {
         return uppercase ? list.map(upper) : list
     }
 
+    /// Settings › Experiments › Quick accents: the first variant after the key's own in its
+    /// list (Spanish "a" → "á", and in capitals "A" → "Á"), in the callout's own spelling.
+    /// Nil when the key holds nothing else.
+    static func primaryVariant(
+        for base: String,
+        uppercase: Bool,
+        language: KeyboardLanguage = .english,
+        letters: KeyboardLetterLayout? = nil
+    ) -> String? {
+        guard let options = options(for: base, uppercase: uppercase, language: language, letters: letters) else {
+            return nil
+        }
+        return options.dropFirst().first
+    }
+
     /// Greek capitals: ς is Σ itself and ΐ ΰ have no capital of their own, so the system
     /// keyboard's held Σ offers nothing, and Ι and Υ only Ί Ϊ and Ύ Ϋ.
     private static let greekWithoutCapitals: Set<String> = ["ς", "ΐ", "ΰ"]

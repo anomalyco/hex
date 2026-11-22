@@ -2907,10 +2907,10 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   `AppleSpeechAssetReservationsTests`); no physical iPhone run checks either deadline.
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
-│   Korean keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, ABC under the
-│   emoji key, Keyboard themes (Black, White, Navy, Forest, Ember), Two-thumb selection,
-│   Delete swiped words letter by letter, Hide word suggestions, Join the keyboard when
-│   unfolded, Learn each language separately
+│   Korean keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents,
+│   ABC under the emoji key, Keyboard themes (Black, White, Navy, Forest, Ember), Two-thumb
+│   selection, Delete swiped words letter by letter, Hide word suggestions, Join the
+│   keyboard when unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -3037,6 +3037,17 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   row 1 are unchanged; off, every layout is key for key the one it was.
 │   Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the iOS
 │   targets, and no physical iPhone run checks it
+├── Quick accents (off by default, `experiments.quickAccents`): a held letter's callout opens
+│   on its main accent, the first variant after the key's own in the language's
+│   `letterHolds` (Spanish a → á, and Á with shift), found where the arrangement put it, so
+│   letting go in place types it. The cell under the finger at opening (`accentOpenCell`) is
+│   remembered, so the preselection stands until the finger moves into another cell, where
+│   sliding picks that one as before; letting go far below still cancels, and another key
+│   going down while the callout is held commits the preselection. Letters only: the 123 and
+│   #+= pages' held symbols, and the mark keys ˇ and ʼ, keep the key's own selected. Off, the
+│   callout opens on the key's own, as before.
+│   Unit tests only (`FullKeyboardEngineTests`): no CI compiles the iOS targets, and no
+│   physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed
 │   or dictated in; on, the keys learn a language's typos and rejections from that
