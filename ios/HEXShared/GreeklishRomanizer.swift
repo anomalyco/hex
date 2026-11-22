@@ -1,6 +1,6 @@
 import Foundation
 
-/// Experiments › Greeklish: Greek dictation in Latin letters ("kalimera ti kanis"), so it reads
+/// Experiments › Greeklish: Greek dictation in Latin letters ("kalimera ti kaneis"), so it reads
 /// the way people text Greek. Apple's Greek speech model writes Greek in its own alphabet, so
 /// each Greek word is transliterated by rule: accents and diaeresis go first (\u{0301} tonos,
 /// \u{0308} diaeresis, and the polytonic marks), then the digraphs people write as one sound
@@ -167,6 +167,15 @@ nonisolated enum GreeklishRomanizer {
         case "χ": return "ch"
         case "ψ": return "ps"
         case "ω": return "o"
+        // Variant Greek letters people's keyboards and fonts use, read as their base letter.
+        case "ϐ": return "v"
+        case "ϑ": return "th"
+        case "ϕ": return "f"
+        case "ϖ": return "p"
+        case "ϰ": return "k"
+        case "ϱ": return "r"
+        case "ϲ": return "s"
+        case "ϵ": return "e"
         default: return String(letter)
         }
     }

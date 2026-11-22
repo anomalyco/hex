@@ -55,6 +55,18 @@ final class GreeklishRomanizerTests: XCTestCase {
         XCTAssertEqual(GreeklishRomanizer.romanize("α\u{0301}λλος"), "allos")
     }
 
+    /// Variant Greek letters copied from fonts and keyboards read as their base letter.
+    func testVariantLettersUseTheirBaseLetters() {
+        let cases = [
+            "ϐ": "v", "ϑ": "th", "ϕ": "f", "ϖ": "p",
+            "ϰ": "k", "ϱ": "r", "ϲ": "s", "ϵ": "e",
+            "ϑεός": "theos", "ϕίλος": "filos",
+        ]
+        for (greek, latin) in cases {
+            XCTAssertEqual(GreeklishRomanizer.romanize(greek), latin, greek)
+        }
+    }
+
     /// A diaeresis marks a new vowel, so it never joins the digraph beside it: "οϋ" is "oy",
     /// and "ουϊ" keeps its ϊ as i.
     func testDiaeresisBlocksDigraphs() {
@@ -107,7 +119,7 @@ final class GreeklishRomanizerTests: XCTestCase {
     /// Greeklish runs first, only for Greek and only while the experiment is on; what was heard
     /// is kept in Latin to learn from.
     @MainActor
-    func testStylesApplyToGreeklish() async {
+    func testStylesApplyToGreeklish() async throws {
         var pipeline = DictationPipeline(style: .verbatim, language: "el-GR", greeklish: true)
         var stages = await pipeline.run("Θα αργήσω 10 λεπτά")
         XCTAssertEqual(stages.heard, "Tha argiso 10 lepta")
@@ -121,7 +133,9 @@ final class GreeklishRomanizerTests: XCTestCase {
         let english = await DictationPipeline(style: .verbatim, language: "en-US", greeklish: true).run("Καλημέρα")
         XCTAssertEqual(english.formatted, "Καλημέρα", "only Greek")
 
-        let defaults = UserDefaults(suiteName: "hex.tests.\(UUID().uuidString)")!
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
         let settings = GreeklishSettings(defaults: defaults)
         XCTAssertFalse(settings.isEnabled, "off by default")
         XCTAssertNil(settings.name(for: "el-GR"))
