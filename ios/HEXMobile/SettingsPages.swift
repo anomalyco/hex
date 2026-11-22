@@ -41,7 +41,7 @@ struct DictationSettingsPage: View {
                 // After the style, on every path (`DictationPipeline`).
                 SettingsToggleRow(
                     title: String(localized: "Lowercase"),
-                    detail: String(localized: "Lowercases everything"),
+                    detail: String(localized: "No capital letters"),
                     isOn: $lowercase
                 )
 
@@ -59,7 +59,7 @@ struct DictationSettingsPage: View {
                 // Inside the style, on every path but Verbatim (`SpokenPunctuation`).
                 SettingsToggleRow(
                     title: String(localized: "Spoken punctuation"),
-                    detail: String(localized: "Say “comma” or “question mark” for the mark"),
+                    detail: String(localized: "Say “comma” or “question mark”"),
                     isOn: $spokenPunctuation
                 )
 
@@ -68,7 +68,7 @@ struct DictationSettingsPage: View {
                 // Inside the style, on every path but Verbatim (`TranscriptFormatter`).
                 SettingsToggleRow(
                     title: String(localized: "End with a period"),
-                    detail: String(localized: "Off drops the final period, keeps ? and !"),
+                    detail: String(localized: "Off still keeps ? and !"),
                     isOn: $endsWithPeriod
                 )
 
@@ -85,7 +85,7 @@ struct DictationSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Clean up what I say"),
-                    detail: String(localized: "Drops ums, repeats and corrected words"),
+                    detail: String(localized: "Removes filler words and false starts"),
                     isOn: $cleanupTagger
                 )
 
@@ -210,7 +210,7 @@ private extension DictationBarAutoStart {
     var detail: String {
         switch self {
         case .never: String(localized: "Tap Dictate to start")
-        case .whenSwitching: String(localized: "When you switch back to Hex in a field")
+        case .whenSwitching: String(localized: "When you switch to Hex")
         case .always: String(localized: "Each time the dictation bar opens")
         }
     }
@@ -247,7 +247,7 @@ private enum HexKeySide: CaseIterable {
 /// and haptics, which the dictation bar uses too. Below, Swipe typing, which says it needs
 /// the full keyboard while the dictation bar is chosen, and Emoji (on by default, with Clear
 /// emoji history while it's on), the bar's emoji key too. The dictation bar and Haptics say
-/// they need Full Access, and say it isn't on yet until a keyboard with it has reported in.
+/// they need Full Access until a keyboard with it has reported in.
 struct KeyboardSettingsPage: View {
     /// `KeyboardSetupMonitor.fullAccessOn`.
     let fullAccessOn: Bool
@@ -268,27 +268,10 @@ struct KeyboardSettingsPage: View {
     @State private var autoStart = FullKeyboardSettings().dictationBarAutoStart
     @State private var practiceText = ""
 
-    /// On an iPad, while Full is chosen, the row says the full keyboard is there too: it shows
-    /// the dictation bar only when that is chosen, as on an iPhone (until build 117 an iPad
-    /// always showed the bar).
-    /// Hex runs there as an iPhone app, whose interface idiom says phone, so this reads the
-    /// hardware model (the simulated one in the simulator).
-    private static let runsOnPad: Bool = {
-        if let simulated = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
-            return simulated.hasPrefix("iPad")
-        }
-        var system = utsname()
-        uname(&system)
-        let model = withUnsafeBytes(of: &system.machine) { raw in
-            String(decoding: raw.prefix { $0 != 0 }, as: UTF8.self)
-        }
-        return model.hasPrefix("iPad")
-    }()
-
-    /// A row's detail for something that needs Full Access: the detail, or while Full Access
-    /// isn't on, that it isn't (as Swipe typing says it needs the full keyboard).
-    private func fullAccessNeed(_ detail: String) -> String {
-        fullAccessOn ? detail : String(localized: "Needs Full Access, which isn't on yet")
+    /// The detail of a row that needs Full Access: none while it's on, and while it isn't, that
+    /// the row needs it (as Swipe typing says it needs the full keyboard).
+    private var fullAccessNeed: String? {
+        fullAccessOn ? nil : String(localized: "Needs Full Access")
     }
 
     var body: some View {
@@ -297,9 +280,7 @@ struct KeyboardSettingsPage: View {
                 HStack(spacing: 12) {
                     SettingsRowLabel(
                         title: String(localized: "Keyboard"),
-                        detail: fullKeyboard
-                            ? (Self.runsOnPad ? String(localized: "The full keyboard works on iPad too") : nil)
-                            : fullAccessNeed(String(localized: "The dictation bar needs Full Access"))
+                        detail: fullKeyboard ? nil : fullAccessNeed
                     )
                     Spacer(minLength: 8)
                     SettingsSegments(
@@ -365,7 +346,6 @@ struct KeyboardSettingsPage: View {
 
                     SettingsToggleRow(
                         title: String(localized: "Auto-capitalization"),
-                        detail: String(localized: "Capitalizes the start of sentences"),
                         isOn: $autoCapitalization
                     )
 
@@ -382,7 +362,7 @@ struct KeyboardSettingsPage: View {
 
                         SettingsToggleRow(
                             title: String(localized: "Spatial autocorrect"),
-                            detail: String(localized: "Uses where you tap, in English and Spanish"),
+                            detail: String(localized: "English and Spanish only"),
                             isOn: $spatialAutocorrect
                         )
                     }
@@ -403,7 +383,6 @@ struct KeyboardSettingsPage: View {
 
                     SettingsToggleRow(
                         title: String(localized: "Key pop-ups"),
-                        detail: String(localized: "Shows the letter above your finger"),
                         isOn: $keyPopups
                     )
                 }
@@ -412,7 +391,7 @@ struct KeyboardSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Haptics"),
-                    detail: fullAccessNeed(String(localized: "A tap as you press Hex's keys. Needs Full Access")),
+                    detail: fullAccessNeed,
                     isOn: $haptics
                 )
 
@@ -438,7 +417,7 @@ struct KeyboardSettingsPage: View {
                 SettingsToggleRow(
                     title: String(localized: "Swipe typing"),
                     detail: fullKeyboard
-                        ? String(localized: "Slide across a word's letters, in English and Spanish")
+                        ? String(localized: "English and Spanish only")
                         : String(localized: "Needs the full keyboard"),
                     isOn: $swipeTyping
                 )
@@ -543,7 +522,7 @@ struct PrivacySettingsPage: View {
                 // dictation bar inserts. On until turned off (`TypingJournalSettings`).
                 SettingsToggleRow(
                     title: String(localized: "Learn how I type"),
-                    detail: String(localized: "Learns on this iPhone from your taps and the words you fix with Hex, never from what you write elsewhere"),
+                    detail: String(localized: "Learns from your taps and the words you fix in Hex"),
                     isOn: $learnTyping
                 )
 
@@ -563,7 +542,7 @@ struct PrivacySettingsPage: View {
                 // Turning it on asks first (App Review 2.5.14); turning it off doesn't.
                 SettingsToggleRow(
                     title: String(localized: "Record typing logs"),
-                    detail: String(localized: "Records taps and the text you type for 14 days, on this iPhone, to export. Off by default."),
+                    detail: String(localized: "Keeps 14 days of taps and typed text to export"),
                     isOn: Binding(
                         get: { typingLogs },
                         set: { on in
@@ -581,7 +560,7 @@ struct PrivacySettingsPage: View {
                         typingLogs = true
                     }
                 } message: {
-                    Text("Hex's keyboard will record each tap and the text you type or dictate with it, including the text around the cursor, for 14 days. The logs stay on this iPhone for you to export or delete. Password, code and card fields are never recorded.")
+                    Text("The Hex keyboard will record each tap and the text you type or dictate, including text around the cursor, for 14 days. Logs stay on this iPhone. Password, code and card fields are never recorded.")
                 }
 
                 if typingLogs {
@@ -637,7 +616,7 @@ struct ExperimentsSettingsPage: View {
             SettingsCard {
                 SettingsToggleRow(
                     title: String(localized: "Hinglish (Hindi in Latin letters)"),
-                    detail: String(localized: "Pick Hinglish as your dictation language"),
+                    detail: String(localized: "Adds Hinglish to dictation languages"),
                     isOn: $hinglish
                 )
 
@@ -654,7 +633,7 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Adaptive touch"),
-                    detail: String(localized: "Learns where you land on the keys on this device. Stores averages, not what you type."),
+                    detail: String(localized: "Learns where you tap each key. Stores no text."),
                     isOn: $adaptiveTouch
                 )
 
@@ -680,7 +659,7 @@ struct ExperimentsSettingsPage: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .confirmationDialog("Forget where you land on the keys?", isPresented: $confirmingTouchReset, titleVisibility: .visible) {
+                    .confirmationDialog("Reset touch learning?", isPresented: $confirmingTouchReset, titleVisibility: .visible) {
                         Button("Reset touch learning", role: .destructive) {
                             AdaptiveTouchSettings().requestReset()
                             refreshAdaptiveTouchStatus()
@@ -694,7 +673,7 @@ struct ExperimentsSettingsPage: View {
                 // then only while Spatial autocorrect is on too (Settings › Keyboard).
                 SettingsToggleRow(
                     title: String(localized: "German spatial autocorrect"),
-                    detail: String(localized: "Uses where you tap on the Deutsch keyboard"),
+                    detail: String(localized: "Needs Spatial autocorrect"),
                     isOn: $germanSpatialAutocorrect
                 )
 
@@ -703,7 +682,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: the emoji panel's ABC stays where it always was.
                 SettingsToggleRow(
                     title: String(localized: "ABC under the emoji key"),
-                    detail: String(localized: "In the emoji panel, ABC sits where the emoji key was, so you can switch back without moving your thumb."),
+                    detail: String(localized: "In the emoji panel, ABC takes the emoji key's place"),
                     isOn: $emojiLettersUnderEmojiKey
                 )
 
@@ -712,7 +691,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: a second finger on the trackpad is ignored, as before.
                 SettingsToggleRow(
                     title: String(localized: "Two-thumb selection"),
-                    detail: String(localized: "With the space bar as a trackpad, a second thumb selects: each thumb moves one end."),
+                    detail: String(localized: "On the space bar trackpad, a second thumb selects text"),
                     isOn: $twoThumbSelection
                 )
 
@@ -721,7 +700,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: delete right after a swipe takes one letter, as anywhere else.
                 SettingsToggleRow(
                     title: String(localized: "Delete swiped words letter by letter"),
-                    detail: String(localized: "Right after a swipe, delete takes one letter at a time instead of the whole word."),
+                    detail: String(localized: "Instead of the whole word at once"),
                     isOn: $deletesSwipedWordsLetterByLetter
                 )
 
@@ -730,7 +709,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: the strip above the keys hides its words, not itself.
                 SettingsToggleRow(
                     title: String(localized: "Hide word suggestions"),
-                    detail: String(localized: "On the full keyboard, the bar above the keys stops suggesting words. Autocorrect still fixes words as you type, and the Hex key and Paste stay."),
+                    detail: String(localized: "Autocorrect still works"),
                     isOn: $hideWordSuggestions
                 )
 
@@ -739,7 +718,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: one shared list of learned words and fixes, as before.
                 SettingsToggleRow(
                     title: String(localized: "Learn each language separately"),
-                    detail: String(localized: "Keeps learned words and fixes with the language you used them in."),
+                    detail: String(localized: "Learned words and fixes stay with their language"),
                     isOn: $learnPerLanguage
                 )
 
@@ -750,7 +729,7 @@ struct ExperimentsSettingsPage: View {
                 SettingsToggleRow(
                     title: String(localized: "Multilingual model (Parakeet)"),
                     detail: multilingualParakeetFits
-                        ? String(localized: "25 languages, even mixed in a sentence. \(Self.multilingualParakeetSize) download, Wi-Fi recommended. Once it's ready, keyboard dictation opens Hex.")
+                        ? String(localized: "25 languages, even mixed in one sentence. \(Self.multilingualParakeetSize) download. Once ready, keyboard dictation opens Hex.")
                         : String(localized: "Needs an iPhone with 6 GB of memory or more"),
                     isOn: $multilingualParakeet
                 )
@@ -825,11 +804,11 @@ struct ExperimentsSettingsPage: View {
     private var adaptiveTouchStatusText: String {
         switch adaptiveTouchStatus {
         case .sessionOnly:
-            String(localized: "Session only: without Full Access, it forgets when the keyboard closes")
+            String(localized: "Without Full Access, resets when the keyboard closes")
         case .learning(let taps):
             String(localized: "Learning: \(taps) of \(AdaptiveTouchModel.activeTaps) taps")
         case .active:
-            String(localized: "Active: your taps are read with your own key centres")
+            String(localized: "Active, using your own key centers")
         }
     }
 
@@ -849,7 +828,7 @@ private struct EmojiRows: View {
         SettingsToggleRow(
             title: String(localized: "Emoji"),
             detail: fullKeyboard
-                ? String(localized: "An emoji key with suggestions as you type")
+                ? String(localized: "Emoji key and suggestions")
                 : String(localized: "An emoji key on the dictation bar"),
             isOn: $emoji
         )

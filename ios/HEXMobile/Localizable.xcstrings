@@ -14,32 +14,32 @@
         }
       }
     },
-    "Checking Apple's on-device speech" : {
+    "Checking speech recognition" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在检查 Apple 的设备端语音识别"
+            "value" : "正在检查语音识别"
           }
         }
       }
     },
-    "Allow Speech Recognition. It stays on this iPhone." : {
+    "Allow Speech Recognition" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请允许语音识别。识别全程在这台 iPhone 上进行。"
+            "value" : "请允许语音识别"
           }
         }
       }
     },
-    "Allow Speech Recognition for Hex in Settings. It runs on this iPhone." : {
+    "Allow Speech Recognition for Hex in Settings." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置”中允许 Hex 使用语音识别。识别在这台 iPhone 上进行。"
+            "value" : "请在“设置”中允许 Hex 使用语音识别。"
           }
         }
       }
@@ -54,12 +54,12 @@
         }
       }
     },
-    "iOS 18 couldn't translate the last dictation while Hex was in the background. Dictations you finish in Hex translate." : {
+    "On iOS 18, dictations translate only with Hex open." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hex 在后台时，iOS 18 未能翻译上一次听写。在 Hex 中完成的听写会被翻译。"
+            "value" : "在 iOS 18 上，只有 Hex 打开时听写才会翻译。"
           }
         }
       }
@@ -204,12 +204,12 @@
         }
       }
     },
-    "Optimizing for this iPhone… about a minute" : {
+    "Optimizing for this iPhone, about a minute" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在为这台 iPhone 优化…约需一分钟"
+            "value" : "正在为这台 iPhone 优化，约需一分钟"
           }
         }
       }
@@ -254,12 +254,12 @@
         }
       }
     },
-    "Slide along the space bar right away to switch. Hold it first and the slide moves the cursor." : {
+    "Slide the space bar to switch. Hold it first to move the cursor." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按下空格键后立即滑动即可切换语言。先按住再滑动则移动光标。"
+            "value" : "滑动空格键即可切换。先按住再滑动则移动光标。"
           }
         }
       }
@@ -383,12 +383,12 @@
         }
       }
     },
-    "%@, like your dictation language" : {
+    "%@, same as dictation" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@，与听写语言一致"
+            "value" : "%@，与听写相同"
           }
         }
       }
@@ -517,16 +517,6 @@
     "A" : {
       "shouldTranslate" : false
     },
-    "A tap as you press Hex's keys. Needs Full Access" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "按下 Hex 的按键时会有触感，需开启完全访问"
-          }
-        }
-      }
-    },
     "Acknowledgements" : {
       "localizations" : {
         "zh-Hans" : {
@@ -640,12 +630,12 @@
         }
       }
     },
-    "An emoji key with suggestions as you type" : {
+    "Emoji key and suggestions" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "表情符号键，并在打字时给出建议"
+            "value" : "表情符号键和建议"
           }
         }
       }
@@ -700,22 +690,22 @@
         }
       }
     },
-    "Apple Speech can't transcribe this language on this iPhone." : {
+    "Apple's speech recognition can't dictate this language on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple 语音识别无法在这台 iPhone 上转录这种语言。"
+            "value" : "Apple 的语音识别无法在这台 iPhone 上听写这种语言。"
           }
         }
       }
     },
-    "Apple Speech did not detect any speech." : {
+    "No speech heard." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple 语音识别没有检测到任何语音。"
+            "value" : "没有听到语音。"
           }
         }
       }
@@ -820,22 +810,12 @@
         }
       }
     },
-    "Capitalizes the start of sentences" : {
+    "Car mic in CarPlay, otherwise iPhone" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "句首字母自动大写"
-          }
-        }
-      }
-    },
-    "Car mic in CarPlay, else iPhone mic" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "CarPlay 中用车载麦克风，其余用 iPhone"
+            "value" : "CarPlay 中用车载麦克风，其他情况用 iPhone"
           }
         }
       }
@@ -1028,12 +1008,12 @@
         }
       }
     },
-    "Delete what Hex learned about your typing and dictation?" : {
+    "Delete what Hex learned?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "删除 Hex 从你的打字和听写中学到的内容？"
+            "value" : "删除 Hex 学到的内容？"
           }
         }
       }
@@ -1118,12 +1098,12 @@
         }
       }
     },
-    "The languages Apple's on-device speech has on this iPhone. One shows here once its keyboard and dictation are on in Settings › General › Keyboard." : {
+    "To add a language, turn on its keyboard and dictation in Settings › General › Keyboard." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Apple 设备端语音识别在这台 iPhone 上支持的语言。在“设置”›“通用”›“键盘”中打开某种语言的键盘和听写后，它就会显示在这里。"
+            "value" : "要添加语言，请在“设置”›“通用”›“键盘”中打开该语言的键盘和听写。"
           }
         }
       }
@@ -1138,12 +1118,12 @@
         }
       }
     },
-    "Discards the active Hex recording." : {
+    "Discards the recording." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "丢弃当前的 Hex 录音。"
+            "value" : "丢弃录音。"
           }
         }
       }
@@ -1178,12 +1158,12 @@
         }
       }
     },
-    "Drops ums, repeats and corrected words" : {
+    "Removes filler words and false starts" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "去掉“嗯”、重复和改口的词"
+            "value" : "去掉口头禅和改口"
           }
         }
       }
@@ -1208,22 +1188,22 @@
         }
       }
     },
-    "End warm microphone session" : {
+    "Turn off warm mic" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "结束麦克风待命"
+            "value" : "关闭麦克风待命"
           }
         }
       }
     },
-    "Every day's log is removed from this iPhone." : {
+    "All logs are deleted from this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每天的日志都会从这台 iPhone 上移除。"
+            "value" : "所有日志都会从这台 iPhone 上删除。"
           }
         }
       }
@@ -1268,12 +1248,12 @@
         }
       }
     },
-    "Fills in as you type and dictate with Hex" : {
+    "Nothing learned yet" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用 Hex 打字和听写时会逐渐填充"
+            "value" : "还没有学到内容"
           }
         }
       }
@@ -1451,12 +1431,12 @@
     "Hex" : {
       "shouldTranslate" : false
     },
-    "Hex closed while loading the speech model, likely short of memory. Close other apps, then tap Set up to try again." : {
+    "Hex closed while loading the speech model. Close other apps, then tap Set up." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hex 在加载语音模型时关闭了，可能是内存不足。请关闭其他 App，然后轻点“开始设置”重试。"
+            "value" : "Hex 在加载语音模型时关闭了。请关闭其他 App，然后轻点“开始设置”。"
           }
         }
       }
@@ -1531,12 +1511,12 @@
         }
       }
     },
-    "Hex's keyboard will record each tap and the text you type or dictate with it, including the text around the cursor, for 14 days. The logs stay on this iPhone for you to export or delete. Password, code and card fields are never recorded." : {
+    "The Hex keyboard will record each tap and the text you type or dictate, including text around the cursor, for 14 days. Logs stay on this iPhone. Password, code and card fields are never recorded." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hex 键盘会记录每一次轻点，以及你用它输入或听写的文字（包括光标周围的文字），保留 14 天。日志保存在这台 iPhone 上，供你导出或删除。密码、验证码和银行卡字段永远不会被记录。"
+            "value" : "Hex 键盘会记录每一次轻点，以及你输入或听写的文字（包括光标周围的文字），保留 14 天。日志保存在这台 iPhone 上。密码、验证码和银行卡字段永远不会被记录。"
           }
         }
       }
@@ -1691,12 +1671,12 @@
         }
       }
     },
-    "Learns on this iPhone from your taps and the words you fix with Hex, never from what you write elsewhere" : {
+    "Learns from your taps and the words you fix in Hex" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在这台 iPhone 上从你的轻点和你用 Hex 修正的词中学习，绝不从你在别处写的内容中学习"
+            "value" : "从你的轻点和你在 Hex 中修正的词中学习"
           }
         }
       }
@@ -1761,12 +1741,12 @@
         }
       }
     },
-    "Lowercases everything" : {
+    "No capital letters" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "全部转为小写"
+            "value" : "不使用大写字母"
           }
         }
       }
@@ -1801,12 +1781,12 @@
         }
       }
     },
-    "Off drops the final period, keeps ? and !" : {
+    "Off still keeps ? and !" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "关闭后去掉末尾的句号，保留问号和感叹号"
+            "value" : "关闭时仍保留问号和感叹号"
           }
         }
       }
@@ -1851,12 +1831,12 @@
         }
       }
     },
-    "Say “comma” or “question mark” for the mark" : {
+    "Say “comma” or “question mark”" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "说“comma”或“question mark”即可输入标点"
+            "value" : "说“comma”或“question mark”"
           }
         }
       }
@@ -1874,22 +1854,22 @@
         }
       }
     },
-    "Microphone access is off. Allow it in Settings to dictate." : {
+    "Allow microphone access in Settings to dictate." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "麦克风访问已关闭。请在“设置”中允许，以便听写。"
+            "value" : "请在“设置”中允许访问麦克风以便听写。"
           }
         }
       }
     },
-    "Microphone access is off. Allow it in Settings." : {
+    "Allow microphone access in Settings." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "麦克风访问已关闭。请在“设置”中允许。"
+            "value" : "请在“设置”中允许访问麦克风。"
           }
         }
       }
@@ -1904,12 +1884,12 @@
         }
       }
     },
-    "Needs Full Access, which isn't on yet" : {
+    "Needs Full Access" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "需开启完全访问，目前尚未开启"
+            "value" : "需开启完全访问"
           }
         }
       }
@@ -2037,12 +2017,12 @@
         }
       }
     },
-    "One file per day, kept 14 days, one event per line. Password, code and card fields are never logged." : {
+    "One file per day, kept for 14 days. Password, code and card fields are never logged." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "每天一个文件，保留 14 天，每行一个事件。密码、验证码和银行卡字段永远不会被记录。"
+            "value" : "每天一个文件，保留 14 天。密码、验证码和银行卡字段永远不会被记录。"
           }
         }
       }
@@ -2097,52 +2077,42 @@
         }
       }
     },
-    "Parakeet did not detect any speech." : {
+    "The speech model didn't download. Check your connection and try again." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet 没有检测到任何语音。"
+            "value" : "语音模型未能下载。请检查网络连接后重试。"
           }
         }
       }
     },
-    "Parakeet V2 didn't download. Check your connection and try again." : {
+    "Not enough memory for the speech model." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet V2 未能下载。请检查网络连接后重试。"
+            "value" : "内存不足，无法使用语音模型。"
           }
         }
       }
     },
-    "Parakeet V2 needs more memory than Hex has here." : {
+    "Not enough memory for the speech model. Hex is using Apple's speech recognition." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet V2 需要的内存比 Hex 在这台 iPhone 上可用的更多。"
+            "value" : "内存不足，无法使用语音模型。Hex 正在使用 Apple 的语音识别。"
           }
         }
       }
     },
-    "Parakeet needs more memory than Hex has here. Hex uses Apple's on-device speech instead." : {
+    "The speech model isn't ready." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet 需要的内存比 Hex 在这台 iPhone 上可用的更多，Hex 改用 Apple 的设备端语音识别。"
-          }
-        }
-      }
-    },
-    "Parakeet V2 is not ready." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Parakeet V2 尚未就绪。"
+            "value" : "语音模型尚未就绪。"
           }
         }
       }
@@ -2317,22 +2287,22 @@
         }
       }
     },
-    "Recording stopped unexpectedly." : {
+    "Recording stopped." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "录音意外停止。"
+            "value" : "录音已停止。"
           }
         }
       }
     },
-    "Records taps and the text you type for 14 days, on this iPhone, to export. Off by default." : {
+    "Keeps 14 days of taps and typed text to export" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在这台 iPhone 上记录 14 天内的轻点和输入的文字，供导出。默认关闭。"
+            "value" : "保留 14 天的轻点和输入的文字，供导出"
           }
         }
       }
@@ -2367,12 +2337,12 @@
         }
       }
     },
-    "Right after a swipe, delete takes one letter at a time instead of the whole word." : {
+    "Instead of the whole word at once" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "滑行键入后，删除键逐字删除，而不是删除整个词语。"
+            "value" : "而不是一次删除整个词语"
           }
         }
       }
@@ -2467,16 +2437,6 @@
         }
       }
     },
-    "Shows the letter above your finger" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在手指上方显示字母"
-          }
-        }
-      }
-    },
     "Siri is using the microphone. Try again." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2493,16 +2453,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂时跳过"
-          }
-        }
-      }
-    },
-    "Slide across a word's letters, in English and Spanish" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "滑过单词的字母来键入，支持英语和西班牙语"
           }
         }
       }
@@ -2597,42 +2547,42 @@
         }
       }
     },
-    "Starts Hex's warm microphone session so the keyboard can dictate without switching apps." : {
+    "Lets the keyboard dictate without opening Hex." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "让 Hex 的麦克风待命，键盘无需切换 App 即可听写。"
+            "value" : "让键盘无需打开 Hex 即可听写。"
           }
         }
       }
     },
-    "Starts or finishes on-device dictation and copies the transcript." : {
+    "Starts or finishes dictation and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开始或结束设备端听写，并拷贝转录文本。"
+            "value" : "开始或结束听写，并拷贝文字。"
           }
         }
       }
     },
-    "Starts recording on first press, then transcribes locally and copies to the clipboard on second press." : {
+    "Press once to record, again to copy the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "第一次按下开始录音，第二次按下在本地转录并拷贝到剪贴板。"
+            "value" : "按一下开始录音，再按一下拷贝文字。"
           }
         }
       }
     },
-    "Stops recording, transcribes on device, and copies the text." : {
+    "Stops recording and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "停止录音，在设备端转录并拷贝文字。"
+            "value" : "停止录音并拷贝文字。"
           }
         }
       }
@@ -2697,12 +2647,12 @@
         }
       }
     },
-    "Switch the language from the Hex key to speak another one." : {
+    "Change the spoken language from the Hex key." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要说另一种语言，请用 Hex 键切换语言。"
+            "value" : "可通过 Hex 键更改说话的语言。"
           }
         }
       }
@@ -2776,16 +2726,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下载已停止。请检查网络连接后重试。"
-          }
-        }
-      }
-    },
-    "The full keyboard works on iPad too" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "iPad 上也能使用完整键盘"
           }
         }
       }
@@ -2900,12 +2840,12 @@
         }
       }
     },
-    "Type with Hex's keyboard and each day's log shows up here." : {
+    "No logs yet" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "用 Hex 键盘打字后，每天的日志会显示在这里。"
+            "value" : "还没有日志"
           }
         }
       }
@@ -2940,12 +2880,12 @@
         }
       }
     },
-    "Uses where you tap, in English and Spanish" : {
+    "English and Spanish only" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按轻点位置改正，适用于英语和西班牙语"
+            "value" : "仅限英语和西班牙语"
           }
         }
       }
@@ -2983,7 +2923,7 @@
     "When are we reviewing the updated iOS keyboard build?" : {
       "shouldTranslate" : false
     },
-    "Where you tap off-centre" : {
+    "Where you tap off-center" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -3053,12 +2993,12 @@
         }
       }
     },
-    "Pick Hinglish as your dictation language" : {
+    "Adds Hinglish to dictation languages" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "将听写语言设为 Hinglish"
+            "value" : "在听写语言中加入 Hinglish"
           }
         }
       }
@@ -3093,12 +3033,12 @@
         }
       }
     },
-    "Hex hears you on this iPhone. Your voice never leaves it." : {
+    "Your voice never leaves this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hex 在这台 iPhone 上听你说话，你的声音不会离开它。"
+            "value" : "你的声音不会离开这台 iPhone。"
           }
         }
       }
@@ -3109,16 +3049,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跳过"
-          }
-        }
-      }
-    },
-    "The dictation bar needs Full Access" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "听写栏需开启完全访问"
           }
         }
       }
@@ -3193,26 +3123,6 @@
         }
       }
     },
-    "So Hex can hear you" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "让 Hex 能听见你"
-          }
-        }
-      }
-    },
-    "Hex keyboard" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hex 键盘"
-          }
-        }
-      }
-    },
     "With Full Access" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3233,12 +3143,12 @@
         }
       }
     },
-    "Finishing the speech model so Hex can hear you." : {
+    "Getting the speech model ready." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在完成语音模型，以便 Hex 能听见你。"
+            "value" : "正在准备语音模型。"
           }
         }
       }
@@ -3313,12 +3223,12 @@
         }
       }
     },
-    "Hex didn't hear any words. Try again a little louder." : {
+    "Hex didn't hear any words. Try speaking louder." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hex 没有听到任何字词。请大声一点再试一次。"
+            "value" : "Hex 没有听到任何字词。请大声一点说。"
           }
         }
       }
@@ -3333,12 +3243,12 @@
         }
       }
     },
-    "Turn on the microphone in Settings so Hex can hear you." : {
+    "Allow the microphone in Settings." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置”中打开麦克风，以便 Hex 能听见你。"
+            "value" : "请在“设置”中允许使用麦克风。"
           }
         }
       }
@@ -3373,22 +3283,22 @@
         }
       }
     },
-    "Learns where you land on the keys on this device. Stores averages, not what you type." : {
+    "Learns where you tap each key. Stores no text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "学习你在这台设备上轻点按键的落点。只存平均值，不存你输入的内容。"
+            "value" : "学习你轻点每个按键的位置。不存储文字。"
           }
         }
       }
     },
-    "Session only: without Full Access, it forgets when the keyboard closes" : {
+    "Without Full Access, resets when the keyboard closes" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "仅限本次：未开启完全访问时，键盘关闭后就会忘记"
+            "value" : "未开启完全访问时，键盘关闭后会重置"
           }
         }
       }
@@ -3403,12 +3313,12 @@
         }
       }
     },
-    "Active: your taps are read with your own key centres" : {
+    "Active, using your own key centers" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已生效：按你自己的按键中心识别轻点"
+            "value" : "已生效，使用你自己的按键中心"
           }
         }
       }
@@ -3423,12 +3333,12 @@
         }
       }
     },
-    "Forget where you land on the keys?" : {
+    "Reset touch learning?" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "要忘记你轻点按键的落点吗？"
+            "value" : "要重置触控学习吗？"
           }
         }
       }
@@ -3473,12 +3383,12 @@
         }
       }
     },
-    "Uses where you tap on the Deutsch keyboard" : {
+    "Needs Spatial autocorrect" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "使用你在 Deutsch 键盘上的触点位置"
+            "value" : "需开启“按触点自动改正”"
           }
         }
       }
@@ -3493,12 +3403,12 @@
         }
       }
     },
-    "In the emoji panel, ABC sits where the emoji key was, so you can switch back without moving your thumb." : {
+    "In the emoji panel, ABC takes the emoji key's place" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在表情符号面板里，ABC 就在表情符号键原来的位置，不用移动拇指就能切回字母键盘。"
+            "value" : "在表情符号面板中，ABC 位于原来表情符号键的位置"
           }
         }
       }
@@ -3513,12 +3423,12 @@
         }
       }
     },
-    "Moves the letters. Accents and autocorrect stay the language's." : {
+    "Accents and autocorrect still follow the language." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "只移动字母的位置，重音字母和自动更正仍跟随该语言。"
+            "value" : "重音字母和自动改正仍跟随该语言。"
           }
         }
       }
@@ -3533,22 +3443,22 @@
         }
       }
     },
-    "Keeps learned words and fixes with the language you used them in." : {
+    "Learned words and fixes stay with their language" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "让学到的词语和修正保留在你使用它们时所用的语言中。"
+            "value" : "学到的词语和修正按语言分开保存"
           }
         }
       }
     },
-    "Parakeet Ultra is not ready." : {
+    "The multilingual model isn't ready." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet Ultra 尚未就绪。"
+            "value" : "多语言模型尚未就绪。"
           }
         }
       }
@@ -3573,22 +3483,22 @@
         }
       }
     },
-    "Parakeet Ultra needs more memory than Hex has here." : {
+    "Not enough memory for the multilingual model." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet Ultra 需要的内存比 Hex 在这台 iPhone 上可用的更多。"
+            "value" : "内存不足，无法使用多语言模型。"
           }
         }
       }
     },
-    "Parakeet Ultra needs more memory than Hex has here. Hex uses its usual speech model instead." : {
+    "Not enough memory for the multilingual model. Hex is using its usual model." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet Ultra 需要的内存比 Hex 在这台 iPhone 上可用的更多，Hex 改用平时的语音模型。"
+            "value" : "内存不足，无法使用多语言模型。Hex 正在使用平时的模型。"
           }
         }
       }
@@ -3673,7 +3583,7 @@
         }
       }
     },
-    "Don't see the Hex key? Tap %@ until Hex's keyboard comes up." : {
+    "Don't see the Hex key? Tap %@ until the Hex keyboard appears." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -3683,12 +3593,12 @@
         }
       }
     },
-    "That came from iOS dictation or another keyboard, not Hex. Tap the Hex key on Hex's keyboard." : {
+    "That wasn't Hex. Tap the Hex key on the Hex keyboard." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这段文字来自 iOS 听写或其他键盘，不是 Hex。请轻点 Hex 键盘上的 Hex 键。"
+            "value" : "这不是 Hex 输入的。请轻点 Hex 键盘上的 Hex 键。"
           }
         }
       }
@@ -3743,12 +3653,12 @@
         }
       }
     },
-    "When you switch back to Hex in a field" : {
+    "When you switch to Hex" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在输入框中切换回 Hex 时"
+            "value" : "切换到 Hex 时"
           }
         }
       }
@@ -3773,12 +3683,12 @@
         }
       }
     },
-    "With the space bar as a trackpad, a second thumb selects: each thumb moves one end." : {
+    "On the space bar trackpad, a second thumb selects text" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "空格键作为触控板时，第二根拇指可选择：每根拇指移动一端。"
+            "value" : "空格键作为触控板时，用第二根拇指选择文本"
           }
         }
       }
@@ -3823,22 +3733,22 @@
         }
       }
     },
-    "On the full keyboard, the bar above the keys stops suggesting words. Autocorrect still fixes words as you type, and the Hex key and Paste stay." : {
+    "Autocorrect still works" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在全键盘上，按键上方的栏不再建议词语。自动改正仍会在你输入时修正词语，Hex 键和粘贴保持原样。"
+            "value" : "自动改正仍然有效"
           }
         }
       }
     },
-    "Parakeet Ultra isn't downloaded yet." : {
+    "The multilingual model isn't downloaded yet." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Parakeet Ultra 尚未下载。"
+            "value" : "多语言模型尚未下载。"
           }
         }
       }
@@ -3863,12 +3773,12 @@
         }
       }
     },
-    "The multilingual model's download stopped. Check your connection. It picks up where it left off." : {
+    "The multilingual model's download stopped. Check your connection and try again." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "多语言模型的下载已停止。请检查网络连接。下载会从中断处继续。"
+            "value" : "多语言模型的下载已停止。请检查网络连接后重试。"
           }
         }
       }
@@ -3883,22 +3793,22 @@
         }
       }
     },
-    "Hugging Face didn't send the multilingual model (error %lld). Try again later." : {
+    "The multilingual model didn't download (error %lld). Try again later." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Hugging Face 没有发送多语言模型（错误 %lld）。请稍后再试。"
+            "value" : "多语言模型未能下载（错误 %lld）。请稍后再试。"
           }
         }
       }
     },
-    "A file of the multilingual model arrived damaged. Try again to download it again." : {
+    "Part of the multilingual model arrived damaged. Try again." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "多语言模型的一个文件下载后已损坏。请重试以重新下载。"
+            "value" : "多语言模型有一部分下载后已损坏。请重试。"
           }
         }
       }
@@ -3933,12 +3843,12 @@
         }
       }
     },
-    "The multilingual model's download is paused. It carries on when you open Hex." : {
+    "The multilingual model's download resumes when you open Hex." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "多语言模型的下载已暂停。打开 Hex 后会继续。"
+            "value" : "打开 Hex 后，多语言模型会继续下载。"
           }
         }
       }
@@ -3963,22 +3873,22 @@
         }
       }
     },
-    "25 languages, even mixed in a sentence. %@ download, Wi-Fi recommended. Once it's ready, keyboard dictation opens Hex." : {
+    "25 languages, even mixed in one sentence. %@ download. Once ready, keyboard dictation opens Hex." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@，建议使用 Wi-Fi。准备好后，键盘听写会打开 Hex。"
+            "value" : "支持 25 种语言，一句话里混着说也行。需下载 %@。就绪后，键盘听写会打开 Hex。"
           }
         }
       }
     },
-    "Hex dictates with its usual model meanwhile." : {
+    "Until then, Hex uses its usual model." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在此期间，Hex 会用平时的模型听写。"
+            "value" : "在此之前，Hex 使用平时的模型。"
           }
         }
       }

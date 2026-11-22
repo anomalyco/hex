@@ -22,7 +22,7 @@ nonisolated enum MicrophoneChoice: String, CaseIterable, Sendable {
 
     var detail: String {
         switch self {
-        case .automatic: String(localized: "Car mic in CarPlay, else iPhone mic")
+        case .automatic: String(localized: "Car mic in CarPlay, otherwise iPhone")
         case .iPhone: String(localized: "Keeps music playing and starts faster")
         case .bluetooth: String(localized: "AirPods and car mics, in call quality")
         }

@@ -17,13 +17,13 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
         var errorDescription: String? {
             switch self {
             case .notPrepared:
-                String(localized: "Parakeet Ultra is not ready.")
+                String(localized: "The multilingual model isn't ready.")
             case .emptyTranscript:
-                String(localized: "Parakeet did not detect any speech.")
+                String(localized: "No speech heard.")
             case .notEnoughMemory:
-                String(localized: "Parakeet Ultra needs more memory than Hex has here.")
+                String(localized: "Not enough memory for the multilingual model.")
             case .notDownloaded:
-                String(localized: "Parakeet Ultra isn't downloaded yet.")
+                String(localized: "The multilingual model isn't downloaded yet.")
             }
         }
     }

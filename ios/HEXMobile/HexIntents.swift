@@ -7,7 +7,7 @@ import Foundation
 nonisolated struct DictateWithHexIntent: AudioRecordingIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Dictate with Hex"
     static let description = IntentDescription(
-        "Starts recording on first press, then transcribes locally and copies to the clipboard on second press."
+        "Press once to record, again to copy the text."
     )
 
     init() {}
@@ -21,7 +21,7 @@ nonisolated struct DictateWithHexIntent: AudioRecordingIntent, LiveActivityInten
 nonisolated struct WarmHexKeyboardIntent: AppIntent {
     static let title: LocalizedStringResource = "Warm Hex Keyboard"
     static let description = IntentDescription(
-        "Starts Hex's warm microphone session so the keyboard can dictate without switching apps."
+        "Lets the keyboard dictate without opening Hex."
     )
     @available(iOS 26.0, *)
     static let supportedModes: IntentModes = .foreground

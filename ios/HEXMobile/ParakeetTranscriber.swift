@@ -40,13 +40,13 @@ actor ParakeetTranscriber: LocalTranscribing {
         var errorDescription: String? {
             switch self {
             case .notPrepared:
-                String(localized: "Parakeet V2 is not ready.")
+                String(localized: "The speech model isn't ready.")
             case .emptyTranscript:
-                String(localized: "Parakeet did not detect any speech.")
+                String(localized: "No speech heard.")
             case .downloadFailed:
-                String(localized: "Parakeet V2 didn't download. Check your connection and try again.")
+                String(localized: "The speech model didn't download. Check your connection and try again.")
             case .notEnoughMemory:
-                String(localized: "Parakeet V2 needs more memory than Hex has here.")
+                String(localized: "Not enough memory for the speech model.")
             }
         }
     }
@@ -286,7 +286,7 @@ nonisolated struct ParakeetPreparationProgress: Sendable, Equatable {
         if compiledBefore {
             detail = String(localized: "Loading the speech model")
         } else if now - loadStartedAt < expectedLoadSeconds * 2 {
-            detail = String(localized: "Optimizing for this iPhone… about a minute")
+            detail = String(localized: "Optimizing for this iPhone, about a minute")
         } else {
             detail = String(localized: "Still optimizing. The first time can take a few minutes.")
         }
@@ -362,7 +362,7 @@ nonisolated struct ParakeetCompileRecord {
 /// another engine (`SpeechEngineChoice`): Apple's, where it has the language, else it waits
 /// for a tap on Set up instead of loading Parakeet at launch. In the app's own defaults.
 nonisolated struct ParakeetLoadGuard {
-    static let message = String(localized: "Hex closed while loading the speech model, likely short of memory. Close other apps, then tap Set up to try again.")
+    static let message = String(localized: "Hex closed while loading the speech model. Close other apps, then tap Set up.")
 
     private let loadingKey: String
     private let interruptedKey: String

@@ -643,7 +643,7 @@ final class DictationController {
             let granted = await audio.requestPermission()
             guard self.jobGeneration == requestGen else { return }
             guard granted else {
-                phase = .failed(String(localized: "Microphone access is off. Allow it in Settings to dictate."))
+                phase = .failed(String(localized: "Allow microphone access in Settings to dictate."))
                 publishKeyboardSnapshot()
                 return
             }
@@ -741,7 +741,7 @@ final class DictationController {
             guard self.jobGeneration == captureGeneration else { return }
             guard granted else {
                 activeKeyboardJobID = nil
-                let message = String(localized: "Microphone access is off. Allow it in Settings.")
+                let message = String(localized: "Allow microphone access in Settings.")
                 keyboardMessage = keyboardJobID == nil ? nil : message
                 phase = .failed(message)
                 publishKeyboardSnapshot()
@@ -1229,7 +1229,7 @@ final class DictationController {
                 self.finishRecording()
             } else {
                 self.cancelCurrentJob()
-                self.phase = .failed(String(localized: "Recording stopped unexpectedly."))
+                self.phase = .failed(String(localized: "Recording stopped."))
                 self.publishKeyboardSnapshot()
             }
         }

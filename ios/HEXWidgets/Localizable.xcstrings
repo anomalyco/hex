@@ -51,12 +51,12 @@
         }
       }
     },
-    "Discards the active Hex recording." : {
+    "Discards the recording." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "丢弃当前的 Hex 录音。"
+            "value" : "丢弃录音。"
           }
         }
       }
@@ -84,32 +84,22 @@
     "Hex" : {
       "shouldTranslate" : false
     },
-    "Starts or finishes on-device dictation and copies the text." : {
+    "Starts or finishes dictation and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开始或结束设备端听写，并拷贝文字。"
+            "value" : "开始或结束听写，并拷贝文字。"
           }
         }
       }
     },
-    "Starts or finishes on-device dictation and copies the transcript." : {
+    "Stops recording and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开始或结束设备端听写，并拷贝转录文本。"
-          }
-        }
-      }
-    },
-    "Stops recording, transcribes on device, and copies the text." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "停止录音，在设备端转录并拷贝文字。"
+            "value" : "停止录音并拷贝文字。"
           }
         }
       }

@@ -1,5 +1,5 @@
 /* The microphone permission prompt. */
-"NSMicrophoneUsageDescription" = "Hex 在这台 iPhone 上将你说的话转换为文字。音频绝不会离开你的 iPhone，转录完成后即被删除。";
+"NSMicrophoneUsageDescription" = "Hex 在这台 iPhone 上将你说的话转换为文字。转录完成后，音频即被删除。";
 
 /* The speech recognition permission prompt. */
-"NSSpeechRecognitionUsageDescription" = "Hex 使用 Apple 的设备端语音识别将你的录音转换为文字。你说的任何内容都不会发送到服务器。";
+"NSSpeechRecognitionUsageDescription" = "Hex 使用 Apple 的设备端语音识别将你说的话转换为文字。";
