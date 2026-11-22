@@ -496,9 +496,10 @@ nonisolated struct KeyboardMetrics: Equatable, Sendable {
                 break
             }
         }
-        // Joined on the Duo unfolded upright, the keys start 19 pt in from the keyboard's own
-        // side, as unfoldedTall's do from its screen's; the split keyboard's 86 pt are measured
-        // from the screen, outside the view iOS gives it there.
+        // Joined on the Duo unfolded upright, the keys start 19 pt in from the keyboard view's
+        // own side, as unfoldedTall's do from its screen's. The split keyboard's 86 pt are
+        // measured from the screen's edge and include the platter's 75 pt window inset, so
+        // they leave 11 pt inside the view.
         let joinedWide = posture == .unfoldedWide && joinsUnfoldedKeyboard
         let side: CGFloat
         if orientation == .landscape {

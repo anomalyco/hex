@@ -719,7 +719,7 @@ struct ExperimentsSettingsPage: View {
                 // Off by default: the Duo unfolded still splits as Apple's does there.
                 SettingsToggleRow(
                     title: String(localized: "Join the keyboard when unfolded"),
-                    detail: String(localized: "On the Duo unfolded, keeps the keys on one keyboard instead of splitting them."),
+                    detail: String(localized: "On the iPhone Duo unfolded, keeps the keys on one keyboard instead of splitting them."),
                     isOn: $joinsKeyboardWhenUnfolded
                 )
 

@@ -2962,11 +2962,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Join the keyboard when unfolded (off by default, `experiments.joinKeyboardWhenUnfolded`):
 │   the Duo unfolded and held upright splits as Apple's does there; on, it draws one joined
-│   keyboard instead, at unfoldedWide's own 39 pt rows and 51.7 pt pitch, 19 pt in from the
-│   keyboard's own side as unfoldedTall's keys sit from its screen's, with the iPhone's
-│   portrait bottom row (123 and the globe to z's right edge, space after them, return
-│   from m). Apple's Split Keyboard preference can't be read by a keyboard extension. Off,
-│   the split keyboard is unchanged.
+│   keyboard instead, at unfoldedWide's own 39 pt rows and 51.7 pt row pitch, 19 pt in from
+│   the keyboard's own side as unfoldedTall's keys sit from its screen's, with the iPhone's
+│   portrait bottom row (123 and the globe to z's right edge, the emoji key on x's column
+│   when the globe shows, space after them, return from m). Apple's Split Keyboard
+│   preference can't be read by a keyboard extension. Off, the split keyboard is unchanged.
 │   Unit tests only: no CI compiles the iOS targets, and no physical iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed

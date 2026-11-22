@@ -1,8 +1,9 @@
 import UIKit
 
-/// The keyboard's key layout settings as it opens (Settings › Keyboard and Settings ›
-/// Experiments): where the Hex key sits, the number row, and whether the Duo unfolded draws
-/// one keyboard. Switches that only change typing behaviour stay in `FullKeyboardView.syncSettings`.
+/// The keyboard's key layout settings (Settings › Keyboard and Settings › Experiments),
+/// applied on every sync: where the Hex key sits, the number row, and whether the Duo unfolded
+/// draws one keyboard. Switches that only change typing behaviour stay in
+/// `FullKeyboardView.syncSettings`.
 @MainActor
 extension FullKeyboardView {
     /// Settings › Keyboard › Hex key: Right (the strip's trailing end) or Left (its leading

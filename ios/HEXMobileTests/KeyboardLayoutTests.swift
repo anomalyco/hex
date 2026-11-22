@@ -2126,7 +2126,30 @@ final class KeyboardLayoutTests: XCTestCase {
         }
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, posture: .cover, windowInset: 75))
         layouts.append(KeyboardLayout(width: 528, orientation: .landscape, showsGlobe: true, posture: .cover, windowInset: 75))
-        // The unfolded keyboard joined (Settings › Experiments), its rows' heights kept.
+        // The unfolded keyboard joined (Settings › Experiments), its rows' heights kept: every
+        // language, the globe and emoji on and off, the number row, and the Hex key either side.
+        for language in KeyboardLanguage.allCases {
+            layouts.append(KeyboardLayout(
+                width: 801, showsGlobe: true, language: language, posture: .unfoldedWide,
+                windowInset: 75, joinsUnfoldedKeyboard: true
+            ))
+        }
+        for (globe, emoji) in [(true, false), (false, true), (false, false)] {
+            layouts.append(KeyboardLayout(
+                width: 801, showsGlobe: globe, showsEmoji: emoji, posture: .unfoldedWide,
+                windowInset: 75, joinsUnfoldedKeyboard: true
+            ))
+        }
+        layouts.append(KeyboardLayout(
+            width: 801, showsGlobe: true, showsEmoji: true, posture: .unfoldedWide,
+            windowInset: 75, numberRow: true, joinsUnfoldedKeyboard: true
+        ))
+        for placement in [HexKeyPlacement.leftOfSpace, .rightOfSpace] {
+            layouts.append(KeyboardLayout(
+                width: 801, showsGlobe: true, showsEmoji: true, posture: .unfoldedWide,
+                windowInset: 75, hexPlacement: placement, joinsUnfoldedKeyboard: true
+            ))
+        }
         for layer in layers {
             for field in fields {
                 layouts.append(KeyboardLayout(

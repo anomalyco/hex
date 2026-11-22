@@ -1166,9 +1166,10 @@ never at a launch by itself.
   until `KeyboardShouldSplitInDefaultContext` is set). Settings › Experiments › Join the
   keyboard when unfolded (off by default, `experiments.joinKeyboardWhenUnfolded`, App
   Group) draws one joined keyboard there instead: unfoldedWide's own 39 pt rows on a
-  51.7 pt pitch, 19 pt in from the keyboard's own side as unfoldedTall's keys sit from
-  its screen's, with the iPhone's portrait bottom row (123 and the globe to z's right
-  edge, space after them, return from m). Off, nothing changes.
+  51.7 pt row pitch, 19 pt in from the keyboard's own side as unfoldedTall's keys sit
+  from its screen's, with the iPhone's portrait bottom row (123 and the globe to z's
+  right edge, the emoji key on x's column when the globe shows, space after them,
+  return from m). Off, nothing changes.
 - **iPad:** The app is iPhone-only (`TARGETED_DEVICE_FAMILY` 1), but iPadOS runs its keyboard
   extension as an iPad keyboard across the screen, so the full keyboard shows there too
   (Settings › Keyboard picks it or the dictation bar, as on an iPhone). Docked, it has
