@@ -176,7 +176,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         period = caps.cap(".", context.getString(R.string.keyboard_period), modifier) { ime.engine.type(".") }
         // Held on the letters page, period offers Gboard's punctuation; on the symbol pages an ellipsis.
         period.setOnLongClickListener {
-            host.openAccents(if (current?.symbols == false) LetterFeedback.periodHolds.flatten() else LetterFeedback.symbolHolds('.')); true
+            host.openAccents(if (current?.symbols == false) LetterFeedback.periodHolds.flatten() else LetterFeedback.symbolHolds('.'), it); true
         }
         period.longClickLabel = context.getString(R.string.keyboard_more_characters)
         typesOnLift(period, preview = { null },
@@ -272,7 +272,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 k.hint(digit?.toString())
                 fun holds() = if (symbols) LetterFeedback.symbolHolds(c) else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit)
                 if (holds().isNotEmpty()) {
-                    k.setOnLongClickListener { host.openAccents(holds()); true }
+                    k.setOnLongClickListener { host.openAccents(holds(), it); true }
                     k.longClickLabel = context.getString(R.string.keyboard_more_characters)
                 }
                 slides[k] = { p ->

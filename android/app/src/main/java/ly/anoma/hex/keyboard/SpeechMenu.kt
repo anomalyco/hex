@@ -34,7 +34,8 @@ internal class SpeechMenu(context: Context, private val ime: HexKeyboard,
         page = Page.Accents; title(s(page.title)); body.removeAllViews(); scrollTo(0, 0)
         values.forEach { v -> row(v, "") { pick(v) } }
     }
-    fun back() { if (page == Page.Home) close() else home() }
+    /** More characters came from a key, so going back leaves the menu. */
+    fun back() { if (page == Page.Home || page == Page.Accents) close() else home() }
 
     private fun show(next: Page) {
         page = next; title(s(next.title)); body.removeAllViews(); scrollTo(0, 0)
