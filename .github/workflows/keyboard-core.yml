@@ -1,0 +1,52 @@
+name: Keyboard core
+
+# The shared keyboard core (crates/keyboard) on pull requests that touch it or
+# the files its tests read: formatting, clippy with warnings as errors, and its
+# tests. It runs on macOS because the swipe parity fixture stores costs bit for
+# bit and they come from Apple's libm (exp, ln, atan2, cos), which Swift and
+# Rust both call on Apple platforms; glibc can differ in the last bit.
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - "crates/keyboard/**"
+      - "ios/HEXKeyboard/TypingModel/**"
+      - "ios/HEXShared/FullKeyboard/never-suggest.tsv"
+      - ".github/workflows/keyboard-core.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A new push to a pull request cancels its stale run.
+concurrency:
+  group: keyboard-core-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  keyboard:
+    name: Keyboard core
+    if: ${{ !github.event.pull_request.draft }}
+    runs-on: blacksmith-6vcpu-macos-26
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: crates/keyboard
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Read the pinned toolchain (rust-toolchain.toml)
+        id: pin
+        run: echo "toolchain=$(sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml)" >> "$GITHUB_OUTPUT"
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: ${{ steps.pin.outputs.toolchain }}
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          workspaces: crates/keyboard
+          cache-on-failure: true
+      - run: cargo fmt --check
+      - run: cargo clippy --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --locked --all-features
