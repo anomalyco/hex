@@ -141,4 +141,38 @@ extension FullKeyboardEngine {
         guard expectedTypingContext != nil, !hostIsBehind else { return }
         expectedTypingContext = nil
     }
+
+    // MARK: - Emoji shortcodes (Settings › Experiments; EmojiShortcode)
+
+    /// A closing ":" that finishes an emoji shortcode (":pizza") types the emoji instead of
+    /// the colon, taking the whole token back. False when no shortcode ends here or the
+    /// experiment is off (the keyboard leaves `emojiShortcode` nil).
+    func typeEmojiShortcode(_ text: String) -> Bool {
+        guard text == ":", let emojiShortcode,
+              let replacement = emojiShortcode(typingContext ?? textBefore) else { return false }
+        return replaceWithEmojiShortcode(replacement.emoji, token: replacement.token)
+    }
+
+    /// A shortcode chip's emoji in place of the token it named, when the host still shows it.
+    @discardableResult
+    func replaceEmojiShortcode(_ emoji: String, token: EmojiShortcode.Token) -> Bool {
+        replaceWithEmojiShortcode(emoji, token: token.text)
+    }
+
+    /// Takes `token` (":name", as typed) back and types `emoji`, with no space or autocorrect
+    /// around it. False when the host no longer shows the token, so the key types as usual.
+    @discardableResult
+    private func replaceWithEmojiShortcode(_ emoji: String, token: String) -> Bool {
+        guard let before = textBefore, before.hasSuffix(token) else { return false }
+        typingLog?.edit("delete", [
+            TypingLogField("deleted", .string(token)),
+            TypingLogField("src", .string("emoji_shortcode")),
+        ])
+        forgetTypingContext()
+        for _ in 0..<token.count {
+            target.deleteBackward()
+        }
+        insert(emoji, source: "emoji_shortcode")
+        return true
+    }
 }

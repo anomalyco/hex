@@ -682,6 +682,7 @@ struct ExperimentsSettingsPage: View {
     @State private var dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
     @State private var commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
     @State private var quickAccents = FullKeyboardSettings().quickAccents
+    @State private var emojiShortcodes = FullKeyboardSettings().emojiShortcodes
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
     @State private var keyboardTheme = FullKeyboardSettings().keyboardTheme
@@ -767,6 +768,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: quickAccents) { _, enabled in
                 FullKeyboardSettings().quickAccents = enabled
+            }
+            .onChange(of: emojiShortcodes) { _, enabled in
+                FullKeyboardSettings().emojiShortcodes = enabled
             }
             .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
                 FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
@@ -918,6 +922,15 @@ struct ExperimentsSettingsPage: View {
 
         SettingsDivider()
 
+        // Off by default: colons type exactly as before.
+        SettingsToggleRow(
+            title: String(localized: "Emoji shortcodes"),
+            detail: String(localized: "Type a colon and a name, like :pizza, to pick an emoji."),
+            isOn: $emojiShortcodes
+        )
+
+        SettingsDivider()
+
         // Off by default: the emoji panel's ABC stays where it always was.
         SettingsToggleRow(
             title: String(localized: "ABC under the emoji key"),
@@ -1043,6 +1056,7 @@ struct ExperimentsSettingsPage: View {
         dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
         commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
         quickAccents = FullKeyboardSettings().quickAccents
+        emojiShortcodes = FullKeyboardSettings().emojiShortcodes
         emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
         keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
         keyboardTheme = FullKeyboardSettings().keyboardTheme

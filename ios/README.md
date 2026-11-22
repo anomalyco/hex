@@ -959,10 +959,10 @@ never at a launch by itself.
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Swipe typing in more languages, Korean
-    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, ABC
-    under the emoji key, Keyboard themes (its Theme menu below the switch while it's on),
-    Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Join
-    the keyboard when unfolded, and Multilingual model (Parakeet).
+    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, Emoji
+    shortcodes, ABC under the emoji key, Keyboard themes (its Theme menu below the switch
+    while it's on), Two-thumb selection, Delete swiped words letter by letter, Hide word
+    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`

@@ -177,6 +177,7 @@ final class FullKeyboardView: UIView {
             guard let self else { return }
             self.keyFeedback()
             if suggestion.kind == .emoji {
+                if self.acceptEmojiShortcode(suggestion) { return }
                 self.recordEmojiUse(suggestion.replacement)
             }
             self.engine.acceptSuggestion(suggestion)
@@ -279,6 +280,7 @@ final class FullKeyboardView: UIView {
         engine.trackpadSelectionState.enabled = FullKeyboardSettings().twoThumbSelection
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
         engine.quickAccentsEnabled = FullKeyboardSettings().quickAccents
+        engine.emojiShortcode = { [weak self] before in self?.emojiShortcodeReplacement(before: before) }
         hidesWordSuggestions = FullKeyboardSettings().hideWordSuggestions
         syncHexPlacement()
         syncNumberRow()
@@ -907,7 +909,9 @@ final class FullKeyboardView: UIView {
         }
         stripOffer = clipboardOffer
         var suggestions = engine.suggestions
-        if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
+        if let shortcodes = emojiShortcodeSuggestions() {
+            suggestions = shortcodes
+        } else if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
             if lastDictation != nil || status != nil || clipboardOffer != nil {
                 suggestions = []
             } else {

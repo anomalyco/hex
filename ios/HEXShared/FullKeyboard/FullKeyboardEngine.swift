@@ -124,6 +124,9 @@ final class FullKeyboardEngine {
     var showsGlobe = false { didSet { if showsGlobe != oldValue { rebuildLayout() } } }
     /// Settings › Keyboard › Emoji, in fields that take emoji.
     var showsEmoji = false { didSet { if showsEmoji != oldValue { rebuildLayout() } } }
+    /// Settings › Experiments › Emoji shortcodes: what a closing ":" types for a name typed
+    /// in full (":pizza"), set by the keyboard from the App Group; nil is off.
+    var emojiShortcode: ((String?) -> EmojiShortcode.Replacement?)?
     var horizontalInset: CGFloat = 0 { didSet { if horizontalInset != oldValue { rebuildLayout() } } }
     /// An iPhone, or the iPhone Duo folded or unfolded (`KeyboardPosture`).
     var posture: KeyboardPosture = .phone { didSet { if posture != oldValue { rebuildLayout() } } }
@@ -946,6 +949,7 @@ final class FullKeyboardEngine {
             shift.didType()
         }
         if layerState.layer == .letters, typeLayoutRules(&text) { return }
+        if typeEmojiShortcode(text) { return }
         if dropsSuggestionSpace(before: text) || !correctWord(endingWith: text) {
             insert(text, source: "key", at: point)
         }

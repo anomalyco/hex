@@ -2909,9 +2909,10 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
 │   Swipe typing in more languages, Korean keyboard (두벌식), Dvorak punctuation keys, Comma
-│   and period keys, Quick accents, ABC under the emoji key, Keyboard themes (Black, White,
-│   Navy, Forest, Ember), Two-thumb selection, Delete swiped words letter by letter, Hide
-│   word suggestions, Join the keyboard when unfolded, Learn each language separately
+│   and period keys, Quick accents, Emoji shortcodes, ABC under the emoji key, Keyboard
+│   themes (Black, White, Navy, Forest, Ember), Two-thumb selection, Delete swiped words
+│   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Learn each
+│   language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -3067,6 +3068,19 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   callout opens on the key's own, as before.
 │   Unit tests only (`FullKeyboardEngineTests`): no CI compiles the iOS targets, and no
 │   physical iPhone run checks it
+├── Emoji shortcodes (off by default, `experiments.emojiShortcodes`): while the full
+│   keyboard's text before the cursor ends in a colon and a name after whitespace or at the
+│   start of the field (":pizza": at least two of a-z, 0-9, "_", "+" and "-", case-insensitive),
+│   the strip shows up to three emoji the bundled index names (`EmojiShortcode`, over
+│   `EmojiLibrary` and scripts/build-emoji-data.py's data) instead of its words: an exact name
+│   or alias first, then the names and keywords the token starts, one per family, with your
+│   emoji use breaking ties. A tap takes the whole token back and types the emoji with its skin
+│   tone, counted like one from the panel; typing the closing ":" of a name typed in full
+│   (":pizza:") types the emoji instead. No match leaves the strip and typing as they were, a
+│   colon inside a word ("abc:pizza") is not a token, and off, nothing changes. The setting is
+│   in the App Group, and without Full Access it reads off.
+│   Unit tests only (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical
+│   iPhone run checks it
 ├── Learn each language separately (off by default, `experiments.learnPerLanguage`):
 │   every typing correction and dictation fix is tagged with the language it was typed
 │   or dictated in; on, the keys learn a language's typos and rejections from that
