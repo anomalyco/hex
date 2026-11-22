@@ -179,7 +179,7 @@ final class SwipeTyping {
             stroke.points.map(layout.joinedForSwipe), times: stroke.times, keys: engine.swipeKeys,
             previous: engine.swipePreviousWord, limit: 8
         )
-        let words = ranked(candidates)
+        let words = engine.autocorrect.readingsOfferingOwnCapitals(ranked(candidates), capsLock: engine.shift.state == .locked, model: model)
         let elapsed = clock() - started
         lastDecodeTime = elapsed
         if let letter = slidTapLetter(stroke), let start = stroke.points.first,

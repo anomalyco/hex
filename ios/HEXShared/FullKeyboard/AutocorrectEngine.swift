@@ -1214,7 +1214,7 @@ final class AutocorrectEngine {
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
             || properNoun(for: token) != nil || partnerWord
         let previous = Self.previousWord(before, token: token)
-        var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
+        var decision = decisionOfferingOwnCapitals(decoder, taps: taps, typed: token, previous: previous, valid: valid, keys: keys)
         if let baseline = decoderBaselineKeys, let replacement = decision?.replacement {
             func clears(_ reading: String) -> Bool? {
                 decoder.replaces(with: reading, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)
@@ -1226,9 +1226,9 @@ final class AutocorrectEngine {
                 // The next reading the baseline would also put in, if any: never a new rewrite,
                 // and no second search on the letter.
                 let readings = decision?.readings ?? []
-                decision?.replacement = readings.lazy.map(\.text).first { $0 != replacement && clears($0) == true }
+                decision?.replacement = readings.lazy.map(\.text).first { $0 != replacement && !isOwnCapitals($0, typed: token) && clears($0) == true }
             case nil:
-                decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)?.replacement
+                decision?.replacement = decisionOfferingOwnCapitals(decoder, taps: taps, typed: token, previous: previous, valid: valid, keys: baseline)?.replacement
             }
         }
         decoderCache = (before, taps, partnerWord, decision)

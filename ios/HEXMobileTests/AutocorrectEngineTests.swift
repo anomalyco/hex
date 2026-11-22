@@ -1416,6 +1416,25 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "Zorbix zorbix ", "a slip in a name from Contacts, and the name typed right")
     }
 
+    /// Record typing logs: a word of someone's own in capitals ("DONT", from Contacts or one Hex
+    /// learned) was read for a lowercase slip and put in by space. The strip offers it; space
+    /// puts in the next reading that clears the margin ("don't") or leaves what was typed.
+    /// Names and your vocabulary's spellings are as before.
+    func testSpatialAutocorrectOffersYourWordsInCapitalsWithoutPuttingThemIn() throws {
+        try useDecoder()
+        engine.autocorrect.loadLexiconEntries([("DONT", "DONT"), ("ZORBIX", "ZORBIX"), ("Quorvent", "Quorvent")])
+        for letter in "dpnt" { tapCentre(letter) }
+        XCTAssertTrue(engine.suggestions.contains { $0.replacement == "DONT" }, "offered in the strip")
+        tap(.space)
+        for word in ["zorbiz", "quorvemt"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "don't zorbiz Quorvent ")
+        let autocorrect = engine.autocorrect
+        XCTAssertTrue(autocorrect.isOwnCapitals("McQuorv", typed: "mcquorc"), "capitals inside")
+        XCTAssertFalse(autocorrect.isOwnCapitals("DONT", typed: "DPNT"), "typed in capitals")
+        autocorrect.setVocabulary(["GitHub"])
+        XCTAssertFalse(autocorrect.isOwnCapitals("GitHub", typed: "githib"), "your vocabulary's spelling")
+    }
+
     /// "th", then the e aimed high 80 ms later, landing on the strip's lower half under its
     /// left slot. Record typing logs showed that picked what was typed and a space ("th  "),
     /// and kept "th" from being corrected for the rest of the session. The keys take the
