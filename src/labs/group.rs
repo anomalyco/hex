@@ -101,7 +101,8 @@ impl Feature {
             | Self::CursorContext
             | Self::VoicePrompt
             | Self::ModesEditor
-            | Self::Signature => Group::Output,
+            | Self::Signature
+            | Self::DictationStyle => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::RecentDictations

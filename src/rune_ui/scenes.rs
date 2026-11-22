@@ -209,6 +209,14 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = portal_fixture();
         ui.pane = Pane::Output;
     }),
+    // Labs › Dictation style on: its row sits above Every dictation.
+    ("output-style", |ui| {
+        *ui = portal_fixture();
+        output::fixture(ui);
+        ui.settings.labs.dictation_style = true;
+        ui.settings.labs.dictation_style_choice = crate::app_settings::DictationStyle::Notes;
+        ui.pane = Pane::Output;
+    }),
     ("modes", |ui| {
         *ui = portal_fixture();
         modes::fixture(ui);

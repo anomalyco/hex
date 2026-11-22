@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use serde::{Deserialize, Serialize};
 
+use crate::app_settings::DictationStyle;
 use crate::desktop::opencode_service::Service;
 use crate::dictation::context::{ContextSelector, ContextSnapshot};
 use crate::dictation::numbers::numbers_only;
@@ -12,6 +13,9 @@ use crate::dictation::text_replacements::ReplacementSet;
 use crate::dictation::vocabulary::VocabularyEntry;
 
 mod generation;
+mod processed;
+
+pub use self::processed::{Processed, ProcessingObservation};
 
 use self::generation::{
     Request, Response, generate_single_model, post_generation, remaining_generation_deadline,
@@ -54,6 +58,9 @@ struct DictationLabs {
     spoken_formatting: bool,
     spoken_symbols: bool,
     filler_words: bool,
+    /// Labs › Dictation style's choice while on; None leaves the text as
+    /// the corrections and rewrite wrote it.
+    dictation_style: Option<DictationStyle>,
 }
 
 impl DictationLabs {
@@ -63,6 +70,7 @@ impl DictationLabs {
             spoken_formatting: crate::labs::spoken_formatting(),
             spoken_symbols: crate::labs::spoken_symbols(),
             filler_words: crate::labs::filler_words(),
+            dictation_style: crate::labs::dictation_style(),
         }
     }
 }
@@ -498,17 +506,64 @@ impl Profiles {
         source: Source,
         voice_prompt: Option<&str>,
     ) -> Processed {
+        self.process_cancellable_inner(
+            transcript,
+            language,
+            context,
+            cancelled,
+            source,
+            voice_prompt,
+            true,
+            DictationLabs::current(),
+        )
+    }
+
+    /// The local API's `process=global`: Global mode's replacements,
+    /// corrections, rewrite, and transformations, without the dictation
+    /// style, which belongs to a dictation's own paste.
+    pub fn process_api_cancellable(
+        &self,
+        transcript: &str,
+        language: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+        source: Source,
+    ) -> Processed {
+        let voice_prompt = crate::labs::voice_prompt().then(crate::labs::voice_prompt_phrase);
+        self.process_cancellable_inner(
+            transcript,
+            language,
+            context,
+            cancelled,
+            source,
+            voice_prompt.as_deref(),
+            false,
+            DictationLabs::current(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn process_cancellable_inner(
+        &self,
+        transcript: &str,
+        language: &str,
+        context: &ContextSnapshot,
+        cancelled: &AtomicBool,
+        source: Source,
+        voice_prompt: Option<&str>,
+        style_dictation: bool,
+        labs: DictationLabs,
+    ) -> Processed {
         let profile = self.select(context);
         // Labs › Spoken formatting, spoken symbols, and filler words only
         // make sense for speech: typed text starts from what is already
         // written and skips them.
-        let corrected = self.corrected(
-            profile,
-            transcript,
-            language,
-            source,
-            DictationLabs::current(),
-        );
+        let corrected = self.corrected(profile, transcript, language, source, labs);
+        // Labs › Dictation style writes a dictation's final text, after the
+        // corrections and any rewrite and before the transformations.
+        let style = labs
+            .dictation_style
+            .filter(|_| style_dictation && source == Source::Dictation);
         // A transcript of numbers alone has nothing to rewrite; a model only
         // turns it into digits and re-punctuates it (#949). The neutral pass
         // and Labs › Clean up with Apple Intelligence skip those too.
@@ -524,7 +579,7 @@ impl Profiles {
             source,
             &profile.transformations,
         ) {
-            return processed;
+            return with_style(processed, style, language);
         }
         // Labs › Rewrite by voice: heard speech may carry a spoken instruction
         // that replaces the mode's rewrite with one request of its own.
@@ -533,7 +588,11 @@ impl Profiles {
             && let Some(instruction) =
                 crate::dictation::voice_prompt::instruction(&corrected, phrase)
         {
-            return voice_prompt_processed(profile, &instruction, &corrected, context, cancelled);
+            return with_style(
+                voice_prompt_processed(profile, &instruction, &corrected, context, cancelled),
+                style,
+                language,
+            );
         }
         if profile.ai_enabled && numbers_only {
             tracing::info!(
@@ -555,12 +614,16 @@ impl Profiles {
             } else {
                 crate::dictation::apple_cleanup::stage(&corrected, numbers_only, cancelled)
             };
-            return Processed {
-                text,
-                nothing: false,
-                observation,
-                transformations: profile.transformations.clone(),
-            };
+            return with_style(
+                Processed {
+                    text,
+                    nothing: false,
+                    observation,
+                    transformations: profile.transformations.clone(),
+                },
+                style,
+                language,
+            );
         }
         let prompt = prompt(
             profile,
@@ -596,13 +659,30 @@ impl Profiles {
                 "dictation post-processing failed; pasting the corrected transcript"
             ),
         }
-        Processed {
-            text: text.unwrap_or(corrected),
-            nothing: false,
-            observation: Some(observation),
-            transformations: profile.transformations.clone(),
-        }
+        with_style(
+            Processed {
+                text: text.unwrap_or(corrected),
+                nothing: false,
+                observation: Some(observation),
+                transformations: profile.transformations.clone(),
+            },
+            style,
+            language,
+        )
     }
+}
+
+/// `processed` after Labs › Dictation style: the text is written in `style`
+/// when the lab is on, and stays exactly as it was otherwise.
+fn with_style(
+    mut processed: Processed,
+    style: Option<DictationStyle>,
+    language: &str,
+) -> Processed {
+    if let Some(style) = style {
+        processed.text = crate::dictation::style::format(&processed.text, style, language);
+    }
+    processed
 }
 
 /// One voice-prompt request instead of the mode's rewrite: the spoken
@@ -1166,69 +1246,6 @@ fn opencode_api_within<T: for<'de> Deserialize<'de>>(
         return Err(eyre!("OpenCode {path} answered HTTP {}", response.status));
     }
     decode_api_response(path, &response.body)
-}
-
-pub struct Processed {
-    pub text: String,
-    /// A voice prompt that deliberately asked nothing: the listeners finish
-    /// quietly instead of failing on empty text. Never true for an ordinary
-    /// empty output.
-    pub nothing: bool,
-    pub observation: Option<ProcessingObservation>,
-    pub transformations: Vec<String>,
-}
-
-pub type ProcessingObservation = crate::desktop::events::DictationProcessing;
-
-impl Processed {
-    /// `text` as heard, with no step run (Dictate without processing on the
-    /// Linux and Windows listeners; macOS skips processing in `parakeet`).
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
-    pub fn unchanged(text: &str) -> Self {
-        Self {
-            text: text.to_string(),
-            nothing: false,
-            observation: None,
-            transformations: Vec::new(),
-        }
-    }
-
-    /// Runs the selected transformations, the last processing stage. The chain
-    /// is one stage: a failure keeps the previous text and records the error.
-    pub fn apply_transformations(
-        &mut self,
-        client: &crate::personal_commands::TransformationClient,
-        context: &ContextSnapshot,
-        cancelled: &AtomicBool,
-        source: Source,
-    ) {
-        if self.transformations.is_empty() || cancelled.load(Ordering::Acquire) {
-            return;
-        }
-        let started = Instant::now();
-        let transformed = client.transform(
-            &self.transformations,
-            &self.text,
-            context,
-            cancelled,
-            source,
-        );
-        let observation = self
-            .observation
-            .get_or_insert_with(|| ProcessingObservation {
-                profile: CUSTOM_TRANSFORMATIONS.into(),
-                latency_ms: 0,
-                model: None,
-                fallback: None,
-            });
-        observation.latency_ms = observation
-            .latency_ms
-            .saturating_add(started.elapsed().as_millis() as u64);
-        match transformed {
-            Ok(text) => self.text = text,
-            Err(error) => observation.fallback = Some(error),
-        }
-    }
 }
 
 /// The transcript ahead of mode corrections. Spoken formatting, spoken
@@ -2030,6 +2047,7 @@ mod tests {
             spoken_formatting: true,
             spoken_symbols: true,
             filler_words: true,
+            dictation_style: None,
         };
         let speech = "um first new line done comma thanks";
         let dictated = prepare_transcript(speech, "en", Source::Dictation, labs);
@@ -2051,6 +2069,66 @@ mod tests {
             prepare_transcript(speech, "en", Source::Dictation, DictationLabs::default()),
             speech
         );
+    }
+
+    /// Labs › Dictation style writes a dictation's final text after its
+    /// corrections and before the transformations; typed text and the local
+    /// API's process=global keep their text exactly.
+    #[test]
+    fn the_dictation_style_writes_a_dictation_and_leaves_typed_text_and_the_api_alone() {
+        use crate::app_settings::DictationStyle;
+        let profiles =
+            Profiles::new(Profile::new("Global", "").transformations(vec!["lowercase".into()]));
+        let context = context("Zed", None);
+        let cancelled = AtomicBool::new(false);
+        let casual = DictationLabs {
+            dictation_style: Some(DictationStyle::Casual),
+            ..DictationLabs::default()
+        };
+        let dictated = profiles.process_cancellable_inner(
+            "Um, I'll call Ravi.",
+            "en",
+            &context,
+            &cancelled,
+            Source::Dictation,
+            None,
+            true,
+            casual,
+        );
+        assert_eq!(dictated.text, "i'll call Ravi");
+        // The transformation runs after the style, so its lowercase output
+        // proves the style wrote "i'll call Ravi" first.
+        let mut dictated = dictated;
+        dictated.apply_transformations(
+            &crate::personal_commands::TransformationClient::default(),
+            &context,
+            &cancelled,
+            Source::Dictation,
+        );
+        assert_eq!(dictated.text, "i'll call ravi");
+        let typed = profiles.process_cancellable_inner(
+            "Um, I'll call Ravi.",
+            "en",
+            &context,
+            &cancelled,
+            Source::TypedText,
+            None,
+            true,
+            casual,
+        );
+        assert_eq!(typed.text, "Um, I'll call Ravi.");
+        let api = profiles.process_cancellable_inner(
+            "Um, I'll call Ravi.",
+            "en",
+            &context,
+            &cancelled,
+            Source::Dictation,
+            None,
+            false,
+            casual,
+        );
+        assert_eq!(api.text, "Um, I'll call Ravi.");
+        assert_eq!(dictated.transformations, ["lowercase"]);
     }
 
     /// Labs › Transform typed text runs the same profile but never the

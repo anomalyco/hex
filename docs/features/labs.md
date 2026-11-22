@@ -108,6 +108,9 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Spoken formatting no labs.spoken_formatting      spoken "new line"/"line break", "new paragraph", "open/close quote", "quote … unquote" become line breaks and quotation marks; Spanish "nuevo párrafo", "nueva línea", "abre/cierra comillas", … too (#630, #1040)
 ├── Spoken symbols  no    labs.spoken_symbols          spoken "hashtag", "underscore", "comma", … become symbols joined to their words: "#release", "my_variable", "done, thanks"; Spanish "arroba", "guion bajo", "coma", … too (#678, #1040)
 ├── Remove filler words no labs.filler_words          English dictations lose um, umm, uh, uhh, erm, er, ah, with no model (#631)
+├── Dictation style no    labs.dictation_style + labs.dictation_style_choice (polished/casual/notes/verbatim, polished by default, every OS)
+│                                        each dictation is written as Polished, Casual, Notes, or Verbatim like the iPhone app,
+│                                        without an AI model
 ├── Clean up with Apple Intelligence no labs.clean_up_with_apple_intelligence (macOS)
 │                                        one short on-device pass after the corrections fixes clearly misheard words and
 │                                        resolves spoken self-corrections ("tuesday, no wait, wednesday" → "wednesday");
@@ -1303,6 +1306,71 @@ exactly as before. Checks: `only_english_dictations_apply_the_filter`,
 [panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the toggle on; the Labs page goldens need regenerating on
 Linux with the new row.
+
+Dictation style (`dictation-style`, every OS, off by default): while on,
+`Profiles::process_cancellable_with` in
+[dictation/processor.rs](../../src/dictation/processor.rs) reads
+`labs::dictation_style()` (the switch and `labs.dictation_style_choice`,
+one of `polished`, `casual`, `notes`, or `verbatim`, Polished by
+default) as each dictation's processing starts, and
+[dictation/style.rs](../../src/dictation/style.rs) writes the text after the
+Global and mode corrections and after any Apple Intelligence cleanup,
+OpenCode rewrite, or voice-prompt rewrite, and before the selected
+transformations. The styled text is therefore `Processed.text` when the
+transformations run, and transformations still have the last word. Only a
+heard dictation (`Source::Dictation`) is styled: Labs › Transform typed
+text, the local API's `process=global` (which promises Global's
+replacement, correction, rewrite, and transformation steps, not a dictation
+style), meetings, and live text keep their text exactly. Dictate without
+processing skips the processor entirely. With the toggle off, processing is
+byte-for-byte as before.
+
+The rules are the iPhone app's `TranscriptFormatter` (`ios/HEXShared/`),
+ported without its spoken lists, spoken punctuation, insertion spacing, or
+"End with a period" handling, which desktop already has as its own Labs or
+does not have. Verbatim only collapses runs of spaces and tabs and trims the
+ends. Polished trims fillers, writes the English informal contractions
+("gonna", "wanna", "gotta", "kinda", "lemme") out except inside quotes or on
+a name mid-sentence, capitalizes each sentence, writes the English pronoun
+"I", and ends every line with "." or, after Chinese or Japanese, "。" (never
+a second mark, and never after a lone address or a line that already ends a
+sentence). Casual trims fillers, drops an opening English interjection's
+comma ("Yeah, sounds good" becomes "yeah sounds good"), lowercases sentence
+starts except acronyms, words with inner capitals, and addresses ("OK"
+becomes "ok"), writes English "I" as "i", and drops the final full stop on a
+short message (one line, up to three sentences). Notes trims fillers, turns
+spoken "new line", "new paragraph", and "bullet"/"bullet point"/"next bullet"
+into lines, makes several sentences a list, splits a short "Intro: a, b,
+and c" into a colon line and bullets (English also splits the last "and" or
+"or"), drops an opening English connective ("so", "yeah", "and then", and
+the rest), removes a final full stop, and capitalizes the first letter.
+
+Filler trimming follows the dictation's language as the iPhone app's
+patterns do: English, Spanish, German, and Norwegian/Danish/Swedish have
+their own hesitations, and any other language trims nothing ("er" is "is" in
+Norwegian, "um" is "a" in Portuguese, and "eh" is "anyway" in German). The
+English-only rules apply when that dictation's language is `en` or starts
+with `en-`/`en_`; `auto` and an empty language say nothing about the
+language, so they get only the language-neutral rules and trim no fillers
+(the iPhone app treats an unknown language as English, which desktop does
+not). Checks: `styles_differ_on_ordinary_short_dictation`,
+`polished_writes_full_sentences`, `casual_texts`,
+`notes_list_several_items_concisely`, `styles_keep_an_address_whole`,
+`styles_trim_spanish_and_german_hesitations`,
+`filler_trimming_follows_the_dictation_language`, and
+`verbatim_collapses_horizontal_spaces_only` in
+[dictation/style/tests.rs](../../src/dictation/style/tests.rs);
+`the_dictation_style_writes_a_dictation_and_leaves_typed_text_and_the_api_alone`
+in [dictation/processor.rs](../../src/dictation/processor.rs);
+`dictation_style_is_its_own_atomic_and_carries_its_choice` in
+[labs.rs](../../src/labs.rs);
+`dictation_style_shows_its_choices_on_its_card_while_on` and
+`output_shows_the_style_row_while_its_lab_is_on` in
+[panes.rs](../../src/rune_ui/tests/panes.rs);
+`every_dictation_style_string_has_every_language` in
+[i18n.rs](../../src/desktop/i18n.rs). Not yet observed with a real
+dictation; the Labs-page goldens were regenerated on Linux, and no Output
+golden moved because its scene leaves the lab off.
 
 Clean up with Apple Intelligence (`clean-up-apple-intelligence`, macOS, off
 by default): while on, each macOS dictation that its mode does not rewrite

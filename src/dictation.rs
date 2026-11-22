@@ -37,6 +37,7 @@ pub(crate) mod signature;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
 pub(crate) mod stop_phrase;
+pub(crate) mod style;
 pub(crate) mod text_replacements;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod vocabulary;

@@ -231,6 +231,9 @@ impl Feature {
             Self::Signature => {
                 "Each normal dictation pastes with your signature on its own line at the end, and Paste Last and History keep the same text; not added to raw, printed, or API output"
             }
+            Self::DictationStyle => {
+                "Write each dictation as Polished, Casual, Notes, or Verbatim after the corrections and rewrite and before transformations; Dictate without processing, Voice Action, meetings, and the local API are left alone"
+            }
         }
     }
 }

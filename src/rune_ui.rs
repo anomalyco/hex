@@ -1487,7 +1487,10 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
     let (actions, body) = match ui.pane {
         _ if ui.labs_open => (vec![labs::tabs(ui, p)], labs::page(ui, p, cx, &mut layer)),
         Pane::General => (Vec::new(), general::pane(ui, p, &mut layer)),
-        Pane::Output => (Vec::new(), output::pane(ui, p, cx.is_reduced_motion())),
+        Pane::Output => (
+            Vec::new(),
+            output::pane(ui, p, cx.is_reduced_motion(), &mut layer),
+        ),
         Pane::Modes => modes::pane(ui, p, &mut layer),
         Pane::History => history::pane(ui, p, cx, &mut layer),
         #[cfg(hex_capture)]

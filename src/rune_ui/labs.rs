@@ -720,6 +720,9 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::SpokenFormatting, None));
     rows.push(row(Feature::SpokenSymbols, None));
     rows.push(row(Feature::FillerWords, None));
+    // Every OS writes each dictation in the chosen style after its
+    // corrections and before its transformations.
+    rows.push(row(Feature::DictationStyle, None));
     // macOS reads the pass through Apple Intelligence: a managed lock keeps
     // the row it built (off, disabled, saying why), else the card says why.
     if caps.os == super::platform::Os::Macos {
@@ -1020,6 +1023,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ModesEditor => "lab-modes-editor",
         Feature::DropTranscribe => "lab-drop-transcribe",
         Feature::VocabularyFiles => "lab-vocabulary-files",
+        Feature::DictationStyle => "lab-dictation-style",
     }
 }
 
@@ -1154,6 +1158,20 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::StopPhrase) => Some(stop_phrase::body(ui, p)),
         Lab::Feature(Feature::Signature) => Some(signature::body(ui, p)),
+        Lab::Feature(Feature::DictationStyle) => Some(
+            row()
+                .key("dictation-style-row")
+                .gap(8.0)
+                .center_y()
+                .flex_wrap()
+                .child(
+                    text(tr("Style"))
+                        .key("label")
+                        .font(controls::DESCRIPTION)
+                        .color(p.muted()),
+                )
+                .child(dictation_style_choice(ui, p, layer)),
+        ),
         // Wayland reports no file drags, so its card offers the file dialog.
         Lab::Feature(Feature::DropTranscribe) => Some(super::drop_transcribe::card(p)),
         #[cfg(all(target_os = "macos", hex_capture))]
@@ -1181,6 +1199,35 @@ fn caps_lock_light(ui: &Ui, p: Paint) -> El {
         let light = CapsLockLight::ALL[index];
         ui.update(|settings| settings.labs.caps_lock_light = light);
     })
+}
+
+/// Which of the four styles every dictation is written as. Four labels no
+/// longer fit a segmented control on a half-width card in every language,
+/// so the choice opens in a menu.
+fn dictation_style_choice(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    use crate::app_settings::DictationStyle;
+    let labels: Vec<String> = DictationStyle::ALL
+        .iter()
+        .map(|style| tr(style.name()).to_owned())
+        .collect();
+    let selected = DictationStyle::ALL
+        .iter()
+        .position(|style| *style == ui.settings.labs.dictation_style_choice)
+        .unwrap_or(0);
+    super::general::quiet_select(
+        ui,
+        p,
+        super::Menu::Pick("dictation-style"),
+        "dictation-style-choice".to_owned(),
+        tr("Style"),
+        labels,
+        selected,
+        |ui, index| {
+            let style = DictationStyle::ALL[index];
+            ui.update(|settings| settings.labs.dictation_style_choice = style);
+        },
+        layer,
+    )
 }
 
 /// Which appearance the main window shows instead of the system's.

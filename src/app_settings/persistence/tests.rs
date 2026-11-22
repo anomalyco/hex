@@ -483,6 +483,22 @@ fn an_invalid_appearance_theme_resets_only_that_field() {
 }
 
 #[test]
+fn an_invalid_dictation_style_choice_resets_only_that_field() {
+    let original =
+        br#"{"labs":{"dictation_style":true,"dictation_style_choice":"song","live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.dictation_style);
+    assert_eq!(
+        settings.labs.dictation_style_choice,
+        crate::app_settings::DictationStyle::Polished
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
 fn a_microphone_linger_window_outside_the_choices_loads_the_default() {
     let original = br#"{"labs":{"keep_microphone_open":true,"keep_microphone_open_seconds":45,"live_text":true}}"#;
     let file = SettingsFile::new(original);

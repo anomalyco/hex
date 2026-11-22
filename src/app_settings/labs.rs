@@ -28,6 +28,50 @@ impl CapsLockLight {
     }
 }
 
+/// How a normal dictation's text is written (Labs › Dictation style): the
+/// iPhone app's four styles. Every choice is punctuation and case rules
+/// only, with no model.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DictationStyle {
+    /// Full sentences: fillers trimmed, each sentence capitalized and
+    /// ended, and informal English contractions written out.
+    #[default]
+    Polished,
+    /// Texting: sentences may start lowercase, "I" is "i", an opening
+    /// interjection loses its comma, and a short message its final period.
+    Casual,
+    /// Concise lines, with a list when several items are said.
+    Notes,
+    /// Exactly as the speech model wrote it.
+    Verbatim,
+}
+
+impl DictationStyle {
+    /// Every choice, in the order the window shows them.
+    pub const ALL: [Self; 4] = [Self::Polished, Self::Casual, Self::Notes, Self::Verbatim];
+
+    /// The English label the window shows.
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Polished => "Polished",
+            Self::Casual => "Casual",
+            Self::Notes => "Notes",
+            Self::Verbatim => "Verbatim",
+        }
+    }
+
+    /// What the choice does, in one line under the label.
+    pub const fn hint(self) -> &'static str {
+        match self {
+            Self::Polished => "Full sentences, fillers trimmed",
+            Self::Casual => "Texting: lowercase start, no final period",
+            Self::Notes => "Short lines, a list for several items",
+            Self::Verbatim => "Exact words from the model",
+        }
+    }
+}
+
 /// The main window's appearance: the OS's, or one forced on it (Labs ›
 /// Appearance).
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -253,6 +297,12 @@ pub struct LabsSettings {
     /// returns to its default.
     #[serde(deserialize_with = "deserialize_phrase")]
     pub voice_prompt_phrase: String,
+    /// Every normal dictation is written in `dictation_style_choice`'s
+    /// style, after corrections and any rewrite and before transformations.
+    pub dictation_style: bool,
+    /// Which of the four styles it is written as while `dictation_style` is
+    /// on.
+    pub dictation_style_choice: DictationStyle,
     /// A spoken phrase at the end of a hands-free dictation finishes it as if
     /// the shortcut were pressed again, and never reaches the pasted text.
     pub stop_phrase: bool,
@@ -461,6 +511,8 @@ impl Default for LabsSettings {
             pause_menu: false,
             voice_prompt: false,
             voice_prompt_phrase: crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned(),
+            dictation_style: false,
+            dictation_style_choice: DictationStyle::Polished,
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
             signature: false,

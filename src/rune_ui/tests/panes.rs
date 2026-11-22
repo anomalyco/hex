@@ -2702,6 +2702,53 @@ fn caps_lock_light_shows_its_choices_on_its_card_while_on() {
 }
 
 #[test]
+fn dictation_style_shows_its_choices_on_its_card_while_on() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| {
+        ui.lab_store.group = Some(crate::labs::Feature::DictationStyle.group());
+        ui.lab_store.search = rune::TextEdit::new("Dictation style".to_owned());
+    });
+    settle(&mut rt);
+    assert!(
+        rt.find("dictation-style-choice-trigger").is_none(),
+        "hidden while off"
+    );
+    assert_eq!(
+        rt.state.settings.labs.dictation_style_choice,
+        crate::app_settings::DictationStyle::Polished
+    );
+    tap(&mut rt, "lab-dictation-style");
+    assert!(rt.state.settings.labs.dictation_style);
+    assert!(rt.find("dictation-style-choice-trigger").is_some());
+    tap(&mut rt, "dictation-style-choice-trigger");
+    tap(&mut rt, "option2");
+    assert_eq!(
+        rt.state.settings.labs.dictation_style_choice,
+        crate::app_settings::DictationStyle::Notes
+    );
+}
+
+#[test]
+fn output_shows_the_style_row_while_its_lab_is_on() {
+    let mut rt = runtime("output", true, (980.0, 4000.0));
+    settle(&mut rt);
+    assert!(rt.find("dictation-style-row").is_none(), "hidden while off");
+    rt.update(|ui, _| ui.settings.labs.dictation_style = true);
+    refresh(&mut rt);
+    assert!(rt.find("dictation-style-row").is_some());
+    assert_eq!(
+        rt.state.settings.labs.dictation_style_choice,
+        crate::app_settings::DictationStyle::Polished
+    );
+    tap(&mut rt, "dictation-style-choice-field-trigger");
+    tap(&mut rt, "dictation-style-choice-item3");
+    assert_eq!(
+        rt.state.settings.labs.dictation_style_choice,
+        crate::app_settings::DictationStyle::Verbatim
+    );
+}
+
+#[test]
 fn appearance_shows_its_theme_on_its_card_while_on() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
     rt.update(|ui, _| ui.lab_store.group = Some(crate::labs::Feature::Appearance.group()));

@@ -433,6 +433,23 @@ pub fn signature_text() -> String {
         .clone()
 }
 
+/// Labs › Dictation style: the style each normal dictation is written as,
+/// or None while the lab is off (every OS; read once as each dictation's
+/// processing starts).
+pub fn dictation_style() -> Option<crate::app_settings::DictationStyle> {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    DICTATION_STYLE
+        .load(Ordering::Acquire)
+        .then(|| {
+            *DICTATION_STYLE_CHOICE
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+        })
+        .filter(|_| Feature::DictationStyle.on_this_os())
+}
+
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
