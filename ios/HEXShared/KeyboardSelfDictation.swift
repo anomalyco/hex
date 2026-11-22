@@ -5,13 +5,16 @@ import Foundation
 /// defaults to Off and its row hides (`KeyboardBridge.warmDuration`). Not before iOS 26, and
 /// not while the keyboard hands its dictations to Hex: it couldn't get its speech model
 /// (`LanguageSettings.keyboardNeedsHex`), Experiments › Multilingual model takes the language
-/// and only Hex loads it, or Dictate opened Hex for one of those or for lack of memory in the
-/// last `recentWindow`, until the keyboard next dictates by itself.
+/// and only Hex loads it, or the keyboard opened Hex for a dictation in the last
+/// `recentWindow` (recorded by the keyboard, and by Hex whatever the reason), until the
+/// keyboard next finishes a dictation by itself.
 nonisolated struct KeyboardSelfDictation {
     enum Reason: String {
         case memory
         case speechModel
         case multilingual
+        /// Hex saw the keyboard open it for a dictation, whatever the keyboard's reason.
+        case openedHex
     }
 
     static let handedToHexKey = "keyboard.handedDictationToHex"
@@ -34,7 +37,13 @@ nonisolated struct KeyboardSelfDictation {
         defaults?.set(now.timeIntervalSince1970, forKey: Self.handedToHexAtKey)
     }
 
-    /// The keyboard dictates by itself again.
+    /// Written by Hex as the keyboard opens it for a dictation, for any reason (one the keyboard
+    /// didn't record, such as a dictation it couldn't start), keeping the keyboard's reason.
+    func recordOpenedHex(at now: Date = Date()) {
+        recordHandedToHex(handedToHex?.reason ?? .openedHex, at: now)
+    }
+
+    /// The keyboard finished a dictation by itself again.
     func clearHandedToHex() {
         guard defaults?.object(forKey: Self.handedToHexKey) != nil else { return }
         defaults?.removeObject(forKey: Self.handedToHexKey)

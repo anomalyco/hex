@@ -550,6 +550,11 @@ struct KeyboardBridge {
         keyboardDictatesItself(osMajorVersion: osMajorVersion, now: now) ? .off : .fifteenMinutes
     }
 
+    /// The keyboard opened Hex for a dictation: it doesn't dictate by itself for now.
+    func noteKeyboardOpenedHex(now: Date = Date()) {
+        KeyboardSelfDictation(defaults: defaults).recordOpenedHex(at: now)
+    }
+
     func keyboardDictatesItself(
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
         now: Date = Date()

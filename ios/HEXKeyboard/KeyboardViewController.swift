@@ -1000,7 +1000,10 @@ final class KeyboardViewController: UIInputViewController {
             translationFailure: snap.translationFailure,
             source: source
         )
-        if source == "keyboard" { localDictation.markDelivered(resultID: resultID) }
+        if source == "keyboard" {
+            localDictation.markDelivered(resultID: resultID)
+            KeyboardSelfDictation().clearHandedToHex()
+        }
         return true
     }
 
@@ -1229,7 +1232,6 @@ final class KeyboardViewController: UIInputViewController {
         localDictationAvailable = available
         viewModel.onLocalDictateTap = available ? { [weak self] in
             guard let self else { return }
-            KeyboardSelfDictation().clearHandedToHex()
             self.localDictation.start(
                 in: self.view,
                 microphone: self.bridge.microphone,

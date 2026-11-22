@@ -549,6 +549,8 @@ final class DictationController {
         if request.opensPage {
             return
         }
+        // Whatever made the keyboard open Hex, it isn't dictating by itself: the warm default is back.
+        keyboardBridge.noteKeyboardOpenedHex()
         refreshWarmDuration()
         // A language picked in the keyboard: prepare it before the handoff records.
         followDictationLanguageSetting()
@@ -647,8 +649,6 @@ final class DictationController {
             }
             return
         }
-        // Off where the keyboard dictates by itself: a launch that missed its recording warms nothing.
-        if warmDuration == .off, keyboardBridge.keyboardDictatesItself() { return }
 
         if keyboardSessionEnabled, audio.isKeepaliveRunning {
             refreshWarmExpiry()

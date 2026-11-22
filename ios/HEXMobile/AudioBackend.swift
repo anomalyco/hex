@@ -263,12 +263,16 @@ final class SystemAudioManager: AudioManaging {
     /// screen recording's audio too) to 16 kHz for as long as Hex held the session, and back
     /// at its end. The hardware keeps its own rate: the recorder writes 16 kHz itself, and the
     /// keepalive taps whatever format the hardware reports.
+    ///
+    /// The category is set only when it changes: on iOS 27 setting it again, even unchanged,
+    /// while Hex is in the background asks iOS to interrupt others, which it refuses there
+    /// ("can't stop others because it is in the background"), so a warm session's dictation
+    /// failed with "Another app is using audio" (cannotInterruptOthers, TestFlight build 129).
     func configureAudioSession(recordingFrom choice: MicrophoneChoice?) throws {
-        try session.setCategory(
-            .playAndRecord,
-            mode: .measurement,
-            options: MicrophoneRoute.categoryOptions(allowingBluetooth: choice?.allowsBluetooth ?? false)
-        )
+        let options = MicrophoneRoute.categoryOptions(allowingBluetooth: choice?.allowsBluetooth ?? false)
+        if session.category != .playAndRecord || session.mode != .measurement || session.categoryOptions != options {
+            try session.setCategory(.playAndRecord, mode: .measurement, options: options)
+        }
         try session.setActive(true, options: [])
         let inputs = session.microphones
         let input = choice.map { MicrophoneRoute.capture($0, from: inputs) } ?? MicrophoneRoute.keepalive(from: inputs)
