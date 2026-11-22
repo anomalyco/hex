@@ -132,6 +132,9 @@ struct Tally {
     tie: usize,
     examples: Vec<String>,
     today_examples: Vec<String>,
+    shared: usize,
+    shared_failures: usize,
+    shared_examples: Vec<String>,
 }
 
 /// The first answer the port's order of your own words changes.
@@ -226,6 +229,7 @@ fn compare(
 fn check(path: &str) {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let ios = read("ios/HEXShared/FullKeyboard/never-suggest.tsv");
+    let shared = read("android/app/src/main/assets/typing/never-suggest.tsv");
     let models: HashMap<String, Arc<Model>> = ["en", "es", "de"]
         .into_iter()
         .map(|c| (c.to_owned(), model(c)))
@@ -276,17 +280,53 @@ fn check(path: &str) {
                 if compare(world, &ios, &v, out, calls, &mut tally) {
                     tally.failures += 1;
                 }
+                // The list both apps read: Android's file, by base language.
+                let shared_out = v.get("shared").and_then(Value::as_array).unwrap_or(out);
+                if v.get("shared").is_some() {
+                    tally.shared += 1;
+                    if tally.shared_examples.len() < 3 {
+                        tally
+                            .shared_examples
+                            .push(order_example(&v, &v["shared"], out));
+                    }
+                }
+                let shared_calls = v
+                    .get("sharedCalls")
+                    .and_then(Value::as_str)
+                    .unwrap_or(calls);
+                let mut scratch = Tally::default();
+                if compare(world, &shared, &v, shared_out, shared_calls, &mut scratch) {
+                    tally.shared_failures += 1;
+                    tally.examples.extend(
+                        scratch
+                            .examples
+                            .into_iter()
+                            .map(|e| format!("[shared list] {e}"))
+                            .take(2),
+                    );
+                }
             }
             other => panic!("unknown line {other}"),
         }
     }
     println!(
-        "{path}: {} cases, {} operations, {} dictionary calls; {} differ; {} answer otherwise \
-         with own words in Swift's dictionary order, {} with Swift's decoder tie order",
-        tally.cases, tally.ops, tally.calls, tally.failures, tally.today, tally.tie
+        "{path}: {} cases, {} operations, {} dictionary calls; {} differ ({} with the shared \
+         never-suggest list); {} answer otherwise with own words in Swift's dictionary order, {} \
+         with Swift's decoder tie order; {} change with the shared list",
+        tally.cases,
+        tally.ops,
+        tally.calls,
+        tally.failures,
+        tally.shared_failures,
+        tally.today,
+        tally.tie,
+        tally.shared
     );
     for e in &tally.today_examples {
         println!("  own words' order: {e}");
+    }
+    for e in &tally.shared_examples {
+        println!("  shared list: {e}");
     }
     for (kind, n) in &tally.by_kind {
         println!("  first difference at {kind}: {n}");
@@ -307,6 +347,10 @@ fn check(path: &str) {
         char_failures.len()
     );
     assert_eq!(tally.failures, 0, "cases differ from the Swift oracle");
+    assert_eq!(
+        tally.shared_failures, 0,
+        "cases differ with the shared list"
+    );
 }
 
 #[test]

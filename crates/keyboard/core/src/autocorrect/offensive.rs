@@ -101,8 +101,8 @@ impl OffensiveWords {
     }
 }
 
-/// The bundled `never-suggest.tsv` the host hands over, read once per layout language
-/// (`OffensiveWords.bundled`).
+/// The bundled `never-suggest.tsv` the host hands over (Android's file, the union of both
+/// apps' lists), read once per base language (`OffensiveWords.bundled`).
 #[derive(Debug, Default)]
 pub struct NeverSuggestList {
     tsv: String,
@@ -117,7 +117,7 @@ impl NeverSuggestList {
         }
     }
 
-    /// The list for a layout language's code ("en", "nb"; the shared `*` lines for others).
+    /// The list for a base language ("en", "fr", "nb"; the shared `*` lines for others).
     pub fn bundled(&self, language: &str) -> Arc<OffensiveWords> {
         let mut loaded = self.loaded.lock().unwrap_or_else(|e| e.into_inner());
         loaded

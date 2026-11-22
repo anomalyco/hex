@@ -14,8 +14,8 @@ use super::{TextChecker, lists, text, tokens};
 use crate::decoder::{Decision, Keys, TypingDecoder};
 use crate::model::Model;
 
-/// Data the host bundles with the keyboard and reads once: the never-suggest list and German's
-/// capitals.
+/// Data the host bundles with the keyboard and reads once: the never-suggest list (one list
+/// for iOS and Android, `never-suggest.tsv`) and German's capitals.
 #[derive(Debug, Default)]
 pub struct Bundled {
     pub never_suggest: NeverSuggestList,
@@ -24,9 +24,11 @@ pub struct Bundled {
 }
 
 impl Bundled {
-    /// The never-suggest list for `language` (`OffensiveWords.bundled(language.rawValue)`).
+    /// The never-suggest list for `language`, by its base language: Apple's three French
+    /// layouts read the "fr" rows (Swift read `OffensiveWords.bundled(language.rawValue)`, so
+    /// French (Canada) and French (Switzerland) read none).
     pub(crate) fn offensive_words(&self, language: Language) -> Arc<OffensiveWords> {
-        self.never_suggest.bundled(language.code())
+        self.never_suggest.bundled(language.base_language())
     }
 }
 
