@@ -2990,12 +2990,14 @@ fullscreen app on a notched Mac is not yet observed.
 At the bottom position the plate keeps its 24 pt gap above
 `visibleFrame.y` (`rune_hud::hud_placement::BOTTOM_OFFSET`), or the
 `labs.hud_bottom_gap` points (0–400, 24 by default) that Labs › HUD height
-chooses. The whole 320 x 128 pt window sits on that display, with
-`Layout.center` moving the plate inside it, so its transparent shadow padding
-never hangs onto a display below; a gap too tall for that padding raises the
-window with the plate at its usual offset inside it, keeping its shadow
-padding, and only a gap taller than the window moves the plate up inside it,
-clamped under the menu bar or notch.
+chooses. A gap of 24 pt or less keeps the window's bottom on the visible
+bottom and moves `Layout.center` (24 pt is exactly the old placement), so the
+window's transparent shadow padding never hangs onto a display below; a larger
+gap raises the window by gap − 24 with the plate at its usual offset inside it,
+keeping its shadow padding. The plate only moves up inside the window once the
+raised window would reach the visible top (a gap above the visible height
+minus 104 pt), which within 0–400 only happens on a very short visible frame,
+and placement clamps it under the menu bar or notch.
 The HUD is
 also pinned to the pointer screen's `NSScreenNumber` with a display-local rect;
 that resolves to the same frame as the global `Primary` rect, so the pin is
