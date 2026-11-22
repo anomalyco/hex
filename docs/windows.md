@@ -22,12 +22,12 @@ alone: another key, or a modifier the shortcut doesn't include, joining it
 makes an ordinary chord for the app in front (Alt-tab, Alt+F4, Alt+Shift for
 the input language, or Ctrl on the way to Ctrl+Alt+V), which cancels the
 press before anything is transcribed, and AltGr keeps typing on the layouts
-that use it. Labs › Hold through other keys keeps a hold that is a second or
-more old recording through those keys instead. Windows opens its menus on an
-Alt tap, so Hex swallows Alt's release when nothing joined it, the way macOS
-keeps Option from opening its menus; a chord's release is always the app's
-own, with no key injected. Rebind the shortcut in Settings if you
-rely on a bare Alt elsewhere. To let another app use the same key, such as a
+that use it. With Labs › Hold through other keys, a hold that is already a
+second old keeps recording through those keys instead. Windows opens its
+menus on an Alt tap, so Hex swallows Alt's release when nothing joined it,
+the way macOS keeps Option from opening its menus; a hold another key or
+modifier joined leaves the release to the app. Rebind the shortcut in
+Settings if you rely on a bare Alt elsewhere. To let another app use the same key, such as a
 Discord push-to-talk key, turn on **Share dictation shortcut with other apps**
 under Advanced: Hex still reacts to it but passes its key-down and key-up on,
 which can also trigger that binding in other apps. In Hold mode, tap the shortcut twice within
