@@ -593,6 +593,135 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(polish, "zolw"), "three diacritics are three edits on another layout")
     }
 
+    /// A Polish word typed without its letters gets them back from the dictionary alone, even
+    /// where its guesses don't offer the word (iOS's Polish guesses for "prosze" or "juz" have no
+    /// "proszę" or "już"): only when the plain spelling is no word, and one word fits or the
+    /// guesses rank one first. A correct word keeps its letters, and the strip offers the marked
+    /// word of a plain word that is one too.
+    func testPolishPutsItsLettersBackFromTheDictionary() {
+        let polish = stubbed {
+            $0.valid = ["proszę", "już", "się", "są", "ze", "że", "sad", "sąd", "dziękuje", "dziękuję", "mąż", "maź",
+                        "żona", "żoną", "łódź", "jest", "książka", "źródło", "cześć", "zona"]
+            $0.guessTable = ["prosze": ["prosie", "proste"], "zona": [], "maz": ["maź", "mąż"]]
+        }
+        polish.setLanguage(.polish, available: ["pl_PL", "en_US"])
+        XCTAssertEqual(fix(polish, "prosze"), "proszę", "not among the guesses")
+        XCTAssertEqual(fix(polish, "Prosze"), "Proszę")
+        XCTAssertEqual(fix(polish, "juz"), "już")
+        XCTAssertEqual(fix(polish, "sie"), "się")
+        XCTAssertEqual(fix(polish, "sa"), "są", "two letters too")
+        XCTAssertEqual(fix(polish, "lodz"), "łódź")
+        XCTAssertEqual(fix(polish, "ksiazka"), "książka")
+        XCTAssertEqual(fix(polish, "zrodlo"), "źródło")
+        XCTAssertEqual(fix(polish, "czesc"), "cześć")
+        XCTAssertEqual(fix(polish, "maz"), "maź", "the guesses rank one first")
+        XCTAssertNil(fix(polish, "dziekuje"), "dziękuje or dziękuję, unranked: the strip offers them")
+        XCTAssertEqual(polish.suggestions(beforeInput: "dziekuje", field: .text, autocorrectionType: .default).dropFirst().first?.replacement, "dziękuje")
+        XCTAssertNil(fix(polish, "ze"), "ze is a word")
+        XCTAssertNil(fix(polish, "zona"), "a word of yours or the dictionary's stays")
+        let slots = polish.suggestions(beforeInput: "ze", field: .text, autocorrectionType: .default)
+        XCTAssertEqual(slots.map(\.replacement), ["ze", "że"])
+        XCTAssertFalse(slots[1].willAutoReplace)
+        for word in ["łódź", "już", "są", "że", "sąd", "książka", "źródło"] {
+            XCTAssertNil(fix(polish, word), "\(word) keeps its letters")
+        }
+        XCTAssertNil(fix(polish, "pozno"), "no word fits: left as typed")
+    }
+
+    /// iOS lists Polish (and Czech, Hungarian, Romanian, Norwegian) with no word data until its
+    /// keyboard's data is on the iPhone: the iOS 27.2 simulator's `pl_PL` takes any letters for
+    /// a word, with or without Apple's Polish keyboard added, and its guesses are English ("moze"
+    /// gets "more"). Then Polish leaves every word as typed. With the data (an iPhone that has
+    /// it), it puts the letters back. Runs against this device's own dictionary.
+    func testPolishFollowsThisDevicesDictionary() {
+        let polish = AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults))
+        polish.setLanguage(.polish)
+        let words = ["zolw", "moze", "prosze", "żółw", "łódź", "może", "proszę"]
+        guard polish.hasDictionary, !polish.dictionaryTakesAnything else {
+            for word in words { XCTAssertNil(fix(polish, word), "no Polish word data: \(word) stays") }
+            XCTAssertTrue(polish.markedWords(for: "zolw").words.isEmpty, "nothing guessed without word data")
+            let english = AutocorrectEngine(checker: SystemTextChecker(), learnedWords: LearnedWordsStore(defaults: defaults))
+            english.setLanguage(.english)
+            english.setPartner(.polish)
+            guard english.partner != nil else { return }
+            XCTAssertNil(english.workingPartner, "a partner without word data doesn't count")
+            XCTAssertNil(fix(english, "żółw"), "Polish letters beside English stay")
+            XCTAssertNil(fix(english, "łódź"))
+            XCTAssertEqual(fix(english, "teh"), "the", "English typos are still fixed")
+            return
+        }
+        XCTAssertEqual(fix(polish, "zolw"), "żółw")
+        XCTAssertEqual(fix(polish, "moze"), "może")
+        XCTAssertEqual(fix(polish, "prosze"), "proszę")
+        for word in ["żółw", "łódź", "może", "proszę"] { XCTAssertNil(fix(polish, word), "\(word) keeps its letters") }
+    }
+
+    /// Bilingual autocorrect with Polish chosen but without its word data: a word typed with
+    /// Polish letters is the partner's and stays (English's guesses would strip or change them),
+    /// while English typos are still fixed. With the data, Polish puts its own letters back.
+    func testEnglishBesideASilentPolishLeavesPolishLettersAlone() {
+        let english = stubbed { $0.valid = ["the", "maze", "story", "low"]
+            $0.guessTable = ["moze": ["maze"], "ktory": ["story"], "teh": ["the"], "zolw": [], "żółw": ["low"], "łódź": ["lodz"]] }
+        english.setLanguage(.english, available: ["en_US", "pl_PL"])
+        let silent = StubChecker()
+        silent.acceptsEverything = true
+        english.setPartner(.polish, available: ["en_US", "pl_PL"], checker: silent)
+        XCTAssertNil(english.workingPartner)
+        XCTAssertNil(fix(english, "żółw"), "not \"low\"")
+        XCTAssertNil(fix(english, "łódź"))
+        XCTAssertEqual(fix(english, "teh"), "the")
+
+        let polishChecker = StubChecker()
+        polishChecker.valid = ["może", "który", "żółw", "jest"]
+        english.setPartner(nil)
+        english.setPartner(.polish, available: ["en_US", "pl_PL"], checker: polishChecker)
+        XCTAssertNotNil(english.workingPartner)
+        XCTAssertEqual(fix(english, "moze"), "może")
+        XCTAssertEqual(fix(english, "ktory"), "który")
+        XCTAssertEqual(fix(english, "zolw"), "żółw", "three letters back from the partner's dictionary on English keys")
+        XCTAssertNil(fix(english, "żółw"))
+        XCTAssertEqual(fix(english, "teh"), "the")
+    }
+
+    /// Czech, Hungarian, Romanian, French, Portuguese and Norwegian put their letters back the
+    /// same way, and French and Portuguese take a guess that lacks only its marks however many
+    /// ("coracao" -> "coração"); Spanish never enumerates (its guesses carry its one accent).
+    func testMarkedLettersComeBackInOtherLanguages() {
+        let french = stubbed { $0.valid = ["déjà", "forêt", "ça", "élève", "élevé"]; $0.guessTable = ["eleve": ["élève", "élevé"]] }
+        french.setLanguage(.french, available: ["fr_FR", "en_US"])
+        XCTAssertEqual(fix(french, "deja"), "déjà")
+        XCTAssertEqual(fix(french, "foret"), "forêt")
+        XCTAssertEqual(fix(french, "ca"), "ça")
+        XCTAssertEqual(fix(french, "eleve"), "élève", "the guesses rank it first")
+        let portuguese = stubbed { $0.valid = ["amanhã", "ação", "acho", "coração"]
+            $0.guessTable = ["acao": ["acho", "ação"], "coracao": ["coração"]] }
+        portuguese.setLanguage(.portuguese, available: ["pt_BR", "en_US"])
+        XCTAssertEqual(fix(portuguese, "amanha"), "amanhã")
+        XCTAssertEqual(fix(portuguese, "acao"), "ação", "not acho")
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "coracao", to: "coração", language: .portuguese)!, 0.20, accuracy: 0.001)
+        XCTAssertEqual(fix(portuguese, "coracao"), "coração")
+        let norwegian = stubbed { $0.valid = ["høyre", "båt", "bat"] }
+        norwegian.setLanguage(.norwegian, available: ["nb", "en_US"])
+        XCTAssertEqual(fix(norwegian, "hoyre"), "høyre")
+        XCTAssertNil(fix(norwegian, "bat"), "a word stays")
+        let czech = stubbed { $0.valid = ["děkuji", "příliš", "žluťoučký"] }
+        czech.setLanguage(.czech, available: ["cs", "en_US"])
+        XCTAssertEqual(fix(czech, "dekuji"), "děkuji")
+        XCTAssertEqual(fix(czech, "prilis"), "příliš")
+        let hungarian = stubbed { $0.valid = ["köszönöm", "szőlő"] }
+        hungarian.setLanguage(.hungarian, available: ["hu", "en_US"])
+        XCTAssertEqual(fix(hungarian, "szolo"), "szőlő")
+        let romanian = stubbed { $0.valid = ["mulțumesc", "știință", "și"] }
+        romanian.setLanguage(.romanian, available: ["ro", "en_US"])
+        XCTAssertEqual(fix(romanian, "multumesc"), "mulțumesc")
+        XCTAssertEqual(fix(romanian, "stiinta"), "știință")
+        XCTAssertEqual(fix(romanian, "si"), "și")
+        let spanish = stubbed { $0.valid = ["mañana"] }
+        spanish.setLanguage(.spanish, available: ["es_ES"])
+        XCTAssertNil(fix(spanish, "manana"), "Spanish keeps to its guesses")
+        XCTAssertTrue(AutocorrectEngine.markedSpellings(of: "zazolc", language: .polish, limit: 100).isEmpty, "too many to try")
+    }
+
     /// Greek types with iOS's el dictionary, and a tonos or diaeresis left out is the cheapest
     /// fix there is, however many ("καλημερα" -> "καλημέρα", "αυπνια" -> "αϋπνία"), as a
     /// missing Polish diacritic is, and so is σ where the word ends in ς; other languages keep

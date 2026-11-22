@@ -755,7 +755,7 @@ final class AutocorrectEngine {
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
                 pool.append(Self.matchCase(of: token, onto: suggested))
             } else if !suppressedInSession.contains(lower), !learning.rejected.contains(lower),
-                      !learnedWords.contains(lower), let accented = language.accentSuggestions[lower] {
+                      !learnedWords.contains(lower), let accented = language.accentSuggestions[lower] ?? suggestedMarkedWord(for: token) {
                 // Offered, never put in by space: the plain spelling is a word of its own
                 // ("e" is "and", "ce" is "to us"), as the contractions above are.
                 pool.append(cased(accented, typed: token))
@@ -886,7 +886,7 @@ final class AutocorrectEngine {
         }
         guard let partner = workingPartner else {
             lastFixLanguage = language
-            return ownReplacement(for: token)
+            return replacementBesideSilentPartner(for: token)
         }
         let lean = languageLean(partner, token: token)
         // One-letter words are left to the keyboard's own language: `UITextChecker` takes
@@ -1151,7 +1151,7 @@ final class AutocorrectEngine {
         let isAllCaps = token.count >= 2 && token == token.uppercased() && token != token.lowercased()
         guard !isAllCaps, !token.dropFirst().contains(where: \.isUppercase) else { return nil }
         let lower = token.lowercased()
-        guard let accented = language.accentRestorations[lower], mayOffer(accented, replacing: token) else {
+        guard let accented = language.accentRestorations[lower] ?? restoredMarkedWord(for: token), mayOffer(accented, replacing: token) else {
             return nil
         }
         return withoutAddedCapitals(cased(accented, typed: token), typed: token)

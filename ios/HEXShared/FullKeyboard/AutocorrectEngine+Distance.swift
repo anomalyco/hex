@@ -83,13 +83,14 @@ extension AutocorrectEngine {
         // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
         // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), and Hungarian: its accented
         // vowels left out ("koszonom" -> "köszönöm", "kesobb" -> "később", "szivesen" ->
-        // "szívesen"), ő and ű included, as o and u with the combining double acute.
-        if language == .polish || language == .greek || language == .czech || language == .hungarian,
+        // "szívesen"), ő and ű included, as o and u with the combining double acute. French and
+        // Portuguese too: "eleve" -> "élève", "coracao" -> "coração".
+        if [.polish, .greek, .czech, .hungarian, .french, .frenchCanadian, .frenchSwiss, .portuguese].contains(language),
            s.count == t.count {
             func same(_ a: Character, _ b: Character) -> Bool {
                 switch language {
                 case .greek: Self.sameGreekLetterIgnoringAccents(a, b)
-                case .hungarian: Self.sameLetterIgnoringAccents(a, b)
+                case .hungarian, .french, .frenchCanadian, .frenchSwiss, .portuguese: Self.sameLetterIgnoringAccents(a, b)
                 default: Self.samePolishLetterIgnoringDiacritics(a, b)
                 }
             }

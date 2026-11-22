@@ -1167,9 +1167,24 @@ never at a launch by itself.
   "ce"/"c'è" stay as typed, because "e" is "and" and "ce" is "to us": the strip offers "è"
   and "c'è", and space never applies them (`KeyboardLanguage.accentSuggestions`). In Polish
   every missing diacritic in a word counts as one such fix
-  ("zolw" → "żółw", "maly" → "mały"). The
-  iOS 27.2 simulator lists `pl_PL` but its checker flags no word, so Polish fixes are
-  checked against a stub dictionary there. Greek likewise: every tonos or diaeresis left out
+  ("zolw" → "żółw", "maly" → "mały"). Polish, Czech, Hungarian, Romanian, French,
+  Portuguese and Norwegian also put their own letters back from the dictionary alone, where
+  its guesses don't offer the word ("prosze" → "proszę", "juz" → "już", "sa" → "są",
+  "deja" → "déjà", "amanha" → "amanhã", "acao" → "ação" rather than "acho"): every spelling
+  with marks added to plain letters is checked, and space puts one in only when the plain
+  spelling is no word of either language and one word fits or the guesses rank one first
+  ("dziekuje" offers "dziękuje" in the strip instead); a plain word that is one too keeps
+  its spelling and the strip offers the marked one ("ze" offers "że";
+  `AutocorrectEngine.markedWords`). French and Portuguese count every missing accent in a
+  guess as one fix too ("coracao" → "coração"). The iOS 27.2 (and 26.5) simulator lists
+  `pl_PL`, `cs_CZ`, `hu_HU`, `ro_RO` and `nb_NO` but their checkers take any letters
+  for a word and guess in English ("moze" gets "more"), with or without Apple's keyboard for
+  the language added: its word data comes as a download (`com.apple.linguisticdata`) the
+  simulator can't fetch, and Apple's own Polish keyboard there corrects nothing either. Such
+  a dictionary puts nothing back and corrects nothing, and as a bilingual partner it is left
+  out; English beside it then leaves a word typed with the partner's letters ("żółw")
+  alone. These fixes are checked against stub dictionaries, and against the device's own
+  (`testPolishFollowsThisDevicesDictionary`). Greek likewise: every tonos or diaeresis left out
   counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
   "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. Czech likewise:
   every háček or čárka left out counts as one such fix ("cesky" → "český", "prilis" →
