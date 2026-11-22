@@ -7,6 +7,9 @@ use std::time::Instant;
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
+use crate::dictation::paste_last::LastDictation;
+use crate::linux::paste::LinuxPaster;
+
 /// What happens to a transcript before and after it is pasted: the modes
 /// that process it and the history that keeps it. The host shares it
 /// with the listener so saved settings apply without a restart.
@@ -22,6 +25,19 @@ pub(crate) struct DictationOutput {
 /// stands alone instead of continuing the previous dictation (Labs ›
 /// Signature). No paste at all means a printing stop.
 pub(super) type Paste<'a> = &'a mut dyn FnMut(&str, bool, bool, bool) -> Result<()>;
+
+/// Paste last dictation: reinsert the remembered text, standing alone when it
+/// carries the signature line so the next dictation never joins it.
+pub(super) fn paste_last(
+    paster: &mut Result<LinuxPaster>,
+    last: Option<&LastDictation>,
+) -> Result<()> {
+    let last = last.ok_or_else(|| eyre!("there is no completed dictation to paste"))?;
+    paster
+        .as_mut()
+        .map_err(|error| eyre!("{error:#}"))?
+        .paste_dictation(last.text(), false, last.standalone())
+}
 
 impl DictationOutput {
     pub(crate) fn from_settings(
@@ -56,7 +72,7 @@ impl DictationOutput {
         flavour: crate::dictation::DictationFlavour,
         language: &str,
         paste: Option<Paste<'_>>,
-        last_dictation: &mut Option<String>,
+        last_dictation: &mut Option<LastDictation>,
         audio_ms: u64,
         inference_ms: u64,
         started: Instant,
@@ -141,12 +157,13 @@ impl DictationOutput {
             // Hex saved it, or a format couldn't be read) keeps the text
             // for Paste last dictation, so the dictation isn't lost;
             // History keeps only pasted output.
-            paste(&processed.text, flavour.terminal_paste(), send, signed)
-                .inspect_err(|_| *last_dictation = Some(processed.text.clone()))?;
+            paste(&processed.text, flavour.terminal_paste(), send, signed).inspect_err(|_| {
+                *last_dictation = Some(LastDictation::new(processed.text.clone(), signed));
+            })?;
             sent = send;
         }
         if !printed {
-            *last_dictation = Some(processed.text.clone());
+            *last_dictation = Some(LastDictation::new(processed.text.clone(), signed));
         }
         if let Some(history) = &self.history {
             let mut draft = crate::dictation::modes::history_draft(

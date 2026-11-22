@@ -13,7 +13,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
             "Dodawaj wiersz na końcu każdego dyktowania, np. „Sent from Hex”",
             "在每次听写末尾添加一行，例如“Sent from Hex”",
             "各音声入力の末尾に「Sent from Hex」などの一行を追加します",
-            "Füge jeder Diktatzeile eine Zeile wie „Sent from Hex“ am Ende hinzu",
+            "Füge am Ende jedes Diktats eine Zeile wie „Sent from Hex“ hinzu",
             "Añade una línea al final de cada dictado, como «Sent from Hex»",
             "Додавайте рядок у кінець кожного диктування, наприклад «Sent from Hex»",
         ],

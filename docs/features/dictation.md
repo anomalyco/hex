@@ -2532,19 +2532,32 @@ printed and not a raw flavour, and Linux's `DictationOutput::deliver` behind
 the same gate. It never touches raw (Dictate without processing), printed, or
 API output, meetings, typed text, Annotate, or `Paster::paste` itself. Nothing
 is appended when the text is empty after trimming, the signature is empty after
-trimming, or the text already ends with it. A signed paste is standalone on
-every OS, so it does not join the previous dictation and records no
-continuation: the next dictation is never glued onto the signature line. On
-Linux Live typing, the signed text is committed in the input method's own final
-step, so nothing is typed twice. Source:
-[dictation/signature.rs](../../src/dictation/signature.rs); checks:
+trimming, or the text already carries it on a line of its own (it is only the
+signature, or the signature follows a line break with nothing but spaces or
+tabs in between; a signature that merely ends a line of prose, like "Hex" in
+"I love Hex", is appended). A saved signature must be one line of at most 200
+characters with no control characters. A signed paste is standalone on every
+OS, so it does not join the previous dictation and records no continuation: the
+next dictation is never glued onto the signature line. Paste last dictation
+remembers with its kept text whether that text was signed
+(`dictation::paste_last::LastDictation`) and reinserts a signed one standalone
+too, even after the lab is turned off or its line changes. On Linux Live
+typing, the signed text is committed in the input method's own final step, so
+nothing is typed twice. Source:
+[dictation/signature.rs](../../src/dictation/signature.rs) and
+[dictation/paste_last.rs](../../src/dictation/paste_last.rs); checks:
 `the_signature_is_appended_once_on_its_own_line`, `off_appends_nothing`,
-`empty_text_appends_nothing`, and
-`text_that_already_ends_with_the_signature_is_left_alone` there, plus
+`empty_text_appends_nothing`,
+`a_signature_that_ends_a_line_of_prose_is_still_appended`,
+`a_signature_after_a_line_break_is_left_alone`, and
+`a_signature_refuses_line_and_control_characters` there,
+`a_signed_dictation_reinserts_standalone` and
+`an_unsigned_dictation_reinserts_as_a_continuation` in
+`paste_last.rs`, `paste_last_reinserts_a_signed_dictation_standalone` in
+[parakeet.rs](../../src/parakeet.rs) (macOS), plus
 `a_signature_is_trimmed_and_must_be_one_line` in
 [control/settings.rs](../../src/control/settings.rs). No automated check pastes
-into a real app, and the macOS and Windows call sites were not built or observed
-here.
+into a real app.
 
 ### Toggle Cancel
 

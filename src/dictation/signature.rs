@@ -14,30 +14,48 @@ pub const MAX_CHARS: usize = 200;
 /// The text with the signature on its own line at the end, or None when
 /// there is nothing to append: the lab is off, the text is empty after
 /// trimming, the signature is empty after trimming, or the text already ends
-/// with it. The saved signature is trimmed, so its own edges never add blank
-/// lines.
+/// with it on a line of its own. The saved signature is trimmed, so its own
+/// edges never add blank lines.
 pub fn append(text: &str, signature: &str, enabled: bool) -> Option<String> {
     if !enabled || text.trim().is_empty() {
         return None;
     }
     let signature = signature.trim();
-    if signature.is_empty() || text.trim_end().ends_with(signature) {
+    if signature.is_empty() || already_signed(text.trim(), signature) {
         return None;
     }
     Some(format!("{text}\n{signature}"))
+}
+
+/// Whether the text already carries the signature as a line of its own: it is
+/// only the signature, or the signature follows a line break with nothing but
+/// spaces or tabs in between. A signature that merely ends a line of prose,
+/// such as "Hex" in "I love Hex", does not make the line signed.
+fn already_signed(text: &str, signature: &str) -> bool {
+    text == signature
+        || text
+            .strip_suffix(signature)
+            .is_some_and(|rest| rest.trim_end_matches([' ', '\t']).ends_with(['\n', '\r']))
 }
 
 /// Why a saved signature is refused, if it is: it is one line of at most
 /// MAX_CHARS characters. Empty is allowed and appends nothing.
 pub fn text_problem(text: &str) -> Option<&'static str> {
     let text = text.trim();
-    if text.contains(['\n', '\r']) {
+    if text.chars().any(splits_a_line) {
         return Some("Use one line");
     }
     if text.chars().count() > MAX_CHARS {
         return Some("Use 200 characters or fewer");
     }
     None
+}
+
+/// A character that breaks or controls a line: every control character (a
+/// line break, a tab, NEL, and the rest) plus the Unicode line and paragraph
+/// separators.
+fn splits_a_line(character: char) -> bool {
+    character.is_control() || matches!(character, '\u{2028}' | '\u{2029}')
 }
 
 #[cfg(test)]
@@ -96,6 +114,36 @@ mod tests {
     }
 
     #[test]
+    fn a_signature_that_ends_a_line_of_prose_is_still_appended() {
+        let signature = "Hex";
+        assert_eq!(
+            append("I love Hex", signature, true),
+            Some("I love Hex\nHex".to_owned())
+        );
+        assert_eq!(
+            append("we ship friday, Hex", signature, true),
+            Some("we ship friday, Hex\nHex".to_owned())
+        );
+        assert_eq!(
+            append("Hex is the best", signature, true),
+            Some("Hex is the best\nHex".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_signature_after_a_line_break_is_left_alone() {
+        for text in [
+            "we ship friday\nSent from Hex",
+            "we ship friday\n  Sent from Hex",
+            "we ship friday\r\nSent from Hex",
+            "we ship friday\rSent from Hex",
+            "\nSent from Hex",
+        ] {
+            assert_eq!(append(text, DEFAULT_TEXT, true), None, "{text:?}");
+        }
+    }
+
+    #[test]
     fn a_signature_must_be_one_line_of_at_most_the_limit() {
         assert_eq!(text_problem(""), None);
         assert_eq!(text_problem("Sent from Hex"), None);
@@ -106,6 +154,20 @@ mod tests {
             text_problem(&"x".repeat(MAX_CHARS + 1)),
             Some("Use 200 characters or fewer")
         );
+    }
+
+    #[test]
+    fn a_signature_refuses_line_and_control_characters() {
+        for text in [
+            "a\u{2028}b",
+            "a\u{2029}b",
+            "a\u{0085}b",
+            "a\tb",
+            "a\u{0007}b",
+            "a\u{001b}b",
+        ] {
+            assert_eq!(text_problem(text), Some("Use one line"), "{text:?}");
+        }
     }
 
     #[test]

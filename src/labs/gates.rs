@@ -424,6 +424,9 @@ pub fn signature() -> bool {
 /// The signature line appended while [`signature`] is on (read as each
 /// output commits, only while the gate is on). Empty appends nothing.
 pub fn signature_text() -> String {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
     SIGNATURE_TEXT
         .read()
         .unwrap_or_else(|error| error.into_inner())

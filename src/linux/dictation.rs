@@ -16,6 +16,7 @@ use crate::desktop::events::{
     DictationPhase, EventLog, TranscriptPhase, VoiceEvent, VoiceState, now_ms,
 };
 use crate::desktop::host::DesktopShortcuts;
+use crate::dictation::paste_last::LastDictation;
 use crate::dictation::service::{DictationQueue, Effect, MICROPHONE_LOST, ServiceDictations};
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL, ReleaseWait};
 use crate::feedback::{self, Tone};
@@ -248,7 +249,7 @@ pub(crate) fn run(
     output.worker = Some(thread::spawn(move || {
         crate::linux::input::activity::start();
         let mut paster = LinuxPaster::new(worker_stop.clone(), worker_paste_with_shift, paste_keys);
-        let mut last_dictation: Option<String> = None;
+        let mut last_dictation: Option<LastDictation> = None;
         while let Ok(job) = job_receiver.recv() {
             if worker_stop.load(Ordering::Acquire) {
                 break;
@@ -257,15 +258,7 @@ pub(crate) fn run(
                 OutputJob::Dictation(job) if job.print.is_some() => (*job, OutputKind::Printed),
                 OutputJob::Dictation(job) => (*job, OutputKind::Dictation),
                 OutputJob::PasteLast => {
-                    let result = last_dictation
-                        .clone()
-                        .ok_or_else(|| eyre!("there is no completed dictation to paste"))
-                        .and_then(|text| {
-                            paster
-                                .as_mut()
-                                .map_err(|error| eyre!("{error:#}"))?
-                                .paste_dictation(&text, false, false)
-                        })
+                    let result = output::paste_last(&mut paster, last_dictation.as_ref())
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
                     if result_sender
@@ -1992,7 +1985,7 @@ mod tests {
     fn a_failed_paste_keeps_the_dictation_for_paste_last() {
         let text = "the dictation whose paste failed";
         let output = DictationOutput::from_settings(&AppSettings::default(), None);
-        let mut last_dictation = Some("an older dictation".to_string());
+        let mut last_dictation = Some(LastDictation::new("an older dictation".to_string(), false));
         let mut paste = |_: &str, _: bool, _: bool, _: bool| -> Result<()> {
             Err(eyre!("clipboard changed while Hex was preserving it"))
         };
@@ -2013,7 +2006,7 @@ mod tests {
         );
 
         assert!(result.is_err(), "the failed paste is still reported");
-        assert_eq!(last_dictation.as_deref(), Some(text));
+        assert_eq!(last_dictation.as_ref().map(LastDictation::text), Some(text));
     }
 
     #[test]

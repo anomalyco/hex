@@ -72,7 +72,7 @@ pub(crate) struct WindowsDesktopHost {
     error: Option<String>,
     settings: AppSettings,
     history: Option<History>,
-    last_dictation: Arc<Mutex<Option<String>>>,
+    last_dictation: Arc<Mutex<Option<crate::dictation::paste_last::LastDictation>>>,
     indicator: crate::rune_hud::HudSender,
     mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     transformations: Arc<crate::personal_commands::TransformationClient>,

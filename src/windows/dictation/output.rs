@@ -7,6 +7,7 @@ use std::time::Instant;
 use color_eyre::eyre::Result;
 
 use crate::control::PrintedTranscript;
+use crate::dictation::paste_last::LastDictation;
 use crate::windows::paste::{Paste, WindowsPaster};
 
 use super::{Job, JobResult, OutputKind};
@@ -16,7 +17,7 @@ pub(super) fn process_dictation_job(
     mut job: Job,
     paster: &mut Result<WindowsPaster>,
     history: Option<&crate::history::History>,
-    last_dictation: &Mutex<Option<String>>,
+    last_dictation: &Mutex<Option<LastDictation>>,
     mode_runtime: &std::sync::RwLock<crate::dictation::modes::ModeRuntime>,
     transformations: &crate::personal_commands::TransformationClient,
 ) -> JobResult {
@@ -122,7 +123,8 @@ pub(super) fn process_dictation_job(
             // A failed paste still keeps the text for Paste Last.
             *last_dictation
                 .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
+                .unwrap_or_else(|error| error.into_inner()) =
+                Some(LastDictation::new(text.clone(), signed));
             pasted.map_err(|error| format!("{error:#}"))?;
         }
         if let Some(history) = history {
@@ -171,7 +173,7 @@ pub(super) fn process_dictation_job(
 
 pub(super) fn process_paste_last(
     paster: &mut Result<WindowsPaster>,
-    last_dictation: &Mutex<Option<String>>,
+    last_dictation: &Mutex<Option<LastDictation>>,
 ) -> JobResult {
     let started = Instant::now();
     let mut copied = false;
@@ -180,14 +182,14 @@ pub(super) fn process_paste_last(
         .unwrap_or_else(|error| error.into_inner())
         .clone()
         .ok_or_else(|| "there is no completed dictation to paste".to_string())
-        .and_then(|text| {
+        .and_then(|last| {
             let paste = paster
                 .as_mut()
                 .map_err(|error| format!("{error:#}"))?
-                .paste(&text, false, None, false)
+                .paste(last.text(), false, None, last.standalone())
                 .map_err(|error| format!("{error:#}"))?;
             copied = paste == Paste::Copied;
-            Ok(text)
+            Ok(last.text().to_owned())
         });
     let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
     tracing::info!(latency_ms, "completed Windows Paste Last job");

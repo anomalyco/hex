@@ -24,6 +24,7 @@ pub(crate) mod modes;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod neutral_voice;
 mod numbers;
+pub(crate) mod paste_last;
 #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
 pub(crate) mod paste_target;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
