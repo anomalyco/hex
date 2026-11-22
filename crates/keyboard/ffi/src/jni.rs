@@ -1,6 +1,12 @@
 //! The Android IME's entry points: `external fun`s of the Kotlin `object`
 //! `ly.anoma.hex.typing.KeyboardCore`. Handles are the C interface's pointers as `Long`s (0
-//! for none); a failure returns 0 or null, never throws from Rust.
+//! for none). A failure returns 0 or null and never throws: a Rust panic is caught, and a Java
+//! exception a JNI call raised on the way (a null array, an allocation that failed, a class R8
+//! renamed) is cleared before the entry point returns.
+//!
+//! Release builds don't ship the core yet. When one does, R8 must keep `KeyboardCore`'s
+//! `external fun`s (their names are these functions' symbols) and `SwipeReading`'s
+//! `(String[], double[], int)` constructor, which `swipe_reading` calls by name.
 
 use std::path::Path;
 use std::ptr;
@@ -36,6 +42,15 @@ unsafe fn decoder_of<'a>(handle: jlong) -> Option<&'a HkSwipeDecoder> {
 
 fn handle<T>(pointer: *mut T) -> jlong {
     pointer as jlong
+}
+
+/// `value`, once any Java exception a JNI call left pending is cleared: an entry point fails by
+/// what it returns, never by throwing.
+fn settled<T>(env: &mut JNIEnv, value: T) -> T {
+    if env.exception_check().unwrap_or(false) {
+        let _ = env.exception_clear();
+    }
+    value
 }
 
 fn region<'a, T: jni::objects::TypeArray + Default + Clone>(
@@ -102,7 +117,7 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_modelOpen(
     _this: JObject,
     path: JString,
 ) -> jlong {
-    guard(0, || {
+    let model = guard(0, || {
         if path.is_null() {
             return 0;
         }
@@ -110,7 +125,8 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_modelOpen(
             Ok(path) => handle(model::open_path(Path::new(&path))),
             Err(_) => 0,
         }
-    })
+    });
+    settled(&mut env, model)
 }
 
 #[unsafe(no_mangle)]
@@ -187,7 +203,7 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeNew(
     extra_costs: JDoubleArray,
     extra_contractions: JBooleanArray,
 ) -> jlong {
-    guard(0, || {
+    let decoder = guard(0, || {
         // SAFETY: 0 or a live handle from modelOpen*, as the Kotlin caller promises.
         let Some(model) = (unsafe { model_of(model) }) else {
             return 0;
@@ -212,7 +228,8 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeNew(
             &never_pairs,
             extra,
         ))
-    })
+    });
+    settled(&mut env, decoder)
 }
 
 #[unsafe(no_mangle)]
@@ -267,7 +284,7 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeRead(
     previous: JString,
     limit: jint,
 ) -> jobject {
-    guard(ptr::null_mut(), || {
+    let reading = guard(ptr::null_mut(), || {
         // SAFETY: 0 or a live handle from swipeNew, as the Kotlin caller promises.
         let Some(decoder) = (unsafe { decoder_of(decoder) }) else {
             return ptr::null_mut();
@@ -316,5 +333,6 @@ pub extern "system" fn Java_ly_anoma_hex_typing_KeyboardCore_swipeRead(
             return ptr::null_mut();
         };
         swipe_reading(&mut env, reading).map_or(ptr::null_mut(), JObject::into_raw)
-    })
+    });
+    settled(&mut env, reading)
 }
