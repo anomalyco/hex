@@ -13,6 +13,8 @@ struct DictationSettingsPage: View {
     @State private var endsWithPeriod = DictationPeriodSettings().isEnabled
     @State private var showsWhatISay = LiveDictationSettings().showsPreview
     @State private var typesAsISpeak = LiveDictationSettings().typesIntoField
+    @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
+    private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
     /// Keep mic warm stays on the page once picked, even Off where it would hide.
     @State private var keepsWarmRow = false
 
@@ -87,6 +89,27 @@ struct DictationSettingsPage: View {
                 )
 
                 DictationLanguageRow(dictation: dictation)
+            }
+
+            // On unless turned off: the keyboard's own English dictation transcribes with Hex's own
+            // speech model once it's downloaded (by itself on Wi-Fi) and compiled in the keyboard;
+            // off, it keeps Apple's speech recognition. Beside the keyboard's live words, in a card
+            // of its own because its status line sits under it and it shows on every iOS.
+            SettingsCard {
+                SettingsToggleRow(
+                    title: String(localized: "Speech model in keyboard"),
+                    detail: keyboardParakeetFits
+                        ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
+                        : String(localized: "Needs an iPhone with 6 GB of memory or more"),
+                    isOn: $keyboardParakeet
+                )
+                .disabled(!keyboardParakeetFits)
+
+                if keyboardParakeet {
+                    KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
+                }
             }
 
             // While the keyboard records by itself (iOS 26 and later): its live words.
@@ -214,6 +237,11 @@ struct DictationSettingsPage: View {
         .onChange(of: typesAsISpeak) { _, enabled in
             LiveDictationSettings().typesIntoField = enabled
         }
+        .onChange(of: keyboardParakeet) { _, enabled in
+            guard enabled != KeyboardParakeetSettings().isEnabled else { return }
+            KeyboardParakeetSettings().isEnabled = enabled
+            DictationController.shared.keyboardParakeetChanged()
+        }
         .onAppear {
             cleanupTagger = CleanupTaggerSettings().isEnabled
             customVocabulary = CustomVocabularySettings().isEnabled
@@ -224,6 +252,7 @@ struct DictationSettingsPage: View {
             endsWithPeriod = DictationPeriodSettings().isEnabled
             showsWhatISay = LiveDictationSettings().showsPreview
             typesAsISpeak = LiveDictationSettings().typesIntoField
+            keyboardParakeet = KeyboardParakeetSettings().isOn
         }
     }
 }
@@ -671,6 +700,7 @@ struct ExperimentsSettingsPage: View {
     @State private var hinglish = HinglishSettings().isEnabled
     @State private var greeklish = GreeklishSettings().isEnabled
     @State private var twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
+    @State private var voiceIsolation = VoiceIsolationSettings().isEnabled
     @State private var appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
     @State private var adaptiveTouch = AdaptiveTouchSettings().isEnabled
@@ -682,6 +712,7 @@ struct ExperimentsSettingsPage: View {
     @State private var dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
     @State private var commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
     @State private var quickAccents = FullKeyboardSettings().quickAccents
+    @State private var emojiShortcodes = FullKeyboardSettings().emojiShortcodes
     @State private var emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
     @State private var keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
     @State private var keyboardTheme = FullKeyboardSettings().keyboardTheme
@@ -692,8 +723,6 @@ struct ExperimentsSettingsPage: View {
     @State private var learnPerLanguage = TypingJournalSettings().learnsPerLanguage
     @State private var multilingualParakeet = MultilingualParakeetSettings().isEnabled
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
-    @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
-    private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
 
     var body: some View {
         switches
@@ -718,11 +747,6 @@ struct ExperimentsSettingsPage: View {
                 // On: downloads beside the engine that dictates; off: stops and deletes it.
                 DictationController.shared.multilingualParakeetChanged()
             }
-            .onChange(of: keyboardParakeet) { _, enabled in
-                guard enabled != KeyboardParakeetSettings().isEnabled else { return }
-                KeyboardParakeetSettings().isEnabled = enabled
-                DictationController.shared.keyboardParakeetChanged()
-            }
             .onAppear { loadSettings() }
     }
 
@@ -741,6 +765,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: twoLanguageDictation) { _, enabled in
                 TwoLanguageDictationSettings().isEnabled = enabled
+            }
+            .onChange(of: voiceIsolation) { _, enabled in
+                VoiceIsolationSettings().isEnabled = enabled
             }
             .onChange(of: adaptiveTouch) { _, enabled in
                 AdaptiveTouchSettings().isEnabled = enabled
@@ -767,6 +794,9 @@ struct ExperimentsSettingsPage: View {
             }
             .onChange(of: quickAccents) { _, enabled in
                 FullKeyboardSettings().quickAccents = enabled
+            }
+            .onChange(of: emojiShortcodes) { _, enabled in
+                FullKeyboardSettings().emojiShortcodes = enabled
             }
             .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
                 FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
@@ -811,6 +841,15 @@ struct ExperimentsSettingsPage: View {
             title: String(localized: "Two-language dictation"),
             detail: String(localized: "Also reads dictation in another of your keyboard languages, when its Apple Speech model is downloaded, and keeps the better one for each phrase."),
             isOn: $twoLanguageDictation
+        )
+
+        SettingsDivider()
+
+        // Off by default: Hex records in measurement mode, as it always has.
+        SettingsToggleRow(
+            title: String(localized: "Voice isolation"),
+            detail: String(localized: "Records with Apple's voice chat processing so Control Center's Mic Mode can offer Voice Isolation. Other audio may be lowered while recording, and Bluetooth headphones may switch to the call (hands-free) profile."),
+            isOn: $voiceIsolation
         )
 
         SettingsDivider()
@@ -918,6 +957,15 @@ struct ExperimentsSettingsPage: View {
 
         SettingsDivider()
 
+        // Off by default: colons type exactly as before.
+        SettingsToggleRow(
+            title: String(localized: "Emoji shortcodes"),
+            detail: String(localized: "Type a colon and a name, like :pizza, to pick an emoji."),
+            isOn: $emojiShortcodes
+        )
+
+        SettingsDivider()
+
         // Off by default: the emoji panel's ABC stays where it always was.
         SettingsToggleRow(
             title: String(localized: "ABC under the emoji key"),
@@ -1006,26 +1054,6 @@ struct ExperimentsSettingsPage: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 12)
         }
-
-        SettingsDivider()
-
-        // On unless turned off: the keyboard's own English dictation transcribes with Parakeet in
-        // the keyboard once downloaded (by itself on Wi-Fi) and compiled there; off, it keeps
-        // Apple's speech recognition.
-        SettingsToggleRow(
-            title: String(localized: "Speech model in keyboard"),
-            detail: keyboardParakeetFits
-                ? String(localized: "For English. Uses about \(KeyboardParakeetDownload.size), downloaded on Wi-Fi. Until then, the keyboard uses Apple's speech recognition.")
-                : String(localized: "Needs an iPhone with 6 GB of memory or more"),
-            isOn: $keyboardParakeet
-        )
-        .disabled(!keyboardParakeetFits)
-
-        if keyboardParakeet {
-            KeyboardParakeetStatus(download: KeyboardParakeetDownload.shared)
-                .padding(.horizontal, 12)
-                .padding(.bottom, 12)
-        }
     }
 
     /// Reads every switch back from its setting, when the page appears.
@@ -1033,6 +1061,7 @@ struct ExperimentsSettingsPage: View {
         hinglish = HinglishSettings().isEnabled
         greeklish = GreeklishSettings().isEnabled
         twoLanguageDictation = TwoLanguageDictationSettings().isEnabled
+        voiceIsolation = VoiceIsolationSettings().isEnabled
         appleIntelligenceCleanup = AppleIntelligenceCleanupSettings().isEnabled
         cleanupAvailability = AppleIntelligenceCleanupAvailability.current
         adaptiveTouch = AdaptiveTouchSettings().isEnabled
@@ -1043,6 +1072,7 @@ struct ExperimentsSettingsPage: View {
         dvorakPunctuation = FullKeyboardSettings().dvorakPunctuation
         commaPeriodKeys = FullKeyboardSettings().commaPeriodKeys
         quickAccents = FullKeyboardSettings().quickAccents
+        emojiShortcodes = FullKeyboardSettings().emojiShortcodes
         emojiLettersUnderEmojiKey = FullKeyboardSettings().emojiLettersUnderEmojiKey
         keyboardThemes = FullKeyboardSettings().keyboardThemesEnabled
         keyboardTheme = FullKeyboardSettings().keyboardTheme
@@ -1052,7 +1082,6 @@ struct ExperimentsSettingsPage: View {
         joinsKeyboardWhenUnfolded = FullKeyboardSettings().joinsKeyboardWhenUnfolded
         learnPerLanguage = TypingJournalSettings().learnsPerLanguage
         multilingualParakeet = MultilingualParakeetSettings().isEnabled
-        keyboardParakeet = KeyboardParakeetSettings().isOn
     }
 
     private static var multilingualParakeetSize: String {

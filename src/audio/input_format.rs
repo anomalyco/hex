@@ -13,7 +13,7 @@ use cpal::{
 };
 
 use super::CaptureInstant;
-use super::stream::{StreamErrorReporter, build_stream};
+use super::stream::{StreamError, StreamErrorReporter, build_stream};
 
 /// A running microphone stream; dropping it stops capture.
 pub(super) enum InputStream {
@@ -24,13 +24,17 @@ pub(super) enum InputStream {
     Wasapi {
         _capture: super::wasapi_capture::WasapiCapture,
     },
+    #[cfg(target_os = "macos")]
+    VoiceProcessing {
+        _stream: super::voice_processing::VoiceProcessingStream,
+    },
 }
 
 /// A started microphone stream and the channels its callback feeds.
 pub(super) struct StartedStream {
     pub stream: InputStream,
     pub chunks: Receiver<(Vec<f32>, CaptureInstant)>,
-    pub stream_errors: Receiver<String>,
+    pub stream_errors: Receiver<StreamError>,
     pub hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
     pub sample_rate: u32,
 }
@@ -169,6 +173,30 @@ pub(super) fn start_stream_with_fallback(
     Err(error
         .or(configuration_error)
         .unwrap_or_else(|| eyre!("the microphone lists no format it will open")))
+}
+
+/// Starts a stream through Apple's voice processing on the device with
+/// `uid` (Labs › Voice isolation). The engine sets the device itself from
+/// that UID, so cpal's handle only supplies it; `device_name` names the open
+/// in the log.
+#[cfg(target_os = "macos")]
+pub(super) fn start_voice_processing(uid: &str, device_name: &str) -> Result<StartedStream> {
+    let started = super::voice_processing::start(uid)?;
+    tracing::info!(
+        device = %device_name,
+        sample_rate = started.sample_rate,
+        channels = started.channels,
+        "opened the microphone through voice processing"
+    );
+    Ok(StartedStream {
+        stream: InputStream::VoiceProcessing {
+            _stream: started.stream,
+        },
+        chunks: started.chunks,
+        stream_errors: started.stream_errors,
+        hex_microphone: started.hex_microphone,
+        sample_rate: started.sample_rate,
+    })
 }
 
 /// Explicit buffers to try at `rate`: about 20 ms within the range the

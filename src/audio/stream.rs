@@ -31,6 +31,17 @@ use super::routes::watch_input_devices;
 use super::uses_fixture;
 use super::{input_format, interruption, overloads};
 
+/// Why a stream stopped, told apart where the reopen leaves voice processing
+/// on rather than counting it as a failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) enum StreamError {
+    /// The stream failed or stopped delivering audio.
+    Failed(String),
+    /// AVAudioEngine reconfigured. Reopen it, but voice processing is not to
+    /// blame, so the fallback memory stays clear.
+    VoiceProcessingConfigurationChanged,
+}
+
 pub struct AudioInput {
     // Tests can deliver PCM through channels without opening a native microphone.
     pub(super) _stream: Option<input_format::InputStream>,
@@ -43,7 +54,14 @@ pub struct AudioInput {
     /// Whether this input stands in for the saved microphone until it can
     /// be opened again.
     pub selection: Selection,
-    pub(super) stream_errors: Receiver<String>,
+    /// Whether this input was asked to open through Apple's voice processing
+    /// (Labs › Voice isolation), whether or not it could; the reconcile
+    /// comparison reads this requested path, not the one that opened.
+    pub voice_isolation: bool,
+    /// Whether Apple's voice processing actually opened this input; false
+    /// when the raw cpal stream stood in.
+    pub voice_processing_active: bool,
+    pub(super) stream_errors: Receiver<StreamError>,
     pub(super) watch_service_restarts: bool,
     pub(super) restart_generation: u64,
     pub(super) hex_microphone: crate::audio::hex_microphone::CaptureFeedSwitch,
@@ -75,6 +93,9 @@ pub enum AudioInputEvent {
     },
     Timeout,
     StreamFailed(String),
+    /// AVAudioEngine reconfigured; reopen the stream, still through voice
+    /// processing when it is on, rather than treating it as a failure.
+    StreamReconfigured,
 }
 
 /// Whether an input stands in for the saved microphone, and why.
@@ -116,6 +137,8 @@ impl AudioInput {
                 device_name: "Test microphone".into(),
                 uid: None,
                 selection: Selection::InUse,
+                voice_isolation: false,
+                voice_processing_active: false,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
@@ -125,6 +148,15 @@ impl AudioInput {
             },
             sender,
         )
+    }
+
+    /// Gives a test its own error channel, so it can report a configuration
+    /// change or failure through the real `recv_timeout` path.
+    #[cfg(test)]
+    pub(super) fn stream_errors_for_test(&mut self) -> SyncSender<StreamError> {
+        let (sender, errors) = mpsc::sync_channel(1);
+        self.stream_errors = errors;
+        sender
     }
 
     #[cfg(test)]
@@ -154,6 +186,8 @@ impl AudioInput {
             avoids_bluetooth: true,
             call_input: None,
             renegotiate_rate: false,
+            voice_processing: false,
+            voice_processing_fallback: false,
         })? {
             Opened::Input(input) => Ok(*input),
             Opened::Unchanged { .. } => unreachable!("nothing to keep"),
@@ -169,18 +203,30 @@ impl AudioInput {
             .iter()
             .position(|name| name.to_lowercase().contains(&query_lower))
             .ok_or_else(|| eyre!("microphone is unavailable: {query}"))?;
-        Self::open_device(devices[index].clone(), names[index].clone(), false, false)
+        Self::open_device(
+            devices[index].clone(),
+            names[index].clone(),
+            false,
+            false,
+            false,
+            false,
+        )
     }
 
     /// Opens `device`. `follows_default` marks cpal's default-input handle,
     /// whose Windows stream reports a default change as invalidation while
     /// it keeps running on the old device. `renegotiate_rate` makes the
     /// device change its sample rate before the stream opens (#1575).
+    /// `voice_processing` opens it through Apple's voice processing instead
+    /// (Labs › Voice isolation), falling back to the raw stream when the
+    /// engine refuses.
     pub(super) fn open_device(
         device: Device,
         device_name: String,
         follows_default: bool,
         renegotiate_rate: bool,
+        voice_processing: bool,
+        voice_processing_fallback: bool,
     ) -> Result<Self> {
         #[cfg(target_os = "macos")]
         watch_input_devices();
@@ -189,12 +235,50 @@ impl AudioInput {
         // Taken before the stream runs, so CoreAudio's real-time thread reads
         // an initialized clock.
         overloads::start_clock();
-        let started = input_format::start_stream_with_fallback(
-            &device,
-            &device_name,
-            follows_default.then(|| device_name.clone()),
-            renegotiate_rate,
-        )?;
+        #[cfg(target_os = "macos")]
+        let voice_processed = if voice_processing && !voice_processing_fallback {
+            match uid.as_deref() {
+                Some(uid) => Some(input_format::start_voice_processing(uid, &device_name)),
+                None => {
+                    tracing::warn!(
+                        device = %device_name,
+                        "voice processing needs the microphone's uid; opening it normally"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+        #[cfg(not(target_os = "macos"))]
+        let voice_processed = {
+            let _ = (voice_processing, voice_processing_fallback);
+            None::<Result<input_format::StartedStream>>
+        };
+        let open_raw = || {
+            input_format::start_stream_with_fallback(
+                &device,
+                &device_name,
+                follows_default.then(|| device_name.clone()),
+                renegotiate_rate,
+            )
+        };
+        let mut voice_processing_active = false;
+        let started = match voice_processed {
+            Some(Ok(started)) => {
+                voice_processing_active = true;
+                started
+            }
+            Some(Err(error)) => {
+                tracing::warn!(
+                    error = format!("{error:#}"),
+                    device = %device_name,
+                    "voice processing would not start; opening the microphone normally"
+                );
+                open_raw()?
+            }
+            None => open_raw()?,
+        };
 
         Ok(Self {
             _stream: Some(started.stream),
@@ -203,6 +287,8 @@ impl AudioInput {
             device_name,
             uid,
             selection: Selection::InUse,
+            voice_isolation: voice_processing,
+            voice_processing_active,
             stream_errors: started.stream_errors,
             watch_service_restarts: true,
             restart_generation,
@@ -232,8 +318,8 @@ impl AudioInput {
         }
         // A stream failure reported before or during the wait outranks any
         // chunk delivered alongside it.
-        if let Ok(error) = self.stream_errors.try_recv() {
-            return AudioInputEvent::StreamFailed(error);
+        if let Some(event) = self.take_stream_error() {
+            return event;
         }
         let received = self.chunks.recv_timeout(timeout);
         if self.watch_service_restarts
@@ -241,8 +327,8 @@ impl AudioInput {
         {
             return AudioInputEvent::StreamFailed("CoreAudio service restarted".into());
         }
-        if let Ok(error) = self.stream_errors.try_recv() {
-            return AudioInputEvent::StreamFailed(error);
+        if let Some(event) = self.take_stream_error() {
+            return event;
         }
         match received {
             Ok((samples, captured_through)) => {
@@ -271,6 +357,19 @@ impl AudioInput {
         }
     }
 
+    /// The stream error waiting, if any, as the event the audio owner acts
+    /// on. A configuration change is its own event so a reopen through voice
+    /// processing isn't mistaken for a failure.
+    fn take_stream_error(&self) -> Option<AudioInputEvent> {
+        match self.stream_errors.try_recv() {
+            Ok(StreamError::Failed(error)) => Some(AudioInputEvent::StreamFailed(error)),
+            Ok(StreamError::VoiceProcessingConfigurationChanged) => {
+                Some(AudioInputEvent::StreamReconfigured)
+            }
+            Err(_) => None,
+        }
+    }
+
     /// Reports how much audio the stream's callbacks deliver, once per open.
     /// cpal exposes no readback of the period it picks for `BufferSize::Default`
     /// and overloads arrive sooner on a smaller one, so the first chunk says
@@ -283,6 +382,7 @@ impl AudioInput {
             tracing::info!(
                 device = %self.device_name,
                 sample_rate = self.sample_rate,
+                voice_processing = self.voice_processing_active,
                 frames,
                 period_us = duration_for_frames(frames, self.sample_rate).as_micros() as u64,
                 "microphone stream opened"
@@ -313,7 +413,7 @@ pub(super) fn mono<T>(samples: &[T], channels: usize, convert: impl Fn(&T) -> f3
 /// Where a stream reports errors to the audio owner.
 #[derive(Clone)]
 pub(super) struct StreamErrorReporter {
-    pub(super) sender: SyncSender<String>,
+    pub(super) sender: SyncSender<StreamError>,
     /// The device's name when the stream was opened on cpal's default-input
     /// handle.
     pub(super) default_name: Option<String>,
@@ -342,7 +442,7 @@ impl StreamErrorReporter {
     }
 }
 
-fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
+fn report_stream_error(sender: &SyncSender<StreamError>, error: cpal::Error) {
     match error.kind() {
         // An overload or a refused real-time promotion is a glitch on a stream
         // that keeps running, common while a cold device starts. Some hosts
@@ -353,7 +453,7 @@ fn report_stream_error(sender: &SyncSender<String>, error: cpal::Error) {
         cpal::ErrorKind::Xrun | cpal::ErrorKind::RealtimeDenied => overloads::record(),
         _ => {
             tracing::error!(%error, "microphone stream failed");
-            let _ = sender.try_send(error.to_string());
+            let _ = sender.try_send(StreamError::Failed(error.to_string()));
         }
     }
 }
@@ -413,7 +513,10 @@ mod tests {
             ),
         );
 
-        assert_eq!(errors.try_recv().unwrap(), "Device sample rate changed");
+        assert_eq!(
+            errors.try_recv().unwrap(),
+            StreamError::Failed("Device sample rate changed".into())
+        );
     }
 
     #[test]

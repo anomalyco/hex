@@ -1205,6 +1205,10 @@ impl Owner {
     }
 
     fn reconcile_input(&mut self) {
+        // Labs › Voice isolation: a change applies to dictation's microphone
+        // at the next idle moment, never to a capture in progress.
+        self.input
+            .request_voice_isolation(crate::labs::voice_isolation(), self.input_idle());
         if self.release_while_idle && !self.capture_sink_open() {
             // Labs › Keep mic open after dictating: a capture's end keeps the
             // microphone open for the lab's window, and closing waits for it.

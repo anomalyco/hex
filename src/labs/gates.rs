@@ -101,6 +101,19 @@ pub fn copy_capture_zip() -> bool {
     COPY_CAPTURE_ZIP.load(Ordering::Acquire) && Feature::CopyCaptureZip.on_this_os()
 }
 
+/// While an Annotate capture records, the dictation shortcut dictates as it
+/// always does: hold, toggle, or double-tap lock it, and the text pastes
+/// into the app in front, History, and Paste Last. The capture keeps
+/// recording, and its narration hears the words too. Read at each press the
+/// capture would otherwise swallow, on every OS.
+#[cfg_attr(not(hex_capture), allow(dead_code))]
+pub fn dictate_while_annotating() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    DICTATE_WHILE_ANNOTATING.load(Ordering::Acquire) && Feature::DictateWhileAnnotating.on_this_os()
+}
+
 /// A kept dictation recording may be copied from History and the menu bar or
 /// tray as a file on the clipboard (read as each Copy audio runs and each
 /// menu or tray opens). It needs Labs › Keep recordings, which owns every
@@ -282,6 +295,14 @@ pub fn hud_bottom_gap() -> f64 {
     } else {
         crate::rune_hud::hud_placement::BOTTOM_OFFSET
     }
+}
+
+/// Dictation's microphone opens through Apple's voice processing, so Control
+/// Center's Mic Mode can offer Voice Isolation (macOS; read as each dictation
+/// stream opens, and when an idle one may be replaced).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn voice_isolation() -> bool {
+    on(VOICE_ISOLATION) && Feature::VoiceIsolation.on_this_os()
 }
 
 /// A paste on a Wayland desktop without data-control (GNOME) snapshots and

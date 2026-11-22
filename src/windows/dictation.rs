@@ -695,11 +695,13 @@ pub fn run(
                 HotkeyAction::Start | HotkeyAction::Finish | HotkeyAction::Cancel
                     if service.is_active() => {}
                 // Annotate records the narration itself: while it records,
-                // dictation starts nothing.
+                // dictation starts nothing, unless Labs › Dictate while
+                // annotating lets it dictate as usual.
                 HotkeyAction::Start
-                    if capture_host
-                        .as_mut()
-                        .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
+                    if !crate::labs::dictate_while_annotating()
+                        && capture_host
+                            .as_mut()
+                            .is_some_and(|host| host.recording_since(&timeline).is_some()) => {}
                 // One key: a tap starts and stops; held while recording, it
                 // draws until it comes up.
                 HotkeyAction::Capture => {

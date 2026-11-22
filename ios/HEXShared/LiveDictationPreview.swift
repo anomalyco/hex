@@ -6,7 +6,8 @@ import UIKit
 /// Dictation › Show what I say): the keys go and the words have their space, the settled
 /// words in the keys' ink and the tentative tail muted, the newest line always in view with
 /// whole lines above it. It takes every touch where the keys were, so nothing types while it
-/// shows; the recording bar above and the globe stay as they are.
+/// shows, and a tap on it finishes the dictation as Done does; the recording bar above and the
+/// globe stay as they are.
 @MainActor
 final class LiveDictationPreviewView: UIView {
     var palette = FullKeyboardPalette(isDark: false) { didSet { if palette != oldValue { render() } } }
@@ -28,8 +29,19 @@ final class LiveDictationPreviewView: UIView {
     /// The words, drawn by one view (`LiveWordsView`), which also moves them.
     let words = LiveWordsView()
     private let globe = GlobeKeycapView()
+    /// Finishes the dictation as Done does, once: a tap on the words, or VoiceOver's activate
+    /// or Finish dictation action on them.
+    var onFinish: (() -> Void)?
+    /// When the words appeared, on the touches' clock.
+    var shownAt = ProcessInfo.processInfo.systemUptime
+    private var down: (point: CGPoint, time: TimeInterval)?
+    private var finished = false
 
     static let placeholder = String(localized: "Listening…")
+    /// A touch that lands this soon after the words appear is the end of the tap that started
+    /// the dictation or a thumb settling where the keys were, not a tap on the words: the swap's
+    /// longer half (the words coming in) and a tenth of a second more.
+    static let settle: TimeInterval = LiveDictationPreviewHost.Motion.wordsIn + 0.1
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -43,6 +55,11 @@ final class LiveDictationPreviewView: UIView {
         // One element for VoiceOver, read when it's focused, never announced as words change.
         isAccessibilityElement = true
         accessibilityTraits = .staticText
+        accessibilityCustomActions = [
+            UIAccessibilityCustomAction(name: String(localized: "Finish dictation")) { [weak self] _ in
+                MainActor.assumeIsolated { self?.finish() ?? false }
+            },
+        ]
         render()
     }
 
@@ -66,6 +83,56 @@ final class LiveDictationPreviewView: UIView {
     /// A touch anywhere on it stays with it.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         bounds.contains(point)
+    }
+
+    /// Only a tap finishes, by the keys' own measures: a touch that moves further than a key's
+    /// slop or is held as long as a key takes to open its accents does nothing, so a thumb
+    /// resting or sliding where the keys were never ends a dictation.
+    func touchDown(at point: CGPoint, time: TimeInterval) {
+        down = time - shownAt >= Self.settle ? (point, time) : nil
+    }
+
+    func touchMoved(to point: CGPoint) {
+        guard let down, hypot(point.x - down.point.x, point.y - down.point.y) > FullKeyboardEngine.accentSlop else { return }
+        self.down = nil
+    }
+
+    func touchUp(at point: CGPoint, time: TimeInterval) {
+        defer { down = nil }
+        guard let down, time - down.time < FullKeyboardEngine.accentHoldDelay,
+              hypot(point.x - down.point.x, point.y - down.point.y) <= FullKeyboardEngine.accentSlop else { return }
+        finish()
+    }
+
+    @discardableResult
+    private func finish() -> Bool {
+        guard !finished, let onFinish else { return false }
+        finished = true
+        onFinish()
+        return true
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        touchDown(at: touch.location(in: self), time: touch.timestamp)
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        touchMoved(to: touch.location(in: self))
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+        guard let touch = touches.first else { return }
+        touchUp(at: touch.location(in: self), time: touch.timestamp)
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+        down = nil
+    }
+
+    override func accessibilityActivate() -> Bool {
+        finish()
     }
 
     private func render() {
@@ -156,6 +223,10 @@ final class LiveDictationPreviewHost {
     private func show(in keyboard: FullKeyboardView) -> LiveDictationPreviewView {
         let preview = LiveDictationPreviewView()
         preview.palette = keyboard.palette
+        preview.onFinish = { [weak keyboard] in
+            keyboard?.typingLog?.ui("dictation_stop", [TypingLogField("from", .string("live_preview"))])
+            keyboard?.model.onStopTap?()
+        }
         keyboard.insertSubview(preview, aboveSubview: keyboard.plane)
         self.preview = preview
         layout()

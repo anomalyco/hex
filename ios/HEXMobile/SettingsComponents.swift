@@ -286,6 +286,7 @@ enum SettingsSnapshotFixture {
         keyboard.dvorakPunctuation = on
         keyboard.commaPeriodKeys = on
         keyboard.quickAccents = on
+        keyboard.emojiShortcodes = on
         keyboard.emojiLettersUnderEmojiKey = on
         keyboard.keyboardThemesEnabled = false
         keyboard.keyboardTheme = .automatic
@@ -319,6 +320,7 @@ enum SettingsSnapshotFixture {
         HinglishSettings().isEnabled = on
         GreeklishSettings().isEnabled = on
         TwoLanguageDictationSettings().isEnabled = on
+        VoiceIsolationSettings().isEnabled = on
         AdaptiveTouchSettings().isEnabled = on
         // Settings scenes skip preparing a model, so this only draws the switch.
         MultilingualParakeetSettings().isEnabled = on

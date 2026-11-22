@@ -16,7 +16,7 @@ dictation, iOS 26+): iOS refuses to record from a keyboard extension
 directly, so it captures through `getUserMedia` in a hidden `WKWebView`
 under Hex's microphone permission, writes a temporary WAV, and transcribes
 it on-device with Apple Speech, downloading the speech assets on first use
-(`HEXKeyboard/KeyboardLocalDictation.swift`), or, with Experiments › Speech model in
+(`HEXKeyboard/KeyboardLocalDictation.swift`), or, with Settings › Dictation › Speech model in
 keyboard on, with Parakeet on the Neural Engine in the keyboard's own process
 (`HEXKeyboard/KeyboardParakeet.swift`, below). With Full Access, the web view
 and its page load as the keyboard shows (unless memory is already short), without
@@ -319,9 +319,15 @@ never at a launch by itself.
     under the recording bar (`LiveDictationPreviewView`), the settled words in the keys'
     ink and the tail the recogniser may still change muted, the newest line in view with
     whole lines above it. It takes every touch where the keys were, so nothing types while
-    it shows; the recording bar's ✕ and ✓ work as before, and an iPhone with a Home button
-    keeps its globe key where it was. VoiceOver reads it as one element, never announced as
-    words change. Its motion is one family, a spring with no bounce by its duration
+    it shows, and a tap on the words finishes the dictation as ✓ does (✕ is still the only
+    way to throw one away). Only a tap, by the keys' own measures: a touch that moves more
+    than a key's slop (`FullKeyboardEngine.accentSlop`, 10 pt) or is held as long as a key
+    takes to open its accents (`accentHoldDelay`, 0.36 s) does nothing, and so does one
+    landing within 0.4 s of the words appearing (their 0.3 s fade in and 0.1 s more: the end
+    of the tap that started the dictation, or a thumb settling); it finishes once. The
+    recording bar's ✕ and ✓ work as before, and an iPhone with a Home button keeps its globe
+    key where it was. VoiceOver reads it as one element, never announced as words change;
+    activating it, or its Finish dictation action, finishes the dictation. Its motion is one family, a spring with no bounce by its duration
     (`LiveWordsMotion`, `LiveDictationPreviewHost.Motion`, and the recording bar's morph and
     fades), and Core Animation runs every frame of it, so it keeps the display's pace however
     busy the main thread is with the capture, the recogniser and the Dot Scope (a display link
@@ -348,7 +354,15 @@ never at a launch by itself.
     itself or with Paste dictation, replaces them where the field still ends with them.
     Once the field changes under it (a key, a cursor move, a selection, or an app that
     reports no text), it stops and leaves its words, and the text goes in at the cursor as
-    without it. Never in secure, password, one-time code or card number fields, over a
+    without it. One change is a send instead: the app emptying the field while it ends with
+    the words (a chat's Send, or select all and delete; `LiveFieldTyping.wasSent`) and still
+    empty 0.3 s later. Those words went out as typed: they count as a kept dictation for
+    `DictationEditTracker` (as a host clearing the field always has), Undo forgets them, and
+    the dictation so far ends there, its audio deleted. The microphone stays on: the audio from
+    the moment the field first read empty (held meanwhile, every chunk in exactly one
+    dictation) starts a new dictation with its own file, live words from the first, final text
+    at ✓, length and memory checks, so talk, Send, talk, Send works hands-free. An app that
+    changes the words without emptying the field (an edit, a mention) still stops the typing. Never in secure, password, one-time code or card number fields, over a
     selection or a two-thumb Dictate's range, or with Translate what I say on. Neither runs
     before iOS 26, for dictations recorded through Hex (Keep mic warm), when less than 32 MB
     is left once the capture runs (`KeyboardLiveDictation`: the recogniser's share in the
@@ -419,7 +433,14 @@ never at a launch by itself.
     Group so Home, Settings › Keyboard, and Setup surface the same one-tap Open
     Settings banner once iOS has created that row. A later fast cross-app paste
     (ignoring Hex's own copies via `markOwnedCopy`) or tapping dismiss clears
-    it.
+    it. With Full Access, when the keyboard appears while it would dictate English
+    with Hex's speech model but the model isn't downloaded, the strip shows
+    `New speech model` / `Downloads in Hex on Wi-Fi` with an **Open Hex** chip
+    that opens Hex as it is, where the download starts on Wi-Fi
+    (`KeyboardParakeetNotice`): at most once a day and three times in all, never
+    again once tapped or put away with its ✕ (counts in the App Group), gone as
+    soon as you type or dictate, and never in a password or one-time-code field.
+    Turning off Speech model in keyboard (Settings › Dictation) stops it too.
   - **Apple Intelligence cleanup (Settings › Experiments › Clean up with
     Apple Intelligence, iOS 26+):** Off by default. For every style but `Verbatim`,
     one on-device FoundationModels pass before formatting fixes clearly
@@ -457,7 +478,7 @@ never at a launch by itself.
     with v3's download). It is chosen only with 1.5 GB left to load it
     (`os_proc_available_memory`), and never again after a load that ended Hex
     (`ParakeetLoadGuard`, its own keys) until Try again beside the status, or the switch
-    turned off and on. Unless Experiments › Speech model in keyboard has it loaded in the
+    turned off and on. Unless Settings › Dictation › Speech model in keyboard has it loaded in the
     keyboard (below), the keyboard doesn't use it, so once Hex has it ready
     (`MultilingualParakeetSettings.isModelReady`, set after a load, cleared while it's
     missing, set aside or off) and it takes the dictation language, Dictate and the Hex
@@ -466,7 +487,7 @@ never at a launch by itself.
     mixed Dutch-English test sentences 7.5% WER against Apple Speech nl-NL's 26.9%,
     pure Dutch 0.9% (0.4%), pure English 0% (0%). Load memory, compile time and speed
     on an iPhone are unmeasured.
-  - **Speech model in keyboard (Settings › Experiments › Speech model in keyboard, iOS
+  - **Speech model in keyboard (Settings › Dictation › Speech model in keyboard, iOS
     26+):** On unless the person turns it off, and disabled (shown off) on iPhones under
     6 GB (`KeyboardParakeetSettings`, in the App Group; a value stored by hand wins, so a
     switch turned off stays off). Off, nothing of it loads and the keyboard dictates exactly
@@ -477,14 +498,18 @@ never at a launch by itself.
     Two-language dictation or the Multilingual model, the keyboard's own memory limit
     measured on this iPhone (the keyboard writes footprint plus `os_proc_available_memory`
     to the App Group at each launch and tells Hex with a Darwin notification) and at least
-    `KeyboardParakeetBudget.requiredLimit`, a connection that isn't expensive or constrained
-    (`NWPathMonitor`: not cellular, a personal hotspot or Low Data Mode), and 2 GB free.
+    `KeyboardParakeetBudget.requiredLimit`, a connection that isn't expensive, constrained or
+    cellular (`NWPathMonitor`, `KeyboardParakeetDownload.isUnmetered`: not cellular, even 5G that
+    iOS calls not expensive under "Allow More Data on 5G", a personal hotspot or Low Data Mode),
+    and 2 GB free.
     It checks at launch, whenever Hex comes to the front, when such a connection returns and
     when the keyboard reports its limit. Turned on by hand (a stored true, including from
     the builds where it was off by default) it downloads at once on any connection. Until
     then the row says what it waits for: "Downloads after you first use the Hex keyboard",
     "Downloads on Wi-Fi", "Downloads once the iPhone has 2 GB free", "Only for English
-    dictation". The keyboard's own dictation transcribes with Parakeet in
+    dictation". Home shows the same status under "New: Hex's own speech model" wherever the
+    keyboard would use it (`SpeechModelHomeCard`: the switch on, an iPhone that fits, English
+    and no other engine); once it's ready in the keyboard the card can be dismissed, for good. The keyboard's own dictation transcribes with Parakeet in
     the keyboard's process (`HEXKeyboard/KeyboardParakeet.swift`), with the app closed:
     V2 for English, and Parakeet Ultra for a language Experiments › Multilingual model
     dictates once its files are there, in which case Dictate and the Hex key stop opening
@@ -497,7 +522,7 @@ never at a launch by itself.
     keyboard only in the background role), and keeps it while its process lives, until a
     memory warning. Its first load compiles it for the Neural Engine in the keyboard's own
     Caches (17 s for V2, 12 s for Ultra on an iPhone 17 Pro); a dictation never waits for
-    that, and uses Apple's speech recognition exactly as with the experiment off whenever
+    that, and uses Apple's speech recognition exactly as with the switch off whenever
     the model isn't loaded, isn't on the Neural Engine (the keyboard's Neural Engine memory,
     else Core ML's compute plan before iOS 27), another transcription runs, the keyboard's
     memory limit (footprint plus `os_proc_available_memory`) is under 131 MB (V2 and Ultra
@@ -511,7 +536,7 @@ never at a launch by itself.
     again, or moved, compiles again, so the log calls a load "cold" by its time (5 s or
     more), and moving a legacy folder forgets the app's compile record for it
     (`ParakeetCompileRecord.forget`), so V2 says it's optimizing for this iPhone and Ultra
-    gets ready beside the engine that dictates. The Experiments row says what it's doing: downloading,
+    gets ready beside the engine that dictates. The Settings › Dictation row says what it's doing: downloading,
     downloaded, getting ready in the keyboard, ready, or that the keyboard can't use it now
     (`KeyboardParakeetSettings.keyboardState`, written by the keyboard). Each dictation logs
     its engine, the keyboard's limit, footprint before and at peak, load and transcription
@@ -525,7 +550,7 @@ never at a launch by itself.
     Neural Engine). A probe keyboard (`~/dev/experiments/2026-11-22-hex-keyboard-asr/native`)
     put 60 s of audio at 0.25–0.5 s; on the CPU, four chunks at once passed the limit
     there, so the keyboard never runs that. Linking FluidAudio into the keyboard grows its binary from
-    5.9 to 12.6 MB and, with the experiment off, its footprint at launch by about 0.2 MB
+    5.9 to 12.6 MB and, with the switch off, its footprint at launch by about 0.2 MB
     (writable data dyld fixes up), with no change to its first frame.
   - **Clean up what I say (Settings › Dictation › Clean up what I say):** Off by
     default. For every style but `Verbatim`, Hex's dictation cleanup tagger
@@ -953,15 +978,17 @@ never at a launch by itself.
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Swipe typing in more languages, Korean
-    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, ABC
-    under the emoji key, Keyboard themes (its Theme menu below the switch while it's on),
-    Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Join
-    the keyboard when unfolded, and Multilingual model (Parakeet).
+    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, Emoji
+    shortcodes, ABC under the emoji key, Keyboard themes (its Theme menu below the switch
+    while it's on), Two-thumb selection, Delete swiped words letter by letter, Hide word
+    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
   (before iOS has asked for the microphone), and
-  `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`. Each writes
+  `settings-<dictation|keyboard|privacy|experiments>[-on][-end]`, and
+  `model-card-<waiting|downloading|ready>` (Home's speech model card, with English
+  dictation and no keyboard limit, so nothing downloads). Each settings scene writes
   its page's switches to the App Group: off by default, on with `-on`; switches that are
   on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
   `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
@@ -1058,6 +1085,16 @@ never at a launch by itself.
   Spanish, German ones (äh, ähm, öhm) in German, and none elsewhere (Norwegian
   "er" is "is", Portuguese "um" is "a"); translation's source is the dictation
   language rather than a guess. Custom vocabulary works in any language.
+- **Voice isolation (Settings › Experiments › Voice isolation):** Off by default
+  (`experiments.voiceIsolation`, App Group). While on, the app records in
+  `AVAudioSession`'s `.voiceChat` mode instead of `.measurement`, so Control
+  Center's Mic Mode can offer Voice Isolation while Hex records, and
+  in-keyboard dictation asks `getUserMedia` for echo cancellation and noise
+  suppression (automatic gain stays off). Other audio may be lowered while
+  recording, and Bluetooth headphones may switch to their hands-free call
+  profile. With it off, both record exactly as before. Not verified on a
+  device: that Control Center actually offers Voice Isolation for Hex, and how
+  the mode changes a recording's level.
 - **Two-language dictation (Settings › Experiments › Two-language dictation, iOS 26+):**
   Off by default (`experiments.twoLanguageDictation`, App Group). While on, and while
   dictation uses Apple Speech's `SpeechTranscriber`, one recording is read twice: in the
@@ -1763,6 +1800,28 @@ never at a launch by itself.
   #+= pages' held symbols, and the mark keys ˇ and ʼ, keep the key's own selected. Off, the
   callout opens on the key's own letter. Unit tests only (`FullKeyboardEngineTests`): no CI
   compiles the iOS targets, and no physical iPhone run checks it.
+- **Emoji shortcodes (full keyboard, Settings › Experiments):** Off by default
+  (`experiments.emojiShortcodes`, App Group). In a plain text field that takes emoji, with
+  autocorrect on and secure entry off (not the emoji search), a colon and a name after
+  whitespace or at the start of the field offer up to three emoji in the strip's slots in
+  place of its words: the name's first character is a letter or digit, at least two of its
+  characters are letters or digits, and the rest may also be "_", "+" and "-"
+  (":pizza", ":thumbs_up", case-insensitive); the shapes of chat emoticons (":-D", ":+1") are
+  not tokens. An exact name or alias comes first, then the names and keywords the token
+  starts, one per family, with your emoji use breaking exact ties and moving prefix matches
+  up (`EmojiShortcode` over `EmojiLibrary`, whose words come from
+  `scripts/build-emoji-data.py`). A tap takes the whole token back and types the emoji with
+  its skin tone, counted like one from the panel; typing the closing ":" of a name typed in
+  full (":pizza:") types the emoji instead. No match, a colon inside a word ("abc:pizza"), a
+  field with autocorrect off, a secure field, the emoji search, or the experiment off leaves
+  the strip and typing as they were. Only names the index weighs as names or aliases
+  complete: `:heart:`, `:joy:` and `:tada:` are keywords in the data and stay text, and
+  `:smile:` completes to 😊, the first emoji `emoji-aliases-en.txt` lists for it, not 😄;
+  adding them needs more aliases and a regenerated index, which
+  `scripts/build-emoji-data.py` can't make from the repo alone (it downloads Unicode's
+  emoji-test.txt 18.0 and CLDR 49, and no copy is checked in). Unit tests only
+  (`EmojiShortcodeTests`): no CI compiles the iOS targets, and no physical iPhone run checks
+  it.
 - **Emoji (Settings › Keyboard › Emoji, for the full keyboard):** On by default (stored as
   `experiments.emoji` from when it was an experiment off by default: unset or true is on,
   false off, so testers who turned it off keep it off). An emoji key
@@ -2075,8 +2134,8 @@ dataset's download and its `convert.py` command.
   which Hex can't change), and compare.
 - **Show what I say and Type as I speak:** `LiveDictationTests` cover how results become the
   words shown, the switches' defaults, the end of a long dictation, and Type as I speak's
-  typing, revising, taking back, stopping when the field changes or an app reports no text, and
-  private fields. The simulator has no speech models, so there the preview and typing ran on a
+  typing, revising, taking back, stopping when the field changes or an app reports no text,
+  private fields, and an app's Send (three in a row, Undo after one, an edit that isn't one). The simulator has no speech models, so there the preview and typing ran on a
   replay of Apple's results recorded on a Mac (`LiveTranscriptReplay`), in a host app, light and
   dark, upright and turned, on an iPhone SE's globe key and with no model at all (no preview).
   On an iPhone 17 Pro (iOS 27.2): the preview, Type as I speak, a 60 s dictation, memory with

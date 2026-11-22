@@ -1872,6 +1872,40 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertNil(hold(free: nil), "space iOS doesn't report doesn't hold it")
     }
 
+    func testHomesSpeechModelCardShowsOnlyWhereTheKeyboardWouldUseItAndStaysDismissed() {
+        func shows(enabled: Bool = true, fits: Bool = true, hold: KeyboardParakeetDownload.Hold? = nil, dismissed: Bool = false) -> Bool {
+            SpeechModelHomeCard.shows(enabled: enabled, fits: fits, hold: hold, dismissed: dismissed)
+        }
+        XCTAssertTrue(shows(), "downloading, downloaded or ready")
+        XCTAssertTrue(shows(hold: .notOnWiFi), "waiting says why")
+        XCTAssertTrue(shows(hold: .keyboardNotMeasured))
+        XCTAssertTrue(shows(hold: .needsSpace))
+        XCTAssertFalse(shows(enabled: false), "the switch turned off")
+        XCTAssertFalse(shows(fits: false), "under 6 GB")
+        XCTAssertFalse(shows(hold: .notEnglish))
+        XCTAssertFalse(shows(hold: .otherEngine))
+        XCTAssertFalse(shows(hold: .keyboardTooSmall))
+        XCTAssertFalse(shows(dismissed: true))
+        let suite = "speech-model-card-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defer { defaults.removePersistentDomain(forName: suite) }
+        XCTAssertFalse(SpeechModelHomeCard.isDismissed(defaults))
+        SpeechModelHomeCard.dismiss(defaults)
+        XCTAssertTrue(SpeechModelHomeCard.isDismissed(UserDefaults(suiteName: suite)!), "dismissed stays dismissed")
+    }
+
+    func testTheKeyboardsSpeechModelNeverDownloadsByItselfOverCellular() {
+        func unmetered(satisfied: Bool = true, expensive: Bool = false, constrained: Bool = false, cellular: Bool = false) -> Bool {
+            KeyboardParakeetDownload.isUnmetered(satisfied: satisfied, expensive: expensive, constrained: constrained, cellular: cellular)
+        }
+        XCTAssertTrue(unmetered(), "Wi-Fi, or a VPN over Wi-Fi")
+        XCTAssertFalse(unmetered(satisfied: false), "no connection")
+        XCTAssertFalse(unmetered(expensive: true), "a personal hotspot, or cellular as iOS usually prices it")
+        XCTAssertFalse(unmetered(constrained: true), "Low Data Mode")
+        XCTAssertFalse(unmetered(cellular: true), "5G that iOS calls not expensive under Allow More Data on 5G")
+        XCTAssertFalse(unmetered(expensive: true, cellular: true), "ordinary cellular")
+    }
+
     func testParakeetsFilesMoveIntoTheAppGroupRatherThanDownloadingAgain() throws {
         XCTAssertEqual(ParakeetTranscriber.cacheDirectory.lastPathComponent, SpeechModelStore.parakeetV2Folder)
         XCTAssertEqual(ParakeetTranscriber.cacheDirectory, SpeechModelStore.parakeetV2)
@@ -3515,8 +3549,11 @@ private final class FakeAudioSession: AudioSessionControlling {
         calls.append(.category(category, mode, options))
         self.category = category
         self.mode = mode
-        categoryOptions = options
-        allowsBluetooth = options.contains(.allowBluetoothHFP)
+        // iOS adds the active mode's implicit options: `.voiceChat` records
+        // Bluetooth hands-free itself, whether or not it was asked for.
+        let implicit: AVAudioSession.CategoryOptions = mode == .voiceChat ? [.allowBluetoothHFP] : []
+        categoryOptions = options.union(implicit)
+        allowsBluetooth = categoryOptions.contains(.allowBluetoothHFP)
     }
 
     func prefer(_ microphone: Microphone?) throws {
@@ -3549,6 +3586,49 @@ final class AudioSessionSetupTests: XCTestCase {
         XCTAssertEqual(categoryCalls.count, 1, "the keepalive's category serves the dictation")
         try audio.configureAudioSession(recordingFrom: .bluetooth)
         XCTAssertEqual(session.calls.filter { if case .category = $0 { true } else { false } }.count, 2)
+    }
+
+    /// Experiments › Voice isolation: on, Hex records in `.voiceChat` mode, whose voice
+    /// processing lets Control Center's Mic Mode offer Voice Isolation; off, `.measurement`
+    /// exactly as before. The options stay today's either way, and the category (with the
+    /// mode) is still set only when it changes, even though `.voiceChat` adds
+    /// `.allowBluetoothHFP` itself.
+    func testVoiceIsolationRecordsInVoiceChatModeAndOffKeepsMeasurement() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = VoiceIsolationSettings(defaults: defaults)
+
+        let offSession = FakeAudioSession()
+        try SystemAudioManager(session: offSession, voiceIsolation: settings)
+            .configureAudioSession(recordingFrom: .automatic)
+        XCTAssertEqual(offSession.mode, .measurement, "off keeps today's mode")
+        XCTAssertEqual(
+            offSession.calls.first,
+            .category(.playAndRecord, .measurement, [.mixWithOthers, .allowBluetoothA2DP, .defaultToSpeaker])
+        )
+
+        settings.isEnabled = true
+        let onSession = FakeAudioSession()
+        let audio = SystemAudioManager(session: onSession, voiceIsolation: settings)
+        try audio.configureAudioSession(recordingFrom: .automatic)
+        XCTAssertEqual(onSession.mode, .voiceChat)
+        guard case .category(.playAndRecord, .voiceChat, let options)? = onSession.calls.first else {
+            return XCTFail("the category and mode are set together")
+        }
+        XCTAssertTrue(options.contains(.mixWithOthers), "the experiment keeps today's options")
+        XCTAssertFalse(options.contains(.duckOthers))
+        XCTAssertTrue(
+            onSession.categoryOptions.contains(.allowBluetoothHFP),
+            "iOS adds hands-free Bluetooth itself in .voiceChat"
+        )
+
+        try audio.configureAudioSession(recordingFrom: nil)
+        XCTAssertEqual(
+            onSession.calls.filter { if case .category = $0 { true } else { false } }.count,
+            1,
+            "the implicit option doesn't set the category again while the mode stays the same"
+        )
     }
 
     func testRecordingMixesWithOtherAppsAudioWhateverTheMicrophone() throws {
@@ -3669,6 +3749,32 @@ final class AudioSessionSetupTests: XCTestCase {
             .active(true, []),
             .active(false, .notifyOthersOnDeactivation),
         ])
+    }
+}
+
+final class VoiceIsolationSettingsTests: XCTestCase {
+    /// Off by default, and turned on in the shared App Group so the keyboard reads it too.
+    func testVoiceIsolationIsOffByDefaultAndPersists() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        XCTAssertFalse(VoiceIsolationSettings(defaults: defaults).isEnabled)
+        XCTAssertNil(defaults.object(forKey: "experiments.voiceIsolation"), "reading writes nothing")
+
+        VoiceIsolationSettings(defaults: defaults).isEnabled = true
+        XCTAssertEqual(defaults.object(forKey: "experiments.voiceIsolation") as? Bool, true)
+        XCTAssertTrue(VoiceIsolationSettings(defaults: defaults).isEnabled)
+    }
+
+    func testTheLaunchArgumentTurnsVoiceIsolationOn() throws {
+        let suite = "hex.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        let settings = VoiceIsolationSettings(defaults: defaults)
+        settings.applyLaunchArguments([VoiceIsolationSettings.launchArgument])
+        XCTAssertTrue(settings.isEnabled)
     }
 }
 

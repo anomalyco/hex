@@ -89,6 +89,8 @@ impl Feature {
             Self::Signature => "Signature",
             Self::DictationStyle => "Dictation style",
             Self::HudHeight => "HUD height",
+            Self::VoiceIsolation => "Voice isolation",
+            Self::DictateWhileAnnotating => "Dictate while annotating",
         }
     }
 
@@ -323,6 +325,12 @@ impl Feature {
             }
             Self::HudHeight => {
                 "Choose how high the dictation HUD sits above the Dock when it's at the bottom"
+            }
+            Self::VoiceIsolation => {
+                "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise."
+            }
+            Self::DictateWhileAnnotating => {
+                "Dictate while a capture records: the text pastes as usual, and the capture keeps going"
             }
         }
     }

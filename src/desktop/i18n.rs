@@ -12,6 +12,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use strings::TRANSLATIONS;
 
 mod agents;
+mod annotate_dictation;
 mod calls;
 mod clock;
 mod failures;
@@ -31,6 +32,7 @@ mod strings;
 mod style;
 mod text_language;
 mod traditional_chinese;
+mod voice_isolation;
 
 pub(crate) use clock::{clock_time, twelve_hour_clock};
 
@@ -385,6 +387,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .chain(labs::TRANSLATIONS)
         .chain(style::TRANSLATIONS)
         .chain(signature::TRANSLATIONS)
+        .chain(annotate_dictation::TRANSLATIONS)
         .chain(agents::TRANSLATIONS)
         .chain(failures::TRANSLATIONS)
         .chain(onboarding::TRANSLATIONS)

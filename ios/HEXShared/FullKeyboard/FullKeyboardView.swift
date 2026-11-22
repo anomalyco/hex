@@ -117,12 +117,16 @@ final class FullKeyboardView: UIView {
     /// Settings › Experiments › Hide word suggestions: the strip keeps its height, chips,
     /// status and notices but shows no words (`refreshStrip`).
     private var hidesWordSuggestions = false
+    /// Settings › Experiments › Emoji shortcodes, cached by `syncEmojiShortcodes`: the strip
+    /// offers emoji for a ":name" and the closing ":" completes one while it is on.
+    private(set) var emojiShortcodesEnabled = false
     /// Settings › Experiments › Keyboard themes: Automatic keeps iOS's glass; another theme
     /// paints the keyboard's own colours. Read again by `syncSettings`, which rebuilds the
     /// palette when it changes.
     private var keyboardTheme = FullKeyboardSettings().effectiveKeyboardTheme
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     var showsAllowPasteHint = false
+    var showsModelNotice = false
     var allowPasteHintHideWork: DispatchWorkItem?
     static let allowPasteHintDuration: TimeInterval = 8
 
@@ -177,6 +181,7 @@ final class FullKeyboardView: UIView {
             guard let self else { return }
             self.keyFeedback()
             if suggestion.kind == .emoji {
+                if self.acceptEmojiShortcode(suggestion) { return }
                 self.recordEmojiUse(suggestion.replacement)
             }
             self.engine.acceptSuggestion(suggestion)
@@ -185,6 +190,7 @@ final class FullKeyboardView: UIView {
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
+        stripView.onDismissNotice = { [weak self] in self?.dismissModelNotice() }
         stripView.onOpenNotice = { [weak self] in
             guard let self else { return }
             self.keyFeedback()
@@ -196,6 +202,7 @@ final class FullKeyboardView: UIView {
                 self.addToVocabulary(word)
                 return
             }
+            if self.modelNotice != nil { return self.openHexForModel() }
             self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
         stripView.onNextKeyboard = { [weak self] in
@@ -248,6 +255,7 @@ final class FullKeyboardView: UIView {
             self.vocabularyOffer = nil
             self.hideFullAccessHint()
             self.hideAllowPasteHint()
+            self.hideModelNotice()
             self.refreshReturnKey()
             self.refreshStrip()
             self.onTextEdit?()
@@ -279,6 +287,7 @@ final class FullKeyboardView: UIView {
         engine.trackpadSelectionState.enabled = FullKeyboardSettings().twoThumbSelection
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
         engine.quickAccentsEnabled = FullKeyboardSettings().quickAccents
+        syncEmojiShortcodes()
         hidesWordSuggestions = FullKeyboardSettings().hideWordSuggestions
         syncHexPlacement()
         syncNumberRow()
@@ -536,6 +545,16 @@ final class FullKeyboardView: UIView {
         plane.spaceLabel = languages.spaceLabel ?? (model.hasFullAccess ? model.languageSummary : nil)
     }
 
+    /// Settings › Experiments › Emoji shortcodes, in the App Group: cached for the strip, and
+    /// the engine's closing ":" hook is set only while it is on, so an off keyboard types a
+    /// colon exactly as it did before the experiment.
+    private func syncEmojiShortcodes() {
+        emojiShortcodesEnabled = FullKeyboardSettings().emojiShortcodes
+        engine.emojiShortcode = emojiShortcodesEnabled
+            ? { [weak self] before in self?.emojiShortcodeReplacement(before: before) }
+            : nil
+    }
+
     func syncSettings() {
         syncLanguage()
         // Learn each language separately: each keyboard language's own learned words, and the
@@ -559,6 +578,7 @@ final class FullKeyboardView: UIView {
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization
         engine.deletesSwipedWordsLetterByLetter = FullKeyboardSettings().deletesSwipedWordsLetterByLetter
         engine.quickAccentsEnabled = FullKeyboardSettings().quickAccents
+        syncEmojiShortcodes()
         let selectionEnabled = FullKeyboardSettings().twoThumbSelection
         engine.trackpadSelectionState.enabled = selectionEnabled
         // Turned off mid-selection: end it now rather than let a thumb keep picking.
@@ -907,7 +927,9 @@ final class FullKeyboardView: UIView {
         }
         stripOffer = clipboardOffer
         var suggestions = engine.suggestions
-        if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
+        if let shortcodes = emojiShortcodeSuggestions() {
+            suggestions = shortcodes
+        } else if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
             if lastDictation != nil || status != nil || clipboardOffer != nil {
                 suggestions = []
             } else {
@@ -935,7 +957,7 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice
+            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice ?? modelNotice
         )
     }
 
@@ -957,7 +979,7 @@ final class FullKeyboardView: UIView {
     private func setRecording(_ recording: Bool) {
         showsRecording = recording
         dismissStyleMenu()
-        if recording { closeEmojiPanel() }
+        if recording { closeEmojiPanel(); hideModelNotice() }
         let closingFrames = recording ? nil : morphFrames()
         if recording {
             plane.cancelAllTouches()
@@ -1236,7 +1258,7 @@ final class FullKeyboardView: UIView {
         let m = engine.layout.metrics
         let bar = CGRect(x: 0, y: appliedLift, width: bounds.width, height: m.stripTop + m.stripHeight)
         guard bar.contains(point), !showsRecording, emojiPanel == nil, styleMenu == nil,
-              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil
+              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil, modelNotice == nil
         else { return false }
         return model.stagePhase == .idle || model.stagePhase == .failed
     }
@@ -1420,7 +1442,7 @@ final class FullKeyboardView: UIView {
         refreshReturnKey()
     }
 
-    private func hideUndo() {
+    func hideUndo() {
         undoHideWork?.cancel()
         undoHideWork = nil
         if lastDictation != nil {

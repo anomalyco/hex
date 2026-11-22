@@ -33,6 +33,8 @@ pub(crate) mod system_idle;
 mod transport;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod voice_filter;
+#[cfg(target_os = "macos")]
+mod voice_processing;
 #[cfg(target_os = "windows")]
 mod wasapi_capture;
 

@@ -257,6 +257,13 @@ mod own {
                     input = None;
                     reopened = Instant::now();
                 }
+                AudioInputEvent::StreamReconfigured => {
+                    // The recording's microphone is raw, so this only keeps
+                    // the match total; reopen as a failed stream would.
+                    tracing::warn!(device, "a recording's microphone reconfigured");
+                    input = None;
+                    reopened = Instant::now();
+                }
             }
         }
         sink.close()

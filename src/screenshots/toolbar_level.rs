@@ -112,7 +112,7 @@ fn drain(input: &AudioInput, peak: &Peak) -> bool {
         match input.recv_timeout(Duration::ZERO) {
             AudioInputEvent::Chunk { samples, .. } => peak.record(&samples),
             AudioInputEvent::Timeout => return true,
-            AudioInputEvent::StreamFailed(_) => return false,
+            AudioInputEvent::StreamFailed(_) | AudioInputEvent::StreamReconfigured => return false,
         }
     }
 }

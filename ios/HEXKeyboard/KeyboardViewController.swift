@@ -173,6 +173,7 @@ final class KeyboardViewController: UIInputViewController {
         // about 80 ms late (Record typing logs), so q, a, p, l, shift and delete lagged and
         // could land after the next key. Apple's own keyboard has no such delay.
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        fullKeyboard?.offerModelNotice()
         // Onboarding's practice tells Hex's keyboard on screen from another one, or iOS's
         // dictation, by these.
         bridge.recordKeyboardShown(at: Date().timeIntervalSince1970)
@@ -205,7 +206,7 @@ final class KeyboardViewController: UIInputViewController {
         // keyboard does, and iOS gives up on a keyboard slow to draw.
         let autoStart = DispatchWorkItem { [weak self] in
             self?.autoStartDictationIfPending()
-            // Experiments › Speech model in keyboard: last, and it loads off the main thread.
+            // Settings › Dictation › Speech model in keyboard: last, and it loads off the main thread.
             if let self, self.isShown, self.hasFullAccess, !self.memoryWarned { KeyboardParakeet.shared.warmUp() }
         }
         launchWork = [lexicon, optional, autoStart]
@@ -350,6 +351,7 @@ final class KeyboardViewController: UIInputViewController {
         updateKeyboardTraits()
         followTypingLogField()
         fullKeyboard?.textDidChange()
+        liveTyping.checkSent()
         observeDictationEdits(fromKeys: false)
         noteHostTextChange()
         handOffNumericPadIfNeeded()
@@ -519,6 +521,21 @@ final class KeyboardViewController: UIInputViewController {
         if dictationEdits.isTracking { dictationEdits.observe(context, fromKeys: fromKeys) }
     }
 
+    /// Type as I speak's words went out with the app's Send: a dictation kept as typed (the host
+    /// emptying the field, as `DictationEditTracker` reads a send), out of Undo's reach, and
+    /// the capture goes on as a fresh dictation.
+    private func liveWordsSent(_ sent: KeyboardLiveTyping.Sent?) {
+        guard let sent else { return localDictation.releaseSend(sent: false) }
+        if learnsFromDictation {
+            let before = sent.before ?? ""
+            dictationEdits.willInsert(heard: sent.heard, inserted: sent.typed, context: .init(before: before, after: "", hasText: !before.isEmpty))
+            dictationEdits.observe(.init(before: before + sent.typed, after: "", hasText: true), fromKeys: true)
+            dictationEdits.observe(.init(before: "", after: "", hasText: false), fromKeys: false)
+        }
+        fullKeyboard?.hideUndo()
+        localDictation.releaseSend(sent: true)
+    }
+
     /// A return key labelled Send ends the dictation's edit window: what is there is sent.
     private func returnKeyWillInsert() {
         guard textDocumentProxy.returnKeyType == .send else { return }
@@ -674,6 +691,8 @@ final class KeyboardViewController: UIInputViewController {
             self?.fullKeyboard?.engine.forgetTextAroundKeys()
             self?.fullKeyboard?.engine.textDidChange()
         }
+        liveTyping.willSend = { [weak self] in self?.localDictation.holdForSend() }
+        liveTyping.didSettleSend = { [weak self] sent in self?.liveWordsSent(sent) }
         viewModel.onPasteDictation = { [weak self] in self?.pasteOfferedDictation() }
         viewModel.onDictateTap = { [weak self] in self?.startWarmDictation() }
         viewModel.onHexKeyPress = { [weak self] at in self?.hexKeyPressed(at: at) }

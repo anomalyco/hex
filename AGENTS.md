@@ -50,7 +50,8 @@ language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Free memory when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
 paste shortcut (Windows, Linux), Stop phrase, Signature, Hold through other keys
-(macOS and Windows), and Microphone key alone (#181, macOS).
+(macOS and Windows), Microphone key alone (#181, macOS), and Dictate while
+annotating.
 Externally contributed features land there too.
 Every `Everyone` lab also gets a page on Hex's website,
 `anoma.ly/hex/labs/<id>` (index at `/hex/labs`), built from
@@ -1246,7 +1247,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   no undo. There is no separate draw shortcut and no send-to list
   shortcut; Send to… is a capsule click. `hex annotate draw` toggles the
   pen for desktops without the portal. While a capture records, the
-  dictation shortcut starts nothing on either OS. Sends
+  dictation shortcut starts nothing on either OS, unless Labs › Dictate while
+  annotating (off by default) lets it dictate as usual: the text pastes into
+  the app in front, History and Paste Last keep it, and the capture keeps
+  recording, its words including the dictated span. Sends
   carry the contact sheet and keyframes as inline `data:` image parts, never
   a local path. The Linux capsule doesn't open suggestions by itself.
   `validate-app.sh` requires

@@ -988,6 +988,40 @@ Whole-clip run starts -> labs::skip_pauses()        // dictate.skip-pauses
 
 Details and checks in [labs.md](labs.md).
 
+### Voice Isolation (Labs, macOS)
+
+With Labs › Voice isolation on (`labs.voice_isolation`, off by default),
+dictation's microphone opens through Apple's voice processing instead of
+cpal's raw input stream, so macOS Control Center's Mic Mode can offer Voice
+Isolation for Hex. The voice-processed microphone stays open while idle, as
+the raw warm one does (unless Release microphone while idle is on), so
+ducking applies while Hex is listening, not only during a dictation. An
+engine configuration change reopens it through voice processing again; a
+real voice-processing failure (an exception or refused graph, the wrong
+device, a stream that stalls or fails, or more than three reconfigurations
+in 30 s) switches that resolved microphone to normal capture until the lab
+is toggled or the microphone changes:
+
+```ts
+Dictation stream opens -> labs::voice_isolation()
+├── Off -> cpal's raw input stream, exactly as before
+├── On -> AVAudioEngine's input node with setVoiceProcessingEnabled(true)
+│   ├── Voice processing starts -> channel-0 float tap carries CaptureInstant::from_mach_ticks
+│   └── It fails -> log, then the same cpal open as Off, remembered for
+│       this resolved microphone until the lab is toggled or it changes
+├── Engine configuration change (after start, engine stopped) -> reopens
+│   through voice processing again; more than three in 30 s -> normal capture
+└── Gate changes while idle -> the stream reopens on the other path;
+    during a capture -> waits until nothing records
+Never: meetings, Annotate captures, the level meter, the local API's host
+audio, open_named_input, or another OS
+```
+
+Not verified on hardware: Control Center's Mic Mode offering Voice Isolation
+for Hex, the tap's latency against the 200 ms release tail, and a meeting
+sharing the microphone while the voice-processed stream is open. Details and
+checks in [labs.md](labs.md).
+
 **Fixed November 3, 2026 (issue 1194):** a clip longer than the model's
 window (Cohere's 35 s) is transcribed in chunks, and a chunk that was only
 silence (a locked dictation left waiting before the words) went to the model

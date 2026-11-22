@@ -74,6 +74,8 @@ final class KeyboardStripView: UIView {
     var onOpenHexFromHint: (() -> Void)?
     /// The notice's chip was tapped (`KeyboardStripNotice`).
     var onOpenNotice: (() -> Void)?
+    /// The notice's ✕ was tapped (a `dismissible` notice).
+    var onDismissNotice: (() -> Void)?
 
     private let statusLabel = UILabel()
     private let undoChip = UIButton(type: .custom)
@@ -332,6 +334,7 @@ final class KeyboardStripView: UIView {
         let view = FullAccessHintView()
         view.chipLeads = hexOnLeading
         view.onOpenHex = { [weak self] in self?.onOpenNotice?() }
+        view.onDismiss = { [weak self] in self?.onDismissNotice?() }
         view.isHidden = true
         addSubview(view)
         noticeView = view
@@ -754,6 +757,8 @@ struct KeyboardStripNotice: Equatable {
     let title: String
     let detail: String
     let button: String
+    /// An ✕ at the end away from the chip that puts the notice away for good (`onDismissNotice`).
+    var dismissible = false
 }
 
 /// What the Hex key shows without Full Access: dictation needs Allow Full Access, where to
@@ -769,10 +774,15 @@ final class FullAccessHintView: UIView {
     /// The Hex key is on the left: Open Hex sits at the leading end, the text after it.
     var chipLeads = false { didSet { if chipLeads != oldValue { setNeedsLayout() } } }
     var onOpenHex: (() -> Void)?
+    var onDismiss: (() -> Void)?
 
     private let titleLabel = UILabel()
     private let pathLabel = UILabel()
     private let openButton = UIButton(type: .custom)
+    /// A dismissible notice's ✕, drawn as Home's cards draw theirs, its touch area the notice's
+    /// height and `dismissWidth` wide at the end away from the chip, so a miss lands on the words.
+    private let dismissButton = UIButton(type: .custom)
+    private static let dismissWidth: CGFloat = 34
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -796,6 +806,11 @@ final class FullAccessHintView: UIView {
         openButton.accessibilityHint = String(localized: "Opens Hex's setup")
         openButton.addTarget(self, action: #selector(handleOpen), for: .touchUpInside)
         addSubview(openButton)
+        dismissButton.setImage(UIImage(systemName: "xmark", withConfiguration: UIImage.SymbolConfiguration(pointSize: 11, weight: .semibold)), for: .normal)
+        dismissButton.accessibilityLabel = String(localized: "Dismiss")
+        dismissButton.isHidden = true
+        dismissButton.addTarget(self, action: #selector(handleDismiss), for: .touchUpInside)
+        addSubview(dismissButton)
         applyPalette()
     }
 
@@ -804,6 +819,10 @@ final class FullAccessHintView: UIView {
 
     @objc private func handleOpen() {
         onOpenHex?()
+    }
+
+    @objc private func handleDismiss() {
+        onDismiss?()
     }
 
     /// Shows `notice` in place of the Full Access words.
@@ -815,6 +834,7 @@ final class FullAccessHintView: UIView {
         open?.title = notice.button
         openButton.configuration = open
         openButton.accessibilityHint = nil
+        dismissButton.isHidden = !notice.dismissible
         setNeedsLayout()
     }
 
@@ -825,6 +845,7 @@ final class FullAccessHintView: UIView {
         open?.baseForegroundColor = palette.textBase
         open?.background.backgroundColor = palette.chipFill
         openButton.configuration = open
+        dismissButton.tintColor = palette.textMuted
     }
 
     override func layoutSubviews() {
@@ -836,8 +857,10 @@ final class FullAccessHintView: UIView {
             width: buttonWidth,
             height: chipHeight
         )
-        let textX = chipLeads ? openButton.frame.maxX + 10 : 0
-        let textWidth = chipLeads ? max(0, bounds.width - textX) : max(0, openButton.frame.minX - 10)
+        let dismiss = dismissButton.isHidden ? 0 : Self.dismissWidth
+        dismissButton.frame = CGRect(x: chipLeads ? bounds.width - dismiss : 0, y: 0, width: dismiss, height: bounds.height)
+        let textX = chipLeads ? openButton.frame.maxX + 10 : dismiss
+        let textWidth = chipLeads ? max(0, bounds.width - textX - dismiss) : max(0, openButton.frame.minX - 10 - textX)
         // Two lines, even above and below the strip's words' line.
         let lineHeight: CGFloat = min(16, (bounds.height + 1) / 2)
         let top = (bounds.height - 2 * lineHeight) / 2

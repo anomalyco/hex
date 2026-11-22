@@ -39,8 +39,8 @@ use capture_actions::{control_dictation, handle_hotkey_action, paste_last};
 use context_watch::ContextWatch;
 use events::handle_dictation_event;
 use guards::{
-    Release, WarmRelease, caps_lock_can_press, capture_boundary, capture_refusal, claims_escape,
-    paste_last_refusal,
+    Release, WarmRelease, caps_lock_can_press, capture_boundary, capture_owns_dictation,
+    capture_refusal, claims_escape, paste_last_refusal,
 };
 use hotkeys::{Hotkeys, Shortcut};
 use output::{finish_dictation, finish_dictation_with, interrupted_dictation};
@@ -779,7 +779,12 @@ pub fn listen(
                 .is_some_and(|host| host.recording_since(&input).is_some());
             #[cfg(not(hex_capture))]
             let annotate_recording = false;
-            if !caps_lock_can_press(caps_recording, annotate_recording) {
+            // Labs › Dictate while annotating leaves dictation working while
+            // a capture records, so a Caps Lock press may start there too.
+            if !caps_lock_can_press(
+                caps_recording,
+                capture_owns_dictation(annotate_recording, crate::labs::dictate_while_annotating()),
+            ) {
                 continue;
             }
             let Some(action) = hotkeys.caps_lock_press() else {
@@ -867,13 +872,16 @@ pub fn listen(
             }
             // Annotate records the narration itself: while it records, the
             // dictation shortcut starts nothing. The tap still swallows its
-            // chord, so it never reaches the app.
+            // chord, so it never reaches the app. Labs › Dictate while
+            // annotating leaves it working as usual instead.
             #[cfg(hex_capture)]
-            if !hotkeys.any_recording()
-                && capture_host
-                    .as_mut()
-                    .is_some_and(|host| host.recording_since(&input).is_some())
-            {
+            if capture_owns_dictation(
+                !hotkeys.any_recording()
+                    && capture_host
+                        .as_mut()
+                        .is_some_and(|host| host.recording_since(&input).is_some()),
+                crate::labs::dictate_while_annotating(),
+            ) {
                 hotkeys.track_key_state(input_event, capture_at);
                 continue;
             }

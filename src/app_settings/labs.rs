@@ -229,6 +229,10 @@ pub struct LabsSettings {
     /// The gap in points above the Dock while `hud_height` is on; a saved
     /// value above [`HUD_BOTTOM_GAP_MAX`] is clamped at placement.
     pub hud_bottom_gap: u16,
+    /// Dictation's microphone opens through Apple's voice processing, so
+    /// Control Center's Mic Mode can offer Voice Isolation (macOS, Labs ›
+    /// Voice isolation).
+    pub voice_isolation: bool,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
     /// Annotate's capsule and ink float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux).
@@ -272,6 +276,9 @@ pub struct LabsSettings {
     /// coding agents' own folders and, on macOS, links `hex` onto PATH
     /// (Labs › Install agent skill from Annotate).
     pub annotate_agent_install: bool,
+    /// While an Annotate capture records, the dictation shortcut dictates
+    /// as it always does, and the capture keeps recording.
+    pub dictate_while_annotating: bool,
     /// The local API's `process=global` returns transcripts after Global
     /// mode's output processing.
     pub api_processing: bool,
@@ -509,6 +516,7 @@ impl Default for LabsSettings {
             notch_indicator: false,
             hud_height: false,
             hud_bottom_gap: HUD_BOTTOM_GAP_DEFAULT,
+            voice_isolation: false,
             annotate_replay: false,
             opencode_in_wsl: false,
             yolo_mode: false,
@@ -518,6 +526,7 @@ impl Default for LabsSettings {
             vocabulary_files: false,
             annotate_agent_tools: false,
             annotate_agent_install: false,
+            dictate_while_annotating: false,
             api_processing: false,
             api_timestamps: false,
             speakers_only: false,

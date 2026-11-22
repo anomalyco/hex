@@ -81,7 +81,8 @@ impl Feature {
             | Self::Playground
             | Self::StopPhrase
             | Self::VocabularyFiles
-            | Self::HudHeight => Group::Dictation,
+            | Self::HudHeight
+            | Self::VoiceIsolation => Group::Dictation,
             Self::SmartSpacing
             | Self::SpokenFormatting
             | Self::SpokenSymbols
@@ -121,7 +122,8 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::CopyCaptureZip
             | Self::AnnotateAgentTools
-            | Self::AnnotateAgentInstall => Group::Annotate,
+            | Self::AnnotateAgentInstall
+            | Self::DictateWhileAnnotating => Group::Annotate,
             Self::MouseShortcuts
             | Self::SecondDictationShortcut
             | Self::MoreDictationShortcuts

@@ -18,9 +18,22 @@ pub(super) fn claims_escape(
     !programmatic && (capture_escape || held_dictation)
 }
 
+/// Whether an Annotate capture is left to record the narration itself, so a
+/// dictation press starts nothing. Labs › Dictate while annotating turns
+/// `dictate_while_annotating` on, and the shortcut works as it always does
+/// while the capture keeps recording.
+pub(super) fn capture_owns_dictation(
+    capture_recording: bool,
+    dictate_while_annotating: bool,
+) -> bool {
+    capture_recording && !dictate_while_annotating
+}
+
 /// Whether a Caps Lock press may act. An Annotate capture records the
-/// narration itself, so a Caps Lock press must not start a dictation over it;
-/// a press that finishes an already-running Caps Lock capture still works.
+/// narration itself, so a Caps Lock press must not start a dictation over it
+/// (except with Labs › Dictate while annotating, which its caller folds in
+/// first); a press that finishes an already-running Caps Lock capture still
+/// works.
 pub(super) fn caps_lock_can_press(caps_recording: bool, annotate_recording: bool) -> bool {
     caps_recording || !annotate_recording
 }
@@ -160,6 +173,22 @@ mod tests {
     /// A capture pressed while the microphone was released keeps that record
     /// once the stream is back: its own tone and edge still depend on it,
     /// while the next press takes the stream's timeline again.
+    /// An Annotate capture swallows a dictation press unless Labs › Dictate
+    /// while annotating is on; with nothing recording, nothing swallows it.
+    #[test]
+    fn a_capture_owns_dictation_unless_the_lab_lets_it_through() {
+        assert!(capture_owns_dictation(true, false));
+        assert!(!capture_owns_dictation(true, true));
+        assert!(!capture_owns_dictation(false, false));
+        assert!(!capture_owns_dictation(false, true));
+        // A Caps Lock press may start over a capture only when the lab says so.
+        assert!(!caps_lock_can_press(false, true));
+        assert!(caps_lock_can_press(
+            false,
+            capture_owns_dictation(true, true)
+        ));
+    }
+
     #[test]
     fn a_capture_keeps_the_cold_press_it_started_from() {
         let mut release = Release::new(true);

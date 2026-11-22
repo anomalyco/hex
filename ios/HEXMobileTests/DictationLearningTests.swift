@@ -547,6 +547,194 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertEqual(words.drawnHeight, 4 * line, accuracy: 0.5, "a long dictation draws only the box's lines, the last at its foot")
     }
 
+    /// Ryan: "tap anywhere on the screen and it will stop dictation". A tap on the words finishes
+    /// as Done does, with Show what I say alone and with Type as I speak; a slide, a hold, a tap
+    /// as the words come in and a second tap do nothing, and ✕ still cancels.
+    @MainActor
+    func testATapOnTheWordsFinishesTheDictationAsDoneDoes() throws {
+        for typing in [false, true] {
+            let (view, model) = recordingKeyboard(showsPreview: true, typesIntoField: typing)
+            var stops = 0, cancels = 0
+            model.onStopTap = { stops += 1 }
+            model.onCancelTap = { cancels += 1 }
+            let words = try XCTUnwrap(view.subviews.lazy.compactMap { $0 as? LiveDictationPreviewView }.first, "the words in place of the keys")
+            let at = CGPoint(x: words.bounds.midX, y: words.bounds.midY)
+            let shown = words.shownAt
+            words.touchDown(at: at, time: shown + 0.1)
+            words.touchUp(at: at, time: shown + 0.15)
+            XCTAssertEqual(stops, 0, "a tap as the words come in is the end of the tap that started it")
+            words.touchDown(at: at, time: shown + 1)
+            words.touchMoved(to: CGPoint(x: at.x + 30, y: at.y))
+            words.touchUp(at: CGPoint(x: at.x + 30, y: at.y), time: shown + 1.1)
+            XCTAssertEqual(stops, 0, "a thumb sliding across the words")
+            words.touchDown(at: at, time: shown + 2)
+            words.touchUp(at: at, time: shown + 2 + FullKeyboardEngine.accentHoldDelay)
+            XCTAssertEqual(stops, 0, "a thumb resting on the words")
+            try XCTUnwrap(control(in: view, labelled: "Cancel dictation")).sendActions(for: .touchUpInside)
+            XCTAssertEqual(cancels, 1, "✕ still throws the dictation away")
+            XCTAssertEqual(stops, 0)
+            let near = CGPoint(x: at.x + 4, y: at.y + 3)
+            words.touchDown(at: at, time: shown + 3)
+            words.touchMoved(to: near)
+            words.touchUp(at: near, time: shown + 3.08)
+            XCTAssertEqual(stops, 1, "a tap finishes")
+            words.touchDown(at: at, time: shown + 3.2)
+            words.touchUp(at: at, time: shown + 3.25)
+            XCTAssertFalse(words.accessibilityActivate())
+            XCTAssertEqual(stops, 1, "once")
+            XCTAssertEqual(cancels, 1)
+        }
+    }
+
+    /// The two things only a real thumb would show, at their edges. A tap is the keys' own:
+    /// it may move up to `FullKeyboardEngine.accentSlop` (10 pt) from where it landed and must
+    /// lift before `FullKeyboardEngine.accentHoldDelay` (0.36 s). And none counts that lands
+    /// within `LiveDictationPreviewView.settle` (0.4 s: the words' 0.3 s fade in and 0.1 s)
+    /// of the words appearing, measured from touch-down on the touches' clock.
+    @MainActor
+    func testOnlyAKeysTapAfterTheWordsHaveComeInCounts() {
+        XCTAssertEqual(FullKeyboardEngine.accentSlop, 10)
+        XCTAssertEqual(FullKeyboardEngine.accentHoldDelay, 0.36, accuracy: 0.001)
+        XCTAssertEqual(LiveDictationPreviewView.settle, 0.4, accuracy: 0.001)
+        XCTAssertEqual(LiveDictationPreviewView.settle, LiveDictationPreviewHost.Motion.wordsIn + 0.1, accuracy: 0.001)
+        let slop = FullKeyboardEngine.accentSlop, hold = FullKeyboardEngine.accentHoldDelay, settle = LiveDictationPreviewView.settle
+        func finishes(down: TimeInterval, up: TimeInterval, path: [CGPoint] = [], lift: CGPoint? = nil) -> Bool {
+            let words = LiveDictationPreviewView(frame: CGRect(x: 0, y: 0, width: 402, height: 220))
+            var finished = 0
+            words.onFinish = { finished += 1 }
+            let at = CGPoint(x: 200, y: 100)
+            words.touchDown(at: at, time: words.shownAt + down)
+            for step in path { words.touchMoved(to: CGPoint(x: at.x + step.x, y: at.y + step.y)) }
+            let end = lift ?? path.last ?? .zero
+            words.touchUp(at: CGPoint(x: at.x + end.x, y: at.y + end.y), time: words.shownAt + up)
+            return finished == 1
+        }
+        XCTAssertTrue(finishes(down: 1, up: 1.08), "a tap")
+        XCTAssertTrue(finishes(down: 1, up: 1.08, path: [CGPoint(x: slop * 0.6, y: slop * 0.8)]), "a tap that rolls a key's slop")
+        XCTAssertFalse(finishes(down: 1, up: 1.08, path: [CGPoint(x: slop + 0.5, y: 0)]), "a touch that moves further is no tap")
+        XCTAssertFalse(finishes(down: 1, up: 1.2, path: [CGPoint(x: 0, y: -(slop + 1)), .zero]), "nor one that goes out and comes back")
+        XCTAssertFalse(finishes(down: 1, up: 1.08, lift: CGPoint(x: 0, y: slop + 1)), "nor one that lifts further away")
+        XCTAssertFalse(finishes(down: 1, up: 1.6, path: (1 ... 32).map { CGPoint(x: CGFloat($0) * 10, y: 0) }), "nor a thumb sliding across the words")
+        XCTAssertTrue(finishes(down: 1, up: 1 + hold - 0.01), "lifted just inside a key's hold")
+        XCTAssertFalse(finishes(down: 1, up: 1 + hold), "held as long as a key takes to open its accents")
+        XCTAssertFalse(finishes(down: 0, up: 0.06), "the end of the tap that started the dictation")
+        XCTAssertFalse(finishes(down: settle - 0.01, up: settle + 0.07), "landing just inside the window, even lifting after it")
+        XCTAssertTrue(finishes(down: settle + 0.01, up: settle + 0.09), "landing just after it")
+    }
+
+    /// VoiceOver reads the words and finishes from them by activating or by Finish dictation;
+    /// with the words switched off the keys stay as they are while it records.
+    @MainActor
+    func testVoiceOverFinishesFromTheWordsAndWithoutThemTheKeysStay() throws {
+        let (view, model) = recordingKeyboard(showsPreview: true, typesIntoField: false)
+        var stops = 0
+        model.onStopTap = { stops += 1 }
+        let words = try XCTUnwrap(view.subviews.lazy.compactMap { $0 as? LiveDictationPreviewView }.first)
+        XCTAssertEqual(words.accessibilityLabel, LiveDictationPreviewView.placeholder, "still read as the words")
+        XCTAssertEqual(words.accessibilityCustomActions?.map(\.name), ["Finish dictation"])
+        XCTAssertTrue(words.accessibilityActivate())
+        XCTAssertEqual(stops, 1)
+
+        for typing in [false, true] {
+            let (keys, _) = recordingKeyboard(showsPreview: false, typesIntoField: typing)
+            XCTAssertTrue(keys.showsRecording)
+            XCTAssertFalse(keys.subviews.contains { $0 is LiveDictationPreviewView })
+            XCTAssertEqual(keys.plane.alpha, 1, "the keys stay and type")
+        }
+    }
+
+    @MainActor
+    private func recordingKeyboard(showsPreview: Bool, typesIntoField: Bool) -> (FullKeyboardView, KeyboardViewModel) {
+        let t0 = 10_000.0
+        let model = KeyboardViewModel()
+        let view = FullKeyboardView(model: model, target: FixtureTextTarget(text: ""))
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        if showsPreview || typesIntoField { model.liveText.begin(showsPreview: showsPreview, typesIntoField: typesIntoField) }
+        model.configureFixture(
+            snapshot: KeyboardSnapshot(state: .recording, heartbeat: t0, expiresAt: t0 + 900, recordingStartedAt: t0 - 1, audioLevel: 0.4, jobID: "live"),
+            now: t0
+        )
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        return (view, model)
+    }
+
+    private func control(in view: UIView, labelled label: String) -> UIControl? {
+        for sub in view.subviews {
+            if let control = sub as? UIControl, control.accessibilityLabel == label { return control }
+            if let found = control(in: sub, labelled: label) { return found }
+        }
+        return nil
+    }
+
+    /// AJ dictates into Slack with Type as I speak and taps Send without stopping. The app
+    /// emptying the field while it ends with the words is a send: the sent words are never typed
+    /// or taken back again, and a fresh typing types the next words from the first into the
+    /// empty field, three sends in a row, so ✓ inserts only the last dictation's text.
+    func testAFieldTheAppEmptiedWithTheWordsInItWasSent() throws {
+        let field = FixtureTextTarget(text: "")
+        var typing = try XCTUnwrap(LiveFieldTyping(target: field))
+        for message in ["See you at ten", "Bring the slides", "And the notes"] {
+            typing.show(message)
+            XCTAssertEqual(field.text, message)
+            XCTAssertFalse(typing.wasSent)
+            while field.hasText { field.deleteBackward() }
+            XCTAssertTrue(typing.wasSent, "the app emptied the field: a send")
+            typing.show(message + " please")
+            XCTAssertEqual(field.text, "", "the sent dictation types nothing more")
+            typing = try XCTUnwrap(LiveFieldTyping(target: field), "the fresh dictation")
+            XCTAssertEqual(typing.base, "")
+        }
+        typing.show("Thanks")
+        XCTAssertEqual(field.text, "Thanks", "typed from its first word")
+        XCTAssertTrue(typing.takeBack())
+        XCTAssertEqual(field.text, "", "✓'s text goes into the empty field, the sent words nowhere")
+    }
+
+    /// An app that changes the words without emptying the field (an edit, a mention) didn't
+    /// send them: typing stops for that dictation, as before.
+    func testAnEditThatLeavesTextIsNotASend() throws {
+        let field = FixtureTextTarget(text: "")
+        let typing = try XCTUnwrap(LiveFieldTyping(target: field))
+        typing.show("Ask the team")
+        for _ in 0 ..< 4 { field.deleteBackward() }
+        field.insertText("@team")
+        XCTAssertFalse(typing.wasSent)
+        typing.show("Ask the team about it")
+        XCTAssertTrue(typing.stopped)
+        XCTAssertEqual(field.text, "Ask the @team", "hands off")
+        XCTAssertFalse(typing.wasSent, "stopped: a later send of the edited text isn't this dictation's")
+    }
+
+    /// After a send the keyboard forgets Undo for the text that left the field, and Undo after
+    /// the next dictation takes back only that one.
+    @MainActor
+    func testUndoAfterASendReachesOnlyTheNewDictation() throws {
+        let field = FixtureTextTarget(text: "")
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: field)
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        func undo() -> UIButton? { visibleButton(in: view, titled: "Undo dictation") }
+        field.insertText("Earlier words.")
+        view.didInsertDictation("Earlier words.", before: "", after: "")
+        XCTAssertNotNil(undo())
+        while field.hasText { field.deleteBackward() }
+        view.hideUndo()
+        XCTAssertNil(undo(), "nothing to undo: the text left with the send")
+        field.insertText("Next words.")
+        view.didInsertDictation("Next words.", before: "", after: "")
+        try XCTUnwrap(undo()).sendActions(for: .touchUpInside)
+        XCTAssertEqual(field.text, "")
+    }
+
+    private func visibleButton(in view: UIView, titled title: String) -> UIButton? {
+        for sub in view.subviews where !sub.isHidden && sub.alpha > 0 {
+            if let button = sub as? UIButton, button.configuration?.title == title { return button }
+            if let found = visibleButton(in: sub, titled: title) { return found }
+        }
+        return nil
+    }
+
     func testTheSwitchesDefaultToShowingButNotTyping() throws {
         let suite = "anomaly.hex.tests.live-dictation"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

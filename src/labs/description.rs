@@ -237,6 +237,12 @@ impl Feature {
             Self::HudHeight => {
                 "Choose how high the dictation HUD sits above the Dock or the screen's bottom edge when its position is Bottom (labs.hud_bottom_gap, macOS)"
             }
+            Self::VoiceIsolation => {
+                "Open dictation's microphone through Apple's voice processing, so Control Center's Mic Mode can offer Voice Isolation and background noise is reduced (macOS; falls back to normal capture when voice processing won't start, and may lower other audio)"
+            }
+            Self::DictateWhileAnnotating => {
+                "While an Annotate capture records, the dictation shortcut dictates as usual: the text pastes into the app in front, History and Paste Last keep it, and the capture goes on recording, hearing the words too"
+            }
         }
     }
 }
