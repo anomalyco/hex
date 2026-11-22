@@ -2,9 +2,8 @@
 
 use std::ffi::{OsStr, c_char, c_int};
 use std::fs::File;
-use std::mem::ManuallyDrop;
+use std::os::fd::BorrowedFd;
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::io::FromRawFd;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -37,8 +36,10 @@ fn model(map: Mmap) -> Option<*mut HkModel> {
 pub(crate) fn open_path(path: &Path) -> *mut HkModel {
     guard(None, || {
         let file = File::open(path).ok()?;
-        // SAFETY: a private read-only map. The model files ship inside the app and are never
-        // written while mapped (as with the Swift reader's mmap).
+        // SAFETY: a read-only shared map (memmap2's `Mmap::map` is MAP_SHARED; the Swift
+        // reader's was MAP_PRIVATE, which reads the same for a file nobody writes): clean,
+        // file-backed pages. The model files ship inside the app and are never written while
+        // mapped.
         let map = unsafe { Mmap::map(&file) }.ok()?;
         model(map)
     })
@@ -51,22 +52,27 @@ pub(crate) fn open_fd(fd: c_int, offset: i64, length: i64) -> *mut HkModel {
     }
     guard(None, || {
         let (offset, length) = (u64::try_from(offset).ok()?, u64::try_from(length).ok()?);
-        // SAFETY: borrows the caller's open descriptor without taking it: ManuallyDrop never
-        // closes it.
-        let file = ManuallyDrop::new(unsafe { File::from_raw_fd(fd) });
+        // SAFETY: only borrowed for the dup below, which leaves the caller's descriptor as it
+        // was; a descriptor that isn't open fails there cleanly (EBADF), as the caller is
+        // told any value is safe.
+        let borrowed = unsafe { BorrowedFd::borrow_raw(fd) };
+        // A duplicate of our own to map from, closed once mapped: the map outlives it.
+        let file = File::from(borrowed.try_clone_to_owned().ok()?);
         let size = file.metadata().ok()?.len();
         if offset.checked_add(length)? > size {
             return None;
         }
-        // SAFETY: a private read-only map of bytes inside the file (checked above), which
-        // ships in the APK and isn't written while mapped. The map outlives the descriptor.
+        // SAFETY: a read-only shared map (MAP_SHARED) of bytes inside the file (checked
+        // above): clean, file-backed pages. It ships in the APK and isn't written while
+        // mapped.
         let map = unsafe {
             MmapOptions::new()
                 .offset(offset)
                 .len(usize::try_from(length).ok()?)
-                .map(&*file)
+                .map(&file)
         }
         .ok()?;
+        drop(file);
         model(map)
     })
     .unwrap_or(std::ptr::null_mut())

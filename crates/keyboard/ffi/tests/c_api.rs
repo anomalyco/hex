@@ -64,6 +64,8 @@ fn opens_the_english_model_inside_a_larger_file() {
         assert!(hk_model_open_fd(fd, 4_099, 0).is_null());
         assert!(hk_model_open_fd(fd, i64::MAX, i64::MAX).is_null());
         assert!(hk_model_open_fd(-1, 4_099, length).is_null());
+        // A descriptor that isn't open: the dup fails (EBADF), nothing is mapped.
+        assert!(hk_model_open_fd(1_000_000, 4_099, length).is_null());
     }
     drop(file);
     std::fs::remove_dir_all(&dir).unwrap();
