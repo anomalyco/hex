@@ -153,13 +153,22 @@ val rustupBin = (System.getenv("CARGO_HOME")?.takeIf { it.isNotEmpty() }?.let(::
 abstract class CargoBuild : Exec() {
     @get:OutputDirectory abstract val outputDirectory: DirectoryProperty
 }
-/** `cargo <arguments(output directory)>` for hex-keyboard-ffi with JNI, the output resolved as it runs. */
-fun CargoBuild.cargo(arguments: (File) -> List<String>) {
+/**
+ * `cargo <arguments(output directory)>` for hex-keyboard-ffi with JNI, the output resolved as it
+ * runs; it fails first, saying what to install, when rustup's cargo or one of `tools` (cargo
+ * subcommands) isn't in CARGO_HOME.
+ */
+fun CargoBuild.cargo(vararg tools: String, arguments: (File) -> List<String>) {
     workingDir(keyboardCrate)
     environment("PATH", rustupBin.path + File.pathSeparator + System.getenv("PATH"))
     executable(rustupBin.resolve("cargo"))
     outputs.upToDateWhen { false }
     doFirst {
+        val missing = (listOf("rustup", "cargo") + tools).filterNot { rustupBin.resolve(it).canExecute() }
+        check(missing.isEmpty()) {
+            "The keyboard core (crates/keyboard) needs ${missing.joinToString(" and ")} in $rustupBin: " +
+                "install rustup (https://rustup.rs) and `cargo install cargo-ndk`"
+        }
         args(arguments(outputDirectory.get().asFile))
         args("--manifest-path", keyboardCrate.resolve("Cargo.toml").path, "-p", "hex-keyboard-ffi", "--features", "jni")
     }
@@ -167,7 +176,7 @@ fun CargoBuild.cargo(arguments: (File) -> List<String>) {
 // Its output directory is the debug variant's (addGeneratedSourceDirectory below).
 val buildKeyboardCore by tasks.registering(CargoBuild::class) {
     environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
-    cargo { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
+    cargo("cargo-ndk") { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
 }
 val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
     outputDirectory.set(layout.buildDirectory.dir("rustHost"))
