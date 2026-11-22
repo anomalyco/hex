@@ -24,6 +24,7 @@ pub(crate) mod modes;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod neutral_voice;
 mod numbers;
+pub(crate) mod paste_last;
 #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
 pub(crate) mod paste_target;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
@@ -32,6 +33,7 @@ mod release_tail;
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) mod screen_vocabulary;
 pub(crate) mod service;
+pub(crate) mod signature;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
 pub(crate) mod stop_phrase;

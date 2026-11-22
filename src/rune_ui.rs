@@ -727,6 +727,7 @@ struct Drafts {
     vocabulary: bool,
     phrase: bool,
     stop_phrase: bool,
+    signature: bool,
 }
 
 impl Ui {
@@ -901,14 +902,7 @@ impl Ui {
         if candidate.vocabulary != submitted.vocabulary {
             self.vocabulary.reload(&candidate.vocabulary);
         }
-        self.lab_store.rebase_phrase(
-            &submitted.labs.voice_prompt_phrase,
-            &candidate.labs.voice_prompt_phrase,
-        );
-        self.lab_store.rebase_stop_phrase(
-            &submitted.labs.stop_phrase_text,
-            &candidate.labs.stop_phrase_text,
-        );
+        self.lab_store.rebase_labs(&submitted.labs, &candidate.labs);
         self.settings = candidate;
         self.modes.committed(&self.settings);
         self.draft_since = None;
@@ -931,6 +925,7 @@ impl Ui {
         candidate.vocabulary = self.vocabulary.project();
         self.lab_store.project_phrase(&mut candidate);
         self.lab_store.project_stop_phrase(&mut candidate);
+        self.lab_store.project_signature(&mut candidate);
         candidate
     }
 
@@ -944,6 +939,7 @@ impl Ui {
             vocabulary: self.vocabulary.project() != settings.vocabulary,
             phrase: self.lab_store.phrase_dirty(settings),
             stop_phrase: self.lab_store.stop_phrase_dirty(settings),
+            signature: self.lab_store.signature_dirty(settings),
         }
     }
 
@@ -1122,33 +1118,15 @@ impl Ui {
             if !drafts.vocabulary && service.vocabulary != self.settings.vocabulary {
                 self.vocabulary.reload(&service.vocabulary);
             }
-            // Only a saved phrase that actually changed may reset the field,
-            // so any other external save leaves its focus and caret alone. A
-            // lab toggled elsewhere resyncs it, dropping a stale draft.
-            if service.labs.voice_prompt != self.settings.labs.voice_prompt {
-                self.lab_store
-                    .sync_phrase(&service.labs.voice_prompt_phrase);
-            } else if !drafts.phrase
-                && service.labs.voice_prompt_phrase != self.settings.labs.voice_prompt_phrase
-            {
-                self.lab_store.rebase_phrase(
-                    &self.settings.labs.voice_prompt_phrase,
-                    &service.labs.voice_prompt_phrase,
-                );
-            }
-            // Stop phrase's field follows its lab and its saved phrase the
-            // same way.
-            if service.labs.stop_phrase != self.settings.labs.stop_phrase {
-                self.lab_store
-                    .sync_stop_phrase(&service.labs.stop_phrase_text);
-            } else if !drafts.stop_phrase
-                && service.labs.stop_phrase_text != self.settings.labs.stop_phrase_text
-            {
-                self.lab_store.rebase_stop_phrase(
-                    &self.settings.labs.stop_phrase_text,
-                    &service.labs.stop_phrase_text,
-                );
-            }
+            // A lab field follows its lab and its saved text: only a saved
+            // text that actually changed may reset the field, so any other
+            // external save leaves its focus and caret alone. A lab toggled
+            // elsewhere resyncs it, dropping a stale draft.
+            self.lab_store.follow_saved(
+                &self.settings.labs,
+                &service.labs,
+                (drafts.phrase, drafts.stop_phrase, drafts.signature),
+            );
             self.settings = service.clone();
             self.settings_changed();
         }

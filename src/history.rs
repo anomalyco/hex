@@ -1702,7 +1702,10 @@ mod tests {
         let mut store = HistoryStore::open(path.clone(), HistoryRetention::Day, 100);
         let older = store.record(draft("older"), 100).unwrap().unwrap();
         let before = fs::read(&path).unwrap();
-        store.recover_paste("could not insert".into(), 101);
+        store.recover_paste(
+            crate::dictation::paste_last::LastDictation::new("could not insert".into(), false),
+            101,
+        );
         let rows = store.paste_rows(8, 102);
         assert_eq!(rows.len(), 2);
         assert_eq!(

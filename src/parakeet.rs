@@ -12,6 +12,7 @@ use transcribe_cpp::{Backend, Model, ModelOptions, RunOptions, TimestampKind, Tr
 
 use crate::continuation::InputActivity;
 use crate::dictation::context::ContextSnapshot;
+use crate::dictation::paste_last::LastDictation;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, correction_watch, pad_for_parakeet};
 use crate::history::{History, HistoryDraft, HistoryKind};
@@ -1079,7 +1080,7 @@ fn queue_error(error: TrySendError<impl Sized>) -> &'static str {
 fn finish_output(
     job: OutputJob,
     paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
-    last_transcript: &mut Option<String>,
+    last_transcript: &mut Option<LastDictation>,
     history: Option<&History>,
 ) -> WorkerEvent {
     match job {
@@ -1100,6 +1101,7 @@ fn finish_output(
             let result = result.and_then(|mut completed| {
                 let paste_started = Instant::now();
                 let mut sent = false;
+                let mut signed = false;
                 if !completed.nothing && !completed.text.trim().is_empty() {
                     match target {
                         TranscriptionTarget::Paste
@@ -1125,8 +1127,11 @@ fn finish_output(
                             // A dictation YOLO mode sends is pasted anyway.
                             let copy_only =
                                 rescued || (crate::labs::copy_only() && send_gate.is_none());
+                            signed = output_history::sign_output(target, &mut completed);
                             let mode = if copy_only {
                                 PasteMode::CopyOnly
+                            } else if signed {
+                                PasteMode::Standalone
                             } else if send_gate.is_some() {
                                 PasteMode::Send
                             } else {
@@ -1137,11 +1142,15 @@ fn finish_output(
                             // nothing is pasted; the text stays for Paste
                             // last dictation, and History keeps only pasted
                             // output, as on any failed paste.
-                            if matches!(mode, PasteMode::Continue | PasteMode::Send)
+                            if !matches!(mode, PasteMode::CopyOnly)
                                 && let Err(error) =
                                     crate::paste::return_to_app::bring_to_front(completed.return_to)
                             {
-                                recover_output(history, last_transcript, completed.text);
+                                recover_output(
+                                    history,
+                                    last_transcript,
+                                    LastDictation::new(completed.text, signed),
+                                );
                                 tracing::warn!(
                                     %error,
                                     "a dictation found another app in front and couldn't return to its own"
@@ -1155,7 +1164,11 @@ fn finish_output(
                             let pasted = match paste(&completed.text, mode) {
                                 Ok(pasted) => pasted,
                                 Err(error) => {
-                                    recover_output(history, last_transcript, completed.text);
+                                    recover_output(
+                                        history,
+                                        last_transcript,
+                                        LastDictation::new(completed.text, signed),
+                                    );
                                     return Err(error.to_string());
                                 }
                             };
@@ -1178,8 +1191,9 @@ fn finish_output(
                     );
                     let recorded = history.and_then(|h| record_history(h, target, sent, &mut completed));
                     if reusable {
-                        if recorded.is_some() { *last_transcript = Some(completed.text.clone()); }
-                        else { recover_output(history, last_transcript, completed.text.clone()); }
+                        let kept = LastDictation::new(completed.text.clone(), signed);
+                        if recorded.is_some() { *last_transcript = Some(kept); }
+                        else { recover_output(history, last_transcript, kept); }
                     }
                 }
                 tracing::info!(
@@ -1214,14 +1228,11 @@ fn finish_output(
         }
         OutputJob::Paste { kind, .. } => {
             let result = match kind {
-                PasteKind::LastTranscript => last_transcript
-                    .clone()
-                    .or_else(|| history.and_then(History::recovered_output))
-                    .ok_or_else(|| "no previous transcript is available".to_string())
-                    .and_then(|text| {
-                        paste(&text, PasteMode::Continue).map_err(|error| error.to_string())?;
-                        Ok(text)
-                    }),
+                PasteKind::LastTranscript => output_history::paste_last(
+                    last_transcript.as_ref(),
+                    history.and_then(History::recovered_output),
+                    paste,
+                ),
                 PasteKind::MeetingDelta => {
                     paste_meeting_delta(paste).map_err(|error| error.to_string())
                 }
@@ -1231,35 +1242,8 @@ fn finish_output(
     }
 }
 
-/// Labs › YOLO mode, after a `Send` paste landed at `pasted_at`: presses
-/// Return unless Escape came after the release. Returns whether it sent; the
-/// text stays pasted either way.
-fn send_unless_escaped(
-    gate: crate::dictation::yolo_mode::SendGate,
-    pasted_at: Instant,
-    paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
-) -> bool {
-    if !gate.wait(pasted_at) {
-        tracing::info!("YOLO mode pasted without Return: Escape after the release");
-        return false;
-    }
-    match paste("", PasteMode::Return) {
-        Ok(_) => {
-            tracing::info!(
-                after_submit_ms = gate.submitted_at().elapsed().as_millis(),
-                "YOLO mode pressed Return"
-            );
-            true
-        }
-        Err(error) => {
-            tracing::warn!(%error, "YOLO mode could not press Return");
-            false
-        }
-    }
-}
-
 mod output_history;
-use output_history::{record_history, recover_output};
+use output_history::{record_history, recover_output, send_unless_escaped};
 
 fn paste_meeting_delta(
     paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
@@ -1685,7 +1669,7 @@ mod tests {
                     }
                     Ok(text.to_owned())
                 },
-                &mut Some("older dictation".into()),
+                &mut Some(LastDictation::new("older dictation".to_owned(), false)),
                 None,
             );
             calls
@@ -1714,7 +1698,7 @@ mod tests {
     #[test]
     fn a_failed_paste_keeps_the_dictation_for_paste_last() {
         let text = "the dictation whose paste failed";
-        let mut last_transcript = Some("an older dictation".to_string());
+        let mut last_transcript = Some(LastDictation::new("an older dictation".to_string(), false));
         let event = finish_output(
             OutputJob::Completed {
                 job_id: DictationJobId(1),
@@ -1748,7 +1732,41 @@ mod tests {
             event,
             WorkerEvent::Completed { result: Err(_), .. }
         ));
-        assert_eq!(last_transcript.as_deref(), Some(text));
+        assert_eq!(
+            last_transcript.as_ref().map(LastDictation::text),
+            Some(text)
+        );
+    }
+
+    #[test]
+    fn paste_last_reinserts_a_signed_dictation_standalone() {
+        for (signed, expected) in [(true, "standalone"), (false, "continue")] {
+            let mut last_transcript = Some(LastDictation::new(
+                "we ship friday\nSent from Hex".to_string(),
+                signed,
+            ));
+            let mut mode = None;
+            let event = finish_output(
+                OutputJob::Paste {
+                    sequence: 1,
+                    kind: PasteKind::LastTranscript,
+                },
+                &mut |text, paste_mode| {
+                    assert_eq!(text, "we ship friday\nSent from Hex");
+                    mode = Some(match paste_mode {
+                        PasteMode::Standalone => "standalone",
+                        PasteMode::Continue => "continue",
+                        PasteMode::CopyOnly | PasteMode::Send | PasteMode::Return => "other",
+                    });
+                    Ok(text.to_owned())
+                },
+                &mut last_transcript,
+                None,
+            );
+
+            assert!(matches!(event, WorkerEvent::Pasted { result: Ok(_), .. }));
+            assert_eq!(mode, Some(expected));
+        }
     }
 
     #[test]
@@ -1818,7 +1836,10 @@ mod tests {
                 matches!(mode, PasteMode::CopyOnly),
                 "{target:?}: an interrupted dictation is copied, never pasted"
             );
-            assert_eq!(last_transcript.as_deref(), Some(text));
+            assert_eq!(
+                last_transcript.as_ref().map(LastDictation::text),
+                Some(text)
+            );
             let entries = history.recent(1);
             assert_eq!(entries.len(), 1);
             assert_eq!(entries[0].kind, kind, "{target:?}");

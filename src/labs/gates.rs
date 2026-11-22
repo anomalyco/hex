@@ -410,6 +410,29 @@ pub fn stop_phrase_text() -> String {
         .clone()
 }
 
+/// Labs › Signature: a normal dictation's final text carries the saved
+/// signature on its own line at the end, before it is pasted, kept in
+/// History, and remembered for Paste Last (every OS; read as each output
+/// commits).
+pub fn signature() -> bool {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    SIGNATURE.load(Ordering::Acquire) && Feature::Signature.on_this_os()
+}
+
+/// The signature line appended while [`signature`] is on (read as each
+/// output commits, only while the gate is on). Empty appends nothing.
+pub fn signature_text() -> String {
+    // The state word has no bit for it: its own atomic, written by
+    // `labs::apply`, and loaded here first in a process that never applied.
+    let _ = state();
+    SIGNATURE_TEXT
+        .read()
+        .unwrap_or_else(|error| error.into_inner())
+        .clone()
+}
+
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

@@ -3,6 +3,7 @@
 #![allow(dead_code, reason = "staged until the mixed shortcut is enabled")]
 
 use super::{HistoryEntry, HistoryKind, HistoryStore};
+use crate::dictation::paste_last::LastDictation;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -21,17 +22,17 @@ pub(crate) struct Row {
 pub(super) struct Recovery {
     id: Id,
     ready_at: u64,
-    text: String,
+    last: LastDictation,
 }
 
 impl HistoryStore {
-    pub(crate) fn recover_paste(&mut self, text: String, now: u64) {
+    pub(crate) fn recover_paste(&mut self, last: LastDictation, now: u64) {
         static NEXT: AtomicU64 = AtomicU64::new(1);
-        if !text.trim().is_empty() {
+        if !last.text().trim().is_empty() {
             self.recovery = Some(Recovery {
                 id: Id::Session(NEXT.fetch_add(1, Ordering::Relaxed)),
                 ready_at: now,
-                text,
+                last,
             });
         }
     }
@@ -68,7 +69,7 @@ impl HistoryStore {
                 .cutoff(now)
                 .is_none_or(|cut| r.ready_at >= cut)
         {
-            rows.push((r.ready_at, r.id, &r.text, false));
+            rows.push((r.ready_at, r.id, r.last.text(), false));
         }
         rows.sort_unstable_by_key(|(at, id, ..)| std::cmp::Reverse((*at, *id)));
         rows.into_iter()
@@ -80,6 +81,16 @@ impl HistoryStore {
                 preview: text.chars().take(100).collect(),
             })
             .collect()
+    }
+
+    /// The unretained text a failed paste kept, while it is inside the
+    /// current retention window.
+    pub(super) fn recovered_paste(&self, now: u64) -> Option<LastDictation> {
+        let recovery = self.recovery.as_ref()?;
+        self.retention
+            .cutoff(now)
+            .is_none_or(|cut| recovery.ready_at >= cut)
+            .then(|| recovery.last.clone())
     }
 
     pub(crate) fn resolve_paste(&self, id: Id, now: u64) -> Option<&str> {
@@ -94,7 +105,7 @@ impl HistoryStore {
                             .cutoff(now)
                             .is_none_or(|cut| r.ready_at >= cut)
                 })
-                .map(|r| r.text.as_str()),
+                .map(|r| r.last.text()),
             Id::Retained(id) => self
                 .entries()
                 .find(|e| e.id == id && self.pasteable(e, now))
@@ -152,17 +163,15 @@ impl super::History {
     }
     /// The ordered output worker hands its only unretained text to the same
     /// owner Clear and retention use. No file read or write to recover it.
-    pub(crate) fn recover_output(&self, text: String) {
+    pub(crate) fn recover_output(&self, last: LastDictation) {
         self.store
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .recover_paste(text, super::now_ms());
+            .recover_paste(last, super::now_ms());
     }
 
-    pub(crate) fn recovered_output(&self) -> Option<String> {
+    pub(crate) fn recovered_output(&self) -> Option<LastDictation> {
         let store = self.store.lock().unwrap_or_else(|e| e.into_inner());
-        store
-            .resolve_paste(store.recovery.as_ref()?.id, super::now_ms())
-            .map(str::to_owned)
+        store.recovered_paste(super::now_ms())
     }
 }

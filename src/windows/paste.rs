@@ -266,11 +266,14 @@ impl WindowsPaster {
     /// `return_to` is the window the capture started in: the desktop or a
     /// taskbar takes no paste, so Hex returns there first and, when it can't,
     /// leaves the transcript on the clipboard instead of sending it nowhere.
+    /// `standalone` pastes the text without joining the previous dictation
+    /// and records no continuation for the next one (Labs › Signature).
     pub fn paste(
         &mut self,
         text: &str,
         shift: bool,
         return_to: Option<CaptureWindow>,
+        standalone: bool,
     ) -> Result<Paste> {
         if text.trim().is_empty() {
             return Err(eyre!("refusing to paste an empty transcript"));
@@ -322,7 +325,7 @@ impl WindowsPaster {
             ));
         }
         let copied = target.is_shell();
-        let text = if copied {
+        let text = if copied || standalone {
             plain.to_string()
         } else {
             text_to_paste(&self.continuation, revision, plain)
@@ -384,8 +387,9 @@ impl WindowsPaster {
             }
             return Err(error);
         }
-        // Only a paste that reached the app is continued by the next one.
-        self.continuation.record(revision, true, text);
+        // Only a paste that reached the app is continued by the next one, and
+        // a standalone paste ends the continuation instead.
+        self.continuation.record(revision, !standalone, text);
         let Some(generation) = generation else {
             return Ok(Paste::Sent);
         };

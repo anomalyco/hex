@@ -85,6 +85,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        with Turn off the mic when not dictating on, the microphone stays open for that
 │                                        long after a capture, so the next dictation starts at once
 ├── Keep dictation on clipboard no labs.keep_on_clipboard (every OS) a pasted dictation stays on the clipboard; the previous one is not restored (#200)
+├── Signature       no    labs.signature + labs.signature_text ("Sent from Hex", every OS)
+│                                        every normal dictation pastes with the signature on its own line at the end, and
+│                                        History and Paste Last keep that same text; not added to an empty transcript, one
+│                                        that already ends with it as its own line, raw, printed, or API output
 ├── Copy dictation only no labs.copy_only (macOS, Windows)    a dictation goes to the clipboard and is never pasted; Paste last dictation still pastes (#629)
 ├── YOLO mode no labs.yolo_mode (every OS) press Return after pasting a shortcut dictation in a chosen app (none chosen = everywhere); Escape after release skips Return on macOS
 ├── Return to app   no    labs.return_to_app           (macOS)   a dictation pastes into the app it started in, switching back to it first when another app came forward
@@ -1126,6 +1130,83 @@ in [control/settings.rs](../../src/control/settings.rs);
 [tests/panes.rs](../../src/rune_ui/tests/panes.rs). Not yet observed: a real
 dictation with the lab on, and the Mac and Windows builds, which the Linux host
 cannot compile.
+
+Signature (`signature`, every OS): while on, every normal dictation is pasted
+with `labs.signature_text` on its own line at the end. The line is added once,
+at the one point each output stage's final text feeds the paste, History, and
+Paste last dictation, so History shows exactly what was inserted and Paste
+last reinserts it unchanged. macOS signs in `parakeet::finish_output` only a
+`TranscriptionTarget::Paste` or `CopyOnlyPaste` (never raw, printed, or the
+local API), Windows in `windows::dictation::output::process_dictation_job`
+only when the job is neither printed nor a raw flavour, and Linux in
+`linux::dictation::output::DictationOutput::deliver` behind the same gate.
+Nothing signs meetings, typed text, Annotate, or `Paster::paste` itself.
+
+The pure rule is `dictation::signature::append`: it appends only when the lab
+is on, the text is not empty after trimming, the saved signature is not empty
+after trimming, and the text does not already carry it on a line of its own.
+That means the text is the signature, or the signature follows a line break
+with nothing but spaces or tabs in between; a signature that merely ends a line
+of prose, like "Hex" in "I love Hex", is appended. The saved signature is
+trimmed, so its own edges add no blank line. A saved value must be one line of
+at most 200 characters with no control characters; another value is an
+`invalid-value` error, and settings load falls back to the default without
+changing the saved file and keeps the switch. While the lab is on, its card
+shows Text: a draft that fails validation stays in the field with the reason
+under it in danger color, and the saved line keeps working; a valid draft saves
+once typing pauses. A line saved elsewhere updates the field without resetting
+its focus, and an invalid draft leaves when the lab is turned off.
+
+A signed paste is standalone on every OS: it neither joins the dictation
+before it nor records a continuation, so the next dictation is never glued onto
+the signature line. macOS passes `PasteMode::Standalone`; Windows and Linux
+pass `standalone` through their paster. Paste last dictation remembers with
+its kept text whether that text was signed (`dictation::paste_last::LastDictation`)
+and reinserts a signed one standalone as well, so it neither joins nor leaves a
+continuation even after the lab is turned off or its line changes; an unsigned
+one reinserts as a continuation. On Linux, Live typing commits the
+signed text in its own final input-method step, so the provisional preedit never
+shows the line and the text is typed exactly once; if that commit fails, the
+ordinary paste path carries the same signed text.
+
+```ts
+Dictate "we ship friday"                  // labs.signature + labs.signature_text
+├── Off -> pasted and kept exactly as before
+├── On, "Sent from Hex" -> pasted "we ship friday\nSent from Hex"
+│   -> History and Paste Last hold the same two lines
+├── Text already ends with the line
+│   └── it is the signature, or follows a line break -> left alone
+├── Empty text, empty signature -> nothing appended
+├── Raw (Dictate without processing), printed, API, meeting, typed text, Annotate -> unaffected
+├── Paste Last of a signed text -> standalone too, even after the lab is off
+└── The next dictation -> standalone: never continues the signature line
+```
+
+Checks: `the_signature_is_appended_once_on_its_own_line`,
+`off_appends_nothing`, `empty_text_appends_nothing`,
+`an_empty_or_whitespace_signature_appends_nothing`,
+`text_that_already_ends_with_the_signature_is_left_alone`,
+`a_signature_that_ends_a_line_of_prose_is_still_appended`,
+`a_signature_after_a_line_break_is_left_alone`,
+`a_saved_signature_is_trimmed_before_it_is_appended`,
+`a_signature_must_be_one_line_of_at_most_the_limit`, and
+`a_signature_refuses_line_and_control_characters` in
+[dictation/signature.rs](../../src/dictation/signature.rs);
+`a_signed_dictation_reinserts_standalone` and
+`an_unsigned_dictation_reinserts_as_a_continuation` in
+[dictation/paste_last.rs](../../src/dictation/paste_last.rs);
+`paste_last_reinserts_a_signed_dictation_standalone` in
+[parakeet.rs](../../src/parakeet.rs), macOS; and
+`signature_is_its_own_atomic_and_carries_its_text` in
+[labs.rs](../../src/labs.rs); `a_signature_is_trimmed_and_must_be_one_line` in
+[control/settings.rs](../../src/control/settings.rs);
+`an_invalid_signature_loads_the_default_and_keeps_its_switch` and
+`an_empty_signature_stays_empty_and_appends_nothing` in
+[persistence/tests.rs](../../src/app_settings/persistence/tests.rs). Nothing
+pastes into a real app here; the three call sites are gated by the same pure
+rule and their platform tests, and CI's clippy builds compile macOS and
+Windows. Not yet observed: a real dictation with the lab on, and the next
+dictation's continuation after a signed paste.
 
 Spoken formatting (`spoken-formatting`, issue 630, every OS): while on,
 `Profiles::process_cancellable` in

@@ -7,6 +7,7 @@ use std::time::Instant;
 use color_eyre::eyre::Result;
 
 use crate::control::PrintedTranscript;
+use crate::dictation::paste_last::LastDictation;
 use crate::windows::paste::{Paste, WindowsPaster};
 
 use super::{Job, JobResult, OutputKind};
@@ -16,7 +17,7 @@ pub(super) fn process_dictation_job(
     mut job: Job,
     paster: &mut Result<WindowsPaster>,
     history: Option<&crate::history::History>,
-    last_dictation: &Mutex<Option<String>>,
+    last_dictation: &Mutex<Option<LastDictation>>,
     mode_runtime: &std::sync::RwLock<crate::dictation::modes::ModeRuntime>,
     transformations: &crate::personal_commands::TransformationClient,
 ) -> JobResult {
@@ -52,7 +53,7 @@ pub(super) fn process_dictation_job(
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
         }
-        let processed = if job.flavour.raw() {
+        let mut processed = if job.flavour.raw() {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             let mode_runtime = mode_runtime
@@ -67,7 +68,7 @@ pub(super) fn process_dictation_job(
                 crate::dictation::processor::Source::Dictation,
             )
         };
-        let text = processed.text.clone();
+        let mut text = processed.text.clone();
         // A voice prompt that deliberately asked nothing ends quietly: no
         // failure, no paste, no last dictation, and no History.
         if processed.nothing {
@@ -76,6 +77,26 @@ pub(super) fn process_dictation_job(
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
+        // Labs › Signature: a normal, unprinted dictation carries the saved
+        // line once at its end. History and Paste Last read the same text,
+        // and the paste is standalone so the next dictation never continues
+        // the signature line.
+        let signed = if !printed && !job.flavour.raw() {
+            match crate::dictation::signature::append(
+                &text,
+                &crate::labs::signature_text(),
+                crate::labs::signature(),
+            ) {
+                Some(signed) => {
+                    text = signed;
+                    processed.text = text.clone();
+                    true
+                }
+                None => false,
+            }
+        } else {
+            false
+        };
         // A printed dictation is never pasted, and Paste Last skips it.
         if !printed {
             let paster = paster.as_mut().map_err(|error| format!("{error:#}"))?;
@@ -90,7 +111,7 @@ pub(super) fn process_dictation_job(
             let pasted = if copy_only {
                 paster.copy_only(&text).map(|()| Paste::Copied)
             } else {
-                paster.paste(&text, job.flavour.terminal_paste(), job.return_to)
+                paster.paste(&text, job.flavour.terminal_paste(), job.return_to, signed)
             };
             sent = matches!(pasted, Ok(Paste::Sent)) && sends;
             let pasted = if sent {
@@ -102,7 +123,8 @@ pub(super) fn process_dictation_job(
             // A failed paste still keeps the text for Paste Last.
             *last_dictation
                 .lock()
-                .unwrap_or_else(|error| error.into_inner()) = Some(text.clone());
+                .unwrap_or_else(|error| error.into_inner()) =
+                Some(LastDictation::new(text.clone(), signed));
             pasted.map_err(|error| format!("{error:#}"))?;
         }
         if let Some(history) = history {
@@ -151,7 +173,7 @@ pub(super) fn process_dictation_job(
 
 pub(super) fn process_paste_last(
     paster: &mut Result<WindowsPaster>,
-    last_dictation: &Mutex<Option<String>>,
+    last_dictation: &Mutex<Option<LastDictation>>,
 ) -> JobResult {
     let started = Instant::now();
     let mut copied = false;
@@ -160,14 +182,14 @@ pub(super) fn process_paste_last(
         .unwrap_or_else(|error| error.into_inner())
         .clone()
         .ok_or_else(|| "there is no completed dictation to paste".to_string())
-        .and_then(|text| {
+        .and_then(|last| {
             let paste = paster
                 .as_mut()
                 .map_err(|error| format!("{error:#}"))?
-                .paste(&text, false, None)
+                .paste(last.text(), false, None, last.standalone())
                 .map_err(|error| format!("{error:#}"))?;
             copied = paste == Paste::Copied;
-            Ok(text)
+            Ok(last.text().to_owned())
         });
     let latency_ms = started.elapsed().as_millis().min(u128::from(u32::MAX)) as u32;
     tracing::info!(latency_ms, "completed Windows Paste Last job");

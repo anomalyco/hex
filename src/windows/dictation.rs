@@ -143,7 +143,7 @@ pub struct WindowsDictationConfig {
     pub feedback_volume: u8,
     pub sound_theme: crate::feedback::SoundSet,
     pub history: Option<crate::history::History>,
-    pub last_dictation: Arc<Mutex<Option<String>>>,
+    pub last_dictation: Arc<Mutex<Option<crate::dictation::paste_last::LastDictation>>>,
     pub indicator: Option<crate::rune_hud::HudSender>,
     pub mode_runtime: Arc<RwLock<crate::dictation::modes::ModeRuntime>>,
     pub transformations: Arc<crate::personal_commands::TransformationClient>,
