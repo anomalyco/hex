@@ -618,64 +618,78 @@ struct ExperimentsSettingsPage: View {
     private let multilingualParakeetFits = MultilingualParakeetSettings.fits()
 
     var body: some View {
+        switches
+            .onChange(of: twoThumbSelection) { _, enabled in
+                FullKeyboardSettings().twoThumbSelection = enabled
+            }
+            .onChange(of: deletesSwipedWordsLetterByLetter) { _, enabled in
+                FullKeyboardSettings().deletesSwipedWordsLetterByLetter = enabled
+            }
+            .onChange(of: hideWordSuggestions) { _, enabled in
+                FullKeyboardSettings().hideWordSuggestions = enabled
+            }
+            .onChange(of: joinsKeyboardWhenUnfolded) { _, enabled in
+                FullKeyboardSettings().joinsKeyboardWhenUnfolded = enabled
+            }
+            .onChange(of: learnPerLanguage) { _, enabled in
+                TypingJournalSettings().learnsPerLanguage = enabled
+            }
+            .onChange(of: multilingualParakeet) { _, enabled in
+                guard enabled != MultilingualParakeetSettings().isEnabled else { return }
+                MultilingualParakeetSettings().isEnabled = enabled
+                // On: downloads beside the engine that dictates; off: stops and deletes it.
+                DictationController.shared.multilingualParakeetChanged()
+            }
+            .onAppear { loadSettings() }
+    }
+
+    /// The page and the switches that only change a stored setting, split into shorter
+    /// modifier chains so the compiler type-checks each one in reasonable time.
+    private var toggles: some View {
+        page
+            .onChange(of: appleIntelligenceCleanup) { _, enabled in
+                AppleIntelligenceCleanupSettings().isEnabled = enabled
+            }
+            .onChange(of: hinglish) { _, enabled in
+                HinglishSettings().isEnabled = enabled
+            }
+            .onChange(of: greeklish) { _, enabled in
+                GreeklishSettings().isEnabled = enabled
+            }
+            .onChange(of: twoLanguageDictation) { _, enabled in
+                TwoLanguageDictationSettings().isEnabled = enabled
+            }
+            .onChange(of: adaptiveTouch) { _, enabled in
+                AdaptiveTouchSettings().isEnabled = enabled
+                refreshAdaptiveTouchStatus()
+            }
+    }
+
+    private var switches: some View {
+        toggles
+            .onChange(of: germanSpatialAutocorrect) { _, enabled in
+                FullKeyboardSettings().germanSpatialAutocorrect = enabled
+            }
+            .onChange(of: koreanKeyboard) { _, enabled in
+                FullKeyboardSettings().koreanKeyboard = enabled
+            }
+            .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
+                FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
+            }
+            .onChange(of: keyboardThemes) { _, enabled in
+                FullKeyboardSettings().keyboardThemesEnabled = enabled
+            }
+            .onChange(of: keyboardTheme) { _, theme in
+                FullKeyboardSettings().keyboardTheme = theme
+            }
+    }
+
+    private var page: some View {
         SettingsPageScaffold(title: "Experiments") {
             SettingsCard { rows }
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: adaptiveTouch)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: keyboardThemes)
-        .onChange(of: appleIntelligenceCleanup) { _, enabled in
-            AppleIntelligenceCleanupSettings().isEnabled = enabled
-        }
-        .onChange(of: hinglish) { _, enabled in
-            HinglishSettings().isEnabled = enabled
-        }
-        .onChange(of: greeklish) { _, enabled in
-            GreeklishSettings().isEnabled = enabled
-        }
-        .onChange(of: twoLanguageDictation) { _, enabled in
-            TwoLanguageDictationSettings().isEnabled = enabled
-        }
-        .onChange(of: adaptiveTouch) { _, enabled in
-            AdaptiveTouchSettings().isEnabled = enabled
-            refreshAdaptiveTouchStatus()
-        }
-        .onChange(of: germanSpatialAutocorrect) { _, enabled in
-            FullKeyboardSettings().germanSpatialAutocorrect = enabled
-        }
-        .onChange(of: koreanKeyboard) { _, enabled in
-            FullKeyboardSettings().koreanKeyboard = enabled
-        }
-        .onChange(of: emojiLettersUnderEmojiKey) { _, enabled in
-            FullKeyboardSettings().emojiLettersUnderEmojiKey = enabled
-        }
-        .onChange(of: keyboardThemes) { _, enabled in
-            FullKeyboardSettings().keyboardThemesEnabled = enabled
-        }
-        .onChange(of: keyboardTheme) { _, theme in
-            FullKeyboardSettings().keyboardTheme = theme
-        }
-        .onChange(of: twoThumbSelection) { _, enabled in
-            FullKeyboardSettings().twoThumbSelection = enabled
-        }
-        .onChange(of: deletesSwipedWordsLetterByLetter) { _, enabled in
-            FullKeyboardSettings().deletesSwipedWordsLetterByLetter = enabled
-        }
-        .onChange(of: hideWordSuggestions) { _, enabled in
-            FullKeyboardSettings().hideWordSuggestions = enabled
-        }
-        .onChange(of: joinsKeyboardWhenUnfolded) { _, enabled in
-            FullKeyboardSettings().joinsKeyboardWhenUnfolded = enabled
-        }
-        .onChange(of: learnPerLanguage) { _, enabled in
-            TypingJournalSettings().learnsPerLanguage = enabled
-        }
-        .onChange(of: multilingualParakeet) { _, enabled in
-            guard enabled != MultilingualParakeetSettings().isEnabled else { return }
-            MultilingualParakeetSettings().isEnabled = enabled
-            // On: downloads beside the engine that dictates; off: stops and deletes it.
-            DictationController.shared.multilingualParakeetChanged()
-        }
-        .onAppear { loadSettings() }
     }
 
     /// The experiment switches, in the card's order.
