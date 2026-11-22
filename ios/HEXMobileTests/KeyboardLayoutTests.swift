@@ -1640,10 +1640,81 @@ final class KeyboardLayoutTests: XCTestCase {
 
     // MARK: - Backdrop
 
-    /// The backdrop is a blurred material in the keyboard's own appearance, not a fixed colour:
-    /// it follows iOS's glass panel, and a layout iOS leaves behind the keyboard has no shapes
-    /// through it (TestFlight build 56, iOS 27.0.1; iOS 27.0 and 27.2 simulators). Only the dark
-    /// one is shaded, and never opaque.
+    /// Hex draws its backdrop only over an earlier Hex keyboard that iOS never took off screen
+    /// in the same field: the one case where iOS leaves Apple's keyboard under a third-party
+    /// one (a field with an accessory view that takes focus as its screen appears, opened with
+    /// Hex, then Hex, Apple's keyboard, Hex; iOS 27.0 and 27.2 simulators). Everywhere else
+    /// the keyboard is clear, so it is the colour of iOS's glass panel on any background.
+    func testBackdropShowsOnlyOverAnEarlierKeyboardLeftOnScreen() {
+        let field = UUID(), other = UUID()
+        var keyboards = KeyboardsOnScreen()
+        XCTAssertFalse(keyboards.isOverAnother(1), "not on screen")
+
+        // A field opens with Hex: one keyboard, clear.
+        keyboards.appeared(1, in: field)
+        XCTAssertFalse(keyboards.isOverAnother(1))
+
+        // Dismissed and opened again (iOS says it disappeared, then makes a new one): clear.
+        keyboards.disappeared(1)
+        keyboards.appeared(2, in: field)
+        XCTAssertFalse(keyboards.isOverAnother(2))
+        XCTAssertEqual(keyboards.count, 1)
+
+        // Switched to Apple's keyboard and back where iOS never says the first one disappeared:
+        // the new keyboard is over it, the old one under it draws nothing more.
+        keyboards.appeared(3, in: field)
+        XCTAssertTrue(keyboards.isOverAnother(3))
+        XCTAssertFalse(keyboards.isOverAnother(2))
+        // Again: over both.
+        keyboards.appeared(4, in: field)
+        XCTAssertTrue(keyboards.isOverAnother(4))
+        XCTAssertTrue(keyboards.isOverAnother(3))
+
+        // The app closes and iOS frees them all: the next keyboard is clear again.
+        for keyboard in [2, 3, 4] { keyboards.disappeared(keyboard) }
+        keyboards.appeared(5, in: other)
+        XCTAssertFalse(keyboards.isOverAnother(5))
+    }
+
+    /// A keyboard still on screen in another field (another app's) is not under this one. A
+    /// field UIKit hasn't named yet might be the same one, so the doubt covers until it is.
+    func testBackdropFollowsTheFieldEachKeyboardIsIn() {
+        let field = UUID(), other = UUID()
+        var keyboards = KeyboardsOnScreen()
+        keyboards.appeared(1, in: other)
+        keyboards.appeared(2, in: field)
+        XCTAssertFalse(keyboards.isOverAnother(2), "another field")
+
+        keyboards.appeared(3, in: nil)
+        XCTAssertTrue(keyboards.isOverAnother(3), "unnamed: it may be over either")
+        keyboards.moved(3, to: UUID())
+        XCTAssertFalse(keyboards.isOverAnother(3), "named, and a field of its own")
+        keyboards.moved(3, to: field)
+        XCTAssertTrue(keyboards.isOverAnother(3), "the same field as 2")
+
+        // An earlier keyboard iOS hasn't named counts as under every later one.
+        var unnamed = KeyboardsOnScreen()
+        unnamed.appeared(1, in: nil)
+        unnamed.appeared(2, in: field)
+        XCTAssertTrue(unnamed.isOverAnother(2))
+        unnamed.moved(1, to: other)
+        XCTAssertFalse(unnamed.isOverAnother(2))
+        unnamed.moved(9, to: field)
+        XCTAssertEqual(unnamed.count, 2, "a keyboard off screen isn't added by its field")
+
+        // A keyboard that appears again goes to the top.
+        var again = KeyboardsOnScreen()
+        again.appeared(1, in: field)
+        again.appeared(2, in: field)
+        again.appeared(1, in: field)
+        XCTAssertTrue(again.isOverAnother(1))
+        XCTAssertFalse(again.isOverAnother(2))
+    }
+
+    /// Where it shows, the backdrop is a blurred material in the keyboard's own appearance,
+    /// not a fixed colour: a layout iOS leaves behind the keyboard has no shapes through it
+    /// (TestFlight build 56, iOS 27.0.1; iOS 27.0 and 27.2 simulators). Only the dark one is
+    /// shaded, and never opaque.
     func testBackdropIsAThinMaterialInLightAndDark() {
         XCTAssertEqual(KeyboardBackdropView.blurStyle(isDark: false), .systemUltraThinMaterialLight)
         XCTAssertEqual(KeyboardBackdropView.blurStyle(isDark: true), .systemUltraThinMaterialDark)

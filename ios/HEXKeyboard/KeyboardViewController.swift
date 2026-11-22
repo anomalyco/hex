@@ -22,9 +22,23 @@ final class KeyboardViewController: UIInputViewController {
     private var heightConstraint: NSLayoutConstraint?
     /// The dictation bar's top edge, `barTopInset` below the keyboard's.
     private var barTopConstraint: NSLayoutConstraint?
-    /// A thin material under the surface: the colour of iOS's glass panel, with nothing iOS
-    /// leaves behind the keyboard readable through it.
+    /// A thin material under the surface, hidden unless iOS kept an earlier Hex keyboard on
+    /// screen in this field (`KeyboardsOnScreen`): then Apple's keys may be under this one, and
+    /// through the material they have no shapes. Otherwise Hex is clear on iOS's glass panel.
     private let backdrop = KeyboardBackdropView()
+    /// Hex's keyboards on screen in this process, and this one's name among them.
+    private static var onScreen = KeyboardsOnScreen() {
+        didSet {
+            guard onScreen != oldValue else { return }
+            NotificationCenter.default.post(name: onScreenDidChange, object: nil)
+        }
+    }
+    private static let onScreenDidChange = Notification.Name("anomaly.hex.mobile.keyboard.onScreenDidChange")
+    private static var lastKeyboardID = 0
+    private let keyboardID: Int = {
+        KeyboardViewController.lastKeyboardID += 1
+        return KeyboardViewController.lastKeyboardID
+    }()
     private var pollInterval: TimeInterval = 0
     private var didHandOffCurrentField = false
     private var didWarmLexicon = false
@@ -96,6 +110,12 @@ final class KeyboardViewController: UIInputViewController {
         if viewIfLoaded !== input { view = input }
     }
 
+    deinit {
+        // iOS frees a keyboard it never said disappeared without another word.
+        let id = keyboardID
+        Task { @MainActor in KeyboardViewController.onScreen.disappeared(id) }
+    }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         reportFullAccess(force: true)
@@ -118,6 +138,8 @@ final class KeyboardViewController: UIInputViewController {
         mountSurface()
         fullKeyboard?.prepareForField()
         isShown = true
+        Self.onScreen.appeared(keyboardID, in: currentDocument)
+        updateBackdrop()
         beginTypingLogSession(trigger: "appear")
         handOffNumericPadIfNeeded()
         syncFromBridge(animated: false)
@@ -206,6 +228,7 @@ final class KeyboardViewController: UIInputViewController {
         TypingJournal.sharedIfEnabled()?.save()
         AdaptiveTouch.current?.save()
         isShown = false
+        Self.onScreen.disappeared(keyboardID)
         launchWork.forEach { $0.cancel() }
         launchWork = []
         closeBarEmojiPanel()
@@ -288,6 +311,7 @@ final class KeyboardViewController: UIInputViewController {
 
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
+        if isShown { Self.onScreen.moved(keyboardID, to: currentDocument) }
         updateKeyboardTraits()
         followTypingLogField()
         fullKeyboard?.textDidChange()
@@ -499,9 +523,16 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
+    /// The backdrop shows only over an earlier Hex keyboard iOS never took off screen.
+    @objc private func updateBackdrop() {
+        backdrop.isHidden = !Self.onScreen.isOverAnother(keyboardID)
+    }
+
     private func configureView() {
         guard backdrop.superview == nil else { return }
         view.backgroundColor = .clear
+        backdrop.isHidden = true
+        NotificationCenter.default.addObserver(self, selector: #selector(updateBackdrop), name: Self.onScreenDidChange, object: nil)
         backdrop.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(backdrop, at: 0)
         NSLayoutConstraint.activate([

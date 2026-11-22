@@ -1082,20 +1082,25 @@ never at a launch by itself.
   for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
   upright, starting as far in from the screen's side as Apple's. Measured in the
   simulator; unverified on a Duo.
-- **Background (full keyboard and dictation bar):** Under its keys Hex draws a thin
-  blurred material (`KeyboardBackdropView`: the system's ultra-thin material, shaded 22%
-  in dark mode, with the panel's 26 pt top corners) instead of a fixed colour, so the
-  keyboard takes most of the colour of iOS's glass panel behind it. On an iPhone 17 Pro
-  (iOS 27.2, dark mode) the glass reads 31 of 255 over Notes and 54 over a light web
-  page; Hex's area reads 36 and 46, where the opaque 34,34,35 panel it replaces was a
-  slab 20 darker than the glass over light pages, with a hard top edge and square corners,
-  which read as a clipped top bar. It isn't clear, as SwiftKey's is, because iOS can leave
-  Apple's keyboard under a third-party one: in a field that takes focus as its screen
-  appears and has an input accessory view, switching from Hex to Apple's keyboard and back
-  keeps Apple's key plane in the app's view tree under Hex (every switch in the iOS 27.0
-  and 27.2 simulators, under a bare clear keyboard extension too; one TestFlight report,
-  build 56, iPhone 17, iOS 27.0.1; not in Notes or Safari on an iPhone 17 Pro on 27.2).
-  Through the material's blur those keys are an even, slightly lighter tone with no shapes.
+- **Background (full keyboard and dictation bar):** Hex draws nothing behind its keys, so
+  the keyboard's background is iOS's own glass panel: the same colour as the band iOS adds
+  above a third-party keyboard and the globe row under it, over any app or wallpaper, with
+  or without that band (no step at Hex's edges on an iPhone 17 Pro, iOS 27.2, in Notes,
+  Safari on a light page and Spotlight over a wallpaper, and in the iOS 27.0 and 27.2
+  simulators, light and dark). One case gets a cover, because iOS can leave Apple's keyboard
+  under a third-party one. In a field that takes focus as its screen appears and has an
+  input accessory view, opened with Hex, switching to Apple's keyboard never tells Hex it
+  disappeared and keeps its view; switching back puts a new Hex over both, and Apple's keys
+  show through Hex's translucent ones (every switch in the iOS 27.0 and 27.2 simulators,
+  under a bare clear keyboard extension too; one TestFlight report, build 56, iPhone 17,
+  iOS 27.0.1; never in Notes, Safari or Spotlight on an iPhone 17 Pro). Hex can't see the
+  app's views, but it can see its own earlier keyboard still on screen in the same field
+  (`KeyboardsOnScreen`), and only then draws a thin blurred material under itself
+  (`KeyboardBackdropView`), through which Apple's keys are an even, slightly lighter tone
+  with no shapes. Opened with Apple's keyboard, or focused by a tap, the same field frees
+  Hex as usual and nothing is left behind. Until build 117 the material was always on: 5 to
+  9 off the glass in dark mode and neutral grey where the glass takes a wallpaper's tint, so
+  Hex showed as a panel of another colour inside iOS's panel, with a seam under iOS's band.
 - **Split keyboard (iPhone Duo):** Unfolded and held upright (the inner screen wider than
   tall), the full keyboard splits as Apple's does there (`SplitGeometry`): each half at
   the keyboard's side with Apple's 46.3 pt keys on a 57 pt pitch, row 2 half a key in
