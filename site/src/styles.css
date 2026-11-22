@@ -213,6 +213,10 @@ a {
 
 .keycap__label {
   align-self: flex-start;
+  /* The dish is a column with space-between: without the Mac's glyph above
+     it, the label is the only child and would sit at the top. The auto margin
+     keeps it on the bottom row, where the canvas shatter draws the legend. */
+  margin-top: auto;
   font-size: 0.9rem;
   font-weight: 540;
   line-height: 1;
