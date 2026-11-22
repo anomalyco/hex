@@ -861,10 +861,11 @@ final class FullKeyboardEngine {
         // what Hex typed, and keep the record when it answers, as the text has not changed.
         if takesSwipeBack, dropsHeldSpace() { return }
         forgetTypingContext()
-        // Right after a swipe, delete takes back its whole word (and the space it added).
+        // Right after a swipe, delete takes back its whole word (and the space it added),
+        // unless its experiment asks for one character at a time, as anywhere else.
         let swiped = swipedWord
         swipedWord = nil
-        if takesSwipeBack, let swiped, deleteSwipedWord(swiped) { return }
+        if takesSwipeBack, !deletesSwipedWordsLetterByLetter, let swiped, deleteSwipedWord(swiped) { return }
         let before = textBefore
         learning?.willErase(word: AutocorrectEngine.currentToken(in: before))
         if autocorrect.revertibleCorrection(before: before.map { String($0.dropLast()) }) == nil {
@@ -1277,6 +1278,11 @@ final class FullKeyboardEngine {
     // MARK: - Swipe typing (Settings › Keyboard › Swipe typing; SwipeTyping.swift)
 
     private(set) var swipedWord: SwipedWord?
+    /// Settings › Experiments › Delete swiped words letter by letter (off by default): delete
+    /// right after a swipe acts as an ordinary delete and takes one character, instead of the
+    /// whole word and the space the swipe added before it (`deleteBackward`). Its record still
+    /// clears with that delete, as with any delete, so what remains types like ordinary text.
+    var deletesSwipedWordsLetterByLetter = false
     /// From a touch becoming a swipe until it ends.
     private(set) var isSwiping = false
     /// What the swipe under way reads as so far, for the strip.
