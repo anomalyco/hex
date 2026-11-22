@@ -43,6 +43,12 @@ internal class LetterFeedback(private val host: ViewGroup) {
         panel?.let { host.overlay.remove(it) }; panel = null; rows = emptyList(); holding = false
         if (dimmed) { host.overlay.remove(scrim); dimmed = false }
     }
+    /** A key the keys were drawn again without, while its finger was down, has nothing to show a pop-up over. */
+    private fun inHost(key: View): Boolean {
+        var parent = key.parent
+        while (parent != null) { if (parent === host) return true; parent = parent.parent }
+        return false
+    }
     /** The key's pop-up: one option shows the letter above the finger; more are a held key's list in one
      * row, the first under the finger and the rest reading away from the nearer edge. */
     fun present(key: View, options: List<String>) = show(key, listOf(options), 0, options.size > 1)
@@ -51,7 +57,7 @@ internal class LetterFeedback(private val host: ViewGroup) {
     fun hold(key: View, options: List<List<String>>, default: Int = 0) = show(key, options, default, true)
     private fun show(key: View, options: List<List<String>>, default: Int, hold: Boolean) {
         clear()
-        if (host.width <= 0 || options.firstOrNull().isNullOrEmpty()) return
+        if (host.width <= 0 || options.firstOrNull().isNullOrEmpty() || !inHost(key)) return
         val r = Rect(0, 0, key.width, key.height); host.offsetDescendantRectToMyCoords(key, r)
         val reverse = hold && options.size == 1 && options[0].size > 1 && r.centerX() > host.width * .52
         rows = if (reverse) listOf(options[0].reversed()) else options

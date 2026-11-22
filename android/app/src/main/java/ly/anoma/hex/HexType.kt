@@ -1,5 +1,8 @@
 package ly.anoma.hex
 
+import android.graphics.Typeface
+import android.graphics.fonts.FontFamily as NativeFontFamily
+import android.graphics.fonts.Font as NativeFont
 import android.widget.TextView
 import androidx.compose.material3.Typography
 import androidx.compose.ui.text.ExperimentalTextApi
@@ -37,8 +40,14 @@ internal val hexTypography = Typography().run {
 }
 
 // Android supplies missing script/emoji glyphs; all Hex-owned Latin labels use the same resource.
+// One typeface per weight: fontVariationSettings on each label made a new native typeface every time the keys
+// were drawn, and the keyboard's native memory grew with each field it opened in.
+private val interWeights = HashMap<Int, Typeface>()
 internal fun TextView.useInter(weight: Int) {
-    typeface = resources.getFont(R.font.inter_variable)
-    fontVariationSettings = "'wght' $weight, 'opsz' 14"
+    typeface = interWeights.getOrPut(weight) {
+        val font = NativeFont.Builder(resources, R.font.inter_variable).setWeight(weight)
+            .setFontVariationSettings("'wght' $weight, 'opsz' 14").build()
+        Typeface.CustomFallbackBuilder(NativeFontFamily.Builder(font).build()).setSystemFallback("sans-serif").build()
+    }
     fontFeatureSettings = "tnum"
 }

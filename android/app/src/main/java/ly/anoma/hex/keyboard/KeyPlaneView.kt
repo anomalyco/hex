@@ -213,9 +213,13 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
 
     fun showPage(page: KeyboardPage) {
         val shown = current
-        if (shown != null && !page.symbols && page.copy(shifted = shown.shifted, locked = shown.locked) == shown) {
-            current = page; relabel(page); return
+        // Shift only recases the letters and changes nothing on the symbol pages: neither draws the keys again,
+        // which would drop a key a second finger is already on (typing the first of a sentence turns shift off).
+        if (shown != null && page.copy(shifted = shown.shifted, locked = shown.locked) == shown) {
+            current = page; if (!page.symbols) relabel(page); return
         }
+        // Another kind of field in the same box (the app changed its type): the keys, not the emoji panel over them.
+        if (emojiOpen) host.closeEmoji()
         current = page
         clearCallout(); endSlide(); grid = null; letters.clear(); caseKeys.clear(); slides.clear(); shiftIcon = null
         rows.removeAllViews()
