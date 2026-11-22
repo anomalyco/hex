@@ -896,14 +896,14 @@ final class AutocorrectEngine {
                 lastFixLanguage = language
                 return own
             }
-            // Spatial autocorrect may still read the taps as another word, counting the other
-            // language's word as one it changes only on a clear margin, as it does its own
-            // words: "tkm" (German) becomes "Tom", "merci" stays. Not a sure fix's word, which
-            // the next word decides ("Im" stays for "I'm going", not "In").
+            // Spatial autocorrect may still read the taps as another word, on a clear margin, as
+            // it does its own: "tkm" (German) becomes "Tom", "merci" stays. Not a sure fix's word,
+            // which the next word decides ("Im" stays for "I'm going", not "In"), and never just
+            // its accents: the other's word is spelled right ("these" stays, not French "thèse").
             guard lean <= 0, !isAllCapsOrMixed(token),
                   !(language.usesEnglishFixes && Self.unambiguousFixes[token.lowercased()] != nil),
                   let replacement = decoderDecision(for: token, partnerWord: true)?.replacement,
-                  mayOffer(replacement, replacing: token) else {
+                  TypingDecoder.withoutAccents(replacement.lowercased()) != TypingDecoder.withoutAccents(token.lowercased()), mayOffer(replacement, replacing: token) else {
                 lastFixLanguage = nil
                 return nil
             }

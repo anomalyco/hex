@@ -1352,6 +1352,19 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(settings.typingModel(for: .spanish)?.language, "es")
     }
 
+    /// French (France) reads taps with Android's French model (`fr.hextm`): the held-out gate's
+    /// critical cases (an accent left out goes back where the plain spelling is no word; "a"
+    /// typed right stays) and a slip on AZERTY's bottom row. Canada's and Switzerland's French
+    /// have no model of their own yet.
+    func testSpatialAutocorrectReadsFrenchWithItsModel() throws {
+        let settings = FullKeyboardSettings(defaults: defaults)
+        XCTAssertEqual(settings.typingModel(for: .french)?.language, "fr")
+        XCTAssertNil(settings.typingModel(for: .frenchCanadian), "no fr-CA model yet")
+        try useDecoder(.french)
+        for word in ["le", "cafe", "il", "a", "faim", "merxi"] { typeTaps(word) }
+        XCTAssertEqual(target.text, "le café il a faim merci ")
+    }
+
     func testSpatialAutocorrectAddsSpanishAccents() throws {
         try useDecoder(.spanish)
         for word in ["esta", "aqui", "manana"] { typeTaps(word) }

@@ -136,8 +136,8 @@ struct FullKeyboardSettings {
     }
 
     /// Settings › Keyboard › Spatial autocorrect: autocorrect reads your taps with a language
-    /// model (`TypingDecoder`) instead of `UITextChecker`'s one-edit guesses, in English and
-    /// Spanish. On by default. Stored as `experiments.spatialAutocorrect`, from when it was an
+    /// model (`TypingDecoder`) instead of `UITextChecker`'s one-edit guesses, in English,
+    /// Spanish and French (France). On by default. Stored as `experiments.spatialAutocorrect`, from when it was an
     /// experiment (off by default) that only its switch ever wrote: unset or true is on and
     /// false off, so testers who never touched it get it and those who turned it off keep it off.
     var spatialAutocorrect: Bool {
@@ -146,8 +146,8 @@ struct FullKeyboardSettings {
     }
 
     /// Settings › Experiments › German spatial autocorrect: lets the Deutsch layout read your
-    /// taps with the German model Android ships (`TypingDecoder`), as English and Spanish
-    /// already do. Off by default, like every experiment: a keyboard without it types German
+    /// taps with the German model Android ships (`TypingDecoder`), as English, Spanish and
+    /// French already do. Off by default, like every experiment: a keyboard without it types German
     /// exactly as before (the dictionary engine, and no word list for the letter odds, the
     /// strip or a bilingual partner). Stored as `experiments.germanSpatialAutocorrect`.
     var germanSpatialAutocorrect: Bool {
@@ -165,8 +165,9 @@ struct FullKeyboardSettings {
     }
 
     /// The typing model the keyboard may read `language`'s taps with: its bundled model, with
-    /// German's only while both Spatial autocorrect and the German experiment are on. English
-    /// and Spanish never wait on the experiment. The keyboard asks this for the word list, the
+    /// German's only while both Spatial autocorrect and the German experiment are on. English,
+    /// Spanish and French never wait on the experiment; Canada's and Switzerland's French
+    /// (`fr-CA`, `fr-CH`) have no file of their own and keep `UITextChecker`. The keyboard asks this for the word list, the
     /// decoder and a bilingual partner, so one gate keeps a German model out of everything
     /// until it is chosen; `TypingDecoderModel.bundled` still loads any bundled file for tests.
     func typingModel(for language: KeyboardLanguage) -> TypingDecoderModel? {

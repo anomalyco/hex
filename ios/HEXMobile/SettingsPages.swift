@@ -368,7 +368,7 @@ struct KeyboardSettingsPage: View {
 
                         SettingsToggleRow(
                             title: String(localized: "Spatial autocorrect"),
-                            detail: String(localized: "English and Spanish only"),
+                            detail: String(localized: "English, Spanish and French only"),
                             isOn: $spatialAutocorrect
                         )
                     }

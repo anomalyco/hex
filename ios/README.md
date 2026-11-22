@@ -79,7 +79,7 @@ never at a launch by itself.
     lock, numbers and symbols, accents, delete, return, the globe key, and
     suggestions and autocorrect (`UITextChecker`, the supplementary lexicon,
     and, where a typing model is bundled for the language, Spatial autocorrect's
-    model: English and Spanish, and German with its experiment on). Words
+    model: English, Spanish and French, and German with its experiment on). Words
     it learns may last only while the keyboard runs, as an iPhone may not let
     it write the App Group; haptics, key clicks (Apple's keyboard guide), Paste and
     dictation need Full Access. Without Full
@@ -550,7 +550,7 @@ never at a launch by itself.
     experiment off by default: unset or true is on, false off, so testers who turned it
     off keep it off. A noisy-channel decoder
     (`TypingDecoder`) replaces `UITextChecker`'s one-edit guesses on space and in the
-    strip for English and Spanish: each tap is scored against every letter with a 2D
+    strip for English, Spanish and French (France): each tap is scored against every letter with a 2D
     Gaussian around the key (shifted by Learn how I type's tap offsets when it has 20
     or more taps on a letter), words are found with a beam search over a memory-mapped
     word list and over your own words (Contacts names and other `UILexicon` terms,
@@ -567,14 +567,22 @@ never at a launch by itself.
     would keep. Deutsch keeps the ordinary readings: its lowercase model cannot give a
     split's nouns their capitals.
     Shortcuts, learned fixes, contractions, and words you kept still come first. Other
-    layouts (Norsk, Deutsch, Italiano, Français, Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
+    layouts (Norsk, Deutsch, Italiano, Français (Canada), Français (Suisse), Português, Polski, Română, Русский, Українська, Ελληνικά) keep the dictionary
     engine in their own language, and Srpski (no iOS dictionary) none, never the English
     model, except as bilingual autocorrect's second language (below). The
     models (`HEXKeyboard/TypingModel/en.hextm` and `es.hextm`, about 3.6 MB each) are
     built from Google Books Ngram v3 by `scripts/build-typing-model.py` (see
     Acknowledgements below); `de.hextm` is the German model Android builds and ships
     (`android/benchmark/typing/build-layout-model.py`), the same v3 format and, on iOS,
-    off until the experiment below is turned on.
+    off until the experiment below is turned on. `fr.hextm` is Android's French model, built
+    the same way from Google Books v3's French shards (corpus spellings, with the books'
+    elided forms such as "c'est") and byte-identical to
+    `android/app/src/main/assets/typing/fr.hextm` (its `SHA256SUMS` hash). On the held-out
+    French replay (2,000 Tatoeba sentences typed on AZERTY, scored as
+    `android/benchmark/typing/quality-gate.py` does) it makes 77.9% fewer word errors than
+    the raw taps (37.8% with `UITextChecker` alone), changes 0.10% of correctly typed words
+    (0.56%) and restores 86.9% of the accents left out where the plain spelling is no word
+    (70.2%). Canada's and Switzerland's French don't read it yet (`fr-CA`, `fr-CH`).
   - **German spatial autocorrect (Settings › Experiments › German spatial autocorrect):**
     Off by default (`experiments.germanSpatialAutocorrect`, App Group), and only while
     Spatial autocorrect is on too. With both on, the Deutsch layout reads taps with
