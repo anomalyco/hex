@@ -2912,11 +2912,14 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   return, punctuation, a page or language switch, emoji, dictation, paste, undo, a selection
 │   action, the delete-word swipe, a cursor move or the keyboard hiding commits the run. A
 │   cursor move is recognized by the text before the run (a 32-character tail, so a host that
-│   trims the front of its window still matches), the text after the cursor, the field, and a
-│   reported selection; a host that trims more than the tail or reports no selection is
-│   best-effort. A field whose text after the cursor changes while you type (inline
-│   autocomplete) commits each jamo, so syllables don't join there. Korean has no accent
-│   holds, spelling dictionary, autocorrect, word suggestions or typing model, and while the
+│   trims the front of its window still matches if the window holds at least those 32
+│   characters plus the run), the text after the cursor, the field, and a reported selection;
+│   a host that trims more than the tail or reports no selection is best-effort, and a host
+│   that reports no text before the cursor joins syllables only while jamo come within about
+│   half a second (a cursor move followed by a jamo inside that window can't be detected). A
+│   field whose text after the cursor changes while you type (inline autocomplete) commits
+│   each jamo, so syllables don't join there. Korean has no accent holds, spelling
+│   dictionary, autocorrect, word suggestions or typing model, and while the
 │   experiment is off it is not listed, Automatic never picks it, and a stored "ko" is
 │   ignored.
 │   Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,

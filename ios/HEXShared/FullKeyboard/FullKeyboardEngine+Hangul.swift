@@ -96,10 +96,13 @@ extension FullKeyboardEngine {
         let reported = textBefore ?? ""
         let context = typingContext ?? ""
         let before: String
-        if old.isEmpty || reported.hasSuffix(old) {
-            before = reported
-        } else if context.hasSuffix(old) {
+        // Hex's own record first: a lagging proxy still reports the text from before its
+        // last insert (after a space, without the space), while `typingContext` has what
+        // Hex wrote and falls back to the host once it has caught up.
+        if context.hasSuffix(old) {
             before = context
+        } else if reported.hasSuffix(old) {
+            before = reported
         } else {
             korean.reset()
             return

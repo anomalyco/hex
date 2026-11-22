@@ -959,10 +959,13 @@ never at a launch by itself.
   cursor move or hiding the keyboard commits the run. The cursor check records the last 32
   characters before the run, the text after the cursor and the field, plus the host's selected
   text, so a move to another place whose text before it ends alike commits too while a host
-  that trims the front of its window still matches; a host that trims more than the tail or
-  reports no selection is best-effort. A field whose text after the cursor changes while you
-  type (inline autocomplete) commits each jamo, so syllables don't join there. Korean has no
-  accent holds, spelling dictionary, autocorrect, word suggestions or typing model, and with
+  that trims the front of its window still matches if the window holds at least those 32
+  characters plus the run; a host that trims more than the tail or reports no selection is
+  best-effort, and a host that reports no text before the cursor joins syllables only while
+  jamo come within about half a second (a cursor move followed by a jamo inside that window
+  can't be detected). A field whose text after the cursor changes while you type (inline
+  autocomplete) commits each jamo, so syllables don't join there. Korean has no accent
+  holds, spelling dictionary, autocorrect, word suggestions or typing model, and with
   the experiment off the language isn't listed, Automatic never picks it, and a stored "ko" is
   ignored. Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,
   `KoreanKeyboardGatingTests`): no CI compiles the iOS targets and no device run checks it.

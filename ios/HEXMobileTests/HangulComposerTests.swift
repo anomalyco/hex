@@ -251,6 +251,21 @@ final class HangulKeyboardTests: XCTestCase {
         XCTAssertEqual(target.text, "하")
     }
 
+    /// A lagging host reports the text from before its last insert (after the space, without
+    /// it): the engine's own record keeps the space, so ㅎ ㅏ makes one syllable.
+    func testALaggingHostKeepsTheSpaceBeforeTheNextJamo() {
+        let field = LaggingField()
+        field.lag = .behind
+        configure(field)
+        engine.clock = { 100 }
+        tap("ㄱ")
+        tap("ㅏ")
+        tap(.space)
+        tap("ㅎ")
+        tap("ㅏ")
+        XCTAssertEqual(target.text, "가 하")
+    }
+
     /// A delete key's jitter is not a word delete: the run survives it, so the next delete
     /// steps back one jamo rather than removing the syllable.
     func testDeleteKeyJitterDoesNotCommitTheRun() {
