@@ -685,8 +685,8 @@ never at a launch by itself.
     by default) with its Typing logs viewer while it's on.
   - **Experiments:** Hinglish (Hindi in Latin letters), Clean up with Apple
     Intelligence, Adaptive touch (its status and Reset touch learning below the switch),
-    German spatial autocorrect, ABC under the emoji key, Two-thumb selection, and
-    Multilingual model (Parakeet).
+    German spatial autocorrect, ABC under the emoji key, Two-thumb selection, Hide word
+    suggestions, and Multilingual model (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1082,6 +1082,16 @@ never at a launch by itself.
   for each screen: 56 pt rows folded, 59.7 pt unfolded and turned, 51.7 pt unfolded
   upright, starting as far in from the screen's side as Apple's. Measured in the
   simulator; unverified on a Duo.
+- **Word suggestions (full keyboard):** The strip above the keys shows the words the engine
+  offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
+  Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops
+  the suggestions: the strip keeps its height, the Hex key, Undo, status, notices and the Paste
+  chip, but shows no typing or next-word suggestions, swipe readings, finished-word emoji, or
+  the chip that keeps what you typed while a correction is still ahead (keep literal).
+  Autocorrect still corrects on space, and the chip that puts back what it replaced (`.revert`)
+  stays after Delete. With no words offered, tapping the left slot to keep what you typed
+  mid-word and holding a word to add it to Custom vocabulary are gone. Off, the strip suggests
+  exactly as it did.
 - **Background (full keyboard and dictation bar):** Hex draws nothing behind its keys, so
   the keyboard's background is iOS's own glass panel: the same colour as the band iOS adds
   above a third-party keyboard and the globe row under it, over any app or wallpaper, with
