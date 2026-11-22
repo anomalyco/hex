@@ -217,26 +217,23 @@ pub fn place(
     };
     match placement {
         Placement::Below if bottom => {
-            // The whole window stays on this screen, its bottom edge on the
-            // visible bottom until the chosen gap lifts the plate out of the
-            // window's lower shadow padding. The window then rises with it, so
-            // the plate's visible gap above the Dock or the screen's edge is
-            // exactly `bottom_gap` and the transparent padding never crosses
-            // onto a display below. The plate top also never goes above the
-            // visible frame's top, below the menu bar or the notch.
+            // The whole window stays on this screen, and the plate keeps its
+            // usual offset inside it, so its shadow padding never crosses onto
+            // a display below. The window's bottom follows the gap's edge and
+            // rises with a larger gap; it stops at the visible top, and only a
+            // gap taller than the window moves the plate up inside it. The gap
+            // clamp keeps the plate's top inside the visible frame, below the
+            // menu bar or the notch.
             let gap = bottom_gap.clamp(0.0, (screen.visible.height - plate_height).max(0.0));
-            let plate_bottom = screen.visible.y + gap;
+            let window_bottom = (screen.visible.y + gap - BOTTOM_OFFSET)
+                .max(screen.visible.y)
+                .min((screen.visible.top() - window_height).max(screen.visible.y));
             // Keep the plate inside the window; only a plate as tall as the
             // window or taller is centred (the real 26 pt plate fits with
             // room to spare).
+            let plate_center = screen.visible.y + gap + plate_height / 2.0 - window_bottom;
             let limit = ((window_height - plate_height) / 2.0).max(0.0);
-            let window_bottom = screen
-                .visible
-                .y
-                .max(plate_bottom + plate_height - window_height);
-            let plate_middle = plate_bottom + plate_height / 2.0;
-            let center = (window_bottom + window_height - plate_middle - window_height / 2.0)
-                .clamp(-limit, limit);
+            let center = (window_height / 2.0 - plate_center).clamp(-limit, limit);
             Placed {
                 top_left: (
                     screen.frame.mid_x() - window_width / 2.0,
@@ -684,10 +681,11 @@ mod tests {
         let window_bottom = placed.top_left.1 - CONTENT.window.1;
         assert_eq!(bottom, screen.visible.y + 200.0, "the gap stays exact");
         assert_eq!(
-            top,
-            window_bottom + CONTENT.window.1,
-            "the plate's top is the window's"
+            bottom - window_bottom,
+            BOTTOM_OFFSET,
+            "the plate keeps its default offset inside the window"
         );
+        assert_eq!(top, bottom + CONTENT.plate.1);
         assert!(
             window_bottom > screen.visible.y,
             "the window rose off the visible bottom"
@@ -696,6 +694,53 @@ mod tests {
             placed.top_left.1 <= screen.visible.top(),
             "and stays inside the visible frame"
         );
+    }
+
+    #[test]
+    fn a_gap_that_reaches_the_visible_top_keeps_the_plate_inside() {
+        let screen = notched();
+        let placed = place(Placement::Below, &screen, CONTENT, true, 900.0);
+        let (top, bottom) = plate_span(&placed, CONTENT);
+        assert_eq!(bottom, screen.visible.y + 900.0, "the gap stays exact");
+        assert_eq!(
+            placed.top_left.1,
+            screen.visible.top(),
+            "the window stops at the visible top"
+        );
+        assert!(top <= screen.visible.top(), "the plate stays inside");
+    }
+
+    #[test]
+    fn a_raised_bottom_gap_works_on_a_display_below_the_primary() {
+        // A secondary display below the primary: its origin y is negative.
+        let screen = Screen {
+            frame: Rect {
+                x: -1440.0,
+                y: -900.0,
+                width: 1440.0,
+                height: 900.0,
+            },
+            visible: Rect {
+                x: -1440.0,
+                y: -840.0,
+                width: 1440.0,
+                height: 816.0,
+            },
+            bar: 24.0,
+            ..Screen::default()
+        };
+        let placed = place(Placement::Below, &screen, CONTENT, true, 200.0);
+        let (top, bottom) = plate_span(&placed, CONTENT);
+        let window_bottom = placed.top_left.1 - CONTENT.window.1;
+        assert_eq!(bottom, screen.visible.y + 200.0, "the gap stays exact");
+        assert_eq!(
+            window_bottom,
+            screen.visible.y + 200.0 - BOTTOM_OFFSET,
+            "the window carries the plate's default offset"
+        );
+        assert_eq!(bottom - window_bottom, BOTTOM_OFFSET);
+        assert_eq!(top, bottom + CONTENT.plate.1);
+        assert!(placed.top_left.1 <= screen.visible.top());
     }
 
     #[test]

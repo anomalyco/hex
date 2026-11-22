@@ -228,7 +228,6 @@ pub struct LabsSettings {
     pub hud_height: bool,
     /// The gap in points above the Dock while `hud_height` is on; a saved
     /// value above [`HUD_BOTTOM_GAP_MAX`] is clamped at placement.
-    #[serde(default = "default_hud_bottom_gap")]
     pub hud_bottom_gap: u16,
     /// The meeting capsules float on a running XWayland on Wayland desktops without layer-shell, such as GNOME (Linux, issue 1274).
     pub gnome_meeting_capsules: bool,
@@ -403,12 +402,6 @@ impl LabsSettings {
     }
 }
 
-/// The default HUD bottom gap, so a settings file without the field keeps
-/// the fixed gap Hex always had.
-fn default_hud_bottom_gap() -> u16 {
-    HUD_BOTTOM_GAP_DEFAULT
-}
-
 /// A saved `keep_microphone_open_seconds` must name one of
 /// [`KEEP_MICROPHONE_OPEN_SECONDS`]; another value fails to load, so the
 /// field returns to its default with the usual launch note.
@@ -555,5 +548,19 @@ impl Default for LabsSettings {
             expire_meeting_audio: None,
             yearly_stats: None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An older settings file has no `hud_bottom_gap`, and the struct's
+    /// default supplies the fixed 24 pt.
+    #[test]
+    fn a_saved_file_without_the_hud_gap_keeps_the_fixed_default() {
+        let labs: LabsSettings = serde_json::from_str(r#"{"notch_indicator":true}"#).unwrap();
+        assert_eq!(labs.hud_bottom_gap, HUD_BOTTOM_GAP_DEFAULT);
+        assert!(!labs.hud_height);
     }
 }

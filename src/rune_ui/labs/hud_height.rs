@@ -3,10 +3,11 @@
 //! when its position is Bottom.
 
 use rune::{El, row, text};
+use rune_theme_opencode::icons::{MINUS, PLUS};
 
 use super::super::Ui;
-use super::super::controls::{DESCRIPTION, Paint};
-use super::super::lists::{inline_slider, small_button};
+use super::super::controls::{DESCRIPTION, Paint, icon_button};
+use super::super::lists::inline_slider;
 use crate::app_settings::HUD_BOTTOM_GAP_MAX;
 use crate::desktop::i18n::{tr, tr_fill};
 
@@ -27,7 +28,9 @@ pub(super) fn body(ui: &Ui, p: Paint) -> El {
             text(tr("Height"))
                 .key("label")
                 .font(DESCRIPTION)
-                .color(p.muted()),
+                .color(p.muted())
+                // The slider reads its name.
+                .a11y_hidden(),
         )
         .child(inline_slider(
             p,
@@ -38,12 +41,20 @@ pub(super) fn body(ui: &Ui, p: Paint) -> El {
             SLIDER_WIDTH,
             |ui: &mut Ui, position, done| set_gap(ui, position, done),
         ))
-        .child(small_button(p, "hud-height-down", tr("−"), |ui, _| {
-            nudge(ui, false)
-        }))
-        .child(small_button(p, "hud-height-up", tr("+"), |ui, _| {
-            nudge(ui, true)
-        }))
+        .child(icon_button(
+            p,
+            "hud-height-down",
+            &MINUS,
+            tr("Lower"),
+            |ui: &mut Ui| nudge(ui, false),
+        ))
+        .child(icon_button(
+            p,
+            "hud-height-up",
+            &PLUS,
+            tr("Raise"),
+            |ui: &mut Ui| nudge(ui, true),
+        ))
 }
 
 /// The point gap `position` names, rounded to whole points.

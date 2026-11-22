@@ -7,6 +7,7 @@
 //! and is hidden while off.
 
 mod group;
+#[cfg(target_os = "macos")]
 mod hud_height;
 #[cfg(all(target_os = "macos", hex_capture))]
 pub(super) mod screenshots;
@@ -234,6 +235,7 @@ pub(super) struct Store {
     pub(super) signature_synced: bool,
     /// Labs › HUD height's slider while it drags: the point gap shown
     /// before release saves it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     pub(super) hud_gap: Option<u16>,
     /// The lab a `hex://labs/<feature>` link named and when, so its card
     /// shows a focus border for [`FLASH`].
@@ -1174,6 +1176,7 @@ fn extras(ui: &Ui, p: Paint, entry: &Row, layer: &mut Vec<El>) -> Option<El> {
         Lab::Feature(Feature::VoicePrompt) => Some(voice_prompt::body(ui, p)),
         Lab::Feature(Feature::StopPhrase) => Some(stop_phrase::body(ui, p)),
         Lab::Feature(Feature::Signature) => Some(signature::body(ui, p)),
+        #[cfg(target_os = "macos")]
         Lab::Feature(Feature::HudHeight) => Some(hud_height::body(ui, p)),
         Lab::Feature(Feature::DictationStyle) => Some(
             row()

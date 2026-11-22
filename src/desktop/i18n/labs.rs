@@ -224,7 +224,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("HUD height", ["Wysokość HUD", "HUD 高度", "HUD の高さ", "HUD-Höhe", "Altura del HUD", "Висота HUD"]),
     ("Choose how high the dictation HUD sits above the Dock when it's at the bottom", ["Wybierz, jak wysoko HUD dyktowania stoi nad Dokiem, gdy jest na dole", "选择听写 HUD 在底部时高出程序坞的高度", "音声入力 HUD が下部にあるとき、Dock からどれだけ上に表示するかを選びます", "Wähle, wie hoch das Diktier-HUD über dem Dock sitzt, wenn es unten ist", "Elige a qué altura se sitúa el HUD de dictado sobre el Dock cuando está abajo", "Виберіть, наскільки високо HUD диктування стоїть над Dock, коли він унизу"]),
     ("Height", ["Wysokość", "高度", "高さ", "Höhe", "Altura", "Висота"]),
-    ("{} pt", ["{} pkt", "{} 点", "{} pt", "{} pt", "{} pt", "{} пт"]),
-    ("−", ["−", "−", "−", "−", "−", "−"]),
-    ("+", ["+", "+", "+", "+", "+", "+"]),
+    ("{} pt", ["{} pkt", "{} pt", "{} pt", "{} pt", "{} pt", "{} пт"]),
+    ("Lower", ["Niżej", "降低", "下げる", "Tiefer", "Bajar", "Нижче"]),
+    ("Raise", ["Wyżej", "升高", "上げる", "Höher", "Subir", "Вище"]),
 ];

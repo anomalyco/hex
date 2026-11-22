@@ -248,11 +248,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Notch indicator no    labs.notch_indicator         (macOS) on a screen with a notch, the HUD widens the notch sideways in the Dynamic Island's compact style at either visible position: an orange mic and level bars, the macOS spinner, a green checkmark; Hidden still hides it, and flat screens keep the Top/Bottom setting
 ├── HUD height      no    labs.hud_height              (macOS) with the HUD position Bottom, the plate keeps labs.hud_bottom_gap points (0–400, 24 by
 │                                        default) above the Dock or the screen's bottom edge; a gap past the window's own padding raises
-│                                        the window with the plate pinned to its top, and placement clamps the plate under the menu bar
-│                                        or notch; off, the fixed 24 pt is exactly as before
+│                                        the window with the plate at its usual inset, only a gap taller than the window can hold
+│                                        moves the plate inside it, and placement clamps the plate under the menu bar or notch;
+│                                        off, the fixed 24 pt is exactly as before
 │                                        // checks: hud_height_is_its_own_bit_and_off_by_default (labs.rs);
 │                                        // the_default_bottom_gap_places_exactly_as_before, a_small_bottom_gap_sits_inside_the_window,
 │                                        // a_tall_bottom_gap_raises_the_window_and_keeps_the_gap_exact,
+│                                        // a_gap_that_reaches_the_visible_top_keeps_the_plate_inside,
+│                                        // a_raised_bottom_gap_works_on_a_display_below_the_primary,
 │                                        // a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame,
 │                                        // a_bottom_gap_never_drops_the_window_below_the_visible_bottom (rune_hud/hud_placement.rs)
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
@@ -2929,8 +2932,9 @@ the HUD is placed (`Hud::place_on_pointer_screen` in
 from the next dictation. A gap that fits inside the 320 × 128 pt window
 keeps the window's bottom on the visible bottom and moves
 `Layout.center`, which at 24 pt is exactly the old placement; a larger
-gap raises the window's top-left with the plate pinned to its top, so the
-visible gap stays exact. Placement clamps the gap so the plate's top never
+gap raises the window's top-left with the plate at its usual offset inside
+it, keeping its shadow padding, so the visible gap stays exact. Only a gap
+taller than the window can hold moves the plate up inside it. Placement clamps the gap so the plate's top never
 passes the visible frame's top, below the menu bar or notch, and the window
 never crosses below the visible bottom. Top, Off, HUD Lab's menu bar and
 notch placements, and Linux and Windows are unchanged. Linux and Windows
@@ -2940,6 +2944,8 @@ have no row, `hex labs on hud-height` doesn't know it there, and
 `the_default_bottom_gap_places_exactly_as_before`,
 `a_small_bottom_gap_sits_inside_the_window`,
 `a_tall_bottom_gap_raises_the_window_and_keeps_the_gap_exact`,
+`a_gap_that_reaches_the_visible_top_keeps_the_plate_inside`,
+`a_raised_bottom_gap_works_on_a_display_below_the_primary`,
 `a_huge_bottom_gap_keeps_the_plate_inside_the_visible_frame`, and
 `a_bottom_gap_never_drops_the_window_below_the_visible_bottom` in
 [rune_hud/hud_placement.rs](../../src/rune_hud/hud_placement.rs);

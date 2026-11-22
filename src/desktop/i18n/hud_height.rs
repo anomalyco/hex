@@ -11,8 +11,8 @@ pub(super) const FRENCH: &[(&str, &str)] = &[
     ),
     ("Height", "Hauteur"),
     ("{} pt", "{} pt"),
-    ("−", "−"),
-    ("+", "+"),
+    ("Lower", "Descendre"),
+    ("Raise", "Monter"),
 ];
 
 pub(super) const PORTUGUESE: &[(&str, &str)] = &[
@@ -23,8 +23,8 @@ pub(super) const PORTUGUESE: &[(&str, &str)] = &[
     ),
     ("Height", "Altura"),
     ("{} pt", "{} pt"),
-    ("−", "−"),
-    ("+", "+"),
+    ("Lower", "Baixar"),
+    ("Raise", "Subir"),
 ];
 
 pub(super) const RUSSIAN: &[(&str, &str)] = &[
@@ -35,6 +35,6 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ),
     ("Height", "Высота"),
     ("{} pt", "{} пт"),
-    ("−", "−"),
-    ("+", "+"),
+    ("Lower", "Ниже"),
+    ("Raise", "Выше"),
 ];
