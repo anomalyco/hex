@@ -656,7 +656,7 @@ pub(super) fn item(ui: &Ui, p: Paint, entry: &Listed) -> El {
                 .key("hover")
                 .gap(2.0)
                 .center_y()
-                .pin(None, Some(-5.0), Some(-6.0), None)
+                .pin(None, Some(-5.0), Some(ld::row_action_inset(p)), None)
                 .group_opacity(0.0, 1.0)
                 .children(actions),
         );
