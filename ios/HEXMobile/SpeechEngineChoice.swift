@@ -74,6 +74,6 @@ nonisolated struct SpeechEngineChoice: Equatable, Sendable {
     func notice(for language: String?) -> String? {
         guard system < 26, SpeechLanguagePicker.isEnglish(language), physicalMemory > Self.smallMemory,
               !parakeetHasRoom else { return nil }
-        return String(localized: "Not enough memory for the speech model. Hex is using Apple's speech recognition.")
+        return String(localized: "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition.")
     }
 }

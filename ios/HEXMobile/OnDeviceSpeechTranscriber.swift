@@ -128,7 +128,7 @@ actor OnDeviceSpeechTranscriber: LocalTranscribing {
         var errorDescription: String? {
             switch self {
             case .notAllowed:
-                String(localized: "Allow Speech Recognition for Hex in Settings.")
+                String(localized: "Allow Speech Recognition for Hex in Settings. It runs on this iPhone.")
             case .emptyTranscript:
                 String(localized: "No speech heard.")
             case .unavailable:
@@ -170,13 +170,13 @@ actor OnDeviceSpeechTranscriber: LocalTranscribing {
         progressHandler: @escaping @Sendable (ModelPreparationProgress) -> Void
     ) async throws {
         guard recognizer == nil else { return }
-        progressHandler(ModelPreparationProgress(fractionCompleted: 0.2, detail: String(localized: "Checking speech recognition")))
+        progressHandler(ModelPreparationProgress(fractionCompleted: 0.2, detail: String(localized: "Checking on-device speech recognition")))
         var status = access.status()
         if status == .notDetermined {
             progressHandler(
                 ModelPreparationProgress(
                     fractionCompleted: 0.4,
-                    detail: String(localized: "Allow Speech Recognition")
+                    detail: String(localized: "Allow Speech Recognition. It stays on this iPhone.")
                 )
             )
             status = await access.request()

@@ -44,7 +44,7 @@ actor HexSystemCommandBus {
 
 nonisolated struct StopHexDictationIntent: LiveActivityIntent {
     static let title: LocalizedStringResource = "Finish dictation"
-    static let description = IntentDescription("Stops recording and copies the text.")
+    static let description = IntentDescription("Stops recording, transcribes on device and copies the text.")
     static let isDiscoverable = false
 
     init() {}

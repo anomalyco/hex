@@ -431,7 +431,7 @@ private struct TranslationBadge: View {
 }
 
 enum KeyboardSetupCopy {
-    static let fullAccessPath = "Allow Full Access: Settings › Apps › Hex › Keyboards"
+    static let fullAccessPath = String(localized: "Allow Full Access: Settings › Apps › Hex › Keyboards")
 }
 
 /// Metal-free stand-in for the resting Dot Scope bar. Mounting it instead of

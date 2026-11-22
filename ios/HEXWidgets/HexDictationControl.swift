@@ -14,6 +14,6 @@ struct HexDictationControl: ControlWidget {
             }
         }
         .displayName("Dictate with Hex")
-        .description("Starts or finishes dictation and copies the text.")
+        .description("Starts or finishes on-device dictation and copies the text.")
     }
 }

@@ -2135,7 +2135,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(choice.engine(for: "en-US", appleSpeechPicks: false), .onDeviceRecognizer)
         XCTAssertEqual(
             choice.notice(for: "en-US"),
-            "Not enough memory for the speech model. Hex is using Apple's speech recognition."
+            "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition."
         )
         let transcriber = DictationController.transcriberBeforeAppleSpeech(choice: choice, suite: suiteName, resolve: { _ in "en-US" })
         XCTAssertTrue(transcriber is OnDeviceSpeechTranscriber)
@@ -2170,7 +2170,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.phase, .ready)
         XCTAssertEqual(
             controller.languageNotice,
-            "Not enough memory for the speech model. Hex is using Apple's speech recognition."
+            "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition."
         )
     }
 
@@ -2192,13 +2192,13 @@ final class DictationControllerTests: XCTestCase {
             XCTAssertEqual(error as? OnDeviceSpeechTranscriber.TranscriberError, .notAllowed)
             XCTAssertEqual(
                 UserFacingError.message(for: error, context: .model),
-                "Allow Speech Recognition for Hex in Settings."
+                "Allow Speech Recognition for Hex in Settings. It runs on this iPhone."
             )
         }
         XCTAssertEqual(access.requests, 1)
         XCTAssertEqual(
             details.values,
-            ["Checking speech recognition", "Allow Speech Recognition"],
+            ["Checking on-device speech recognition", "Allow Speech Recognition. It stays on this iPhone."],
             "says it stays on the iPhone before iOS asks"
         )
         let languageID = await transcriber.languageIdentifier

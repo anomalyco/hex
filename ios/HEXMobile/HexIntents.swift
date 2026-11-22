@@ -7,7 +7,7 @@ import Foundation
 nonisolated struct DictateWithHexIntent: AudioRecordingIntent, LiveActivityIntent {
     static let title: LocalizedStringResource = "Dictate with Hex"
     static let description = IntentDescription(
-        "Press once to record, again to copy the text."
+        "Press once to record, again to transcribe on device and copy the text."
     )
 
     init() {}

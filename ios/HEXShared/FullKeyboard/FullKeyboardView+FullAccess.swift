@@ -17,7 +17,7 @@ extension FullKeyboardView {
         refreshStrip()
         UIAccessibility.post(
             notification: .announcement,
-            argument: "\(FullAccessHintView.title). Settings, Apps, Hex, Keyboards."
+            argument: "\(FullAccessHintView.title). \(FullAccessHintView.spokenPath)."
         )
         fullAccessHintHideWork?.cancel()
         let work = DispatchWorkItem { [weak self] in self?.hideFullAccessHint() }

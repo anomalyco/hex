@@ -44,8 +44,8 @@ targets:
             CFBundleURLName: anomaly.hex.mobile.keyboard-session
             CFBundleURLSchemes:
               - hex-dictation
-        NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. The audio is deleted once it's transcribed.
-        NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device speech recognition to turn what you say into text.
+        NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. Audio never leaves it and is deleted once it's transcribed.
+        NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device speech recognition to turn what you say into text. Nothing you say is sent to a server.
         NSSupportsLiveActivities: true
         ITSAppUsesNonExemptEncryption: false
         UIBackgroundModes:
@@ -92,8 +92,8 @@ targets:
       path: HEXKeyboard/Info.plist
       properties:
         CFBundleDisplayName: Hex Keyboard
-        NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. The audio is deleted once it's transcribed.
-        NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device speech recognition to turn what you say into text.
+        NSMicrophoneUsageDescription: Hex turns what you say into text on this iPhone. Audio never leaves it and is deleted once it's transcribed.
+        NSSpeechRecognitionUsageDescription: Hex uses Apple's on-device speech recognition to turn what you say into text. Nothing you say is sent to a server.
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         NSExtension:

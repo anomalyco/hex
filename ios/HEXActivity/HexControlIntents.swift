@@ -6,7 +6,7 @@ import Foundation
 @available(iOS 18.0, *)
 nonisolated struct ToggleHexControlIntent: AppIntent {
     static let title: LocalizedStringResource = "Dictate with Hex"
-    static let description = IntentDescription("Starts or finishes dictation and copies the text.")
+    static let description = IntentDescription("Starts or finishes on-device dictation and copies the text.")
     @available(iOS 26.0, *)
     static let supportedModes: IntentModes = .foreground
     static let isDiscoverable = false

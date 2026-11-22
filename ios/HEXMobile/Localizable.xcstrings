@@ -14,32 +14,32 @@
         }
       }
     },
-    "Checking speech recognition" : {
+    "Checking on-device speech recognition" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "正在检查语音识别"
+            "value" : "正在检查设备端语音识别"
           }
         }
       }
     },
-    "Allow Speech Recognition" : {
+    "Allow Speech Recognition. It stays on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请允许语音识别"
+            "value" : "请允许语音识别。识别全程在这台 iPhone 上进行。"
           }
         }
       }
     },
-    "Allow Speech Recognition for Hex in Settings." : {
+    "Allow Speech Recognition for Hex in Settings. It runs on this iPhone." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "请在“设置”中允许 Hex 使用语音识别。"
+            "value" : "请在“设置”中允许 Hex 使用语音识别。识别在这台 iPhone 上进行。"
           }
         }
       }
@@ -1158,12 +1158,12 @@
         }
       }
     },
-    "Removes filler words and false starts" : {
+    "Drops ums, repeats and corrected words" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "去掉口头禅和改口"
+            "value" : "去掉“嗯”、重复和改口的词"
           }
         }
       }
@@ -1671,12 +1671,12 @@
         }
       }
     },
-    "Learns from your taps and the words you fix in Hex" : {
+    "Learns on this iPhone from your taps and the words you fix in Hex" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "从你的轻点和你在 Hex 中修正的词中学习"
+            "value" : "在这台 iPhone 上从你的轻点和你在 Hex 中修正的词中学习"
           }
         }
       }
@@ -2097,12 +2097,12 @@
         }
       }
     },
-    "Not enough memory for the speech model. Hex is using Apple's speech recognition." : {
+    "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "内存不足，无法使用语音模型。Hex 正在使用 Apple 的语音识别。"
+            "value" : "内存不足，无法使用语音模型。Hex 正在使用 Apple 的设备端语音识别。"
           }
         }
       }
@@ -2297,12 +2297,12 @@
         }
       }
     },
-    "Keeps 14 days of taps and typed text to export" : {
+    "Keeps 14 days of taps and typed text on this iPhone, to export" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "保留 14 天的轻点和输入的文字，供导出"
+            "value" : "在这台 iPhone 上保留 14 天的轻点和输入的文字，供导出"
           }
         }
       }
@@ -2557,32 +2557,32 @@
         }
       }
     },
-    "Starts or finishes dictation and copies the text." : {
+    "Starts or finishes on-device dictation and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "开始或结束听写，并拷贝文字。"
+            "value" : "开始或结束设备端听写，并拷贝文字。"
           }
         }
       }
     },
-    "Press once to record, again to copy the text." : {
+    "Press once to record, again to transcribe on device and copy the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "按一下开始录音，再按一下拷贝文字。"
+            "value" : "按一下开始录音，再按一下在设备端转录并拷贝文字。"
           }
         }
       }
     },
-    "Stops recording and copies the text." : {
+    "Stops recording, transcribes on device and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "停止录音并拷贝文字。"
+            "value" : "停止录音，在设备端转录并拷贝文字。"
           }
         }
       }
@@ -3283,12 +3283,12 @@
         }
       }
     },
-    "Learns where you tap each key. Stores no text." : {
+    "Learns on this iPhone where you tap each key. Stores no text." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "学习你轻点每个按键的位置。不存储文字。"
+            "value" : "在这台 iPhone 上学习你轻点每个按键的位置。不存储文字。"
           }
         }
       }
@@ -3889,6 +3889,106 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在此之前，Hex 使用平时的模型。"
+          }
+        }
+      }
+    },
+    "Undo dictation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销听写"
+          }
+        }
+      }
+    },
+    "Paste" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "粘贴"
+          }
+        }
+      }
+    },
+    "Code from Messages" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自“信息”的验证码"
+          }
+        }
+      }
+    },
+    "Switches to the next keyboard, where iOS offers codes from Messages and Mail" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到下一个键盘，iOS 会在那里提供来自“信息”和“邮件”的验证码"
+          }
+        }
+      }
+    },
+    "Undoes the autocorrection" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销自动改正"
+          }
+        }
+      }
+    },
+    "Allow Full Access to dictate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许完全访问后即可听写"
+          }
+        }
+      }
+    },
+    "Settings › Apps › Hex › Keyboards" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置 › App › Hex › 键盘"
+          }
+        }
+      }
+    },
+    "Settings, Apps, Hex, Keyboards" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设置，App，Hex，键盘"
+          }
+        }
+      }
+    },
+    "Opens Hex's setup" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开 Hex 的设置步骤"
+          }
+        }
+      }
+    },
+    "Allow Full Access: Settings › Apps › Hex › Keyboards" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许完全访问：设置 › App › Hex › 键盘"
           }
         }
       }

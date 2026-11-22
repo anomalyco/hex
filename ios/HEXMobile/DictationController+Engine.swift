@@ -281,7 +281,7 @@ extension DictationController {
             return UserFacingError.message(for: unavailable, context: .model)
         }
         if (error as? ParakeetTranscriber.TranscriberError) == .notEnoughMemory {
-            return String(localized: "Not enough memory for the speech model. Hex is using Apple's speech recognition.")
+            return String(localized: "Not enough memory for the speech model. Hex is using Apple's on-device speech recognition.")
         }
         if (error as? ParakeetUltraTranscriber.TranscriberError) == .notEnoughMemory {
             return String(localized: "Not enough memory for the multilingual model. Hex is using its usual model.")

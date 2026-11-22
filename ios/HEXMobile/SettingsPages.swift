@@ -85,7 +85,7 @@ struct DictationSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Clean up what I say"),
-                    detail: String(localized: "Removes filler words and false starts"),
+                    detail: String(localized: "Drops ums, repeats and corrected words"),
                     isOn: $cleanupTagger
                 )
 
@@ -522,7 +522,7 @@ struct PrivacySettingsPage: View {
                 // dictation bar inserts. On until turned off (`TypingJournalSettings`).
                 SettingsToggleRow(
                     title: String(localized: "Learn how I type"),
-                    detail: String(localized: "Learns from your taps and the words you fix in Hex"),
+                    detail: String(localized: "Learns on this iPhone from your taps and the words you fix in Hex"),
                     isOn: $learnTyping
                 )
 
@@ -542,7 +542,7 @@ struct PrivacySettingsPage: View {
                 // Turning it on asks first (App Review 2.5.14); turning it off doesn't.
                 SettingsToggleRow(
                     title: String(localized: "Record typing logs"),
-                    detail: String(localized: "Keeps 14 days of taps and typed text to export"),
+                    detail: String(localized: "Keeps 14 days of taps and typed text on this iPhone, to export"),
                     isOn: Binding(
                         get: { typingLogs },
                         set: { on in
@@ -633,7 +633,7 @@ struct ExperimentsSettingsPage: View {
 
                 SettingsToggleRow(
                     title: String(localized: "Adaptive touch"),
-                    detail: String(localized: "Learns where you tap each key. Stores no text."),
+                    detail: String(localized: "Learns on this iPhone where you tap each key. Stores no text."),
                     isOn: $adaptiveTouch
                 )
 

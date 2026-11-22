@@ -127,7 +127,7 @@ final class KeyboardStripView: UIView {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.5, weight: .medium)
         )
         chip.imagePadding = 6
-        chip.title = "Undo dictation"
+        chip.title = String(localized: "Undo dictation")
         chip.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
         chip.background.cornerRadius = 15
         undoChip.configuration = chip
@@ -140,7 +140,7 @@ final class KeyboardStripView: UIView {
             withConfiguration: UIImage.SymbolConfiguration(font: Self.pasteFont, scale: .small)
         )
         paste.imagePadding = 5
-        paste.title = "Paste"
+        paste.title = String(localized: "Paste")
         paste.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { attributes in
             var attributes = attributes
             attributes.font = Self.pasteFont
@@ -160,11 +160,11 @@ final class KeyboardStripView: UIView {
             withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.5, weight: .medium)
         )
         next.imagePadding = 6
-        next.title = "Code from Messages"
+        next.title = String(localized: "Code from Messages")
         next.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
         next.background.cornerRadius = 15
         nextKeyboardChip.configuration = next
-        nextKeyboardChip.accessibilityHint = "Switches to the next keyboard, where iOS offers codes from Messages and Mail"
+        nextKeyboardChip.accessibilityHint = String(localized: "Switches to the next keyboard, where iOS offers codes from Messages and Mail")
         nextKeyboardChip.isHidden = true
         nextKeyboardChip.addTarget(self, action: #selector(handleNextKeyboard), for: .touchUpInside)
         addSubview(nextKeyboardChip)
@@ -213,7 +213,7 @@ final class KeyboardStripView: UIView {
         show(undoChip, showsUndo && !showsHint)
         let showsClipboard = showsClipboard
         var paste = pasteControl.configuration
-        let pasteTitle = clipboard == .dictation ? "Paste dictation" : "Paste"
+        let pasteTitle = clipboard == .dictation ? String(localized: "Paste dictation") : String(localized: "Paste")
         if paste?.title != pasteTitle {
             paste?.title = pasteTitle
             pasteControl.configuration = paste
@@ -495,7 +495,7 @@ final class KeyboardStripView: UIView {
             isAccessibilityElement = suggestion != nil
             isUserInteractionEnabled = suggestion != nil
             accessibilityLabel = suggestion?.displayText
-            accessibilityHint = suggestion?.kind == .revert ? "Undoes the autocorrection" : nil
+            accessibilityHint = suggestion?.kind == .revert ? String(localized: "Undoes the autocorrection") : nil
             if old?.displayText != suggestion?.displayText {
                 if animated, window != nil, !UIAccessibility.isReduceMotionEnabled {
                     outgoing = old
@@ -683,8 +683,9 @@ struct KeyboardStripNotice: Equatable {
 /// turn it on, and an Open Hex chip, the only part that opens Hex, on the Hex key's side.
 @MainActor
 final class FullAccessHintView: UIView {
-    static let title = "Allow Full Access to dictate"
-    static let path = "Settings › Apps › Hex › Keyboards"
+    static let title = String(localized: "Allow Full Access to dictate")
+    static let path = String(localized: "Settings › Apps › Hex › Keyboards")
+    static let spokenPath = String(localized: "Settings, Apps, Hex, Keyboards")
 
     var palette = FullKeyboardPalette(isDark: false) { didSet { applyPalette() } }
     var chipHeight: CGFloat = 30 { didSet { setNeedsLayout() } }
@@ -703,7 +704,7 @@ final class FullAccessHintView: UIView {
         titleLabel.font = .systemFont(ofSize: 13, weight: .medium)
         pathLabel.text = Self.path
         pathLabel.font = .systemFont(ofSize: 11.5)
-        pathLabel.accessibilityLabel = "Settings, Apps, Hex, Keyboards"
+        pathLabel.accessibilityLabel = Self.spokenPath
         for label in [titleLabel, pathLabel] {
             label.adjustsFontSizeToFitWidth = true
             label.minimumScaleFactor = 0.8
@@ -711,11 +712,11 @@ final class FullAccessHintView: UIView {
             addSubview(label)
         }
         var open = UIButton.Configuration.plain()
-        open.title = "Open Hex"
+        open.title = String(localized: "Open Hex")
         open.contentInsets = NSDirectionalEdgeInsets(top: 0, leading: 13, bottom: 0, trailing: 13)
         open.background.cornerRadius = 15
         openButton.configuration = open
-        openButton.accessibilityHint = "Opens Hex's setup"
+        openButton.accessibilityHint = String(localized: "Opens Hex's setup")
         openButton.addTarget(self, action: #selector(handleOpen), for: .touchUpInside)
         addSubview(openButton)
         applyPalette()
