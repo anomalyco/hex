@@ -96,8 +96,10 @@ extension FullKeyboardEngine {
             ownEdit = true
         }
 
-        private static func place(of before: String?) -> String? {
-            guard var text = before else { return nil }
+        /// A real iPhone reports nothing before the cursor in an empty field (nil, where a
+        /// swipe's record keeps ""): the same place.
+        private static func place(of before: String?) -> String {
+            var text = before ?? ""
             while text.last == " " { text.removeLast() }
             return text
         }
