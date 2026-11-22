@@ -6,6 +6,22 @@ final class KeyboardLayoutTests: XCTestCase {
     private let portraitWidths: [CGFloat] = [320, 375, 393, 402, 430, 440]
     private let layers: [KeyboardLayer] = [.letters, .numbers, .symbols]
     private let fields: [KeyboardFieldKind] = [.text, .url, .email]
+    /// Every layout here is Apple's iOS 27 keyboard, read on 27.0 and 27.2 simulators, while CI's
+    /// newest simulator runtime is iOS 26.5. Pin the version the expectations describe
+    /// (`KeyboardLanguage.systemMajorVersion` exists for this; the before-27 Ukrainian test sets
+    /// 26 itself) so the suite does not depend on the runner's runtime.
+    private var runningSystemMajorVersion = 0
+
+    override func setUp() {
+        super.setUp()
+        runningSystemMajorVersion = KeyboardLanguage.systemMajorVersion
+        KeyboardLanguage.systemMajorVersion = 27
+    }
+
+    override func tearDown() {
+        KeyboardLanguage.systemMajorVersion = runningSystemMajorVersion
+        super.tearDown()
+    }
 
     private func everyPortraitLayout() -> [KeyboardLayout] {
         var layouts: [KeyboardLayout] = []

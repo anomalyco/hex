@@ -9,8 +9,13 @@ final class AutocorrectEngineTests: XCTestCase {
     private var target: FixtureTextTarget!
     private var engine: FullKeyboardEngine!
     private var now: TimeInterval = 200
+    /// The layouts and dictionaries below are Apple's iOS 27 keyboard; CI's newest simulator
+    /// runtime is iOS 26.5, so the version these tests describe is pinned.
+    private var runningSystemMajorVersion = 0
 
     override func setUp() async throws {
+        runningSystemMajorVersion = KeyboardLanguage.systemMajorVersion
+        KeyboardLanguage.systemMajorVersion = 27
         suiteName = "AutocorrectEngineTests-\(UUID().uuidString)"
         defaults = UserDefaults(suiteName: suiteName)!
         target = FixtureTextTarget()
@@ -24,6 +29,7 @@ final class AutocorrectEngineTests: XCTestCase {
     }
 
     override func tearDown() async throws {
+        KeyboardLanguage.systemMajorVersion = runningSystemMajorVersion
         defaults.removePersistentDomain(forName: suiteName)
     }
 
