@@ -92,4 +92,60 @@ class SwipedWordsTest {
         assertEquals("hello world", editor.text)
         assertTrue(swiped.active)
     }
+
+    private fun swipedHello(): Pair<Editor, SwipedWords> {
+        val editor = Editor("say")
+        val swiped = SwipedWords(editor)
+        swiped.type(SwipeTyped(true, "hello", arrayOf("hell")))
+        return editor to swiped
+    }
+
+    @Test fun aCharacterThatStartsAWordGoesInAfterAPendingSpace() {
+        for ((typed, expected) in listOf("w" to "say hello w", "5" to "say hello 5", "(" to "say hello (", "@" to "say hello @", "é" to "say hello é")) {
+            val (editor, swiped) = swipedHello()
+            val text = swiped.spaceBefore(typed, ShiftState()) { false }
+            assertEquals(typed, text)
+            editor.commit(text!!)
+            assertEquals(expected, editor.text)
+            // The word is done with: delete is an ordinary one now, a character at a time.
+            assertFalse(swiped.active)
+            assertFalse(swiped.takeBack())
+        }
+    }
+
+    @Test fun closingMarksGoAgainstTheWord() {
+        for (mark in listOf(",", ".", "!", "?", ";", ":", ")", "]", "}", "'", "\u2019", "-", "/")) {
+            val (editor, swiped) = swipedHello()
+            assertEquals(mark, null, swiped.spaceBefore(mark, ShiftState()) { true })
+            assertEquals("say hello", editor.text)
+        }
+    }
+
+    @Test fun theSpaceMayBringACapitalButShiftYouSetStays() {
+        // Shift off in a field that capitalises every word: the space brings one.
+        val (_, swiped) = swipedHello()
+        val off = ShiftState()
+        assertEquals("W", swiped.spaceBefore("w", off) { true })
+        assertTrue(off.uppercase)
+        // Off where the field wants none: none.
+        val (_, plain) = swipedHello()
+        assertEquals("w", plain.spaceBefore("w", ShiftState()) { false })
+        // Shift you turned on, or caps lock, stays as it is, whatever the field wants.
+        val (_, on) = swipedHello()
+        val shift = ShiftState().apply { down(0); up() }
+        assertEquals("W", on.spaceBefore("W", shift) { false })
+        assertEquals(ShiftState.Mode.On, shift.mode)
+        val (_, locked) = swipedHello()
+        val caps = ShiftState().apply { down(0); up(); down(100); up() }
+        assertEquals("W", locked.spaceBefore("W", caps) { false })
+        assertEquals(ShiftState.Mode.Locked, caps.mode)
+    }
+
+    @Test fun noPendingSpaceOnceTheWordMoved() {
+        val (editor, swiped) = swipedHello()
+        editor.cursor = 2
+        assertEquals(null, swiped.spaceBefore("w", ShiftState()) { false })
+        assertEquals("say hello", editor.text)
+        assertEquals(null, SwipedWords(Editor("say")).spaceBefore("w", ShiftState()) { false })
+    }
 }
