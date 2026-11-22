@@ -17,11 +17,8 @@ pub(super) const HANG: f32 = METRICS.gutter - METRICS.row_px;
 const LIST_W: f32 = 316.0;
 /// How far a list fades as rows slide under the search field.
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
-/// Room the card's text leaves for its scroll bar.
-const SCROLL_BAR: f32 = 12.0;
-
-/// The pane bar's thumb: 8 pt at rest and 10 under the pointer, so it stays
-/// inside the card's 12 pt scroll-bar room.
+/// The pane bar's thumb: 8 pt at rest and 10 under the pointer, inside the
+/// strip every scrolling body leaves clear for it.
 const PANE_THUMB: f32 = 8.0;
 const PANE_THUMB_HOVER: f32 = 10.0;
 
@@ -167,7 +164,7 @@ fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
                 .key("hover")
                 .gap(2.0)
                 .center_y()
-                .pin(None, Some(-5.0), Some(-6.0), None)
+                .pin(None, Some(-5.0), Some(row_action_inset(p)), None)
                 .group_opacity(0.0, 1.0)
                 .children(item.hover),
         )
@@ -285,7 +282,13 @@ pub(super) fn card_scroll(p: Paint, key: &str, content: El) -> El {
 /// A [`card_scroll`] that, with `stick_bottom`, follows content added at
 /// its end while scrolled to the bottom.
 pub(super) fn card_scroll_sticky(p: Paint, key: &str, content: El, stick_bottom: bool) -> El {
-    faded_body_sticky(p.k, key, content.pr(SCROLL_BAR), LIST_FADE, stick_bottom)
+    faded_body_sticky(
+        p.k,
+        key,
+        content.pr(scroll_gutter(p.k)),
+        LIST_FADE,
+        stick_bottom,
+    )
 }
 
 /// The window's faded scroll body (`super::faded_body`); with
@@ -304,16 +307,32 @@ pub(super) fn faded_body_sticky(
         .clip_fade(0.0, top, 0.0, bottom)
         .scroll(super::ScrollSpec { stick_bottom })
         .child(col().key("inset").pt(top).pb(bottom).child(content));
-    let style = rune_kit::ScrollBarStyle::from_kit(k)
-        .thumb(k.c.text_faint)
-        .thumb_hover(k.c.text_muted)
-        .width(PANE_THUMB)
-        .hover_width(PANE_THUMB_HOVER);
+    let style = scroll_style(k);
     viewport
         .scroll_bar_styled(style)
         .grow(1.0)
         .shrink()
         .min_h(0.0)
+}
+
+/// The bar every scrolling body in a list-and-detail pane draws.
+fn scroll_style(k: &rune_kit::Kit) -> rune_kit::ScrollBarStyle {
+    rune_kit::ScrollBarStyle::from_kit(k)
+        .thumb(k.c.text_faint)
+        .thumb_hover(k.c.text_muted)
+        .width(PANE_THUMB)
+        .hover_width(PANE_THUMB_HOVER)
+}
+
+/// The room a scrolling body leaves for its scroll bar's press strip.
+pub(super) fn scroll_gutter(k: &rune_kit::Kit) -> f32 {
+    scroll_style(k).strip()
+}
+
+/// The right inset a row's hover actions take: the row's own padding already
+/// clears the bar, so their right edge stays on the text's edge.
+pub(super) fn row_action_inset(p: Paint) -> f32 {
+    (scroll_gutter(p.k) - METRICS.row_px).max(0.0)
 }
 
 /// A quiet empty state: an icon, a short title, and at most one line.

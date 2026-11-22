@@ -2143,6 +2143,55 @@ fn a_rows_copy_leaves_the_selection() {
     assert_eq!(rt.state.history.selected, Some(2));
 }
 
+/// A hovered row's Copy, pressed a point inside its right edge, copies
+/// rather than scrolling when the list overflows under the scroll bar. The
+/// row fill still reaches the search field's edge, so selection stays flush.
+#[test]
+fn a_rows_copy_clears_the_scroll_bar() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    let seeds = rt.state.history.entries.clone();
+    for (index, seed) in seeds.iter().cycle().take(40).enumerate() {
+        let mut entry = seed.clone();
+        entry.id = 1_000 + index as u64;
+        rt.state.history.entries.push(entry);
+    }
+    rt.invalidate();
+    settle(&mut rt);
+    rt.elements()
+        .into_iter()
+        .find(|e| e.key.as_deref() == Some("scroll-bar") && e.path.contains("history-scroll"))
+        .expect("an overflowing list shows its scroll bar");
+
+    let row = element(&rt, "history-entry1").rect;
+    rt.pointer_move(row[0] + row[2] / 2.0, row[1] + row[3] / 2.0);
+    settle(&mut rt);
+    let copy = rt
+        .elements()
+        .into_iter()
+        .find(|e| e.path.contains("history-entry1/") && e.key.as_deref() == Some("row-copy"))
+        .expect("the row's Copy")
+        .rect;
+    let (x, y) = (copy[0] + copy[2] - 1.0, copy[1] + copy[3] / 2.0);
+    rt.pointer_move(x, y);
+    rt.pointer_down(x, y);
+    rt.pointer_up(x, y);
+    settle(&mut rt);
+    assert_eq!(
+        rt.state.history.copied,
+        Some(1),
+        "a press on the Copy's right edge copies"
+    );
+
+    let search = element(&rt, "history-search").rect;
+    let row = element(&rt, "history-entry2").rect;
+    assert!(
+        (row[0] + row[2] - (search[0] + search[2])).abs() < 0.5,
+        "the selected row ends at {} but the search field at {}",
+        row[0] + row[2],
+        search[0] + search[2]
+    );
+}
+
 #[test]
 fn history_copy_writes_the_clipboard() {
     let mut rt = runtime("history", true, PANE_SIZE);
