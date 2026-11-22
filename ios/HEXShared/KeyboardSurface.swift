@@ -388,26 +388,6 @@ extension View {
     }
 }
 
-/// Record typing logs is recording: a dot and "Logging", flat and small, in the dictation
-/// bar's top row (the full keyboard draws `TypingLogMarkView`).
-struct TypingLogMark: View {
-    let textColor: Color
-
-    var body: some View {
-        HStack(spacing: 4) {
-            // Muted, not orange: an orange dot would read as iOS's microphone indicator.
-            Circle()
-                .fill(textColor)
-                .frame(width: 5, height: 5)
-            Text(TypingLogMarkView.text)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(textColor)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(TypingLogMarkView.accessibilityText)
-    }
-}
-
 /// Beside the dictation bar's Hex mark while dictations paste translated: the target's code
 /// ("EN"), so a dictation never comes out in another language by surprise.
 private struct TranslationBadge: View {
@@ -621,14 +601,10 @@ struct KeyboardSurfaceView: View {
             .accessibilityLabel("Open Hex")
 
             // The mark's tap area reaches past its pill into this group's slot: the
-            // outdent keeps the badge, the logging mark, and the status where they were.
+            // outdent keeps the badge and the status where they were.
             HStack(spacing: 8) {
                 if let target = model.translatingTo {
                     TranslationBadge(target: target, palette: p)
-                }
-
-                if model.isLoggingTyping {
-                    TypingLogMark(textColor: p.textMuted)
                 }
 
                 leadingAccessory(palette: p)

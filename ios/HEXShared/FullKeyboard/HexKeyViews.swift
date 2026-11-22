@@ -210,22 +210,6 @@ final class HexKeyRecordingPanel: UIView {
     var metrics = KeyboardMetrics.portrait { didSet { setNeedsLayout() } }
     /// The Hex key sits on the left (Settings › Keyboard › Hex key): ✓ and ✕ lead.
     var hexOnLeading = false { didSet { if hexOnLeading != oldValue { setNeedsLayout() } } }
-    /// Record typing logs is recording: the mark the strip shows, at the well's end away
-    /// from ✕ and ✓.
-    var showsLoggingMark = false {
-        didSet {
-            guard showsLoggingMark != oldValue else { return }
-            if showsLoggingMark, loggingMark == nil {
-                let mark = TypingLogMarkView()
-                mark.textColor = palette.textMuted
-                addSubview(mark)
-                loggingMark = mark
-            }
-            loggingMark?.isHidden = !showsLoggingMark
-            setNeedsLayout()
-        }
-    }
-    private var loggingMark: TypingLogMarkView?
 
     init(loudness: @escaping () -> Float) {
         var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 5)
@@ -301,7 +285,6 @@ final class HexKeyRecordingPanel: UIView {
         cancelButton.palette = palette
         doneButton.palette = palette
         doneSpinner.color = palette.textBase
-        loggingMark?.textColor = palette.textMuted
     }
 
     override func layoutSubviews() {
@@ -328,21 +311,7 @@ final class HexKeyRecordingPanel: UIView {
         let wellLeft = hexOnLeading ? cancelButton.frame.maxX + 6 : innerLeft
         let wellRight = hexOnLeading ? innerRight : cancelButton.frame.minX - 6
         well.frame = CGRect(x: wellLeft, y: rowY, width: max(24, wellRight - wellLeft), height: rowH)
-        if let loggingMark, showsLoggingMark {
-            // The scope stops short of the mark, so its dots never run under the text.
-            let size = loggingMark.sizeThatFits(bounds.size)
-            let markX = hexOnLeading ? well.frame.maxX - 14 - size.width : well.frame.minX + 14
-            loggingMark.frame = CGRect(x: markX, y: well.frame.midY - size.height / 2, width: size.width, height: size.height)
-            if hexOnLeading {
-                let end = loggingMark.frame.minX - 6 - well.frame.minX
-                scope.frame = CGRect(x: 0, y: 0, width: max(0, end), height: well.bounds.height)
-            } else {
-                let lead = loggingMark.frame.maxX + 6 - well.frame.minX
-                scope.frame = CGRect(x: lead, y: 0, width: max(0, well.bounds.width - lead), height: well.bounds.height)
-            }
-        } else {
-            scope.frame = well.bounds
-        }
+        scope.frame = well.bounds
     }
 
     @objc private func done() { onDone?() }

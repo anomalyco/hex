@@ -1859,24 +1859,19 @@ final class FullKeyboardEngineTests: XCTestCase {
             let panel = HexKeyRecordingPanel(loudness: { -62 })
             defer { panel.tearDown() }
             panel.hexOnLeading = onLeft
-            panel.showsLoggingMark = true
             panel.frame = CGRect(x: 0, y: 0, width: 393, height: 44)
             panel.layoutIfNeeded()
             let done = try XCTUnwrap(panel.subviews.first { $0.accessibilityLabel == "Done" })
             let cancel = try XCTUnwrap(panel.subviews.first { $0.accessibilityLabel == "Cancel dictation" })
             let well = try XCTUnwrap(panel.subviews.first { $0.subviews.contains(panel.scope) })
-            let mark = try XCTUnwrap(panel.subviews.first { $0 is TypingLogMarkView })
             if onLeft {
                 XCTAssertEqual(done.frame.minX, KeyboardMetrics.portrait.side, accuracy: 0.5)
                 XCTAssertLessThan(done.frame.maxX, cancel.frame.minX)
                 XCTAssertLessThan(cancel.frame.maxX, well.frame.minX)
-                XCTAssertGreaterThan(mark.frame.minX, well.frame.midX, "the mark at the well's far end")
-                XCTAssertLessThanOrEqual(well.frame.minX + panel.scope.frame.maxX, mark.frame.minX)
             } else {
                 XCTAssertEqual(done.frame.maxX, 393 - KeyboardMetrics.portrait.side, accuracy: 0.5)
                 XCTAssertLessThan(cancel.frame.maxX, done.frame.minX)
                 XCTAssertLessThan(well.frame.maxX, cancel.frame.minX)
-                XCTAssertLessThan(mark.frame.maxX, well.frame.midX)
             }
         }
     }
