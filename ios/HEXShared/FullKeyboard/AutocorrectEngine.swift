@@ -1034,7 +1034,7 @@ final class AutocorrectEngine {
     }
 
     /// `cautiousReplacement` in this language alone.
-    private func ownReplacement(for token: String) -> String? {
+    func ownReplacement(for token: String) -> String? {
         let lower = token.lowercased()
         // 1. Explicit iOS Text Replacement (`omw` -> `On my way!`).
         if let shortcut = shortcut(for: token) {
@@ -1117,8 +1117,10 @@ final class AutocorrectEngine {
             return accented
         }
 
-        // 5. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
-        guard token.count >= 3, !token.contains("'") else { return nil }
+        // 5. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words
+        // (a French elision's sides each as a word, `frenchElisionFix`).
+        if token.contains("'") { return frenchElisionFix(for: token) }
+        guard token.count >= 3 else { return nil }
         guard !checker.isWordValid(token) else { return nil }
 
         var bestGuess: String?

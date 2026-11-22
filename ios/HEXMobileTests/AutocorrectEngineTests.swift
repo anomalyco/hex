@@ -779,6 +779,36 @@ final class AutocorrectEngineTests: XCTestCase {
         engine.replacementOnSpace(beforeInput: before, field: .text, autocorrectionType: .default)?.replacement
     }
 
+    /// French elisions ("l'", "qu'"), typed on the AZERTY's apostrophe key: a slip on either
+    /// side of the apostrophe is fixed as a word of its own, an elision a key away from the one
+    /// typed becomes it, and a whole word the dictionary knows, a lone "l'" and every other
+    /// language's apostrophes stay as typed.
+    func testFrenchElisionsAreCorrectedOnEitherSide() {
+        let french = stubbed {
+            $0.valid = ["homme", "il", "ici", "est", "accord", "ai", "aujourd'hui"]
+            $0.guessTable = ["hpmme": ["homme"], "eat": ["est"], "acvord": ["accord"]]
+        }
+        french.setLanguage(.french, available: ["fr_FR"])
+        XCTAssertEqual(fix(french, before: "l'hpmme"), "l'homme")
+        XCTAssertEqual(fix(french, before: "Je dis l'hpmme"), "l'homme")
+        XCTAssertEqual(fix(french, before: "L'hpmme"), "L'homme")
+        XCTAssertEqual(fix(french, before: "d'acvord"), "d'accord")
+        XCTAssertEqual(fix(french, before: "c'eat"), "c'est")
+        XCTAssertEqual(fix(french, before: "k'homme"), "l'homme", "a slip in the elision")
+        XCTAssertEqual(fix(french, before: "qi'il"), "qu'il")
+        XCTAssertNil(fix(french, before: "l'homme"))
+        XCTAssertNil(fix(french, before: "j'ai"))
+        XCTAssertNil(fix(french, before: "aujourd'hui"))
+        XCTAssertNil(fix(french, before: "l'"))
+        XCTAssertNil(fix(french, before: "zz'homme"), "no elision a key away")
+        let english = stubbed {
+            $0.valid = ["man"]
+            $0.guessTable = ["hpmme": ["homme"]]
+        }
+        english.setLanguage(.english, available: ["en_US"])
+        XCTAssertNil(fix(english, before: "l'hpmme"), "other languages never split a word at its apostrophe")
+    }
+
     /// French and English on one keyboard (Apple's "Français et English"): a word of either is
     /// never "corrected" into the other, a typo only one can fix gets its fix, and when both
     /// can, the language of the words before wins, else the keyboard's own.

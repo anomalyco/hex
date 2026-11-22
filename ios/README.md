@@ -1009,8 +1009,10 @@ never at a launch by itself.
   (iOS 27.0 simulator, black box), its own (today's) first: English QWERTY, AZERTY, QWERTZ,
   Dvorak; Deutsch "QWERTZ – Deutsch" (with ü ö ä), QWERTZ, QWERTY, AZERTY; Español
   "QWERTY – Español" (with ñ), QWERTY, AZERTY, QWERTZ; Français (France) AZERTY, QWERTY,
-  QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Apple's
-  "– French" variants add only the ´ key Hex leaves out); Italiano and Português QWERTY,
+  QWERTZ, (Canada) QWERTY, AZERTY, QWERTZ, (Suisse) QWERTZ, AZERTY, QWERTY (Français (France)'s
+  AZERTY is Apple's "AZERTY – French", the first layout Apple lists for France and Belgium, with
+  the apostrophe key; Apple's other "– French" variants, Canada's and Switzerland's own among
+  them, add that key at the end of row 2, and Hex's are still the plain ones); Italiano and Português QWERTY,
   AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
   "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
   simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Srpski
@@ -1035,10 +1037,16 @@ never at a launch by itself.
   Norsk (`å` ending row 1, `ø æ` row 2), Español (`ñ` ending row 2; beside English, the
   first of the two's keys, above),
   Deutsch (QWERTZ with `ü`, `ö ä`), Italiano and Português on the English letters
-  (Apple's keyboards for them are QWERTY), Français (France) on Apple's AZERTY (rows of
-  10, 10 and 6 letters, W to N under E to I with a gap beside shift and delete, as on
-  Apple's French and English keyboard; Apple's French-only one adds a ´ dead key that Hex
-  leaves out), Français (Canada) on QWERTY and Français (Suisse) on QWERTZ, as on Apple's
+  (Apple's keyboards for them are QWERTY), Français (France) on Apple's "AZERTY – French" (rows of
+  10, 10 and 7 keys: W to N and the apostrophe key, a letter wide and centred between shift
+  and delete at their English size, as on Apple's; Hex's keycaps fall on Apple's to the pixel on
+  an iPhone 17 Pro and SE, upright and turned, iOS 27.2 simulator). The apostrophe key
+  (`FrenchTyping`) shows ’ right after a letter and types the apostrophe, curled as the field
+  curls quotes (l’homme, qu’il), and holds ' ’ ‘ `; anywhere else it shows and types ´ (never a
+  dead key) and holds ´ ˋ ˆ ¨, as Apple's does. It is no letter, so the decoder, Adaptive touch,
+  next-letter odds and swipe typing never read it, and French autocorrect fixes a slip on either
+  side of an elision's apostrophe as a word of its own ("l'hpmme" → "l'homme", "k'homme" →
+  "l'homme", `frenchElisionFix`). The iPad keeps its own ' and : key instead; Français (Canada) on QWERTY and Français (Suisse) on QWERTZ, as on Apple's
   (automatic picks them for `fr-CA` and `fr-CH`, AZERTY for any other French, Belgium
   included), Русский (Apple's ЙЦУКЕН: 11, 11 and 9 letters, ё on a
   held е, ъ on a held ь), Українська (the standard Ukrainian ЙЦУКЕН, ДСТУ 4862:2007, in the

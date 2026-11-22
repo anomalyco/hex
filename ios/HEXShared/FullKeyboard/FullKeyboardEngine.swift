@@ -297,6 +297,8 @@ final class FullKeyboardEngine {
         refreshAutoCapitalization()
         refreshSuggestions()
         trackpadFieldChanged()
+        // French's apostrophe key shows ’ or ´ by the character before the cursor.
+        if layout.language == .french, layout.key(.character(FrenchTyping.key)) != nil { onChange?() }
     }
 
     /// Text moved by a path of Hex's own around the keys (a delete slide, a paste, a
@@ -521,7 +523,7 @@ final class FullKeyboardEngine {
         guard activeAccentMenu == nil,
               let touch = touches[id],
               !touch.committed,
-              let base = touch.key.character else { return false }
+              let base = touch.key.character.map(heldBase) else { return false }
         let dx = touch.point.x - touch.startPoint.x
         let dy = touch.point.y - touch.startPoint.y
         guard (dx * dx + dy * dy).squareRoot() <= Self.accentSlop else { return false }
