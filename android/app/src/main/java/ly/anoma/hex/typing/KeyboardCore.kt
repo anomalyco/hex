@@ -95,6 +95,15 @@ object KeyboardCore {
 
     external fun swipeNeedsSpace(before: String?): Boolean
 
+    /** The cost of English contraction `word` (any case), as `hk_swipe_cost_of_contraction` with the core's base. */
+    external fun swipeCostOfContraction(word: String): Double
+
+    /** The cost of one of your own words. */
+    external fun swipeOwnWordCost(): Double
+
+    /** The English contractions Swipe typing reads as common words, in iOS's order. */
+    external fun swipeEnglishContractions(): Array<String>
+
     /** `points` interleaves (x, y); `key` is the character of the key it went down and lifted on. */
     external fun swipeIsSlidTap(points: DoubleArray, pitch: Double, key: String?, firstReading: String?): Boolean
 }
