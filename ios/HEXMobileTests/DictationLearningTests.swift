@@ -531,6 +531,18 @@ final class LiveDictationTests: XCTestCase {
         XCTAssertTrue(LiveTranscript(settled: " ", tentative: "").isEmpty)
     }
 
+    func testTheLongestDictationShowsOnlyItsEndFromAWordsStart() {
+        let short = LiveTranscript(settled: "Hey, I am late.", tentative: "Can you")
+        XCTAssertTrue(LiveDictationPreviewView.tail(of: short, characters: 200) == ("Hey, I am late.", " Can you"))
+        let long = LiveTranscript(settled: "one two three four five six", tentative: "seven eight")
+        let end = LiveDictationPreviewView.tail(of: long, characters: 20)
+        XCTAssertEqual(end.settled, "five six", "no word shows cut")
+        XCTAssertEqual(end.tentative, " seven eight")
+        let tentativeOnly = LiveDictationPreviewView.tail(of: LiveTranscript(settled: "", tentative: "alpha beta gamma delta"), characters: 12)
+        XCTAssertEqual(tentativeOnly.settled, "")
+        XCTAssertEqual(tentativeOnly.tentative, "gamma delta")
+    }
+
     func testTheSwitchesDefaultToShowingButNotTyping() throws {
         let suite = "anomaly.hex.tests.live-dictation"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))

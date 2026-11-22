@@ -24,11 +24,11 @@ final class LiveDictationPreviewView: UIView {
     }
     var globeRadius: CGFloat = FullKeyboardPalette.cornerRadius { didSet { globe.cornerRadius = globeRadius } }
     private(set) var transcript = LiveTranscript()
-    private let textView = UITextView(usingTextLayoutManager: true)
+    /// The words' box, and the words in it: one label, as tall as the text it shows, moved up
+    /// by whole lines once that's taller than the box.
+    private let box = UIView()
+    private let label = UILabel()
     private let globe = GlobeKeycapView()
-    /// When the person last scrolled back: the newest words wait a moment before taking the view again.
-    private var scrolledBackAt: Date?
-    private let scrollDelegate = ScrollWatcher()
 
     static let placeholder = String(localized: "Listening…")
 
@@ -36,19 +36,12 @@ final class LiveDictationPreviewView: UIView {
         super.init(frame: frame)
         backgroundColor = .clear
         isOpaque = false
-        textView.backgroundColor = .clear
-        textView.isEditable = false
-        textView.isSelectable = false
-        textView.isScrollEnabled = true
-        textView.showsVerticalScrollIndicator = false
-        textView.alwaysBounceVertical = false
-        textView.textContainer.lineFragmentPadding = 0
-        textView.contentInsetAdjustmentBehavior = .never
-        textView.isAccessibilityElement = false
-        textView.accessibilityElementsHidden = true
-        scrollDelegate.onDrag = { [weak self] in self?.scrolledBackAt = Date() }
-        textView.delegate = scrollDelegate
-        addSubview(textView)
+        box.clipsToBounds = true
+        box.isUserInteractionEnabled = false
+        label.numberOfLines = 0
+        label.isAccessibilityElement = false
+        box.addSubview(label)
+        addSubview(box)
         globe.isHidden = true
         globe.isUserInteractionEnabled = false
         addSubview(globe)
@@ -69,16 +62,14 @@ final class LiveDictationPreviewView: UIView {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // The words' own box, so scrolling shows whole lines at its top.
         let frame = bounds.inset(by: textInsets)
-        if textView.frame != frame {
-            textView.frame = frame
-            textView.textContainerInset = .zero
-            scrollToNewest(animated: false)
+        if box.frame != frame {
+            box.frame = frame
+            placeWords()
         }
     }
 
-    /// A touch anywhere on it stays with it, scrolling the words at most.
+    /// A touch anywhere on it stays with it.
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
         bounds.contains(point)
     }
@@ -100,29 +91,53 @@ final class LiveDictationPreviewView: UIView {
             text.append(NSAttributedString(string: Self.placeholder, attributes: base.merging([.foregroundColor: palette.textMuted]) { $1 }))
             accessibilityLabel = Self.placeholder
         } else {
-            text.append(NSAttributedString(string: transcript.settled, attributes: base.merging([.foregroundColor: palette.textBase]) { $1 }))
-            text.append(NSAttributedString(string: transcript.tentativeJoined, attributes: base.merging([.foregroundColor: palette.textMuted]) { $1 }))
+            let shown = Self.tail(of: transcript, characters: shownCharacters)
+            text.append(NSAttributedString(string: shown.settled, attributes: base.merging([.foregroundColor: palette.textBase]) { $1 }))
+            text.append(NSAttributedString(string: shown.tentative, attributes: base.merging([.foregroundColor: palette.textMuted]) { $1 }))
             accessibilityLabel = transcript.text
         }
-        textView.attributedText = text
-        scrollToNewest(animated: true)
+        label.attributedText = text
+        placeWords()
+    }
+
+    /// About as many characters as fill the box and three lines more: a minute's text laid out
+    /// whole in a scrolling text view held 27 MB more in the keyboard (iPhone 17 Pro).
+    private var shownCharacters: Int {
+        let lines = max(1, box.bounds.height / lineHeight) + 3
+        let perLine = max(10, box.bounds.width / (font.pointSize * 0.42))
+        return max(200, Int(lines * perLine))
+    }
+
+    /// The end of `transcript` in at most `characters`, from a word's start: its settled part,
+    /// then its tentative tail as it follows them.
+    static func tail(of transcript: LiveTranscript, characters: Int) -> (settled: String, tentative: String) {
+        let settled = transcript.settled
+        let tentative = transcript.tentativeJoined
+        let total = settled.count + tentative.count
+        guard total > characters else { return (settled, tentative) }
+        let full = settled + tentative
+        var start = full.index(full.startIndex, offsetBy: total - characters)
+        // From the next word's start, so no word shows cut.
+        if let space = full[start...].firstIndex(where: \.isWhitespace) {
+            start = full[space...].firstIndex(where: { !$0.isWhitespace }) ?? start
+        }
+        let dropped = full.distance(from: full.startIndex, to: start)
+        if dropped >= settled.count {
+            return ("", String(full[start...]))
+        }
+        return (String(settled.dropFirst(dropped)), tentative)
     }
 
     private var lineHeight: CGFloat { (font.lineHeight * 1.08).rounded(.up) }
 
-    /// Keeps the last line in view with whole lines at the top, unless the person scrolled
-    /// back in the last 3 s.
-    private func scrollToNewest(animated: Bool) {
-        if let scrolledBackAt, Date().timeIntervalSince(scrolledBackAt) < 3 { return }
-        guard textView.bounds.height > 0 else { return }
-        textView.layoutIfNeeded()
-        let line = lineHeight
-        // Room to scroll a part line further, so the top line is never cut.
-        if textView.contentInset.bottom != line { textView.contentInset.bottom = line }
-        let overflow = textView.contentSize.height - textView.bounds.height
-        let target = overflow > 0 ? (overflow / line).rounded(.up) * line : 0
-        guard abs(textView.contentOffset.y - target) > 0.5 else { return }
-        textView.setContentOffset(CGPoint(x: 0, y: target), animated: animated && window != nil)
+    /// The newest line at the box's foot once the words overflow it, with whole lines above.
+    private func placeWords() {
+        let width = box.bounds.width
+        guard width > 0 else { return }
+        let height = label.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude)).height.rounded(.up)
+        let overflow = height - box.bounds.height
+        let y = overflow > 0 ? -(overflow / lineHeight).rounded(.up) * lineHeight : 0
+        label.frame = CGRect(x: 0, y: y, width: width, height: height)
     }
 }
 
@@ -151,15 +166,6 @@ private final class GlobeKeycapView: UIView {
             .withTintColor(palette.textBase, renderingMode: .alwaysOriginal) else { return }
         image.draw(at: CGPoint(x: bounds.midX - image.size.width / 2, y: bounds.midY - image.size.height / 2 + (isLandscape ? 0 : -1)))
     }
-}
-
-/// Notes when the person drags the words, so the newest line doesn't snatch the view back.
-@MainActor
-private final class ScrollWatcher: NSObject, UITextViewDelegate {
-    var onDrag: (() -> Void)?
-
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) { onDrag?() }
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) { onDrag?() }
 }
 
 /// Puts `LiveDictationPreviewView` in place of a full keyboard's keys while it records with
