@@ -442,7 +442,7 @@ pub fn is_slid_tap(
     let reach = pitch * SLID_TAP_REACH;
     if !points
         .iter()
-        .all(|p| (p.0 - first.0).hypot(p.1 - first.1) <= reach)
+        .all(|p| libm::hypot(p.0 - first.0, p.1 - first.1) <= reach)
     {
         return false;
     }

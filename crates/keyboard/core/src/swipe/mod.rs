@@ -189,9 +189,9 @@ impl Parameters {
     fn cost(&self, squared: f64, sigma: f64, straying_sigma: f64) -> f64 {
         let near = (1.0 - self.stray) / (sigma * sigma);
         let far = self.stray / (straying_sigma * straying_sigma);
-        let density = near * (-squared / (2.0 * sigma * sigma)).exp()
-            + far * (-squared / (2.0 * straying_sigma * straying_sigma)).exp();
-        ((near + far) / max(density, f64::MIN_POSITIVE)).ln()
+        let density = near * libm::exp(-squared / (2.0 * sigma * sigma))
+            + far * libm::exp(-squared / (2.0 * straying_sigma * straying_sigma));
+        libm::log((near + far) / max(density, f64::MIN_POSITIVE))
     }
 }
 

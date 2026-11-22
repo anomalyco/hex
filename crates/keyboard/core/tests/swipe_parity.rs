@@ -1,5 +1,8 @@
 //! The Rust swipe decoder reads every swipe as the Swift one it was ported from does: the same
-//! candidates in the same order, the same `scored`, and costs equal bit for bit.
+//! candidates in the same order and the same `scored`. Costs are the core's own since it
+//! computes exp, log, atan2 and cos with the `libm` crate rather than Apple's libm: they must
+//! equal a file's bit for bit when its header says they are the core's (`"costs"`), as the
+//! committed fixture's are; against the Swift decoder's costs, the changed ones are counted.
 //!
 //! The cases come from `SwipeParityExportTests` (`ios/HEXMobileTests/SwipeParity`), which
 //! documents the format: the committed `tests/fixtures/swipe-parity.jsonl`, with the Swift
@@ -41,6 +44,11 @@ fn check(path: &str) {
     let mut layouts: HashMap<u64, Layout> = HashMap::new();
     let mut cases: HashMap<String, usize> = HashMap::new();
     let mut differences: Vec<String> = Vec::new();
+    // Whether the file's costs are the core's, so they must match bit for bit.
+    let mut core_costs = false;
+    let (mut candidates, mut changed_costs, mut max_ulps) = (0usize, 0usize, 0u64);
+    // Changed costs by how far: 1 ulp, 2 ulps, 3 to 1,000, more.
+    let mut by_size = [0usize; 4];
     let mut rust_ns: Vec<u128> = Vec::new();
     let mut swift_ns: Vec<u128> = Vec::new();
     for line in text.lines() {
@@ -48,6 +56,7 @@ fn check(path: &str) {
         match v["kind"].as_str().expect("kind") {
             "header" => {
                 assert_eq!(v["generator"], 1, "{path}: a generator this test reads");
+                core_costs = v["costs"].is_string();
                 check_parameters(&v["parameters"]);
                 for (language, digest) in v["models"].as_object().expect("models") {
                     let bytes = bundled_model(language);
@@ -150,7 +159,29 @@ fn check(path: &str) {
                     .map(|c| (c.text.clone(), format!("{:016x}", c.cost.to_bits())))
                     .collect();
                 let scored = v["scored"].as_u64().unwrap() as usize;
-                if got != expected || reading.scored != scored {
+                let words =
+                    |c: &[(String, String)]| c.iter().map(|c| c.0.clone()).collect::<Vec<_>>();
+                let mut costs_differ = false;
+                // Costs compared where the same word is read in the same place.
+                for (a, b) in expected.iter().zip(&got).filter(|(a, b)| a.0 == b.0) {
+                    candidates += 1;
+                    let ulps = ulps(&a.1, &b.1);
+                    if ulps > 0 {
+                        changed_costs += 1;
+                        by_size[match ulps {
+                            1 => 0,
+                            2 => 1,
+                            3..=1000 => 2,
+                            _ => 3,
+                        }] += 1;
+                        max_ulps = max_ulps.max(ulps);
+                        costs_differ = true;
+                    }
+                }
+                if words(&expected) != words(&got)
+                    || reading.scored != scored
+                    || (core_costs && costs_differ)
+                {
                     differences.push(format!(
                         "case {} ({language} {}, {:?}): swift {expected:?} of {scored}, rust {got:?} of {}",
                         v["id"], v["type"], v["word"], reading.scored
@@ -163,8 +194,17 @@ fn check(path: &str) {
     let mut counts: Vec<_> = cases.iter().collect();
     counts.sort();
     println!(
-        "{path}: cases {counts:?}, differences {}",
-        differences.len()
+        "{path}: cases {counts:?}, differences {}; costs {} ({candidates} candidates): {changed_costs} changed (1 ulp {}, 2 ulps {}, 3-1000 {}, more {}), max {max_ulps} ulp",
+        differences.len(),
+        if core_costs {
+            "the core's"
+        } else {
+            "the Swift decoder's"
+        },
+        by_size[0],
+        by_size[1],
+        by_size[2],
+        by_size[3],
     );
     println!("  rust read {}", timing(&mut rust_ns));
     if !swift_ns.is_empty() {
@@ -179,6 +219,16 @@ fn check(path: &str) {
         "{} readings differ from Swift's",
         differences.len()
     );
+}
+
+/// How many representable doubles apart two costs (IEEE 754 bits in hex) are.
+fn ulps(a: &str, b: &str) -> u64 {
+    let (a, b) = (
+        u64::from_str_radix(a, 16).unwrap(),
+        u64::from_str_radix(b, 16).unwrap(),
+    );
+    // Costs are finite and positive, so their bits order as their values do.
+    a.abs_diff(b)
 }
 
 fn check_parameters(swift: &Value) {

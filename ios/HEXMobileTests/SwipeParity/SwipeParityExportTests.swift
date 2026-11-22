@@ -5,17 +5,18 @@ import XCTest
 
 /// Writes swipe parity fixtures (`crates/keyboard/core/tests/swipe_parity.rs`): `SwipeParity`'s
 /// cases with what the app's decoder (`SwipeDecoder`, the Rust core) reads for each. The
-/// committed fixture was written by the Swift decoder the core was ported from, and the core
-/// reads it bit for bit; export again only to record an intended change in the core. Skipped
-/// unless asked for:
+/// committed fixture's words, order and `scored` were written by the Swift decoder the core was
+/// ported from, and its costs are the core's (it computes exp, log, atan2 and cos with the
+/// `libm` crate, not Apple's libm); export again only to record an intended change in the core.
+/// Skipped unless asked for:
 ///
 ///     xcodebuild test … -only-testing:HEXMobileTests/SwipeParityExportTests \
 ///       TEST_RUNNER_HEX_SWIPE_PARITY_OUT=/tmp/swipe-parity.jsonl TEST_RUNNER_HEX_SWIPE_PARITY_COUNT=800
 ///
 /// (`TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1` adds each read's time in nanoseconds.)
 ///
-/// JSON Lines: a header (generator version, the decoder, the models' SHA-256, the
-/// parameters), each context and layout, then one case per line. Numbers that must come
+/// JSON Lines: a header (generator version, the decoder, whose costs they are, the models'
+/// SHA-256, the parameters), each context and layout, then one case per line. Numbers that must come
 /// through exactly are strings: a key's centre, a split layout's edges or a base time as
 /// Swift's shortest round-trip decimal, a cost as its IEEE 754 bits in 16 hex digits. The
 /// touches (as whole quarter points, x then y) and their times (as whole ticks,
@@ -53,7 +54,7 @@ final class SwipeParityExportTests: XCTestCase {
             "\(JSONLines.string($0.label ?? "")):\(JSONLines.string("\($0.value)"))"
         }
         out.line(
-            #"{"kind":"header","generator":\#(SwipeParity.generatorVersion),"decoder":"SwipeDecoder (the Rust core)","#
+            #"{"kind":"header","generator":\#(SwipeParity.generatorVersion),"decoder":"SwipeDecoder (the Rust core)","costs":"the core's (libm)","#
                 + #""count":\#(count),"models":{\#(models.joined(separator: ","))},"parameters":{\#(parameters.joined(separator: ","))}}"#
         )
         for setup in setups {
