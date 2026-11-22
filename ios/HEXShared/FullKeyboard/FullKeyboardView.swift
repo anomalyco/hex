@@ -57,6 +57,8 @@ final class FullKeyboardView: UIView {
     private var barHoldTouch: UITouch?
     private var barHoldWork: DispatchWorkItem?
     private var lastDictation: DictationUndo?
+    /// The globe's touch went off the key before lifting (`globeTouch`).
+    private var globeTouchLeftKey = false
     /// The model's stage last seen, for a selection's dictation ending
     /// (`FullKeyboardView+Selection`).
     var lastStagePhase: KeyboardViewModel.StagePhase?
@@ -1410,14 +1412,36 @@ final class FullKeyboardView: UIView {
         }
     }
 
+    /// The globe's touches go to UIKit's `handleInputModeList(from:with:)` as this control's
+    /// real events, as Apple documents: a tap switches to the next keyboard, a hold (0.2 s) or a
+    /// slide up opens the list, and lifting over the list picks that keyboard.
     private func configureGlobe() {
         globeButton.removeTarget(nil, action: nil, for: .allEvents)
-        if let controller = hostController {
-            globeButton.addTarget(
-                controller,
-                action: #selector(UIInputViewController.handleInputModeList(from:with:)),
-                for: .allTouchEvents
-            )
+        guard hostController != nil else { return }
+        globeButton.addTarget(self, action: #selector(globeTouch(_:with:)), for: .allTouchEvents)
+    }
+
+    @objc private func globeTouch(_ sender: UIButton, with event: UIEvent) {
+        guard let controller = hostController else { return }
+        if let touch = event.touches(for: sender)?.first {
+            let onKey = sender.bounds.contains(touch.location(in: sender))
+            if touch.phase == .began { globeTouchLeftKey = false }
+            if touch.phase == .moved, !onKey { globeTouchLeftKey = true }
+            guard Self.passesGlobeTouch(
+                phase: touch.phase, onKey: onKey, leftKey: globeTouchLeftKey,
+                appleKeyboardSplits: engine.posture.splitsKeyboard
+            ) else { return }
         }
+        controller.handleInputModeList(from: sender, with: event)
+    }
+
+    /// Where Apple's keyboard is split (the Duo unfolded and upright), a lift on the globe that
+    /// never left it isn't passed on, so UIKit's hold opens the list instead of switching to the
+    /// next keyboard. iOS 27.2's switch to the next keyboard can end the app being typed in there
+    /// (TestFlight build 121, iPhone Duo: `-[UIKeyboardLayoutStar activationIndicatorView]` reads
+    /// one key past the end of a split keyboard not laid out yet, to show its language); a pick
+    /// from the list doesn't show that indicator.
+    static func passesGlobeTouch(phase: UITouch.Phase, onKey: Bool, leftKey: Bool, appleKeyboardSplits: Bool) -> Bool {
+        !(appleKeyboardSplits && phase == .ended && onKey && !leftKey)
     }
 }
