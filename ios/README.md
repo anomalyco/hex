@@ -628,7 +628,7 @@ never at a launch by itself.
     with Autocorrect on). Stored as `experiments.spatialAutocorrect` from when it was an
     experiment off by default: unset or true is on, false off, so testers who turned it
     off keep it off. A noisy-channel decoder
-    (`TypingDecoder`) replaces `UITextChecker`'s one-edit guesses on space and in the
+    (`TypingDecoder`, a wrapper of the keyboard's Rust core: `crates/keyboard`) replaces `UITextChecker`'s one-edit guesses on space and in the
     strip for English, Spanish and French (France): each tap is scored against every letter with a 2D
     Gaussian around the key (shifted by Learn how I type's tap offsets when it has 20
     or more taps on a letter), words are found with a beam search over a memory-mapped

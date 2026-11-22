@@ -3,7 +3,8 @@ import Darwin
 import Foundation
 @testable import HEX
 
-/// One language's cases for `TapParityExport`: key geometry from the real `KeyboardLayout`
+/// One language's tap parity cases (`TapParityExport`, `TapParityGolden`), answered by the
+/// shipped decoder (`TypingDecoder` over the Rust core): key geometry from the real `KeyboardLayout`
 /// (375, 390, 402 and 430 pt wide, and the Duo's split keyboard), each with and without Learn
 /// how I type offsets; words drawn from the model by frequency band and typed as key centres
 /// plus Gaussian noise at several spreads, with slips (a neighbour key, two taps swapped, a
@@ -25,35 +26,29 @@ struct TapParityExporter {
     struct KeySet {
         var id: Int
         /// What the decoder reads with: the layout's centres, moved by the offsets.
-        var keys: TapOracle.Keys
+        var keys: TypingDecoder.Keys
         /// The layout's own centres, where the generated fingers aim.
-        var truth: TapOracle.Keys
+        var truth: TypingDecoder.Keys
         var letters: [(Character, CGPoint)]
     }
 
     let language: KeyboardLanguage
-    let model: TapOracleModel
+    let model: TypingDecoderModel
     var rng: TapParityRandom
     let byFrequency: [Int]
     /// The never-suggest lists by Suggest swear words (on: slurs only).
     let blocked: [Bool: [String]]
     let clean: Set<String>
-    var decoders: [Int: TapOracle] = [:]
+    var decoders: [Int: TypingDecoder] = [:]
     var keysets: [KeySet] = []
     var counts: [String: Int] = [:]
-    var ties: [String: Int] = [:]
-    var swiftDiffers: [String: Int] = [:]
     var decideNanos: [UInt64] = []
 
     init(language: KeyboardLanguage, seed: UInt64) throws {
         self.language = language
         rng = TapParityRandom(state: seed)
         let name = language.rawValue
-        var url = Bundle.main.url(forResource: name, withExtension: "hextm")
-        if url == nil, let plugins = Bundle.main.builtInPlugInsURL {
-            url = Bundle(url: plugins.appendingPathComponent("HEXKeyboard.appex"))?.url(forResource: name, withExtension: "hextm")
-        }
-        guard let url, let model = TapOracleModel(url: url) else { throw TapParityError.noModel(name) }
+        guard let model = TypingDecoderModel.bundled(name) else { throw TapParityError.noModel(name) }
         self.model = model
         byFrequency = (0..<model.wordCount).sorted { model.unigramCost($0) < model.unigramCost($1) }
         let words = OffensiveWords.bundled(name)
@@ -62,11 +57,11 @@ struct TapParityExporter {
     }
 
     var summary: String {
-        let kinds = counts.keys.sorted().map { "\($0)=\(counts[$0]!) tie=\(ties[$0, default: 0]) swift-differs=\(swiftDiffers[$0, default: 0])" }
+        let kinds = counts.keys.sorted().map { "\($0)=\(counts[$0]!)" }
         let sorted = decideNanos.sorted()
         func at(_ q: Double) -> Double { sorted.isEmpty ? 0 : Double(sorted[min(sorted.count - 1, Int(q * Double(sorted.count)))]) / 1000 }
         let mean = sorted.isEmpty ? 0 : Double(sorted.reduce(0, +)) / Double(sorted.count) / 1000
-        return kinds.joined(separator: " ") + String(format: " oracle-decide-us median=%.1f p95=%.1f mean=%.1f", at(0.5), at(0.95), mean)
+        return kinds.joined(separator: " ") + String(format: " decide-us median=%.1f p95=%.1f mean=%.1f", at(0.5), at(0.95), mean)
     }
 
     mutating func run(count: Int, into writer: inout TapParityWriter) throws {
@@ -103,8 +98,8 @@ struct TapParityExporter {
                         stats[c] = TypingJournalKeyStats(count: n, dx: rng.gaussian() * 0.2 * Double(n), dy: rng.gaussian() * 0.2 * Double(n))
                     }
                 }
-                let offsets = TapOracle.offsets(from: stats, layout: layout)
-                guard let keys = TapOracle.Keys(layout: layout, offsets: offsets), let truth = TapOracle.Keys(layout: layout) else {
+                let offsets = TypingDecoder.offsets(from: stats, layout: layout)
+                guard let keys = TypingDecoder.Keys(layout: layout, offsets: offsets), let truth = TypingDecoder.Keys(layout: layout) else {
                     throw TapParityError.noKeys
                 }
                 let set = KeySet(id: keysets.count, keys: keys, truth: truth, letters: truth.centres.sorted { $0.key < $1.key }.map { ($0.key, $0.value) })
@@ -128,7 +123,7 @@ struct TapParityExporter {
         }
     }
 
-    static func json(_ keys: TapOracle.Keys) -> [String: Any] {
+    static func json(_ keys: TypingDecoder.Keys) -> [String: Any] {
         [
             "centres": keys.centres.sorted { $0.key < $1.key }.map { [String($0.key)] + bits($0.value) },
             "pitch": [bits(Double(keys.pitch.width)), bits(Double(keys.pitch.height))],
@@ -139,12 +134,12 @@ struct TapParityExporter {
 
     // MARK: Fingers
 
-    private mutating func decoder(user: Int, swearing: Bool) -> TapOracle {
+    private mutating func decoder(user: Int, swearing: Bool) -> TypingDecoder {
         let id = user * 2 + (swearing ? 1 : 0)
         if let d = decoders[id] { return d }
-        var d = TapOracle(model: model)
-        d.userWords = TapOracle.UserWords(Self.userSets[user], model: model)
-        d.neverSuggest = TapOracle.NeverSuggest(blocked[swearing]!, model: model)
+        var d = TypingDecoder(model: model)
+        d.userWords = TypingDecoder.UserWords(Self.userSets[user], model: model)
+        d.neverSuggest = TypingDecoder.NeverSuggest(blocked[swearing]!, model: model)
         decoders[id] = d
         return d
     }
@@ -167,7 +162,7 @@ struct TapParityExporter {
     /// Where a finger aims for `c`: its key, or its base letter's (é on a layout without it).
     private func aim(_ c: Character, _ set: KeySet) -> CGPoint? {
         if let p = set.truth.centres[c] { return p }
-        guard let base = TapOracle.withoutAccents(String(c)).first, base != c else { return nil }
+        guard let base = Self.withoutAccents(String(c)).first, base != c else { return nil }
         return set.truth.centres[base]
     }
 
@@ -240,21 +235,21 @@ struct TapParityExporter {
         ["kind": kind, "lang": language.rawValue, "keys": set.id, "user": user, "swear": swearing]
     }
 
-    /// Runs `body` in the fixed order, the reverse of it and Swift's own.
-    private mutating func threeWays<T: Equatable & Sendable>(_ kind: String, timed: Bool = false, _ body: () -> T) -> (fixed: T, swift: T, reverse: T, tie: Bool) {
-        TapOracle.tieOrder = .ascending
+    /// Runs `body` with the shipped decoder, counting the case.
+    private mutating func answer<T>(_ kind: String, timed: Bool = false, _ body: () -> T) -> T {
         let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
-        let fixed = body()
+        let out = body()
         if timed { decideNanos.append(clock_gettime_nsec_np(CLOCK_UPTIME_RAW) - start) }
-        TapOracle.tieOrder = .descending
-        let reverse = body()
-        TapOracle.tieOrder = .dictionary
-        let swift = body()
-        let tie = reverse != fixed || swift != fixed
         counts[kind, default: 0] += 1
-        if tie { ties[kind, default: 0] += 1 }
-        if swift != fixed { swiftDiffers[kind, default: 0] += 1 }
-        return (fixed, swift, reverse, tie)
+        return out
+    }
+
+    /// The text with acute, grave, circumflex and diaeresis marks removed, keeping ñ: where a
+    /// generated finger aims for an accented letter on a layout without its key.
+    static func withoutAccents(_ text: String) -> String {
+        let scalars = text.decomposedStringWithCanonicalMapping.unicodeScalars
+            .filter { !((0x300...0x308).contains($0.value) && $0.value != 0x303) }
+        return String(String.UnicodeScalarView(scalars)).precomposedStringWithCanonicalMapping
     }
 
     private mutating func decideCase() -> [String: Any]? {
@@ -334,23 +329,17 @@ struct TapParityExporter {
         let previous = previous()
         let valid = rng.chance(0.3)
         let keys = set.keys
-        let run = threeWays("decide", timed: true) { d.decide(taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys) }
+        let decision = answer("decide", timed: true) { d.decide(taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys) }
         var line = base("decide", set, user: user, swearing: swearing)
         line["taps"] = taps.map(bits)
         line["typed"] = typed
         line["previous"] = previous ?? NSNull()
         line["valid"] = valid
-        line["fixed"] = Self.json(run.fixed)
-        if run.swift != run.fixed { line["swift"] = Self.json(run.swift) }
-        line["tie"] = run.tie
-        // Whether some order of the tie changes what space puts in, or only the strip.
-        if run.tie {
-            line["tieChangesReplacement"] = run.swift?.replacement != run.fixed?.replacement || run.reverse?.replacement != run.fixed?.replacement
-        }
+        line["fixed"] = Self.json(decision)
         return line
     }
 
-    static func json(_ d: TapOracle.Decision?) -> Any {
+    static func json(_ d: TypingDecoder.Decision?) -> Any {
         guard let d else { return NSNull() }
         return ["replacement": d.replacement ?? NSNull(), "readings": d.readings.map { [$0.text, bits($0.cost)] }, "literal": bits(d.literalCost)] as [String: Any]
     }
@@ -385,7 +374,7 @@ struct TapParityExporter {
         let previous = previous()
         let firstValid = rng.chance(0.5), secondValid = rng.chance(0.5)
         let keys = set.keys
-        let run = threeWays("merge") {
+        let merged = answer("merge") {
             d.merge(first: typedFirst, firstTaps: firstTaps, space: space, second: typedSecond, secondTaps: secondTaps,
                     previous: previous, firstIsValid: firstValid, secondIsValid: secondValid, keys: keys)
         }
@@ -398,9 +387,7 @@ struct TapParityExporter {
         line["previous"] = previous ?? NSNull()
         line["firstValid"] = firstValid
         line["secondValid"] = secondValid
-        line["fixed"] = run.fixed ?? NSNull()
-        if run.swift != run.fixed { line["swift"] = run.swift ?? NSNull() }
-        line["tie"] = run.tie
+        line["fixed"] = merged ?? NSNull()
         return line
     }
 
@@ -415,13 +402,12 @@ struct TapParityExporter {
         let d = decoder(user: user, swearing: swearing)
         let previous = previous()
         let valid = rng.chance(0.3)
-        TapOracle.tieOrder = .ascending
         let decision = d.decide(taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: set.keys)
         var readings = [word, model.word(wordIndex()), word + " " + model.word(wordIndex(band: 0)), rng.pick(Self.userSets[1]), typed]
         if let best = decision?.readings.first { readings.append(best.text) }
         let reading = rng.pick(readings)
         let keys = rng.chance(0.8) ? set.keys : set.truth
-        let run = threeWays("replaces") { d.replaces(with: reading, taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys) }
+        let replaces = answer("replaces") { d.replaces(with: reading, taps: taps, typed: typed, previous: previous, literalIsValid: valid, keys: keys) }
         var line = base("replaces", set, user: user, swearing: swearing)
         line["reading"] = reading
         line["taps"] = taps.map(bits)
@@ -429,9 +415,7 @@ struct TapParityExporter {
         line["previous"] = previous ?? NSNull()
         line["valid"] = valid
         line["truth"] = keys == set.truth && keys != set.keys
-        line["fixed"] = run.fixed ?? NSNull()
-        if run.swift != run.fixed { line["swift"] = run.swift ?? NSNull() }
-        line["tie"] = run.tie
+        line["fixed"] = replaces ?? NSNull()
         return line
     }
 
@@ -462,7 +446,7 @@ struct TapParityExporter {
             line["out"] = model.nextWords(after: word, allowing: allowing)
         case 3:
             var prefix = String(word.prefix(1 + rng.int(4)))
-            if rng.chance(0.2) { prefix = TapOracle.withoutAccents(prefix) }
+            if rng.chance(0.2) { prefix = Self.withoutAccents(prefix) }
             let previous = rng.chance(0.3) ? nil : previous()
             line["fn"] = "completions"
             line["word"] = prefix

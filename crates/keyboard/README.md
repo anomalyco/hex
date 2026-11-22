@@ -18,7 +18,8 @@ This is its own Cargo workspace with its own `Cargo.lock` and pinned toolchain
 Pieces move here one at a time from the Swift keyboard (`ios/HEXShared/FullKeyboard`), each
 proven identical to the Swift it replaces before iOS switches to it. Today: the typing
 model reader, Swipe typing's decoder and the tap decoder (Spatial autocorrect,
-`core/src/decoder`). Tune those here, not in Swift.
+`core/src/decoder`, which iOS runs through `TypingDecoder` and `TypingDecoderModel`). Tune
+those here, not in Swift.
 
 ## Setup
 
@@ -72,9 +73,26 @@ goes to the commoner word, then the one earlier in the word list, and a tie betw
 run-together readings to the one with fewer words. About 1% of the parity cases have such a
 tie (`tests/tap_parity.rs`).
 
-`tests/tap_parity.rs` replays `tests/fixtures/tap-parity.jsonl`, cases the Swift oracle
-(`ios/HEXMobileTests/TapParity`) wrote, and must match them bit for bit; it says how to
-write the fixture again, or a larger set for `HEX_TAP_PARITY=/path`.
+`tests/tap_parity.rs` replays `tests/fixtures/tap-parity.jsonl` and must match it bit for bit,
+and iOS's `TapParityGolden` (`ios/HEXMobileTests/TapParity`) generates the same cases again and
+runs them through the shipped Swift wrappers and the C interface. The fixture holds the
+answers of the Swift decoder this replaced (dev fc867484, in the fixed tie order), so a test
+that fails against it is a change in behaviour.
+
+When a change to the decoder is meant to change its answers, write the fixture again from the
+shipped decoder and review the difference (`git diff --stat`, then a few lines) before
+committing it with the change. From `ios/`, after `xcodegen generate`:
+
+```sh
+TEST_RUNNER_HEX_TAP_PARITY_OUT=$PWD/../crates/keyboard/core/tests/fixtures/tap-parity.jsonl \
+xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>" \
+  -only-testing:HEXMobileTests/TapParityExport
+```
+
+`TEST_RUNNER_HEX_TAP_PARITY_COUNT` sets the cases per language (400 by default, which
+`TapParityGolden` expects); a larger set written to `/tmp` runs in Rust with
+`HEX_TAP_PARITY=/tmp/set.jsonl cargo test --release -p hex-keyboard-core --test tap_parity`.
+A fixture written this way has no `tie` or `swift` notes: there is no Swift order any more.
 
 `examples/tap_replay.rs` replays a typing set through the decoder alone and prints its word
 error rate and per-word latency as the Android benchmark (`android/benchmark/typing`) does.

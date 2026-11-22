@@ -1,24 +1,18 @@
-//! The tap decoder against the Swift it replaces: every case in the fixture
-//! `tests/fixtures/tap-parity.jsonl` (written by the iOS test `TapParityExport` with the oracle
-//! `ios/HEXMobileTests/TapParity/TypingDecoderOracle.swift`, a copy of `TypingDecoder.swift`),
-//! read here with the same inputs, must give the oracle's outputs bit for bit: key geometry
-//! from the layout, Learn how I type offsets, `decide`, `merge`, `replaces` and the model's
-//! predictions.
+//! The tap decoder against the Swift it replaced: every case in the fixture
+//! `tests/fixtures/tap-parity.jsonl`, read here with the same inputs, must give the fixture's
+//! outputs bit for bit: key geometry from the layout, Learn how I type offsets, `decide`,
+//! `merge`, `replaces` and the model's predictions. The fixture was written by
+//! `TypingDecoder.swift` as of dev fc867484 (a copy run as an oracle beside the port, removed
+//! once iOS switched to this core); iOS's `TapParityGolden` checks the shipped Swift path
+//! against the same file.
 //!
-//! Where Swift walks a dictionary, exact cost ties come out in an order that changes from run
-//! to run. The oracle ran each case in the port's fixed order (`fixed`, which must match), the
-//! reverse of it and Swift's own (`swift`, kept where it differed); a case whose result
-//! depends on that order is `tie`. A larger set (see the exporter) runs with
-//! `HEX_TAP_PARITY=/path/to/set.jsonl`.
+//! Where Swift walked a dictionary, exact cost ties came out in an order that changed from
+//! run to run. The oracle ran each case in the port's fixed order (`fixed`, which must match),
+//! the reverse of it and Swift's own (`swift`, kept where it differed); a case whose result
+//! depended on that order is `tie`. A larger set runs with `HEX_TAP_PARITY=/path/to/set.jsonl`.
 //!
-//! Regenerate the fixture (from `ios/`, after `xcodegen generate`):
-//!
-//! ```sh
-//! TEST_RUNNER_HEX_TAP_PARITY_OUT=$PWD/../crates/keyboard/core/tests/fixtures/tap-parity.jsonl \
-//! TEST_RUNNER_HEX_TAP_PARITY_COUNT=300 xcodebuild test -project HEXMobile.xcodeproj \
-//!   -scheme HEXMobile -destination "id=<SIM_UDID>" SWIFT_OPTIMIZATION_LEVEL=-O \
-//!   -only-testing:HEXMobileTests/TapParityExport
-//! ```
+//! The fixture changes only with a deliberate change to the decoder: see
+//! `crates/keyboard/README.md` to write it again.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;

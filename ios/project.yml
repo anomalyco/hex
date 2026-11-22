@@ -176,6 +176,9 @@ targets:
       # SwipeFixtureTests' golden readings, which crates/keyboard/core/tests/swipe_parity.rs reads too.
       - path: ../crates/keyboard/core/tests/fixtures/swipe-parity.jsonl
         buildPhase: resources
+      # The tap decoder's golden cases (TapParityGolden), shared with the Rust core's tests.
+      - path: ../crates/keyboard/core/tests/fixtures/tap-parity.jsonl
+        buildPhase: resources
     dependencies:
       - target: HEXMobile
     settings:
