@@ -70,25 +70,30 @@ struct TapParityExporter {
     }
 
     mutating func run(count: Int, into writer: inout TapParityWriter) throws {
-        try writer.write(["kind": "setup", "lang": language.rawValue, "blocked": ["swearing": blocked[true]!, "clean": blocked[false]!], "users": Self.userSets])
-        try makeKeysets(into: &writer)
+        try run(count: count) { try writer.write($0) }
+    }
+
+    /// The setup line, the key sets, then `count` cases, each handed to `each`.
+    mutating func run(count: Int, each: ([String: Any]) throws -> Void) throws {
+        try each(["kind": "setup", "lang": language.rawValue, "blocked": ["swearing": blocked[true]!, "clean": blocked[false]!], "users": Self.userSets])
+        try makeKeysets(each)
         var made = 0
         while made < count {
             let roll = rng.uniform()
             let line: [String: Any]?
             if roll < 0.70 { line = decideCase() } else if roll < 0.80 { line = mergeCase() } else if roll < 0.90 { line = replacesCase() } else { line = modelCase() }
             guard let line else { continue }
-            try writer.write(line)
+            try each(line)
             made += 1
         }
     }
 
     // MARK: Keys
 
-    private mutating func makeKeysets(into writer: inout TapParityWriter) throws {
-        var layouts = [375, 390, 402, 430].map { KeyboardLayout(width: CGFloat($0), language: language) }
-        layouts.append(KeyboardLayout(width: 801, language: language, posture: .unfoldedWide, windowInset: 75))
-        for layout in layouts {
+    private mutating func makeKeysets(_ each: ([String: Any]) throws -> Void) throws {
+        var layouts = [375, 390, 402, 430].map { (width: Double($0), duo: false, layout: KeyboardLayout(width: CGFloat($0), language: language)) }
+        layouts.append((801, true, KeyboardLayout(width: 801, language: language, posture: .unfoldedWide, windowInset: 75)))
+        for (width, duo, layout) in layouts {
             for learned in [false, true] {
                 var stats: [String: TypingJournalKeyStats] = [:]
                 if learned {
@@ -111,8 +116,8 @@ struct TapParityExporter {
                             "frame": [f.origin.x, f.origin.y, f.size.width, f.size.height].map { bits(Double($0)) }]
                 }
                 let split: Any = layout.split.map { [bits(Double($0.middle)), bits(Double($0.shift))] } ?? NSNull()
-                try writer.write([
-                    "kind": "keys", "lang": language.rawValue, "id": set.id,
+                try each([
+                    "kind": "keys", "lang": language.rawValue, "id": set.id, "width": width, "duo": duo,
                     "layout": ["keys": layoutKeys, "split": split, "pitch": [bits(Double(keys.pitch.width)), bits(Double(keys.pitch.height))]],
                     "stats": stats.mapValues { [$0.count, bits($0.dx), bits($0.dy)] as [Any] },
                     "offsets": Dictionary(uniqueKeysWithValues: offsets.map { (String($0.key), [bits(Double($0.value.dx)), bits(Double($0.value.dy))]) }),
@@ -236,7 +241,7 @@ struct TapParityExporter {
     }
 
     /// Runs `body` in the fixed order, the reverse of it and Swift's own.
-    private mutating func threeWays<T: Equatable & Sendable>(_ kind: String, timed: Bool = false, _ body: () -> T) -> (fixed: T, swift: T, tie: Bool) {
+    private mutating func threeWays<T: Equatable & Sendable>(_ kind: String, timed: Bool = false, _ body: () -> T) -> (fixed: T, swift: T, reverse: T, tie: Bool) {
         TapOracle.tieOrder = .ascending
         let start = clock_gettime_nsec_np(CLOCK_UPTIME_RAW)
         let fixed = body()
@@ -249,7 +254,7 @@ struct TapParityExporter {
         counts[kind, default: 0] += 1
         if tie { ties[kind, default: 0] += 1 }
         if swift != fixed { swiftDiffers[kind, default: 0] += 1 }
-        return (fixed, swift, tie)
+        return (fixed, swift, reverse, tie)
     }
 
     private mutating func decideCase() -> [String: Any]? {
@@ -338,6 +343,10 @@ struct TapParityExporter {
         line["fixed"] = Self.json(run.fixed)
         if run.swift != run.fixed { line["swift"] = Self.json(run.swift) }
         line["tie"] = run.tie
+        // Whether some order of the tie changes what space puts in, or only the strip.
+        if run.tie {
+            line["tieChangesReplacement"] = run.swift?.replacement != run.fixed?.replacement || run.reverse?.replacement != run.fixed?.replacement
+        }
         return line
     }
 
