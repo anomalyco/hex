@@ -173,6 +173,27 @@ fn types_character(key: &str) -> bool {
     }
 }
 
+impl super::WindowsHotkey {
+    /// Whether the chord names this modifier key, which a side-less code
+    /// (`VK_MENU`) reads as its left key, as [`ModifierState::update`] does.
+    /// A modifier the chord does not name is another application's chord when
+    /// it joins a modifier-only hold (#2278).
+    pub(super) fn names_modifier(&self, key: u32) -> bool {
+        let (named, side) = match key as u16 {
+            VK_LCONTROL | VK_CONTROL => (self.control, ModifierSide::Left),
+            VK_RCONTROL => (self.control, ModifierSide::Right),
+            VK_LMENU | VK_MENU => (self.alt, ModifierSide::Left),
+            VK_RMENU => (self.alt, ModifierSide::Right),
+            VK_LSHIFT | VK_SHIFT => (self.shift, ModifierSide::Left),
+            VK_RSHIFT => (self.shift, ModifierSide::Right),
+            VK_LWIN => (self.windows, ModifierSide::Left),
+            VK_RWIN => (self.windows, ModifierSide::Right),
+            _ => return false,
+        };
+        matches!(named, Some(ModifierSide::Either | ModifierSide::Both)) || named == Some(side)
+    }
+}
+
 fn side_matches(side: Option<ModifierSide>, left: bool, right: bool) -> bool {
     match side {
         None => !left && !right,

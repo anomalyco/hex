@@ -303,12 +303,24 @@ Windows modifier-only shortcut                           // dictate.windows-lone
   ├── Any key or click joins while held -> Chord: Cancel if recording, else nothing
   │   (Escape never: it reaches the app and the capture goes on, #786)
   │   (the key reaches the app; locked and toggle captures keep recording)
+  ├── A modifier the chord doesn't name joins -> Its chord too: Cancel at once,
+  │   a Toggle press locks nothing, and Alt's release is the app's (no mask,
+  │   no 0xE8 tap), so Ctrl+Alt+V still fires Paste Last (#2278)
+  │   (a modifier the chord names, like Ctrl of Ctrl+Alt, is part of it, in either order)
   ├── Alt or Windows released -> Swallowed, VK 0xE8 tapped, release replayed
   │   -> No menu bar or Start menu; Share shortcut skips the mask
   ├── AltGr -> A synthesized Left Ctrl and the Right Alt: the left Alt's
   │   default ignores both, so it types and starts nothing
   └── Hex's own injected keys (paste, mask) -> Skipped by the hook (HEX_INJECTED)
 ```
+
+A modifier the chord does not name is a chord like any key: it cancels the
+hold (`names_modifier`), Toggle's press then locks nothing, and the shortcut's
+Alt release is the app's, with no mask key. So Left Alt on the way to
+Ctrl+Alt+V cancels a dictation and Paste Last still fires, and Alt+Shift
+switches the keyboard language. A modifier the chord names is part of it,
+whichever order the keys go down in. Labs › Hold through other keys keeps a
+hold a second or more old, as it does for keys.
 
 On layouts where Right Alt is AltGr, Windows sends a synthesized Left Ctrl
 (scan code 0x21D, not 0x1D), and `GetAsyncKeyState` reports it as a real Ctrl.
