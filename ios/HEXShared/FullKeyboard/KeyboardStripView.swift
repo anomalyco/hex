@@ -99,11 +99,16 @@ final class KeyboardStripView: UIView {
     /// Where the bar's middle slot centres, from this view's leading edge: the keyboard's middle,
     /// not this view's, which leaves out the Hex key. Paste and Next keyboard centre on it.
     var barMidX: CGFloat? { didSet { if barMidX != oldValue { setNeedsLayout() } } }
+    /// The bar around this view, in its coordinates: from the keyboard's top to the bar's bottom
+    /// and across it up to the Hex key's cell. While Paste (or Paste dictation) is the only chip,
+    /// a tap anywhere on it pastes; beside Code from Messages each chip keeps its own frame. The
+    /// Hex key and row 1's reach, laid over it, keep theirs.
+    var barTouchFrame: CGRect? { didSet { if barTouchFrame != oldValue { setNeedsLayout() } } }
     /// Plain text on the words' line, as a suggestion is: `UIPasteControl` renders as an empty
     /// blue box inside a keyboard extension (TestFlight build 4), so this reads the clipboard on
     /// tap instead, once, which iOS asks about until Paste from Other Apps is Allow
     /// (`KeyboardClipboardTracker`).
-    private let pasteControl = UIButton(type: .custom)
+    private let pasteControl = StripChip()
     private let nextKeyboardChip = UIButton(type: .custom)
 
     override init(frame: CGRect) {
@@ -374,6 +379,7 @@ final class KeyboardStripView: UIView {
             width: nextSize.width,
             height: chipH
         )
+        pasteControl.touchArea = pasteShown && !nextShown ? barTouchFrame ?? bounds : nil
         // The hint's two lines and chip centre on the words' line, as everything in the strip.
         let hintHalf = min(midY, bounds.height - midY)
         let hintY = midY - hintHalf
@@ -387,6 +393,11 @@ final class KeyboardStripView: UIView {
             button.inSystemPlatter = inSystemPlatter
             button.frame = slots[idx]
         }
+    }
+
+    override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+        if pasteControl.touchArea != nil, let barTouchFrame, barTouchFrame.contains(point) { return true }
+        return super.point(inside: point, with: event)
     }
 
     private var currentSlotFrames: [CGRect] {
@@ -436,6 +447,66 @@ final class KeyboardStripView: UIView {
         guard recognizer.state == .began, let slot = recognizer.view?.tag,
               let item = Self.slots(for: currentSuggestions).firstIndex(of: slot) else { return }
         onHoldSuggestion?(currentSuggestions[item])
+    }
+
+    /// A chip whose touch can reach past its frame (`touchArea`, in the strip's coordinates): it
+    /// lights wherever there the finger lands, follows it in and out, and acts only if it lifts
+    /// inside, so a finger slid off the bar cancels. Without one, a plain button.
+    private final class StripChip: UIButton {
+        var touchArea: CGRect?
+        private var trackedTouch: UITouch?
+
+        private func inArea(_ touch: UITouch) -> Bool {
+            guard let touchArea, let superview else { return false }
+            return touchArea.contains(touch.location(in: superview))
+        }
+
+        override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
+            guard let touchArea, let superview else { return super.point(inside: point, with: event) }
+            return touchArea.contains(convert(point, to: superview))
+        }
+
+        override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard touchArea != nil, trackedTouch == nil, let touch = touches.first else {
+                super.touchesBegan(touches, with: event)
+                return
+            }
+            trackedTouch = touch
+            isHighlighted = true
+            sendActions(for: .touchDown)
+        }
+
+        override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard let touch = trackedTouch, touches.contains(touch) else {
+                super.touchesMoved(touches, with: event)
+                return
+            }
+            let inside = inArea(touch)
+            guard inside != isHighlighted else { return }
+            isHighlighted = inside
+            sendActions(for: inside ? .touchDragEnter : .touchDragExit)
+        }
+
+        override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard let touch = trackedTouch, touches.contains(touch) else {
+                super.touchesEnded(touches, with: event)
+                return
+            }
+            trackedTouch = nil
+            let inside = inArea(touch)
+            isHighlighted = false
+            sendActions(for: inside ? .touchUpInside : .touchUpOutside)
+        }
+
+        override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent?) {
+            guard let touch = trackedTouch, touches.contains(touch) else {
+                super.touchesCancelled(touches, with: event)
+                return
+            }
+            trackedTouch = nil
+            isHighlighted = false
+            sendActions(for: .touchCancel)
+        }
     }
 
     /// One suggestion slot. A word that changes swaps letter by letter, as Apple's bar does

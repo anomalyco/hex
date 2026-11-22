@@ -748,6 +748,14 @@ final class FullKeyboardView: UIView {
         stripView.dividerBesideHex = layout.metrics.appleBar && layout.key(.hex).map { $0.row < 0 } == true
         stripView.hexOnLeading = layout.hexOnLeading
         stripView.barMidX = layout.stripBarFrame.midX - layout.stripFrame.minX
+        // The bar from the keyboard's top to the strip's bottom, up to the Hex key beside it.
+        var bar = CGRect(x: layout.stripBarFrame.minX, y: 0, width: layout.stripBarFrame.width, height: layout.stripBarFrame.maxY)
+        if let hex = layout.key(.hex), hex.row < 0 {
+            bar = layout.hexOnLeading
+                ? CGRect(x: hex.hitFrame.maxX, y: bar.minY, width: bar.maxX - hex.hitFrame.maxX, height: bar.height)
+                : CGRect(x: bar.minX, y: bar.minY, width: hex.hitFrame.minX - bar.minX, height: bar.height)
+        }
+        stripView.barTouchFrame = bar.offsetBy(dx: -layout.stripFrame.minX, dy: -layout.stripFrame.minY)
 
         hexKey.cornerRadius = layout.metrics.cornerRadius
         if let hex = layout.key(.hex) {

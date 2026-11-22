@@ -386,6 +386,59 @@ final class TranslationPasteSwitchTests: XCTestCase {
         XCTAssertFalse(visibleLabels(in: strip).contains("Couldn't translate, pasted as spoken"))
     }
 
+    /// Paste alone takes a tap anywhere on the bar, top to bottom and up to the Hex key's cell,
+    /// which keeps its own; beside Code from Messages, Code alone, and the words, every chip and
+    /// word keeps its own touch area.
+    @MainActor
+    func testPasteTakesTheWholeBar() throws {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget(text: ""))
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 262)
+        view.layoutIfNeeded()
+        let strip = view.stripView
+        let hex = view.hexKey.frame
+        XCTAssertTrue(view.hexKey.inStrip)
+        func show(_ clipboard: KeyboardClipboardOffer?, _ words: [KeyboardSuggestion] = []) {
+            strip.update(suggestions: words, showsUndo: false, statusText: nil, clipboard: clipboard)
+            strip.layoutIfNeeded()
+        }
+        func chip(_ title: String) throws -> UIButton {
+            try XCTUnwrap(visibleControls(in: strip).first { $0.configuration?.title == title }, title)
+        }
+        // Every point of the bar the keys' own reach above row 1 doesn't take.
+        let barPoints = stride(from: 0.5, to: hex.minX, by: 6).flatMap { x in
+            stride(from: 0.5, to: strip.frame.maxY, by: 4).map { CGPoint(x: x, y: $0) }
+        }.filter { !view.plane.point(inside: view.convert($0, to: view.plane), with: nil) }
+        XCTAssertGreaterThan(barPoints.count, 200)
+
+        show(.paste)
+        let paste = try chip("Paste")
+        for point in barPoints { XCTAssertTrue(view.hitTest(point, with: nil) === paste, "\(point)") }
+        XCTAssertTrue(view.hitTest(CGPoint(x: hex.minX - 0.5, y: strip.frame.midY), with: nil) === paste)
+        XCTAssertTrue(view.hitTest(CGPoint(x: hex.minX + 0.5, y: strip.frame.midY), with: nil) === view.hexKey)
+        XCTAssertTrue(view.hitTest(CGPoint(x: hex.midX, y: strip.frame.midY), with: nil) === view.hexKey)
+        XCTAssertEqual(visibleControls(in: strip).map(\.configuration?.title), ["Paste"], "one Paste for VoiceOver, at the chip")
+
+        show(.dictation)
+        let dictation = try chip("Paste dictation")
+        for point in barPoints { XCTAssertTrue(view.hitTest(point, with: nil) === dictation, "\(point)") }
+
+        show(.code(canPaste: true))
+        let pasteCode = try chip("Paste"), code = try chip("Code from Messages")
+        for point in barPoints {
+            let hit = view.hitTest(point, with: nil)
+            let inPaste = pasteCode.point(inside: view.convert(point, to: pasteCode), with: nil)
+            let inCode = code.bounds.contains(view.convert(point, to: code))
+            XCTAssertTrue(inPaste ? hit === pasteCode : inCode ? hit === code : !(hit is UIButton), "two chips keep their own: \(point)")
+        }
+
+        show(.code(canPaste: false))
+        let codeAlone = try chip("Code from Messages")
+        XCTAssertFalse(view.hitTest(CGPoint(x: 2, y: strip.frame.midY), with: nil) === codeAlone, "Code alone keeps its chip's own area")
+
+        show(.paste, ["one", "two", "three"].map { KeyboardSuggestion(displayText: $0, replacement: $0, kind: .secondary) })
+        for point in barPoints { XCTAssertFalse(view.hitTest(point, with: nil) is UIButton, "words, not Paste: \(point)") }
+    }
+
     /// Undo dictation still takes the dictation back after the cursor moves within it, before it
     /// or after it, and the cursor stays in the text you moved it to. Where it can't tell the
     /// dictation from other text it goes, and deletes nothing.
