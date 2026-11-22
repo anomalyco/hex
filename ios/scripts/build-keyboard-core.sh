@@ -30,8 +30,10 @@ mkdir -p "$out_dir/$PLATFORM_NAME"
 
 # A clean environment: Xcode's (SDKROOT for iOS, its build settings) would point the host
 # build of dependencies' build scripts at the iOS SDK. rustc and cc find the iOS SDK for the
-# target themselves, through the same Xcode (DEVELOPER_DIR). Run from the crate so rustup
-# picks its pinned toolchain (rust-toolchain.toml).
+# target themselves, through the same Xcode (DEVELOPER_DIR). Proxies pass through, for a
+# first build that downloads crates. Run from the crate so rustup picks its pinned toolchain
+# (rust-toolchain.toml). Only the static library: the crate's cdylib (Android's) would be
+# linked and optimised across the whole crate for nothing.
 cd "$crate_dir"
 env -i \
   HOME="$HOME" \
@@ -40,10 +42,17 @@ env -i \
   ${CARGO_HOME:+CARGO_HOME="$CARGO_HOME"} \
   ${RUSTUP_HOME:+RUSTUP_HOME="$RUSTUP_HOME"} \
   ${CARGO_BUILD_JOBS:+CARGO_BUILD_JOBS="$CARGO_BUILD_JOBS"} \
+  ${HTTPS_PROXY:+HTTPS_PROXY="$HTTPS_PROXY"} \
+  ${https_proxy:+https_proxy="$https_proxy"} \
+  ${HTTP_PROXY:+HTTP_PROXY="$HTTP_PROXY"} \
+  ${http_proxy:+http_proxy="$http_proxy"} \
+  ${ALL_PROXY:+ALL_PROXY="$ALL_PROXY"} \
+  ${NO_PROXY:+NO_PROXY="$NO_PROXY"} \
+  ${no_proxy:+no_proxy="$no_proxy"} \
   IPHONEOS_DEPLOYMENT_TARGET="${IPHONEOS_DEPLOYMENT_TARGET:-18.0}" \
   CARGO_TARGET_DIR="$out_dir/target" \
-  cargo build --release --locked --target "$target" \
-  --manifest-path "$crate_dir/Cargo.toml" -p hex-keyboard-ffi
+  cargo rustc --release --locked --target "$target" \
+  --manifest-path "$crate_dir/Cargo.toml" -p hex-keyboard-ffi --lib --crate-type staticlib
 
 built="$out_dir/target/$target/release/libhex_keyboard.a"
 library="$out_dir/$PLATFORM_NAME/libhex_keyboard.a"
