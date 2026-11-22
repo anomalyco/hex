@@ -24,6 +24,7 @@ mod onboarding;
 mod portuguese;
 mod russian;
 mod screenshots;
+mod signature;
 mod strings;
 mod text_language;
 mod traditional_chinese;
@@ -378,6 +379,7 @@ pub(super) fn all_translations() -> impl Iterator<Item = &'static (&'static str,
         .iter()
         .chain(meetings::TRANSLATIONS)
         .chain(labs::TRANSLATIONS)
+        .chain(signature::TRANSLATIONS)
         .chain(agents::TRANSLATIONS)
         .chain(failures::TRANSLATIONS)
         .chain(onboarding::TRANSLATIONS)
@@ -589,6 +591,7 @@ mod tests {
         include_str!("../rune_ui/labs.rs"),
         include_str!("../rune_ui/labs/group.rs"),
         include_str!("../rune_ui/labs/screenshots.rs"),
+        include_str!("../rune_ui/labs/signature.rs"),
         include_str!("../rune_ui/labs/store.rs"),
         include_str!("../rune_ui/labs/stop_phrase.rs"),
         include_str!("../rune_ui/labs/voice_prompt.rs"),

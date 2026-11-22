@@ -228,6 +228,9 @@ impl Feature {
             Self::AnnotateAgentInstall => {
                 "Adds an Agents section to the Annotate pane: one checked row per coding agent writes the hex-annotate skill into its own skills folder, a row copies the npx skills add command, and on macOS the Command-line tool row links hex onto PATH (/opt/homebrew/bin, /usr/local/bin, else ~/.local/bin) without replacing a hex another program owns"
             }
+            Self::Signature => {
+                "Each normal dictation pastes with your signature on its own line at the end, and Paste Last and History keep the same text; not added to raw, printed, or API output"
+            }
         }
     }
 }

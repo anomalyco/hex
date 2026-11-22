@@ -37,6 +37,30 @@ pub(super) fn record_history(
     }
 }
 
+/// Labs › Signature: a normal dictation carries the saved line once at its
+/// end, before the paste, History, and Paste Last read the same text. A raw,
+/// printed, or API transcript stays unsigned.
+pub(super) fn sign_output(
+    target: TranscriptionTarget,
+    completed: &mut CompletedTranscript,
+) -> bool {
+    if !matches!(
+        target,
+        TranscriptionTarget::Paste | TranscriptionTarget::CopyOnlyPaste
+    ) {
+        return false;
+    }
+    let Some(text) = crate::dictation::signature::append(
+        &completed.text,
+        &crate::labs::signature_text(),
+        crate::labs::signature(),
+    ) else {
+        return false;
+    };
+    completed.text = text;
+    true
+}
+
 pub(super) fn recover_output(history: Option<&History>, last: &mut Option<String>, text: String) {
     if let Some(history) = history {
         history.recover_output(text);

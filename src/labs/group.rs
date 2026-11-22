@@ -100,7 +100,8 @@ impl Feature {
             | Self::YoloMode
             | Self::CursorContext
             | Self::VoicePrompt
-            | Self::ModesEditor => Group::Output,
+            | Self::ModesEditor
+            | Self::Signature => Group::Output,
             Self::KeepRecordings
             | Self::HistoryStats
             | Self::RecentDictations

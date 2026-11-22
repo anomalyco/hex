@@ -261,6 +261,14 @@ pub struct LabsSettings {
     /// field returns to its default.
     #[serde(deserialize_with = "deserialize_phrase")]
     pub stop_phrase_text: String,
+    /// Every normal dictation is signed with `signature_text` on its own line
+    /// at the end (every OS).
+    pub signature: bool,
+    /// The line appended while `signature` is on: one line of at most 200
+    /// characters, empty appending nothing. Another value fails to load, so
+    /// the field returns to its default.
+    #[serde(deserialize_with = "deserialize_signature")]
+    pub signature_text: String,
     /// A key or click joining a held modifier-only shortcut a second or more
     /// after it went down reaches the app in front and leaves the dictation
     /// recording, which the release still finishes (macOS and Windows).
@@ -365,6 +373,21 @@ where
     }
 }
 
+/// A saved `signature_text` must pass
+/// [`crate::dictation::signature::text_problem`]; another value fails to
+/// load, so the field returns to the default with the usual launch note.
+fn deserialize_signature<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let signature = String::deserialize(deserializer)?;
+    let signature = signature.trim();
+    match crate::dictation::signature::text_problem(signature) {
+        Some(problem) => Err(serde::de::Error::custom(problem)),
+        None => Ok(signature.to_owned()),
+    }
+}
+
 impl Default for LabsSettings {
     fn default() -> Self {
         Self {
@@ -440,6 +463,8 @@ impl Default for LabsSettings {
             voice_prompt_phrase: crate::dictation::voice_prompt::DEFAULT_PHRASE.to_owned(),
             stop_phrase: false,
             stop_phrase_text: crate::dictation::stop_phrase::DEFAULT_PHRASE.to_owned(),
+            signature: false,
+            signature_text: crate::dictation::signature::DEFAULT_TEXT.to_owned(),
             hold_through_keys: false,
             modes_editor: false,
             gnome_meeting_capsules: false,

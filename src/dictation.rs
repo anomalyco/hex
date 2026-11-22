@@ -32,6 +32,7 @@ mod release_tail;
 #[cfg_attr(not(any(target_os = "macos", test)), allow(dead_code))]
 pub(crate) mod screen_vocabulary;
 pub(crate) mod service;
+pub(crate) mod signature;
 pub(crate) mod spoken_formatting;
 pub(crate) mod spoken_symbols;
 pub(crate) mod stop_phrase;

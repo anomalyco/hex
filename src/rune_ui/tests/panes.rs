@@ -415,6 +415,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
         "lab-mouse-shortcuts",
         "lab-pause-browser",
         "lab-keep-on-clipboard",
+        "lab-signature",
         "lab-copy-only",
         "lab-return-to-app",
         "lab-spoken-formatting",
@@ -449,6 +450,9 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     assert!(!rt.state.settings.labs.keep_on_clipboard);
     tap(&mut rt, "lab-keep-on-clipboard");
     assert!(rt.state.settings.labs.keep_on_clipboard);
+    assert!(!rt.state.settings.labs.signature);
+    tap(&mut rt, "lab-signature");
+    assert!(rt.state.settings.labs.signature);
     assert!(!rt.state.settings.labs.copy_only);
     tap(&mut rt, "lab-copy-only");
     assert!(rt.state.settings.labs.copy_only);
@@ -470,6 +474,7 @@ fn contributed_options_are_labs_toggles_off_by_default() {
     open_labs(&mut rt);
     assert!(rt.find("lab-mouse-shortcuts").is_none(), "macOS only");
     assert!(rt.find("lab-keep-on-clipboard").is_some(), "every OS");
+    assert!(rt.find("lab-signature").is_some(), "every OS");
     assert!(rt.find("lab-copy-only").is_some(), "macOS and Windows");
     assert!(rt.find("lab-spoken-formatting").is_some(), "every OS");
     assert!(rt.find("lab-filler-words").is_some(), "every OS");
@@ -2528,6 +2533,57 @@ fn stop_phrase_shows_its_phrase_on_its_card_while_on() {
     tap(&mut rt, "lab-stop-phrase");
     assert!(!rt.state.settings.labs.stop_phrase);
     assert!(rt.find("stop-phrase-text").is_none());
+}
+
+#[test]
+fn signature_shows_its_line_on_its_card_while_on() {
+    use crate::labs::Feature;
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    rt.update(|ui, _| ui.lab_store.group = Some(Feature::Signature.group()));
+    settle(&mut rt);
+    assert!(rt.find("signature-text").is_none(), "hidden while off");
+    tap(&mut rt, "lab-signature");
+    assert!(rt.state.settings.labs.signature);
+    assert!(rt.find("signature-text").is_some());
+    assert_eq!(
+        rt.state.lab_store.signature.text,
+        crate::dictation::signature::DEFAULT_TEXT,
+        "the field starts at the saved line"
+    );
+
+    // A draft that fails validation stays in the field, says why, and leaves
+    // the saved line working.
+    let saved = rt.state.settings.labs.signature_text.clone();
+    let too_long = "x".repeat(crate::dictation::signature::MAX_CHARS + 1);
+    rt.update(|ui, _| ui.lab_store.signature = rune::TextEdit::new(too_long));
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.signature_text, saved);
+    refresh(&mut rt);
+    assert!(rt.find("signature-text-error").is_some());
+
+    // A valid draft saves, and an empty one saves too (it appends nothing).
+    rt.update(|ui, _| {
+        ui.lab_store.signature = rune::TextEdit::new("Dax, from Hex".to_string());
+    });
+    rt.state.flush_drafts();
+    assert_eq!(rt.state.settings.labs.signature_text, "Dax, from Hex");
+    refresh(&mut rt);
+    assert!(rt.find("signature-text-error").is_none());
+    rt.update(|ui, _| ui.lab_store.signature = rune::TextEdit::new(String::new()));
+    rt.state.flush_drafts();
+    assert!(rt.state.settings.labs.signature_text.is_empty());
+
+    // A line saved elsewhere updates the field.
+    let mut external = rt.state.settings.clone();
+    external.labs.signature_text = "Sent from Dax".to_string();
+    assert!(rt.state.adopt(external));
+    refresh(&mut rt);
+    assert_eq!(rt.state.lab_store.signature.text, "Sent from Dax");
+
+    // The field leaves with its lab.
+    tap(&mut rt, "lab-signature");
+    assert!(!rt.state.settings.labs.signature);
+    assert!(rt.find("signature-text").is_none());
 }
 
 #[test]

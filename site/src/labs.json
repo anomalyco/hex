@@ -825,6 +825,19 @@
       ],
       "summary": "Import terms from a CSV file in the Vocabulary sheet, or save the whole list as one",
       "title": "Vocabulary files"
+    },
+    {
+      "added": "2026-11-21",
+      "group": "output",
+      "groupTitle": "Output",
+      "id": "signature",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Add a line to the end of each dictation, such as \"Sent from Hex\"",
+      "title": "Signature"
     }
   ]
 }

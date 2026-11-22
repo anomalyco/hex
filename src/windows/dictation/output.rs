@@ -52,7 +52,7 @@ pub(super) fn process_dictation_job(
         if raw_text.is_empty() {
             return Err("transcription was empty".into());
         }
-        let processed = if job.flavour.raw() {
+        let mut processed = if job.flavour.raw() {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             let mode_runtime = mode_runtime
@@ -67,7 +67,7 @@ pub(super) fn process_dictation_job(
                 crate::dictation::processor::Source::Dictation,
             )
         };
-        let text = processed.text.clone();
+        let mut text = processed.text.clone();
         // A voice prompt that deliberately asked nothing ends quietly: no
         // failure, no paste, no last dictation, and no History.
         if processed.nothing {
@@ -76,6 +76,26 @@ pub(super) fn process_dictation_job(
         if text.trim().is_empty() {
             return Err("text replacements produced empty output".into());
         }
+        // Labs › Signature: a normal, unprinted dictation carries the saved
+        // line once at its end. History and Paste Last read the same text,
+        // and the paste is standalone so the next dictation never continues
+        // the signature line.
+        let signed = if !printed && !job.flavour.raw() {
+            match crate::dictation::signature::append(
+                &text,
+                &crate::labs::signature_text(),
+                crate::labs::signature(),
+            ) {
+                Some(signed) => {
+                    text = signed;
+                    processed.text = text.clone();
+                    true
+                }
+                None => false,
+            }
+        } else {
+            false
+        };
         // A printed dictation is never pasted, and Paste Last skips it.
         if !printed {
             let paster = paster.as_mut().map_err(|error| format!("{error:#}"))?;
@@ -90,7 +110,7 @@ pub(super) fn process_dictation_job(
             let pasted = if copy_only {
                 paster.copy_only(&text).map(|()| Paste::Copied)
             } else {
-                paster.paste(&text, job.flavour.terminal_paste(), job.return_to)
+                paster.paste(&text, job.flavour.terminal_paste(), job.return_to, signed)
             };
             sent = matches!(pasted, Ok(Paste::Sent)) && sends;
             let pasted = if sent {
@@ -164,7 +184,7 @@ pub(super) fn process_paste_last(
             let paste = paster
                 .as_mut()
                 .map_err(|error| format!("{error:#}"))?
-                .paste(&text, false, None)
+                .paste(&text, false, None, false)
                 .map_err(|error| format!("{error:#}"))?;
             copied = paste == Paste::Copied;
             Ok(text)

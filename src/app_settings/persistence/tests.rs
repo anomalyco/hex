@@ -553,6 +553,37 @@ fn an_invalid_stop_phrase_loads_the_default_and_keeps_its_switch() {
 }
 
 #[test]
+fn an_invalid_signature_loads_the_default_and_keeps_its_switch() {
+    let original = br#"{"labs":{"signature":true,"signature_text":"two\nlines","live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(
+        settings.labs.signature,
+        "the switch stays as saved; only the text falls back"
+    );
+    assert_eq!(
+        settings.labs.signature_text,
+        crate::dictation::signature::DEFAULT_TEXT
+    );
+    assert!(settings.labs.live_text);
+    assert_eq!(fs::read(&file.path).unwrap(), original);
+    assert!(file.backups().is_empty());
+}
+
+#[test]
+fn an_empty_signature_stays_empty_and_appends_nothing() {
+    let original = br#"{"labs":{"signature":true,"signature_text":"","live_text":true}}"#;
+    let file = SettingsFile::new(original);
+    let settings = AppSettings::load_from(&file.path).unwrap();
+    assert!(settings.labs.signature);
+    assert!(settings.labs.signature_text.is_empty());
+    assert_eq!(
+        crate::dictation::signature::append("we ship friday", &settings.labs.signature_text, true),
+        None
+    );
+}
+
+#[test]
 fn unbound_optional_shortcuts_stay_unbound_after_saving() {
     let settings = AppSettings {
         paste_last_hotkey: None,

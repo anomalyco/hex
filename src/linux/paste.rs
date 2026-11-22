@@ -584,18 +584,27 @@ impl LinuxPaster {
 
     /// Pastes a dictation, joined onto the one before it when the person
     /// did nothing in between, as macOS and Windows join them. Only where
-    /// [`activity`] reports their input; elsewhere it pastes as is.
-    pub(crate) fn paste_dictation(&mut self, text: &str, shift: bool) -> Result<()> {
+    /// [`activity`] reports their input; elsewhere it pastes as is. A
+    /// `standalone` paste neither joins the previous one nor leaves a
+    /// continuation for the next (Labs › Signature).
+    pub(crate) fn paste_dictation(
+        &mut self,
+        text: &str,
+        shift: bool,
+        standalone: bool,
+    ) -> Result<()> {
         let Some(revision) = activity::revision() else {
             return self.paste(text, shift);
         };
+        let joinable = !standalone;
         let text = self
             .continuation
-            .join(revision, true, text)
+            .join(revision, joinable, text)
             .unwrap_or_else(|| text.to_string());
         self.paste(&text, shift)?;
-        // Only a paste that reached the app is continued by the next one.
-        self.continuation.record(revision, true, text);
+        // Only a paste that reached the app is continued by the next one, and
+        // a standalone paste ends the continuation instead.
+        self.continuation.record(revision, joinable, text);
         Ok(())
     }
 

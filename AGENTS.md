@@ -49,7 +49,7 @@ Vocabulary files, Words on screen, Learn from corrections
 language (#216), Mouse shortcuts (#209, macOS), Also pause the browser (#301,
 macOS), Share dictation shortcut (#176, Windows), Free memory when idle
 (#442), Smaller model files (macOS), Terminal paste (Windows), Terminal
-paste shortcut (Windows, Linux), Stop phrase, Hold through other keys
+paste shortcut (Windows, Linux), Stop phrase, Signature, Hold through other keys
 (macOS and Windows), and Microphone key alone (#181, macOS).
 Externally contributed features land there too.
 Every `Everyone` lab also gets a page on Hex's website,

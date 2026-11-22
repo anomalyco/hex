@@ -88,7 +88,8 @@ impl Feature {
             | Self::ModesEditor
             | Self::VocabularyFiles
             | Self::AnnotateAgentTools
-            | Self::AnnotateAgentInstall => Audience::Everyone,
+            | Self::AnnotateAgentInstall
+            | Self::Signature => Audience::Everyone,
         }
     }
 
@@ -156,9 +157,10 @@ impl Feature {
             | Self::AnnotatePointerScreen
             | Self::FasterLiveText
             | Self::VocabularyFiles => 20261120,
-            Self::LearnFromCorrections | Self::AnnotateAgentTools | Self::AnnotateAgentInstall => {
-                20261121
-            }
+            Self::LearnFromCorrections
+            | Self::AnnotateAgentTools
+            | Self::AnnotateAgentInstall
+            | Self::Signature => 20261121,
         }
     }
 
@@ -190,6 +192,9 @@ impl Feature {
         }
         if key == "labs.stop_phrase_text" {
             return Some(Self::StopPhrase);
+        }
+        if key == "labs.signature_text" {
+            return Some(Self::Signature);
         }
         if key == "labs.caps_lock_light" {
             return Some(Self::CapsLockDictation);
@@ -308,7 +313,8 @@ impl Feature {
             | Self::ModesEditor
             | Self::VocabularyFiles
             | Self::AnnotateAgentTools
-            | Self::AnnotateAgentInstall => EVERY,
+            | Self::AnnotateAgentInstall
+            | Self::Signature => EVERY,
         }
     }
 
@@ -393,6 +399,7 @@ impl Feature {
             Self::VocabularyFiles => "vocabulary-files",
             Self::AnnotateAgentTools => "annotate-agent-tools",
             Self::AnnotateAgentInstall => "annotate-agent-install",
+            Self::Signature => "signature",
         }
     }
 
@@ -477,6 +484,7 @@ impl Feature {
             Self::VocabularyFiles => "labs.vocabulary_files",
             Self::AnnotateAgentTools => "labs.annotate_agent_tools",
             Self::AnnotateAgentInstall => "labs.annotate_agent_install",
+            Self::Signature => "labs.signature",
         }
     }
 

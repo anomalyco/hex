@@ -264,7 +264,7 @@ pub(crate) fn run(
                             paster
                                 .as_mut()
                                 .map_err(|error| eyre!("{error:#}"))?
-                                .paste_dictation(&text, false)
+                                .paste_dictation(&text, false, false)
                         })
                         .map(|()| String::new())
                         .map_err(|error| format!("{error:#}"));
@@ -352,8 +352,8 @@ pub(crate) fn run(
                     );
                 }
                 let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
-                let mut paste = |text: &str, terminal: bool, send: bool| {
-                    paster.paste_dictation(text, terminal)?;
+                let mut paste = |text: &str, terminal: bool, send: bool, standalone: bool| {
+                    paster.paste_dictation(text, terminal, standalone)?;
                     if send {
                         paster.press_return()?;
                     }
@@ -1993,7 +1993,7 @@ mod tests {
         let text = "the dictation whose paste failed";
         let output = DictationOutput::from_settings(&AppSettings::default(), None);
         let mut last_dictation = Some("an older dictation".to_string());
-        let mut paste = |_: &str, _: bool, _: bool| -> Result<()> {
+        let mut paste = |_: &str, _: bool, _: bool, _: bool| -> Result<()> {
             Err(eyre!("clipboard changed while Hex was preserving it"))
         };
 

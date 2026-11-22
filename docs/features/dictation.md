@@ -2521,6 +2521,31 @@ paste without joining, as before. Sources:
 simulated clock). `the_compositor_reports_input` is a manual probe of the real
 compositor; no automated check reads one, and none dictates twice into an app.
 
+**Signature (Labs, every OS):** while `labs.signature` is on, a normal
+dictation's final text carries `labs.signature_text` (default "Sent from Hex")
+on its own new line at the end, added once before the text feeds the paste,
+History, and Paste last dictation. Each platform reads the same
+`dictation::signature::append` rule at its output stage: macOS's
+`parakeet::finish_output` only a `TranscriptionTarget::Paste` or
+`CopyOnlyPaste`, Windows's `process_dictation_job` only when the job is not
+printed and not a raw flavour, and Linux's `DictationOutput::deliver` behind
+the same gate. It never touches raw (Dictate without processing), printed, or
+API output, meetings, typed text, Annotate, or `Paster::paste` itself. Nothing
+is appended when the text is empty after trimming, the signature is empty after
+trimming, or the text already ends with it. A signed paste is standalone on
+every OS, so it does not join the previous dictation and records no
+continuation: the next dictation is never glued onto the signature line. On
+Linux Live typing, the signed text is committed in the input method's own final
+step, so nothing is typed twice. Source:
+[dictation/signature.rs](../../src/dictation/signature.rs); checks:
+`the_signature_is_appended_once_on_its_own_line`, `off_appends_nothing`,
+`empty_text_appends_nothing`, and
+`text_that_already_ends_with_the_signature_is_left_alone` there, plus
+`a_signature_is_trimmed_and_must_be_one_line` in
+[control/settings.rs](../../src/control/settings.rs). No automated check pastes
+into a real app, and the macOS and Windows call sites were not built or observed
+here.
+
 ### Toggle Cancel
 
 ```ts

@@ -18,9 +18,10 @@ pub(crate) struct DictationOutput {
 }
 
 /// How a finished dictation is pasted: its text, whether it asks for
-/// Ctrl+Shift+V, and whether Return follows (Labs › YOLO mode).
-/// No paste at all means a printing stop.
-pub(super) type Paste<'a> = &'a mut dyn FnMut(&str, bool, bool) -> Result<()>;
+/// Ctrl+Shift+V, whether Return follows (Labs › YOLO mode), and whether it
+/// stands alone instead of continuing the previous dictation (Labs ›
+/// Signature). No paste at all means a printing stop.
+pub(super) type Paste<'a> = &'a mut dyn FnMut(&str, bool, bool, bool) -> Result<()>;
 
 impl DictationOutput {
     pub(crate) fn from_settings(
@@ -70,7 +71,7 @@ impl DictationOutput {
             .read()
             .unwrap_or_else(|error| error.into_inner())
             .clone();
-        let processed = if flavour.raw() {
+        let mut processed = if flavour.raw() {
             crate::dictation::processor::Processed::unchanged(raw_text.trim())
         } else {
             modes.process(
@@ -91,6 +92,27 @@ impl DictationOutput {
             }
             return Ok(processed.text);
         }
+        // Labs › Signature: a normal, unprinted dictation carries the saved
+        // line once at its end. Live typing commits the signed text in its
+        // own final step, so its preedit never shows the line and nothing is
+        // typed twice; the paste, Paste Last, and History read the same
+        // text. The paste is standalone, so the next dictation never
+        // continues the signature line.
+        let signed = if !printed && !flavour.raw() {
+            match crate::dictation::signature::append(
+                &processed.text,
+                &crate::labs::signature_text(),
+                crate::labs::signature(),
+            ) {
+                Some(signed) => {
+                    processed.text = signed;
+                    true
+                }
+                None => false,
+            }
+        } else {
+            false
+        };
         // Live typing inserts the final text through the input method; a
         // printed or copy-only dictation clears its preedit and takes the
         // usual path instead.
@@ -119,7 +141,7 @@ impl DictationOutput {
             // Hex saved it, or a format couldn't be read) keeps the text
             // for Paste last dictation, so the dictation isn't lost;
             // History keeps only pasted output.
-            paste(&processed.text, flavour.terminal_paste(), send)
+            paste(&processed.text, flavour.terminal_paste(), send, signed)
                 .inspect_err(|_| *last_dictation = Some(processed.text.clone()))?;
             sent = send;
         }

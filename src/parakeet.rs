@@ -1125,8 +1125,11 @@ fn finish_output(
                             // A dictation YOLO mode sends is pasted anyway.
                             let copy_only =
                                 rescued || (crate::labs::copy_only() && send_gate.is_none());
+                            let signed = output_history::sign_output(target, &mut completed);
                             let mode = if copy_only {
                                 PasteMode::CopyOnly
+                            } else if signed {
+                                PasteMode::Standalone
                             } else if send_gate.is_some() {
                                 PasteMode::Send
                             } else {
@@ -1137,7 +1140,7 @@ fn finish_output(
                             // nothing is pasted; the text stays for Paste
                             // last dictation, and History keeps only pasted
                             // output, as on any failed paste.
-                            if matches!(mode, PasteMode::Continue | PasteMode::Send)
+                            if !matches!(mode, PasteMode::CopyOnly)
                                 && let Err(error) =
                                     crate::paste::return_to_app::bring_to_front(completed.return_to)
                             {

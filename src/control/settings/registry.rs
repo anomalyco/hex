@@ -756,6 +756,18 @@ pub(super) const KEYS: &[Key] = &[
          letters; \"stop dictation\" by default",
     ),
     key(
+        "labs.signature",
+        Kind::Bool,
+        "Labs: every normal dictation is signed with labs.signature_text on its own line at \
+         the end, before it is pasted, kept in History, and remembered for Paste Last",
+    ),
+    key(
+        "labs.signature_text",
+        Kind::Text,
+        "Labs: the line added to each normal dictation, one line of at most 200 characters; \
+         \"Sent from Hex\" by default, and empty adds nothing",
+    ),
+    key(
         "meetings.enabled",
         Kind::Bool,
         "Labs: Meetings (beta), call detection, recording, and transcripts",
