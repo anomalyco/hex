@@ -487,7 +487,7 @@ final class FullKeyboardView: UIView {
                 )
             )
         }
-        // The keys' language's layout: with English and Spanish on one keyboard, the first one's.
+        // The keys' language's layout: with English and Spanish, or German, on one keyboard, the first one's.
         let letters = letterLayoutOverride.map(list.layout.offered) ?? settings.letterLayout(for: list.layout)
         // The host spells and autocorrects in the input mode's language, which supersedes the
         // Info.plist's en-US (`primaryLanguage`): report every change, a space-bar switch too.
