@@ -87,6 +87,7 @@ impl MeetingCapsules {
                 | ControllerEvent::RecordingStarted { .. }
                 | ControllerEvent::Reminder { .. }
                 | ControllerEvent::Offer(..)
+                | ControllerEvent::Discarded(_)
                 | ControllerEvent::Failed { .. }
         ) {
             self.clear_finishing();
@@ -157,6 +158,10 @@ impl Pill {
             ControllerEvent::Transcribing => model.shown.take(),
             ControllerEvent::Finished(m) if model.shown.as_ref() == Some(&m.id) => {
                 model.shown.take()
+            }
+            ControllerEvent::Discarded(id) if model.shown.as_ref() == Some(id) => {
+                model.shown.take();
+                None
             }
             _ => None,
         };

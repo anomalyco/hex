@@ -349,3 +349,36 @@ fn stops_row_has_gone_before_the_heading_arrives_and_neither_moves() {
         assert!(seen > if name == "close" { 2 } else { 20 }, "{name}: {seen}");
     }
 }
+
+#[test]
+fn a_discarded_recording_dismisses_the_pill_and_shows_no_finished_panel() {
+    // The pill's model forgets the recording, so its reconcile hides it.
+    let mut model = PillModel::default();
+    let now = Instant::now();
+    model.apply(
+        &ControllerEvent::RecordingStarted {
+            id: "discarded".into(),
+            title: "Design sync".into(),
+            automatic: false,
+        },
+        now,
+    );
+    assert!(model.recording.is_some());
+    model.apply(&ControllerEvent::Transcribing, now);
+    assert!(model.recording.is_none());
+    model.apply(&ControllerEvent::Discarded("discarded".into()), now);
+    assert!(model.pill(true).is_none());
+
+    // The finalizing pill leaves on that dismissal (what clear_finishing does)
+    // and never becomes the finished screen.
+    let (mut rt, _, _) = runtime(live_recording("discarded"), false, true, RECORDING);
+    rt.update(|capsule, tx| {
+        capsule.capture_stopped();
+        assert!(matches!(capsule.state, State::Finalizing { .. }));
+        capsule.dismiss(tx);
+        assert!(capsule.state.is_empty());
+    });
+    rt.frame(1.0 / 60.0);
+    assert!(rt.find("transcript-block").is_none());
+    assert!(rt.find("summary").is_none());
+}

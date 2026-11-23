@@ -108,6 +108,11 @@ impl PendingFinals {
                         Ok(Some(manifest))
                             if manifest.status == MeetingStatus::Complete =>
                         {
+                            // A kept final pass gets notes; an empty one went to
+                            // the Trash with its Markdown.
+                            if !super::keep_or_discard(&manifest) {
+                                continue;
+                            }
                             tracing::info!(meeting = id, "finished a meeting left unfinished");
                             if super::notes_wanted() {
                                 start_notes(manifest.id, &events);

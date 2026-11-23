@@ -86,6 +86,7 @@ pub use chapters::{Chapter, chapter_entries, section_markdown};
 pub use delete::DeleteRefusal;
 pub use delete::{DeleteError, TrashedMeeting, delete, trash};
 pub use delta::*;
+pub(crate) use finish::keep_or_discard;
 pub use markdown::{
     live_transcript_markdown, render_turns_markdown, speaker_label, transcript_markdown,
     transcript_markdown_with,
@@ -663,7 +664,6 @@ pub fn record(
         }
         keep_rename(&meeting_dir, &mut manifest);
         write_manifest(&meeting_dir, &manifest)?;
-        finished_events::publish(&manifest.id);
         println!("Saved meeting {}", meeting_dir.display());
         Ok(manifest)
     })();
