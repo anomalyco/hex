@@ -1388,7 +1388,7 @@ mod tests {
         wait_for("GTK to receive the second transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == twice
         });
-        thread::sleep(RESTORE_DELAY * 2);
+        thread::sleep(CLIPBOARD_RESTORE_DELAY * 2);
         assert!(
             !wl_paste(&["--list-types"]).status.success(),
             "the transcript stayed on a clipboard that was empty"
@@ -1408,7 +1408,7 @@ mod tests {
         wait_for("GTK to receive the kept transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == thrice
         });
-        thread::sleep(RESTORE_DELAY * 2);
+        thread::sleep(CLIPBOARD_RESTORE_DELAY * 2);
         let kept = wl_paste(&["--no-newline", "--type", "text/plain;charset=utf-8"]);
         assert!(
             kept.status.success() && kept.stdout == expected.as_bytes(),
