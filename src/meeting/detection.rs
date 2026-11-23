@@ -806,9 +806,10 @@ impl BrowserPageMemory {
 }
 
 fn is_browser_application(application_lower: &str) -> bool {
-    // Arc's and Zen's names are too short to match as a substring: `Citizen`
-    // and `Zendesk` are not browsers.
+    // Arc's, Aside's, and Zen's names are too short or too common to match as
+    // a substring: `Citizen`, `Seaside`, and `Zendesk` are not browsers.
     application_lower == "arc"
+        || application_lower == "aside"
         || application_lower == "zen"
         || application_lower.starts_with("zen ")
         || [
@@ -837,6 +838,7 @@ fn context_matches_browser(
         "org.mozilla.firefox" => lower.contains("firefox"),
         "com.microsoft.edgemac" => lower.contains("edge"),
         "company.thebrowser.Browser" => lower == "arc",
+        "at.studio.AsideBrowser" => lower == "aside",
         "com.vivaldi.Vivaldi" => lower.contains("vivaldi"),
         "net.imput.helium" => lower.contains("helium"),
         "com.ardia.browser" => lower.contains("ardia"),
@@ -929,6 +931,7 @@ pub(crate) const BROWSER_TITLE_SUFFIXES: &[&str] = &[
     " - Microsoft Edge",
     " - Safari",
     " - Arc",
+    " - Aside",
     " - Vivaldi",
     " - Helium",
     " - Ardia",
@@ -1810,6 +1813,15 @@ mod tests {
         .unwrap();
         assert_eq!(helium.title, "Weekly Architecture");
         assert!(helium.named);
+
+        let aside = candidate_from_context(&context(
+            "Aside",
+            Some("https://meet.google.com/abc-defg-hij"),
+            "Meet – Weekly Architecture - Aside",
+        ))
+        .unwrap();
+        assert_eq!(aside.title, "Weekly Architecture");
+        assert!(aside.named);
     }
 
     #[test]
@@ -3208,6 +3220,39 @@ mod tests {
             Some("company.thebrowser.Browser")
         );
         assert_eq!(meet.application_name.as_deref(), Some("Arc"));
+        assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
+        let always = [choice("meet.google.com", MeetingPolicy::AlwaysRecord)];
+        let mut watch = Watch::new();
+        assert!(watch.run(Some(&meet), &always, 2_000).is_empty());
+        assert_eq!(
+            watch.run(Some(&meet), &always, 500),
+            [(2_000, Detection::Record(meet))]
+        );
+    }
+
+    #[test]
+    fn a_google_meet_call_in_aside_records_after_about_two_seconds() {
+        // Aside's Chromium audio service holds the microphone and reports
+        // `at.studio.AsideBrowser.helper`; the main app is
+        // `at.studio.AsideBrowser`.
+        let aside_helper = ActiveMicrophoneApplication {
+            pid: 5320,
+            bundle_id: "at.studio.AsideBrowser.helper".into(),
+            name: "Aside Helper".into(),
+        };
+        assert!(aside_helper.is_browser());
+        let meet = candidate_from_microphone(
+            &aside_helper,
+            &context(
+                "Aside",
+                Some("https://meet.google.com/abc-defg-hij"),
+                "Meet - Design sync - Aside",
+            ),
+        )
+        .unwrap();
+        assert_eq!(meet.source, MeetingSource::GoogleMeet);
+        assert_eq!(meet.application.as_deref(), Some("at.studio.AsideBrowser"));
+        assert_eq!(meet.application_name.as_deref(), Some("Aside"));
         assert_eq!(meet.site.as_deref(), Some("meet.google.com"));
         let always = [choice("meet.google.com", MeetingPolicy::AlwaysRecord)];
         let mut watch = Watch::new();

@@ -484,17 +484,21 @@ Brave's), Helium (`net.imput.helium`, helpers included; `helium` and
 (`com.ardia.browser`, its Chromium audio service reports
 `com.ardia.browser.helper`), Zen (`app.zen-browser.zen`; Firefox-based, so its
 helpers are `app.zen-browser.*` rather than `org.mozilla.*`, and on Linux the
-microphone's `zen` or `zen-bin` binary maps to it), and Vivaldi
+microphone's `zen` or `zen-bin` binary maps to it), Vivaldi
 (`com.vivaldi.Vivaldi`; `vivaldi-bin` and friends on Linux, `vivaldi.exe` on
-Windows). Arc was missing until #801, so its Meet calls were never detected;
-Vivaldi was missing until #1105, so its calls
+Windows), and Aside (`at.studio.AsideBrowser`, whose Chromium audio service
+reports `at.studio.AsideBrowser.helper`; tab titles end in ` - Aside`). Arc
+was missing until #801, so its Meet calls were never detected; Vivaldi was
+missing until #1105, so its calls
 (Teams in a Vivaldi web app included) were never offered; Ardia and Zen were
-missing until #1875, so their calls were never offered. Checks:
+missing until #1875, so their calls were never offered; Aside was missing
+until #2525, so its Meet calls were never detected. Checks:
 `a_google_meet_call_in_arc_records_after_about_two_seconds`,
+`a_google_meet_call_in_aside_records_after_about_two_seconds`,
 `vivaldi_on_the_microphone_is_a_browser_call`,
 `ardia_on_the_microphone_is_a_named_browser_call`, and
 `zen_on_the_microphone_is_a_named_browser_call`. Not observed on a real
-Vivaldi, Ardia, or Zen call.
+Vivaldi, Ardia, Zen, or Aside call.
 
 Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
 `teams.live.com`) are known call sites: a browser on one is a

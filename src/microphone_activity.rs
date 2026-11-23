@@ -98,6 +98,7 @@ pub(crate) fn is_browser_id(canonical_bundle_id: Option<&str>) -> bool {
                 | "net.imput.helium"
                 | "com.ardia.browser"
                 | "app.zen-browser.zen"
+                | "at.studio.AsideBrowser"
         )
     )
 }
@@ -391,6 +392,7 @@ pub(crate) fn canonical_bundle_id_for(bundle_id: &str, name: Option<&str>) -> Op
         ("im.riot.app", "im.riot.app"),
         ("com.apple.mobilephone", "com.apple.mobilephone"),
         ("com.google.chrome", "com.google.Chrome"),
+        ("at.studio.asidebrowser", "at.studio.AsideBrowser"),
         ("com.brave.browser", "com.brave.Browser"),
         ("com.apple.safari", "com.apple.Safari"),
         ("org.mozilla.firefox", "org.mozilla.firefox"),
@@ -430,6 +432,7 @@ pub(crate) fn canonical_application_name(canonical_bundle_id: &str) -> Option<&'
         "com.webex.meetingmanager" => Some("Webex"),
         "im.riot.app" => Some("Element"),
         "com.apple.mobilephone" => Some("Phone"),
+        "at.studio.AsideBrowser" => Some("Aside"),
         "com.google.Chrome" => Some("Google Chrome"),
         "com.brave.Browser" => Some("Brave Browser"),
         "com.apple.Safari" => Some("Safari"),
@@ -1062,6 +1065,7 @@ mod tests {
         assert!(browser_bundle("com.google.Chrome.helper", None));
         assert!(browser_bundle("net.imput.helium.helper", None));
         assert!(browser_bundle("com.ardia.browser.helper", None));
+        assert!(browser_bundle("at.studio.AsideBrowser.helper", None));
         assert!(browser_bundle("app.zen-browser.zen", None));
         assert!(browser_bundle("app.zen-browser.plugincontainer", None));
         assert!(browser_bundle(
@@ -1136,6 +1140,18 @@ mod tests {
                 true,
             ),
             ("company.thebrowser.dia", "Dia", None, false),
+            (
+                "at.studio.AsideBrowser",
+                "Aside",
+                Some("at.studio.AsideBrowser"),
+                true,
+            ),
+            (
+                "at.studio.AsideBrowser.helper",
+                "Aside Helper",
+                Some("at.studio.AsideBrowser"),
+                true,
+            ),
             ("net.imput.helium", "Helium", Some("net.imput.helium"), true),
             (
                 "net.imput.helium.helper",
