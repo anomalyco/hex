@@ -274,7 +274,10 @@ fade drifting 6 pt up (0.15 s) as the keys come back (0.3 s), and they stop taki
 at once; the field gets the dictation's own text, with its style, clean-up,
 punctuation, held results and Undo dictation as before, so it can differ from the
 preview: with the speech model in keyboard (Parakeet, English's default) the preview's
-words are Apple's and the text Parakeet's ("10" can go in as "ten"). **Into field**:
+words are Apple's and the text Parakeet's ("10" can go in as "ten"). The words on screen
+are never what goes in: ✓ (or a tap on the words) while some are still muted throws none
+of what was said away, since the recogniser is stopped and the whole recording is read
+again for the text. **Into field**:
 the words are typed into the field as they come
 (`LiveFieldTyping`), only the changed tail retyped. It keeps exactly what it typed and
 edits only while the text before the cursor still ends with it; when the dictation's
@@ -780,6 +783,15 @@ public way to keep the screen on.
   comes back there within 30 s, and is offered as Paste dictation
   anywhere else or later. A capture that goes quiet for 6 s finishes with
   what it heard, and a transcription stuck for 2 minutes is given up.
+- ✓, a tap on the live words or a push-to-talk release keeps what was said up to
+  the tap. The capture page hands its audio over 4,096 samples (85 ms at 48 kHz)
+  at a time, and its stop used to drop the part-filled buffer, so the recording
+  ended 50–110 ms before the finger lifted (TestFlight build 147 and App Store
+  1.0.4, Live words on or off, simulator); a tap as the last syllable still
+  sounded could lose its end. The stop now waits for that buffer (at most 85 ms,
+  250 ms for a context that went quiet) before it lets the microphone go, so the
+  spinner shows that much later; a start meanwhile waits for it. The keyboard
+  hiding still finishes at once.
 - An in-keyboard capture that another sound interrupts waits for it instead
   of ending: a notification, an alarm or a call takes the audio session, and
   WebKit interrupts or suspends the capture page's `AudioContext` and mutes
