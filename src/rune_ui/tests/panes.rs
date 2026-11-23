@@ -1679,6 +1679,87 @@ fn deleting_a_meeting_takes_the_menu_then_a_confirmation() {
 }
 
 #[test]
+fn deleting_transcript_lines_needs_the_lab_a_selection_and_a_confirmation() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    assert!(
+        rt.find("meeting-select-lines").is_none(),
+        "the lab is off: no selection UI"
+    );
+
+    rt.state.settings.labs.transcript_edits = true;
+    refresh(&mut rt);
+    tap(&mut rt, "meeting-select-lines");
+    assert!(rt.state.meetings.selection.active());
+    assert!(texts(&rt).iter().any(|text| text == "0 lines selected"));
+
+    // One turn reads in the singular, however many lines it covers.
+    tap(&mut rt, "select-turn0");
+    assert_eq!(rt.state.meetings.selection.len(), 1);
+    assert!(texts(&rt).iter().any(|text| text == "1 line selected"));
+    tap(&mut rt, "meeting-delete-lines");
+    assert!(texts(&rt).iter().any(|text| text == "Delete 1 line"));
+    tap(&mut rt, "meeting-cancel-delete-lines");
+
+    // A mixed pair: one Them turn and one You turn, each one published line.
+    tap(&mut rt, "select-turn2");
+    assert_eq!(rt.state.meetings.selection.len(), 2);
+    assert!(texts(&rt).iter().any(|text| text == "2 lines selected"));
+
+    tap(&mut rt, "meeting-delete-lines");
+    assert!(asked(&rt).is_empty(), "the first press only arms");
+    tap(&mut rt, "meeting-confirm-delete-lines");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Meeting(MeetingRequest::DeleteTranscript {
+            id: "preview-notes".into(),
+            entries: vec![
+                crate::meeting::TranscriptEntryKey {
+                    source: crate::meeting::MeetingSource::System,
+                    start_ms: 1_000,
+                    end_ms: 2_000,
+                },
+                crate::meeting::TranscriptEntryKey {
+                    source: crate::meeting::MeetingSource::Microphone,
+                    start_ms: 9_000,
+                    end_ms: 10_000,
+                },
+            ],
+        })],
+        "exactly one request, for the lines under the two turns"
+    );
+    assert!(!rt.state.meetings.selection.active());
+}
+
+/// The bar only promises to remove notes that exist, and a selection the pane
+/// no longer offers goes away with it.
+#[test]
+fn the_selection_bar_only_warns_about_notes_that_exist() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    rt.state.settings.labs.transcript_edits = true;
+    refresh(&mut rt);
+    let warns = |rt: &Runtime<Ui>| {
+        texts(rt)
+            .iter()
+            .any(|text| text.starts_with("Its summary and chapters will be removed"))
+    };
+
+    // The notes meeting has a summary.
+    tap(&mut rt, "meeting-select-lines");
+    assert!(warns(&rt));
+    tap(&mut rt, "meeting-cancel-selection");
+
+    // The design review is Complete with a transcript but no summary or chapters.
+    tap(&mut rt, "meeting-preview-design");
+    tap(&mut rt, "meeting-select-lines");
+    assert!(!warns(&rt));
+
+    // Turning the lab off takes the selection away with it.
+    rt.state.settings.labs.transcript_edits = false;
+    refresh(&mut rt);
+    assert!(!rt.state.meetings.selection.active());
+}
+
+#[test]
 fn the_overflow_menu_copies_the_summary_and_asks_for_new_notes() {
     let mut rt = runtime("meetings-actions", true, PANE_SIZE);
     let copy = menu_item(&rt, "meeting-actions", "Copy summary");

@@ -51,6 +51,7 @@ pub(crate) use os::{open_folder, reveal};
 mod delete;
 mod delta;
 mod echo;
+mod edit;
 mod export_name;
 mod finish;
 pub(crate) mod finished_events;
@@ -182,6 +183,12 @@ pub enum MeetingRequest {
     Summarize(String),
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
+    /// Delete selected lines from a saved meeting's transcript
+    /// (Labs › Delete transcript lines).
+    DeleteTranscript {
+        id: String,
+        entries: Vec<TranscriptEntryKey>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -361,6 +368,32 @@ pub struct TranscriptEntry {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+}
+
+/// Identifies one published transcript line by its speaker and exact span,
+/// not its text: the Meetings pane carries these keys so an edit deletes the
+/// lines it showed even if the words were rewritten meanwhile.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct TranscriptEntryKey {
+    pub source: MeetingSource,
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+impl TranscriptEntryKey {
+    pub fn of(entry: &TranscriptEntry) -> Self {
+        Self {
+            source: entry.source,
+            start_ms: entry.start_ms,
+            end_ms: entry.end_ms,
+        }
+    }
+
+    pub fn matches(self, entry: &TranscriptEntry) -> bool {
+        self.source == entry.source
+            && self.start_ms == entry.start_ms
+            && self.end_ms == entry.end_ms
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -934,27 +967,7 @@ fn transcribe(
     manifest.echo_suppressed_utterances = echo_suppressed;
     // Transcription takes a while; the headings use a rename made meanwhile.
     keep_rename(directory, manifest);
-
-    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
-    let markdown_temporary = directory.join("transcript.md.tmp");
-    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
-    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
-    set_owner_only(&ndjson_temporary, false)?;
-    set_owner_only(&markdown_temporary, false)?;
-    writeln!(markdown, "# {}\n", display_title(manifest))?;
-    for entry in &transcript {
-        serde_json::to_writer(&mut ndjson, entry)?;
-        ndjson.write_all(b"\n")?;
-        writeln!(markdown, "{}", markdown_line(entry))?;
-    }
-    ndjson.flush()?;
-    markdown.flush()?;
-    ndjson.get_ref().sync_all()?;
-    markdown.get_ref().sync_all()?;
-    sync_directory(directory)?;
-    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
-    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
-    sync_directory(directory)?;
+    publish_transcript_files(directory, &display_title(manifest), &transcript)?;
 
     match transcript::export_markdown(
         &crate::app_settings::meeting_output_folder(),
@@ -973,6 +986,37 @@ fn transcribe(
         }
     }
     let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
+    Ok(())
+}
+
+/// Replaces `transcript.ndjson` and `transcript.md` atomically: both
+/// temporary files are written and synced, then renamed over the published
+/// pair. Final publication and a transcript edit write the same files.
+pub(super) fn publish_transcript_files(
+    directory: &Path,
+    title: &str,
+    entries: &[TranscriptEntry],
+) -> Result<()> {
+    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
+    let markdown_temporary = directory.join("transcript.md.tmp");
+    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
+    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
+    set_owner_only(&ndjson_temporary, false)?;
+    set_owner_only(&markdown_temporary, false)?;
+    writeln!(markdown, "# {title}\n")?;
+    for entry in entries {
+        serde_json::to_writer(&mut ndjson, entry)?;
+        ndjson.write_all(b"\n")?;
+        writeln!(markdown, "{}", markdown_line(entry))?;
+    }
+    ndjson.flush()?;
+    markdown.flush()?;
+    ndjson.get_ref().sync_all()?;
+    markdown.get_ref().sync_all()?;
+    sync_directory(directory)?;
+    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
+    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
+    sync_directory(directory)?;
     Ok(())
 }
 

@@ -140,6 +140,18 @@ Import audio                                        // Labs › Import audio, of
         ├── Native picker filters WAV, M4A, MP3, AIFF, AIF, and CAF
         ├── Off -> no button, dialog, decoder, or watcher command
         └── see Import Audio (Labs) below
+Delete transcript lines                       // Labs › Delete transcript lines, off by default (every OS)
+        finished meeting detail -> Select lines beside Copy; every turn gets a check column
+        ├── Press a turn (You and Them together) to select every published line
+        │   under it; adjacent same-speaker entries within 3 s coalesce into one
+        │   turn, so the request carries all their (source, start_ms, end_ms) keys
+        ├── The bar counts the turns clicked (Delete 1 line / Delete {n} lines,
+        │   with singular strings for one); Delete lines… only arms, the
+        │   confirmation sends one request, and Escape or Cancel leaves without asking
+        ├── Its summary, provisional title, and chapters are removed with the
+        │   lines, since their stored text came from them; Regenerate summary
+        │   reads the edited transcript
+        └── see Delete transcript lines (Labs) below
 Live transcript scrolling                           // always on (#1332; graduated from Labs)
         while the selected meeting is Starting or Recording (no Stop
         pending), the detail card's scroll sticks to the bottom: new turns
@@ -1323,6 +1335,59 @@ Proof limits: the decoder now has macOS-only unit tests through
 16 kHz float out), but no automated end-to-end run on a real Mac: the native
 picker is not exercised headlessly, and quitting at each mid-import moment is
 reasoned from the shared cleanup scope and `final.pending` rather than observed.
+
+### Delete Transcript Lines (Labs)
+
+```ts
+Meetings > a finished meeting > Select lines (Labs › Delete transcript lines, off by default) // labs.transcript_edits
+├── The pane shows Select lines only for a Complete meeting with turns and no notes running
+│   └── Labs off -> no Select lines, checkboxes, bar, or request; the controller refuses too;
+│       the selection is dropped when the meeting changes, the lab goes off, the meeting leaves
+│       Complete, or its notes start
+├── Selecting a turn selects every published line under it (a coalesced turn can cover several);
+│   the request carries each line's (source, start_ms, end_ms), never its text. Counts are turns
+│   (what was clicked), with singular strings for one
+├── Delete lines… arms; Delete {n} lines is the one confirmation (Return), Escape cancels
+│   └── The bar says its summary and chapters will be removed only when it has either
+├── Controller (meeting::edit::delete_entries) / one path on every OS:
+│   ├── Meetings off, or the lab off -> refused before touching the folder
+│   ├── Recording, Transcribing, final.pending, not Complete, or no final transcript -> refused
+│   │   (src/meeting/delete.rs's refusal codes, plus NotFinished)
+│   ├── Takes the notes claim (notes::InProgress) before reading the manifest, so a summary that
+│   │   finished meanwhile is not overwritten by the cleared one; Notes while one runs, and Trash
+│   │   sees the same claim
+│   ├── Reads transcript.ndjson and drops exactly the requested lines
+│   ├── Writes the cleared manifest first, so a crash before the transcript rewrite leaves notes
+│   │   that mention nothing the transcript no longer has
+│   ├── Replaces transcript.ndjson and transcript.md atomically through the same
+│   │   meeting::publish_transcript_files that final publication uses (tmp + fsync + rename,
+│   │   owner-only)
+│   ├── Drops transcript.rolling.ndjson entries whose key matches a deleted line, keeping its
+│   │   coverage line; the draft chunks the audio differently, so words inside an entry it kept can
+│   │   remain, and no reader shows the draft while the final transcript exists
+│   ├── Clears notes, notes_error, provisional_title, chapters, and chapters_refined: their stored
+│   │   text came from the edited lines and would otherwise reach the shown title, chapters, search,
+│   │   MCP, and the Markdown copy. Regenerate summary reads the edited transcript through
+│   │   notes::summary_entries only
+│   ├── Rewrites the user Markdown copy from the edited manifest only while its bytes still match
+│   │   export_sha256; a copy the user edited (or one with no recorded hash) is left alone
+│   ├── Refreshes a tracked separate notes file under its own hash guard
+│   └── Never opens, rewrites, or deletes system.wav or microphone.wav
+└── Opening the meeting, Copy transcript, Copy section, search, MCP transcripts/notes, and the CLI
+    read the edited files; the query library's fingerprint sees the rewrite
+
+Checks: deleting_turns_rewrites_the_transcript_and_reopens_without_them,
+an_edit_waits_for_the_notes_claim,
+the_summary_prompt_reads_the_edited_transcript_from_disk (through
+notes::summary_entries), and
+the_export_and_rolling_draft_lose_the_lines_but_a_user_edit_stays (meeting/edit.rs);
+turns_carry_exactly_their_own_published_lines (rune_ui/meetings_host.rs);
+deleting_transcript_lines_needs_the_lab_a_selection_and_a_confirmation and
+the_selection_bar_only_warns_about_notes_that_exist (tests/panes.rs);
+scenes meetings-select and meetings-select-confirm. Not observed on a real Mac or Linux
+meeting; the confirmation and hash-guarded export are reasoned from the shared pane and
+write paths.
+```
 The manifest flag, the empty microphone track, the Speaker label, and the lab
 default are unit-checked on every OS that can run them.
 

@@ -43,4 +43,13 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("{} seconds after the call app leaves the microphone", ["{} s po tym, jak aplikacja do rozmów zwolni mikrofon", "通话应用停止使用麦克风 {} 秒后", "通話アプリがマイクの使用をやめてから {} 秒後", "{} Sekunden, nachdem die Anruf-App das Mikrofon freigibt", "{} segundos después de que la app de llamadas deje el micrófono", "Через {} с після того, як застосунок дзвінків звільнить мікрофон"]),
     ("{name}: {answer}", ["{name}: {answer}", "{name}：{answer}", "{name}：{answer}", "{name}: {answer}", "{name}: {answer}", "{name}: {answer}"]),
     ("{} apps and websites answer differently", ["Inne odpowiedzi: {}", "{} 个应用和网站有自己的设置", "独自の設定があるアプリと Web サイト：{}", "{} Apps und Websites antworten anders", "{} apps y sitios web responden de otra forma", "Інші відповіді: {}"]),
+    ("Select lines", ["Zaznacz wiersze", "选择行", "行を選択", "Zeilen auswählen", "Seleccionar líneas", "Вибрати рядки"]),
+    ("{} lines selected", ["Zaznaczono wierszy: {}", "已选择 {} 行", "{} 行を選択中", "{} Zeilen ausgewählt", "{} líneas seleccionadas", "Вибрано рядків: {}"]),
+    ("1 line selected", ["Zaznaczono 1 wiersz", "已选择 1 行", "1 行を選択中", "1 Zeile ausgewählt", "1 línea seleccionada", "Вибрано 1 рядок"]),
+    ("Delete lines…", ["Usuń wiersze…", "删除行…", "行を削除…", "Zeilen löschen…", "Eliminar líneas…", "Видалити рядки…"]),
+    ("Delete {} lines", ["Usuń wiersze: {}", "删除 {} 行", "{} 行を削除", "{} Zeilen löschen", "Eliminar {} líneas", "Видалити рядків: {}"]),
+    ("Delete 1 line", ["Usuń 1 wiersz", "删除 1 行", "1 行を削除", "1 Zeile löschen", "Eliminar 1 línea", "Видалити 1 рядок"]),
+    ("Select the lines to delete.", ["Zaznacz wiersze do usunięcia.", "选择要删除的行。", "削除する行を選択してください。", "Wähle die zu löschenden Zeilen aus.", "Selecciona las líneas que quieres eliminar.", "Виберіть рядки, які треба видалити."]),
+    ("Its summary and chapters will be removed. Summarize again for a fresh one.", ["Jego podsumowanie i rozdziały zostaną usunięte. Podsumuj ponownie, aby je odtworzyć.", "它的摘要和章节将被移除。再次总结可生成新的。", "要約とチャプターは削除されます。もう一度要約すると新しく作成されます。", "Zusammenfassung und Kapitel werden entfernt. Fasse erneut zusammen, um neue zu erhalten.", "Se eliminarán su resumen y sus capítulos. Vuelve a resumir para crear unos nuevos.", "Підсумок і розділи буде вилучено. Підсумуйте знову, щоб створити нові."]),
+    ("Lines could not be deleted.", ["Nie udało się usunąć wierszy.", "无法删除行。", "行を削除できませんでした。", "Zeilen konnten nicht gelöscht werden.", "No se pudieron eliminar las líneas.", "Не вдалося видалити рядки."]),
 ];

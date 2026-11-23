@@ -723,6 +723,43 @@ pub(super) const SCENES: &[Scene] = &[
         ui.meetings.delete_armed = Some("preview-notes".into());
         ui.pane = Pane::Meetings;
     }),
+    // Labs › Delete transcript lines: two saved turns checked, the bar
+    // asking, then its one confirmation.
+    ("meetings-select", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.transcript_edits = true;
+        ui.meetings.selection.select_lines(&[
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::System,
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::Microphone,
+                start_ms: 9_000,
+                end_ms: 10_000,
+            },
+        ]);
+        ui.pane = Pane::Meetings;
+    }),
+    ("meetings-select-confirm", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.transcript_edits = true;
+        ui.meetings.selection.select_lines(&[
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::System,
+                start_ms: 1_000,
+                end_ms: 2_000,
+            },
+            crate::meeting::TranscriptEntryKey {
+                source: crate::meeting::MeetingSource::Microphone,
+                start_ms: 9_000,
+                end_ms: 10_000,
+            },
+        ]);
+        ui.meetings.selection.delete_armed = true;
+        ui.pane = Pane::Meetings;
+    }),
     ("meetings-rename", |ui| {
         *ui = mac_fixture();
         ui.meetings.renaming = Some("preview-notes".into());

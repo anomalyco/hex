@@ -622,6 +622,9 @@ impl MacHost {
             MeetingRequest::Import(path) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Import(path)),
+            MeetingRequest::DeleteTranscript { id, entries } => self
+                .runtime()?
+                .meeting(crate::meeting::MeetingRequest::DeleteTranscript { id, entries }),
             MeetingRequest::Summarize(id) => self
                 .runtime()?
                 .meeting(crate::meeting::MeetingRequest::Summarize(id)),

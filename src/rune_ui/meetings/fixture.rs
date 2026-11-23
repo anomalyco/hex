@@ -12,6 +12,15 @@ impl MeetingsPane {
             start_ms: seconds * 1_000,
             text: text.into(),
             pause_before_ms: None,
+            entries: vec![crate::meeting::TranscriptEntryKey {
+                source: if mine {
+                    crate::meeting::MeetingSource::Microphone
+                } else {
+                    crate::meeting::MeetingSource::System
+                },
+                start_ms: seconds * 1_000,
+                end_ms: seconds * 1_000 + 1_000,
+            }],
         };
         let mut conversation = vec![
             turn(

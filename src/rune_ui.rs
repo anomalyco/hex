@@ -45,7 +45,7 @@ pub(crate) use self::meetings::meeting_import_failed;
 #[cfg(hex_capture)]
 mod captures;
 mod meetings_host;
-pub(crate) use meetings_host::{meeting_failed, meeting_settings_saved};
+pub(crate) use meetings_host::{meeting_edit_failed, meeting_failed, meeting_settings_saved};
 mod model_details;
 mod model_import;
 mod models;
@@ -1313,9 +1313,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
     } else if ui.open.is_some() {
         ui.open = None;
         true
-    } else if ui.meetings.renaming.is_some() || ui.meetings.delete_armed.is_some() {
-        ui.meetings.renaming = None;
-        ui.meetings.delete_armed = None;
+    } else if meetings::cancel_edit(ui) {
         true
     } else {
         ui.pane == Pane::History && ui.history.cancel_delete(tx)
@@ -1486,6 +1484,9 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             changed |= leave_hidden_pane(ui);
         }
     }
+    // The lab, the selected meeting's status, or its notes can take the
+    // selection away between frames.
+    changed |= meetings::settle_selection(ui);
     let preparing = ui
         .view
         .as_ref()

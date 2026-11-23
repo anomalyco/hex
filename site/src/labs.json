@@ -625,6 +625,19 @@
       "title": "Import audio"
     },
     {
+      "added": "2026-11-23",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "transcript-edits",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Select lines in a saved meeting transcript and delete them. Summaries, copies, and the Markdown file use what's left",
+      "title": "Delete transcript lines"
+    },
+    {
       "added": "2026-11-07",
       "group": "shortcuts",
       "groupTitle": "Shortcuts",
