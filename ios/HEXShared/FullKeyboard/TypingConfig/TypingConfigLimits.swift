@@ -26,4 +26,16 @@ nonisolated enum TypingConfigLimits {
     static let zoneKeepFromCentre: CGFloat = 0.3
     /// The edges a zone may move, by key ("letter" is every letter key).
     static let zoneEdges: [String: [KeyboardZone.Edge]] = ["letter": [.top, .bottom, .left, .right], "space": [.top, .left, .right], "layer:numbers": [.top, .right], "return": [.top, .left], "shift": [.top, .right], "delete": [.top, .left]]
+    /// The least evidence a part may claim (a reader skips one that claims less).
+    static let keepMinTimes = 2
+    static let keepMinSessions = 2
+    static let neverCorrectToMinTakenBack = 2
+    static let fixMinTimes = 2
+    static let fixMinSessions = 2
+    static let dictationMinTimes = 2
+    static let aimMinTunedTaps = 40
+    static let aimMinCheckedTaps = 20
+    static let zoneMinTunedTaps = 15
+    static let zoneMinNetCheckedTaps = 3
+    static let zoneMaxLostShare: Double = 0.34
 }

@@ -99,8 +99,10 @@ UTF-8 JSON, at most 65,536 bytes, extension `.mhexconfig`, type `anomaly.hex.typ
 ```
 
 - `id`: `cfg-` plus the first 16 hex digits of the SHA-256 of the file's canonical JSON without
-  `id` (keys sorted, no spaces, UTF-8). `scripts/check_config.py --write` fills it in. A reader
-  that finds a different id shows "changed after it was made".
+  `id` (keys sorted, no spaces, UTF-8). `scripts/check_config.py --write` fills it in.
+  - It is the file's name for itself, which other configs' `basedOn` refers to.
+  - Hex doesn't recompute it, because languages print numbers differently. Its history knows
+    each file by the SHA-256 of its bytes.
 - `basedOn`: the id of the config this one starts from (`state/phone.json` `activeTypingConfig`),
   or null.
 - `madeFrom.heldOut`: which half of the sessions the values were tuned on, and which half they
@@ -176,6 +178,11 @@ Which edge is which:
 3. Words are too sparse for halves: they need their counts in 2 different sessions instead.
 
 ## Reading (what Hex does with a file)
+
+On the phone, `TypingConfigReview` (in `HEXShared/FullKeyboard/TypingConfig/`) does all of this.
+It gives an outcome for every part: applied, clamped (from what to what), or skipped with a
+reason from a fixed list.
+
 
 - **A file over 65,536 bytes, not JSON, or with another `format`:** refused, with nothing applied.
 - **A `version` newer than this Hex:** the fields it knows are read, and the rest are listed as
