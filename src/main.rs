@@ -97,6 +97,7 @@ use color_eyre::eyre::eyre;
 #[command(
     name = "hex",
     version = crate::VERSION,
+    long_version = option_env!("HEX_LOCAL_LONG_VERSION"),
     about = "Local, observable voice control",
     long_about = "Local, observable voice control.\n\n\
         Control commands (status, dictation, meetings record, settings, model, window, …) drive \

@@ -282,6 +282,7 @@ fn footer(ui: &Ui, p: Paint) -> El {
                     .truncate(),
             )
     };
+    let build = ui.build_preview.unwrap_or_else(build_kind);
     let status = ui.view.as_ref().map(|view| &view.update_status);
     let status = match status {
         None
@@ -334,13 +335,10 @@ fn footer(ui: &Ui, p: Paint) -> El {
         Some(DesktopUpdateStatus::Downloading) => {
             Some(line("update-status", tr("Downloading update"), p.faint()))
         }
+        Some(DesktopUpdateStatus::SourceBuild) if matches!(build, BuildKind::Local { .. }) => None,
         Some(DesktopUpdateStatus::SourceBuild) => Some(line(
             "update-status",
-            if ui.build_preview.unwrap_or_else(build_kind) == BuildKind::Local {
-                tr("Local build · updates off")
-            } else {
-                tr("Updated from your source checkout")
-            },
+            tr("Updated from your source checkout"),
             p.faint(),
         )),
         Some(DesktopUpdateStatus::PackageManager) => Some(line(
@@ -358,7 +356,22 @@ fn footer(ui: &Ui, p: Paint) -> El {
                 .py(2.0),
         ),
     };
-    let version = version_line(ui, p, line("version", &version_label(), p.faint()));
+    let version = match build {
+        BuildKind::Local { version, commit } => {
+            let words = tr_fill("{} · Local build", version);
+            let detail = tr("Local build · updates off");
+            let version = line("version", &words, c.text_muted)
+                .role("group")
+                .label(words)
+                .help(detail)
+                .help_above();
+            match commit {
+                Some(sha) => version.help_row(sha),
+                None => version,
+            }
+        }
+        _ => version_line(ui, p, line("version", &version_label(), p.faint())),
+    };
     let version = if host::QUIT_IN_WINDOW {
         // Long build labels and translations get a second line rather than
         // crowding the badge or overlaying Quit's hit target.
@@ -406,8 +419,7 @@ fn release_notes_url(ui: &Ui) -> Option<String> {
     crate::updater::notes::release_notes_url(version)
 }
 
-/// A local or test build marks itself beside the version, quietly: an outline
-/// pill with a dot, in muted theme tokens.
+/// Published releases can link to their notes; test builds keep their badge.
 fn version_line(ui: &Ui, p: Paint, version: El) -> El {
     if let Some(url) = release_notes_url(ui) {
         return version
@@ -426,11 +438,9 @@ fn version_line(ui: &Ui, p: Paint, version: El) -> El {
                 }
             });
     }
-    let badge = match ui.build_preview.unwrap_or_else(build_kind) {
-        BuildKind::Release => return version,
-        BuildKind::Local => tr("Local"),
-        BuildKind::Test => tr("Test"),
-    };
+    if ui.build_preview.unwrap_or_else(build_kind) != BuildKind::Test {
+        return version;
+    }
     let c = &p.k.c;
     row()
         .key("version-row")
@@ -452,7 +462,7 @@ fn version_line(ui: &Ui, p: Paint, version: El) -> El {
                         .radius(2.5),
                 )
                 .child(
-                    text(badge)
+                    text(tr("Test"))
                         .key("label")
                         .font(p.k.ty.small)
                         .color(c.text_muted),
@@ -465,13 +475,19 @@ fn version_line(ui: &Ui, p: Paint, version: El) -> El {
 #[derive(Clone, Copy, PartialEq)]
 pub(super) enum BuildKind {
     Release,
-    Local,
+    Local {
+        version: &'static str,
+        commit: Option<&'static str>,
+    },
     Test,
 }
 
 fn build_kind() -> BuildKind {
     if crate::app_paths::is_local_build() {
-        BuildKind::Local
+        BuildKind::Local {
+            version: crate::VERSION,
+            commit: option_env!("HEX_COMMIT"),
+        }
     } else if option_env!("HEX_TEST_BUILD") == Some("1") {
         BuildKind::Test
     } else {
@@ -482,20 +498,13 @@ fn build_kind() -> BuildKind {
 /// The footer's lines: as tall as each other, so a check moves nothing.
 pub(super) const FOOTER_LINE: f32 = 20.0;
 
-/// Test and local builds also name their commit: main moves past a release without
+/// A test build names its commit too: dev moves past a release without
 /// changing the version.
 fn version_label() -> String {
-    // Goldens render a fixed version: a local build's names its commit.
+    // Goldens render a fixed version.
     let version = if cfg!(test) { "0.0.0" } else { crate::VERSION };
     match option_env!("HEX_COMMIT") {
-        Some(commit) => {
-            let kind = if crate::app_paths::is_local_build() {
-                "local"
-            } else {
-                "test"
-            };
-            tr_fill("Version {}", &format!("{version} ({kind} {commit})"))
-        }
+        Some(commit) => tr_fill("Version {}", &format!("{version} (test {commit})")),
         None => tr_fill("Version {}", version),
     }
 }

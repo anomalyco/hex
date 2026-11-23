@@ -929,7 +929,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Show Hex", "Показать Hex"),
     ("Enable / Disable Hex", "Включить / выключить Hex"),
     ("Updated by your package manager", "Обновляется менеджером пакетов"),
-    ("Local", "Локальная"),
+    ("{} · Local build", "{} · Локальная сборка"),
     ("Test", "Тестовая"),
     ("Local build · updates off", "Локальная сборка · обновления выключены"),
     ("Updated from your source checkout", "Обновляется из вашей копии исходного кода"),

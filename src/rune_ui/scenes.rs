@@ -595,10 +595,13 @@ pub(super) const SCENES: &[Scene] = &[
         *ui = mac_fixture();
         ui.settings.updates.channel = Some(crate::app_settings::UpdateChannel::Dev);
     }),
-    // A local build: the badge, the quiet status line, no channel row.
+    // Pin both parts of an actual local build, independent of the render host.
     ("mac-local-build", |ui| {
         *ui = mac_fixture();
-        ui.build_preview = Some(BuildKind::Local);
+        ui.build_preview = Some(BuildKind::Local {
+            version: "3.4.0",
+            commit: Some("fc837db2a56858eeef61411c97737d2435e60a88"),
+        });
         if let Some(view) = &mut ui.view {
             view.update_status = DesktopUpdateStatus::SourceBuild;
         }
