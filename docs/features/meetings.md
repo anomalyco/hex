@@ -296,11 +296,17 @@ Stop when the call ends -> the same row and 30 s grace as macOS
     holds the microphone OR still plays output: Windows any active render
     session on any output of its processes (IAudioSessionManager2), Linux a
     running Stream/Output/Audio node of its executable in the same pw-dump
-    graph. A failed or unknown read counts as playing, so a muted call is
-    never stopped
+    graph. A failed read counts as playing, so a muted call is never stopped;
+    on Linux the graph is briefly empty right after its monitor (re)starts,
+    which reads as not playing, harmless because the microphone read is empty
+    too and an absence only counts after 3 s. Windows and macOS skip an
+    individual output, session, or process that can't be read
     // checks: running_output_streams_say_whether_an_app_still_plays
     // (microphone_activity/linux.rs); Windows has no automated check
-    └── not observed on a real muted call on either OS
+    ├── not observed on a real muted call on either OS
+    └── A page naming a different call ends the recording after the same
+        grace (#1775) on Windows too, untested there; never on Linux, which
+        reads no site
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -365,9 +371,11 @@ monitor capture and the pw-dump parsing were checked by hand on Arch/niri
 before #1801. Not verified: the multi-sink capture #1801 added has not been
 run against a real PipeWire session (neither has `target.object` been shown to
 link each `pw-record` to that sink's monitor), a recorded call end to end on
-either OS, Windows loopback and session detection on hardware, and the
+either OS, Windows loopback and session detection on hardware, the
 audio-output read behind Stop when the call ends (a Windows render session
-and a Linux PipeWire output node on a real muted call).
+and a Linux PipeWire output node on a real muted call), and whether the new
+Teams on Windows may play through msedgewebview2.exe: Hex does not map that
+process to Teams, so its output would not count as playing.
 
 ## Sub-features
 
@@ -1197,8 +1205,11 @@ meetings.stop_when_call_ends) // meetings.auto-stop
      processes on macOS, an active render session on any output in
      IAudioSessionManager2 on Windows, and a running Stream/Output/Audio
      node in PipeWire's graph on Linux
-     └── A failed or unknown output read counts as playing, so it never
-         stops a recording
+     └── A failed read counts as playing, so it never stops a recording.
+         Windows and macOS skip an individual output, session, or process
+         that can't be read. On Linux the graph is briefly empty right after
+         its monitor (re)starts, which reads as not playing, harmless because
+         the microphone read is empty too and an absence only counts after 3 s
   -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
      unless you keep recording."
      ├── App back on the microphone or output within 30 s -> its stop is
@@ -1530,12 +1541,12 @@ Checks: `call_end_is_reported_once_per_sustained_absence`,
 `keep_recording_disarms_a_pending_automatic_stop` in
 [meeting/watcher.rs](../../src/meeting/watcher.rs),
 `an_automatic_stop_says_so_and_keep_recording_cancels_it` in
-[meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs) (auto-stop; not
-yet observed on a real Mac: the output read
-`microphone_activity::application_running_output` against a live WhatsApp
-call, a muted call, and Zoom or Teams helpers, and not on a real muted call
-on Windows or Linux either), and
-`running_output_streams_say_whether_an_app_still_plays` in
+[meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs) (auto-stop).
+The auto-stop and the output read behind it
+(`microphone_activity::application_running_output`) have not yet been
+observed on a real Mac: not against a live WhatsApp call, a muted call, or
+Zoom or Teams helpers, and not on a real muted call on Windows or Linux.
+Other checks: `running_output_streams_say_whether_an_app_still_plays` in
 [microphone_activity/linux.rs](../../src/microphone_activity/linux.rs),
 `paste_cursor_counts_coalesced_turns_and_advances_only_on_success` in
 [meeting/tests.rs](../../src/meeting/tests.rs),
