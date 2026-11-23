@@ -502,6 +502,26 @@ class InsertionTest {
         assertEquals("o ônibus", SpokenText.continuing("O ônibus", "e", "pt"))
         assertEquals("Maria chegou", SpokenText.continuing("Maria chegou", "e", "pt"))
     }
+    @Test fun polishAndRussianAreDictationLanguagesWithoutEnglishRules() {
+        // Polish and Russian phones used to fall back to English, and Whisper told "en" translates.
+        assertEquals(DictationLanguage.Polish, DictationLanguage.automatic(null, listOf("pl", "en")))
+        assertEquals(DictationLanguage.Russian, DictationLanguage.automatic(null, listOf("ru")))
+        assertEquals(DictationLanguage.Russian, DictationLanguage.matching("ru"))
+        assertEquals(null, DictationLanguage.Polish.layout)
+        assertEquals(null, DictationLanguage.Russian.layout)
+        fun format(text: String, style: Style, language: DictationLanguage) = SpokenText.format(text, SpeechOptions(style, language,
+            clean = true, translate = false, formatLists = true, spokenPunctuation = true))
+        // Cleanup has no Polish rules, so the particle "no" ("well") is not English's correction marker.
+        assertEquals("Kupię dwa, no, trzy bilety.", format("kupię dwa, no, trzy bilety", Style.Polished, DictationLanguage.Polish))
+        assertEquals("dziękuję za pomoc", format("Dziękuję za pomoc.", Style.Casual, DictationLanguage.Polish))
+        assertEquals("Спасибо за помощь, до завтра.", format("спасибо за помощь, до завтра", Style.Polished, DictationLanguage.Russian))
+        assertEquals("спасибо за помощь", format("Спасибо за помощь.", Style.Casual, DictationLanguage.Russian))
+        assertEquals("Я немного опоздаю", format("Я немного опоздаю", Style.Verbatim, DictationLanguage.Russian))
+        assertEquals("to jest", SpokenText.continuing("To jest", "i", "pl"))
+        assertEquals("Warszawa jest", SpokenText.continuing("Warszawa jest", "i", "pl"))
+        assertEquals("это мой", SpokenText.continuing("Это мой", "и", "ru"))
+        assertEquals("Москва большая", SpokenText.continuing("Москва большая", "и", "ru"))
+    }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
         val typed = StringBuilder()
