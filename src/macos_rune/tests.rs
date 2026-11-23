@@ -109,7 +109,7 @@ impl Fixture {
                 ),
                 settings,
                 preparation,
-                automatic_preparation: false,
+                automatic_preparation: None,
                 recognition_start: None,
                 listener_failure: Default::default(),
                 event_reader: crate::desktop::events::EventReader::open(""),

@@ -217,7 +217,9 @@ impl Pump {
                     Err(error) => return Some(error.into()),
                 };
                 let definition = crate::transcription::models::definition(selection.model);
-                if !crate::transcription::models::is_installed(definition, &selection.language) {
+                if !crate::transcription::readiness::readiness(definition, &selection.language)
+                    .installed
+                {
                     return Some(ControlReply::error(
                         "not-installed",
                         format!(
@@ -238,7 +240,9 @@ impl Pump {
                     Err(error) => return Some(error.into()),
                 };
                 let definition = crate::transcription::models::definition(selection.model);
-                if crate::transcription::models::is_installed(definition, &selection.language) {
+                if crate::transcription::readiness::readiness(definition, &selection.language)
+                    .installed
+                {
                     return start_model_use(runtime, selection, reply);
                 }
                 Some(reply_with(
@@ -1007,7 +1011,7 @@ mod tests {
                 None,
             ),
             app_switcher: crate::transcription::app_model_switching::Switcher::new(false, None),
-            automatic_preparation: false,
+            automatic_preparation: None,
             preparation,
             recognition_start: None,
             listener_failure: Default::default(),

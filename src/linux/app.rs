@@ -934,6 +934,9 @@ impl LinuxDesktopHost {
                         };
                         match saved {
                             Ok(candidate) => {
+                                if preparation.automatic {
+                                    self.keyboard_switcher.commit();
+                                }
                                 // Read from disk, so it may carry an outside
                                 // edit the modes must pick up too.
                                 self.settings = candidate;
@@ -963,6 +966,9 @@ impl LinuxDesktopHost {
                                 }
                             }
                             Err(error) => {
+                                if preparation.automatic {
+                                    self.keyboard_switcher.fail(Instant::now());
+                                }
                                 self.transcription_error = Some(format!(
                                     "Could not save transcription selection: {error:#}"
                                 ));
@@ -970,6 +976,9 @@ impl LinuxDesktopHost {
                         }
                     }
                     Err(error) => {
+                        if preparation.automatic {
+                            self.keyboard_switcher.fail(Instant::now());
+                        }
                         self.note_model_check_failure();
                         self.transcription_error = Some(error);
                     }
@@ -1233,6 +1242,7 @@ impl LinuxDesktopHost {
     /// once the debounced choice is due.
     fn supersede_automatic(&mut self) {
         self.keyboard_switch = None;
+        self.keyboard_switcher.cancel_applying();
         if let Some(preparation) = &self.transcription_preparation
             && preparation.automatic
         {
@@ -1272,15 +1282,21 @@ impl LinuxDesktopHost {
             if let Some(preparation) = &self.transcription_preparation {
                 preparation.canceled.store(true, Ordering::Relaxed);
             }
-            self.keyboard_switch = (selection.model != self.settings.transcription.model
-                || selection.language != self.settings.transcription.language)
-                .then_some(selection);
+            if selection.model != self.settings.transcription.model
+                || selection.language != self.settings.transcription.language
+            {
+                self.keyboard_switch = Some(selection);
+            } else {
+                self.keyboard_switcher.commit();
+                self.keyboard_switch = None;
+            }
         }
         if self.transcription_preparation.is_none()
             && self.shortcut_edit.is_none()
             && let Some(selection) = self.keyboard_switch.take()
             && let Err(error) = self.prepare_transcription(selection, true, true)
         {
+            self.keyboard_switcher.fail(Instant::now());
             self.transcription_error = Some(format!("{error:#}"));
         }
     }

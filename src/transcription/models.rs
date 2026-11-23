@@ -372,15 +372,10 @@ impl ModelDefinition {
     /// and search use the vocabulary with every model.
     pub fn vocabulary_use(&self) -> VocabularyUse {
         match self.runtime {
-            ModelRuntime::Gguf(artifact) if artifact.architecture == "parakeet" => {
-                VocabularyUse::Bias
+            ModelRuntime::Gguf(artifact) => {
+                super::readiness::vocabulary_use_for_architecture(artifact.architecture)
             }
-            ModelRuntime::Gguf(artifact)
-                if matches!(artifact.architecture, "whisper" | "qwen3_asr") =>
-            {
-                VocabularyUse::Prompt
-            }
-            _ => VocabularyUse::None,
+            ModelRuntime::AppleSpeech => VocabularyUse::None,
         }
     }
 

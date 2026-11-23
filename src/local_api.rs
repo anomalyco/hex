@@ -833,15 +833,7 @@ fn transcription_action(
         }
     };
     let model = crate::transcription::models::definition(selection.model);
-    let prepared = match model.runtime {
-        crate::transcription::models::ModelRuntime::Gguf(_) => {
-            crate::transcription::models::is_verified(model)
-        }
-        crate::transcription::models::ModelRuntime::AppleSpeech => {
-            crate::transcription::models::is_installed(model, &selection.language)
-        }
-    };
-    if !prepared {
+    if !crate::transcription::readiness::is_ready(model, &selection.language) {
         return RequestAction::Respond(HttpResponse::code(409, "model-not-ready"));
     }
     let Some(admission) = transcription.admit_audio() else {
@@ -1093,26 +1085,18 @@ fn model_infos(path: &str) -> std::result::Result<Vec<ModelInfo>, &'static str> 
     if !crate::transcription::models::is_known_language(&language) {
         return Err("unsupported-language");
     }
-    Ok(crate::transcription::models::all_models()
+    Ok(crate::transcription::readiness::catalog_models(&language)
         .into_iter()
-        .filter(|model| model.available())
-        .map(|model| {
-            let managed = matches!(
-                model.runtime,
-                crate::transcription::models::ModelRuntime::AppleSpeech
-            );
-            let installed = crate::transcription::models::is_installed(model, &language);
-            ModelInfo {
-                id: model.id.as_str(),
-                name: model.name,
-                installed,
-                verified: managed && installed || crate::transcription::models::is_verified(model),
-                managed,
-                download_bytes: model.download_bytes(),
-                languages: model.presentation_languages(),
-                supports_language_detection: model.supports_language_detection,
-                source: crate::control::model_source(model, &language),
-            }
+        .map(|model| ModelInfo {
+            id: model.id_str,
+            name: model.name,
+            installed: model.readiness.installed,
+            verified: model.readiness.verified,
+            managed: model.managed,
+            download_bytes: model.download_bytes,
+            languages: model.languages,
+            supports_language_detection: model.supports_language_detection,
+            source: model.source,
         })
         .collect())
 }

@@ -495,12 +495,89 @@ fn a_dropped_yielding_stream_never_wedges_stream_window_or_streams_slot() {
     worker.join().unwrap();
 }
 
+#[test]
+fn lease_expires_even_while_close_window_waits_for_busy_dictation() {
+    struct BlockingOfflineEngine {
+        entered_transcribe: Arc<AtomicBool>,
+    }
+
+    impl Engine for BlockingOfflineEngine {
+        fn dictation_busy(&self) -> bool {
+            false
+        }
+
+        fn streams(&self) -> bool {
+            false
+        }
+
+        fn holds_model(&self) -> bool {
+            true
+        }
+
+        fn begin(&self) -> Option<Box<dyn Live>> {
+            None
+        }
+
+        fn transcribe(&self, _window: Vec<f32>, stop: &dyn Fn() -> bool) -> Result<String, String> {
+            self.entered_transcribe.store(true, Ordering::SeqCst);
+            while !stop() {
+                thread::sleep(Duration::from_millis(5));
+            }
+            Err("stopped".into())
+        }
+
+        fn quitting(&self) -> bool {
+            false
+        }
+    }
+
+    let entered = Arc::new(AtomicBool::new(false));
+    let streams = Streams::with_lease(Duration::from_millis(200));
+    let stream = streams
+        .create(
+            BlockingOfflineEngine {
+                entered_transcribe: entered.clone(),
+            },
+            SampleFormat::F32le,
+            selection(),
+            "owner".into(),
+        )
+        .unwrap();
+    // Push a full window so the worker enters close_window -> engine.transcribe
+    // while the stream is still Live (not Finishing).
+    for _ in 0..(MAX_WINDOW_SAMPLES / SAMPLE_RATE) {
+        stream.push(&[0.0; SAMPLE_RATE]).unwrap();
+    }
+    eventually(|| entered.load(Ordering::SeqCst));
+    let end = stream.finish_after_lease_for_test();
+    assert!(matches!(
+        end,
+        End::Failed {
+            code: "lease-expired",
+            ..
+        }
+    ));
+}
+
+#[test]
+fn cancel_after_terminal_end_does_not_overwrite_final_state() {
+    let engine = FakeEngine::default();
+    let streams = Streams::default();
+    let stream = create(&streams, &engine);
+    stream.push(&[0.0; 160]).unwrap();
+    let end = finish(&stream);
+    assert!(matches!(end, End::Final { .. }));
+    stream.cancel();
+    assert_eq!(finish(&stream), end);
+    assert!(!stream.heartbeat());
+}
+
 impl Stream {
     /// Waits for the end without finishing, so the lease can lapse.
     fn finish_after_lease_for_test(&self) -> End {
         let mut state = self.shared.lock();
         loop {
-            if let Some(end) = &state.end {
+            if let Some(end) = state.phase.ended() {
                 return end.clone();
             }
             state = self.shared.changed.wait_timeout(state, POLL).unwrap().0;

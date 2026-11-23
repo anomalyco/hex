@@ -717,13 +717,14 @@ impl ModelReport {
     /// The saved `selection`, and the fallback Hex runs while it can't run;
     /// no preparation.
     pub fn saved(selection: &crate::transcription::models::TranscriptionSelection) -> Self {
-        use crate::transcription::{custom_models, models};
+        use crate::transcription::{custom_models, models, readiness};
         let definition = models::definition(selection.model);
+        let status = readiness::readiness(definition, &selection.language);
         Self {
             id: selection.model.as_str().into(),
             name: definition.name.into(),
             language: selection.language.clone(),
-            installed: models::is_installed(definition, &selection.language),
+            installed: status.installed,
             fallback: custom_models::fallback_reason(selection).map(|reason| {
                 let running = custom_models::fallback();
                 FallbackReport {
@@ -793,56 +794,27 @@ pub struct ModelInfo {
     pub source: String,
 }
 
-/// Where `model`'s file is or comes from, as `hex model list` and the local
-/// API say it: `found: owner/name@abcdef1`, `imported`, `hex`, or `download`.
-pub fn model_source(
-    model: &crate::transcription::models::ModelDefinition,
-    language: &str,
-) -> String {
-    use crate::transcription::found_models::describe;
-    use crate::transcription::models::{is_installed, model_path};
-    let installed = is_installed(model, language);
-    let here = model_path(model)
-        .ok()
-        .filter(|_| installed)
-        .and_then(|path| describe(&path));
-    match (model.id.is_custom(), here) {
-        (true, Some(origin)) => format!("found: {origin} (not tested by Hex)"),
-        (false, Some(origin)) => format!("found: {origin}"),
-        (true, None) => "imported".into(),
-        (false, None) if installed => "hex".into(),
-        (false, None) => "download".into(),
-    }
-}
-
-/// Every model `hex model` can name, with what this Mac has installed.
+/// Every model `hex model` can name, with what this computer has installed.
 pub fn model_infos(
     selection: &crate::transcription::models::TranscriptionSelection,
 ) -> Vec<ModelInfo> {
-    use crate::transcription::found_models;
     use crate::transcription::models::VocabularyUse;
+    use crate::transcription::{found_models, readiness};
     // Listing models looks for ones already on this computer: headers only.
     let found = found_models::scan();
-    let source = |model| model_source(model, &selection.language);
-    let mut infos: Vec<ModelInfo> = crate::transcription::models::all_models()
+    let mut infos: Vec<ModelInfo> = readiness::catalog_models(&selection.language)
         .into_iter()
-        .filter(|model| model.available())
         .map(|model| ModelInfo {
-            source: source(model),
             id: model.id.as_str().into(),
             name: model.name.into(),
-            languages: model.languages.iter().map(|&code| code.into()).collect(),
-            size: model.size_label(),
-            installed: crate::transcription::models::is_installed(model, &selection.language),
+            languages: model.languages.into_iter().map(Into::into).collect(),
+            size: model.size,
+            installed: model.readiness.installed,
             selected: model.id == selection.model,
             streams: model.streams,
-            vocabulary: match model.vocabulary_use() {
-                VocabularyUse::Prompt => "prompt",
-                VocabularyUse::Bias => "bias",
-                VocabularyUse::None => "none",
-            }
-            .into(),
-            supports_recognition_hints: model.vocabulary_use() == VocabularyUse::Prompt,
+            vocabulary: readiness::vocabulary_use_label(model.vocabulary).into(),
+            supports_recognition_hints: model.vocabulary == VocabularyUse::Prompt,
+            source: model.source,
         })
         .collect();
     // Compatible files that aren't catalog models and aren't in use yet:
@@ -853,6 +825,7 @@ pub fn model_infos(
         let Some(sha256) = &model.blob_sha256 else {
             continue;
         };
+        let vocabulary = readiness::vocabulary_use_for_architecture(&model.architecture);
         infos.push(ModelInfo {
             id: format!("custom-{}", &sha256[..16]),
             name: model.name.clone(),
@@ -861,18 +834,8 @@ pub fn model_infos(
             installed: true,
             selected: false,
             streams: false,
-            vocabulary: if matches!(model.architecture.as_str(), "whisper" | "qwen3_asr") {
-                "prompt"
-            } else if model.architecture == "parakeet" {
-                "bias"
-            } else {
-                "none"
-            }
-            .into(),
-            supports_recognition_hints: matches!(
-                model.architecture.as_str(),
-                "whisper" | "qwen3_asr"
-            ),
+            vocabulary: readiness::vocabulary_use_label(vocabulary).into(),
+            supports_recognition_hints: vocabulary == VocabularyUse::Prompt,
             source: format!("found: {} (not tested by Hex)", model.source()),
         });
     }
