@@ -339,6 +339,30 @@ extension FullKeyboardEngineTests {
         }
     }
 
+    /// iOS hands the field's traits to the keyboard as it brings it on screen, after its first
+    /// words were chosen without them, so they change then ("the" to "The" once the field says it
+    /// capitalizes, "I'm" to "I’m"). Until the keyboard has appeared those changes just show;
+    /// once it is on screen they roll, and the next appearance (another field) holds still again.
+    func testTheStripsWordsJustShowUntilTheKeyboardIsOnScreen() throws {
+        let window = try XCTUnwrap(UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.windows.first }.first)
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: target)
+        view.frame = CGRect(x: 0, y: 0, width: 393, height: 254)
+        window.addSubview(view)
+        defer { view.removeFromSuperview() }
+        view.layoutIfNeeded()
+        let strip = view.stripView
+        func show(_ words: [String]) -> Double? {
+            strip.update(suggestions: words.map { KeyboardSuggestion(displayText: $0, replacement: $0, kind: .nextWord) }, showsUndo: false, statusText: nil)
+            return strip.debugMotionSample()["slot1"]
+        }
+        XCTAssertEqual(show(["I", "the", "I'm"]), 1)
+        XCTAssertEqual(show(["I", "The", "I’m"]), 1, "appearing: the recased word is just there")
+        view.keyboardDidAppear()
+        XCTAssertEqual(show(["I", "They", "I’m"]), 0, "on screen: a change rolls")
+        view.prepareForField()
+        XCTAssertEqual(show(["I", "There", "I’m"]), 1, "appearing again, for another field")
+    }
+
     /// The Hex key's menu opens toward the screen's middle, and the Full Access hint's Open Hex
     /// sits beside the key, on whichever side it is.
     func testTheMenuAndFullAccessHintFollowTheHexKey() throws {

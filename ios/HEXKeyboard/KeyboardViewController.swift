@@ -173,6 +173,7 @@ final class KeyboardViewController: UIInputViewController {
         // about 80 ms late (Record typing logs), so q, a, p, l, shift and delete lagged and
         // could land after the next key. Apple's own keyboard has no such delay.
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
+        fullKeyboard?.keyboardDidAppear()
         fullKeyboard?.offerModelNotice()
         // Onboarding's practice tells Hex's keyboard on screen from another one, or iOS's
         // dictation, by these.

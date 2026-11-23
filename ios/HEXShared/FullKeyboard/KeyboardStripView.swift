@@ -198,7 +198,13 @@ final class KeyboardStripView: UIView {
     /// read as the old state coming back first.
     var holdsStill = false
 
-    private var animates: Bool { window != nil && !holdsStill }
+    /// Until the keyboard is on screen (`FullKeyboardView.keyboardDidAppear`), changes just show
+    /// too. iOS hands the field's traits over as it brings the keyboard in, after its first words
+    /// were chosen without them: rolled, "the" turned into "The" and "I'm" into "I’m" in front of
+    /// the person on every switch to Hex (iPhone and iPad, iOS 26 and 27).
+    var appearing = true
+
+    private var animates: Bool { window != nil && !holdsStill && !appearing }
 
     /// `fullAccessHint`, while true, replaces everything else in the strip with what
     /// dictation needs (`FullAccessHintView`); `notice` does the same after it.

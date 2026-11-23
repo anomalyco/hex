@@ -702,6 +702,7 @@ final class FullKeyboardView: UIView {
 
     /// The keyboard came on screen for a (possibly new) field.
     func prepareForField() {
+        stripView.appearing = true
         closeEmojiPanel()
         refreshLanguageSignals()
         syncSettings()
@@ -715,6 +716,11 @@ final class FullKeyboardView: UIView {
             keyTicks.prepare()
             selectionHaptics.prepare()
         }
+    }
+
+    /// The keyboard is on screen: from here the strip's words roll as they change.
+    func keyboardDidAppear() {
+        stripView.appearing = false
     }
 
     /// Frees non-essential UI and Metal drawables when the extension approaches its memory ceiling.
