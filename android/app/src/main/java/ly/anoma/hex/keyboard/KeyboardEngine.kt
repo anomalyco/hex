@@ -148,6 +148,9 @@ internal class KeyboardEngine(
         }
     }
 
+    /** The number row changed (Labs › Keyboard › Number row): the keys redraw with it at once. */
+    fun numberRowChanged() { showPlane() }
+
     /** Suggest swear words changed: the current word's suggestions follow at once. */
     fun swearWordsChanged() {
         word?.let {

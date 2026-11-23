@@ -34,8 +34,8 @@ internal class TypingPreferences(context: Context) {
         set(value) { prefs.edit().putBoolean("letterSymbols", value).apply() }
     /** Labs › Keyboard › Number row: the digits above the letters. Off by default. */
     var numberRow: Boolean
-        get() = prefs.getBoolean("numberRow", false)
-        set(value) { prefs.edit().putBoolean("numberRow", value).apply() }
+        get() = prefs.getBoolean(NUMBER_ROW, false)
+        set(value) { prefs.edit().putBoolean(NUMBER_ROW, value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -48,5 +48,8 @@ internal class TypingPreferences(context: Context) {
         val key = pair(language, original, replacement)
         prefs.edit().putInt(key, (prefs.getInt(key, 0) + 1).coerceAtMost(2)).apply()
     }
-    companion object { const val SUGGEST_SWEAR_WORDS = "suggestSwearWords" }
+    companion object {
+        const val SUGGEST_SWEAR_WORDS = "suggestSwearWords"
+        const val NUMBER_ROW = "numberRow"
+    }
 }

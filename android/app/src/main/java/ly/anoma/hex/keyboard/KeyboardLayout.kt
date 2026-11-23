@@ -58,7 +58,7 @@ internal data class KeyboardPage(
     val digits: String? get() = if (numberRow && !symbols && pad == null) KeyboardLetters.DIGITS else null
 
     /** Row 1's digit corner hint, or none while the number row already shows the digit. */
-    fun hint(row: Int, index: Int): Char? = if (numberRow) null else KeyboardLetters.digit(row, index)
+    fun hint(row: Int, index: Int): Char? = if (digits != null) null else KeyboardLetters.digit(row, index)
 }
 
 /** Sizes in dp, measured from Gboard on a Pixel 8 emulator (API 36, 411 dp wide, default

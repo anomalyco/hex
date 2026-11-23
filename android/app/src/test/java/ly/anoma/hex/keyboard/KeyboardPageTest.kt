@@ -26,6 +26,11 @@ class KeyboardPageTest {
         assertNull(page(numberRow = true, symbols = true, pad = Pad.Number).digits)
     }
 
+    @Test fun aPadPageKeepsItsOwnKeysWithoutTheNumberRow() {
+        // A pad page can be drawn without the symbol pages' flag; the number row is still not its row.
+        assertNull(page(numberRow = true, pad = Pad.Number).digits)
+    }
+
     @Test fun theNumberRowHidesTheLetterRowsCornerDigits() {
         val plain = page(numberRow = false)
         assertEquals("1", plain.hint(0, 0)?.toString())

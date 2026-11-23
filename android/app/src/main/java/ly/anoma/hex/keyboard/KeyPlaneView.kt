@@ -56,7 +56,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val reach = if (landscape) 0 else px(KeyboardMetrics.ROW1_REACH)
     private val side = KeyboardMetrics.SIDE * density
     private val gap = KeyboardMetrics.GAP * density
-    val menuHeight get() = rowHeight * KeyboardMetrics.MENU_ROWS + bottomExtra + reach
+    /** The menu's height is the keys' height for the page, the number row included, so opening it
+     * never resizes the keyboard. */
+    val menuHeight get() = rowHeight * (KeyboardMetrics.MENU_ROWS + if (current?.digits != null) 1 else 0) +
+        bottomExtra + reach
     private val letters = LinkedHashMap<Char, KeyCap>()
     private var grid: KeyGrid? = null
     private var pendingAccents: Runnable? = null
