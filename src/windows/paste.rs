@@ -181,6 +181,11 @@ impl CaptureWindow {
             })
         }
     }
+
+    #[cfg(test)]
+    pub(crate) const fn for_test(window: isize, pid: u32) -> Self {
+        Self { window, pid }
+    }
 }
 
 /// The window's class name, empty when Windows has none to give.

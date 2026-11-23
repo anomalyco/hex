@@ -39,7 +39,7 @@ pub(super) fn finish(
     };
     // A `hex dictation start --print` capture answers its command, as its
     // press would.
-    let print = hotkeys.print_for(shortcut, action);
+    let (raw, print) = hotkeys.resolve_action(shortcut, action);
     tracing::info!(
         phrase_chars = phrase.chars().count(),
         "the stop phrase finished a hands-free dictation"
@@ -55,7 +55,7 @@ pub(super) fn finish(
         indicator,
         pressed_cold,
         print,
-        hotkeys.raw_capture,
+        raw,
         Some(phrase),
     )
     .map(drop)

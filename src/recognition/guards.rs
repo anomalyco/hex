@@ -5,19 +5,6 @@ use crate::audio::CaptureInstant;
 use crate::control::ControlReply;
 use crate::dictation::audio::DictationAudio;
 
-/// Whether Hex takes Escape from the app in front: for a capture (drawing,
-/// its press, the capsule's picker) and a held dictation it cancels, never a
-/// hands-free one, and never while a programmatic dictation records: the
-/// listener ignores every key then, so Escape stays with its owner app
-/// rather than being swallowed.
-pub(super) fn claims_escape(
-    programmatic: bool,
-    capture_escape: bool,
-    held_dictation: bool,
-) -> bool {
-    !programmatic && (capture_escape || held_dictation)
-}
-
 /// Whether an Annotate capture is left to record the narration itself, so a
 /// dictation press starts nothing. Labs › Dictate while annotating turns
 /// `dictate_while_annotating` on, and the shortcut works as it always does

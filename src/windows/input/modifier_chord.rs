@@ -25,8 +25,8 @@ impl CallbackState {
             is_down && self.trigger_vk.is_none() && !self.binding.names_modifier(vk);
         if joining_modifier {
             self.mask_release = false;
-            if self.capture.active
-                && self.capture.flavour.normal()
+            if self.capture.is_down()
+                && self.capture.flavour().normal()
                 && !self
                     .capture
                     .holds_through_joining_keys(crate::labs::hold_through_keys(), time)
@@ -35,8 +35,8 @@ impl CallbackState {
                 send_event(self, action, time);
             }
         } else if self.trigger_vk.is_none()
-            && self.capture.locked
-            && self.capture.flavour.normal()
+            && self.capture.is_locked()
+            && self.capture.flavour().normal()
             && !self.dirty
             && is_down
             && self.holds(&self.binding)
@@ -52,15 +52,16 @@ impl CallbackState {
                 self.dirty = true;
                 send_event(self, action, time);
             }
-        } else if self.capture.active && self.capture.flavour.normal() && !self.holds(&self.binding)
+        } else if self.capture.is_down()
+            && self.capture.flavour().normal()
+            && !self.holds(&self.binding)
         {
             if let Some(action) = self.capture.release(self.double_tap_enabled, time) {
                 self.dirty = self.holds_any_required(&self.binding);
                 send_event(self, action, time);
             }
         } else if self.trigger_vk.is_none()
-            && !self.capture.active
-            && !self.capture.locked
+            && self.capture.is_idle()
             && !self.dirty
             && is_down
             && self.holds(&self.binding)

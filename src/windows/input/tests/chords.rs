@@ -88,10 +88,7 @@ impl Rig {
             state.paste_last = Some(paste.clone());
             state.paste_trigger_vk = paste.key.as_deref().and_then(|key| virtual_key(key).ok());
         }
-        state.capture = CaptureState {
-            toggle,
-            ..CaptureState::default()
-        };
+        state.capture = CaptureState::new(toggle);
         *CALLBACK_STATE
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(state);
@@ -133,7 +130,7 @@ impl Rig {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .as_ref()
-            .is_some_and(|state| state.capture.locked)
+            .is_some_and(|state| state.capture.is_locked())
     }
 
     fn dirty(&self) -> bool {
