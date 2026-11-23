@@ -23,7 +23,8 @@ final class DictationSSOTTests: XCTestCase {
             }
         }
 
-        // Full Access on, model not installed always routes to needsModel.
+        // Full Access on, Hex's model not installed: the keyboard still dictates by itself where
+        // it can (it uses its own speech model), else needsModel.
         for warm in [false, true] {
             for local in [false, true] {
                 XCTAssertEqual(
@@ -34,7 +35,7 @@ final class DictationSSOTTests: XCTestCase {
                         localAvailable: local,
                         opensHexReason: .speechModel
                     ),
-                    .needsModel
+                    local ? .inKeyboard : .needsModel
                 )
             }
         }
