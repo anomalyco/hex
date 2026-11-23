@@ -6,8 +6,9 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class KeyboardPageTest {
-    private fun page(numberRow: Boolean, symbols: Boolean = false, more: Boolean = false, pad: Pad? = null) =
-        KeyboardPage(Spoken.English, symbols, more, shifted = false, locked = false, enter = EnterKey(null, 0),
+    private fun page(numberRow: Boolean, symbols: Boolean = false, more: Boolean = false, pad: Pad? = null,
+                     language: Spoken = Spoken.English) =
+        KeyboardPage(language, symbols, more, shifted = false, locked = false, enter = EnterKey(null, 0),
             pad = pad, numberRow = numberRow)
 
     @Test fun theNumberRowShowsOneToZeroAboveTheLetters() {
@@ -45,5 +46,26 @@ class KeyboardPageTest {
             LetterFeedback.holds('e', "en", page(numberRow = true).hint(0, 2)))
         assertEquals(listOf("3", "e", "è", "é", "ê", "ë", "ē", "ė", "ę"),
             LetterFeedback.holds('e', "en", page(numberRow = false).hint(0, 2)))
+    }
+
+    @Test fun withBothLabsTheCornerShowsOneHintAndHoldsTheSymbolFirst() {
+        // AZERTY's a is on a digit row whose corner hint the number row takes away, so its
+        // Symbols on letter keys hint is the one hint left, never a digit and a symbol together.
+        val both = page(numberRow = true, language = Spoken.French)
+        val digitHint = both.hint(0, 0)
+        assertNull(digitHint)
+        assertEquals("@", digitHint?.toString() ?: LetterFeedback.letterSymbol('a')?.toString())
+        // Its hold offers the symbol first, then the same accents, with no digit before either.
+        assertEquals(listOf("@") + LetterFeedback.options('a', "fr"),
+            LetterFeedback.holds('a', "fr", digitHint, symbolsOnLetters = true))
+        // A row-1 letter without a symbol keeps its accents alone, and its digit hint stays hidden.
+        assertNull(both.hint(0, 2))
+        assertEquals(LetterFeedback.options('e', "fr"),
+            LetterFeedback.holds('e', "fr", both.hint(0, 2), symbolsOnLetters = true))
+        // A QWERTY home-row key shows no digit either way, so its symbol hint and hold are unchanged.
+        val qwerty = page(numberRow = true)
+        assertNull(qwerty.hint(1, 0))
+        assertEquals(listOf("@") + LetterFeedback.options('a', "en"),
+            LetterFeedback.holds('a', "en", qwerty.hint(1, 0), symbolsOnLetters = true))
     }
 }
