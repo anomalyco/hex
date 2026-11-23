@@ -42,6 +42,8 @@ internal data class KeyboardPage(
     val enter: EnterKey,
     val kind: FieldKind = FieldKind.Text,
     val pad: Pad? = null,
+    /** Labs › Keyboard › Number row: the letter pages draw 1 to 0 above their letters too. */
+    val numberRow: Boolean = false,
 ) {
     val lines: List<String> get() {
         val code = language.layoutCode
@@ -51,6 +53,12 @@ internal data class KeyboardPage(
             else -> KeyboardLetters.numbers(code)
         }
     }
+
+    /** The ten digits above the letter rows while the number row shows; ?123 and the pads keep their own. */
+    val digits: String? get() = if (numberRow && !symbols && pad == null) KeyboardLetters.DIGITS else null
+
+    /** Row 1's digit corner hint, or none while the number row already shows the digit. */
+    fun hint(row: Int, index: Int): Char? = if (digits != null) null else KeyboardLetters.digit(row, index)
 }
 
 /** Sizes in dp, measured from Gboard on a Pixel 8 emulator (API 36, 411 dp wide, default

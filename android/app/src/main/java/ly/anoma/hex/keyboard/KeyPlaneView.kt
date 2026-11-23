@@ -56,7 +56,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val reach = if (landscape) 0 else px(KeyboardMetrics.ROW1_REACH)
     private val side = KeyboardMetrics.SIDE * density
     private val gap = KeyboardMetrics.GAP * density
-    val menuHeight get() = rowHeight * KeyboardMetrics.MENU_ROWS + bottomExtra + reach
+    /** The menu's height is the keys' height for the page, the number row included, so opening it
+     * never resizes the keyboard. */
+    val menuHeight get() = rowHeight * (KeyboardMetrics.MENU_ROWS + if (current?.digits != null) 1 else 0) +
+        bottomExtra + reach
     private val letters = LinkedHashMap<Char, KeyCap>()
     private var grid: KeyGrid? = null
     private var pendingAccents: Runnable? = null
@@ -238,8 +241,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         val lines = page.lines
         val columns = KeyboardMetrics.columns(lines).toFloat()
         val side = KeyboardMetrics.sideWidth(page, lines)
+        // Labs › Keyboard › Number row: the digits above the letters, in a row of their own.
+        page.digits?.let { addDigitRow(it, columns) }
         for ((index, line) in lines.withIndex()) {
-            val top = if (index == 0) reach else 0
+            val top = if (index == 0 && page.digits == null) reach else 0
             val row = KeyRowLayout(context, columns, this.side, gap, insetTop + top, insetBottom)
             rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + top))
             // Rows 1 and 2 centre their letters; row 3's share what shift and delete leave.
@@ -280,7 +285,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 }
                 row.add(k, at, width); at += width
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
-                val digit = if (symbols) null else KeyboardLetters.digit(index, position)
+                val digit = if (symbols) null else page.hint(index, position)
                 val symbol = if (letterHolds) LetterFeedback.letterSymbol(c) else null
                 k.hint(digit?.toString() ?: symbol?.toString())
                 fun holds() = if (symbols) LetterFeedback.symbolHolds(c)
@@ -324,6 +329,26 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         enterIcon.setImageResource(actionIcon(page.enter.action))
         enterIcon.visibility = if (label == null) View.VISIBLE else View.GONE
         enterKey.contentDescription = label ?: actionLabel(page.enter.action) ?: context.getString(R.string.keyboard_return)
+    }
+
+    /** The number row: 1 to 0 across the letters' cells, with the ?123 page's digit keys' feedback,
+     * pop-ups and held symbols. Shift neither changes them nor is changed by them. */
+    private fun addDigitRow(digits: String, columns: Float) {
+        val row = KeyRowLayout(context, columns, side, gap, insetTop + reach, insetBottom)
+        rows.addView(row, LayoutParams(LayoutParams.MATCH_PARENT, rowHeight + reach))
+        val width = columns / digits.length
+        for ((position, c) in digits.withIndex()) {
+            val text = c.toString()
+            val k = caps.cap(text, text) { ime.engine.type(text) }
+            row.add(k, position * width, width)
+            fun holds() = LetterFeedback.symbolHolds(c)
+            if (holds().isNotEmpty()) {
+                k.setOnLongClickListener { host.openAccents(holds(), it); true }
+                k.longClickLabel = context.getString(R.string.keyboard_more_characters)
+            }
+            typesOnLift(k, preview = { text }, holds = { listOf(holds()) },
+                type = { option -> if (option != null && option != text) ime.engine.type(option) else k.performClick() })
+        }
     }
 
     /** A pad in place of the letter rows and the bottom row (Gboard's for number, phone and date fields,
@@ -485,7 +510,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         // Turned, the screen is short: the panel may take up to two thirds of it, with smaller cells.
         val share = if (landscape) 0.67f else 0.6f
         val grow = minOf(px(KeyboardMetrics.EMOJI_GROW), (resources.displayMetrics.heightPixels * share).toInt() - keyboard).coerceAtLeast(0)
-        val height = 3 * rowHeight + reach + extra + grow
+        // With the number row on, the panel takes its place too, so the keyboard keeps its height.
+        val height = (if (current?.digits != null) 4 else 3) * rowHeight + reach + extra + grow
         val p = picker?.also { it.setRecentEmojiProvider(recents); it.post { it.toTop() } } ?: EmojiPickerView(ContextThemeWrapper(context, R.style.HexEmoji)).also { p ->
             p.setRecentEmojiProvider(recents)
             p.setOnEmojiPickedListener { item ->

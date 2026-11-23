@@ -114,6 +114,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val popups = remember(revision) { typing.popups }
     val haptics = remember(revision) { typing.haptics }
     val letterSymbols = remember(revision) { typing.letterSymbols }
+    val numberRow = remember(revision) { typing.numberRow }
     var copied by remember(transcript) { mutableStateOf(false) }
     fun open(next: Page) {
         // A send in progress keeps the form; leaving it otherwise drops what was written.
@@ -330,6 +331,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Card {
                                 Toggle(stringResource(R.string.letter_symbols), stringResource(R.string.letter_symbols_detail),
                                     letterSymbols) { typing.letterSymbols = it }
+                                Rule()
+                                Toggle(stringResource(R.string.number_row), stringResource(R.string.number_row_detail),
+                                    numberRow) { typing.numberRow = it }
                             }
                         }
                     }

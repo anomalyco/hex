@@ -47,6 +47,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
 
     override fun showPage(page: KeyboardPage) {
         keys.showPage(page)
+        resizeMenu()
         // What TalkBack names the keyboard as it appears, as Gboard's "English (US) (QWERTY)".
         val title = context.getString(R.string.keyboard_pane, page.language.label)
         if (accessibilityPaneTitle != title) accessibilityPaneTitle = title
@@ -66,9 +67,17 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
         if (!keys.emojiOpen) return
         keys.closeEmoji(); strip.visibility = VISIBLE; strip.update()
     }
+    /** The menu takes the keys' height for the page, the number row included: opening it never resizes. */
+    private fun resizeMenu() {
+        val params = menu.layoutParams ?: return
+        if (params.height == keys.menuHeight) return
+        params.height = keys.menuHeight
+        menu.layoutParams = params
+    }
     fun openMenu() {
         if (strip.recording) return
         closeEmoji()
+        resizeMenu()
         keys.visibility = GONE; menu.visibility = VISIBLE
         strip.choosing = true; strip.menuOpened(); menu.home(); strip.update()
     }
