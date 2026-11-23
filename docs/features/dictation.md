@@ -499,7 +499,7 @@ Secure input turns on  // dictate.secure-input
 │   in front when it turned on (kCGSSessionSecureInputPID, as `ioreg -l` shows
 │   it), which is not necessarily the one holding secure input
 ├── Registered as Carbon hotkeys: Annotate, Annotate replay, Paste last,
-│   Paste meeting, and with Labs › Screenshots its two shortcuts
+│   and with Labs › Screenshots its two shortcuts
 │   ├── A press -> the same key down the tap would have sent (log: "shortcut
 │   │   arrived through secure input"); a release -> its key up
 │   ├── Annotate's "starts once a modifier comes up" still works: the tap
@@ -753,7 +753,7 @@ Labs > Second dictation shortcut > recorder    // dictate.second-dictation
 │   └── Own flavour -> processed and pasted exactly like dictation
 │       (modes, History kind Dictation, last dictation updated)
 ├── Clear (trash) -> unbound again; the lab off -> inactive and unregistered
-└── Paste Last and meeting paste -> only from the main shortcut
+└── Paste Last -> only from the main shortcut
 ```
 
 Checks: `second_dictation_shortcut_owns_the_capture_it_starts` (Linux reducer),

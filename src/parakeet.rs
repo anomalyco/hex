@@ -16,7 +16,6 @@ use crate::dictation::paste_last::LastDictation;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, correction_watch, pad_for_parakeet};
 use crate::history::{History, HistoryDraft, HistoryKind};
-use crate::meeting;
 use crate::paste::{PasteMode, Paster};
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
@@ -82,7 +81,6 @@ pub enum DictationJobStage {
 #[derive(Clone, Copy, Debug)]
 pub enum PasteKind {
     LastTranscript,
-    MeetingDelta,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -558,10 +556,6 @@ impl DictationWorker {
         self.submit_paste(PasteKind::LastTranscript)
     }
 
-    pub fn paste_meeting(&self) -> Result<(), &'static str> {
-        self.submit_paste(PasteKind::MeetingDelta)
-    }
-
     fn submit_paste(&self, kind: PasteKind) -> Result<(), &'static str> {
         self.enqueue_paste(|sequence| OutputJob::Paste { sequence, kind })
     }
@@ -1017,19 +1011,6 @@ impl Drop for DictationInference {
     }
 }
 
-/// Makes [`dictation_busy`] hold until dropped, as a dictation would.
-#[cfg(test)]
-pub(crate) struct DictationBusyForTest {
-    _busy: DictationInference,
-}
-
-#[cfg(test)]
-pub(crate) fn dictation_busy_for_test() -> DictationBusyForTest {
-    DictationBusyForTest {
-        _busy: DictationInference::begin(),
-    }
-}
-
 /// Whether dictation is capturing or running inference. Meeting
 /// transcription starts no chunk while this holds. A capture counts from its
 /// press: a chunk already running then finishes during the hold threshold
@@ -1233,9 +1214,6 @@ fn finish_output(
                     history.and_then(History::recovered_output),
                     paste,
                 ),
-                PasteKind::MeetingDelta => {
-                    paste_meeting_delta(paste).map_err(|error| error.to_string())
-                }
             };
             WorkerEvent::Pasted { kind, result }
         }
@@ -1244,12 +1222,6 @@ fn finish_output(
 
 mod output_history;
 use output_history::{record_history, recover_output, send_unless_escaped};
-
-fn paste_meeting_delta(
-    paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
-) -> Result<String> {
-    meeting::consume_active_or_latest_delta(|text| paste(text, PasteMode::Standalone).map(drop))
-}
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
     model_path(crate::transcription::models::definition(
@@ -1505,7 +1477,6 @@ mod tests {
     use super::*;
 
     use crate::dictation::resample_for_parakeet;
-    use crate::meeting::{MeetingSource, TranscriptEntry, format_meeting_delta};
 
     fn processing_job(target: TranscriptionTarget) -> ProcessorJob {
         ProcessorJob {
@@ -1602,27 +1573,6 @@ mod tests {
                 "{name}: {text}"
             );
         }
-    }
-
-    #[test]
-    fn meeting_delta_coalesces_turns_in_time_order() {
-        let entry = |source, start_ms, end_ms, text: &str| TranscriptEntry {
-            source,
-            start_ms,
-            end_ms,
-            text: text.into(),
-        };
-        let entries = [
-            entry(MeetingSource::Microphone, 0, 1_000, "First."),
-            entry(MeetingSource::Microphone, 1_100, 1_400, "Still me."),
-            entry(MeetingSource::System, 1_500, 2_500, "Reply."),
-            entry(MeetingSource::Microphone, 2_600, 3_000, "Second."),
-        ];
-        assert_eq!(
-            format_meeting_delta(&entries).unwrap(),
-            "You: First. Still me.\n\nThem: Reply.\n\nYou: Second."
-        );
-        assert!(format_meeting_delta(&[]).is_err());
     }
 
     #[test]
@@ -1978,7 +1928,6 @@ mod tests {
             assert!(ordered.push(output_receiver.try_recv().unwrap()).is_empty());
         }
         assert_eq!(worker.paste_last(), Err("dictation queue is full"));
-        assert_eq!(worker.paste_meeting(), Err("dictation queue is full"));
         assert_eq!(ordered.waiting.len(), MAX_PENDING_OUTPUTS - 1);
         assert_eq!(
             worker.state.lock().unwrap().next_sequence,

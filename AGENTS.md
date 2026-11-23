@@ -1112,8 +1112,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   command waits, at most 60 s, for the text, processed as a paste. It never
   pastes, even on failure or timeout; no speech exits 4. History records it as
   Printed and Paste Last skips it.
-- Option-Shift-V pastes the last completed dictation. Option-Control-V pastes
-  completed meeting turns added since the previous successful invocation.
+- Option-Shift-V pastes the last completed dictation. Meetings have no paste
+  shortcut: the recording capsule's Copy agent prompt and Copy all are the
+  in-call copies.
 - Do not persist captured audio by default. Explicit foreground meeting
   recording must remain visibly active. Diagnostic dictation retention is an
   explicit, bounded, owner-only opt-in through `HEX_RETAIN_DICTATION_AUDIO`.
@@ -1199,8 +1200,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   quitting begins, no meeting work starts a chunk or loads a model. The next
   launch with Meetings on runs the final pass on the dictation engine's model
   (or its own after 30 s without an engine).
-- Every in-call meeting view and copy (the Meetings pane,
-  Option-Control-V, provisional titles, `hex meetings`, and MCP) reads the
+- Every in-call meeting view and copy (the Meetings pane, the capsule's
+  Copy all, provisional titles, `hex meetings`, and MCP) reads the
   rolling Parakeet transcript, which publishes only entries no later chunk
   can replace; after Stop they read the final transcript.
 - Meeting system audio uses a Core Audio process tap on macOS (System Audio
@@ -1367,10 +1368,6 @@ CoreAudio formats, AppleScript details, or event serialization.
   meeting is also written as Markdown to the configured folder (default
   `~/Documents/Hex Meetings`) without overwriting existing files; an export
   failure does not fail the meeting.
-- Meeting paste cursors advance only after successful insertion and reset when
-  Hex restarts. They track, per source, the end of the text already handed
-  out, so rewrites near the live edge and the switch to the final transcript
-  neither repeat nor drop turns.
 - Deleting a meeting moves its exported Markdown and then its recording folder
   to the Trash (never `rm`), after a two-step confirmation in the pane (the CLI
   `hex meetings delete` asks none; its callers do), and is refused while

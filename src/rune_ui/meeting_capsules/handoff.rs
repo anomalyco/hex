@@ -107,10 +107,10 @@ impl MeetingCapsules {
         });
     }
 
-    pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) -> OverlayHandle<Capsule> {
+    pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) {
         if self.finishing.as_ref() != Some(&manifest.id) {
             self.show_panel(Kind::Ready(Box::new(manifest.clone())), Some(READY_TIMEOUT));
-            return self.panel.clone();
+            return;
         }
         let handle = self.pill.handle.clone();
         let finished = Box::new(manifest.clone());
@@ -121,8 +121,7 @@ impl MeetingCapsules {
             c.stir(tx);
         });
         let generation = self.generation.fetch_add(1, Ordering::SeqCst) + 1;
-        self.timeout(handle.clone(), generation, READY_TIMEOUT);
-        handle
+        self.timeout(handle, generation, READY_TIMEOUT);
     }
 }
 
