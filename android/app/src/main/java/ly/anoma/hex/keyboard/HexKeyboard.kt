@@ -137,8 +137,12 @@ class HexKeyboard : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
-    // The speech model is a few hundred MB while loaded; give it back when Android runs short.
-    override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (level >= TRIM_MEMORY_RUNNING_LOW) SpeechModel.releaseSoon() }
+    // The speech model is a few hundred MB while loaded; give it back when Android runs short. Not on
+    // TRIM_MEMORY_UI_HIDDEN, which only says the keyboard hid (every app switch), not that memory is low.
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        if (level >= TRIM_MEMORY_RUNNING_LOW && level != TRIM_MEMORY_UI_HIDDEN) SpeechModel.releaseSoon()
+    }
     override fun onDestroy() {
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
