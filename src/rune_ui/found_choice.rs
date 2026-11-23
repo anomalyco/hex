@@ -83,10 +83,13 @@ pub(super) fn rows(ui: &Ui, model: ItemStatus) -> Vec<ChoiceRow> {
 
 fn row(ui: &Ui, entry: &Entry<'_>, selected: bool, model: ItemStatus) -> ChoiceRow {
     let name = match entry {
-        Entry::Recommended { .. } => transcription_models::definition(recommended(ui).model).name,
-        Entry::Found(found) => found.catalog.map_or(found.name.as_str(), |id| {
-            transcription_models::definition(id).name
-        }),
+        Entry::Recommended { .. } => transcription_models::definition(recommended(ui).model)
+            .name
+            .to_string(),
+        Entry::Found(found) => found.catalog.map_or_else(
+            || found.name.clone(),
+            |id| transcription_models::definition(id).name.to_string(),
+        ),
     };
     let started = selected && ui.found.picked.is_some();
     let line = match (entry, started, model) {

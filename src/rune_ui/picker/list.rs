@@ -12,7 +12,7 @@ use crate::rune_ui::Ui;
 use crate::rune_ui::controls::{ButtonKind, Paint, PushSize, button};
 use crate::rune_ui::lists::group_label;
 use crate::transcription::models::{
-    self as transcription_models, AUTO_LANGUAGE, ModelRuntime, TranscriptionModelId, language_name,
+    self as transcription_models, AUTO_LANGUAGE, TranscriptionModelId, language_name,
 };
 
 const PROGRESS_WIDTH: f32 = 196.0;
@@ -187,7 +187,7 @@ fn fold(p: Paint, count: usize, language: &str, open: bool, first: bool) -> El {
 /// What a row's second line says: the wait, the wrong words where they
 /// were measured in the language, the languages, and the size.
 fn facts_line(entry: &Entry, language: &str) -> String {
-    let def = entry.def;
+    let def = &entry.def;
     if def.id.is_custom() {
         return crate::rune_ui::model_import::metadata(def);
     }
@@ -221,10 +221,10 @@ fn facts_line(entry: &Entry, language: &str) -> String {
 }
 
 fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
-    let def = entry.def;
+    let def = &entry.def;
     // The row is named by the model; its other lines stay readable inside.
     let mut title = row().key("title").gap(8.0).center_y().child(
-        text(def.name)
+        text(def.name.as_ref())
             .key("name")
             .font(p.k.ty.ui_medium)
             .color(p.text())
@@ -329,7 +329,7 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
     row()
         .key(format!("model-{}", def.id.as_str()))
         .role("listitem")
-        .label(def.name)
+        .label(def.name.as_ref())
         .py(12.0)
         .gap(16.0)
         .center_y()
@@ -340,9 +340,9 @@ fn model_row(ui: &Ui, p: Paint, entry: &Entry, language: &str) -> El {
 /// Delete for a downloaded catalog model, Forget for another app's file
 /// used in place; the first press arms it.
 fn delete_button(ui: &Ui, p: Paint, entry: &Entry, free: bool) -> Option<El> {
-    let def = entry.def;
-    let deletable =
-        entry.state == State::Downloaded && free && matches!(def.runtime, ModelRuntime::Gguf(_));
+    let def = &entry.def;
+    let id = def.id;
+    let deletable = entry.state == State::Downloaded && free && def.runtime.is_gguf();
     if !deletable {
         return None;
     }
@@ -359,7 +359,7 @@ fn delete_button(ui: &Ui, p: Paint, entry: &Entry, free: bool) -> Option<El> {
                 "delete-model",
                 &label,
                 ButtonKind::Danger,
-                move |ui: &mut Ui, _| delete(ui, def),
+                move |ui: &mut Ui, _| delete(ui, id),
             )
             .default_button(),
         );
@@ -368,7 +368,7 @@ fn delete_button(ui: &Ui, p: Paint, entry: &Entry, free: bool) -> Option<El> {
         return Some(
             rune_kit::Button::new(tr("Forget"))
                 .variant(ButtonVariant::Ghost)
-                .on_press_tx(move |ui: &mut Ui, _| delete(ui, def))
+                .on_press_tx(move |ui: &mut Ui, _| delete(ui, id))
                 .build_small_push(p.k)
                 .key("delete-model"),
         );
@@ -378,7 +378,7 @@ fn delete_button(ui: &Ui, p: Paint, entry: &Entry, free: bool) -> Option<El> {
             .variant(IconButtonVariant::Ghost)
             .control_size(ControlSize::Regular)
             .label(tr("Delete"))
-            .on_press(move |ui: &mut Ui| delete(ui, def))
+            .on_press(move |ui: &mut Ui| delete(ui, id))
             .build(p.k)
             .key("delete-model"),
     )
@@ -392,9 +392,9 @@ mod tests {
         transcription_models::picker_models(language)
             .into_iter()
             .map(|(def, recommendation)| Entry {
+                supports: def.supports_language(language),
                 def,
                 recommendation,
-                supports: def.supports_language(language),
                 state: State::NotDownloaded,
             })
             .collect()

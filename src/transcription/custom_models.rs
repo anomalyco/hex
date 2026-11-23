@@ -13,12 +13,12 @@
 //! stays saved, and the listener runs the default model until it is fixed
 //! ([`runnable`]).
 
-use std::collections::HashMap;
+use std::borrow::Cow;
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{LazyLock, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use color_eyre::eyre::{Result, WrapErr, bail, eyre};
@@ -27,8 +27,8 @@ use sha2::{Digest, Sha256};
 
 use super::gguf_header::{self, GgufHeader, TensorTypes};
 use super::models::{
-    GgufArtifact, ModelDefinition, ModelRuntime, TranscriptionModelId, TranscriptionSelection,
-    is_known_language, known_language, models_dir,
+    GgufArtifact, ModelDefinition, ModelRef, ModelRuntime, TranscriptionModelId,
+    TranscriptionSelection, is_known_language, known_language, models_dir,
 };
 
 const PREFIX: &str = "custom-";
@@ -171,7 +171,7 @@ pub enum Status {
 /// show it.
 #[derive(Clone)]
 pub struct Imported {
-    pub definition: &'static ModelDefinition,
+    pub definition: ModelRef,
     pub architecture: &'static str,
     pub sha256: String,
     pub source: String,
@@ -186,7 +186,9 @@ pub struct Imported {
 struct Entry {
     id: CustomModelId,
     manifest: Manifest,
-    definition: &'static ModelDefinition,
+    /// One live definition per import. A rename, an in-place change, or a
+    /// re-import replaces it; the old one drops with its last reader.
+    definition: Arc<ModelDefinition>,
     receipt: Option<Receipt>,
 }
 
@@ -195,11 +197,9 @@ struct Registry {
     /// The folder and modification time the entries were read at.
     stamp: Option<(PathBuf, Option<SystemTime>)>,
     entries: Vec<Entry>,
-    /// Definitions built so far, by ID, name, and the file it uses: a
-    /// rename, an in-place change, or a re-import builds one, and every
-    /// other read reuses it.
-    built: HashMap<(CustomModelId, String, Option<PathBuf>), &'static ModelDefinition>,
-    placeholders: HashMap<CustomModelId, &'static ModelDefinition>,
+    /// The last id that had no import, so a saved selection from another
+    /// machine does not allocate a placeholder every frame.
+    placeholder: Option<(CustomModelId, Arc<ModelDefinition>)>,
 }
 
 static REGISTRY: LazyLock<Mutex<Registry>> = LazyLock::new(Mutex::default);
@@ -255,10 +255,14 @@ impl Registry {
                     tracing::warn!(path = %path.display(), "ignoring an unreadable imported model manifest");
                     continue;
                 };
-                let definition = *self
-                    .built
-                    .entry((id, manifest.name.clone(), manifest.path.clone()))
-                    .or_insert_with(|| build(id, &manifest));
+                let definition = match self
+                    .entries
+                    .iter()
+                    .find(|entry| entry.id == id && entry.manifest == manifest)
+                {
+                    Some(entry) => Arc::clone(&entry.definition),
+                    None => Arc::new(build(id, &manifest)),
+                };
                 let receipt = fs::read(receipt_path(&model_file(&directory, id)))
                     .ok()
                     .and_then(|data| serde_json::from_slice::<Receipt>(&data).ok())
@@ -307,29 +311,31 @@ fn receipt_path(model: &Path) -> PathBuf {
     model.with_extension("gguf.verified.json")
 }
 
-/// A `'static` definition for `manifest`, as the catalog's are. Each is
-/// built once per ID and name, so the few bytes it keeps are bounded by the
-/// imports and renames a person makes.
-fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
-    let leak = |text: &str| -> &'static str { Box::leak(text.to_owned().into_boxed_str()) };
+/// An owned definition for `manifest`, as the catalog's are. The registry
+/// keeps one per import and replaces it on a rename or an in-place change, so
+/// the strings it owns drop with the last reader that held the old one.
+fn build(id: CustomModelId, manifest: &Manifest) -> ModelDefinition {
     let languages: Vec<&'static str> = manifest
         .languages
         .iter()
         .filter_map(|code| known_language(code))
         .collect();
-    let languages: &'static [&'static str] = if languages.is_empty() {
-        &["en"]
+    let languages: Cow<'static, [&'static str]> = if languages.is_empty() {
+        Cow::Borrowed(&["en"])
     } else {
-        Box::leak(languages.into_boxed_slice())
+        Cow::Owned(languages)
     };
+    // Every import is checked against ARCHITECTURES when it is added, so a
+    // manifest edited by hand is the only way here; it reads as "unknown"
+    // rather than leaking the string it declared.
     let architecture = ARCHITECTURES
         .iter()
         .find(|(name, _)| *name == manifest.architecture)
-        .map_or_else(|| leak(&manifest.architecture), |(name, _)| *name);
-    let artifact: &'static GgufArtifact = Box::leak(Box::new(GgufArtifact {
+        .map_or("unknown", |(name, _)| *name);
+    let artifact = GgufArtifact {
         // `models_dir().join` keeps an absolute path, so a found file loads
         // where it is.
-        filename: leak(&manifest.path.as_ref().map_or_else(
+        filename: Cow::Owned(manifest.path.as_ref().map_or_else(
             || format!("custom/{}.gguf", id.digits()),
             |path| path.to_string_lossy().into_owned(),
         )),
@@ -337,56 +343,62 @@ fn build(id: CustomModelId, manifest: &Manifest) -> &'static ModelDefinition {
         revision: "",
         repository: "",
         bytes: manifest.bytes,
-        sha256: leak(&manifest.sha256),
+        sha256: Cow::Owned(manifest.sha256.clone()),
         architecture,
-        variant: leak(&manifest.variant),
-    }));
-    Box::leak(Box::new(ModelDefinition {
+        variant: Cow::Owned(manifest.variant.clone()),
+    };
+    ModelDefinition {
         id: TranscriptionModelId::Custom(id),
-        name: leak(&manifest.name),
+        name: Cow::Owned(manifest.name.clone()),
         realtime: "Unknown",
         word_error_rate: None,
         streams: false,
-        runtime: ModelRuntime::Gguf(artifact),
+        runtime: ModelRuntime::Gguf(Cow::Owned(artifact)),
         languages,
         accepts_language_hint: takes_language_hint(architecture),
         // The header's lang_detect decides Auto. A no-hint family (Parakeet,
         // GigaAM) hears the language itself without a hint, the way the
         // catalog's v3-type entries do.
         supports_language_detection: manifest.detects_language,
-    }))
+    }
 }
 
 /// The definition for `id`: its manifest's, or a placeholder that is never
 /// available when nothing is imported under it (a deleted import, or an ID
 /// from another machine's settings).
-pub fn definition(id: CustomModelId) -> &'static ModelDefinition {
+pub fn definition(id: CustomModelId) -> ModelRef {
     let mut registry = registry();
     if let Some(entry) = registry.entry(id) {
-        return entry.definition;
+        return ModelRef::Custom(Arc::clone(&entry.definition));
     }
-    registry.placeholders.entry(id).or_insert_with(|| {
-        build(
-            id,
-            &Manifest {
-                name: "Imported model".into(),
-                metadata_name: String::new(),
-                architecture: String::new(),
-                variant: String::new(),
-                languages: vec!["en".into()],
-                detects_language: false,
-                bytes: 0,
-                sha256: "0".repeat(64),
-                source: String::new(),
-                license: None,
-                repository: None,
-                imported_at: 0,
-                path: None,
-                origin: None,
-                k_quants: false,
-            },
-        )
-    })
+    if let Some((cached, definition)) = &registry.placeholder
+        && *cached == id
+    {
+        return ModelRef::Custom(Arc::clone(definition));
+    }
+    let definition = Arc::new(build(id, &placeholder_manifest()));
+    registry.placeholder = Some((id, Arc::clone(&definition)));
+    ModelRef::Custom(definition)
+}
+
+fn placeholder_manifest() -> Manifest {
+    Manifest {
+        name: "Imported model".into(),
+        metadata_name: String::new(),
+        architecture: String::new(),
+        variant: String::new(),
+        languages: vec!["en".into()],
+        detects_language: false,
+        bytes: 0,
+        sha256: "0".repeat(64),
+        source: String::new(),
+        license: None,
+        repository: None,
+        imported_at: 0,
+        path: None,
+        origin: None,
+        k_quants: false,
+    }
 }
 
 /// Whether a found file is already in use as an import.
@@ -432,8 +444,8 @@ pub fn imported() -> Vec<Imported> {
         .entries
         .iter()
         .map(|entry| Imported {
-            definition: entry.definition,
-            architecture: match entry.definition.runtime {
+            definition: ModelRef::Custom(Arc::clone(&entry.definition)),
+            architecture: match &entry.definition.runtime {
                 ModelRuntime::Gguf(artifact) => artifact.architecture,
                 ModelRuntime::AppleSpeech => "",
             },
@@ -513,7 +525,7 @@ pub fn fallback() -> TranscriptionSelection {
     let recommended = super::models::recommended_selection(&language);
     let installed = |selection: &TranscriptionSelection| {
         let model = super::models::definition(selection.model);
-        model.available() && super::models::is_installed(model, &selection.language)
+        model.available() && super::models::is_installed(&model, &selection.language)
     };
     if installed(&recommended) {
         return recommended;
@@ -1100,19 +1112,19 @@ mod tests {
         let definition = definition(id);
         assert_eq!(definition.name, "Parakeet primeLine");
         assert_eq!(definition.id, TranscriptionModelId::Custom(id));
-        assert_eq!(definition.languages, ["en", "de"]);
+        assert_eq!(definition.languages.as_ref(), ["en", "de"].as_slice());
         assert!(!definition.accepts_language_hint && !definition.streams);
         assert!(is_registered(id));
-        let ModelRuntime::Gguf(artifact) = definition.runtime else {
+        let ModelRuntime::Gguf(artifact) = &definition.runtime else {
             unreachable!("imports are GGUF files")
         };
         assert_eq!(artifact.bytes, fs::metadata(&source).unwrap().len());
         assert_eq!(
-            artifact.sha256,
+            artifact.sha256.as_ref(),
             super::super::models::sha256_hex(&source, None).unwrap()
         );
         assert!(
-            super::super::models::model_path(definition)
+            super::super::models::model_path(&definition)
                 .unwrap()
                 .is_file()
         );
@@ -1124,7 +1136,7 @@ mod tests {
         assert_eq!(super::definition(id).name, "primeLine");
         // A copy whose time moved but whose contents match repairs; one
         // that changed stays refused.
-        let copy = super::super::models::model_path(super::definition(id)).unwrap();
+        let copy = super::super::models::model_path(&super::definition(id)).unwrap();
         let receipt = receipt_path(&copy);
         let written = fs::read(&receipt).unwrap();
         fs::write(&receipt, br#"{"bytes":0,"sha256":"","modified_ns":0}"#).unwrap();
@@ -1164,6 +1176,106 @@ mod tests {
         fs::remove_dir_all(models).unwrap();
     }
 
+    /// The registry keeps one definition per import: renaming replaces it,
+    /// and the old one is freed once nothing reads it.
+    #[test]
+    fn renaming_many_times_keeps_one_entry_and_frees_earlier_definitions() {
+        let models = temporary_models_dir();
+        let source = models.join("rename-Q8_0.gguf");
+        fs::write(&source, parakeet("Renamed primeLine")).unwrap();
+        let id = import(&source, None, &AtomicBool::new(false)).unwrap();
+        let first = match definition(id) {
+            ModelRef::Custom(definition) => definition,
+            ModelRef::Static(_) => unreachable!("an import gets a custom definition"),
+        };
+        let weak = Arc::downgrade(&first);
+        drop(first);
+        for index in 0..64 {
+            rename(id, &format!("Name {index}")).unwrap();
+        }
+        assert_eq!(registry().entries.len(), 1);
+        assert_eq!(definition(id).name, "Name 63");
+        assert!(
+            weak.upgrade().is_none(),
+            "an earlier definition is freed once nothing reads it"
+        );
+        remove(id).unwrap();
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    /// A reader that took a snapshot keeps the name it read; the next read
+    /// sees the rename.
+    #[test]
+    fn a_held_snapshot_keeps_its_name_across_a_rename() {
+        let models = temporary_models_dir();
+        let source = models.join("snapshot-Q8_0.gguf");
+        fs::write(&source, parakeet("Snapshot primeLine")).unwrap();
+        let id = import(&source, None, &AtomicBool::new(false)).unwrap();
+        let held = definition(id);
+        assert_eq!(held.name, "Snapshot primeLine");
+        rename(id, "Renamed").unwrap();
+        assert_eq!(definition(id).name, "Renamed");
+        assert_eq!(held.name, "Snapshot primeLine");
+        remove(id).unwrap();
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    /// Removing an import drops its definition once the last reader lets go;
+    /// until then the snapshot stays valid, and the id reads as the
+    /// placeholder.
+    #[test]
+    fn removing_an_import_frees_its_definition_after_the_last_reader() {
+        let models = temporary_models_dir();
+        let source = models.join("removed-Q8_0.gguf");
+        fs::write(&source, parakeet("Removed primeLine")).unwrap();
+        let id = import(&source, None, &AtomicBool::new(false)).unwrap();
+        let held = definition(id);
+        let weak = match &held {
+            ModelRef::Custom(definition) => Arc::downgrade(definition),
+            ModelRef::Static(_) => unreachable!("an import gets a custom definition"),
+        };
+        remove(id).unwrap();
+        assert!(!is_registered(id));
+        assert_eq!(held.name, "Removed primeLine");
+        let placeholder = definition(id);
+        assert_eq!(placeholder.name, "Imported model");
+        assert!(!placeholder.available());
+        drop(held);
+        assert!(
+            weak.upgrade().is_none(),
+            "the removed import's definition is freed"
+        );
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
+    /// An in-place change rebuilds the definition for the new file, and a
+    /// snapshot taken before it keeps reading the old one.
+    #[test]
+    fn an_in_place_path_change_rebuilds_the_definition() {
+        let models = temporary_models_dir();
+        let first = models.join("in-place-first.gguf");
+        fs::write(&first, parakeet("In place primeLine")).unwrap();
+        let id = import(&first, Some("Mine"), &AtomicBool::new(false)).unwrap();
+        let before = definition(id);
+        let before_path = super::super::models::model_path(&before).unwrap();
+        let second = models.join("second.gguf");
+        fs::write(&second, parakeet("In place primeLine")).unwrap();
+        assert_eq!(add_in_place(&second, &AtomicBool::new(false)).unwrap(), id);
+        let after = definition(id);
+        assert_eq!(super::super::models::model_path(&after).unwrap(), second);
+        assert_eq!(
+            super::super::models::model_path(&before).unwrap(),
+            before_path
+        );
+        assert_eq!(before.name, "Mine");
+        remove(id).unwrap();
+        super::super::models::set_test_models_dir(None);
+        fs::remove_dir_all(models).unwrap();
+    }
+
     #[test]
     fn a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it() {
         let models = temporary_models_dir();
@@ -1178,7 +1290,7 @@ mod tests {
         assert_eq!(status(id), Status::Ready);
         let model = definition(id);
         assert_eq!(model.name, "Mine");
-        assert_eq!(super::super::models::model_path(model).unwrap(), source);
+        assert_eq!(super::super::models::model_path(&model).unwrap(), source);
         let added = imported()
             .into_iter()
             .find(|import| import.definition.id == TranscriptionModelId::Custom(id))
@@ -1228,7 +1340,7 @@ mod tests {
             invalidate();
             assert_eq!(status(id), Status::Ready);
             let model = definition(id);
-            assert_eq!(super::super::models::model_path(model).unwrap(), copy);
+            assert_eq!(super::super::models::model_path(&model).unwrap(), copy);
             assert_eq!(model.name, "Mine");
         }
         super::super::models::set_test_models_dir(None);
@@ -1258,7 +1370,7 @@ mod tests {
         invalidate();
         assert_eq!(status(id), Status::Ready);
         assert_eq!(
-            super::super::models::model_path(definition(id)).unwrap(),
+            super::super::models::model_path(&definition(id)).unwrap(),
             chosen
         );
         super::super::models::set_test_models_dir(None);

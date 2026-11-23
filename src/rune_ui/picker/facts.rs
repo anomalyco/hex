@@ -18,8 +18,8 @@ use crate::rune_ui::Ui;
 use crate::rune_ui::controls::{ButtonKind, Paint, PushSize, button, status_dot};
 use crate::transcription::model_benchmarks::ErrorMetric;
 use crate::transcription::models::{
-    self as transcription_models, AUTO_LANGUAGE, ModelDefinition, ModelRuntime, Recommendation,
-    TranscriptionModelId, VocabularyUse, language_name,
+    self as transcription_models, AUTO_LANGUAGE, ModelDefinition, ModelRef, ModelRuntime,
+    Recommendation, TranscriptionModelId, VocabularyUse, language_name,
 };
 
 /// The one state a model shows.
@@ -47,7 +47,7 @@ impl State {
 }
 
 pub(super) struct Entry {
-    pub(super) def: &'static ModelDefinition,
+    pub(super) def: ModelRef,
     pub(super) recommendation: Option<Recommendation>,
     pub(super) supports: bool,
     pub(super) state: State,
@@ -67,16 +67,16 @@ pub(super) fn entries(ui: &Ui, language: &str, models: &[PickerModel]) -> Vec<En
     let details = picker::benchmark_details_on(ui);
     models
         .iter()
-        .map(|&(def, recommendation)| Entry {
-            def,
-            recommendation: picker::shown_recommendation(recommendation, def, language, details),
+        .map(|(def, recommendation)| Entry {
+            recommendation: picker::shown_recommendation(*recommendation, def, language, details),
             supports: def.supports_language(language),
             state: state(ui, def, language),
+            def: def.clone(),
         })
         .collect()
 }
 
-fn state(ui: &Ui, def: &'static ModelDefinition, language: &str) -> State {
+fn state(ui: &Ui, def: &ModelDefinition, language: &str) -> State {
     let language = def.language_for(language);
     let installed = ui.picker.installed(def, language);
     let ready = ui.picker.ready(def, language);
@@ -265,13 +265,13 @@ pub(super) fn role(
         Some(Recommendation::Vocabulary) => Some((tr("Reads your vocabulary"), Some("vocabulary"))),
         None if others.len() > 1
             && others.iter().all(|other| {
-                language_count(other.def) < language_count(entry.def)
+                language_count(&other.def) < language_count(&entry.def)
                     || other.def.id == entry.def.id
             }) =>
         {
             Some((tr("Most languages"), Some("languages")))
         }
-        None if reads_vocabulary(ui, entry.def) => {
+        None if reads_vocabulary(ui, &entry.def) => {
             Some((tr("Reads your vocabulary"), Some("vocabulary")))
         }
         None => None,
@@ -413,7 +413,7 @@ pub(super) fn progress_line(p: Paint, entry: &Entry) -> El {
 /// Use or Download for a model that can be chosen, at the button size of
 /// the compare columns.
 pub(super) fn choose_button(p: Paint, entry: &Entry, primary: bool) -> El {
-    let def = entry.def;
+    let def = entry.def.clone();
     let label = if downloads(entry) {
         tr_fill("Download {}", &def.size_label())
     } else {
@@ -428,17 +428,17 @@ pub(super) fn choose_button(p: Paint, entry: &Entry, primary: bool) -> El {
         } else {
             ButtonKind::Secondary
         },
-        move |ui: &mut Ui, _| choose(ui, def),
+        move |ui: &mut Ui, _| choose(ui, &def),
     )
 }
 
 /// The list's quieter Use or download action, at row size.
 pub(super) fn row_choose_button(p: Paint, entry: &Entry) -> El {
-    let def = entry.def;
+    let def = entry.def.clone();
     if !downloads(entry) {
         return Button::new(tr("Use"))
             .variant(ButtonVariant::Neutral)
-            .on_press_tx(move |ui: &mut Ui, _| choose(ui, def))
+            .on_press_tx(move |ui: &mut Ui, _| choose(ui, &def))
             .build_small_push(p.k)
             .key("choose-model");
     }
@@ -457,7 +457,7 @@ pub(super) fn row_choose_button(p: Paint, entry: &Entry) -> El {
                 )
                 .child(text(size).key("label").font(tnum(font)).color(ink))
         })
-        .on_press_tx(move |ui: &mut Ui, _| choose(ui, def))
+        .on_press_tx(move |ui: &mut Ui, _| choose(ui, &def))
         .build_small_push(p.k)
         .key("choose-model")
         // A ghost's label lines up with the row's other right edges.

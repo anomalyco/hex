@@ -269,6 +269,6 @@ pub(crate) fn most_accurate_is_comparable(model: &ModelDefinition, language: &st
         && choices_for_runtime(language)
             .iter()
             .filter(|choice| choice.model.id != model.id)
-            .filter_map(|choice| benchmark(choice.model))
+            .filter_map(|choice| benchmark(&choice.model))
             .all(|other| record.comparable(&other))
 }

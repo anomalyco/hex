@@ -573,7 +573,13 @@ pub fn install() -> Result<Receiver<StatusItemAction>> {
         .enumerate()
         .filter(|(_, model)| model.available())
         .map(|(index, model)| {
-            let item = add_item(&models, &target, model.name, sel!(selectModel:), mtm);
+            let item = add_item(
+                &models,
+                &target,
+                model.name.as_ref(),
+                sel!(selectModel:),
+                mtm,
+            );
             item.setTag(index as isize);
             item.setHidden(true);
             (model.id, item)
@@ -807,7 +813,7 @@ pub fn update_transcription(settings: &AppSettings, status: &PreparationStatus) 
                 .model_preparing
                 .setTitle(&NSString::from_str(&tr_fill(
                     "Preparing {}…",
-                    crate::transcription::models::definition(model).name,
+                    &crate::transcription::models::definition(model).name,
                 )));
         }
         controller.model_error.setHidden(status.error.is_none());

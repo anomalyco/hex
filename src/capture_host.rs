@@ -752,7 +752,7 @@ const WORD_LAGS: &[(TranscriptionModelId, &str, WordLag)] = &[(
 )];
 
 fn word_lag(model: TranscriptionModelId) -> Option<&'static WordLag> {
-    let ModelRuntime::Gguf(artifact) = crate::transcription::models::definition(model).runtime
+    let ModelRuntime::Gguf(artifact) = &crate::transcription::models::definition(model).runtime
     else {
         return None;
     };

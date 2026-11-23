@@ -321,13 +321,13 @@ fn alternate_selection(
 /// download to show, even while Setup still waits for its check.
 fn installed(ui: &Ui, selection: &TranscriptionSelection) -> bool {
     transcription_models::validate(selection)
-        .is_ok_and(|model| ui.picker.installed(model, &selection.language))
+        .is_ok_and(|model| ui.picker.installed(&model, &selection.language))
 }
 
 /// Whether Setup can move on: the installed file has passed its check.
 fn ready(ui: &Ui, selection: &TranscriptionSelection) -> bool {
     transcription_models::validate(selection)
-        .is_ok_and(|model| ui.picker.ready(model, &selection.language))
+        .is_ok_and(|model| ui.picker.ready(&model, &selection.language))
 }
 
 /// Opens the first run over the tour, at the tour's step: at launch when
@@ -554,7 +554,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         ui.view.as_ref().map_or((false, 0, false), |view| {
             let t = &view.transcription;
             (
-                model.is_some_and(|m| t.preparing == Some(m.id)),
+                model.as_ref().is_some_and(|m| t.preparing == Some(m.id)),
                 t.downloaded_bytes,
                 t.error.is_some(),
             )
@@ -688,7 +688,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     s.toggle = toggle;
     live.release_microphone = release_microphone;
     if let Some(download) = s.download.as_mut() {
-        if let Some(total) = model.and_then(|m| m.download_bytes()) {
+        if let Some(total) = model.as_ref().and_then(|model| model.download_bytes()) {
             download.total = total;
         }
         if choice_installed {

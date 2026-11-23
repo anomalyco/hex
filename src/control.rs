@@ -719,17 +719,17 @@ impl ModelReport {
     pub fn saved(selection: &crate::transcription::models::TranscriptionSelection) -> Self {
         use crate::transcription::{custom_models, models, readiness};
         let definition = models::definition(selection.model);
-        let status = readiness::readiness(definition, &selection.language);
+        let status = readiness::readiness(&definition, &selection.language);
         Self {
             id: selection.model.as_str().into(),
-            name: definition.name.into(),
+            name: definition.name.to_string(),
             language: selection.language.clone(),
             installed: status.installed,
             fallback: custom_models::fallback_reason(selection).map(|reason| {
                 let running = custom_models::fallback();
                 FallbackReport {
                     id: running.model.as_str().into(),
-                    name: models::definition(running.model).name.into(),
+                    name: models::definition(running.model).name.to_string(),
                     language: running.language,
                     reason,
                 }

@@ -89,18 +89,18 @@ fn measures(ui: &Ui, shown: &[&Entry], language: &str) -> Vec<Measure> {
         label: tr("Wait when you stop"),
         values: shown
             .iter()
-            .map(|entry| facts::wait_label(entry.def))
+            .map(|entry| facts::wait_label(&entry.def))
             .collect(),
         scores: shown
             .iter()
-            .map(|entry| facts::wait_score(entry.def))
+            .map(|entry| facts::wait_score(&entry.def))
             .collect(),
     }];
     // Wrong words only where at least one column was measured in the
     // language, in the first measured column's terms.
     let measured: Vec<_> = shown
         .iter()
-        .map(|entry| errors(entry.def, language))
+        .map(|entry| errors(&entry.def, language))
         .collect();
     if let Some((metric, _)) = measured.iter().flatten().next().copied() {
         let same = |found: &Option<(_, f64)>| found.filter(|(other, _)| *other == metric);
@@ -125,11 +125,11 @@ fn measures(ui: &Ui, shown: &[&Entry], language: &str) -> Vec<Measure> {
         label: tr("Languages"),
         values: shown
             .iter()
-            .map(|entry| facts::languages_label(entry.def))
+            .map(|entry| facts::languages_label(&entry.def))
             .collect(),
         scores: shown
             .iter()
-            .map(|entry| Some(facts::language_count(entry.def) as f64))
+            .map(|entry| Some(facts::language_count(&entry.def) as f64))
             .collect(),
     });
     measures.push(Measure {
@@ -138,7 +138,7 @@ fn measures(ui: &Ui, shown: &[&Entry], language: &str) -> Vec<Measure> {
         values: shown
             .iter()
             .map(|entry| {
-                if facts::reads_vocabulary(ui, entry.def) {
+                if facts::reads_vocabulary(ui, &entry.def) {
                     tr("Yes")
                 } else {
                     "—"
@@ -148,7 +148,7 @@ fn measures(ui: &Ui, shown: &[&Entry], language: &str) -> Vec<Measure> {
             .collect(),
         scores: shown
             .iter()
-            .map(|entry| facts::reads_vocabulary(ui, entry.def).then_some(1.0))
+            .map(|entry| facts::reads_vocabulary(ui, &entry.def).then_some(1.0))
             .collect(),
     });
     measures
@@ -219,13 +219,13 @@ pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
                     .color(if recommended { p.accent() } else { p.faint() }),
             )
             .child(
-                text(entry.def.name)
+                text(entry.def.name.as_ref())
                     .key("name")
                     .font(p.k.ty.body_medium)
                     .color(p.text()),
             )
             .child(
-                text(facts::blurb(entry.def))
+                text(facts::blurb(&entry.def))
                     .key("blurb")
                     .font(p.k.ty.caption())
                     .color(p.muted())
@@ -235,7 +235,7 @@ pub(super) fn body(ui: &Ui, p: Paint, entries: &[Entry], language: &str) -> El {
         let mut column = col()
             .key(format!("model{index}"))
             .role("group")
-            .label(entry.def.name)
+            .label(entry.def.name.as_ref())
             .w(width)
             .radius(p.k.radius.lg)
             .child(head);
@@ -333,9 +333,9 @@ mod tests {
         crate::transcription::models::picker_models(language)
             .into_iter()
             .map(|(def, recommendation)| Entry {
+                supports: def.supports_language(language),
                 def,
                 recommendation,
-                supports: def.supports_language(language),
                 state: State::NotDownloaded,
             })
             .collect()

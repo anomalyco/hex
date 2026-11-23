@@ -2812,7 +2812,7 @@ fn choosing_the_selected_installed_but_unchecked_model_checks_it() {
     std::fs::create_dir_all(&directory).unwrap();
     models::set_test_models_dir(Some(directory.clone()));
     let model = models::definition(TranscriptionModelId::ParakeetUnifiedEnglish);
-    let ModelRuntime::Gguf(artifact) = model.runtime else {
+    let ModelRuntime::Gguf(artifact) = &model.runtime else {
         unreachable!("Parakeet Unified English is a GGUF model")
     };
     std::fs::File::create(directory.join(artifact.local_name()))
@@ -2828,7 +2828,7 @@ fn choosing_the_selected_installed_but_unchecked_model_checks_it() {
     // Readiness here comes from the filesystem: the file is installed but
     // has no verification receipt yet.
     rt.state.picker.installed = None;
-    picker::choose(&mut rt.state, model);
+    picker::choose(&mut rt.state, &model);
     assert_eq!(
         sent(&rt),
         [Request::ChooseModel {

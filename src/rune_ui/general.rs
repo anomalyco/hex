@@ -116,7 +116,7 @@ pub(super) fn basics(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
         p,
         "transcription-control",
         tr("Speech model"),
-        model.name,
+        model.name.as_ref(),
         &rune_theme_opencode::icons::CHEVRON_RIGHT,
         super::picker::open,
     );
@@ -238,7 +238,7 @@ pub(super) fn missing_model(ui: &Ui) -> Option<crate::desktop::onboarding::Model
     {
         let fallback = crate::transcription::custom_models::fallback();
         let model = transcription_models::definition(fallback.model);
-        if ui.picker.installed(model, &fallback.language) {
+        if ui.picker.installed(&model, &fallback.language) {
             return None;
         }
     }

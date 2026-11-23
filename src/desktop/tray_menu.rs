@@ -31,7 +31,7 @@ pub(crate) fn model_menu_entries(
         .filter(|model| model.available())
         .filter_map(|model| {
             let selection = settings.transcription_for_model(model.id);
-            installed(model, &selection.language).then(|| ModelMenuEntry {
+            installed(&model, &selection.language).then(|| ModelMenuEntry {
                 model: model.id,
                 title: format!("{} · {}", model.name, language_name(&selection.language)),
                 selected: model.id == settings.transcription.model,

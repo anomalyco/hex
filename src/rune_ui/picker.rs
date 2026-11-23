@@ -27,7 +27,7 @@ use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::transcription::models::{
     self as transcription_models, AUTO_LANGUAGE, BenchmarkRecord, ModelDefinition,
-    ModelPreparationStage, ModelRuntime, Recommendation, TranscriptionModelId,
+    ModelPreparationStage, ModelRef, ModelRuntime, Recommendation, TranscriptionModelId,
     TranscriptionSelection, language_name,
 };
 
@@ -122,7 +122,7 @@ impl Picker {
 
     pub(super) fn selected_installed(&self, settings: &AppSettings) -> bool {
         transcription_models::validate(&settings.transcription)
-            .is_ok_and(|model| self.installed(model, &settings.transcription.language))
+            .is_ok_and(|model| self.installed(&model, &settings.transcription.language))
     }
 
     /// Whether `model` can run here. A fixture's installed stand-ins count as
@@ -137,7 +137,7 @@ impl Picker {
 
     pub(super) fn selected_ready(&self, settings: &AppSettings) -> bool {
         transcription_models::validate(&settings.transcription)
-            .is_ok_and(|model| self.ready(model, &settings.transcription.language))
+            .is_ok_and(|model| self.ready(&model, &settings.transcription.language))
     }
 
     fn clear_deletion(&mut self) {
@@ -315,10 +315,7 @@ pub(super) fn benchmark_detail(record: &BenchmarkRecord) -> String {
     parts.join(" · ")
 }
 
-pub(super) type PickerModel = (
-    &'static ModelDefinition,
-    Option<transcription_models::Recommendation>,
-);
+pub(super) type PickerModel = (ModelRef, Option<transcription_models::Recommendation>);
 
 /// The picker's models for `language` in `sort`'s order, only those that
 /// support it when `supported_only`. Recommended keeps the catalog's order.
@@ -384,7 +381,7 @@ pub(super) fn cancel(ui: &mut Ui) {
 
 /// Asks for `model` with the saved language when it supports it, else with
 /// its default language, which Settings then names.
-pub(super) fn choose(ui: &mut Ui, model: &'static ModelDefinition) {
+pub(super) fn choose(ui: &mut Ui, model: &ModelDefinition) {
     ui.picker.clear_deletion();
     let current = &ui.settings.transcription;
     // A file that is here but not checked is not active yet: choosing it
@@ -430,7 +427,7 @@ pub(super) fn fallback_note(ui: &Ui) -> Option<String> {
             &[
                 (
                     "model",
-                    transcription_models::definition(fallback.model).name,
+                    &transcription_models::definition(fallback.model).name,
                 ),
                 ("previous", language_name(&fallback.from)),
                 ("language", language_name(&selection.language)),
@@ -439,17 +436,18 @@ pub(super) fn fallback_note(ui: &Ui) -> Option<String> {
     })
 }
 
-pub(super) fn delete(ui: &mut Ui, model: &'static ModelDefinition) {
+pub(super) fn delete(ui: &mut Ui, id: TranscriptionModelId) {
     ui.picker.deletion_error = None;
-    if ui.picker.deletion != Some(model.id) {
-        ui.picker.deletion = Some(model.id);
+    if ui.picker.deletion != Some(id) {
+        ui.picker.deletion = Some(id);
         return;
     }
     ui.picker.deletion = None;
     if !ui.live() {
         return;
     }
-    match transcription_models::remove_installed(model) {
+    let model = transcription_models::definition(id);
+    match transcription_models::remove_installed(&model) {
         Ok(()) => tracing::info!(model = ?model.id, "deleted transcription model"),
         Err(error) => ui.picker.deletion_error = Some(error.to_string()),
     }
@@ -749,20 +747,20 @@ fn hidden_note(ui: &Ui, p: Paint, shown: &[PickerModel], language: &str) -> Opti
     let selected = transcription_models::definition(ui.settings.transcription.model);
     let active = transcription_selection_is_active(
         &ui.settings.transcription,
-        selected,
+        &selected,
         ui.picker
-            .installed(selected, selected.language_for(language)),
+            .installed(&selected, selected.language_for(language)),
     )
     .then_some(selected.id);
     let (id, is_preparing) = hidden_model(shown, preparing, active)?;
     let model = transcription_models::definition(id);
     let state = if is_preparing {
-        preparation(ui, model)?.0
+        preparation(ui, &model)?.0
     } else {
         tr("Active").to_owned()
     };
-    let names = [("model", model.name), ("state", state.as_str())];
-    let copy = if downloaded_filter(ui) && !is_downloaded(ui, model, language) {
+    let names = [("model", model.name.as_ref()), ("state", state.as_str())];
+    let copy = if downloaded_filter(ui) && !is_downloaded(ui, &model, language) {
         tr_named(
             "{model} is hidden by the downloaded filter: {state}",
             &names,
@@ -859,8 +857,10 @@ mod tests {
         let selection = TranscriptionSelection::default();
         let model = transcription_models::definition(selection.model);
 
-        assert!(!transcription_selection_is_active(&selection, model, false));
-        assert!(transcription_selection_is_active(&selection, model, true));
+        assert!(!transcription_selection_is_active(
+            &selection, &model, false
+        ));
+        assert!(transcription_selection_is_active(&selection, &model, true));
     }
 
     fn ids(models: &[PickerModel]) -> Vec<TranscriptionModelId> {
@@ -931,7 +931,7 @@ mod tests {
     #[test]
     fn benchmark_details_show_raw_rates_and_mark_unknowns() {
         let qwen = transcription_models::definition(TranscriptionModelId::Qwen3Asr06B);
-        let record = transcription_models::benchmark(qwen).unwrap();
+        let record = transcription_models::benchmark(&qwen).unwrap();
         assert_eq!(benchmark_rate(&record), "7.57% CER · lower is better");
         let detail = benchmark_detail(&record);
         for part in [
@@ -947,7 +947,7 @@ mod tests {
             assert!(detail.contains(part), "{detail:?} lacks {part:?}");
         }
         let parakeet = transcription_models::definition(TranscriptionModelId::ParakeetV2);
-        let detail = benchmark_detail(&transcription_models::benchmark(parakeet).unwrap());
+        let detail = benchmark_detail(&transcription_models::benchmark(&parakeet).unwrap());
         for part in [
             "English",
             "Dataset unknown",
@@ -957,18 +957,18 @@ mod tests {
             assert!(detail.contains(part), "{detail:?} lacks {part:?}");
         }
         let apple = transcription_models::definition(TranscriptionModelId::AppleSpeech);
-        assert!(transcription_models::benchmark(apple).is_none());
+        assert!(transcription_models::benchmark(&apple).is_none());
     }
 
     #[test]
     fn most_accurate_needs_comparable_figures_only_with_benchmark_details() {
         let cohere = transcription_models::definition(TranscriptionModelId::CohereTranscribe);
         let badge = Some(Recommendation::MostAccurate);
-        assert_eq!(shown_recommendation(badge, cohere, "en", false), badge);
-        assert_eq!(shown_recommendation(badge, cohere, "en", true), None);
+        assert_eq!(shown_recommendation(badge, &cohere, "en", false), badge);
+        assert_eq!(shown_recommendation(badge, &cohere, "en", true), None);
         let recommended = Some(Recommendation::Recommended);
         assert_eq!(
-            shown_recommendation(recommended, cohere, "el", true),
+            shown_recommendation(recommended, &cohere, "el", true),
             recommended
         );
     }

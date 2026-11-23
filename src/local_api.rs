@@ -780,7 +780,7 @@ fn handle_request(request: HttpRequest, context: &HttpContext) -> RequestAction 
             if !model.available() {
                 return RequestAction::Respond(HttpResponse::code(404, "unknown-model"));
             }
-            let Ok(selection) = installation_selection(model, &request.path) else {
+            let Ok(selection) = installation_selection(&model, &request.path) else {
                 return RequestAction::Respond(HttpResponse::code(400, "unsupported-model"));
             };
             if context
@@ -833,7 +833,7 @@ fn transcription_action(
         }
     };
     let model = crate::transcription::models::definition(selection.model);
-    if !crate::transcription::readiness::is_ready(model, &selection.language) {
+    if !crate::transcription::readiness::is_ready(&model, &selection.language) {
         return RequestAction::Respond(HttpResponse::code(409, "model-not-ready"));
     }
     let Some(admission) = transcription.admit_audio() else {
@@ -1111,38 +1111,41 @@ fn installation_selection(
 
 fn stream_model_prepare(
     stream: &mut TcpStream,
-    model: &'static crate::transcription::models::ModelDefinition,
+    model: crate::transcription::models::ModelRef,
     selection: crate::transcription::models::TranscriptionSelection,
     preparing: Arc<AtomicBool>,
     shutdown: &AtomicBool,
     transcription: crate::transcription::service::TranscriptionServiceHandle,
 ) {
-    let preparer: ModelPreparer = Box::new(move |canceled, downloaded, stage| {
-        if matches!(
-            model.runtime,
-            crate::transcription::models::ModelRuntime::Gguf(_)
-        ) {
-            crate::transcription::models::download_with_stage_progress(
-                model,
-                &canceled,
-                &downloaded,
-                &stage,
-            )?;
+    let preparer: ModelPreparer = Box::new({
+        let model = model.clone();
+        move |canceled, downloaded, stage| {
+            if matches!(
+                &model.runtime,
+                crate::transcription::models::ModelRuntime::Gguf(_)
+            ) {
+                crate::transcription::models::download_with_stage_progress(
+                    &model,
+                    &canceled,
+                    &downloaded,
+                    &stage,
+                )?;
+            }
+            if canceled.load(Ordering::Acquire) {
+                bail!("model preparation canceled");
+            }
+            crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
+            transcription
+                .prepare(selection, canceled)
+                .map_err(|error| eyre!("model preparation failed: {error:?}"))
         }
-        if canceled.load(Ordering::Acquire) {
-            bail!("model preparation canceled");
-        }
-        crate::transcription::models::ModelPreparationStage::Loading.store(&stage);
-        transcription
-            .prepare(selection, canceled)
-            .map_err(|error| eyre!("model preparation failed: {error:?}"))
     });
     stream_model_prepare_with(stream, model, preparing, shutdown, preparer);
 }
 
 fn stream_model_prepare_with(
     stream: &mut TcpStream,
-    model: &'static crate::transcription::models::ModelDefinition,
+    model: crate::transcription::models::ModelRef,
     preparing: Arc<AtomicBool>,
     shutdown: &AtomicBool,
     preparer: ModelPreparer,
@@ -1155,7 +1158,7 @@ fn stream_model_prepare_with(
     let canceled = Arc::new(AtomicBool::new(false));
     let downloaded = Arc::new(AtomicU64::new(0));
     let initial_stage = if matches!(
-        model.runtime,
+        &model.runtime,
         crate::transcription::models::ModelRuntime::AppleSpeech
     ) {
         crate::transcription::models::ModelPreparationStage::Loading as u8
@@ -1315,7 +1318,7 @@ impl AuthObservationLimiter {
 enum RequestAction {
     Respond(HttpResponse),
     Prepare {
-        model: &'static crate::transcription::models::ModelDefinition,
+        model: crate::transcription::models::ModelRef,
         selection: crate::transcription::models::TranscriptionSelection,
     },
     Transcribe {
@@ -1370,8 +1373,8 @@ impl Drop for PrepareGuard {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ModelInfo {
-    id: &'static str,
-    name: &'static str,
+    id: String,
+    name: std::borrow::Cow<'static, str>,
     installed: bool,
     verified: bool,
     managed: bool,
@@ -1867,7 +1870,9 @@ mod tests {
         let apple = crate::transcription::models::definition(
             crate::transcription::models::TranscriptionModelId::AppleSpeech,
         );
-        assert!(installation_selection(apple, "/models/apple_speech/prepare?language=de").is_err());
+        assert!(
+            installation_selection(&apple, "/models/apple_speech/prepare?language=de").is_err()
+        );
     }
 
     #[test]

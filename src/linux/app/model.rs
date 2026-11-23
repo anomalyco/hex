@@ -49,10 +49,10 @@ impl LinuxDesktopHost {
                 if installed_only {
                     crate::transcription::models::ModelPreparationStage::Verifying
                         .store(&worker_stage);
-                    crate::transcription::models::verify_installed(definition, &worker_canceled)?;
+                    crate::transcription::models::verify_installed(&definition, &worker_canceled)?;
                 } else {
                     crate::transcription::models::download_with_stage_progress(
-                        definition,
+                        &definition,
                         &worker_canceled,
                         &worker_progress,
                         &worker_stage,
@@ -97,7 +97,7 @@ impl LinuxDesktopHost {
         let Ok(model) = crate::transcription::models::validate(&selection) else {
             return false;
         };
-        if !crate::transcription::models::needs_check(model, &selection.language) {
+        if !crate::transcription::models::needs_check(&model, &selection.language) {
             return false;
         }
         if self.prepare_transcription(selection, true, false).is_err() {

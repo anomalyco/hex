@@ -70,7 +70,7 @@ pub fn install(selection: &TranscriptionSelection, canceled: &AtomicBool) -> Res
     let model = validate(selection)?;
     let downloaded = AtomicU64::new(0);
     println!("Installing {} ({})...", model.name, model.size_label());
-    let path = download_with_progress(model, canceled, &downloaded)?;
+    let path = download_with_progress(&model, canceled, &downloaded)?;
     println!(
         "Installed {} bytes at {}",
         downloaded.load(Ordering::Relaxed),
@@ -461,13 +461,13 @@ impl LocalTranscriber {
     ) -> Result<Self> {
         check_canceled(canceled)?;
         let definition = validate(selection)?;
-        if !crate::transcription::models::is_installed(definition, &selection.language) {
+        if !crate::transcription::models::is_installed(&definition, &selection.language) {
             return Err(eyre!(
                 "{} is not installed; run `cargo run -- model install`",
                 definition.name
             ));
         }
-        let path = model_path(definition)?;
+        let path = model_path(&definition)?;
         check_canceled(canceled)?;
         let model = Model::load_with(
             &path,
@@ -485,7 +485,7 @@ impl LocalTranscriber {
         let capabilities = model.capabilities()?;
         let language = crate::transcription::gguf_session::validate_gguf_artifact(
             &path,
-            definition,
+            &definition,
             &architecture,
             &variant,
             selection,

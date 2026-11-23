@@ -158,7 +158,7 @@ impl Runtime {
                 // names it again; one with no file has nothing to load.
                 let same = same_model_and_language(&selection, &self.settings.transcription);
                 let check = crate::transcription::models::validate(&selection).is_ok_and(|model| {
-                    crate::transcription::models::needs_check(model, &selection.language)
+                    crate::transcription::models::needs_check(&model, &selection.language)
                 });
                 if !same || check {
                     self.preparation.start(selection, true);

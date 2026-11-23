@@ -206,7 +206,7 @@ pub(super) fn can_recover() -> bool {
 
 fn model_installed(selection: &crate::transcription::models::TranscriptionSelection) -> bool {
     crate::transcription::models::validate(selection)
-        .is_ok_and(|model| crate::transcription::models::is_installed(model, &selection.language))
+        .is_ok_and(|model| crate::transcription::models::is_installed(&model, &selection.language))
 }
 
 /// Whether one folder is waiting for the launch pass, for read-only readers
@@ -264,7 +264,7 @@ pub(super) fn recover(id: &str) -> Result<Option<MeetingManifest>> {
     }
     let (_, selection) = crate::app_settings::transcription_selection();
     let model = crate::transcription::models::validate(&selection)?;
-    if !crate::transcription::models::is_installed(model, &selection.language) {
+    if !crate::transcription::models::is_installed(&model, &selection.language) {
         return Err(eyre!("{} is not installed", model.name));
     }
     tracing::info!(

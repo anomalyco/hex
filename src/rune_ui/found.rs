@@ -305,7 +305,7 @@ pub(super) fn section(ui: &Ui, p: super::controls::Paint) -> Option<rune::El> {
 /// `model`'s pinned file, as a scene's hub cache holds it.
 pub(super) fn fixture_catalog(model: TranscriptionModelId) -> Found {
     let definition = crate::transcription::models::definition(model);
-    let crate::transcription::models::ModelRuntime::Gguf(artifact) = definition.runtime else {
+    let crate::transcription::models::ModelRuntime::Gguf(artifact) = &definition.runtime else {
         unreachable!("scenes use GGUF models");
     };
     let folder = format!("models--{}", artifact.repository.replacen('/', "--", 1));
@@ -314,16 +314,16 @@ pub(super) fn fixture_catalog(model: TranscriptionModelId) -> Found {
             .join(folder)
             .join("snapshots")
             .join(artifact.revision)
-            .join(artifact.filename),
+            .join(artifact.filename.as_ref()),
         repository: artifact.repository.into(),
         revision: artifact.revision.into(),
-        file_name: artifact.filename.into(),
+        file_name: artifact.filename.to_string(),
         bytes: artifact.bytes,
-        blob_sha256: Some(artifact.sha256.into()),
+        blob_sha256: Some(artifact.sha256.to_string()),
         catalog: Some(model),
-        name: definition.name.into(),
+        name: definition.name.to_string(),
         architecture: artifact.architecture.into(),
-        variant: artifact.variant.into(),
+        variant: artifact.variant.to_string(),
         languages: definition
             .languages
             .iter()

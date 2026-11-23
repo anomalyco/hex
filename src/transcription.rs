@@ -9,6 +9,7 @@ pub(crate) mod benchmark;
 ))]
 pub(crate) mod cpu_floor;
 pub(crate) mod custom_models;
+pub(crate) mod definitions;
 pub(crate) mod engine;
 pub(crate) mod file_transcript;
 pub(crate) mod found_models;

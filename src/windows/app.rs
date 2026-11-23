@@ -530,7 +530,7 @@ impl WindowsDesktopHost {
         let Ok(model) = crate::transcription::models::validate(&selection) else {
             return false;
         };
-        if !crate::transcription::models::needs_check(model, &selection.language) {
+        if !crate::transcription::models::needs_check(&model, &selection.language) {
             return false;
         }
         self.checking = true;

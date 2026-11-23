@@ -261,20 +261,20 @@ pub(super) fn status_note(model: &ModelDefinition) -> Option<String> {
 /// keeps the choice and runs the default model until it is fixed.
 pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
     let model = crate::transcription::models::definition(ui.settings.transcription.model);
-    let fallback = crate::transcription::models::definition(custom_models::fallback().model).name;
+    let fallback = &crate::transcription::models::definition(custom_models::fallback().model).name;
     if model.id == TranscriptionModelId::ParakeetUltra && !model.available() {
         return Some(tr_named(
             "{model} needs Labs › Parakeet Ultra, so Hex uses {fallback} until you turn it on or choose another model",
-            &[("model", model.name), ("fallback", fallback)],
+            &[("model", model.name.as_ref()), ("fallback", fallback)],
         ));
     }
     let TranscriptionModelId::Custom(id) = model.id else {
         return None;
     };
     let name = if custom_models::is_registered(id) {
-        model.name
+        model.name.to_string()
     } else {
-        tr("The imported model")
+        tr("The imported model").to_owned()
     };
     // The same order fallback_reason uses: a file to fix is named first, and
     // only a ready import can be waiting on its Labs toggle.
@@ -290,7 +290,10 @@ pub(super) fn selection_notice(ui: &Ui) -> Option<String> {
             "{model} changed since it was added, so Hex uses {fallback} until you check it again in the speech model picker or choose another model"
         }
     };
-    Some(tr_named(notice, &[("model", name), ("fallback", fallback)]))
+    Some(tr_named(
+        notice,
+        &[("model", name.as_str()), ("fallback", fallback)],
+    ))
 }
 
 /// What an imported card's metadata line says.
@@ -298,7 +301,7 @@ pub(super) fn metadata(model: &ModelDefinition) -> String {
     let import = custom_models::imported()
         .into_iter()
         .find(|import| import.definition.id == model.id);
-    let languages = match model.languages {
+    let languages = match model.languages.as_ref() {
         [only] => crate::transcription::models::language_name(only).to_owned(),
         languages => crate::desktop::i18n::tr_fill("{} languages", &languages.len().to_string()),
     };
@@ -334,12 +337,7 @@ fn in_place(id: CustomModelId) -> bool {
 }
 
 /// Rename and Remove for an imported card, or its name field while renaming.
-pub(super) fn actions(
-    ui: &Ui,
-    p: Paint,
-    model: &'static ModelDefinition,
-    removable: bool,
-) -> Vec<El> {
+pub(super) fn actions(ui: &Ui, p: Paint, model: &ModelDefinition, removable: bool) -> Vec<El> {
     let TranscriptionModelId::Custom(id) = model.id else {
         return Vec::new();
     };
@@ -396,7 +394,7 @@ pub(super) fn actions(
             move |ui: &mut Ui, _| {
                 choose(ui);
                 ui.picker.import.reselect = ui.picker.import.chooser.is_some()
-                    && ui.settings.transcription.model == model.id;
+                    && ui.settings.transcription.model == TranscriptionModelId::Custom(id);
             },
         ));
     }
@@ -404,13 +402,14 @@ pub(super) fn actions(
     if ui.settings.transcription.model == model.id {
         return actions;
     }
+    let name = model.name.to_string();
     actions.push(button(
         p,
         "rename-model",
         tr("Rename"),
         ButtonKind::Secondary,
         move |ui: &mut Ui, _| {
-            ui.picker.import.renaming = Some((id, TextEdit::new(model.name)));
+            ui.picker.import.renaming = Some((id, TextEdit::new(name.clone())));
         },
     ));
     if removable {
