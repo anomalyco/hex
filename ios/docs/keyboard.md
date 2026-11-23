@@ -66,7 +66,19 @@ beside Hex, it switches to the next keyboard; elsewhere (Emoji or another
 third-party keyboard on, where that switch lands on them about half the
 time) a tap opens iOS's keyboard list, as the globe's hold does, to pick
 Apple's. Where Apple's keyboard is split (the Duo unfolded and upright, where the
-switch can end the app) it always opens the list. It needs no Full Access, which only Paste does. When iOS prompts
+switch can end the app) it always opens the list. It needs no Full Access, which only Paste does.
+**Passwords** (a key, and the word) shows the same way in an empty field iOS marks as a username,
+password or new password, by the same route: iOS offers saved logins (Passwords, and password
+managers' AutoFill extensions such as Bitwarden's) only in Apple's keyboard's bar. In practice
+Hex sees only web usernames (Safari's `autocomplete="username"`, iOS 26.5 and 27.2 simulators):
+iOS brings its own keyboard, with its Passwords bar, to a native `.username` field and to every
+secure field, and comes back to Hex in the next ordinary field. Under Hex, Safari's own sign-in
+sheet (Fill Password) still covers the keyboard as it does Apple's, and the field's menu offers
+AutoFill › Passwords (on the simulator that item showed no list under either keyboard). An
+email field gets no chip: a keyboard sees only its own field's traits and can't tell a login
+form's from any other. With only Hex (or Hex and Emoji) there is nothing to switch to and no
+chip. Deciding reads only whether the field is empty, as Paste does; nothing in these fields
+is typed, read or logged beyond what Hex already skipped. When iOS prompts
 Allow Paste (read ≥ 0.3 s) or refuses a paste read, the strip shows a
 tappable two-line notice (`Paste without asking` / `Paste from Other Apps ›
 Allow` with a **Settings** chip that routes through

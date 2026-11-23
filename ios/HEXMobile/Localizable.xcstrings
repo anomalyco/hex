@@ -4273,6 +4273,16 @@
         }
       }
     },
+    "Passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "密码"
+          }
+        }
+      }
+    },
     "The multilingual model's download stopped. Trying again in %lld s." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4667,6 +4677,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已可在键盘中使用"
+          }
+        }
+      }
+    },
+    "Shows your keyboards: pick Apple's, where iOS offers your saved passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示你的键盘：选择 Apple 的键盘，iOS 会在那里提供你存储的密码"
+          }
+        }
+      }
+    },
+    "Switches to the next keyboard, where iOS offers your saved passwords" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "切换到下一个键盘，iOS 会在那里提供你存储的密码"
           }
         }
       }

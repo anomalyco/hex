@@ -65,7 +65,7 @@ final class KeyboardStripView: UIView {
     var onUndoDictation: (() -> Void)?
     var onPaste: (() -> Void)?
     var onNextKeyboard: (() -> Void)?
-    /// Code from Messages' touches where it opens iOS's keyboard list (`.code(opensList: true)`).
+    /// Code from Messages' and Passwords' touches where they open iOS's keyboard list (`opensList`).
     var onKeyboardListTouch: ((UIButton, UIEvent) -> Void)?
     /// The Full Access hint's Open Hex was tapped (it opens Hex's setup).
     var onOpenHexFromHint: (() -> Void)?
@@ -243,9 +243,23 @@ final class KeyboardStripView: UIView {
         }
         show(pasteControl, showsPasteChip)
         show(nextKeyboardChip, showsNextKeyboardChip)
-        nextKeyboardChip.accessibilityHint = chipOpensList
-            ? String(localized: "Shows your keyboards: pick Apple's, where iOS offers codes from Messages and Mail")
-            : String(localized: "Switches to the next keyboard, where iOS offers codes from Messages and Mail")
+        var next = nextKeyboardChip.configuration
+        let logins = if case .passwords? = clipboard { true } else { false }
+        let nextTitle = logins ? String(localized: "Passwords") : String(localized: "Code from Messages")
+        if next?.title != nextTitle {
+            next?.title = nextTitle
+            next?.image = UIImage(
+                systemName: logins ? "key" : "keyboard",
+                withConfiguration: UIImage.SymbolConfiguration(pointSize: 12.5, weight: .medium)
+            )
+            nextKeyboardChip.configuration = next
+        }
+        nextKeyboardChip.accessibilityHint = switch (logins, chipOpensList) {
+        case (true, true): String(localized: "Shows your keyboards: pick Apple's, where iOS offers your saved passwords")
+        case (true, false): String(localized: "Switches to the next keyboard, where iOS offers your saved passwords")
+        case (false, true): String(localized: "Shows your keyboards: pick Apple's, where iOS offers codes from Messages and Mail")
+        case (false, false): String(localized: "Switches to the next keyboard, where iOS offers codes from Messages and Mail")
+        }
         // Words swap letter by letter (and leave the same way when a chip or status takes the
         // strip); the strip being shown for the first time just draws them.
         let animated = animates
@@ -313,23 +327,21 @@ final class KeyboardStripView: UIView {
     /// Clipboard chips replace the empty strip; suggestions and status win.
     private var showsClipboard: Bool {
         guard let clipboard, !showsUndo, statusText == nil, !showsFullAccessHint, notice == nil else { return false }
-        if case .code = clipboard { return true }
+        if clipboard.leadsToAppleKeyboard { return true }
         return currentSuggestions.isEmpty
     }
 
     private var showsPasteChip: Bool {
-        if case .code(canPaste: false, _)? = clipboard { return false }
+        if clipboard?.canPaste == false { return false }
         return showsClipboard
     }
 
     private var chipOpensList: Bool {
-        if case .code(_, opensList: true)? = clipboard { return true }
-        return false
+        clipboard?.opensList == true
     }
 
     private var showsNextKeyboardChip: Bool {
-        guard showsClipboard, case .code = clipboard else { return false }
-        return true
+        showsClipboard && clipboard?.leadsToAppleKeyboard == true
     }
 
     @objc private func handlePaste() {
