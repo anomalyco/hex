@@ -10,7 +10,7 @@ Welcome explains that the internet is used only to fetch the 190 MB speech model
 
 ## Keyboard and styles
 
-**Automatic** uses the first supported Android system language, or English if none is supported. Hold the language-labelled space bar to switch immediately between Automatic, English, Español, Deutsch and Norsk (Bokmål). Slide on the Hex key or tap **Hex menu** to change the spoken language or style:
+**Automatic** follows a keyboard layout chosen in Keyboard › Keyboard layout, else the first supported Android system language, else English. Hold the language-labelled space bar to switch immediately between Automatic, English, Español, Deutsch, Norsk (Bokmål), Français, Italiano, Nederlands and Português. Português is one entry for Brazil and Portugal (Whisper has one `pt`). It and Nederlands keep the English layout and have no cleanup or list rules; Português has spoken punctuation, Nederlands doesn’t. Slide on the Hex key or tap **Hex menu** to change the spoken language or style:
 
 - **Polished** (default): trims standalone hesitation sounds, fixes spacing/capitals and closes sentences.
 - **Casual:** lowercase texting, without the period at the end of a single statement.
@@ -89,4 +89,4 @@ Its updater lives only in `app/src/preview` (code, permissions, strings); debug 
 
 [`scripts/preview-release.sh`](scripts/preview-release.sh) publishes a build: the build number is the count of commits up to the built commit of `dev`, the version name `<versionName>-preview.<build>`, the tag `android-preview-<build>` (a pre-release, never moved), and the channel branch `android-preview` holds only `latest.json` and the README people land on.
 
-**Scope:** Android 12+ (min API 31), target 36, ARM64, four typing models and four dictation languages. See the [Play release evidence, listing drafts, phone screenshots and real-device checklist](play/README.md). The Studio also exercised offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing in earlier phases.
+**Scope:** Android 12+ (min API 31), target 36, ARM64, six typing models and eight dictation languages. See the [Play release evidence, listing drafts, phone screenshots and real-device checklist](play/README.md). The Studio also exercised offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing in earlier phases.
