@@ -1183,7 +1183,14 @@ emoji for the text before the cursor, then a grid that scrolls sideways through
 Frequently used (eight columns: your emoji, then common ones) and the eight
 categories, at the system emoji keyboard's 46 pt pitch, with ABC, the categories and
 delete below, drawn without keycaps as the system's are; a tap anywhere under the
-grid goes to the key under it, each category the full width of its slot. With
+grid goes to the key under it, each category the full width of its slot. Every point
+of the panel takes a touch, between two emoji, between rows and beside a category icon
+too, and so does every point of the search's results row: iOS hands a keyboard only the
+touches that land on something its layers draw, so both have an invisible fill
+(`UIColor.keyboardTouchFill`, 0.1% black) under their clear look. Without it a finger
+landing between emoji reached nothing, so a swipe that began there did nothing and a
+glide couldn't be stopped or flung again (TestFlight build 147: "the animation in the
+emoji section is not cancelable"; iOS 27.2 simulator). With
 Settings › Experiments › ABC under the emoji key on (off by default,
 `experiments.emojiLettersUnderEmojiKey`, App Group), ABC sits exactly where the emoji
 key that opened the panel was, its x and width, so switching back to the letters needs
