@@ -37,6 +37,16 @@ pub struct Staged {
     installed: PathBuf,
 }
 
+#[cfg(test)]
+impl Staged {
+    pub fn dummy() -> Self {
+        Self {
+            update: PathBuf::new(),
+            installed: PathBuf::new(),
+        }
+    }
+}
+
 /// The running `Hex.app`, when this executable is inside one.
 fn installed_bundle() -> Option<PathBuf> {
     let executable = std::env::current_exe().ok()?.canonicalize().ok()?;

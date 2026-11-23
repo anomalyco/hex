@@ -1103,26 +1103,14 @@ fn restore_capture_enabled() -> bool {
 }
 
 fn update_title(status: &crate::desktop::host::DesktopUpdateStatus) -> String {
-    use crate::desktop::host::DesktopUpdateStatus;
-    match status {
-        DesktopUpdateStatus::ReadyToRestart => label("Restart to Update", tr("Restart to update")),
-        DesktopUpdateStatus::Available => label("Download Update…", tr("Download update")),
-        DesktopUpdateStatus::SwitchAvailable { channel, version } => {
-            format!("{}…", crate::updater::switch_label(channel, version))
-        }
-        _ => label("Check for Updates…", tr("Check for updates")),
-    }
+    crate::updater::menu_title(status)
 }
 
 /// While a meeting records, the updater refuses Restart to update, so the
 /// item that would ask for it is dimmed instead. Every other update row
 /// (Check for updates, Download update, a channel switch) stays usable.
 fn update_enabled(recording: bool, status: &crate::desktop::host::DesktopUpdateStatus) -> bool {
-    !(recording
-        && matches!(
-            status,
-            crate::desktop::host::DesktopUpdateStatus::ReadyToRestart
-        ))
+    crate::updater::offer_hold(status, recording).is_none()
 }
 
 /// Shows the saved Paste Last binding beside Paste Last Dictation, or
