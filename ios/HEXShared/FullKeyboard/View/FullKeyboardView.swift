@@ -47,8 +47,9 @@ final class FullKeyboardView: UIView {
     /// under Automatic, which leaves iOS's glass exactly as it was.
     let themePanel = KeyboardThemePanelView()
     let globeButton = UIButton(type: .custom)
-    /// The capsule that grows from the Hex mark across the strip into the recording bar.
-    private let morph = UIView()
+    /// The words' side of the soft edge the recording bar's dots come out of the Hex key behind
+    /// (`StripRevealMask`); only while the bar is coming, shown, or going.
+    private var wordsMask: StripRevealMask?
     private var recordingPanel: HexKeyRecordingPanel?
     /// The words so far over the keys while recording (Show words as you speak).
     let livePreview = LiveDictationPreviewHost()
@@ -166,9 +167,6 @@ final class FullKeyboardView: UIView {
         // view, which must never clip them, so the panel is a subview, not this view's fill.
         insertSubview(themePanel, at: 0)
         addSubview(stripView)
-        morph.isUserInteractionEnabled = false
-        morph.isHidden = true
-        addSubview(morph)
         addSubview(plane)
         addSubview(selectionStrip)
         addSubview(hexKey)
@@ -793,7 +791,10 @@ final class FullKeyboardView: UIView {
         hexKey.cornerRadius = layout.metrics.cornerRadius
         if let hex = layout.key(.hex) {
             hexKey.inStrip = hex.row < 0
-            hexKey.frame = hex.hitFrame.offsetBy(dx: 0, dy: lift)
+            // Bounds and centre: the key may be mid-scale as the recording bar comes and goes.
+            let hit = hex.hitFrame.offsetBy(dx: 0, dy: lift)
+            hexKey.bounds = CGRect(origin: .zero, size: hit.size)
+            hexKey.center = CGPoint(x: hit.midX, y: hit.midY)
             hexKey.keycapFrame = hex.frame.offsetBy(dx: -hex.hitFrame.minX, dy: -hex.hitFrame.minY)
             hexKey.markCenterY = layout.metrics.stripTop + layout.metrics.stripTextCenter - hex.hitFrame.minY
         }
@@ -976,11 +977,18 @@ final class FullKeyboardView: UIView {
         )
     }
 
+    /// Recording in and out with no shape between: the Hex key hands its spot to ✓ (the key
+    /// leaving as ✓ arrives, on the same frame), ✕ slides out from under ✓, and the dots come
+    /// out of the key behind a soft edge that runs across the bar, wiping the words as it goes.
+    /// Going back, the edge runs home into the key, the words return behind it, ✕ tucks under
+    /// ✓ and the key takes its spot back. Reduce Motion crossfades instead.
     private func setRecording(_ recording: Bool) {
         showsRecording = recording
         dismissStyleMenu()
         if recording { closeEmojiPanel(); hideModelNotice() }
-        let closingFrames = recording ? nil : morphFrames()
+        let animated = window != nil
+        let travels = animated && !StripMotion.reduced && engine.layout.key(.hex).map { $0.row < 0 } == true
+        stripView.holdsStill = recording || recordingPanel != nil
         if recording {
             plane.cancelAllTouches()
             hideUndo()
@@ -989,29 +997,114 @@ final class FullKeyboardView: UIView {
             panel.frame = recordingPanelFrame
             refreshRecordingPanel()
             panel.isHidden = false
-            if let (mark, bar) = morphFrames(), window != nil {
-                // The mark grows into a capsule and runs across the strip, then the panel takes over.
-                runMorph(from: mark, to: bar, appearing: true)
-                fade(in: [], out: [stripView, hexKey])
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.16) { [weak self, weak panel] in
-                    guard let self, self.showsRecording, let panel else { return }
-                    self.fade(in: [panel], out: [self.morph])
-                }
-            } else {
-                fade(in: [panel], out: [stripView, hexKey])
+            panel.layoutIfNeeded()
+            guard travels else {
+                endReveal(panel)
+                panel.setControls(shown: true)
+                fade(in: [panel], out: [stripView, hexKey], duration: animated ? StripMotion.reducedFade : 0)
+                return
             }
+            panel.alpha = 1
+            let fresh = beginReveal(panel)
+            if fresh {
+                UIView.performWithoutAnimation { panel.setControls(shown: false) }
+            }
+            StripMotion.animate(StripMotion.grow, fresh: fresh, {
+                self.placeReveal(open: true, panel: panel)
+            }, completion: { [weak self] _ in
+                // Masked away, the words would still take touches.
+                guard let self, self.showsRecording else { return }
+                self.stripView.isHidden = true
+            })
+            StripMotion.animate(StripMotion.settle, fresh: fresh) { panel.setControls(shown: true) }
+            StripMotion.animate(StripMotion.settleExit, {
+                self.hexKey.alpha = 0
+                self.hexKey.transform = self.hexKeyTucked
+            }, completion: { [weak self] _ in
+                // A Hex key still held for push to talk stays in the window (at alpha 0), so its
+                // touch keeps arriving and lifting the finger finishes the dictation.
+                guard let self, self.showsRecording, !self.hexKey.isTracking else { return }
+                self.hexKey.isHidden = true
+            })
         } else if let panel = recordingPanel {
-            panel.scope.phase = .hidden
-            if let (_, bar) = closingFrames, let (mark, _) = morphFrames(), window != nil {
-                runMorph(from: bar, to: mark, appearing: false)
-            }
-            fade(in: [stripView, hexKey], out: [panel]) { [weak self, weak panel] in
+            let finish = { [weak self, weak panel] in
                 guard let self, !self.showsRecording, let panel, panel === self.recordingPanel else { return }
+                self.stripView.holdsStill = false
+                self.endReveal(panel)
                 panel.tearDown()
                 panel.removeFromSuperview()
                 self.recordingPanel = nil
             }
+            guard travels else {
+                endReveal(panel)
+                fade(in: [stripView, hexKey], out: [panel], duration: animated ? StripMotion.reducedFade : 0, after: finish)
+                return
+            }
+            stripView.isHidden = false
+            stripView.alpha = 1
+            let fresh = beginReveal(panel)
+            if fresh {
+                UIView.performWithoutAnimation { placeReveal(open: true, panel: panel) }
+            }
+            if hexKey.isHidden || hexKey.alpha == 0 {
+                hexKey.isHidden = false
+                hexKey.transform = hexKeyTucked
+            }
+            StripMotion.animate(StripMotion.shrink, fresh: fresh, {
+                self.placeReveal(open: false, panel: panel)
+            }, completion: { _ in finish() })
+            StripMotion.animate(StripMotion.settleExit) { panel.setControls(shown: false) }
+            StripMotion.animate(StripMotion.settle) {
+                self.hexKey.alpha = 1
+                self.hexKey.transform = .identity
+            }
         }
+    }
+
+    /// The Hex key a little smaller about its keycap's centre, as it leaves and returns.
+    private var hexKeyTucked: CGAffineTransform {
+        let s = StripMotion.controlScale
+        let cap = hexKey.keycapFrame
+        let dx = cap.midX - hexKey.bounds.midX
+        let dy = cap.midY - hexKey.bounds.midY
+        return CGAffineTransform(translationX: dx, y: dy).scaledBy(x: s, y: s).translatedBy(x: -dx, y: -dy)
+    }
+
+    /// Masks the words and the dots on the two sides of one soft edge. True when they were
+    /// unmasked, so the edge starts at home in the Hex key; false mid-flight, where it carries on.
+    private func beginReveal(_ panel: HexKeyRecordingPanel) -> Bool {
+        let dotsAfter = !engine.layout.hexOnLeading
+        if let wordsMask, wordsMask.opaqueAfter == !dotsAfter, panel.dotsMask?.opaqueAfter == dotsAfter {
+            return false
+        }
+        let words = StripRevealMask(opaqueAfter: !dotsAfter)
+        let dots = StripRevealMask(opaqueAfter: dotsAfter)
+        stripView.mask = words
+        wordsMask = words
+        panel.dotsMask = dots
+        UIView.performWithoutAnimation { placeReveal(open: false, panel: panel) }
+        return true
+    }
+
+    private func endReveal(_ panel: HexKeyRecordingPanel) {
+        stripView.mask = nil
+        wordsMask = nil
+        panel.dotsMask = nil
+    }
+
+    /// Where the edge's band starts (it is `StripRevealMask.feather` wide): home, at the Hex key's
+    /// side of the bar with every dot gathered in and every word shown, or across the bar.
+    private func placeReveal(open: Bool, panel: HexKeyRecordingPanel) {
+        let well = panel.convert(panel.wellFrame, to: self)
+        let words = stripView.frame
+        let feather = StripRevealMask.feather
+        let band: CGFloat = if engine.layout.hexOnLeading {
+            open ? max(well.maxX, words.maxX) : min(well.minX, words.minX) - feather
+        } else {
+            open ? min(well.minX, words.minX) - feather : max(well.maxX, words.maxX)
+        }
+        wordsMask?.place(bandStart: band - words.minX)
+        panel.dotsMask?.place(bandStart: band - well.minX)
     }
 
     /// Where the recording panel sits: the suggestion strip, full width and its height, so
@@ -1021,64 +1114,17 @@ final class FullKeyboardView: UIView {
         return CGRect(x: 0, y: m.stripTop + appliedLift, width: bounds.width, height: m.stripHeight)
     }
 
-    /// The Hex mark's frame in the strip and the full-width bar it grows into, or nil when
-    /// the Hex key sits in the bottom row.
-    private func morphFrames() -> (CGRect, CGRect)? {
-        let layout = engine.layout
-        guard let hex = layout.key(.hex), hex.row < 0 else { return nil }
-        let m = layout.metrics
-        let lift = appliedLift
-        let mark = hex.frame.offsetBy(dx: 0, dy: lift)
-        let bar = CGRect(
-            x: layout.horizontalInset + m.side,
-            y: m.stripTop + lift + m.stripInset,
-            width: bounds.width - 2 * (layout.horizontalInset + m.side),
-            height: m.stripPillHeight
-        )
-        return (mark, bar)
-    }
-
-    private func runMorph(from start: CGRect, to end: CGRect, appearing: Bool) {
-        morph.layer.removeAllAnimations()
-        // Under the recording panel on the way in (the panel fades in over it), above it on the
-        // way out so the bar is seen shrinking back into the mark.
-        if appearing {
-            insertSubview(morph, aboveSubview: stripView)
-        } else {
-            bringSubviewToFront(morph)
-        }
-        morph.backgroundColor = palette.chipFill
-        morph.frame = start
-        morph.layer.cornerRadius = start.height / 2
-        morph.alpha = appearing ? 0.6 : 1
-        morph.isHidden = false
-        // No bounce: the recording bar and the live words share one spring family.
-        UIView.animate(
-            springDuration: 0.34,
-            bounce: 0,
-            initialSpringVelocity: 0,
-            delay: 0,
-            options: [.beginFromCurrentState, .allowUserInteraction]
-        ) {
-            self.morph.frame = end
-            self.morph.layer.cornerRadius = end.height / 2
-            if appearing { self.morph.alpha = 1 }
-        }
-        guard !appearing else { return }
-        UIView.animate(springDuration: 0.15, bounce: 0, initialSpringVelocity: 0, delay: 0.22, options: [.allowUserInteraction]) {
-            self.morph.alpha = 0
-        } completion: { _ in
-            if !self.showsRecording {
-                self.morph.isHidden = true
-            }
-        }
-    }
-
-    private func fade(in shown: [UIView], out hidden: [UIView], after: (() -> Void)? = nil) {
+    private func fade(
+        in shown: [UIView],
+        out hidden: [UIView],
+        duration requested: TimeInterval = 0.2,
+        delay: TimeInterval = 0,
+        after: (() -> Void)? = nil
+    ) {
         shown.forEach { $0.isHidden = false }
         let globeHidden = engine.layout.key(.globe) == nil
         let accentHidden = engine.activeAccentMenu == nil
-        let duration = window == nil ? 0 : 0.2
+        let duration = window == nil ? 0 : requested
         if duration == 0 {
             shown.forEach { $0.alpha = 1 }
             hidden.forEach {
@@ -1090,7 +1136,7 @@ final class FullKeyboardView: UIView {
             after?()
             return
         }
-        UIView.animate(springDuration: duration, bounce: 0, initialSpringVelocity: 0, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction]) {
+        UIView.animate(springDuration: duration, bounce: 0, initialSpringVelocity: 0, delay: delay * MotionDebug.slow, options: [.beginFromCurrentState, .allowUserInteraction]) {
             shown.forEach { $0.alpha = 1 }
             hidden.forEach { $0.alpha = 0 }
         } completion: { _ in
@@ -1103,6 +1149,32 @@ final class FullKeyboardView: UIView {
             if accentHidden { self.accentCallout.isHidden = true }
             after?()
         }
+    }
+
+    /// The snapshot stage's motion scenes press the Hex key the way a finger would before recording.
+    func debugPressHexKey(_ down: Bool) { hexKey.isHighlighted = down }
+
+    /// What the strip shows this frame, from the presentation layers, for `--motion-trace`.
+    func debugMotionSample() -> [String: Double] {
+        func alpha(_ view: UIView?) -> Double {
+            guard let view, !view.isHidden else { return 0 }
+            return Double((view.layer.presentation() ?? view.layer).opacity)
+        }
+        func frame(_ view: UIView) -> CGRect { (view.layer.presentation() ?? view.layer).frame }
+        var s: [String: Double] = [
+            "strip": alpha(stripView),
+            "hex": alpha(hexKey),
+            "hexX": frame(hexKey).midX,
+            "hexScale": Double((hexKey.layer.presentation() ?? hexKey.layer).transform.m11),
+            "edge": wordsMask.map { Double(($0.layer.presentation() ?? $0.layer).frame.minX + StripRevealMask.reach + stripView.frame.minX) } ?? -1,
+            "panel": alpha(recordingPanel),
+            "keys": alpha(plane),
+        ]
+        if let panel = recordingPanel {
+            s.merge(panel.debugMotionSample()) { a, _ in a }
+        }
+        s.merge(stripView.debugMotionSample()) { a, _ in a }
+        return s
     }
 
     private func makeRecordingPanel() -> HexKeyRecordingPanel {

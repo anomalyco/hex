@@ -187,6 +187,57 @@ final class HexKeyControl: UIControl {
     }
 }
 
+/// Launch arguments for the snapshot stage's motion scenes (`ios/scripts/motion-capture.sh`):
+/// `--motion-slow 4` plays the strip at a quarter speed, `--motion-trace` writes per-frame
+/// samples, and `--reduce-motion` plays it as Reduce Motion would.
+enum MotionDebug {
+    nonisolated static let slow: Double = {
+        let args = ProcessInfo.processInfo.arguments
+        guard let i = args.firstIndex(of: "--motion-slow"), i + 1 < args.count else { return 1 }
+        return max(1, Double(args[i + 1]) ?? 1)
+    }()
+    nonisolated static let tracing = ProcessInfo.processInfo.arguments.contains("--motion-trace")
+    nonisolated static let reduceMotion = ProcessInfo.processInfo.arguments.contains("--reduce-motion")
+}
+
+/// The recording strip's one spring family (Kit's motion tokens, no bounce): the bar, its
+/// dots, ✕ and ✓, and the spinner all move on these, so nothing in the strip runs on its own clock.
+enum StripMotion {
+    /// Things arriving: ✕ and ✓, the Hex key coming back, the spinner, the dots cooling.
+    static let settle: TimeInterval = 0.3
+    /// Things leaving, a fifth quicker.
+    static let settleExit: TimeInterval = 0.24
+    /// The soft edge the dots come out of the Hex key behind, across the bar, and home again.
+    static let grow: TimeInterval = 0.4
+    static let shrink: TimeInterval = 0.32
+    /// ✓'s mark handing its spot to the spinner.
+    static let markExit: TimeInterval = 0.15
+    /// Reduce Motion: a fade and nothing else.
+    static let reducedFade: TimeInterval = 0.18
+    /// ✕, ✓ and the Hex key start this much smaller and grow into place as they fade in.
+    static let controlScale: CGFloat = 0.86
+
+    @MainActor static var reduced: Bool { UIAccessibility.isReduceMotionEnabled || MotionDebug.reduceMotion }
+
+    /// A no-bounce spring. Durations stretch with `--motion-slow` through the window's layer
+    /// speed; UIKit counts delays in real time, so those are stretched here. `fresh`: the values
+    /// were only just set (nothing on screen yet), so the spring starts from them, not from what
+    /// the layer last showed.
+    @MainActor static func animate(
+        _ duration: TimeInterval,
+        delay: TimeInterval = 0,
+        fresh: Bool = false,
+        _ changes: @escaping @MainActor @Sendable () -> Void,
+        completion: (@MainActor @Sendable (Bool) -> Void)? = nil
+    ) {
+        UIView.animate(
+            springDuration: duration, bounce: 0, initialSpringVelocity: 0, delay: delay * MotionDebug.slow,
+            options: fresh ? [.allowUserInteraction] : [.beginFromCurrentState, .allowUserInteraction],
+            animations: changes, completion: completion
+        )
+    }
+}
+
 /// While recording, this replaces the suggestion strip only, so the keys stay put: a Dot
 /// Scope well that takes the rest of the strip, then ✕ and Done, ✓ where the Hex key was.
 /// With the Hex key on the left it mirrors: ✓, ✕, then the well.
@@ -212,14 +263,17 @@ final class HexKeyRecordingPanel: UIView {
     var hexOnLeading = false { didSet { if hexOnLeading != oldValue { setNeedsLayout() } } }
 
     init(loudness: @escaping () -> Float) {
-        var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 5)
+        var tuning = DotScopeTuning.bar(leadingInset: 0, trailingInset: 0, fade: 24, spacing: 2.7)
         tuning.height = Float(KeyboardMetrics.portrait.stripPillHeight)
+        tuning.transition = Float(StripMotion.settle)
         // Cap drawables at 2 inside the keyboard extension to save ~2.2 MB of IOSurface RAM.
         scope = DotScopeHostView(tuning: tuning, maximumDrawableCount: 2)
         super.init(frame: .zero)
         scope.drawPlate = false
+        scope.look = .strip
         scope.loudnessProvider = loudness
-        scope.reduceMotion = UIAccessibility.isReduceMotionEnabled
+        scope.reduceMotion = StripMotion.reduced
+        scope.hostFades = true
         scope.useDemoVoice = ProcessInfo.processInfo.arguments.contains("--snap-state")
 
         styleButton.titleLabel?.font = .systemFont(ofSize: 13, weight: .medium)
@@ -258,15 +312,19 @@ final class HexKeyRecordingPanel: UIView {
     }
 
     func update(phase: DotScopePhase, style: DictationStyle) {
+        let wasTranscribing = isTranscribing
         isTranscribing = phase == .processing
         scope.phase = phase
         // The scope, then two round buttons, ✕ and ✓; once the recording stops the ✓ turns into
         // the spinner in the same spot, so there's one place to look, and ✕ still cancels.
-        doneButton.symbol = isTranscribing ? nil : "checkmark"
         doneButton.isPrimary = true
         doneButton.isEnabled = !isTranscribing
         doneButton.accessibilityLabel = isTranscribing ? "Transcribing" : "Done"
-        if isTranscribing { doneSpinner.startAnimating() } else { doneSpinner.stopAnimating() }
+        if isTranscribing != wasTranscribing {
+            swapDone(toSpinner: isTranscribing)
+        } else {
+            doneButton.symbol = isTranscribing ? nil : "checkmark"
+        }
         let config = UIImage.SymbolConfiguration(pointSize: 9, weight: .semibold)
         styleButton.setImage(
             UIImage(systemName: "chevron.down", withConfiguration: config)?
@@ -278,9 +336,70 @@ final class HexKeyRecordingPanel: UIView {
         setNeedsLayout()
     }
 
+    /// ✕ and ✓ at rest (shown), or gone: ✓ a little smaller in the Hex key's spot, and ✕ tucked
+    /// under it, so ✕ slides out from ✓ as it comes. With Reduce Motion they only fade.
+    func setControls(shown: Bool) {
+        let moves = !StripMotion.reduced
+        let s = StripMotion.controlScale
+        let small = CGAffineTransform(scaleX: s, y: s)
+        doneButton.alpha = shown ? 1 : 0
+        cancelButton.alpha = shown ? 1 : 0
+        doneButton.transform = shown || !moves ? .identity : small
+        let tuck = doneButton.center.x - cancelButton.center.x
+        cancelButton.transform = shown || !moves ? .identity : CGAffineTransform(translationX: tuck, y: 0).scaledBy(x: s, y: s)
+        // The spinner in ✓'s spot leaves with it, into the Hex key's spot.
+        doneSpinner.alpha = shown && isTranscribing ? 1 : 0
+        doneSpinner.transform = shown || !moves ? .identity : small
+    }
+
+    /// The well's frame in the panel: where the dots are.
+    var wellFrame: CGRect { well.frame }
+
+    /// The dots' side of the soft edge they come out of the Hex key behind.
+    var dotsMask: StripRevealMask? {
+        get { well.mask as? StripRevealMask }
+        set { well.mask = newValue }
+    }
+
+    /// ✓ hands its spot to the spinner (and back) on the scope's own spring: the mark fades
+    /// and shrinks a little as the spinner grows in, so the button never stands empty.
+    private func swapDone(toSpinner: Bool) {
+        let animated = window != nil
+        let moves = animated && !StripMotion.reduced
+        let small = CGAffineTransform(scaleX: 0.6, y: 0.6)
+        if toSpinner {
+            doneSpinner.alpha = 0
+            doneSpinner.transform = moves ? small : .identity
+            doneSpinner.startAnimating()
+        }
+        let changes = {
+            self.doneSpinner.alpha = toSpinner ? 1 : 0
+            self.doneSpinner.transform = toSpinner || !moves ? .identity : small
+        }
+        guard animated else {
+            doneButton.symbol = toSpinner ? nil : "checkmark"
+            changes()
+            if !toSpinner { doneSpinner.stopAnimating() }
+            return
+        }
+        UIView.transition(
+            with: doneButton,
+            duration: toSpinner ? StripMotion.markExit : StripMotion.settle,
+            options: [.transitionCrossDissolve, .allowUserInteraction, .beginFromCurrentState]
+        ) {
+            self.doneButton.symbol = toSpinner ? nil : "checkmark"
+        }
+        UIView.animate(
+            springDuration: StripMotion.settle, bounce: 0, initialSpringVelocity: 0,
+            delay: (toSpinner ? 0.06 : 0) * MotionDebug.slow,
+            options: [.allowUserInteraction], animations: changes
+        ) { _ in
+            if !toSpinner, !self.isTranscribing { self.doneSpinner.stopAnimating() }
+        }
+    }
+
     private func applyPalette() {
         styleButton.setTitleColor(palette.textMuted, for: .normal)
-        well.backgroundColor = palette.wellFill
         scope.isDark = palette.isDark
         cancelButton.palette = palette
         doneButton.palette = palette
@@ -297,19 +416,26 @@ final class HexKeyRecordingPanel: UIView {
 
         doneButton.cornerRadius = rowH / 2
         cancelButton.cornerRadius = rowH / 2
+        // Bounds and centre, not frames: ✕ and ✓ may be mid-scale as they come and go.
+        let doneRect: CGRect
+        let cancelRect: CGRect
         if hexOnLeading {
-            doneButton.frame = CGRect(x: innerLeft, y: rowY, width: rowH, height: rowH)
-            cancelButton.frame = CGRect(x: doneButton.frame.maxX + 6, y: rowY, width: rowH, height: rowH)
+            doneRect = CGRect(x: innerLeft, y: rowY, width: rowH, height: rowH)
+            cancelRect = CGRect(x: doneRect.maxX + 6, y: rowY, width: rowH, height: rowH)
         } else {
-            doneButton.frame = CGRect(x: innerRight - rowH, y: rowY, width: rowH, height: rowH)
-            cancelButton.frame = CGRect(x: doneButton.frame.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
+            doneRect = CGRect(x: innerRight - rowH, y: rowY, width: rowH, height: rowH)
+            cancelRect = CGRect(x: doneRect.minX - 6 - rowH, y: rowY, width: rowH, height: rowH)
         }
-        doneSpinner.center = CGPoint(x: doneButton.frame.midX, y: doneButton.frame.midY)
+        for (button, rect) in [(doneButton, doneRect), (cancelButton, cancelRect)] {
+            button.bounds = CGRect(origin: .zero, size: rect.size)
+            button.center = CGPoint(x: rect.midX, y: rect.midY)
+        }
+        doneSpinner.center = CGPoint(x: doneRect.midX, y: doneRect.midY)
 
         // No room for the style chip in the strip; the Hex key's menu sets the style.
         styleButton.isHidden = true
-        let wellLeft = hexOnLeading ? cancelButton.frame.maxX + 6 : innerLeft
-        let wellRight = hexOnLeading ? innerRight : cancelButton.frame.minX - 6
+        let wellLeft = hexOnLeading ? cancelRect.maxX + 6 : innerLeft
+        let wellRight = hexOnLeading ? innerRight : cancelRect.minX - 6
         well.frame = CGRect(x: wellLeft, y: rowY, width: max(24, wellRight - wellLeft), height: rowH)
         scope.frame = well.bounds
     }
@@ -317,6 +443,29 @@ final class HexKeyRecordingPanel: UIView {
     @objc private func done() { onDone?() }
     @objc private func cancel() { onCancel?() }
     @objc private func cycleStyle() { onCycleStyle?() }
+
+    func debugMotionSample() -> [String: Double] {
+        func layer(_ view: UIView) -> CALayer { view.layer.presentation() ?? view.layer }
+        let pose = scope.debugPose
+        return [
+            "cancel": view(cancelButton),
+            "cancelX": layer(cancelButton).frame.midX,
+            "cancelScale": Double(layer(cancelButton).transform.m11),
+            "done": view(doneButton),
+            "doneScale": Double(layer(doneButton).transform.m11),
+            "spinner": doneSpinner.isAnimating ? view(doneSpinner) : 0,
+            "doneSymbol": isTranscribing ? 0 : 1,
+            "scopeOpacity": Double(pose.opacity),
+            "scopeLive": Double(pose.live),
+            "scopeCool": Double(pose.cool),
+            "scopeGrid": Double(pose.grid),
+            "scopeGlow": Double(pose.glow),
+        ]
+    }
+
+    private func view(_ v: UIView) -> Double {
+        v.isHidden ? 0 : Double((v.layer.presentation() ?? v.layer).opacity)
+    }
 }
 
 /// A keycap-styled button for the recording panel.
@@ -796,5 +945,38 @@ final class HexStyleMenuView: UIView {
                 )
             }
         }
+    }
+}
+/// A mask with one soft vertical edge: clear on one side, opaque on the other, and a
+/// `feather`-wide ramp between, so whatever it uncovers comes in behind a soft edge, never a
+/// hard crop. Move the edge with `place(bandStart:)` inside an animation.
+final class StripRevealMask: UIView {
+    static let feather: CGFloat = 44
+    /// How far the mask reaches either side of its edge, past anything it covers.
+    static let reach: CGFloat = 2000
+    let opaqueAfter: Bool
+
+    override class var layerClass: AnyClass { CAGradientLayer.self }
+
+    init(opaqueAfter: Bool) {
+        self.opaqueAfter = opaqueAfter
+        super.init(frame: CGRect(x: 0, y: -200, width: Self.reach * 2 + Self.feather, height: 600))
+        let gradient = layer as! CAGradientLayer
+        let clear = UIColor.clear.cgColor
+        let solid = UIColor.black.cgColor
+        gradient.colors = opaqueAfter ? [clear, clear, solid, solid] : [solid, solid, clear, clear]
+        let w = bounds.width
+        gradient.locations = [0, NSNumber(value: Double(Self.reach / w)), NSNumber(value: Double((Self.reach + Self.feather) / w)), 1]
+        gradient.startPoint = CGPoint(x: 0, y: 0.5)
+        gradient.endPoint = CGPoint(x: 1, y: 0.5)
+        isUserInteractionEnabled = false
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { fatalError() }
+
+    /// Puts the ramp's start at `x` in the masked view's coordinates.
+    func place(bandStart x: CGFloat) {
+        center = CGPoint(x: x - Self.reach + bounds.width / 2, y: center.y)
     }
 }
