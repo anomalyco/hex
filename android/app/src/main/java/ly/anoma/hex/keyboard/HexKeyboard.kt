@@ -18,6 +18,7 @@ import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.MicCapture
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.speech.SpeechOptions
+import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
 import ly.anoma.hex.typing.PersonalWords
@@ -136,6 +137,8 @@ class HexKeyboard : InputMethodService() {
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
+    // The speech model is a few hundred MB while loaded; give it back when Android runs short.
+    override fun onTrimMemory(level: Int) { super.onTrimMemory(level); if (level >= TRIM_MEMORY_RUNNING_LOW) SpeechModel.releaseSoon() }
     override fun onDestroy() {
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()

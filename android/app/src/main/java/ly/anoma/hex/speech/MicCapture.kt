@@ -49,6 +49,10 @@ internal class MicCapture(
         val ticket = Ticket(options)
         active = ticket
         publish(SpeechPhase.Opening)
+        // The model loads while the person speaks, not after they let go.
+        transcriber.execute {
+            try { if (!ticket.cancelled) recognizer.prepare() } catch (_: Throwable) {}
+        }
         recorder.execute {
             try {
                 record(ticket)
