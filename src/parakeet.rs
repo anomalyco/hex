@@ -1189,10 +1189,10 @@ impl Parakeet {
 
     pub fn load_selection(selection: &TranscriptionSelection) -> Result<Self> {
         let definition = validate(selection)?;
-        if !crate::transcription::models::is_installed(definition, &selection.language) {
+        if !crate::transcription::models::is_installed(&definition, &selection.language) {
             return Err(eyre!("{} is not installed", definition.name));
         }
-        let path = model_path(definition)?;
+        let path = model_path(&definition)?;
         let mut parakeet = Self::load_from(&path, true, Some(selection))?;
         parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
@@ -1298,7 +1298,7 @@ impl Parakeet {
         if let (Some(selection), Some(definition)) = (selection, definition) {
             let runtime_language = crate::transcription::gguf_session::validate_gguf_artifact(
                 model_path,
-                definition,
+                &definition,
                 &architecture,
                 &variant,
                 selection,
