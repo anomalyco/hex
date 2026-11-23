@@ -49,6 +49,9 @@ enum LiveDictationMode: String, CaseIterable {
 struct DictationSettingsPage: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Bindable var dictation: DictationController
+    /// From Home's speech model card: the page starts at Speech model in keyboard.
+    var opensAtSpeechModel = false
+    static let speechModelRow = "speech-model-in-keyboard"
     @State private var revision = 0
     @State private var keyboardParakeet = KeyboardParakeetSettings().isOn
     private let keyboardParakeetFits = KeyboardParakeetSettings.fits()
@@ -83,7 +86,7 @@ struct DictationSettingsPage: View {
     }
 
     var body: some View {
-        SettingsPageScaffold(title: "Dictation") {
+        SettingsPageScaffold(title: "Dictation", startsAt: opensAtSpeechModel ? Self.speechModelRow : nil) {
             SettingsCard {
                 HStack(spacing: 12) {
                     SettingsRowLabel(title: String(localized: "Style"))
@@ -302,6 +305,7 @@ struct DictationSettingsPage: View {
                 .padding(.vertical, 10)
                 .frame(minHeight: 50)
             }
+            .id(Self.speechModelRow)
         }
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: customVocabularyOn)
         .animation(HexMotion.settleAnimation(reduceMotion: reduceMotion), value: showsStyleFormatting)

@@ -45,6 +45,8 @@ struct ContentView: View {
     @State private var keyboardSpeech = KeyboardSpeechPreparation()
     @State private var onboardingPage = OnboardingProgress.launchPage
     @State private var settingsPath = SettingsSnapshotFixture.initialPath
+    /// Settings › Dictation opened from the speech model card: it starts at that card's row.
+    @State private var dictationOpensAtSpeechModel = false
     @State private var showAcknowledgements = false
     /// Whether Hex went to the background, so only a real return starts the keyboard's check over.
     @State private var keyboardCheckWasInBackground = false
@@ -186,6 +188,22 @@ struct ContentView: View {
                 setupMonitor.refresh()
             }
         }
+        // While Home or its setup sheet shows, once a second: what changes with Hex still in
+        // front (the keyboard's Allow Paste flag, keyboards added from Settings beside it in
+        // Split View) has no notification of its own.
+        .task(id: setupIsShowing) {
+            while setupIsShowing, !Task.isCancelled {
+                setupMonitor.refresh()
+                try? await Task.sleep(for: .seconds(1))
+            }
+        }
+        .onChange(of: settingsPath) { _, path in
+            if path.isEmpty { dictationOpensAtSpeechModel = false }
+        }
+    }
+
+    private var setupIsShowing: Bool {
+        scenePhase == .active && (settingsPath.isEmpty || showSetup)
     }
 
     /// Fits one screen: the header and its status line, Dictate, and the four pages.
@@ -221,7 +239,10 @@ struct ContentView: View {
                     turnOff: { dictation.turnOffMultilingualParakeet() }
                 )
 
-                SpeechModelHomeCard(download: KeyboardParakeetDownload.shared, open: { settingsPath = [.dictation] })
+                SpeechModelHomeCard(download: KeyboardParakeetDownload.shared, open: {
+                    dictationOpensAtSpeechModel = true
+                    settingsPath = [.dictation]
+                })
 
                 if setupMonitor.needsAllowPasteSetting {
                     AllowPasteBanner(
@@ -321,7 +342,7 @@ struct ContentView: View {
     private func settingsPage(_ page: SettingsPage) -> some View {
         switch page {
         case .dictation:
-            DictationSettingsPage(dictation: dictation)
+            DictationSettingsPage(dictation: dictation, opensAtSpeechModel: dictationOpensAtSpeechModel)
         case .keyboard:
             KeyboardSettingsPage(
                 fullAccessOn: setupMonitor.fullAccessOn,

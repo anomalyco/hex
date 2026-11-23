@@ -234,14 +234,16 @@ dictionary doesn't know in lowercase (likely names). German keeps the case,
 since its dictionary takes nouns in lowercase; so does a language with no
 dictionary on the iPhone (`TranscriptFormatter.insertionText`).
 
-## While the keyboard records: Show what I say and Type as I speak (Settings › Dictation, iOS 26+)
+## While the keyboard records: Live words (Settings › Dictation, iOS 26+)
 
 While the keyboard records by itself (in-keyboard dictation),
 the capture's chunks also go to Apple's `SpeechAnalyzer` as they arrive
 (`AppleLiveTranscriber`: `SpeechTranscriber` with volatile and fast results, or
 `DictationTranscriber`'s progressive long dictation for its languages), only when the
-language's model is already on the iPhone: it never downloads one. **Show what I say**
-(on by default): the full keyboard's keys go and the words so far take their place
+language's model is already on the iPhone: it never downloads one. **Live words** is
+one choice of three, kept in two App Group keys (`LiveDictationSettings`: Show what I say's
+and Type as I speak's, the two switches it replaced): **Off**, **In bar** (the default)
+or **Into field**. **In bar**: the full keyboard's keys go and the words so far take their place
 under the recording bar (`LiveDictationPreviewView`), the settled words in the keys'
 ink and the tail the recogniser may still change muted, the newest line in view with
 whole lines above it. It takes every touch where the keys were, so nothing types while
@@ -269,8 +271,8 @@ fade drifting 6 pt up (0.15 s) as the keys come back (0.3 s), and they stop taki
 at once; the field gets the dictation's own text, with its style, clean-up,
 punctuation, held results and Undo dictation as before, so it can differ from the
 preview: with the speech model in keyboard (Parakeet, English's default) the preview's
-words are Apple's and the text Parakeet's ("10" can go in as "ten"). **Type as I speak**
-(off by default): the words are typed into the field as they come
+words are Apple's and the text Parakeet's ("10" can go in as "ten"). **Into field**:
+the words are typed into the field as they come
 (`LiveFieldTyping`), only the changed tail retyped. It keeps exactly what it typed and
 edits only while the text before the cursor still ends with it; when the dictation's
 text goes in, its words come out first, so the text goes in where and as it would without
@@ -289,12 +291,16 @@ the moment the field first read empty (held meanwhile, every chunk in exactly on
 dictation) starts a new dictation with its own file, live words from the first, final text
 at ✓, length and memory checks, so talk, Send, talk, Send works hands-free. An app that
 changes the words without emptying the field (an edit, a mention) still stops the typing. Never in secure, password, one-time code or card number fields, over a
-selection or a two-thumb Dictate's range, or with Translate what I say on. Neither runs
+selection or a two-thumb Dictate's range, in an app that reports no text, or with Translate
+what I say on; where it can't type a dictation for one of these, the words show over the keys
+instead, as In bar does, so Into field never shows nothing (`LiveDictationSettings.liveWords`;
+what is stored doesn't change). Both keys on (1.0.4's two switches together, until another
+choice is picked) types into the field and shows the words over the keys. Neither runs
 before iOS 26, for dictations recorded through Hex (Keep mic warm), when less than 32 MB
 is left once the capture runs (`KeyboardLiveDictation`: the recogniser's share in the
 keyboard with margin, and the speech model's transcription after it), on an error, or
 when the recogniser isn't running 4–6 s into the audio; under 24 MB, or on a memory warning, the recogniser goes
-and the dictation goes on. The dictation bar shows no preview (Type as I speak works
+and the dictation goes on. The dictation bar shows no preview (Into field works
 there, unverified on an iPhone). On an iPhone 17 Pro (iOS 27.2, keyboard limit 177 MB,
 Parakeet loaded, a clip played from a Mac's speaker): the first words show about 1.2–1.3 s
 after speech starts (2 s after the capture's first audio; 2.1 s and 3 s on the first

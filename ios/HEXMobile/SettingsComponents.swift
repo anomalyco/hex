@@ -29,18 +29,26 @@ enum SettingsPage: String, Hashable, CaseIterable {
 /// A settings page: a short scrolling column of cards under an inline title.
 struct SettingsPageScaffold<Content: View>: View {
     let title: LocalizedStringKey
+    /// The `id` of a row to start at instead of the top.
+    var startsAt: String?
     @ViewBuilder var content: Content
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                content
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 12) {
+                    content
+                }
+                .frame(maxWidth: 500)
+                .padding(.horizontal, 20)
+                .padding(.top, 8)
+                .padding(.bottom, 28)
+                .frame(maxWidth: .infinity)
             }
-            .frame(maxWidth: 500)
-            .padding(.horizontal, 20)
-            .padding(.top, 8)
-            .padding(.bottom, 28)
-            .frame(maxWidth: .infinity)
+            .onAppear {
+                guard let startsAt else { return }
+                DispatchQueue.main.async { proxy.scrollTo(startsAt, anchor: .top) }
+            }
         }
         .scrollBounceBehavior(.basedOnSize)
         .scrollDismissesKeyboard(.interactively)

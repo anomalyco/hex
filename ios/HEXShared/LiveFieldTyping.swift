@@ -24,13 +24,15 @@ final class LiveFieldTyping {
     /// Nil where it never types: secure, password, one-time code and card number fields, with
     /// text selected, or a field with text whose app reports none (nothing could be checked).
     init?(target: KeyboardTextTarget) {
-        guard Self.mayType(secure: target.isSecureTextEntry, content: target.textContentType, selected: target.selectedText) else {
-            return nil
-        }
-        let before = target.documentContextBeforeInput
-        guard before != nil || !target.hasText else { return nil }
+        guard Self.types(in: target) else { return nil }
         self.target = target
-        base = before
+        base = target.documentContextBeforeInput
+    }
+
+    /// Whether it would type in `target` as it is now (`init?(target:)`).
+    static func types(in target: KeyboardTextTarget) -> Bool {
+        mayType(secure: target.isSecureTextEntry, content: target.textContentType, selected: target.selectedText)
+            && (target.documentContextBeforeInput != nil || !target.hasText)
     }
 
     /// Words typed in an earlier keyboard that hid before the dictation went in, resumed while

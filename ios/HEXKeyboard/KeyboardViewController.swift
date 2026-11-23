@@ -687,6 +687,7 @@ final class KeyboardViewController: UIInputViewController {
         localDictation.liveText = viewModel.liveText
         liveTyping.attach(viewModel.liveText)
         liveTyping.mayType = { [weak self] in self?.fullKeyboard?.engine.hasPendingSelectionDictation != true }
+        viewModel.liveText.fieldTakesTyping = { [weak self] in self?.liveTyping.takesTyping ?? true }
         liveTyping.didEdit = { [weak self] in
             self?.fullKeyboard?.engine.forgetTextAroundKeys()
             self?.fullKeyboard?.engine.textDidChange()
