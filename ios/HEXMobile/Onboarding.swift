@@ -1,3 +1,4 @@
+import StoreKit
 import SwiftUI
 import UIKit
 
@@ -843,6 +844,7 @@ private struct OnboardingPracticePage: View {
             try? await Task.sleep(for: .milliseconds(250))
             followHexKeyboard(bridge)
             if bridge.lastInsertedResultID != insertedAtStart {
+                if !dictated { ReviewPrompt().notePracticeDictated() }
                 dictated = true
                 heardNothing = false
             }
@@ -937,6 +939,7 @@ private struct OnboardingPracticePage: View {
 /// says what's left. Start using Hex never waits on it (App Review 5.1.1(iv)).
 private struct OnboardingReadyPage: View {
     @Environment(\.openURL) private var openURL
+    @Environment(\.requestReview) private var requestReview
     let monitor: KeyboardSetupMonitor
     let model: OnboardingModel
     let onRetry: () -> Void
@@ -996,6 +999,14 @@ private struct OnboardingReadyPage: View {
             OnboardingPrimaryButton(title: "Start using Hex", action: onStart)
                 .padding(.bottom, 12)
                 .onboardingStagger(3)
+        }
+        // The practice's dictation is the first good moment, and often the last time someone
+        // opens Hex itself: ask once the page has settled, only when nothing is left to do.
+        .task(id: left == .nothing) {
+            guard left == .nothing, !OnboardingFixture.isSnapshot else { return }
+            try? await Task.sleep(for: .seconds(1))
+            guard !Task.isCancelled, ReviewPrompt().shouldAsk(at: .practiceDictated) else { return }
+            requestReview()
         }
     }
 

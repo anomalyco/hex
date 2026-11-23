@@ -92,6 +92,21 @@ do nothing in a keyboard extension, so the keyboard opens Hex through
 the `UIApplication` at the end of its responder chain
 (`ContainingAppOpener`).
 
+## Asking for a review (`HEXMobile/ReviewPrompt.swift`)
+
+Only iOS's own prompt (`requestReview`), never a custom one (App Review
+rejects gating). The keyboard can't show it, so Hex asks in the app, at
+three moments: **Hex is ready** a second after the practice's dictation
+arrived (with nothing left to do), **Home after Settings** when something
+wrote a setting while Settings showed, and **an open** of Hex by itself
+(not the keyboard's handoff, past onboarding, 2 s after it settles) when
+the keyboard inserted a dictation since the last open, or on the third
+open since the last ask. Each needs Home idle (no recording, no failure).
+On top of iOS's limit of three a year, Hex asks once per marketing
+version, 120 days apart, and at most three times in 365 days. iOS may
+still skip any ask, and TestFlight never shows the prompt, so only a
+development build on a device shows it.
+
 ## Cold start (before iOS 26)
 
 Tapping **Dictate** opens the containing app

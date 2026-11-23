@@ -1,3 +1,5 @@
+import Combine
+import StoreKit
 import SwiftUI
 import UIKit
 
@@ -36,6 +38,7 @@ struct ContentView: View {
     @Environment(\.openURL) private var openURL
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.requestReview) private var requestReview
     @Bindable var dictation: DictationController
     @Binding var openedFromKeyboard: Bool
     @Binding var showSetup: Bool
@@ -50,6 +53,11 @@ struct ContentView: View {
     @State private var showAcknowledgements = false
     /// Whether Hex went to the background, so only a real return starts the keyboard's check over.
     @State private var keyboardCheckWasInBackground = false
+    /// A launch or a return from the background that `ReviewPrompt` hasn't counted as an open
+    /// yet. Finishing onboarding isn't one: Hex is ready already had its moment.
+    @State private var reviewOpenPending = OnboardingProgress.launchPage == nil
+    /// Something wrote a setting while Settings showed.
+    @State private var settingChanged = false
 
     private static let stageWellHeight: CGFloat = 48
     private static let stageControlHeight: CGFloat = 36
@@ -93,6 +101,7 @@ struct ContentView: View {
             switch phase {
             case .background:
                 keyboardCheckWasInBackground = true
+                reviewOpenPending = true
             case .active:
                 // Only after a real background trip: an alert, Face ID or Control Center goes
                 // inactive and back without suspending anything, and launch starts active. The
@@ -107,8 +116,23 @@ struct ContentView: View {
                 break
             }
         }
+        .task(id: reviewOpenCanAsk) {
+            guard reviewOpenCanAsk, reviewOpenPending else { return }
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled, reviewOpenCanAsk else { return }
+            reviewOpenPending = false
+            guard settingsPath.isEmpty, appStageMode == .idle,
+                  ReviewPrompt().shouldAsk(at: .opened, keyboardResultID: KeyboardBridge().lastInsertedResultID)
+            else { return }
+            requestReview()
+        }
         .animation(HexMotion.reducedFade, value: openedFromKeyboard)
         .animation(HexMotion.reducedFade, value: onboardingPage == nil)
+    }
+
+    /// Home in front by itself: not the keyboard's handoff, nor onboarding.
+    private var reviewOpenCanAsk: Bool {
+        scenePhase == .active && !openedFromKeyboard && onboardingPage == nil && !OnboardingFixture.isSnapshot
     }
 
     private var appStageMode: AppStageMode {
@@ -198,7 +222,26 @@ struct ContentView: View {
             }
         }
         .onChange(of: settingsPath) { _, path in
-            if path.isEmpty { dictationOpensAtSpeechModel = false }
+            guard path.isEmpty else { return }
+            dictationOpensAtSpeechModel = false
+            if settingChanged {
+                settingChanged = false
+                askForReviewAfterSettings()
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification).receive(on: DispatchQueue.main)) { _ in
+            if !settingsPath.isEmpty { settingChanged = true }
+        }
+    }
+
+    /// Back on Home after changing a setting: a calm moment, once Home has settled.
+    private func askForReviewAfterSettings() {
+        Task {
+            try? await Task.sleep(for: .seconds(1))
+            guard !OnboardingFixture.isSnapshot, scenePhase == .active, settingsPath.isEmpty, !showSetup, appStageMode == .idle,
+                  ReviewPrompt().shouldAsk(at: .settingChanged)
+            else { return }
+            requestReview()
         }
     }
 
