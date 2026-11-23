@@ -311,52 +311,69 @@ pub(crate) fn run(
                     audio_ms = job.audio_ms,
                     "transcribed Linux dictation"
                 );
-                let text = transcribed.text;
-                // Labs › Stop phrase: the words that finished this capture
-                // never reach the text or its processing.
-                let text =
-                    crate::dictation::stop_phrase::strip_finished(text, job.stop_phrase.as_deref());
-                if text.is_empty() {
-                    if let Some(print) = job.print.take() {
-                        print.send(PrintedTranscript::NoSpeech);
-                    }
-                    if job.stop_phrase.is_some() {
-                        // A capture that was only the phrase: nothing to
-                        // paste, no History, and nothing failed.
+                use crate::dictation::modes::output::{
+                    EMPTY_TRANSCRIPT_ERROR, InsertPlan, InsertResult, OutputTarget,
+                    PreparedTranscript, prepare_transcript,
+                };
+                let target = OutputTarget::from_flavour(job.flavour, kind == OutputKind::Printed);
+                let text = match prepare_transcript(
+                    transcribed.text,
+                    job.stop_phrase.as_deref(),
+                    target,
+                ) {
+                    PreparedTranscript::StopPhraseOnly => {
+                        if let Some(session) = job.typing.take() {
+                            session.cancel();
+                        }
+                        if let Some(print) = job.print.take() {
+                            print.send(PrintedTranscript::NoSpeech);
+                        }
                         stop_phrase_only = true;
                         return Ok(String::new());
                     }
-                    return Err(eyre!("transcription was empty"));
-                }
-                if kind == OutputKind::Printed {
-                    return output_settings.deliver(
-                        text,
-                        job.flavour,
-                        &job.language,
-                        None,
-                        &mut last_dictation,
-                        job.audio_ms,
-                        inference_ms,
-                        started,
-                        job.recording.take(),
-                        job.typing.take(),
-                        job.context.finish(),
-                        job.by_shortcut,
-                    );
-                }
-                let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
-                let mut paste = |text: &str, terminal: bool, send: bool, standalone: bool| {
-                    paster.paste_dictation(text, terminal, standalone)?;
-                    if send {
-                        paster.press_return()?;
+                    PreparedTranscript::Empty => {
+                        if let Some(session) = job.typing.take() {
+                            session.cancel();
+                        }
+                        if let Some(print) = job.print.take() {
+                            print.send(PrintedTranscript::NoSpeech);
+                        }
+                        return Err(eyre!(EMPTY_TRANSCRIPT_ERROR));
                     }
-                    Ok(())
+                    PreparedTranscript::Ready(text) => text,
+                };
+                let mut insert = |text: &str, plan: InsertPlan| -> Result<InsertResult> {
+                    let paster = paster.as_mut().map_err(|error| eyre!("{error:#}"))?;
+                    match plan {
+                        InsertPlan::CopyOnly => {
+                            paster.copy(text)?;
+                            Ok(InsertResult {
+                                sent: false,
+                                copied: true,
+                            })
+                        }
+                        InsertPlan::Paste { send, standalone } => {
+                            paster.paste_dictation(
+                                text,
+                                job.flavour.terminal_paste(),
+                                standalone,
+                            )?;
+                            if send {
+                                paster.press_return()?;
+                            }
+                            Ok(InsertResult {
+                                sent: send,
+                                copied: false,
+                            })
+                        }
+                        InsertPlan::None => Ok(InsertResult::default()),
+                    }
                 };
                 output_settings.deliver(
                     text,
-                    job.flavour,
+                    target,
                     &job.language,
-                    Some(&mut paste),
+                    (!target.is_print()).then_some(&mut insert as output::Insert<'_>),
                     &mut last_dictation,
                     job.audio_ms,
                     inference_ms,
@@ -1968,16 +1985,17 @@ mod tests {
 
     #[test]
     fn a_failed_paste_keeps_the_dictation_for_paste_last() {
+        use crate::dictation::modes::output::{InsertPlan, InsertResult, OutputTarget};
         let text = "the dictation whose paste failed";
         let output = DictationOutput::from_settings(&AppSettings::default(), None);
         let mut last_dictation = Some(LastDictation::new("an older dictation".to_string(), false));
-        let mut paste = |_: &str, _: bool, _: bool, _: bool| -> Result<()> {
+        let mut paste = |_: &str, _: InsertPlan| -> Result<InsertResult> {
             Err(eyre!("clipboard changed while Hex was preserving it"))
         };
 
         let result = output.deliver(
             text.to_string(),
-            crate::dictation::DictationFlavour::Normal,
+            OutputTarget::Paste,
             "en",
             Some(&mut paste),
             &mut last_dictation,

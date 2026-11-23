@@ -1,5 +1,7 @@
 //! The Windows and Linux listeners' snapshot of the shared processing pipeline.
 
+pub(crate) mod output;
+
 use std::sync::atomic::AtomicBool;
 
 use url::Url;
@@ -135,37 +137,6 @@ pub(crate) fn uses_page(settings: &DictationProcessingSettings) -> bool {
                         .iter()
                         .any(|id| !crate::personal_commands::is_builtin_transformation(id))
             })
-}
-
-/// The history entry for one pasted dictation.
-pub fn history_draft(
-    raw_text: String,
-    processed: &Processed,
-    application: Option<String>,
-    audio_ms: u64,
-    inference_ms: u64,
-    total_ms: u64,
-    recording: Option<crate::history::Recording>,
-) -> crate::history::HistoryDraft {
-    crate::history::HistoryDraft {
-        kind: crate::history::HistoryKind::Dictation,
-        raw_text,
-        final_text: processed.text.clone(),
-        application,
-        processing: processed.observation.as_ref().map(|processing| {
-            crate::history::HistoryProcessing {
-                profile: processing.profile.clone(),
-                latency_ms: processing.latency_ms,
-                model: processing.model.clone(),
-                fallback: processing.fallback.clone(),
-            }
-        }),
-        audio_ms,
-        inference_ms,
-        total_ms,
-        recording,
-        model: crate::history::dictation_model(),
-    }
 }
 
 /// The speech model and language the mode matching the focused context

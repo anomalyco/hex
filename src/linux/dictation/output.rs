@@ -1,5 +1,6 @@
 //! What happens to a finished Linux dictation's transcript: processing,
-//! the paste, Paste last dictation, and History.
+//! live typing or clipboard insertion, Paste last dictation, and History,
+//! driven by the shared output policy in `crate::dictation::modes::output`.
 
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
@@ -7,6 +8,10 @@ use std::time::Instant;
 use color_eyre::Result;
 use color_eyre::eyre::eyre;
 
+use crate::dictation::modes::output::{
+    DeliveryInput, DeliveryOutcome, EMPTY_PROCESSED_ERROR, InsertPlan, InsertResult, OutputAdapter,
+    OutputTarget, deliver, resolve_paste_last,
+};
 use crate::dictation::paste_last::LastDictation;
 use crate::linux::paste::LinuxPaster;
 
@@ -20,11 +25,8 @@ pub(crate) struct DictationOutput {
     pub(crate) transformations: Arc<crate::personal_commands::TransformationClient>,
 }
 
-/// How a finished dictation is pasted: its text, whether it asks for
-/// Ctrl+Shift+V, whether Return follows (Labs › YOLO mode), and whether it
-/// stands alone instead of continuing the previous dictation (Labs ›
-/// Signature). No paste at all means a printing stop.
-pub(super) type Paste<'a> = &'a mut dyn FnMut(&str, bool, bool, bool) -> Result<()>;
+/// How a finished dictation is inserted (copy-only or paste + optional Return).
+pub(super) type Insert<'a> = &'a mut dyn FnMut(&str, InsertPlan) -> Result<InsertResult>;
 
 /// Paste last dictation: reinsert the remembered text, standing alone when it
 /// carries the signature line so the next dictation never joins it.
@@ -32,11 +34,61 @@ pub(super) fn paste_last(
     paster: &mut Result<LinuxPaster>,
     last: Option<&LastDictation>,
 ) -> Result<()> {
-    let last = last.ok_or_else(|| eyre!("there is no completed dictation to paste"))?;
+    let last = resolve_paste_last(last, None).map_err(|error| eyre!(error))?;
     paster
         .as_mut()
         .map_err(|error| eyre!("{error:#}"))?
         .paste_dictation(last.text(), false, last.standalone())
+}
+
+struct LinuxOutputAdapter<'a> {
+    typing: Option<crate::linux::live_typing::Session>,
+    insert: Option<Insert<'a>>,
+    last_dictation: &'a mut Option<LastDictation>,
+}
+
+impl OutputAdapter for LinuxOutputAdapter<'_> {
+    fn cancel_pending(&mut self) {
+        if let Some(session) = self.typing.take() {
+            session.cancel();
+        }
+    }
+
+    fn insert(&mut self, text: &str, plan: InsertPlan) -> Result<InsertResult, String> {
+        match plan {
+            InsertPlan::None => {
+                self.cancel_pending();
+                Ok(InsertResult::default())
+            }
+            InsertPlan::CopyOnly => {
+                self.cancel_pending();
+                let Some(insert) = self.insert.as_mut() else {
+                    return Ok(InsertResult {
+                        sent: false,
+                        copied: true,
+                    });
+                };
+                insert(text, plan).map_err(|error| format!("{error:#}"))
+            }
+            InsertPlan::Paste { .. } => {
+                // Live typing inserts the final text through the input method;
+                // a failed or absent session falls back to the clipboard paste.
+                if let Some(session) = self.typing.take()
+                    && session.finish(text)
+                {
+                    return Ok(InsertResult::default());
+                }
+                let Some(insert) = self.insert.as_mut() else {
+                    return Ok(InsertResult::default());
+                };
+                insert(text, plan).map_err(|error| format!("{error:#}"))
+            }
+        }
+    }
+
+    fn remember_last(&mut self, last: LastDictation, _recorded_in_history: bool) {
+        *self.last_dictation = Some(last);
+    }
 }
 
 impl DictationOutput {
@@ -62,16 +114,16 @@ impl DictationOutput {
         self
     }
 
-    /// Processes (unless raw) and pastes one transcript, or only
-    /// processes it when there is no paste (a printing stop), then records
-    /// it. A failed paste still becomes Paste last dictation's.
+    /// Processes (unless raw) and delivers one transcript according to
+    /// `target`, updating Paste last dictation and History through the shared
+    /// policy. A failed paste still becomes Paste last dictation's.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn deliver(
         &self,
         raw_text: String,
-        flavour: crate::dictation::DictationFlavour,
+        target: OutputTarget,
         language: &str,
-        paste: Option<Paste<'_>>,
+        insert: Option<Insert<'_>>,
         last_dictation: &mut Option<LastDictation>,
         audio_ms: u64,
         inference_ms: u64,
@@ -81,15 +133,12 @@ impl DictationOutput {
         context: crate::dictation::context::ContextSnapshot,
         by_shortcut: bool,
     ) -> Result<String> {
-        let application = context.application.clone();
-        let modes = self
-            .modes
-            .read()
-            .unwrap_or_else(|error| error.into_inner())
-            .clone();
-        let mut processed = if flavour.raw() {
-            crate::dictation::processor::Processed::unchanged(raw_text.trim())
-        } else {
+        let processed = if target.processes() {
+            let modes = self
+                .modes
+                .read()
+                .unwrap_or_else(|error| error.into_inner())
+                .clone();
             modes.process(
                 &raw_text,
                 language,
@@ -97,95 +146,32 @@ impl DictationOutput {
                 &self.transformations,
                 crate::dictation::processor::Source::Dictation,
             )
-        };
-        let printed = paste.is_none();
-        // A voice prompt that deliberately asked nothing ends quietly: no
-        // failure, no paste, no last dictation, and no History. A live
-        // preedit for the capture is discarded rather than committed empty.
-        if processed.nothing {
-            if let Some(session) = typing {
-                session.cancel();
-            }
-            return Ok(processed.text);
-        }
-        // Labs › Signature: a normal, unprinted dictation carries the saved
-        // line once at its end. Live typing commits the signed text in its
-        // own final step, so its preedit never shows the line and nothing is
-        // typed twice; the paste, Paste Last, and History read the same
-        // text. The paste is standalone, so the next dictation never
-        // continues the signature line.
-        let signed = if !printed && !flavour.raw() {
-            match crate::dictation::signature::append(
-                &processed.text,
-                &crate::labs::signature_text(),
-                crate::labs::signature(),
-            ) {
-                Some(signed) => {
-                    processed.text = signed;
-                    true
-                }
-                None => false,
-            }
         } else {
-            false
+            crate::dictation::processor::Processed::unchanged(raw_text.trim())
         };
-        // Live typing inserts the final text through the input method; a
-        // printed or copy-only dictation clears its preedit and takes the
-        // usual path instead.
-        let inserted = match typing {
-            Some(session) if !printed && !crate::labs::copy_only() => {
-                session.finish(&processed.text)
-            }
-            Some(session) => {
-                session.cancel();
-                false
-            }
-            None => false,
+        let input = DeliveryInput {
+            target,
+            raw_text,
+            text: processed.text,
+            nothing: processed.nothing,
+            application: context.application,
+            bundle_name: None,
+            processing: processed.observation,
+            audio_ms,
+            inference_ms,
+            total_started: started,
+            recording,
+            allow_yolo: by_shortcut,
         };
-        if processed.text.trim().is_empty() {
-            return Err(eyre!("text replacements produced empty output"));
+        let mut adapter = LinuxOutputAdapter {
+            typing,
+            insert,
+            last_dictation,
+        };
+        match deliver(input, self.history.as_ref(), &mut adapter).map_err(|error| eyre!(error))? {
+            DeliveryOutcome::VoicePromptNothing => Ok(String::new()),
+            DeliveryOutcome::EmptyOutput => Err(eyre!(EMPTY_PROCESSED_ERROR)),
+            DeliveryOutcome::Delivered { text, .. } => Ok(text),
         }
-        let mut sent = false;
-        if let Some(paste) = paste
-            && !inserted
-        {
-            let send = by_shortcut
-                && !flavour.raw()
-                && !crate::labs::copy_only()
-                && crate::dictation::yolo_mode::sends(application.as_deref(), None);
-            // A paste that fails (another app changed the clipboard while
-            // Hex saved it, or a format couldn't be read) keeps the text
-            // for Paste last dictation, so the dictation isn't lost;
-            // History keeps only pasted output.
-            paste(&processed.text, flavour.terminal_paste(), send, signed).inspect_err(|_| {
-                *last_dictation = Some(LastDictation::new(processed.text.clone(), signed));
-            })?;
-            sent = send;
-        }
-        if !printed {
-            *last_dictation = Some(LastDictation::new(processed.text.clone(), signed));
-        }
-        if let Some(history) = &self.history {
-            let mut draft = crate::dictation::modes::history_draft(
-                raw_text,
-                &processed,
-                context.application,
-                audio_ms,
-                inference_ms,
-                started.elapsed().as_millis() as u64,
-                recording,
-            );
-            if printed {
-                draft.kind = crate::history::HistoryKind::Printed;
-            } else if sent {
-                draft.kind = crate::history::HistoryKind::Send;
-            } else if flavour.raw() {
-                draft.kind = crate::history::HistoryKind::Raw;
-            }
-            if let Err(error) = history.record(draft) {
-                tracing::warn!(%error, "could not retain Linux dictation history");
-            }
-        }
-        Ok(processed.text)
     }
 }
