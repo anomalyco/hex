@@ -1288,8 +1288,8 @@ what is playing, so Hex hears the browsers through a private process tap
 (aggregate `anomaly.hex.browser-tap.<pid>`, apart from the meeting tap) and sends
 play only after it saw the browser go silent right after its own pause. The
 browsers are the ones [microphone_activity.rs](../../src/microphone_activity.rs)
-knows: Chrome, Brave, Safari, Firefox, Edge, Arc, Vivaldi, Helium, Ardia, and
-Zen, whose helpers count as their browser. The sequence checks in
+knows: Chrome, Brave, Safari, Firefox, Edge, Arc, Vivaldi, Helium, Ardia,
+Zen, and Aside, whose helpers count as their browser. The sequence checks in
 [audio/browser_media.rs](../../src/audio/browser_media.rs) run on fakes:
 `a_confirmed_pause_is_resumed`, `two_sounding_tabs_never_get_play`,
 `a_browser_already_playing_gets_no_play`, `a_call_is_never_paused`,
@@ -1532,9 +1532,10 @@ other way. Check: `the_page_is_read_only_when_processing_uses_it` in
 browser. On macOS the front window's title is read only by meeting detection
 and while a script transformation is set up (`reads_window_title`). When
 something uses the page, macOS asks the front tab of Safari, Orion, Chrome,
-Brave, Edge, Arc, Vivaldi, Opera, Helium, and Chromium over AppleScript (one
-Automation prompt per browser; a refusal keeps the application context) and
-reads any other app's focused AXWebArea `AXURL` (Firefox, Zen, web views).
+Brave, Edge, Arc, Vivaldi, Opera, Helium, Chromium, and Aside over
+AppleScript (one Automation prompt per browser; a refusal keeps the
+application context) and reads any other app's focused AXWebArea `AXURL`
+(Firefox, Zen, web views).
 That AppleScript read is not part of the 500 ms foreground-context poll: the
 poll reads it once when a scriptable browser becomes the frontmost process
 (caching its address, or no address after a failed read, per pid), so
