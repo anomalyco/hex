@@ -842,6 +842,44 @@ else. Holding the `.` offers `.` and `…` (the symbol pages' list); Apple's off
 (`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
 screenshots beside Apple's in Safari; no physical iPhone run checks it.
 
+## Number pads (full keyboard, iPhone)
+
+A field that asks for `.numberPad`, `.asciiCapableNumberPad` or `.decimalPad` (in Safari,
+`inputmode="numeric"` and `"decimal"`) gets Hex's own pad (`KeyboardNumberPad`), drawn on
+Apple's (iPhone 17 Pro and SE, iOS 26.5 and 27.2 simulators, 2026-11-23): 1 2 3 / 4 5 6 /
+7 8 9 / a blank corner, 0 and delete, the phone letters under 2 to 9 (ABC … WXYZ), Apple's
+columns to the point (4.67, 126.33, 6, 126.67, 6, 126.33, 6 pt across a 402 pt iPhone; 4.5,
+117.5 pt keys with 6 pt gaps on the 375 pt SE; turned, 137.33 pt keys centred, the letters
+right of the digit), 6 pt between rows. The decimal pad's separator is the region's (`,` in
+Germany), in the corner without a keycap, as Apple's; delete has none either. A pressed
+digit greys and raises no pop-up, and nothing holds (Apple's pad offers no long presses).
+Taps type on release with rollover, delete repeats, and clicks and haptics are the letter
+keys', so the palette and themes follow. Hex keeps its strip above the pad (the Hex key,
+Paste and Code from Messages), where Apple's pad has no bar: the pad fills the letter keys'
+band, so the keyboard is the same height in a text field and a number field beside it
+(Apple's own grows: 48 pt keys on a 54 pt pitch, its panel 26 pt lower than its letters' on
+a 17 Pro). Hex's keys are 45.75 pt there (26.5: 46.75; SE 46.5). With Settings › Keyboard
+› Number row on, the pad takes that band too. On a Home-button iPhone, where iOS draws no
+globe, Hex's globe takes the blank corner (beside the separator on the decimal pad), as it does
+on the Duo. On the Duo folded the pad spans the letter keys' edges with 7 pt gaps, as Apple's
+does beside its own letters; unfolded and upright Apple's pad is its split keyboard's right
+half (101.33 pt keys, 7 pt apart, ending 80 pt from the right edge, iOS 27.2) and Hex's sits
+there too, a third of a point off on the first two columns; unfolded and turned, unmeasured,
+it takes the letter keys' edges. An iPad keeps the 123 page (not measured beside Apple's).
+
+Nothing hands a number field to the next keyboard any more: before, where iOS asked Hex for a
+globe (Home-button iPhones, the Duo), a number pad switched to Apple's keyboard by itself, and
+elsewhere it got Hex's 123 page. The way to Apple's keyboard stays the globe, and Code from
+Messages in an empty one-time-code field, by its usual route. iOS never gives a third-party
+keyboard a `.phonePad` (`inputmode="tel"`, `type="tel"`) or `.namePhonePad` field or a
+secure one (a PIN): it brings its own keyboard there, as it always did. `type="number"`
+asks for `.numbersAndPunctuation` and keeps the 123 page. The pad is a field kind of its own
+(`KeyboardFieldKind.numberPad`, `.decimalPad`) that takes no words: no suggestions,
+autocorrect, swipe, Learn how I type or Adaptive touch, and typing logs name the field as such.
+Hex's keys have no VoiceOver elements anywhere yet, the pad's included. Unit tests
+(`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
+screenshots beside Apple's; no physical iPhone run checks it.
+
 ## Comma and period keys (full keyboard, iPhone)
 
 Settings › Experiments › Comma and

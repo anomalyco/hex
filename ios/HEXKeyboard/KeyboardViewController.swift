@@ -47,9 +47,6 @@ final class KeyboardViewController: UIInputViewController {
         return KeyboardViewController.lastKeyboardID
     }()
     private var pollInterval: TimeInterval = 0
-    private var didHandOffCurrentField = false
-    /// A number pad's hand-off waits for the Duo's posture (`handOffNumericPadIfNeeded`).
-    private var handOffWaitsForPosture = false
     private var didWarmLexicon = false
     /// Learn how I type: what becomes of each dictation Hex inserts.
     private let dictationEdits = DictationEditTracker()
@@ -152,8 +149,6 @@ final class KeyboardViewController: UIInputViewController {
         isRetired = false
         autoStartPending = true
         coldStartJobID = UUID().uuidString
-        didHandOffCurrentField = false
-        handOffWaitsForPosture = false
         // The keyboard may come back for another field: settle on where the dictation was last seen.
         dictationEdits.finish(nil)
         mountSurface()
@@ -162,7 +157,6 @@ final class KeyboardViewController: UIInputViewController {
         Self.onScreen.appeared(keyboardID, in: currentDocument)
         updateBackdrop()
         beginTypingLogSession(trigger: "appear")
-        handOffNumericPadIfNeeded()
         syncFromBridge(animated: false)
         schedulePoll(force: true)
     }
@@ -235,7 +229,7 @@ final class KeyboardViewController: UIInputViewController {
         autoStartPending = false
         guard wantsAutoStart(), fullKeyboard == nil, barEmojiPanel == nil, viewModel.hasFullAccess,
               viewModel.stagePhase == .idle,
-              KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) != .handOff
+              !KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType).field.isNumberPad
         else { return }
         switch viewModel.route {
         case .warm:
@@ -252,7 +246,6 @@ final class KeyboardViewController: UIInputViewController {
         bridge.recordKeyboardHidden(at: Date().timeIntervalSince1970)
         switchGuess.keyboardHid(in: currentDocument, at: Date().timeIntervalSince1970)
         autoStartPending = false
-        handOffWaitsForPosture = false
         isRetired = false
         if dictationEdits.isTracking { dictationEdits.finish(editContext) }
         TypingJournal.sharedIfEnabled()?.save()
@@ -295,7 +288,6 @@ final class KeyboardViewController: UIInputViewController {
         } else {
             applyBarInset()
         }
-        if handOffWaitsForPosture { handOffNumericPadIfNeeded() }
     }
 
     /// The dictation bar's own height, under `barTopInset`: 4 pt top padding, the 40 pt
@@ -343,13 +335,6 @@ final class KeyboardViewController: UIInputViewController {
         }
     }
 
-    override func textWillChange(_ textInput: UITextInput?) {
-        super.textWillChange(textInput)
-        if KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) != .handOff {
-            didHandOffCurrentField = false
-        }
-    }
-
     override func textDidChange(_ textInput: UITextInput?) {
         super.textDidChange(textInput)
         if isShown || isRetired { Self.onScreen.moved(keyboardID, to: currentDocument) }
@@ -359,7 +344,6 @@ final class KeyboardViewController: UIInputViewController {
         liveTyping.checkSent()
         observeDictationEdits(fromKeys: false)
         noteHostTextChange()
-        handOffNumericPadIfNeeded()
     }
 
     /// The cursor moved or a selection changed: a Hangul run that is no longer right before
@@ -549,24 +533,6 @@ final class KeyboardViewController: UIInputViewController {
         dictationEdits.finish(editContext)
     }
 
-    private func handOffNumericPadIfNeeded() {
-        guard let fullKeyboard else { return }
-        if KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) == .handOff {
-            guard !didHandOffCurrentField else { return }
-            // The Duo's posture needs the keyboard's window: layout asks again once it has one.
-            guard let posture = fullKeyboard.currentPosture else {
-                handOffWaitsForPosture = true
-                return
-            }
-            handOffWaitsForPosture = false
-            didHandOffCurrentField = true
-            if KeyboardFieldRouting.handsOffNumberPad(needsInputModeSwitchKey: needsInputModeSwitchKey, posture: posture) {
-                advanceToNextInputMode()
-            }
-        } else {
-            didHandOffCurrentField = false
-        }
-    }
 
     private func warmFullKeyboardLexiconIfNeeded() {
         guard let fullKeyboard else { return }
@@ -616,7 +582,6 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func tearDownSurface() {
-        handOffWaitsForPosture = false
         closeBarEmojiPanel()
         barEmojiLibrary = nil
         children.forEach { child in
@@ -636,7 +601,6 @@ final class KeyboardViewController: UIInputViewController {
 
     private func retireSupersededKeyboard() {
         autoStartPending = false
-        handOffWaitsForPosture = false
         if dictationEdits.isTracking { dictationEdits.finish(nil) }
         TypingJournal.sharedIfEnabled()?.save()
         AdaptiveTouch.current?.save()
@@ -656,10 +620,6 @@ final class KeyboardViewController: UIInputViewController {
     private func restoreRetiredKeyboard() {
         isRetired = false
         autoStartPending = false
-        handOffWaitsForPosture = false
-        if KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) == .handOff {
-            didHandOffCurrentField = true
-        }
         mountSurface()
         fullKeyboard?.prepareForField()
         isShown = true

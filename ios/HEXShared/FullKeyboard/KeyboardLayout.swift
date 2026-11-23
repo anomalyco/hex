@@ -680,10 +680,22 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
         )
         if let availableHeight { metrics = metrics.fitted(toHeight: availableHeight) }
         self.metrics = metrics
+        if field.isNumberPad, metrics.pad == nil {
+            padLetterWidth = nil
+            split = nil
+            keys = Self.buildNumberPadKeys(
+                width: width, metrics: metrics, orientation: orientation, posture: posture, phoneSize: phoneSize,
+                decimal: field == .decimalPad, showsGlobe: showsGlobe, inset: self.horizontalInset, hexPlacement: hexPlacement,
+                joinsUnfoldedKeyboard: joinsUnfoldedKeyboard
+            )
+            return
+        }
+        // An iPad's number fields keep the 123 page, as Apple's iPad keyboard does.
+        let rowsField: KeyboardFieldKind = field.isNumberPad ? .text : field
         if metrics.pad?.isDocked == true {
             padLetterWidth = Self.padLetterWidth(innerWidth: innerWidth, metrics: metrics, layer: layer, language: language, letters: letters)
             self.keys = Self.buildPadKeys(
-                width: width, metrics: metrics, orientation: orientation, layer: layer, field: field,
+                width: width, metrics: metrics, orientation: orientation, layer: layer, field: rowsField,
                 showsGlobe: showsGlobe, showsEmoji: showsEmoji, inset: self.horizontalInset, language: language, letters: letters
             )
             self.split = nil
@@ -695,7 +707,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 width: width,
                 metrics: metrics,
                 layer: layer,
-                field: field,
+                field: rowsField,
                 showsGlobe: showsGlobe,
                 showsEmoji: showsEmoji,
                 inset: self.horizontalInset,
@@ -712,7 +724,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
                 width: width,
                 metrics: metrics,
                 layer: layer,
-                field: field,
+                field: rowsField,
                 showsGlobe: showsGlobe,
                 showsEmoji: showsEmoji,
                 inset: self.horizontalInset,
@@ -1246,24 +1258,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             }
         }
         if placement.isInStrip {
-            // A bare mark in a target wider than tall, inset like the suggestion pills; in Apple's
-            // bar the same mark, centred in its cell on the words' line.
-            let height = m.appleBar ? KeyboardMetrics.barHexKeyHeight : m.stripPillHeight
-            let hexWidth: CGFloat = 44
-            let cell = KeyboardMetrics.appleIconCellWidth
-            let x = m.appleBar
-                ? (placement == .stripLeading ? inset + (cell - hexWidth) / 2 : width - inset - (cell + hexWidth) / 2)
-                : (placement == .stripLeading ? left : right - hexWidth)
-            let y = m.appleBar ? m.stripTop + m.stripTextCenter - height / 2 : m.stripTop + m.stripInset
-            let frame = CGRect(x: x, y: y, width: hexWidth, height: height)
-            // In Apple's bar the key takes its whole cell across, up to the slot beside it.
-            let target = m.appleBar
-                ? CGRect(x: x - (cell - hexWidth) / 2, y: frame.minY - 4, width: cell, height: frame.height + 8)
-                : frame.insetBy(dx: -4, dy: -4)
-            // Up to the strip's top at least: the room above the pill belongs to the key too.
-            let targetTop = min(target.minY, m.stripTop)
-            let hitFrame = CGRect(x: target.minX, y: targetTop, width: target.width, height: top - targetTop)
-            keys.append(KeyboardKey(kind: .hex, row: -1, frame: frame, hitFrame: hitFrame, label: "hex"))
+            keys.append(stripHexKey(width: width, metrics: m, inset: inset, placement: placement))
         }
         return keys
     }

@@ -675,8 +675,7 @@ final class FullKeyboardView: UIView {
     func textDidChange() {
         applyAppearance()
         let field = engine.field
-        let route = KeyboardFieldRouting.route(for: engine.target.keyboardType)
-        let routeField: KeyboardFieldKind = if case .keys(let kind, _) = route { kind } else { .text }
+        let routeField = KeyboardFieldRouting.route(for: engine.target.keyboardType).field
         // While you search emoji the keys still type the query, whatever the host changed.
         if routedTarget.isSearching {
             refreshReturnKey()

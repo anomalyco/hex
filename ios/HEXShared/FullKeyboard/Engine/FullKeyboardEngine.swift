@@ -255,7 +255,7 @@ final class FullKeyboardEngine {
     /// The key whose balloon shows: the newest character still held, or the one a 123, #+= or
     /// shift press slid onto (hidden while an accent menu is up).
     var previewKey: KeyboardKey? {
-        guard activeAccentMenu == nil else { return nil }
+        guard activeAccentMenu == nil, !layout.isNumberPad else { return nil }
         for id in touchOrder.reversed() {
             guard let touch = touches[id] else { continue }
             if let slid = touch.slideKey { return slid }
@@ -270,13 +270,9 @@ final class FullKeyboardEngine {
 
     /// Call when the keyboard appears or the field changes.
     func configureForField() {
-        switch KeyboardFieldRouting.route(for: target.keyboardType) {
-        case .keys(let kind, let initialLayer):
+        if case .keys(let kind, let initialLayer) = KeyboardFieldRouting.route(for: target.keyboardType) {
             field = kind
             layerState.reset(to: initialLayer)
-        case .handOff:
-            field = .text
-            layerState.reset(to: .numbers)
         }
         shift.reset()
         korean.reset()
