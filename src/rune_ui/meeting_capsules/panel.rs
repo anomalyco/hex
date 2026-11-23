@@ -566,9 +566,11 @@ pub(super) fn rest_width(shown: &Recording) -> f32 {
 /// The minutes on the time the capsule draws.
 fn minutes_shown(capsule: &Capsule) -> u64 {
     match capsule.drawn() {
-        Some(Kind::Recording(shown)) => shown.started.elapsed().as_secs() / 60,
-        Some(Kind::Finalizing { duration_ms }) => duration_ms / 60_000,
-        Some(Kind::Ready(manifest)) => manifest.duration_ms.unwrap_or(0) / 60_000,
+        Some(State::Recording {
+            recording: shown, ..
+        }) => shown.started.elapsed().as_secs() / 60,
+        Some(State::Finalizing { duration_ms, .. }) => duration_ms / 60_000,
+        Some(State::Ready { manifest, .. }) => manifest.duration_ms.unwrap_or(0) / 60_000,
         _ => 0,
     }
 }
@@ -591,8 +593,10 @@ const FIELD_LEAST: f32 = 40.0;
 /// whole header once the panel is open.
 pub(super) fn field_wanted(capsule: &Capsule) -> f32 {
     let open = match capsule.drawn() {
-        Some(Kind::Recording(_)) => capsule.hovered || capsule.stopping,
-        Some(Kind::Finalizing { .. } | Kind::Ready(_)) => true,
+        Some(State::Recording {
+            hovered, stopping, ..
+        }) => *hovered || *stopping,
+        Some(State::Finalizing { .. } | State::Ready { .. }) => true,
         _ => false,
     };
     if open {
@@ -694,7 +698,13 @@ impl Capsule {
     /// How much of action row `row` (Stop, then the two copies) shows.
     /// Whole wherever the surface isn't in motion.
     pub(super) fn action_presence(&self, row: usize) -> stage::Presence {
-        let (Some(o), Some(Kind::Recording(shown))) = (self.stage.outline(), self.drawn()) else {
+        let (
+            Some(o),
+            Some(State::Recording {
+                recording: shown, ..
+            }),
+        ) = (self.stage.outline(), self.drawn())
+        else {
             return stage::Presence::flat(1.0);
         };
         let mut presence = self.stage.presence(stage::Layer::Action(row));
@@ -758,8 +768,14 @@ pub(super) fn arriving_header(
 /// The recording: at rest only its levels and time; under the
 /// pointer it springs open into Stop and the copies, its header nearest the
 /// screen edge.
-pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
-    let open = capsule.hovered || capsule.stopping;
+pub(super) fn recording(
+    p: Paint,
+    capsule: &Capsule,
+    shown: &Recording,
+    hovered: bool,
+    stopping: bool,
+) -> El {
+    let open = hovered || stopping;
     // Rows that are leaving stay drawn until they have gone.
     let actions = open || (0..stage::ACTIONS).any(|row| capsule.action_presence(row).shows());
     let notice = recording_notice(shown);
@@ -818,7 +834,6 @@ pub(super) fn recording(p: Paint, capsule: &Capsule, shown: &Recording) -> El {
     let action = actions.then(|| {
         // Pressed, the same row says so in place: its glyph and first
         // letters stay where they were and it stops taking the pointer.
-        let stopping = capsule.stopping;
         let row = panel_row(
             p,
             "stop",

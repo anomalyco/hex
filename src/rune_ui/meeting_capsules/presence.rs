@@ -24,7 +24,7 @@ pub(super) struct Surface {
     track: Track,
     /// What the surface showed when it closed, and when it closed: drawn
     /// until it has gone, and a leaving recording's time stops there.
-    pub(super) ghost: Option<(Kind, Instant)>,
+    pub(super) ghost: Option<(State, Instant)>,
     last: Option<f64>,
     /// The finished meeting's title and summary as they are drawn.
     pub(super) title: Roll<String>,
@@ -41,9 +41,9 @@ impl Surface {
         }
     }
 
-    pub(super) fn leave(&mut self, kind: Option<Kind>) {
-        if let Some(kind) = kind {
-            self.ghost = Some((kind, Instant::now()));
+    pub(super) fn leave(&mut self, state: State) {
+        if !state.is_empty() {
+            self.ghost = Some((state, Instant::now()));
         }
     }
 
@@ -142,10 +142,12 @@ impl<T: PartialEq + Clone> Roll<T> {
 
 impl Capsule {
     /// What the surface draws: what it shows, or what it showed as it goes.
-    pub(super) fn drawn(&self) -> Option<&Kind> {
-        self.kind
-            .as_ref()
-            .or(self.surface.ghost.as_ref().map(|(kind, _)| kind))
+    pub(super) fn drawn(&self) -> Option<&State> {
+        if !self.state.is_empty() {
+            Some(&self.state)
+        } else {
+            self.surface.ghost.as_ref().map(|(state, _)| state)
+        }
     }
 
     /// Shows `kind` in this capsule's window, in place of whatever it showed
@@ -159,16 +161,12 @@ impl Capsule {
         timer: Option<offer::After>,
         tx: &mut Tx,
     ) {
-        self.kind = Some(kind);
+        self.state = State::from_kind(kind, false, timer);
         self.presentation = presentation;
         self.stage = Default::default();
-        self.more_open = false;
-        self.set_offer_timer(timer);
+        self.arm_offer_timeout();
         self.live = Live::default();
         self.waveform = None;
-        self.hovered = false;
-        self.stopping = false;
-        self.expired = false;
         self.corner = corner;
         self.throw.stop();
         // Nothing in it mounts with an entrance of its own.
@@ -185,13 +183,13 @@ impl Capsule {
     /// Steps the surface's presence and its lines; true while they move.
     pub(super) fn step_surface(&mut self, now: f64, tx: &mut Tx) -> bool {
         let reduced = self.reduced.get();
-        let shown = self.kind.is_some();
+        let shown = self.is_shown();
         if shown {
             self.surface.ghost = None;
         }
         let (title, summary) = match self.drawn() {
-            Some(Kind::Finalizing { .. }) => (Some(tr("Transcribing…").to_owned()), None),
-            Some(Kind::Ready(manifest)) => (
+            Some(State::Finalizing { .. }) => (Some(tr("Transcribing…").to_owned()), None),
+            Some(State::Ready { manifest, .. }) => (
                 Some(meeting::display_title(manifest)),
                 panel::ready_summary(manifest),
             ),

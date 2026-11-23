@@ -1,7 +1,7 @@
 //! The dictation HUD's listening field, drawn into the recording header. The
 //! capsule supplies the surface and timer; there is no HUD window.
 use super::panel;
-use super::{Capsule, Kind, meeting};
+use super::{Capsule, State, meeting};
 use crate::dictation::indicator::{DictationIndicatorEvent as Event, DotFrame, IndicatorModel};
 use crate::rune_hud::spring::{REDUCED_FADE, Spec, Spring};
 use crate::rune_hud::{
@@ -324,8 +324,8 @@ pub(super) fn feed(
     now: Instant,
     levels: impl FnOnce() -> [f32; 2],
 ) -> Option<(bool, bool)> {
-    let recording = matches!(c.kind, Some(Kind::Recording(_)));
-    let cooling = matches!(c.kind, Some(Kind::Finalizing { .. } | Kind::Ready(_)));
+    let recording = matches!(c.state, State::Recording { .. });
+    let cooling = matches!(c.state, State::Finalizing { .. } | State::Ready { .. });
     if !recording && !cooling {
         return None;
     }

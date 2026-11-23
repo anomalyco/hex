@@ -4,6 +4,7 @@ use super::*;
 impl Flow {
     pub(super) fn step(&mut self, input: Input, now: f64) -> Vec<Action> {
         let mut actions = Vec::new();
+        self.undo.expire(now);
         if input == Input::NothingHeard {
             self.silent = true;
             return actions;
@@ -24,41 +25,38 @@ impl Flow {
             }
         }
         if matches!(input, Input::Stage(_)) {
-            self.closed = false;
-            self.undoing = false;
-            self.superseded = false;
+            self.undo = Undo::Idle;
         }
-        if matches!(input, Input::Undone(_)) {
-            // The earlier send's, taken back before the pick went.
-            if std::mem::take(&mut self.superseded) {
+        match (self.undo, &input) {
+            // The earlier send's Undone, taken back before the pick went.
+            (Undo::Superseded { .. }, Input::Undone(_)) => {
+                self.undo = Undo::Idle;
                 return actions;
             }
-            self.undoing = false;
-        }
-        // The send an Undo takes back, arriving late (it went, queued, or
-        // failed), changes nothing: the list it reopened stays.
-        if self.undoing
-            && matches!(
-                input,
-                Input::Settled | Input::Delivered(_) | Input::Failed(Failure::Send(_), _)
-            )
-        {
-            return actions;
-        }
-        // News of the earlier send under the pick shown says nothing of it.
-        if self.superseded
-            && let Phase::Sent(sent) = &self.phase
-            && match &input {
-                Input::Delivered(Delivered::Sent { to } | Delivered::Queued { to, .. })
-                | Input::Failed(Failure::Send(to), _) => *to != sent.to,
-                _ => false,
+            (Undo::InFlight { .. }, Input::Undone(_)) => {
+                self.undo = Undo::Idle;
             }
-        {
-            return actions;
+            // The send an Undo takes back, arriving late (posting, went,
+            // queued, or failed), changes nothing: the list it reopened stays.
+            (
+                Undo::InFlight { .. },
+                Input::Sending
+                | Input::Settled
+                | Input::Delivered(_)
+                | Input::Failed(Failure::Send(_), _),
+            ) => return actions,
+            // News of the earlier send under the pick shown says nothing of it.
+            (
+                Undo::Superseded { .. },
+                Input::Delivered(Delivered::Sent { to } | Delivered::Queued { to, .. })
+                | Input::Failed(Failure::Send(to), _),
+            ) if matches!(&self.phase, Phase::Sent(sent) if *to != sent.to) => {
+                return actions;
+            }
+            _ => {}
         }
         if input == Input::Sending {
-            if !self.undoing
-                && let Phase::Routed(routed) = &mut self.phase
+            if let Phase::Routed(routed) = &mut self.phase
                 && !routed.taken_back
             {
                 routed.sending = true;
@@ -191,7 +189,7 @@ impl Flow {
             // Closed before the router answered (dismissed, or the answer
             // came after the hold): it stays closed, and `hex capture list`
             // and `hex capture send` still offer the capture.
-            (Phase::Hidden, Input::Routed(_) | Input::Delivered(_)) if self.closed => Phase::Hidden,
+            (Phase::Dismissed, Input::Routed(_) | Input::Delivered(_)) => Phase::Dismissed,
             // A queued send went on a retry: Hex can't take it back.
             (_, Input::Delivered(delivered)) => match delivered {
                 Delivered::Sent { to } => Phase::Sent(Sent {
@@ -359,7 +357,7 @@ impl Flow {
             {
                 match already_with {
                     None => Phase::Kept { at: now },
-                    Some(_) => Phase::Hidden,
+                    Some(_) => Phase::Dismissed,
                 }
             }
             // Escape only reaches an open list; it folds it. It never takes
@@ -410,7 +408,7 @@ impl Flow {
                 Phase::Hidden
             }
             // Pasted or dismissed: the take-back it asked for says nothing.
-            (Phase::Hidden, Input::Undone(_)) => Phase::Hidden,
+            (phase @ (Phase::Hidden | Phase::Dismissed), Input::Undone(_)) => phase,
             // The list opened as the Undo was asked for. Taken back, it
             // stays as it is; too late, the session it went to has it.
             (Phase::Routed(mut routed), Input::Undone(undone)) if routed.taken_back => {
@@ -474,6 +472,16 @@ impl Flow {
             // Escape is the app's everywhere else: it is never claimed, so
             // one that arrives is ignored.
             (phase, Input::Escape | Input::Undo) => phase,
+            (
+                Phase::Saved { .. }
+                | Phase::Routed(_)
+                | Phase::Sent(_)
+                | Phase::Queued { .. }
+                | Phase::Kept { .. }
+                | Phase::TooLate { .. }
+                | Phase::Failed { .. },
+                Input::Dismiss,
+            ) => Phase::Dismissed,
             (_, Input::Dismiss) => Phase::Hidden,
             (phase, _) => phase,
         };

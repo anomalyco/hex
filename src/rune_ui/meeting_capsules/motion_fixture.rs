@@ -56,7 +56,7 @@ fn recording_motion_frames() {
         let mut trace = String::from("frame,hovered,key,x,y,w,h\n");
         for frame in 0..366 {
             // Put the fixture on the same second at each event, independent of GPU speed.
-            if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+            if let State::Recording { recording: shown, .. } = &mut rt.state.state {
                 shown.started = Instant::now() - Duration::from_secs(258 + frame as u64 / 60);
             }
             if frame % 60 == 0 {
@@ -86,7 +86,7 @@ fn recording_motion_frames() {
                     elem.key.as_deref()
                 {
                     let [x, y, w, h] = elem.rect;
-                    writeln!(trace, "{frame},{},{key},{x},{y},{w},{h}", rt.state.hovered).unwrap();
+                    writeln!(trace, "{frame},{},{key},{x},{y},{w},{h}", rt.state.hovered()).unwrap();
                 }
             }
             {
@@ -165,7 +165,7 @@ fn a_light_host_draws_the_dark_recording_from_the_first_frame() {
 /// recolour.
 fn hold_clock(rt: &mut Runtime<Capsule>) {
     rt.update(|capsule, tx| {
-        if let Some(Kind::Recording(shown)) = &mut capsule.kind {
+        if let State::Recording { recording: shown, .. } = &mut capsule.state {
             shown.started = Instant::now() - Duration::from_secs(258);
         }
         tx.instant();
@@ -293,8 +293,13 @@ fn stop_hits_its_center_edges_and_corners_but_not_its_neighbors() {
                 assert!(commands.try_recv().is_err());
                 assert!(rt.find("elapsed").is_some());
                 rt.update(|c, tx| {
-                    c.stopping = false;
-                    c.hovered = true;
+                    if let State::Recording {
+                        hovered, stopping, ..
+                    } = &mut c.state
+                    {
+                        *stopping = false;
+                        *hovered = true;
+                    }
                     tx.instant();
                 });
                 rt.frame(0.);
@@ -532,7 +537,7 @@ fn row_swipes_do_not_move_the_panel_or_fire_actions_but_small_clicks_work() {
         }
     }
     tap(&mut rt, "dismiss");
-    assert!(rt.state.kind.is_none() && commands.try_recv().is_err());
+    assert!(!rt.state.is_shown() && commands.try_recv().is_err());
 }
 
 #[test]
@@ -721,7 +726,7 @@ fn a_long_recording_keeps_its_timer_and_stop_inside_each_corner() {
             let (mut rt, received, _) = runtime(live_recording("fixture"), false, true, RECORDING);
             rt.update(move |c, tx| {
                 c.corner = corner;
-                if let Some(Kind::Recording(shown)) = &mut c.kind {
+                if let State::Recording { recording: shown, .. } = &mut c.state {
                     shown.started = Instant::now() - Duration::from_secs(sec);
                     shown.warning = warning.then_some(meeting::TrackWarning::DigitalSilence);
                 }

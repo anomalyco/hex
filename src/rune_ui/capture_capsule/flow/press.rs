@@ -29,8 +29,7 @@ impl Flow {
         if self.cues.len() == cued {
             self.cue(&before, &actions);
         }
-        self.closing(&before);
-        self.track_undo(&actions);
+        self.track_undo(&actions, now);
         let mut actions = actions;
         actions.extend(self.hold_countdown(now));
         actions
@@ -103,11 +102,11 @@ impl Flow {
                 let Some(bundle) = self.paste_bundle().cloned() else {
                     return Vec::new();
                 };
-                self.phase = Phase::Hidden;
+                self.phase = Phase::Dismissed;
                 vec![Action::Paste(bundle)]
             }
             (_, Id::Inspect) => {
-                self.phase = Phase::Hidden;
+                self.phase = Phase::Dismissed;
                 vec![Action::Inspect]
             }
             (_, Id::Undo) => self.input(Input::Undo, now),
