@@ -4881,16 +4881,6 @@
         }
       }
     },
-    "Send anonymously" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "匿名发送"
-          }
-        }
-      }
-    },
     "The message is too long. Keep it under 20,000 characters." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4907,16 +4897,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "图片加起来太大了。请移除一张后再试。"
-          }
-        }
-      }
-    },
-    "That email doesn't look right." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个邮箱地址似乎不正确。"
           }
         }
       }
@@ -5031,16 +5011,6 @@
         }
       }
     },
-    "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言、打开此页面的位置，以及一个把你的反馈归在一起的随机安装 ID 发送到 Anomaly 的反馈收件箱。你在别处听写或输入的内容都不会发送。"
-          }
-        }
-      }
-    },
     "When you tap Send, Hex sends your message, the pictures above, your email, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
       "localizations" : {
         "zh-Hans" : {
@@ -5051,22 +5021,42 @@
         }
       }
     },
-    "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. No email and no install id. Anonymous feedback can't be answered." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言，以及打开此页面的位置发送到 Anomaly 的反馈收件箱。不含邮箱，也不含安装 ID。匿名反馈无法回复。"
-          }
-        }
-      }
-    },
     "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. Your dictations, what you type, and what Hex learned are never included." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
+          }
+        }
+      }
+    },
+    "With an email, the team can reply. Without one, your feedback is anonymous." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "填写邮箱后，团队可以回复你。不填写，反馈就是匿名的。"
+          }
+        }
+      }
+    },
+    "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言，以及打开此页面的位置发送到 Anomaly 的反馈收件箱。你在别处听写或输入的内容都不会发送。"
+          }
+        }
+      }
+    },
+    "That isn't an email address. Fix it, or clear it to send without one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是有效的邮箱地址。请修正，或清空后不带邮箱发送。"
           }
         }
       }

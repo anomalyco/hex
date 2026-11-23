@@ -56,8 +56,8 @@ nonisolated struct FeedbackDraft: Equatable, Sendable {
     var message = ""
     var subject = ""
     var category: Feedback.Category?
+    /// Optional. Given, the team can reply; empty, the feedback is anonymous.
     var email = ""
-    var anonymous = false
     /// JPEG data, already shrunk (`FeedbackImage.jpeg`).
     var images: [Data] = []
 
@@ -73,6 +73,9 @@ nonisolated struct FeedbackDraft: Equatable, Sendable {
 
     var trimmedMessage: String { message.trimmingCharacters(in: .whitespacesAndNewlines) }
     var trimmedEmail: String { email.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// No email: sent anonymously, with no install id. A typed email that isn't an address
+    /// isn't anonymous: it stops the send (`invalidEmail`) until it's fixed or cleared.
+    var anonymous: Bool { trimmedEmail.isEmpty }
 
     /// What stops it being sent, checked before anything goes out.
     var problem: Problem? {
@@ -82,7 +85,7 @@ nonisolated struct FeedbackDraft: Equatable, Sendable {
         if images.count > Feedback.imageLimit { return .tooManyImages }
         if images.contains(where: { $0.count > Feedback.imageBytesLimit }) { return .imageTooLarge }
         if images.reduce(0, { $0 + $1.count }) > Feedback.imagesBytesLimit { return .imagesTooLarge }
-        if !anonymous, !trimmedEmail.isEmpty, !Self.looksLikeEmail(trimmedEmail) { return .invalidEmail }
+        if !trimmedEmail.isEmpty, !Self.looksLikeEmail(trimmedEmail) { return .invalidEmail }
         return nil
     }
 
@@ -133,9 +136,10 @@ nonisolated struct FeedbackRequest: Sendable {
     let pictures: [[String: Int]]
 
     /// The payload, with nothing Hex keeps on the phone: no typing logs, dictations, vocabulary
-    /// or learned words, no `logs` and no `user` (Hex has no accounts). Anonymous: no email
-    /// and no install id, and metadata holds nothing identifying.
-    static func payload(_ draft: FeedbackDraft, context: FeedbackContext, installID: String) -> [String: Any] {
+    /// or learned words, no `logs` and no `user` (Hex has no accounts). With an email, the email
+    /// and the install id; without one, anonymous: no email and no install id, and metadata holds
+    /// nothing identifying.
+    static func payload(_ draft: FeedbackDraft, context: FeedbackContext, installID: String?) -> [String: Any] {
         var out: [String: Any] = [
             "message": draft.trimmedMessage,
             "app": ["name": "Hex", "version": context.appVersion, "build": context.appBuild],
@@ -151,13 +155,13 @@ nonisolated struct FeedbackRequest: Sendable {
         if draft.anonymous {
             out["anonymous"] = true
         } else {
-            if !draft.trimmedEmail.isEmpty { out["email"] = draft.trimmedEmail }
-            out["install_id"] = installID
+            out["email"] = draft.trimmedEmail
+            if let installID { out["install_id"] = installID }
         }
         return out
     }
 
-    init(draft: FeedbackDraft, context: FeedbackContext, installID: String, idempotencyKey: String = UUID().uuidString,
+    init(draft: FeedbackDraft, context: FeedbackContext, installID: String?, idempotencyKey: String = UUID().uuidString,
          boundary: String = "hex-feedback-\(UUID().uuidString)") {
         let object = Self.payload(draft, context: context, installID: installID)
         payload = (try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])) ?? Data()

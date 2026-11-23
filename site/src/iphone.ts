@@ -8,7 +8,7 @@
 // Every claim here is checked against ios/: Hex makes no network request of
 // its own except FluidAudio's English model download (ParakeetTranscriber)
 // and Send feedback's one POST to Bellhop, made only when the person taps Send
-// (HEXMobile/Feedback), Hex Keyboard makes none, and the Experiments that keep data are off by
+// (HEXMobile/Feedback; Android's form says the same), Hex Keyboard makes none, and the Experiments that keep data are off by
 // default and write only to the App Group. The Android page is checked
 // against android/ the same way (the setup's labels, the 190 MB model,
 // Android 12, and Hex Preview's update check in src/preview).
@@ -211,15 +211,14 @@ export function renderPrivacy(origin: string): string {
 </section>
 <section id="feedback">
 <h2>Feedback you send</h2>
-<p>Hex for iPhone has a Send feedback form, on Home and at the end of Settings › Experiments. Nothing is sent until you tap Send. Then Hex sends, to Anomaly's feedback inbox (Bellhop, run by Anomaly):</p>
+<p>Hex on iPhone and on Android has a Send feedback form. Nothing is sent until you tap Send. Then Hex sends, to Anomaly's feedback inbox (Bellhop, run by Anomaly):</p>
 <ul>
 <li>What you wrote: your message, and a subject and kind if you chose them.</li>
-<li>The pictures shown in the form: a picture of Hex's own screen taken when you opened the form (never the rest of your iPhone's screen), and any photos you add. You can remove each one before sending.</li>
-<li>Hex's version, your iPhone's model, its iOS version and language, which screen of Hex you opened the form from, and the language and speech model Hex dictates with.</li>
-<li>Your email, only if you type one in, so Anomaly can reply. Nothing is emailed when you send: if Anomaly replies, you'll get an email and confirm your address once.</li>
-<li>A random install ID, made by Hex the first time you send feedback, so your reports can be kept together. It isn't tied to your iPhone or Apple account, and deleting Hex deletes it.</li>
+<li>The pictures shown in the form: a picture of Hex's own screen taken when you opened the form (never the rest of your phone's screen), and any photos you add. You can remove each one before sending.</li>
+<li>Hex's version, your phone's model, its system version and language, which screen of Hex you opened the form from, and the language and speech model Hex dictates with.</li>
+<li>Your email, only if you type one in, so Anomaly can reply. Nothing is emailed when you send: if Anomaly replies, you'll get an email and confirm your address once. With an email, Hex also sends a random install ID, made the first time you send feedback with one, so your reports can be kept together. It isn't tied to your phone or your Apple or Google account, and deleting Hex deletes it.</li>
 </ul>
-<p>With <strong>Send anonymously</strong> on, Hex sends no email and no install ID, so anonymous feedback can't be answered. Feedback never includes your dictations, what you type, your vocabulary, what Hex learned about your typing, typing logs, or recordings. Hex Keyboard never sends feedback. Anomaly uses feedback only to answer you and improve Hex. Like any request, the server sees your IP address.</p>
+<p>Without an email, your feedback is anonymous: Hex sends no email and no install ID, so it can't be answered. Feedback never includes your dictations, what you type, your vocabulary, what Hex learned about your typing, typing logs, or recordings, and Hex Keyboard never sends it. Anomaly uses feedback only to answer you and improve Hex. Like any request, the server sees your IP address.</p>
 </section>
 <section>
 <h2>Downloads</h2>

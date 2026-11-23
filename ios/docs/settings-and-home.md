@@ -93,8 +93,8 @@ feedback code or key and still makes no network request.
 Send feedback (row)
 ├─ draws Hex's key window (never the screen) → the form's first picture, JPEG
 └─ the form: Problem · Idea · Question · Other, subject, message, pictures (✕ removes;
-   Add opens the system photo picker, no permission, up to 5 in all), email, Send anonymously,
-   and what is sent in plain words
+   Add opens the system photo picker, no permission, up to 5 in all), an optional email
+   (without one the feedback is anonymous), and what is sent in plain words
    └─ Send → Idempotency-Key made now → multipart (payload JSON + screenshot parts), progress bar
       ├─ 201 → Thanks; email "pending" → "you'll get an email if they reply, confirm once"
       ├─ no connection / 5xx → retried (4 tries, 1 s, 2 s, 4 s), same body and key → offline words
@@ -105,9 +105,10 @@ Send feedback (row)
 
 - **Payload** (`FeedbackRequest.payload`): message, subject and category when set, app
   (name, version, build), device (platform, os, model identifier, locale), metadata (screen,
-  dictation_language, speech_model: internal ids for the team, never shown), email when
-  given, and install_id (a random UUID in Hex's `UserDefaults`, `feedback.installID`).
-  Anonymous sends `anonymous: true` and no email or install_id. Never `user` (no accounts)
+  dictation_language, speech_model: internal ids for the team, never shown). With an email:
+  the email and install_id (a random UUID in Hex's `UserDefaults`, `feedback.installID`,
+  made at the first such send). Without one: `anonymous: true`, no email, and no install_id
+  (none is made). A typed email that isn't an address stops Send until it's fixed or cleared. Never `user` (no accounts)
   or `logs`, and nothing Hex keeps (typing logs, dictations, vocabulary, learned words,
   recordings).
 - **Pictures** (`FeedbackImage`): re-encoded as JPEG at 80% with the longest side at most

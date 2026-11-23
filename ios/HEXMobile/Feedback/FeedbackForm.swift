@@ -34,8 +34,8 @@ struct FeedbackFormStart: Identifiable {
 }
 
 /// Send feedback: a message, optionally a subject and a kind, the pictures (Hex's window to
-/// start with, removable, up to five with the photo picker), an optional email or Send
-/// anonymously, and what is sent in plain words. Nothing goes out until Send.
+/// start with, removable, up to five with the photo picker), an optional email (without one the
+/// feedback is anonymous), and what is sent in plain words. Nothing goes out until Send.
 struct FeedbackForm: View {
     let start: FeedbackFormStart
     @Environment(\.dismiss) private var dismiss
@@ -44,6 +44,7 @@ struct FeedbackForm: View {
     @State private var sender = FeedbackSender()
     @State private var phase = Phase.editing
     @FocusState private var messageFocused: Bool
+    @FocusState private var emailFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     private static let sendID = "send"
 
@@ -193,20 +194,24 @@ struct FeedbackForm: View {
         pictures
 
         SettingsCard {
-            if !draft.anonymous {
-                TextField(String(localized: "Email for a reply (optional)"), text: $draft.email)
-                    .font(.system(size: 15))
-                    .foregroundStyle(HexTheme.textBase)
-                    .keyboardType(.emailAddress)
-                    .textContentType(.emailAddress)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled()
-                    .padding(.horizontal, 16)
-                    .frame(minHeight: 50)
-                SettingsDivider()
-            }
-            SettingsToggleRow(title: String(localized: "Send anonymously"), isOn: $draft.anonymous)
+            TextField(String(localized: "Email for a reply (optional)"), text: $draft.email)
+                .font(.system(size: 15))
+                .foregroundStyle(HexTheme.textBase)
+                .keyboardType(.emailAddress)
+                .textContentType(.emailAddress)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .focused($emailFocused)
+                .padding(.horizontal, 16)
+                .frame(minHeight: 50)
         }
+
+        Text("With an email, the team can reply. Without one, your feedback is anonymous.")
+            .font(.system(size: 12))
+            .foregroundStyle(HexTheme.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 16)
+            .padding(.top, -8)
 
         Text(whatIsSent)
             .font(.system(size: 12))
@@ -294,11 +299,8 @@ struct FeedbackForm: View {
 
     /// The form's promise, in plain words: what goes out, to whom, and only on Send.
     private var whatIsSent: String {
-        if draft.anonymous {
-            return String(localized: "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. No email and no install id. Anonymous feedback can't be answered.")
-        }
-        return draft.trimmedEmail.isEmpty
-            ? String(localized: "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent.")
+        draft.anonymous
+            ? String(localized: "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent.")
             : String(localized: "When you tap Send, Hex sends your message, the pictures above, your email, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent.")
     }
 
@@ -307,7 +309,9 @@ struct FeedbackForm: View {
         switch draft.problem {
         case .messageTooLong?: return String(localized: "The message is too long. Keep it under 20,000 characters.")
         case .imageTooLarge?, .imagesTooLarge?: return String(localized: "The pictures are too large together. Remove one and try again.")
-        case .invalidEmail?: return String(localized: "That email doesn't look right.")
+        // Shown once they leave the field, so it doesn't nag while they type.
+        case .invalidEmail? where !emailFocused:
+            return String(localized: "That isn't an email address. Fix it, or clear it to send without one.")
         default: return nil
         }
     }
@@ -351,7 +355,8 @@ struct FeedbackForm: View {
             sent.images[sent.images.count - 1] = last.prefix(last.count / 2)
         }
         #endif
-        let request = FeedbackRequest(draft: sent, context: start.context, installID: draft.anonymous ? "" : Feedback.installID())
+        // An anonymous send makes no install id.
+        let request = FeedbackRequest(draft: sent, context: start.context, installID: draft.anonymous ? nil : Feedback.installID())
         phase = .sending
         Task {
             switch await sender.send(request, key: key) {
