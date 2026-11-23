@@ -85,14 +85,19 @@ nonisolated struct SpeechModelNeedsHex: HexDescribedError, Equatable {
         return SpeechModelNeedsHex(language: language)
     }
 
-    /// What the keyboard says when installing `language`'s model failed there. Automatic
-    /// moving to another language, or a choice that can't be had with one to try instead,
-    /// keeps `SpeechModelUnavailable`'s sentence: the next dictation works without Hex. A
-    /// daemon that never answered says so and counts no strike, like a cancelled try;
-    /// anything else is Hex's to download (`handOff`).
+    /// What the keyboard says when installing `language`'s model failed there. A daemon that
+    /// never answered says so and counts no strike, like a cancelled try. A language Hex
+    /// itself set aside (its own installs failed, `LanguageSettings.isUnavailable`) keeps
+    /// `SpeechModelUnavailable`'s sentence, which names one to try instead. Anything else is
+    /// Hex's to download (`handOff`): the keyboard sets nothing aside, and its own failures
+    /// (its reservation, a download it couldn't finish) say nothing about Apple's languages.
+    /// Taking them as Apple's, a language picked by hand on an English iPhone (Hebrew,
+    /// Norwegian, German) said "isn't available on this iPhone yet. Try English." at every
+    /// dictation and never went to Hex, which could download it.
     static func keyboardError(for error: Error, language: String, settings: LanguageSettings) -> Error {
         if error is CancellationError || error is SpeechModelUnresponsive { return error }
-        if let unavailable = error as? SpeechModelUnavailable, unavailable.fallback != nil {
+        if let unavailable = error as? SpeechModelUnavailable, unavailable.fallback != nil,
+           settings.isUnavailable(language) {
             return unavailable
         }
         return handOff(language, settings: settings)

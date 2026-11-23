@@ -3355,6 +3355,15 @@ final class SpeechModelInstallTests: XCTestCase {
             XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Open Hex to download English.")
             XCTAssertTrue(settings.keyboardNeedsHex(), "the Hex key opens Hex, which downloads it")
         }
+        // Hebrew picked by hand on an English iPhone: the keyboard's install failing names
+        // English to try, but Hex set nothing aside, so Hex downloads Hebrew too.
+        let hebrew = SpeechModelUnavailable(language: "he-IL", reason: .notOnThisIPhone, fallback: "en-US", automatic: false)
+        settings.clearKeyboardNeedsHex()
+        let first = SpeechModelNeedsHex.keyboardError(for: hebrew, language: "he-IL", settings: settings)
+        XCTAssertEqual(UserFacingError.message(for: first, context: .transcription), "Hex couldn't transcribe that. Try again.")
+        let shown = SpeechModelNeedsHex.keyboardError(for: hebrew, language: "he-IL", settings: settings)
+        XCTAssertEqual(UserFacingError.message(for: shown, context: .transcription), "Open Hex to download Hebrew.")
+        XCTAssertTrue(settings.keyboardNeedsHex())
     }
 
     func testAKeyboardDictationThatWorksBetweenTwoFailuresKeepsTheKeyboardDictating() async throws {
@@ -3374,9 +3383,14 @@ final class SpeechModelInstallTests: XCTestCase {
         XCTAssertTrue(settings.noteKeyboardModelFailure(at: marked.addingTimeInterval(LanguageSettings.keyboardStrikeWindow + 60)))
     }
 
+    /// Only a language Hex itself set aside keeps the sentence naming another one to try.
     func testTheKeyboardKeepsAMoveToAnotherLanguageAndACancel() {
         let switched = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US")
         let offer = SpeechModelUnavailable(language: "ru-RU", reason: .notOnThisIPhone, fallback: "en-US", automatic: false)
+        // Hex's own installs of Russian failed twice in a row.
+        settings.noteUnavailable("ru-RU")
+        settings.noteUnavailable("ru-RU")
+        XCTAssertTrue(settings.isUnavailable("ru-RU"))
         for error in [switched, offer] {
             let shown = SpeechModelNeedsHex.keyboardError(for: error, language: "ru-RU", settings: settings)
             XCTAssertEqual(shown as? SpeechModelUnavailable, error, "the next dictation works without Hex")
