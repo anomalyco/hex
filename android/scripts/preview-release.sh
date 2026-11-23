@@ -121,27 +121,6 @@ PY
 
 fp=$(echo "$fingerprint" | sed 's/../&:/g; s/:$//')
 cat > "$out/README.md" <<MD
-
-if [ "$dry" = yes ]; then
-  echo "$commit $raw $sha" > "$out/checked.txt"
-  echo "dry run: nothing published. Would create $tag on $repo at $commit with $apk ($size bytes, SHA-256 $sha),"
-  echo "then point $channel at it. To publish: rerun this command without --dry-run. Review:"
-  echo "  $out/latest.json"; echo "  $out/README.md"; echo "  $out/release.md"
-  exit 0
-fi
-
-gh release create "$tag" --repo "$repo" --target "$commit" --prerelease --latest=false \
-  --title "Hex Preview $version (build $build)" --notes-file "$out/release.md" "$out/$apk" "$out/$apk.sha256"
-# The asset must serve exactly what was checked before the channel points at it.
-curl -fsSL "$url" | shasum -a 256 | grep -q "^$sha " || { echo "the published APK doesn't match; channel left as it was" >&2; exit 1; }
-
-# Point the channel at it: one commit on the channel branch, fast-forward only.
-ch=$(mktemp -d)
-git -C "$ch" init -q
-git -C "$ch" remote add origin "https://github.com/$repo.git"
-if git -C "$ch" fetch -q --depth 1 origin "$channel" 2>/dev/null; then git -C "$ch" checkout -q -b "$channel" FETCH_HEAD
-else git -C "$ch" checkout -q --orphan "$channel"; fi
-cp "$out/latest.json" "$out/README.md" "$ch/"
 # Hex Preview for Android
 
 **[Download Hex Preview $version (build $build)]($url)** · $(( size / 1000000 )) MB · Android 12 or later · $(date -u +%Y-%m-%d)
@@ -169,6 +148,27 @@ $(sed '/^[[:space:]]*$/d; s/^/- /' "$notes")
 
 Earlier builds are on the [releases page](https://github.com/$repo/releases?q=android-preview) (tags \`android-preview-<build>\`). Typing and dictation stay on the phone; the update check asks GitHub for this file and carries nothing about you.
 MD
+
+if [ "$dry" = yes ]; then
+  echo "$commit $raw $sha" > "$out/checked.txt"
+  echo "dry run: nothing published. Would create $tag on $repo at $commit with $apk ($size bytes, SHA-256 $sha),"
+  echo "then point $channel at it. To publish: rerun this command without --dry-run. Review:"
+  echo "  $out/latest.json"; echo "  $out/README.md"; echo "  $out/release.md"
+  exit 0
+fi
+
+gh release create "$tag" --repo "$repo" --target "$commit" --prerelease --latest=false \
+  --title "Hex Preview $version (build $build)" --notes-file "$out/release.md" "$out/$apk" "$out/$apk.sha256"
+# The asset must serve exactly what was checked before the channel points at it.
+curl -fsSL "$url" | shasum -a 256 | grep -q "^$sha " || { echo "the published APK doesn't match; channel left as it was" >&2; exit 1; }
+
+# Point the channel at it: one commit on the channel branch, fast-forward only.
+ch=$(mktemp -d)
+git -C "$ch" init -q
+git -C "$ch" remote add origin "https://github.com/$repo.git"
+if git -C "$ch" fetch -q --depth 1 origin "$channel" 2>/dev/null; then git -C "$ch" checkout -q -b "$channel" FETCH_HEAD
+else git -C "$ch" checkout -q --orphan "$channel"; fi
+cp "$out/latest.json" "$out/README.md" "$ch/"
 git -C "$ch" add latest.json README.md
 git -C "$ch" -c user.name="$(git -C "$root" config user.name)" -c user.email="$(git -C "$root" config user.email)" \
   commit -q -m "Hex Preview $name (${commit:0:12})"
