@@ -730,4 +730,33 @@ class InsertionTest {
                 .send(FeedbackRequest(FeedbackDraft("Hi"), feedbackContext, installId = { "" })) { _, _ -> })
         }
     }
+
+    // Keyboard › Swipe typing: where a swiped word's space goes (Gboard's, and iPhone Hex's where Gboard says nothing).
+    @Test fun aSwipedWordGetsASpaceBeforeItUnlessTheTextOpensOne() {
+        assertFalse(SwipeText.needsSpace(null))
+        assertFalse(SwipeText.needsSpace(""))
+        assertTrue(SwipeText.needsSpace("Hello"))
+        assertTrue(SwipeText.needsSpace("Hello,"))
+        assertTrue(SwipeText.needsSpace("Hi."))
+        assertFalse(SwipeText.needsSpace("Hello "))
+        assertFalse(SwipeText.needsSpace("Hello\n"))
+        for (opening in listOf("(", "[", "“", "¿", "¡", "@", "#", "/")) assertFalse(opening, SwipeText.needsSpace("see $opening"))
+        assertFalse(SwipeText.needsSpace("he said \""))
+        assertTrue(SwipeText.needsSpace("he said \"yes\""))
+    }
+
+    @Test fun aSwipeWhereDeleteTookAWordBackTypesItsNextReading() {
+        val retries = SwipeRetries()
+        val readings = listOf("there", "they're", "three")
+        assertEquals(readings, retries.typing(readings, "Hello world "))
+        retries.tookBack("there", "Hello world ")
+        assertEquals(listOf("they're", "three", "there"), retries.typing(readings, "Hello world "))
+        retries.tookBack("they're", "Hello world")
+        assertEquals(listOf("three", "there", "they're"), retries.typing(readings, "Hello world "))
+        // Somewhere else, or after any other edit, the words are forgotten.
+        assertEquals(readings, retries.typing(readings, "Goodbye "))
+        retries.tookBack("there", "Hello world ")
+        retries.forget()
+        assertEquals(readings, retries.typing(readings, "Hello world "))
+    }
 }

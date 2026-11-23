@@ -94,6 +94,8 @@
     <string name="settings_autocorrect_detail">Fixes typos when you press space</string>
     <string name="settings_spatial">Spatial autocorrect</string>
     <string name="settings_spatial_detail">Uses where you tap to fix typos</string>
+    <string name="settings_swipe">Swipe typing</string>
+    <string name="settings_swipe_detail">Slide across a word’s letters to type it</string>
     <string name="settings_swear_words">Suggest swear words</string>
     <string name="settings_swear_words_detail">Slurs are never suggested</string>
     <string name="settings_personal_dictionary">Personal dictionary</string>

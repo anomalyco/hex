@@ -48,6 +48,36 @@ Outputs also drop the `. , ! ? ; :` and quotes the engine may add, and ’ reads
 
 iOS numbers quoted elsewhere in this file (`ZZDecoderBench`, "iOS today") were made before the nearest-key rule, which moved them by 1–1.6 points of word error rate.
 
+## Swipe typing
+
+Keyboard › Swipe typing's decoder ([SwipeDecoder](../../app/src/main/java/ly/anoma/hex/typing/SwipeDecoder.kt)) is scored the way iPhone Hex's was (its experiment `2026-11-20-hex-swipe-typing`): synthetic swipes for every word of the held-out sentences above, with the true word before as context. Words of one key are tapped and words the model lacks are left out. [swipe_paths.py](swipe_paths.py) is a port of the iPhone benchmark's generator: the same random numbers, noise model and minimum-jerk timing, on the key grid both keyboards share. Its paths match the Swift generator's to 5e-6 pitch, word for word. The iPhone replay reads the same files, so the two platforms are scored on the very same paths. [SwipeReplay.java](SwipeReplay.java) decodes them with the keyboard's own `SwipeReader`: the decoder, English's contractions, the never-suggest list, then a rare name ranked lower.
+
+```sh
+android/benchmark/typing/swipe-bench.py                          # every language, host JVM
+android/benchmark/typing/swipe-bench.py en --device emulator-5760  # time per swipe against the installed APK
+```
+
+It writes the paths, each set's summary and each word's readings to `android/build/swipe-bench/`. Typical fingers, 120 Hz (2026-11-23):
+
+| Layout | Words swiped | First word right | Typed or in the strip | iPhone, same paths | Emulator, median / p99 |
+|---|---:|---:|---:|---:|---:|
+| English | 12,514 | 96.9% | 99.6% | 96.9% / 99.6% | 1.00 / 3.82 ms |
+| Spanish | 12,346 | 94.3% | 99.4% | 94.3% / 99.4% | 1.28 / 5.16 ms |
+| German | 13,206 | 95.9% | 99.4% | 95.9% / 99.4% | 1.17 / 3.49 ms |
+| Bokmål | 11,845 | 96.4% | 99.3% | — | 1.10 / 3.79 ms |
+| French | 12,666 | 95.2% | 99.3% | 95.2% / 99.3% | 1.30 / 4.62 ms |
+| Italian | 11,002 | 96.0% | 99.3% | — | 1.43 / 4.69 ms |
+
+"Typed or in the strip" is the word among the first four readings: the one typed and the three the strip offers. The emulator is the Studio's API 36 Pixel 8 (4 cores, ARM64), timing `SwipeReader` alone as the keyboard calls it when the finger lifts. iPhone Hex has no Bokmål or Italian model. English with neat and sloppy fingers: 99.0% / 99.9% and 82.0% / 92.2%, the same as iPhone; Spanish 96.1% / 99.9% and 83.3% / 93.4% (iPhone 83.2%).
+
+On the same paths, the Android and iPhone decoders give the same four readings for every English and Spanish swipe. They differ where Android reads more:
+- **German:** a word with ß is swiped through s ("straße", "groß"), so ß words join the candidates. The first reading differs on 86 of 13,206 swipes (Android right on 34, iPhone on 36).
+- **French:** Android leaves out French swear words, which iPhone's never-suggest list lacks ("con", "salaud"). The first reading differs on 4 of 12,666.
+
+The keyboard ranks a rare name ("kent", "ut") 4 nats lower, as iPhone does, except in German, whose capitals list marks nouns. That costs Italian 0.2 points of first word right against the decoder alone; the other layouts are unchanged.
+
+Taps are unaffected: `quality-gate.py all` gives the same report, field for field, with swipe typing as without it. Separately, 60 English held-out sentences tapped into Messages on the emulator came out the same with Swipe typing on and off. The taps were real touches that drift up to 8 px while down, moved onto Hex's keys.
+
 ## Against today's iOS engine
 
 The same 2,000 held-out English and Spanish sentences, typed by today's iOS engine (`origin/dev` 96b4f365, Spatial autocorrect on, iPhone 17 simulator, its taps moved onto today's layout key by key) and by the Android replay, which finishes each word with `TypingWord.finish` and moves each letter tap to the likelier next letter (`likelierKey`, touch areas tiling the rows) as the keyboard does. German and Bokmål have their own 2,000-sentence sets ([synthetic_sets.py](synthetic_sets.py)): held-out Tatoeba sentences typed with the same touch model on Android's eleven-key rows at a 36 pt pitch. iOS ships no Bokmål model and keeps German's behind an experiment, so those two have no iOS column.

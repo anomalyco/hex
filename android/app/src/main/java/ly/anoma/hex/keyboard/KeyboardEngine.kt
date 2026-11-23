@@ -14,6 +14,7 @@ import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.Suggestion
+import ly.anoma.hex.typing.SwipeReader
 import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.typing.TypingWord
@@ -110,6 +111,19 @@ internal class KeyboardEngine(
     private var dictated: Dictated? = null
     private val dropDictation = Runnable { offerUndo(null) }
     private val continuation = DictationContinuation()
+    // Keyboard › Swipe typing (SwipeTyping.kt). The word a swipe just typed, until anything else changes the text:
+    // the strip offers its other readings, any of which takes its place, and delete takes it back.
+    private data class Swiped(val word: String, val alternatives: List<String>)
+    private var swiped: Swiped? = null
+    // The text before the cursor right after a swiped word: a letter, digit or opening mark tapped next goes in after
+    // a space, as Gboard keeps one pending; closing marks go against the word (SpaceRules.JOINERS).
+    private var swipeAnchor: String? = null
+    // The word delete just took back and the text before the cursor then: the strip offers it again (Gboard).
+    private var takenBack: Pair<String, String>? = null
+    private val retries = SwipeRetries()
+    /** A swipe is under way: from the touch becoming one until it ends. */
+    var swiping = false
+        private set
 
     fun startInput(attribute: EditorInfo) {
         edited()
@@ -127,7 +141,7 @@ internal class KeyboardEngine(
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
                 InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_FILTER) &&
             attribute.inputType and (InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS or InputType.TYPE_TEXT_FLAG_AUTO_COMPLETE) == 0
-        resetTyping(); word = null; clearSpaces()
+        resetTyping(); word = null; clearSpaces(); forgetSwipe()
         pad = Pad.of(attribute.inputType)
         symbols = pad != null
         more = false; shift.reset()
@@ -145,6 +159,12 @@ internal class KeyboardEngine(
                 val suffix = undo?.let { it.replacement + " " } ?: word?.token?.takeIf { it.isNotEmpty() }?.let { prefix + it }
                 if (newSelStart != newSelEnd || suffix == null || !endsWith(suffix) ||
                     oldSelStart == expectedCaret) { resetTyping(); surface?.suggestions(emptyList()) }
+            }
+            // The cursor left the word a swipe typed (or the place delete took it back from): its strip goes.
+            val s = swiped; val back = takenBack
+            if (!swiping && ((s != null && (newSelStart != newSelEnd || !endsWith(s.word))) ||
+                    (back != null && (newSelStart != newSelEnd || before() != back.second)))) {
+                forgetSwipe(); retries.forget(); surface?.suggestions(emptyList())
             }
             refreshCaps()
         }
@@ -215,7 +235,8 @@ internal class KeyboardEngine(
     private fun resetTyping() {
         cancelChip(); word?.reset(); undo = null; expectedCaret = -1; prefix = ""
     }
-    private fun clearSpaces() { spaceAnchor = null; pickedAnchor = null; heldAnchor = null }
+    private fun clearSpaces() { spaceAnchor = null; pickedAnchor = null; heldAnchor = null; swipeAnchor = null }
+    private fun forgetSwipe() { swiped = null; takenBack = null }
     private fun cancelChip() { pendingChip?.let(main::removeCallbacks); pendingChip = null }
     fun configureTyping(keepWord: Boolean = false) {
         val language = layoutLanguage().layoutCode
@@ -324,8 +345,9 @@ internal class KeyboardEngine(
     }
     // A space a pick held goes in before the next word starts; returns the text before the cursor.
     private fun takeHeldSpace(before: String): String {
-        if (heldAnchor == null || heldAnchor != before) return before
-        heldAnchor = null
+        val held = heldAnchor != null && heldAnchor == before
+        if (!held && (swipeAnchor == null || swipeAnchor != before)) return before
+        heldAnchor = null; swipeAnchor = null
         if (!target.commit(" ")) return before
         if (expectedCaret >= 0) expectedCaret++
         return "$before "
@@ -346,6 +368,7 @@ internal class KeyboardEngine(
      * double-space), and a closing mark takes its place. */
     fun pickSuggestion(text: String) {
         val w = word ?: return
+        if (pickSwiped(text)) return
         edited()
         if (symbols || !canEndWord()) return
         val old = w.token
@@ -377,9 +400,11 @@ internal class KeyboardEngine(
                 if (replace(" ", ". ")) { resetTyping(); showPredictions(before()); inputDone(); return }
             }
         }
+        // Space never changes a swiped word: it is a reading, not a typo (iPhone Hex).
+        val afterSwipe = swipeAnchor != null && swipeAnchor == b
         clearSpaces()
         val w = word
-        if (w != null && !symbols && canEndWord()) {
+        if (w != null && !symbols && canEndWord() && !afterSwipe) {
             val old = w.token; val lang = w.decoder.model.language
             // Your text replacements first, whatever autocorrect is set to; they never offer an undo.
             val swap = w.textReplacement(b)
@@ -414,10 +439,11 @@ internal class KeyboardEngine(
             if (replace(" ", value)) { resetTyping(); showPredictions(before()); inputDone(); return }
         }
         // Anything that starts another word puts a held space in first; marks go against the word.
+        val afterSwipe = swipeAnchor != null && swipeAnchor == b
         val text = if (value.any { it in SpaceRules.JOINERS || it.isWhitespace() }) b else takeHeldSpace(b)
         clearSpaces()
         val w = word
-        if (mark && w != null && !symbols && canEndWord()) {
+        if (mark && w != null && !symbols && canEndWord() && !afterSwipe) {
             val swap = w.textReplacement(text)
             if (swap != null && replace(swap.original, swap.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             if (feedback.autocorrect && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
@@ -431,6 +457,7 @@ internal class KeyboardEngine(
     }
     fun delete() {
         if (!target.connected) return
+        if (deleteSwiped()) return
         edited()
         // Right after a pick held its space, delete takes that space back and deletes nothing.
         if (heldAnchor != null && heldAnchor == before()) { clearSpaces(); surface?.suggestions(emptyList()); return }
@@ -544,5 +571,134 @@ internal class KeyboardEngine(
         if (shown || next != null) surface?.undoDictation(next != null)
     }
     /** Any edit through the keys ends the Undo dictation offer, and a signed dictation's effect on the next. */
-    private fun edited() { if (dictated != null) offerUndo(null); continuation.clear() }
+    private fun edited() { if (dictated != null) offerUndo(null); continuation.clear(); forgetSwipe(); retries.forget() }
+
+    // MARK: Swipe typing (Keyboard › Swipe typing; SwipeTyping.kt and KeyPlaneView)
+
+    /** What a swipe here is read with: the layout's reader and the word before. */
+    class SwipeContext(val reader: SwipeReader, val previous: String?)
+
+    /** Whether a letter touch may become a swipe now: the setting on, on the letters page of an ordinary text field
+     * (not a password, address, URL or number, where Hex reads no words), with its typing model loaded. */
+    val swipes get() = feedback.swipe && !secure && word != null && !symbols && pad == null && target.connected
+
+    /** A letter touch became a swipe: its key no longer types. Null when it can't be one here. */
+    fun beginSwipe(): SwipeContext? {
+        val w = word ?: return null
+        if (!swipes) return null
+        // A word delete took back stays remembered for this swipe; anything else ends the Undo dictation offer.
+        if (dictated != null) offerUndo(null)
+        continuation.clear(); cancelChip(); forgetSwipe()
+        val reader = w.decoder.swipe.also { it.prepare(feedback.suggestSwearWords) }
+        swiping = true
+        surface?.suggestions(emptyList())
+        val b = before()
+        return SwipeContext(reader, TypingWord.previousWord(if (SwipeText.needsSpace(b)) "$b " else b).takeIf { it.isNotEmpty() })
+    }
+
+    /** The swipe under way reads as [readings] so far, best first: the strip shows the first, as it would go in. */
+    fun swipePreview(readings: List<String>) {
+        if (!swiping) return
+        val b = before()
+        val first = retries.reordered(readings, b).firstOrNull() ?: return
+        surface?.suggestions(listOf(Suggestion(swipeCased(first, swipeCapital(b, SwipeText.needsSpace(b))), Suggestion.Kind.Word)))
+    }
+
+    /** The swipe ended: its best reading goes in (none when [readings] is empty, as for a cancelled swipe), after a
+     * space unless the text before ends in one or in opening punctuation, with a capital from shift or the sentence,
+     * and the strip offers the next three. The next tapped letter goes in after a space; a closing mark against it. */
+    fun endSwipe(readings: List<String>) {
+        if (!swiping) return
+        swiping = false
+        val w = word
+        if (!target.connected || w == null || readings.isEmpty()) { surface?.suggestions(emptyList()); return }
+        val b = before()
+        val ordered = retries.typing(readings, b)
+        val space = SwipeText.needsSpace(b)
+        val capital = swipeCapital(b, space)
+        val text = swipeCased(ordered.first(), capital)
+        val alternatives = swipeAlternatives(w, ordered, capital)
+        clearSpaces(); resetTyping()
+        if (!target.commit(if (space) " $text" else text)) return
+        swiped = Swiped(text, alternatives); takenBack = null
+        swipeAnchor = before()
+        surface?.suggestions(alternatives.map { Suggestion(it, Suggestion.Kind.Word) })
+        inputDone()
+    }
+
+    /** A swipe that read as nothing, was cancelled, or was a tap that slid: nothing goes in. */
+    fun cancelSwipe() {
+        if (!swiping) return
+        swiping = false
+        surface?.suggestions(emptyList())
+    }
+
+    /** Whether a swiped word starts with a capital: shift (one-shot, held, caps lock, or the field's own capital at
+     * the cursor), or the capital the space the swipe adds brings to a sentence ("Hi." then a swipe types " There"). */
+    private fun swipeCapital(before: String, space: Boolean): Boolean {
+        if (shift.uppercase) return true
+        if (!space || !feedback.autoCapitalize) return false
+        val mask = (editor?.inputType ?: 0) and
+            (InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS or InputType.TYPE_TEXT_FLAG_CAP_WORDS or InputType.TYPE_TEXT_FLAG_CAP_SENTENCES)
+        if (mask == 0) return false
+        return mask != InputType.TYPE_TEXT_FLAG_CAP_SENTENCES || TypingWord.startsSentence("$before ")
+    }
+
+    /** A reading as it goes in: all capitals with caps lock, a capital first letter with [capital], else as the word
+     * list writes it mid-sentence (names and German nouns with their capital, "I", your own spellings). */
+    private fun swipeCased(reading: String, capital: Boolean): String {
+        if (shift.locked) return reading.uppercase()
+        val shown = word?.swiped(reading, TypingWord.previousWord(before()).takeIf { it.isNotEmpty() }) ?: reading
+        return if (capital) shown.replaceFirstChar { it.uppercase() } else shown
+    }
+
+    /** The strip's other readings after a swipe, cased as its word is; a reading that is one of your shortcuts shows
+     * as its phrase (the swiped word's first), which space never puts in. */
+    private fun swipeAlternatives(w: TypingWord, readings: List<String>, capital: Boolean): List<String> {
+        val out = ArrayList<String>(3)
+        fun phrase(reading: String) = w.decoder.personal?.shortcut(if (capital) reading.replaceFirstChar { it.uppercase() } else reading)
+        phrase(readings.first())?.let(out::add)
+        for (r in readings.drop(1)) {
+            val item = phrase(r) ?: swipeCased(r, capital)
+            if (out.none { it == item }) out.add(item)
+            if (out.size == 3) break
+        }
+        return out
+    }
+
+    /** The strip tapped right after a swipe: another reading takes the swiped word's place, or a word delete took
+     * back goes in again. False when [text] isn't one of them. */
+    private fun pickSwiped(text: String): Boolean {
+        val back = takenBack
+        if (back != null && back.first == text) {
+            if (before() != back.second || !target.commit(text)) { forgetSwipe(); return false }
+            takenBack = null
+            swiped = Swiped(text, emptyList()); swipeAnchor = before()
+            surface?.suggestions(emptyList()); inputDone(); return true
+        }
+        val s = swiped ?: return false
+        if (text !in s.alternatives) return false
+        if (swipeAnchor != before() || !replace(s.word, text)) { forgetSwipe(); return false }
+        val alternatives = (listOf(s.word) + s.alternatives.filter { it != text }).take(3)
+        swiped = Swiped(text, alternatives); swipeAnchor = before()
+        surface?.suggestions(alternatives.map { Suggestion(it, Suggestion.Kind.Word) })
+        return true
+    }
+
+    /** Right after a swipe, delete takes back its whole word, as Gboard's does: the space before it stays, the strip
+     * offers the word again, and the next swipe there types its next reading. */
+    private fun deleteSwiped(): Boolean {
+        val s = swiped ?: return false
+        val b = before()
+        if (swipeAnchor != b || !b.endsWith(s.word) || !replace(s.word, "")) return false
+        if (dictated != null) offerUndo(null)
+        continuation.clear(); clearSpaces(); resetTyping()
+        val left = before()
+        swiped = null
+        retries.tookBack(s.word, left)
+        takenBack = s.word to left
+        surface?.suggestions(listOf(Suggestion(s.word, Suggestion.Kind.Word)))
+        refreshCaps()
+        return true
+    }
 }

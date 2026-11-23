@@ -22,6 +22,10 @@ internal class TypingPreferences(context: Context) {
     var spatial: Boolean
         get() = prefs.getBoolean("spatial", true)
         set(value) { prefs.edit().putBoolean("spatial", value).apply() }
+    /** Keyboard › Swipe typing: slide through a word's letters to type it. On by default, as on iPhone and Gboard. */
+    var swipe: Boolean
+        get() = prefs.getBoolean("swipe", true)
+        set(value) { prefs.edit().putBoolean("swipe", value).apply() }
     var popups: Boolean
         get() = prefs.getBoolean("popups", true)
         set(value) { prefs.edit().putBoolean("popups", value).apply() }

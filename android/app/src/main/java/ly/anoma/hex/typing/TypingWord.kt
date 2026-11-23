@@ -279,6 +279,24 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         return if (model.language == "de" && ' ' !in fix) capitalised(fix) ?: fix else fix
     }
 
+    /** A swiped reading ([SwipeReader]'s: the model's lowercase spelling, a contraction such as "I'm", or your own
+     * word) as it goes in mid-sentence after [previous] (lowercase, or null), iPhone Hex's swipeCased: "i" and its
+     * contractions, names the books nearly always capitalise and German nouns take their capital (as the tap decoder
+     * gives them), your own words keep your spelling unless that is an ordinary word with a stray capital ("Will").
+     * With Auto-capitalisation off, no capital you didn't type, your own spellings aside. */
+    fun swiped(reading: String, previous: String?): String {
+        val own = decoder.personal?.owns(reading) == true
+        if (!addsCapitals) return if (own) reading else reading.lowercase()
+        if (own) return if (reading.drop(1).none { it.isUpperCase() } && ordinary(reading)) reading.lowercase() else reading
+        val lower = reading.lowercase()
+        if (model.language == "en" && (lower == "i" || lower.startsWith("i'"))) return "I" + lower.drop(1)
+        if (lower.length < 2) return lower
+        val share = model.capitals?.percent(lower) ?: return lower
+        val capital = share >= 95 || (model.language == "de" && share >= 50 && previous in germanDeterminers)
+        val first = lower.first().uppercase()
+        return if (capital && first.length == 1) first + lower.drop(1) else lower
+    }
+
     private fun capitalisedName(word: String): String? {
         if (word.length < 2 || word != word.lowercase() || (model.capitals?.percent(word) ?: -1) < 95) return null
         val first = word.first().uppercase()
@@ -370,7 +388,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         const val REACH = 5.0
         const val ODDS_PER_DP = .8
         // Words the strip offers in place of these, but space never puts in: each is a word too.
-        private val suggestOnly = mapOf("ill" to "I'll", "id" to "I'd", "were" to "we're", "wed" to "we'd",
+        val suggestOnly = mapOf("ill" to "I'll", "id" to "I'd", "were" to "we're", "wed" to "we'd",
             "well" to "we'll", "its" to "it's", "lets" to "let's", "hell" to "he'll", "shell" to "she'll")
         // Hex's own short lists, as iOS: a sentence's common first words, a clause's after a comma, and
         // the commonest words for next-word slots the model can't fill.
