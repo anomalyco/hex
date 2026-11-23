@@ -464,6 +464,22 @@ fn bad_arguments_and_text_alone() {
             .collect();
         assert_eq!(starters, ["ja", "to", "nie"]);
         hk_string_list_free(&mut words);
+        assert_eq!(hk_language_words(c("fr-CA").as_ptr(), 4, &mut words), 0);
+        let codes: Vec<&str> = std::slice::from_raw_parts(words.items, words.count)
+            .iter()
+            .map(|&w| s(w))
+            .collect();
+        assert_eq!(codes, ["fr_CA", "fr", "fr_FR"]);
+        hk_string_list_free(&mut words);
+        assert_eq!(hk_language_words(c("it").as_ptr(), 5, &mut words), 0);
+        let pairs: Vec<&str> = std::slice::from_raw_parts(words.items, words.count)
+            .iter()
+            .map(|&w| s(w))
+            .collect();
+        assert_eq!(pairs.len(), 56);
+        assert!(pairs.as_chunks::<2>().0.contains(&["perche", "perché"]));
+        hk_string_list_free(&mut words);
+        assert_ne!(hk_language_words(c("it").as_ptr(), 9, &mut words), 0);
         hk_autocorrect_free(ac);
         hk_autocorrect_free(ptr::null_mut());
     }

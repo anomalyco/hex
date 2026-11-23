@@ -381,7 +381,9 @@ pub unsafe extern "C" fn hk_adjacent_keys(
 }
 
 /// A language's words (`language` its tag): `which` 0 sentence starters, 1 clause starters, 2
-/// its commonest words, 3 the English contractions Hex corrects to or offers (any language).
+/// its commonest words, 3 the English contractions Hex corrects to or offers (any language), 4
+/// its `UITextChecker` dictionaries, best first, 5 its accent restorations, each plain
+/// spelling followed by its accented one.
 /// Returns 0 and fills `out` (release it with `hk_string_list_free`), else nonzero.
 ///
 /// # Safety
@@ -398,11 +400,21 @@ pub unsafe extern "C" fn hk_language_words(
     };
     guard(FAILED, || {
         let config = LanguageConfig::for_tag(language);
+        let restorations: Vec<&str>;
         let words: &[&str] = match which {
             0 => config.sentence_starters,
             1 => config.clause_starters,
             2 => config.common_words,
             3 => &lists::english_contractions(),
+            4 => config.system_dictionaries,
+            5 => {
+                restorations = config
+                    .accent_restorations
+                    .iter()
+                    .flat_map(|&(a, b)| [a, b])
+                    .collect();
+                &restorations
+            }
             _ => return BAD_ARGUMENT,
         };
         let words = words.iter().map(|w| (*w).to_owned()).collect();

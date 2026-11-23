@@ -557,7 +557,9 @@ int32_t hk_edit_cost(const char *source, const char *target, const char *languag
 /// Whether letters `a` and `b`'s keys neighbour on the grid: 1 or 0, -1 on a bad argument.
 int32_t hk_adjacent_keys(const char *a, const char *b, const HkKeyCentre *cells, size_t count);
 /// `language`'s words, by `which`: 0 sentence starters, 1 clause starters, 2 its commonest
-/// words, 3 the English contractions Hex corrects to or offers (any language).
+/// words, 3 the English contractions Hex corrects to or offers (any language), 4 its
+/// UITextChecker dictionaries, best first, 5 its accent restorations, each plain spelling
+/// followed by its accented one.
 int32_t hk_language_words(const char *language, uint8_t which, HkStringList *out);
 
 #ifdef __cplusplus
