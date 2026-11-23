@@ -3161,7 +3161,8 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     never continues the signature line. Home's preview and Copy stay unsigned, and Hex's
     own fields are never signed.
     Unit tests plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-    on a GitHub-hosted runner; the repo has no Android CI.
+    on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45268305325, the
+    latest observed verification); the repo has no Android CI.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 
