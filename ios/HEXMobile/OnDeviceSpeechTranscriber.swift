@@ -137,7 +137,7 @@ actor OnDeviceSpeechTranscriber: LocalTranscribing {
         }
     }
 
-    nonisolated let displayName = "Apple Speech"
+    nonisolated let engine: DictationEngine = .onDeviceRecognizer
     /// BCP 47, as `SFSpeechRecognizer` lists it.
     private let language: String
     private let access: SpeechRecognitionAccess

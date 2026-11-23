@@ -28,7 +28,7 @@ extension DictationController {
                 await download.stop()
                 ParakeetUltraModel.remove()
             }
-            if engineName != ParakeetUltraTranscriber.name, isModelReady, phase != .preparingModel {
+            if engine != .parakeetUltra, isModelReady, phase != .preparingModel {
                 // Ultra wasn't dictating: drop a load of it beside the engine that is.
                 modelPrepGeneration &+= 1
                 return
@@ -172,7 +172,7 @@ extension DictationController {
         }
         guard modelPrepGeneration == generation else { throw CancellationError() }
         try Task.checkCancellation()
-        engineName = candidate.displayName
+        engine = candidate.engine
         preparingMultilingualParakeet = candidate is ParakeetUltraTranscriber
         try await candidate.prepare { [weak self] progress in
             Task { @MainActor [weak self] in
@@ -215,7 +215,7 @@ extension DictationController {
                 try await candidate.prepare { _ in }
                 guard self.modelPrepGeneration == prepGen else { return }
                 self.transcriber = candidate
-                self.engineName = candidate.displayName
+                self.engine = candidate.engine
                 self.transcriptionLanguage = await candidate.languageName
                 self.transcriptionLanguageID = await candidate.languageIdentifier
                 self.languageOffer = nil

@@ -11,7 +11,7 @@ extension DictationController {
             return false
         }
         let scene = args[flagIndex + 1]
-        controller.engineName = "Apple Speech"
+        controller.engine = .appleSpeech
         controller.transcriptionLanguage = "English"
         controller.transcriptionLanguageID = "en-US"
         controller.keyboardBridge.setModelInstalled(true)
@@ -33,7 +33,7 @@ extension DictationController {
                 automatic: false
             )
             controller.isModelReady = false
-            controller.engineName = "Apple Speech"
+            controller.engine = .appleSpeech
             controller.phase = .failed(UserFacingError.message(for: unavailable, context: .model))
             controller.languageOffer = "en-US"
 

@@ -180,7 +180,7 @@ actor AppleSpeechTranscriber: LocalTranscribing {
         }
     }
 
-    nonisolated let displayName = "Apple Speech"
+    nonisolated let engine: DictationEngine = .appleSpeech
 
     /// The language it dictates; the same language on `DictationTranscriber` once
     /// `SpeechTranscriber`'s model wouldn't install.

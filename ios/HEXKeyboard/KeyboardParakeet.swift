@@ -62,21 +62,11 @@ final class KeyboardParakeet {
     /// before took 0.3 s, one that compiled 11.6 s (Ultra) to 16.5 s (V2).
     static let compilingLoad: TimeInterval = 5
 
-    /// The model the keyboard would transcribe with, or nil for Apple's speech recognition:
-    /// the experiment on, an iPhone with the memory, not Two-language dictation, and the
-    /// model's files complete in the App Group.
+    /// The model the keyboard would transcribe with, or nil for Apple's speech recognition,
+    /// resolved from the shared `KeyboardParakeetPlan`.
     nonisolated static func choice() -> Choice? {
-        guard KeyboardParakeetSettings().isEnabled, KeyboardParakeetSettings.fits(),
-              !TwoLanguageDictationSettings().isEnabled else { return nil }
-        if let language = MultilingualParakeetSettings().language(),
-           SpeechModelStore.isComplete(SpeechModelStore.parakeetUltra) {
-            return Choice(multilingual: true, language: language)
-        }
-        let languages = LanguageSettings()
-        guard let wanted = languages.dictationLanguage ?? languages.keyboardDictationLanguage() ?? Locale.preferredLanguages.first,
-              Locale(identifier: wanted).language.languageCode?.identifier == "en",
-              SpeechModelStore.isComplete(SpeechModelStore.parakeetV2) else { return nil }
-        return Choice(multilingual: false, language: wanted)
+        guard let picked = KeyboardParakeetPlan.current().modelChoice else { return nil }
+        return Choice(multilingual: picked.model.isMultilingual, language: picked.language)
     }
 
     /// Whether the keyboard dictates the multilingual model's language itself now, so the Hex

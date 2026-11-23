@@ -56,20 +56,48 @@ nonisolated struct KeyboardSelfDictation {
         return (reason, Date(timeIntervalSince1970: at))
     }
 
-    func dictatesItself(
+    /// Why the keyboard hands dictation to Hex instead of dictating in its own process, or nil
+    /// when the keyboard dictates by itself.
+    func handoffReason(
         osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
-        now: Date = Date()
-    ) -> Bool {
-        guard osMajorVersion >= Self.firstVersion else { return false }
-        if let handed = handedToHex, now.timeIntervalSince(handed.at) < Self.recentWindow { return false }
+        now: Date = Date(),
+        hasMultilingualModelInKeyboard: Bool? = nil,
+        hasMemoryToStart: Bool = true,
+        includeRecentHandoff: Bool = true
+    ) -> Reason? {
+        guard osMajorVersion >= Self.firstVersion else { return .openedHex }
+        if includeRecentHandoff,
+           let handed = handedToHex,
+           now.timeIntervalSince(handed.at) < Self.recentWindow {
+            return handed.reason
+        }
         let languages = LanguageSettings(defaults: defaults)
-        if languages.keyboardNeedsHex(now: now) { return false }
         // Speech model in keyboard (on unless turned off) dictates the multilingual model's
         // language in the keyboard only once the keyboard has that model loaded; until then
         // Dictate opens Hex for it.
         let multilingual = MultilingualParakeetSettings(defaults: defaults)
-        let language = multilingual.language(set: languages.dictationLanguage, keyboard: languages.keyboardDictationLanguage())
-        return !multilingual.keyboardOpensHex(language: language)
-            || KeyboardParakeetSettings(defaults: defaults).keyboardHasMultilingualModel
+        let language = multilingual.language(
+            set: languages.dictationLanguage,
+            keyboard: languages.keyboardDictationLanguage()
+        )
+        let keyboardHasMultilingual = hasMultilingualModelInKeyboard
+            ?? KeyboardParakeetSettings(defaults: defaults).keyboardHasMultilingualModel
+        if multilingual.keyboardOpensHex(language: language) && !keyboardHasMultilingual {
+            return .multilingual
+        }
+        if languages.keyboardNeedsHex(now: now) {
+            return .speechModel
+        }
+        if !hasMemoryToStart {
+            return .memory
+        }
+        return nil
+    }
+
+    func dictatesItself(
+        osMajorVersion: Int = ProcessInfo.processInfo.operatingSystemVersion.majorVersion,
+        now: Date = Date()
+    ) -> Bool {
+        handoffReason(osMajorVersion: osMajorVersion, now: now) == nil
     }
 }

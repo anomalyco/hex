@@ -7,6 +7,7 @@ struct ModelPreparationProgress: Sendable {
 }
 
 protocol LocalTranscribing: Actor {
+    nonisolated var engine: DictationEngine { get }
     nonisolated var displayName: String { get }
     var languageName: String { get }
     /// The BCP 47 identifier of the language it transcribes.
@@ -21,6 +22,8 @@ protocol LocalTranscribing: Actor {
 }
 
 extension LocalTranscribing {
+    nonisolated var displayName: String { engine.displayName }
+
     /// English unless the engine says otherwise.
     var languageIdentifier: String { "en-US" }
 
@@ -75,7 +78,7 @@ actor ParakeetTranscriber: LocalTranscribing {
 
     private var manager: AsrManager?
 
-    nonisolated let displayName = "Parakeet V2"
+    nonisolated let engine: DictationEngine = .parakeetV2
     let languageName = "English"
 
     /// In the App Group (`SpeechModelStore`), so Settings › Dictation › Speech model in keyboard can load

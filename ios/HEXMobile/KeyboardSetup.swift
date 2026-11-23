@@ -309,7 +309,7 @@ struct SetupSheet: View {
                     // A check or download that ended is never the last word: try it again here.
                     if modelFailed {
                         smallButton("Try again") {
-                            keyboardSpeech.start(retry: true) { dictation.engineName }
+                            keyboardSpeech.start(retry: true) { dictation.engine }
                             if case .failed = dictation.phase { dictation.prepareModel() }
                         }
                     }

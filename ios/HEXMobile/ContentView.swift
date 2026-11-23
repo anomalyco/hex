@@ -88,7 +88,7 @@ struct ContentView: View {
                 TranslationSessionHostView()
             }
         }
-        .task { keyboardSpeech.start { dictation.engineName } }
+        .task { keyboardSpeech.start { dictation.engine } }
         .onChange(of: scenePhase) { _, phase in
             switch phase {
             case .background:
@@ -99,10 +99,10 @@ struct ContentView: View {
                 // app's own preparation resumes in HEXMobileApp, which tracks it the same way.
                 if keyboardCheckWasInBackground {
                     keyboardCheckWasInBackground = false
-                    keyboardSpeech.resumeOnForeground { dictation.engineName }
+                    keyboardSpeech.resumeOnForeground { dictation.engine }
                 }
                 // Opened from a keyboard handing its dictations to Hex: check again whether it must.
-                keyboardSpeech.recheckKeyboardHandoff { dictation.engineName }
+                keyboardSpeech.recheckKeyboardHandoff { dictation.engine }
             default:
                 break
             }

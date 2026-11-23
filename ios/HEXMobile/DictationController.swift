@@ -46,27 +46,8 @@ final class DictationController {
         let capture: any ActiveAudioCapture
         let startedAt: TimeInterval
         let keyboardJobID: String?
-        let style: DictationStyle
+        let preferences: DictationPipeline.Preferences
         let usesCleanup: Bool
-        /// Settings › Dictation › Lowercase, read at start.
-        let lowercase: Bool
-        /// Settings › Dictation › Format lists, read at start.
-        let formatLists: Bool
-        /// Settings › Dictation › Spoken punctuation, read at start.
-        let spokenPunctuation: Bool
-        /// Settings › Dictation › Numbers as digits, read at start.
-        let numbersAsDigits: Bool
-        /// Settings › Dictation › End with a period, read at start.
-        let endsWithPeriod: Bool
-        /// Experiments › Hinglish, read at start.
-        let hinglish: Bool
-        /// Experiments › Greeklish, read at start.
-        let greeklish: Bool
-        let vocabularyTerms: [String]
-        /// Learn how I type's dictation fixes, read at start; empty while it is off.
-        let personalCorrections: [DictationCorrection]
-        /// Custom vocabulary plus the learned fixes' meant words, for Apple Speech.
-        let recognitionHints: [String]
         /// Whether the keyboard gets the raw transcript to learn from.
         let sharesHeard: Bool
         let copyToPasteboard: Bool
@@ -195,7 +176,8 @@ final class DictationController {
     private(set) var style: DictationStyle
     private(set) var microphone: MicrophoneChoice
     private(set) var handoffNotice: String?
-    var engineName = "Local speech"
+    var engine: DictationEngine = .undecided
+    var engineName: String { engine.displayName }
     var transcriptionLanguage = "English"
     /// The BCP 47 identifier of `transcriptionLanguage`, for the steps that depend on it.
     var transcriptionLanguageID = "en-US"
@@ -760,20 +742,19 @@ final class DictationController {
         transcriptionTask = nil
         let effectiveStyle = styleOverride ?? style
         let usesCleanup = cleanupSettings.isEnabled
-        let lowercase = lowercaseSettings.isEnabled
-        let formatLists = listSettings.isEnabled
-        let spokenPunctuation = punctuationSettings.isEnabled
-        let numbersAsDigits = numberSettings.isEnabled
-        let endsWithPeriod = periodSettings.isEnabled
-        let hinglish = hinglishSettings.isEnabled
-        let greeklish = greeklishSettings.isEnabled
         let language = transcriptionLanguageID
         CleanupTagger.prepareIfEnabled(style: effectiveStyle, language: language)
-        let vocabularyTerms = customVocabularySettings.activeTerms
-        let personalCorrections = learnedDictationCorrections(language)
-        let recognitionHints = DictationCorrections.recognitionHints(
-            vocabulary: vocabularyTerms,
-            corrections: personalCorrections
+        let preferences = DictationPipeline.Preferences.current(
+            style: effectiveStyle,
+            vocabulary: customVocabularySettings,
+            corrections: learnedDictationCorrections(language),
+            lowercase: lowercaseSettings,
+            lists: listSettings,
+            punctuation: punctuationSettings,
+            numbers: numberSettings,
+            hinglish: hinglishSettings,
+            greeklish: greeklishSettings,
+            period: periodSettings
         )
         let sharesHeard = typingJournalSettings.isEnabled
 
@@ -814,18 +795,8 @@ final class DictationController {
                     capture: capture,
                     startedAt: startedAt,
                     keyboardJobID: keyboardJobID,
-                    style: effectiveStyle,
+                    preferences: preferences,
                     usesCleanup: usesCleanup,
-                    lowercase: lowercase,
-                    formatLists: formatLists,
-                    spokenPunctuation: spokenPunctuation,
-                    numbersAsDigits: numbersAsDigits,
-                    endsWithPeriod: endsWithPeriod,
-                    hinglish: hinglish,
-                    greeklish: greeklish,
-                    vocabularyTerms: vocabularyTerms,
-                    personalCorrections: personalCorrections,
-                    recognitionHints: recognitionHints,
                     sharesHeard: sharesHeard,
                     copyToPasteboard: copyToPasteboard,
                     language: language
@@ -904,24 +875,15 @@ final class DictationController {
             do {
                 let rawText = try await activeTranscriber.transcribe(
                     captureURL,
-                    vocabulary: session.recognitionHints
+                    vocabulary: session.preferences.recognitionHints
                 )
                 guard let self, self.jobGeneration == captureGeneration, !Task.isCancelled else {
                     return
                 }
                 // The steps in-keyboard dictation runs too, plus Apple Intelligence's cleanup.
                 let pipeline = DictationPipeline(
-                    style: session.style,
-                    language: session.language,
-                    vocabulary: session.vocabularyTerms,
-                    corrections: session.personalCorrections,
-                    lowercase: session.lowercase,
-                    formatLists: session.formatLists,
-                    spokenPunctuation: session.spokenPunctuation,
-                    numbersAsDigits: session.numbersAsDigits,
-                    hinglish: session.hinglish,
-                    greeklish: session.greeklish,
-                    endsWithPeriod: session.endsWithPeriod
+                    preferences: session.preferences,
+                    language: session.language
                 )
                 let stages = await pipeline.run(rawText) { tagged in
                     await self.cleanedTranscriptIfEnabled(tagged, session: session)
@@ -952,14 +914,14 @@ final class DictationController {
                         ? DictationStages(
                             engine: self.engineName,
                             language: self.transcriptionLanguage,
-                            style: session.style.rawValue,
+                            style: session.preferences.style.rawValue,
                             recordedMS: Int((finalDuration * 1000).rounded()),
                             transcribeMS: Int((Date().timeIntervalSince(transcribeStarted) * 1000).rounded()),
                             raw: rawText,
                             fixed: stages.fixed,
                             spelled: stages.spelled,
-                            tagged: CleanupTaggerSettings().isEnabled && session.style != .verbatim ? stages.tagged : nil,
-                            cleaned: session.usesCleanup && session.style != .verbatim ? stages.cleaned : nil,
+                            tagged: CleanupTaggerSettings().isEnabled && session.preferences.style != .verbatim ? stages.tagged : nil,
+                            cleaned: session.usesCleanup && session.preferences.style != .verbatim ? stages.cleaned : nil,
                             translated: translated,
                             formatted: formatted
                         )
@@ -990,6 +952,7 @@ final class DictationController {
                 let message = UserFacingError.message(for: error, context: .transcription)
                 self.keyboardMessage = keyboardJobID == nil ? nil : message
                 self.phase = .failed(message)
+                self.captureFailed = self.isModelReady
                 self.publishKeyboardSnapshot()
                 self.prepareDeferredLanguageIfNeeded()
             }
@@ -1002,7 +965,7 @@ final class DictationController {
         session: ActiveCaptureSession
     ) async -> String {
         guard session.usesCleanup,
-              session.style != .verbatim,
+              session.preferences.style != .verbatim,
               !rawText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               let cleaner,
               cleaner.isAvailable,
@@ -1279,6 +1242,7 @@ final class DictationController {
             } else {
                 self.cancelCurrentJob()
                 self.phase = .failed(String(localized: "Recording stopped."))
+                self.captureFailed = self.isModelReady
                 self.publishKeyboardSnapshot()
             }
         }

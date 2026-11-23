@@ -188,7 +188,9 @@ nonisolated enum KeyboardLocalCapturePhase: Equatable, Sendable {
             )
         case .failed(let message, let until):
             guard until > now else { return nil }
-            return KeyboardSnapshot(state: .failed, heartbeat: now, expiresAt: until, message: message, messageAt: now)
+            // A local failure is not a warm Hex session: heartbeat/expiresAt stay 0 so
+            // `isWarmAvailable` stays false while `statusSlot` still shows the message.
+            return KeyboardSnapshot(state: .failed, heartbeat: 0, expiresAt: 0, message: message, messageAt: now)
         }
     }
 }

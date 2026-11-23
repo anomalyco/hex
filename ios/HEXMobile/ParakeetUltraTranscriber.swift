@@ -28,7 +28,7 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
         }
     }
 
-    static let name = "Parakeet Ultra"
+    static let name = DictationEngine.parakeetUltra.displayName
     /// After a load that ended Hex (`ParakeetLoadGuard`), beside Try again.
     nonisolated static var setAsideMessage: String {
         String(localized: "Hex closed while getting the multilingual model ready, likely short of memory.")
@@ -48,7 +48,7 @@ actor ParakeetUltraTranscriber: LocalTranscribing {
         available == 0 || available >= loadMemory
     }
 
-    nonisolated let displayName = ParakeetUltraTranscriber.name
+    nonisolated let engine: DictationEngine = .parakeetUltra
     let languageIdentifier: String
     private var manager: AsrManager?
 

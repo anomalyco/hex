@@ -61,19 +61,37 @@ final class KeyboardParakeetDownload {
 
     /// What holds the download back now, nil once it may start by itself.
     var hold: Hold? {
-        let wanted = DictationController.wantedLanguage()
-        return Self.hold(
-            otherEngine: TwoLanguageDictationSettings().isEnabled || MultilingualParakeetSettings().language() != nil,
-            english: SpeechLanguagePicker.isEnglish(wanted),
-            keyboardLimit: KeyboardParakeetSettings().keyboardLimit,
+        Self.hold(
+            plan: KeyboardParakeetPlan.current(),
             unmetered: isUnmetered,
             freeBytes: Self.freeBytes()
         )
     }
 
-    /// Only for a keyboard that would use it: English, the keyboard's own limit measured and
-    /// enough (`KeyboardParakeetBudget`), a connection that isn't cellular, a hotspot or Low
-    /// Data Mode, and `freeSpaceNeeded` free (unknown space doesn't hold it).
+    /// Only for a keyboard that would use it: resolved from `KeyboardParakeetPlan`, plus a
+    /// connection that isn't cellular, a hotspot or Low Data Mode, and `freeSpaceNeeded` free.
+    nonisolated static func hold(
+        plan: KeyboardParakeetPlan,
+        unmetered: Bool?,
+        freeBytes: Int64?
+    ) -> Hold? {
+        switch plan {
+        case .twoLanguage, .multilingual:
+            return .otherEngine
+        case .notEnglish:
+            return .notEnglish
+        case .unmeasured:
+            return .keyboardNotMeasured
+        case .tooSmall:
+            return .keyboardTooSmall
+        case .off, .awaitingV2Download, .readyV2:
+            guard unmetered == true else { return .notOnWiFi }
+            if let freeBytes, freeBytes < freeSpaceNeeded { return .needsSpace }
+            return nil
+        }
+    }
+
+    /// Convenience over the individual inputs; delegates to `KeyboardParakeetPlan`.
     nonisolated static func hold(
         otherEngine: Bool,
         english: Bool,
@@ -81,13 +99,17 @@ final class KeyboardParakeetDownload {
         unmetered: Bool?,
         freeBytes: Int64?
     ) -> Hold? {
-        if otherEngine { return .otherEngine }
-        guard english else { return .notEnglish }
-        guard let keyboardLimit else { return .keyboardNotMeasured }
-        guard keyboardLimit >= KeyboardParakeetBudget.requiredLimit else { return .keyboardTooSmall }
-        guard unmetered == true else { return .notOnWiFi }
-        if let freeBytes, freeBytes < freeSpaceNeeded { return .needsSpace }
-        return nil
+        let plan = KeyboardParakeetPlan.resolve(
+            isEnabled: true,
+            fitsDevice: true,
+            twoLanguageEnabled: otherEngine,
+            multilingualLanguage: nil,
+            wantedLanguage: english ? "en-US" : "fr-FR",
+            keyboardLimit: keyboardLimit,
+            v2Downloaded: false,
+            ultraDownloaded: false
+        )
+        return hold(plan: plan, unmetered: unmetered, freeBytes: freeBytes)
     }
 
     /// Whether a connection lets the download start by itself: up, not expensive (a personal

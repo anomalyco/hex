@@ -125,7 +125,7 @@ final class KeyboardBridgeTests: XCTestCase {
             )
         }
 
-        // A warm session's dictation failed just now: the keyboard says so and dictates itself.
+        // A warm session's dictation failed just now: the keyboard says so and retries through Hex.
         let model = KeyboardViewModel()
         show(
             KeyboardSnapshot(state: .failed, heartbeat: t0 + 1, expiresAt: t0 + 900, message: busy, messageAt: t0),
@@ -135,7 +135,8 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertEqual(model.stagePhase, .failed)
         XCTAssertEqual(model.statusMessage, busy)
         XCTAssertTrue(model.isWarmAvailable)
-        XCTAssertFalse(model.dictatesThroughHex, "the Hex key dictates in the keyboard, as Dictate does")
+        XCTAssertEqual(model.route, .warm)
+        XCTAssertTrue(model.dictatesThroughHex, "a live warm session retries through Hex")
 
         // Seconds later, with the session still up, it's over and the Hex key uses the session.
         let later = KeyboardSnapshot(state: .failed, heartbeat: t0 + 9, expiresAt: t0 + 900, message: busy, messageAt: t0)
@@ -164,16 +165,17 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertNil(noted.statusMessage)
         XCTAssertTrue(noted.dictatesThroughHex)
 
-        // The keyboard's own failure keeps its snapshot live for its 6 s, which is no session:
-        // the full keyboard's Hex key tries again in the keyboard instead of sending to no one.
+        // The keyboard's own failure snapshot has no warm session (heartbeat/expiresAt 0):
+        // both keyboards show the message and retry in the keyboard instead of sending to Hex.
         let own = KeyboardViewModel()
-        show(
-            KeyboardSnapshot(state: .failed, heartbeat: t0 + 1, expiresAt: t0 + 6, message: busy, messageAt: t0 + 1),
-            at: t0 + 1,
-            on: own
-        )
+        own.onLocalDictateTap = {}
+        let localFailed = KeyboardLocalCapturePhase.failed(message: busy, until: t0 + 6)
+            .snapshot(now: t0 + 1, loudnessDB: -62)!
+        show(localFailed, at: t0 + 1, on: own)
         XCTAssertEqual(own.stagePhase, .failed)
-        XCTAssertTrue(own.isWarmAvailable)
+        XCTAssertEqual(own.failureMessage, busy)
+        XCTAssertFalse(own.isWarmAvailable)
+        XCTAssertEqual(own.route, .inKeyboard)
         XCTAssertFalse(own.dictatesThroughHex)
 
         let encoded = KeyboardSnapshot(state: .failed, heartbeat: t0, expiresAt: 0, message: busy, messageAt: t0)

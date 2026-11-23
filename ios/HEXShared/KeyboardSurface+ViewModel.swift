@@ -2,6 +2,43 @@ import Combine
 import SwiftUI
 import UIKit
 
+/// Which dictation starts when a finger lands on Dictate or the Hex key.
+/// Every surface (dictation bar, full keyboard, selection dictation, auto-start, touch-down
+/// arming) switches on this single resolution.
+nonisolated enum DictationRoute: Equatable, Sendable {
+    /// Full Access is off: open Hex's setup sheet or show the Full Access hint.
+    case setUp
+    /// Full Access is on, but Hex's speech model isn't installed yet: open Hex to finish setup.
+    case needsModel
+    /// Hex's warm session takes the dictation (including warm retry after a failure).
+    case warm
+    /// In-keyboard dictation (iOS 26+) runs in the keyboard's own process.
+    case inKeyboard
+    /// Opens Hex to dictate (cold start / handoff). The optional reason records why in-keyboard
+    /// dictation handed off (`memory`, `speechModel`, `multilingual`), or nil where in-keyboard
+    /// dictation isn't supported.
+    case opensHex(KeyboardSelfDictation.Reason?)
+
+    static func resolve(
+        hasFullAccess: Bool,
+        isModelInstalled: Bool,
+        isWarmAvailable: Bool,
+        localAvailable: Bool,
+        opensHexReason: KeyboardSelfDictation.Reason?
+    ) -> DictationRoute {
+        guard hasFullAccess else { return .setUp }
+        guard isModelInstalled else { return .needsModel }
+        if isWarmAvailable { return .warm }
+        if localAvailable { return .inKeyboard }
+        return .opensHex(opensHexReason)
+    }
+
+    /// Whether dictation starts without leaving the host app (warm session or in-keyboard).
+    var dictatesInPlace: Bool {
+        self == .warm || self == .inKeyboard
+    }
+}
+
 /// The dictation bar's state: its phase, the style and language trays, the message and
 /// transcript, and the clock the surface reads. Kept beside the surface view.
 @MainActor
@@ -20,6 +57,18 @@ final class KeyboardViewModel: ObservableObject {
         case recording
         case transcribing
         case failed
+    }
+
+    /// Mutually exclusive status shown in the dictation bar's leading slot and read by the full
+    /// keyboard's strip for failures.
+    enum StatusSlot: Equatable {
+        case none
+        case noAccess
+        case starting
+        case recording
+        case message(String, isFailure: Bool)
+        case translationNote(TranslationFailure)
+        case warm
     }
 
     struct PendingCommand: Equatable {
@@ -43,11 +92,56 @@ final class KeyboardViewModel: ObservableObject {
     @Published private(set) var isWarmAvailable = false
     @Published private(set) var stagePhase: StagePhase = .idle
     @Published private(set) var statusMessage: String?
-    /// A tap on Dictate or the Hex key records through Hex's warm session. Not while the last
-    /// dictation shows as failed: the keyboard's own failure keeps its snapshot live for a few
-    /// seconds, which isn't a session, and the bar already dictates in the keyboard then.
+    /// Why Dictate opens Hex when in-keyboard dictation can't take it, fed by `KeyboardViewController`.
+    var opensHexReason: KeyboardSelfDictation.Reason?
+
+    /// The single precedence table for what happens when a finger lands to dictate.
+    var route: DictationRoute {
+        DictationRoute.resolve(
+            hasFullAccess: hasFullAccess,
+            isModelInstalled: isModelInstalled,
+            isWarmAvailable: isWarmAvailable,
+            localAvailable: onLocalDictateTap != nil,
+            opensHexReason: opensHexReason
+        )
+    }
+
+    /// A tap on Dictate or the Hex key records through Hex's warm session (including retrying
+    /// after a warm-session failure).
     var dictatesThroughHex: Bool {
-        hasFullAccess && isWarmAvailable && stagePhase != .failed
+        route == .warm
+    }
+
+    /// Push-to-talk is available when idle or after a failure and dictation stays in-place.
+    var canPushToTalk: Bool {
+        route.dictatesInPlace && (stagePhase == .idle || stagePhase == .failed)
+    }
+
+    /// Single mutually exclusive status for the leading bar slot and full-keyboard failure strip.
+    var statusSlot: StatusSlot {
+        guard hasFullAccess else { return .noAccess }
+        switch stagePhase {
+        case .starting:
+            return .starting
+        case .recording:
+            return .recording
+        case .transcribing:
+            return .none
+        case .failed:
+            if let statusMessage { return .message(statusMessage, isFailure: true) }
+            if let translationNote { return .translationNote(translationNote) }
+            return isWarmAvailable ? .warm : .none
+        case .idle:
+            if let translationNote { return .translationNote(translationNote) }
+            if let statusMessage { return .message(statusMessage, isFailure: false) }
+            return isWarmAvailable ? .warm : .none
+        }
+    }
+
+    /// Failure message shown consistently by both the dictation bar and the full keyboard.
+    var failureMessage: String? {
+        if case .message(let text, isFailure: true) = statusSlot { return text }
+        return nil
     }
     @Published var style: DictationStyle = .polished
     @Published var activeTray: PickerTray = .none

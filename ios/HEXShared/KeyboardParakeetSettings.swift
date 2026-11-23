@@ -139,13 +139,21 @@ nonisolated struct KeyboardParakeetNotice {
         otherEngine: Bool = TwoLanguageDictationSettings().isEnabled || MultilingualParakeetSettings().language() != nil,
         downloaded: Bool = SpeechModelStore.isComplete(SpeechModelStore.parakeetV2)
     ) -> Bool {
-        guard settings.isOn, let limit = settings.keyboardLimit, limit >= KeyboardParakeetBudget.requiredLimit else { return false }
-        return english && !otherEngine && !downloaded
+        KeyboardParakeetPlan.resolve(
+            isEnabled: settings.isEnabled,
+            fitsDevice: KeyboardParakeetSettings.fits(),
+            twoLanguageEnabled: otherEngine,
+            multilingualLanguage: nil,
+            wantedLanguage: english ? "en-US" : "fr-FR",
+            keyboardLimit: settings.keyboardLimit,
+            v2Downloaded: downloaded,
+            ultraDownloaded: false
+        ).awaitsV2Download
     }
 
     static func dictatesEnglish(_ languages: LanguageSettings = LanguageSettings()) -> Bool {
-        guard let wanted = languages.dictationLanguage ?? languages.keyboardDictationLanguage() ?? Locale.preferredLanguages.first else { return false }
-        return Locale(identifier: wanted).language.languageCode?.identifier == "en"
+        guard let wanted = languages.wantedDictationLanguage() else { return false }
+        return SpeechLanguagePicker.isEnglish(wanted)
     }
 
     /// Not opened from or dismissed, under three showings, and not shown today.
