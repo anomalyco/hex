@@ -60,12 +60,12 @@ transcribe-cpp-sys = { git = "https://github.com/anomalyco/transcribe.cpp", rev 
 # parley_engine, wgpu-hal, accesskit_windows and accesskit_macos. Patch winit
 # and sctk-adwaita together: Rune's winit calls the vendored frame's
 # `AdwaitaFrame::content_corner_radius`. Bump the rev with the rune pin above.
-winit = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-sctk-adwaita = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-parley_engine = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-wgpu-hal = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-accesskit_windows = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-accesskit_macos = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+winit = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+sctk-adwaita = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+parley_engine = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+wgpu-hal = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+accesskit_windows = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+accesskit_macos = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
 
 [dependencies]
 clap = { version = "4.6.7", features = ["derive"] }
@@ -153,16 +153,16 @@ rmcp = { version = "3.5.1", default-features = false, features = ["server", "mac
 tokio = { version = "1.53.1", features = ["rt", "io-std"] }
 anyhow = "1.0.104"
 # The capture capsule's motion-lint trace.
-rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+rune-motion = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
 scrawl-capture = { path = "crates/capture", default-features = false, features = ["screen", "helper"] }
 pollster = "1.0.1"
 # Screenshot PNGs and the screenshot editor's export.
 png = "0.18"
 # The local API's `/profile/vitals`; it reports nothing off macOS.
-procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-rune = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef", features = ["native-file-dialog", "macos-background-cursor"] }
-rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
-rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "c853811c8e0e60a632eaa2e72992f871225737ef" }
+procwatch = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+rune = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227", features = ["native-file-dialog", "macos-background-cursor"] }
+rune-kit = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
+rune-theme-opencode = { git = "https://github.com/anomalyco/rune.git", rev = "9d4b4636f1f7e6d172053a0b6469a334c0bfc227" }
 # The welcome hero's own GPU pass (`rune_ui::hero`); Rune's version.
 wgpu = { version = "30", default-features = false, features = ["std", "parking_lot", "metal", "wgsl"] }
 
