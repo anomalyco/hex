@@ -49,13 +49,13 @@ pub const LANGUAGES: &[(&str, &str)] = &[
     ("fil", "Filipino"),
     ("km", "Khmer"),
     ("az", "Azerbaijani"),
+    ("ca", "Catalan"),
 ];
 
 /// Names for the other languages Whisper knows, which Settings lists only
 /// for a model that declares them (an import), after [`LANGUAGES`].
 const OTHER_LANGUAGES: &[(&str, &str)] = &[
     ("nn", "Norwegian Nynorsk"),
-    ("ca", "Catalan"),
     ("ta", "Tamil"),
     ("ur", "Urdu"),
     ("la", "Latin"),

@@ -1845,6 +1845,26 @@ mod tests {
     }
 
     #[test]
+    fn catalan_is_transcribed_by_whisper_with_its_language_hint() {
+        let selection = recommended_selection("ca");
+        assert_eq!(selection.model, TranscriptionModelId::WhisperLargeV3Turbo);
+        assert_eq!(selection.language, "ca");
+        let model = validate(&selection).unwrap();
+        assert_eq!(model.runtime_language_hint("ca"), Some("ca"));
+        assert!(model.language_choices().contains(&"ca"));
+        let choices = choices_for_runtime("ca");
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].recommendation, Recommendation::Recommended);
+        assert!(
+            validate(&TranscriptionSelection {
+                model: TranscriptionModelId::Qwen3Asr06B,
+                language: "ca".into(),
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
     fn whisper_and_qwen3_asr_read_the_vocabulary_as_a_prompt_and_parakeet_biases() {
         use TranscriptionModelId::*;
         let by = |kind| {
