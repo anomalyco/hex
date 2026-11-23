@@ -71,6 +71,8 @@ struct Invocation {
     binding: RuntimeHotkey,
     target: Target,
     check: Instant,
+    /// The rows are being read for this invocation.
+    reading: bool,
 }
 pub(super) struct Picker {
     hold: Gesture,
@@ -107,11 +109,16 @@ impl Picker {
         if !can_hold {
             return worker.paste_recent(Request { id: None, target });
         }
+        let epoch = browse::begin();
+        // Read the rows while the key is held, so the picker opens the
+        // moment the hold passes; a tap leaves them unread.
+        let reading = self.read(epoch).is_ok();
         self.active = Some(Invocation {
-            epoch: browse::begin(),
+            epoch,
             binding,
             target,
             check: Instant::now(),
+            reading,
         });
         self.hold.press(binding, at, true);
         Ok(())
@@ -125,14 +132,9 @@ impl Picker {
         if self.active.is_none() {
             return Ok(());
         }
+        // Open, the picker outlives the keys: the session tap's keys, a
+        // click on a row, or a click outside it end it.
         if browse::open() {
-            if let InputEvent::Flags(flags) = event
-                && let Some(inv) = &self.active
-                && !inv.binding.modifiers.is_empty()
-                && !inv.binding.required_modifiers_down(flags)
-            {
-                browse::nav(Nav::Commit);
-            }
             if matches!(event, InputEvent::TapDisabled) {
                 self.cancel();
             }
@@ -191,31 +193,41 @@ impl Picker {
                 })
             }
             Effect::Browse => {
-                let epoch = self.active.as_ref().unwrap().epoch;
-                if self.reader.is_none() {
-                    let (tx, rx) = mpsc::sync_channel(1);
-                    let history = self.history.clone();
-                    std::thread::Builder::new()
-                        .name("paste-choices".into())
-                        .spawn(move || {
-                            while let Ok(epoch) = rx.recv() {
-                                let rows = history
-                                    .as_ref()
-                                    .map(recent::current_rows)
-                                    .unwrap_or_default();
-                                browse::show(epoch, rows);
-                            }
-                        })
-                        .map_err(|_| "paste list is unavailable")?;
-                    self.reader = Some(tx);
-                }
-                if self.reader.as_ref().unwrap().try_send(epoch).is_err() {
+                let inv = self.active.as_ref().unwrap();
+                let (epoch, reading) = (inv.epoch, inv.reading);
+                browse::reveal(epoch);
+                if !reading && let Err(error) = self.read(epoch) {
                     self.cancel();
-                    return Err("paste list is busy");
+                    return Err(error);
                 }
                 Ok(())
             }
         }
+    }
+    /// Asks the one bounded reader for this invocation's rows.
+    fn read(&mut self, epoch: u64) -> Result<(), &'static str> {
+        if self.reader.is_none() {
+            let (tx, rx) = mpsc::sync_channel(1);
+            let history = self.history.clone();
+            std::thread::Builder::new()
+                .name("paste-choices".into())
+                .spawn(move || {
+                    while let Ok(epoch) = rx.recv() {
+                        let rows = history
+                            .as_ref()
+                            .map(recent::current_rows)
+                            .unwrap_or_default();
+                        browse::show(epoch, rows);
+                    }
+                })
+                .map_err(|_| "paste list is unavailable")?;
+            self.reader = Some(tx);
+        }
+        self.reader
+            .as_ref()
+            .unwrap()
+            .try_send(epoch)
+            .map_err(|_| "paste list is busy")
     }
     pub fn cancel(&mut self) {
         if self.active.take().is_some() {

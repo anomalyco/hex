@@ -906,35 +906,43 @@ fn list_tap(event_type: u32, event: EventRef) -> ListSwallow {
         return ListSwallow::Only;
     }
     if crate::paste::browse::active() && !crate::app_settings::shortcuts_suspended() {
-        use crate::paste::browse::{self, Nav};
-        let flags = unsafe { CGEventGetFlags(event) };
+        use crate::paste::browse::{self, Key, KeyUse, Nav};
+        // SAFETY: CoreGraphics supplied a valid keyboard event.
+        let (flags, repeat) = unsafe {
+            (
+                CGEventGetFlags(event),
+                CGEventGetIntegerValueField(event, KEYBOARD_EVENT_AUTOREPEAT) != 0,
+            )
+        };
         let bindings = crate::app_settings::runtime_hotkeys();
-        let trigger = bindings
-            .paste_last
-            .is_some_and(|key| key.matches_key_press(code, flags));
+        let paste_last = bindings.paste_last;
+        let trigger = paste_last.is_some_and(|key| key.matches_key_press(code, flags));
         let other_shortcut = !trigger
             && bindings
                 .all()
                 .iter()
                 .flatten()
                 .any(|key| key.matches_key_press(code, flags));
-        let nav = match code {
-            53 => Some(Nav::Cancel),
-            _ if other_shortcut => None,
-            125 | 48 => Some(Nav::Next),
-            126 => Some(Nav::Previous),
-            36 | 76 => Some(Nav::Commit),
-            _ if trigger && browse::open() => Some(Nav::Next),
-            _ => None,
+        let key = Key {
+            code,
+            repeat,
+            trigger,
+            trigger_key: paste_last.is_some_and(|key| key.key_code == Some(code)),
+            other_shortcut,
         };
-        if let Some(nav) = nav
-            && browse::nav(nav)
-        {
-            *taken |= bit;
-            return ListSwallow::Only;
-        }
-        if !trigger {
-            browse::nav(Nav::Cancel);
+        match browse::key_use(key, browse::open()) {
+            KeyUse::Nav(nav) if browse::nav(nav) => {
+                *taken |= bit;
+                return ListSwallow::Only;
+            }
+            KeyUse::Swallow => {
+                *taken |= bit;
+                return ListSwallow::Only;
+            }
+            KeyUse::Pass => {}
+            KeyUse::Nav(_) | KeyUse::Close => {
+                browse::nav(Nav::Cancel);
+            }
         }
     }
     let suggesting = suggesting();
