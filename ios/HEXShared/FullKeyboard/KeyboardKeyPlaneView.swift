@@ -134,6 +134,10 @@ final class KeyboardKeyPlaneView: UIView {
                     drawText(lower, in: CGRect(x: labelFrame.minX, y: labelFrame.midY - 0.2 * half, width: labelFrame.width, height: half), font: font, color: palette.textBase)
                     continue
                 }
+                if KeyboardFlicks.isEnabled, let flick = key.flick, layout.metrics.pad?.isDocked == true {
+                    drawFlickKey(key, flick: flick, in: labelFrame)
+                    continue
+                }
                 var label = Self.keycapLabel(engine.keycapLabel(for: key))
                 let isUpperLetter = layout.layer == .letters && engine.keycapsUppercase && label.first?.isUppercase == true
                 var style = isLandscape
@@ -241,6 +245,28 @@ final class KeyboardKeyPlaneView: UIView {
                 drawSymbol("keyboard.chevron.compact.down", in: labelFrame, color: palette.textBase, pointSize: 19, yOffset: 0)
             }
         }
+    }
+
+    /// A docked iPad key with a flick (`KeyboardFlicks`), as Apple's draws it (iPad mini, iPadOS
+    /// 27.2): the flick character about 12.5 pt high, grey, centred 14.5 pt below a 55.5 pt
+    /// keycap's top, and the label 11 pt below the middle. Pulled, the character slides to the
+    /// middle at the label's size, darkening as the label fades (both by half way); with Reduce Motion it
+    /// takes the label's place at once, half way.
+    private func drawFlickKey(_ key: KeyboardKey, flick: String, in frame: CGRect) {
+        let pulled = engine.touches.values.first { $0.key.kind == key.kind && $0.flick != nil }?.flick ?? 0
+        let p = UIAccessibility.isReduceMotionEnabled ? (pulled >= KeyboardFlicks.commitProgress ? 1 : 0) : pulled
+        let scale = frame.height / 55.5
+        let labelText = Self.keycapLabel(engine.keycapLabel(for: key))
+        let labelFont = UIFont.systemFont(ofSize: 21 * scale, weight: .regular)
+        if p < 1 {
+            let labelFrame = frame.offsetBy(dx: 0, dy: (11 + 8 * p) * scale)
+            drawText(labelText, in: labelFrame, font: labelFont, color: palette.textBase.withAlphaComponent(max(0, 1 - 2 * p)))
+        }
+        let size = (13 + 8 * p) * scale
+        let centre = frame.minY + (14.5 + (frame.height / scale / 2 - 14.5) * p) * scale
+        let flickFrame = CGRect(x: frame.minX, y: centre - frame.height / 2, width: frame.width, height: frame.height)
+        let color = palette.textBase.withAlphaComponent(0.45 + 0.55 * min(1, 2 * p))
+        drawText(flick, in: flickFrame, font: UIFont.systemFont(ofSize: size, weight: .regular), color: color)
     }
 
     /// `rect` with its edges on this screen's pixel grid.
@@ -560,6 +586,8 @@ final class KeyboardKeyPlaneView: UIView {
         engine.touchMoved(id: id, to: sample.point, time: sample.timestamp)
         let current = engine.touches[id]?.key
         typingLog?.touch(.moved, id: id, sample: sample, key: current, under: engine.layout.hitTest(sample.point))
+        // A pulled key flicks: its hold opens no accents.
+        if engine.touches[id]?.flick != nil { cancelAccentTimer(for: id) }
         if current?.kind != previousKey {
             cancelAccentTimer(for: id)
             if case .character = current?.kind {

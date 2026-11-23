@@ -95,6 +95,7 @@ struct FullKeyboardSettings {
         static let hideWordSuggestions = "experiments.hideWordSuggestions"
         static let hexKeyOnLeft = "settings.keyboardHexKeyLeft"
         static let numberRow = "settings.keyboardNumberRow"
+        static let keyFlicks = "settings.keyboardKeyFlicks"
         static let dictationBarAutoStart = "settings.dictationBarAutoStart"
         static let joinKeyboardWhenUnfolded = "experiments.joinKeyboardWhenUnfolded"
         static let dvorakPunctuation = "experiments.dvorakPunctuation"
@@ -322,6 +323,14 @@ struct FullKeyboardSettings {
     var numberRow: Bool {
         get { defaults?.bool(forKey: Key.numberRow) ?? false }
         nonmutating set { defaults?.set(newValue, forKey: Key.numberRow) }
+    }
+
+    /// Settings › Keyboard › Key flicks (iPad): pulling a docked iPad key down types the
+    /// character over its letter, as Apple's keyboard does (`KeyboardFlicks`). On by default, as
+    /// Apple's Enable Key Flicks is; a keyboard extension can't read that one.
+    var keyFlicks: Bool {
+        get { defaults?.object(forKey: Key.keyFlicks) as? Bool ?? true }
+        nonmutating set { defaults?.set(newValue, forKey: Key.keyFlicks) }
     }
 
     /// Settings › Experiments › Join the keyboard when unfolded: on the Duo unfolded and held

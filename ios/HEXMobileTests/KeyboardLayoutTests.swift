@@ -3504,4 +3504,24 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertTrue(settings.quickAccents)
         XCTAssertEqual(defaults.object(forKey: "experiments.quickAccents") as? Bool, true)
     }
+
+    /// Apple's key flicks over the docked iPad's keys (iPad mini, iPadOS 27.2): digits over row 1,
+    /// @ # $ & * ( ) ' " over row 2 and % - + = / ; : over row 3 in English and German, AZERTY's
+    /// own in French, the #+= page's characters over the 123 page's symbols, nothing on the
+    /// two-symbol keys or the floating keyboard.
+    func testDockedIPadKeysCarryApplesKeyFlicks() {
+        func flicks(_ language: KeyboardLanguage, _ layer: KeyboardLayer = .letters, pad: KeyboardPadPlacement = .docked(.mini)) -> [String] {
+            let layout = KeyboardLayout(width: 744, layer: layer, language: language, pad: pad)
+            return (0..<3).map { row in
+                layout.keys.filter { $0.row == row }.sorted { $0.frame.minX < $1.frame.minX }.compactMap(\.flick).joined()
+            }
+        }
+        XCTAssertEqual(flicks(.english), ["1234567890", "@#$&*()'\"", "%-+=/;:"])
+        XCTAssertEqual(flicks(.german), ["1234567890", "@#$&*()'\"", "%-+=/;:"])
+        XCTAssertEqual(flicks(.french), ["1234567890", "@#&\"$(!)-*", "%_+=/;"])
+        XCTAssertEqual(flicks(.english, .numbers), ["", "€£¥_^[]{}", "§|~…\\<>"])
+        XCTAssertEqual(flicks(.english, .symbols), ["", "", ""])
+        XCTAssertEqual(flicks(.english, pad: .floating), ["", "", ""])
+        XCTAssertNil(KeyboardLayout(width: 744, layer: .letters, pad: .docked(.mini)).key(.character(","))?.flick)
+    }
 }

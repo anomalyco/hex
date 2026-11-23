@@ -28,10 +28,10 @@ final class FullKeyboardEngine {
     /// How far along the space bar a language swipe must go; a shorter one types a space.
     static let languageSwipeDistance: CGFloat = 24
 
-    private(set) var shift = ShiftStateMachine()
+    var shift = ShiftStateMachine()
     var layerState = KeyboardLayerState()
     private(set) var field: KeyboardFieldKind = .text
-    private(set) var touches: [Int: ActiveTouch] = [:]
+    var touches: [Int: ActiveTouch] = [:]
     /// Touch ids in the order they went down.
     private var touchOrder: [Int] = []
     var lastSpaceAt: TimeInterval?
@@ -500,7 +500,7 @@ final class FullKeyboardEngine {
                 commitAccentSelection(menu.selectedOption)
                 activeAccentMenu = nil
                 activeAccentTouchID = nil
-            } else {
+            } else if !commitFlick(touch) {
                 commitCharacter(touch.key, at: touch.startPoint, down: touch.downPoint)
             }
             touch.committed = true
@@ -663,6 +663,7 @@ final class FullKeyboardEngine {
             return
         }
 
+        if moveFlick(&touch, id: id, to: point) { return }
         // 4. Sliding across character keys updates the active key and re-anchors the hold timer.
         // A letter the next-letter odds claimed keeps the touch while it stays within reach.
         if touch.key.character != nil, !touch.committed,
@@ -736,7 +737,7 @@ final class FullKeyboardEngine {
 
         switch touch.key.kind {
         case .character:
-            if !touch.committed {
+            if !touch.committed, !commitFlick(touch) {
                 commitCharacter(touch.key, at: touch.startPoint, down: touch.downPoint)
             }
         case .shift:
@@ -966,7 +967,7 @@ final class FullKeyboardEngine {
     /// Punctuation right after a word corrects it as space does ("teh," becomes "the,"), and
     /// goes in after the fix. Delete right after takes only the mark, as after a space.
     /// False when there is nothing to fix: the caller types the mark as usual.
-    private func correctWord(endingWith text: String) -> Bool {
+    func correctWord(endingWith text: String) -> Bool {
         guard text.count == 1, let mark = text.first, Self.wordEnders.contains(mark), swipedWord == nil else { return false }
         if applyTextReplacement(ending: text) { return true }
         let before = textBefore
