@@ -27,7 +27,10 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
     German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian),
     French("fr", "Français", Spoken.French), Italian("it", "Italiano", Spoken.Italian), Dutch("nl", "Nederlands", null),
     // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules.
-    Portuguese("pt", "Português", null);
+    Portuguese("pt", "Português", null),
+    // No layouts of their own yet: Polish's letters are held on the English keys, and Russian has no
+    // Cyrillic keys, so a Russian speaker dictates here and types on another keyboard.
+    Polish("pl", "Polski", null), Russian("ru", "Русский", null);
 
     companion object {
         fun matching(code: String?): DictationLanguage? = when (code) {
