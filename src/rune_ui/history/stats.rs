@@ -11,6 +11,7 @@ use super::super::Ui;
 use super::super::controls::{
     ButtonKind, Paint, STATS_NUMBER, button, modal_scrim_transition, modal_transition,
 };
+use super::super::list_detail::HANG;
 use super::super::lists::{inline_slider, section_label};
 use super::super::meetings::length;
 use crate::desktop::i18n::numbers;
@@ -39,9 +40,8 @@ const COUNT_WIDTH: f32 = 34.0;
 const TILE_WIDTH: f32 = 136.0;
 /// Room beside the body's scroll bar.
 const SCROLL_BAR_INSET: f32 = 12.0;
-/// The Labs › Stats on History strip: hangs like History's rows, with its own
-/// inner padding, gaps, and room above the list.
-const STRIP_HANG: f32 = 16.0;
+/// The Labs › Stats on History strip's inner padding, gaps, and room above
+/// the list; it hangs on History's own gutter ([`HANG`]).
 const STRIP_PAD: f32 = 16.0;
 const STRIP_PAD_Y: f32 = 8.0;
 const STRIP_GAP: f32 = 24.0;
@@ -282,7 +282,7 @@ pub(super) fn strip(ui: &Ui, p: Paint) -> Option<El> {
         row()
             .key("history-stats-strip")
             .w_full()
-            .px(STRIP_HANG)
+            .px(HANG)
             .mb(STRIP_BOTTOM)
             .child(cells),
     )
@@ -292,6 +292,9 @@ pub(super) fn strip(ui: &Ui, p: Paint) -> Option<El> {
 fn strip_cell(p: Paint, key: &str, value: &str, label: &str) -> El {
     col()
         .key(format!("strip-{key}"))
+        .grow(1.0)
+        .shrink()
+        .min_w(0.0)
         .gap(1.0)
         .child(
             text(value.to_owned())

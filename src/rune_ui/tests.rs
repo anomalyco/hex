@@ -1738,6 +1738,33 @@ fn history_stats_strip_shows_the_dialogs_six_headline_numbers() {
     );
 }
 
+/// The strip fits the smallest window in a long-language column: its cells
+/// share the row and truncate instead of running past the pane.
+#[test]
+fn history_stats_strip_fits_the_smallest_window_in_russian() {
+    let mut rt = runtime("history-stats-strip", true, (860.0, 560.0));
+    crate::desktop::i18n::apply(Some("ru"));
+    rt.invalidate();
+    settle(&mut rt);
+    let (strip, _) = rt.presented("history-stats-strip").expect("the strip");
+    for key in [
+        "dictations",
+        "words",
+        "time-saved",
+        "wpm",
+        "streak",
+        "busiest-hour",
+    ] {
+        let (cell, _) = rt
+            .presented(&format!("strip-{key}"))
+            .unwrap_or_else(|| panic!("strip-{key} draws"));
+        assert!(
+            cell[0] >= strip[0] && cell[0] + cell[2] <= strip[0] + strip[2],
+            "strip-{key} stays inside the strip: {cell:?} in {strip:?}"
+        );
+    }
+}
+
 /// The full Stats button and dialog stay exactly as they were with the strip
 /// on, and the strip stays behind them.
 #[test]
@@ -4030,6 +4057,7 @@ fn goldens() {
         check_golden("portal", dark, GOLDEN_SIZE);
         for scene in [
             "history",
+            "history-stats-strip",
             "captures",
             "mac-labs",
             "mac-labs-link",
