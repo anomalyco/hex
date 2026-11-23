@@ -87,4 +87,65 @@ class KeyboardCoreTest {
         assertNull(KeyboardCore.swipeRead(decoder, points, DoubleArray(1), letters, xs, ys, 38.3, 54.0, null, 3))
         KeyboardCore.swipeFree(decoder)
     }
+
+    /** A dictionary of a few words, logging every question as the Swift stub does. */
+    private class Words(private val valid: Set<String>, val log: MutableList<String>) : KeyboardCore.TextChecker {
+        override fun isWordValid(word: String): Boolean =
+            (word.length == 1 || word.lowercase() in valid).also { log += "v|$word|$it" }
+        override fun guesses(word: String): Array<String> =
+            valid.filter { it.length in word.length - 1..word.length + 1 && it[0] == word[0] }.sorted().toTypedArray().also { log += "g|$word" }
+        override fun completions(prefix: String): Array<String> =
+            valid.filter { it.startsWith(prefix) && it != prefix }.sorted().toTypedArray().also { log += "c|$prefix" }
+        override fun useLanguage(code: String) {
+            log += "u|$code"
+        }
+    }
+
+    @Test
+    fun autocorrectsThroughTheCore() {
+        val log = mutableListOf<String>()
+        val tsv = "*\tswear\tfuck\nfr\tswear\tmerde\n"
+        val ac = KeyboardCore.autocorrectNew(tsv, Words(setOf("the", "they", "you", "hello", "help"), log))
+        assertNotEquals(0L, ac)
+        val available = arrayOf("en_US", "fr")
+        assertTrue(KeyboardCore.autocorrectSetLanguage(ac, "en", available))
+        assertEquals("u|en_US", log.first())
+        val rows = listOf("qwertyuiop" to 0.0, "asdfghjkl" to 0.5, "zxcvbnm" to 1.5)
+        val letters = rows.flatMap { (r, _) -> r.map { it.code } }.toIntArray()
+        val columns = rows.flatMap { (r, offset) -> r.indices.map { it + offset } }.toDoubleArray()
+        val rowOf = rows.flatMapIndexed { i, (r, _) -> r.map { i.toDouble() } }.toDoubleArray()
+        assertTrue(KeyboardCore.autocorrectSetKeys(ac, "en", letters, columns, rowOf))
+        assertTrue(KeyboardCore.autocorrectLoadLexicon(ac, arrayOf("omw"), arrayOf("On my way!")))
+
+        assertArrayEquals(arrayOf("teh", "the"), KeyboardCore.autocorrectReplacementOnSpace(ac, "teh", 0, false))
+        assertEquals("en", KeyboardCore.autocorrectLastFixLanguage(ac))
+        assertArrayEquals(arrayOf("omw", "On my way!"), KeyboardCore.autocorrectReplacementOnSpace(ac, "say omw", 0, false))
+        assertNull(KeyboardCore.autocorrectReplacementOnSpace(ac, "the", 0, false))
+        assertNull(KeyboardCore.autocorrectReplacementOnSpace(ac, "teh", 1, false))
+        assertNull(KeyboardCore.autocorrectLastFixLanguage(ac))
+        val strip = KeyboardCore.autocorrectSuggestions(ac, "teh", 0, false, 0, false)!!
+        assertEquals(listOf(0, 2), strip.take(2).map { it.kind })
+        assertEquals("the", strip[1].replacement)
+        val starters = KeyboardCore.autocorrectSuggestions(ac, "Done. ", 0, false, 0, true)!!
+        assertEquals(listOf("I", "The", "I'm"), starters.map { it.replacement })
+        assertFalse(KeyboardCore.autocorrectMayOffer(ac, "fuck", null))
+        assertNull(KeyboardCore.autocorrectRevision(ac, "the", "the", "end", 0, false))
+
+        assertTrue(KeyboardCore.autocorrectSetPartner(ac, "fr", available, Words(setOf("merci", "est"), mutableListOf())))
+        assertNull(KeyboardCore.autocorrectReplacementOnSpace(ac, "merci", 0, false))
+        KeyboardCore.autocorrectSuppressAndKeep(ac, "teh")
+        assertNull(KeyboardCore.autocorrectReplacementOnSpace(ac, "teh", 0, false))
+        KeyboardCore.autocorrectFree(ac)
+        KeyboardCore.autocorrectFree(0)
+    }
+
+    @Test
+    fun autocorrectReadsTextAndManifestsAlone() {
+        assertEquals("wor", KeyboardCore.currentToken("hello wor"))
+        assertNull(KeyboardCore.currentToken("@handle"))
+        assertTrue(KeyboardCore.languageKnown("fr-CA"))
+        assertTrue(KeyboardCore.languageKnown("ko"))
+        assertFalse(KeyboardCore.languageKnown("xx"))
+        assertNull(KeyboardCore.autocorrectSuggestions(0, "teh", 0, false, 0, false))
+    }
 }

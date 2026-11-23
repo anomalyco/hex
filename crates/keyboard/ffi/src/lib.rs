@@ -8,6 +8,8 @@
 mod autocorrect;
 #[cfg(feature = "jni")]
 mod jni;
+#[cfg(feature = "jni")]
+mod jni_autocorrect;
 mod lookup;
 mod model;
 mod swipe;
