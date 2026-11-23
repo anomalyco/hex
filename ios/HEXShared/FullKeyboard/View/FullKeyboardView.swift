@@ -200,6 +200,10 @@ final class FullKeyboardView: UIView {
                 self.addToVocabulary(word)
                 return
             }
+            if self.stoppedNotice != nil {
+                self.model.onPasteDictation?()
+                return self.refreshStrip()
+            }
             if self.modelNotice != nil { return self.openHexForModel() }
             self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
@@ -945,8 +949,14 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice ?? modelNotice
+            notice: allowPasteNotice ?? vocabularyNotice ?? stoppedNotice ?? translationNotice ?? modelNotice
         )
+    }
+
+    /// A dictation the keyboard closing cut short: where it stopped, why, and Paste.
+    private var stoppedNotice: KeyboardStripNotice? {
+        guard let note = model.stoppedNote else { return nil }
+        return KeyboardStripNotice(title: note.title, detail: note.detail, button: String(localized: "Paste"))
     }
 
     /// The last dictation went in as spoken while Translate what I say was on: what happened,
@@ -1142,7 +1152,8 @@ final class FullKeyboardView: UIView {
         let m = engine.layout.metrics
         let bar = CGRect(x: 0, y: appliedLift, width: bounds.width, height: m.stripTop + m.stripHeight)
         guard bar.contains(point), !showsRecording, emojiPanel == nil, styleMenu == nil,
-              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil, modelNotice == nil
+              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, stoppedNotice == nil, translationNotice == nil,
+              modelNotice == nil
         else { return false }
         return model.stagePhase == .idle || model.stagePhase == .failed
     }

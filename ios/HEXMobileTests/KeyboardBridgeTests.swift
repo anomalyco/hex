@@ -220,6 +220,57 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertTrue(KeyboardJobWatchdog.isStalled(.transcribing, lastProgress: 100, now: 230))
     }
 
+    /// The screen locked mid-dictation: the keyboard stops and keeps what was said, and leaves
+    /// the recording for the next keyboard in case iOS ends this one (it freezes a keyboard
+    /// seconds after the lock) before it has transcribed it. The text, once held, says for a
+    /// few seconds beside Paste dictation where it stopped and why.
+    func testARecordingTheKeyboardClosedDuringWaitsForTheNextKeyboard() throws {
+        let suiteName = "hex.tests.interruptedRecording.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let field = UUID()
+        let record = KeyboardInterruptedRecording(
+            jobID: "a", fileName: "keyboard-\(UUID().uuidString).wav", document: field, seconds: 44.6, cutShort: true, at: 1_000
+        )
+        try Data([1, 2, 3]).write(to: record.url)
+
+        XCTAssertNil(KeyboardInterruptedRecording.load(defaults: defaults))
+        record.save(defaults: defaults)
+        XCTAssertEqual(KeyboardInterruptedRecording.load(defaults: defaults), record, "a new keyboard process finds it")
+        XCTAssertFalse(record.isExpired(at: 1_000 + 60 * 60), "an hour's drive later")
+        XCTAssertTrue(record.isExpired(at: 1_000 + KeyboardInterruptedRecording.keptFor + 1))
+        KeyboardInterruptedRecording.clear(jobID: "b", defaults: defaults)
+        XCTAssertEqual(KeyboardInterruptedRecording.load(defaults: defaults), record, "another job's text leaves it")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: record.url.path))
+        KeyboardInterruptedRecording.clear(jobID: "a", defaults: defaults)
+        XCTAssertNil(KeyboardInterruptedRecording.load(defaults: defaults))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: record.url.path), "its recording goes with it")
+
+        XCTAssertEqual(KeyboardInterruptedRecording.note(stoppedAfter: 44.6).title, "Stopped at 0:44")
+        XCTAssertEqual(KeyboardInterruptedRecording.note(stoppedAfter: 79.5).title, "Stopped at 1:19")
+
+        let bridge = KeyboardBridge(defaults: defaults)
+        bridge.heldDictation = KeyboardHeldDictation(
+            id: "held", text: "Meet at ten.", heard: nil, document: field, finishedAt: 1_000, stoppedAfter: 44.6
+        )
+        XCTAssertEqual(bridge.heldDictation?.stoppedAfter, 44.6)
+        defaults.set(Data(#"{"id":"old","text":"Hi.","finishedAt":1000}"#.utf8), forKey: "keyboard.heldDictation")
+        XCTAssertEqual(bridge.heldDictation?.id, "old", "held by an earlier build")
+        XCTAssertNil(bridge.heldDictation?.stoppedAfter)
+
+        let model = KeyboardViewModel()
+        model.configureFixture(snapshot: .offline, now: 1_000)
+        model.offeredDictation = "Meet at ten."
+        model.showStoppedNote(44.6)
+        XCTAssertEqual(model.stoppedNote?.detail, "The screen locked or you left the app")
+        XCTAssertEqual(model.statusSlot, .message("Stopped at 0:44. The screen locked or you left the app", isFailure: false))
+        model.offeredDictation = nil
+        XCTAssertNil(model.stoppedNote, "pasted: the note goes with it")
+        model.offeredDictation = "Meet at ten."
+        model.showStoppedNote(nil)
+        XCTAssertEqual(model.statusSlot, .none, "a dictation that wasn't cut short says nothing")
+    }
+
     /// A notification takes the audio session for a second or two: the page says its capture is
     /// interrupted, that wait isn't counted as quiet, and once the page says it's back the same
     /// dictation carries on, its quiet counted from then. Interrupted longer than

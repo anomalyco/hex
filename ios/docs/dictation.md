@@ -752,10 +752,25 @@ app's String Catalog, so the Hex key menu is in Chinese on a Chinese iPhone.
 
 Recording and transcribing set
 `isIdleTimerDisabled`, and every way out (done, cancel, failure) hands the
-screen back to Auto-Lock. iOS honors it only while Hex is in front: the
-handoff screen and in-app recording, not a warm session or in-keyboard
-dictation, where another app is in front and a keyboard extension has no
-public way to keep the screen on.
+screen back to Auto-Lock. It is Hex's own idle timer ("for the app", Apple's
+`UIApplication.isIdleTimerDisabled`), so it keeps the screen on only while Hex
+is in front: the handoff screen and in-app recording, not a warm session or
+in-keyboard dictation, where another app is in front. A keyboard extension has
+no public way to keep the screen on: an app extension can't reach
+`UIApplication.shared` (Apple's App Extension Programming Guide, "Some APIs Are
+Unavailable to App Extensions"). Apple doesn't say in so many words that the
+timer counts only while the app is in front, and the simulator has no
+Auto-Lock to check it.
+
+When the iPhone locks (Auto-Lock, or the side button), Hex's own recording
+goes on: the app, a warm session and the Action Button record in the
+background (`audio` background mode), up to the app's 60 s limit, and their
+text goes where it would have (the app's transcript, Paste dictation, the
+clipboard). In-keyboard dictation stops at the lock, since a keyboard
+can't record in the background, and keeps what was said up to it (below).
+Measured on the iOS 27.2 simulator (its lock button), locking 20, 45 and 80 s
+into a two-minute dictation: the keyboard kept 20.1, 44.9 and 79.5 s, and the
+app, a warm session and the Action Button each kept 59.8 s.
 
 ## Resilient capture & expiry contract (`DictationController`)
 
@@ -779,13 +794,28 @@ public way to keep the screen on.
   after Hex wrote it (`KeyboardSnapshot.messageAt`), not for as long as it
   stays in the App Group; meanwhile both keyboards dictate in the keyboard, and
   after it a warm session's next start is Hex's Try again.
-- An in-keyboard dictation the keyboard is dismissed from (or another app
-  comes forward) stops its capture at once, keeps what was said, and
-  finishes without the keyboard; its text is held in the App Group
+- An in-keyboard dictation the keyboard is dismissed from (the screen locks,
+  or another app comes forward) stops its capture at once, keeps what was
+  said, and finishes without the keyboard; its text is held in the App Group
   (`keyboard.heldDictation`), goes into the same field if the keyboard
   comes back there within 30 s, and is offered as Paste dictation
   anywhere else or later. A capture that goes quiet for 6 s finishes with
   what it heard, and a transcription stuck for 2 minutes is given up.
+- iOS freezes a keyboard seconds after the screen locks (11 s in the
+  simulator) and may end it before it has transcribed: the text then never
+  came, and the recording stayed in the keyboard's temporary folder, unheard
+  (simulator, the keyboard's process ended 20 s after the lock). Now the
+  recording of a dictation the keyboard closed during stays on disk, recorded
+  in the App Group (`keyboard.interruptedRecording`, `KeyboardInterruptedRecording`,
+  one at a time), until its text is held; the next keyboard that finds one
+  no process is transcribing transcribes it and holds its text as the first
+  would have, for up to 24 hours, after which it is deleted unheard. A
+  transcription the keyboard gave up on while it was away stays for the
+  next keyboard too. Paste dictation for a dictation cut short says for 8 s
+  where it stopped and why, "Stopped at 0:45" over "The screen locked or you
+  left the app" (the full keyboard's strip, with Paste), or on one line in
+  the dictation bar: a keyboard can't tell the screen locking from leaving
+  the app, so it names both. What was said after the lock is not recorded.
 - ✓, a tap on the live words or a push-to-talk release keeps what was said up to
   the tap. The capture page hands its audio over 4,096 samples (85 ms at 48 kHz)
   at a time, and its stop used to drop the part-filled buffer, so the recording
