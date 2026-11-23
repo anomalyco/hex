@@ -1,0 +1,8 @@
+{
+  "id": "nb",
+  "model": "nb",
+  "system_dictionaries": ["nb", "nb_NO", "no", "no_NO"],
+  "sentence_starters": ["jeg", "det", "vi"],
+  "clause_starters": ["og", "men", "jeg"],
+  "common_words": ["og", "i", "det", "er", "på", "som"]
+}

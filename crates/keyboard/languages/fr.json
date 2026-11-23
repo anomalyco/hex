@@ -1,0 +1,9 @@
+{
+  "id": "fr",
+  "model": "fr",
+  "system_dictionaries": ["fr", "fr_FR", "fr_CA"],
+  "elision_heads": ["l", "d", "j", "qu", "n", "c", "s", "m", "t", "jusqu", "lorsqu", "puisqu", "quoiqu", "quelqu", "presqu"],
+  "sentence_starters": ["je", "le", "la"],
+  "clause_starters": ["et", "mais", "je"],
+  "common_words": ["de", "la", "et", "le", "je", "à"]
+}

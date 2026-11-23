@@ -17,7 +17,7 @@ extern "C" {
 #endif
 
 /// Bumped whenever a signature or struct below changes.
-#define HK_ABI_VERSION 2
+#define HK_ABI_VERSION 3
 
 uint32_t hk_abi_version(void);
 
@@ -339,6 +339,228 @@ int32_t hk_layout_tap_keys(const HkLayoutKey *keys, size_t key_count, const doub
                            double pitch_width, double pitch_height, const HkKeyOffset *offsets,
                            size_t offset_count, HkKeyCentre *centres, size_t capacity,
                            HkTapKeys *out);
+
+// MARK: - Autocorrect
+
+// One keyboard's suggestions and replace-on-space (iOS's AutocorrectEngine): the language's
+// engine and, with bilingual autocorrect, its partner's. A language is its BCP 47 tag ("en",
+// "fr-CA", "sr-Latn"), whose manifest is compiled into the core (crates/keyboard/languages);
+// an unknown tag turns everything off but your text replacements. A handle is used from one
+// thread at a time. Unless a comment says otherwise, a function returns 0, or nonzero on a
+// bad argument (1) or a failure (2), and leaves its out arguments NULL or empty then; strings
+// out are released with hk_string_free, lists with hk_string_list_free.
+
+typedef struct HkAutocorrect HkAutocorrect;
+/// Strings a checker callback answers with.
+typedef struct HkStrings HkStrings;
+/// Adds `text` to the answer a guesses or completions callback is filling.
+void hk_strings_push(HkStrings *list, const char *text);
+
+/// The host's spelling dictionary (iOS: SystemTextChecker over UITextChecker). Each function
+/// gets `context` and is called on the handle's thread, synchronously, during the call that
+/// needs it, in the order the Swift engine asked; it must not call back into the handle.
+/// `release` (NULL: nothing) is called once the core no longer needs the checker.
+typedef struct {
+    void *context;
+    uint8_t (*is_word_valid)(void *context, const char *word);
+    void (*guesses)(void *context, const char *word, HkStrings *out);
+    void (*completions)(void *context, const char *prefix, HkStrings *out);
+    void (*use_language)(void *context, const char *code);
+    void (*release)(void *context);
+} HkTextChecker;
+
+/// The never-suggest list (the text of never-suggest.tsv), read once per language; NULL on a
+/// bad argument.
+typedef struct HkNeverSuggest HkNeverSuggest;
+HkNeverSuggest *hk_never_suggest_new(const char *tsv);
+void hk_never_suggest_free(HkNeverSuggest *list);
+/// The kind of `word` (a spelling or two-word expression, any case) in `language`'s rows
+/// ("en", "fr"; others read the shared * rows): 0 none, 1 a slur, 2 a swear word, -1 on a bad
+/// argument.
+int32_t hk_never_suggest_kind(const HkNeverSuggest *list, const char *language, const char *word);
+/// Whether `candidate` may not be offered (it, a word of it, or an expression with `previous`,
+/// NULL for none, is a slur, or a swear word without `allow_swearing`): 1 or 0, -1 on a bad
+/// argument.
+int32_t hk_never_suggest_blocks(const HkNeverSuggest *list, const char *language,
+                                const char *candidate, uint8_t allow_swearing,
+                                const char *previous);
+typedef struct {
+    char **items;
+    size_t count;
+} HkStringList;
+void hk_string_list_free(HkStringList *list);
+/// `language`'s spellings and expressions to block, sorted.
+int32_t hk_never_suggest_blocked(const HkNeverSuggest *list, const char *language,
+                                 uint8_t allow_swearing, HkStringList *out);
+
+/// German's nouns' share of capitalised uses (de.capitals), read in place: mapped from a file
+/// (NULL when it can't be or isn't a list), or a copy of a list's bytes.
+typedef struct HkGermanCapitals HkGermanCapitals;
+HkGermanCapitals *hk_german_capitals_open(const char *path);
+HkGermanCapitals *hk_german_capitals_new(const uint8_t *bytes, size_t count);
+void hk_german_capitals_free(HkGermanCapitals *capitals);
+/// `word`'s share (50 to 100), 0 when the list doesn't know it, -1 on a bad argument.
+int32_t hk_german_capitals_percent(const HkGermanCapitals *capitals, const char *word);
+/// Whether `word`, all lowercase, takes a capital after `previous` (NULL: none): 1 yes, 0 no, 2
+/// when the list doesn't know it, -1 on a bad argument.
+int32_t hk_german_capitals_capitalises(const HkGermanCapitals *capitals, const char *word,
+                                       const char *previous);
+
+/// A new autocorrect in English. `never_suggest` and `german` (the bundled capitals) may be
+/// NULL; the core keeps its own references. The checker is released on free (or at once,
+/// with NULL returned, on a bad argument).
+HkAutocorrect *hk_autocorrect_new(const HkNeverSuggest *never_suggest,
+                                  const HkGermanCapitals *german, HkTextChecker checker);
+void hk_autocorrect_free(HkAutocorrect *ac);
+/// Settings › Keyboard › Autocorrect, Suggest swear words, Auto-capitalization, and Learn each
+/// language separately: 0 off, else on.
+int32_t hk_autocorrect_set_settings(HkAutocorrect *ac, uint8_t enabled, uint8_t allows_swearing,
+                                    uint8_t adds_capitals, uint8_t learns_per_language);
+/// Follows the keyboard layout: `tag` the language, `available` the device's dictionaries
+/// (UITextChecker.availableLanguages). Clears what you kept this session.
+int32_t hk_autocorrect_set_language(HkAutocorrect *ac, const char *tag,
+                                    const char *const *available, size_t count);
+/// Bilingual autocorrect's second language (`tag` NULL: none) with its own dictionary,
+/// released when the core doesn't keep it.
+int32_t hk_autocorrect_set_partner(HkAutocorrect *ac, const char *tag,
+                                   const char *const *available, size_t count,
+                                   HkTextChecker checker);
+/// The keys the letters are typed on: `layout` the layout's language tag (whose manifest says
+/// which accents a slip may leave out) and the letter grid the host shows, a cell per letter
+/// with x its column and y its row (rows shifted as the keys are).
+int32_t hk_autocorrect_set_keys(HkAutocorrect *ac, const char *layout, const HkKeyCentre *cells,
+                                size_t count);
+/// Your UILexicon entries: typing `inputs[i]` gives `outputs[i]`.
+int32_t hk_autocorrect_load_lexicon(HkAutocorrect *ac, const char *const *inputs,
+                                    const char *const *outputs, size_t count);
+#define HK_AUTOCORRECT_VOCABULARY 0
+#define HK_AUTOCORRECT_LEARNED 1
+#define HK_AUTOCORRECT_PARTNER_LEARNED 2
+/// Hex's vocabulary, or the words of the list of kept words this language (or the partner)
+/// reads (LearnedWordsStore.words: the host keeps them), whenever they change.
+int32_t hk_autocorrect_set_words(HkAutocorrect *ac, uint8_t which, const char *const *words,
+                                 size_t count);
+/// What Learn how I type learned (TypingLearning): typos and their fixes, and the words you
+/// turned down.
+typedef struct {
+    const char *const *typos;
+    const char *const *fixes;
+    size_t typo_count;
+    const char *const *rejected;
+    size_t rejected_count;
+} HkLearning;
+/// With Learn each language separately on, the partner takes `partner` (NULL: `mine`).
+int32_t hk_autocorrect_apply_learning(HkAutocorrect *ac, const HkLearning *mine,
+                                      const HkLearning *partner);
+/// Keeps `word` as typed this session; the host counts the keep in its LearnedWordsStore.
+int32_t hk_autocorrect_suppress_and_keep(HkAutocorrect *ac, const char *word);
+#define HK_AUTOCORRECT_DECODER 0
+#define HK_AUTOCORRECT_PARTNER_DECODER 1
+#define HK_AUTOCORRECT_CONTEXT 2
+/// Spatial autocorrect's model, the partner's, or the layout language's word list and pairs
+/// (contextModel); NULL for none. The core keeps its own reference.
+int32_t hk_autocorrect_set_model(HkAutocorrect *ac, uint8_t which, const HkModel *model);
+/// The letter keys taps are read against (`baseline` 0), or the centres read without Adaptive
+/// touch (1); NULL for none.
+int32_t hk_autocorrect_set_decoder_keys(HkAutocorrect *ac, uint8_t baseline,
+                                        const HkTapKeys *keys);
+/// Where each letter of the word being typed was tapped: `count` (x, y) pairs interleaved, or
+/// `taps` NULL when the keys don't know.
+int32_t hk_autocorrect_set_taps(HkAutocorrect *ac, const double *taps, size_t count);
+/// This engine's German capitals (NULL: none); until set, the bundled ones.
+int32_t hk_autocorrect_set_german_capitals(HkAutocorrect *ac, const HkGermanCapitals *capitals);
+
+/// One slot of the strip: `kind` 0 keeps what was typed, 1 the best replacement, 2 the best
+/// replacement space puts in, 3 the runner-up, 4 a word that can follow.
+typedef struct {
+    char *display_text;
+    char *replacement;
+    uint8_t kind;
+} HkSuggestion;
+typedef struct {
+    HkSuggestion *items;
+    size_t count;
+} HkSuggestions;
+/// The strip for the text before the cursor (`before` NULL when the host doesn't know it).
+/// `field` 0 text, 1 URL, 2 email; `autocorrection_off` nonzero for a field that turns it off;
+/// `prediction_model` the typing model predictions read (NULL: none); `capitalizes_next`
+/// nonzero when shift would turn itself on. Release `out` with hk_suggestions_free.
+int32_t hk_autocorrect_suggestions(HkAutocorrect *ac, const char *before, uint8_t field,
+                                   uint8_t autocorrection_off, const HkModel *prediction_model,
+                                   uint8_t capitalizes_next, HkSuggestions *out);
+void hk_suggestions_free(HkSuggestions *list);
+/// What space puts in: what was typed and its replacement, both NULL to keep it.
+int32_t hk_autocorrect_replacement_on_space(HkAutocorrect *ac, const char *before, uint8_t field,
+                                            uint8_t autocorrection_off, char **original,
+                                            char **replacement);
+/// Your text replacement whose shortcut ends `before`: the shortcut as typed and what it gives,
+/// both NULL for none.
+int32_t hk_autocorrect_text_replacement(HkAutocorrect *ac, const char *before, char **typed,
+                                        char **replacement);
+/// The word before the one being finished revised now that `next` follows it (`before`: the
+/// text up to the end of `word`); NULL to leave it.
+int32_t hk_autocorrect_revision(HkAutocorrect *ac, const char *word, const char *before,
+                                const char *next, uint8_t field, uint8_t autocorrection_off,
+                                char **out);
+/// One word in place of `first` (with its `count` taps), a space tapped as a letter at
+/// (`space_x`, `space_y`) and `second`, the word being finished (taps from
+/// hk_autocorrect_set_taps); `before` the text up to the end of `first`. NULL to keep both.
+int32_t hk_autocorrect_merge(HkAutocorrect *ac, const char *first, const double *first_taps,
+                             size_t count, double space_x, double space_y, const char *second,
+                             const char *before, char **out);
+/// The word of `word`'s group ("id" or "I'd") the words around it make clearly likelier;
+/// `previous` and `next` NULL for none. NULL to keep it.
+int32_t hk_autocorrect_context_choice(HkAutocorrect *ac, const char *word, const char *previous,
+                                      const char *next, uint8_t starts_sentence, char **out);
+/// A string answer, by `which`: 0 `word` without a capital it only has from where it was
+/// learned (typed as `other`), 1 the fix `word` as autocorrect puts it in for `other` typed
+/// (NULL when that is what was typed), 2 your vocabulary's word `word` spells, 3 the language's
+/// tag, 4 the partner's, 5 the language of the fix space last decided on, 6 that of the last
+/// revision. NULL for none.
+int32_t hk_autocorrect_text(HkAutocorrect *ac, uint8_t which, const char *word, const char *other,
+                            char **out);
+/// A yes-or-no answer, by `which`: 0 `word` may be offered after `other` (NULL: none), 1
+/// `word` is a word as typed (the dictionary's, yours or shorthand), 2 `word` is one of your
+/// own spellings, 3 `word` is one of your words in capitals read for `other` typed, 4 the
+/// device has a dictionary for the language, 5 the language has words to correct with (its
+/// dictionary or Hex's model), 6 the dictionary knows `word`. 1 or 0, -1 on a bad argument.
+int32_t hk_autocorrect_is(HkAutocorrect *ac, uint8_t which, const char *word, const char *other);
+/// Which language the words of `before` are in, counting words of `common_from` letters or
+/// more by the typing models: above zero the partner's, below this one's. Nonzero without a
+/// partner.
+int32_t hk_autocorrect_language_lean(HkAutocorrect *ac, const char *before, size_t common_from,
+                                     int32_t *out);
+/// Bumped whenever your own words, the language or Suggest swear words change.
+uint64_t hk_autocorrect_own_words_revision(HkAutocorrect *ac);
+/// A list, by `which`: 0 your words for Swipe typing, 1 the words never offered in the
+/// language, 2 `items` (the strip's words) without capitals that `word` didn't type, 3 a
+/// swipe's readings `items` with your words in capitals never first unless `flag` (caps lock),
+/// read with `model`.
+int32_t hk_autocorrect_list(HkAutocorrect *ac, uint8_t which, const char *const *items,
+                            size_t count, const char *word, uint8_t flag, const HkModel *model,
+                            HkStringList *out);
+
+/// A string from text alone, by `which`: 0 the word right before the caret in `a` (NULL for
+/// none: none inside URLs, handles, paths or numbers), 1 the word before `b` in `a`,
+/// lowercased, when only spaces separate them, 2 `b` cased as `a` was typed, 3 your vocabulary
+/// word `b`'s spelling for `a` typed (NULL when that is what was typed). NULL for none.
+int32_t hk_text(uint8_t which, const char *a, const char *b, char **out);
+/// A yes-or-no from text alone, by `which`: 0 a sentence starts after `a` (NULL: an empty
+/// field) in `language`, 1 `b`, at the end of `a`, starts a sentence, 2 `a` has a vowel, 3 `a`
+/// is an abbreviation a period doesn't correct, 4 the core has `language`'s manifest. 1 or 0,
+/// -1 on a bad argument.
+int32_t hk_text_is(uint8_t which, const char *a, const char *b, const char *language);
+/// The keyboard cost of a one-edit slip from `source` to `target` in `language` on the grid
+/// (as hk_autocorrect_set_keys's): writes it, NaN when they're further apart.
+int32_t hk_edit_cost(const char *source, const char *target, const char *language,
+                     const HkKeyCentre *cells, size_t count, double *out);
+/// Whether letters `a` and `b`'s keys neighbour on the grid: 1 or 0, -1 on a bad argument.
+int32_t hk_adjacent_keys(const char *a, const char *b, const HkKeyCentre *cells, size_t count);
+/// `language`'s words, by `which`: 0 sentence starters, 1 clause starters, 2 its commonest
+/// words, 3 the English contractions Hex corrects to or offers (any language), 4 its
+/// UITextChecker dictionaries, best first, 5 its accent restorations, each plain spelling
+/// followed by its accented one.
+int32_t hk_language_words(const char *language, uint8_t which, HkStringList *out);
 
 #ifdef __cplusplus
 }

@@ -964,7 +964,7 @@ final class FullKeyboardEngine {
         let before = textBefore
         guard let last = before?.last, last.isLetter, let token = AutocorrectEngine.currentToken(in: before) else { return false }
         // "approx." and "etc." are abbreviations, not typos.
-        if mark == ".", AutocorrectEngine.abbreviations.contains(token.lowercased()) { return false }
+        if mark == ".", AutocorrectEngine.isAbbreviation(token.lowercased()) { return false }
         learning?.didFinish(word: token, language: autocorrect.language.rawValue)
         syncLearning()
         autocorrect.decoderTaps = currentTokenTaps

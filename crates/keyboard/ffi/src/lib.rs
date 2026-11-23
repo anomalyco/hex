@@ -5,8 +5,11 @@
 //! comes back as NULL or a nonzero status and never unwinds into Swift, C or the JVM. The
 //! hosts are iOS and Android (and the Mac or Linux machine running the tests): Unix only.
 
+mod autocorrect;
 #[cfg(feature = "jni")]
 mod jni;
+#[cfg(feature = "jni")]
+mod jni_autocorrect;
 mod lookup;
 mod model;
 mod swipe;
@@ -15,6 +18,7 @@ mod tap;
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+pub use autocorrect::*;
 pub use lookup::{
     HkAllowWord, HkModelInfo, hk_model_alphabet, hk_model_completions, hk_model_continuations,
     hk_model_cost, hk_model_encode, hk_model_has_pair, hk_model_index, hk_model_info,
@@ -35,7 +39,7 @@ pub use tap::{
 };
 
 /// `HK_ABI_VERSION` in `include/hex_keyboard.h`.
-pub const HK_ABI_VERSION: u32 = 2;
+pub const HK_ABI_VERSION: u32 = 3;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn hk_abi_version() -> u32 {

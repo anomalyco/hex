@@ -1,0 +1,11 @@
+{
+  "id": "it",
+  "model": "it",
+  "system_dictionaries": ["it", "it_IT"],
+  "two_letter_words": ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci", "ti", "se", "ne", "no", "io", "tu", "su", "al"],
+  "accent_restorations": {"perche": "perché", "poiche": "poiché", "affinche": "affinché", "benche": "benché", "finche": "finché", "piu": "più", "gia": "già", "puo": "può", "cioe": "cioè", "percio": "perciò", "citta": "città", "societa": "società", "universita": "università", "qualita": "qualità", "liberta": "libertà", "verita": "verità", "realta": "realtà", "attivita": "attività", "possibilita": "possibilità", "difficolta": "difficoltà", "opportunita": "opportunità", "caffe": "caffè", "giu": "giù", "lunedi": "lunedì", "martedi": "martedì", "mercoledi": "mercoledì", "giovedi": "giovedì", "venerdi": "venerdì"},
+  "accent_suggestions": {"e": "è", "ce": "c'è"},
+  "sentence_starters": ["io", "il", "la"],
+  "clause_starters": ["e", "ma", "che"],
+  "common_words": ["di", "e", "che", "la", "il", "a"]
+}

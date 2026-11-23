@@ -1,0 +1,8 @@
+{
+  "id": "pt",
+  "model": "pt",
+  "system_dictionaries": ["pt_BR", "pt", "pt_PT"],
+  "sentence_starters": ["eu", "o", "a"],
+  "clause_starters": ["e", "mas", "que"],
+  "common_words": ["de", "que", "e", "o", "a", "do"]
+}

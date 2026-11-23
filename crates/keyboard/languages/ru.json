@@ -1,0 +1,8 @@
+{
+  "id": "ru",
+  "model": "ru",
+  "system_dictionaries": ["ru", "ru_RU"],
+  "sentence_starters": ["я", "это", "мы"],
+  "clause_starters": ["и", "но", "что"],
+  "common_words": ["и", "в", "не", "на", "я", "что"]
+}

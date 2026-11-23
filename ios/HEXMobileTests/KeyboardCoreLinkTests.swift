@@ -8,6 +8,9 @@ import XCTest
 final class KeyboardCoreLinkTests: XCTestCase {
     func testTheCoreIsTheHeadersVersion() {
         XCTAssertEqual(hk_abi_version(), UInt32(HK_ABI_VERSION))
+        for language in KeyboardLanguage.allCases {
+            XCTAssertEqual(hk_text_is(4, nil, nil, language.rawValue), 1, "the core has \(language.rawValue)'s language manifest")
+        }
     }
 
     func testTheCoreOpensTheBundledEnglishModel() throws {

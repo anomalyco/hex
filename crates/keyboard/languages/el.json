@@ -1,0 +1,11 @@
+{
+  "id": "el",
+  "model": "el",
+  "system_dictionaries": ["el", "el_GR"],
+  "fold_diacritics": true,
+  "fold_pairs": [["σ", "ς"]],
+  "extra_sentence_enders": [";", "\u037e"],
+  "sentence_starters": ["θα", "δεν", "το"],
+  "clause_starters": ["και", "αλλά", "που"],
+  "common_words": ["και", "να", "το", "θα", "δεν", "η"]
+}

@@ -1,0 +1,8 @@
+{
+  "id": "sr-Latn",
+  "model": "sr-Latn",
+  "system_dictionaries": ["sr_Latn", "sr_Latn_RS", "sr-Latn"],
+  "sentence_starters": ["ja", "to", "da"],
+  "clause_starters": ["i", "ali", "da"],
+  "common_words": ["i", "je", "da", "u", "se", "na"]
+}

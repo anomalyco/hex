@@ -1,0 +1,10 @@
+{
+  "id": "pl",
+  "model": "pl",
+  "system_dictionaries": ["pl", "pl_PL"],
+  "fold_diacritics": true,
+  "fold_pairs": [["l", "ł"]],
+  "sentence_starters": ["ja", "to", "nie"],
+  "clause_starters": ["a", "ale", "że"],
+  "common_words": ["nie", "i", "w", "się", "na", "to"]
+}

@@ -22,13 +22,13 @@ use crate::model::{self, HkModel};
 use crate::swipe::{self, HkKeyCentre, HkSwipeDecoder};
 use crate::{HK_ABI_VERSION, guard};
 
-type Result<T> = jni::errors::Result<T>;
+pub(crate) type Result<T> = jni::errors::Result<T>;
 
 /// The model behind a handle from `modelOpen*`, or None for 0.
 ///
 /// # Safety
 /// `handle` is 0 or a live handle from `modelOpen*`.
-unsafe fn model_of<'a>(handle: jlong) -> Option<&'a HkModel> {
+pub(crate) unsafe fn model_of<'a>(handle: jlong) -> Option<&'a HkModel> {
     // SAFETY: 0 or a live HkModel pointer, as the caller promises.
     unsafe { (handle as *const HkModel).as_ref() }
 }
@@ -40,13 +40,13 @@ unsafe fn decoder_of<'a>(handle: jlong) -> Option<&'a HkSwipeDecoder> {
     unsafe { (handle as *const HkSwipeDecoder).as_ref() }
 }
 
-fn handle<T>(pointer: *mut T) -> jlong {
+pub(crate) fn handle<T>(pointer: *mut T) -> jlong {
     pointer as jlong
 }
 
 /// `value`, once any Java exception a JNI call left pending is cleared: an entry point fails by
 /// what it returns, never by throwing.
-fn settled<T>(env: &mut JNIEnv, value: T) -> T {
+pub(crate) fn settled<T>(env: &mut JNIEnv, value: T) -> T {
     if env.exception_check().unwrap_or(false) {
         let _ = env.exception_clear();
     }
@@ -64,13 +64,13 @@ fn region<'a, T: jni::objects::TypeArray + Default + Clone>(
     Ok(items)
 }
 
-fn ints(env: &JNIEnv, array: &JIntArray) -> Result<Vec<jint>> {
+pub(crate) fn ints(env: &JNIEnv, array: &JIntArray) -> Result<Vec<jint>> {
     region(env, array, |env, a, out| {
         env.get_int_array_region(a, 0, out)
     })
 }
 
-fn doubles(env: &JNIEnv, array: &JDoubleArray) -> Result<Vec<jdouble>> {
+pub(crate) fn doubles(env: &JNIEnv, array: &JDoubleArray) -> Result<Vec<jdouble>> {
     region(env, array, |env, a, out| {
         env.get_double_array_region(a, 0, out)
     })
@@ -82,11 +82,11 @@ fn booleans(env: &JNIEnv, array: &JBooleanArray) -> Result<Vec<jboolean>> {
     })
 }
 
-fn string(env: &mut JNIEnv, value: &JString) -> Result<String> {
+pub(crate) fn string(env: &mut JNIEnv, value: &JString) -> Result<String> {
     Ok(env.get_string(value)?.into())
 }
 
-fn strings(env: &mut JNIEnv, array: &JObjectArray) -> Result<Vec<String>> {
+pub(crate) fn strings(env: &mut JNIEnv, array: &JObjectArray) -> Result<Vec<String>> {
     let length = env.get_array_length(array)?;
     let mut out = Vec::with_capacity(usize::try_from(length).unwrap_or(0));
     for i in 0..length {

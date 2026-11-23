@@ -648,32 +648,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         }
     }
 
-    /// `UITextChecker` language codes to try, best first.
+    /// `UITextChecker` language codes to try, best first: the language's manifest's
+    /// (`crates/keyboard/languages`), read by the keyboard core.
     var spellCheckCandidates: [String] {
-        switch self {
-        case .english: ["en_US", "en"]
-        case .norwegian: ["nb", "nb_NO", "no", "no_NO"]
-        case .spanish: ["es", "es_ES", "es_MX"]
-        case .german: ["de", "de_DE"]
-        case .italian: ["it", "it_IT"]
-        case .french: ["fr", "fr_FR", "fr_CA"]
-        case .frenchCanadian: ["fr_CA", "fr", "fr_FR"]
-        case .frenchSwiss: ["fr_CH", "fr", "fr_FR"]
-        // Brazil's spelling first, Portugal's where only it is installed.
-        case .portuguese: ["pt_BR", "pt", "pt_PT"]
-        case .polish: ["pl", "pl_PL"]
-        case .czech: ["cs", "cs_CZ"]
-        case .hungarian: ["hu", "hu_HU"]
-        case .romanian: ["ro", "ro_RO"]
-        case .russian: ["ru", "ru_RU"]
-        case .ukrainian: ["uk", "uk_UA"]
-        case .greek: ["el", "el_GR"]
-        // Latin only: a Cyrillic `sr` dictionary would reject every Latin word.
-        case .serbianLatin: ["sr_Latn", "sr_Latn_RS", "sr-Latn"]
-        // No dictionary: Hangul is composed, not spelled, and never autocorrected into another
-        // language.
-        case .korean: []
-        }
+        KeyboardCoreText.languageWords(rawValue, 4)
     }
 
     /// The first candidate the iPhone has a dictionary for, or nil: then autocorrect and
@@ -694,72 +672,17 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             ?? available.first { $0.hasPrefix(base + "_") }
     }
 
-    /// Whether the built-in English contractions and typo list apply.
-    var usesEnglishFixes: Bool { self == .english }
-
-    /// Two-letter words common enough that autocorrect fixes a two-letter non-word one
-    /// neighbouring key from one of them ("tk" -> "to"), commonest first. Empty where no list
-    /// has been chosen yet: then two-letter words are left alone, as before.
-    var commonTwoLetterWords: [String] {
-        switch self {
-        case .english:
-            ["to", "of", "in", "it", "is", "be", "as", "at", "so", "we", "he", "by", "or", "on",
-             "do", "if", "me", "my", "up", "an", "go", "no", "us", "am"]
-        case .spanish:
-            ["de", "la", "el", "en", "no", "se", "lo", "es", "un", "su", "me", "te", "ya", "mi",
-             "tu", "yo", "le", "si", "al", "ha", "ni"]
-        case .italian:
-            ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
-             "ti", "se", "ne", "no", "io", "tu", "su", "al"]
-        case .hungarian:
-            ["az", "és", "is", "de", "ha", "ez", "el", "ki", "be", "rá", "én", "te", "mi", "ne", "se"]
-        case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
-            []
-        }
-    }
-
     /// Unaccented spellings space puts the accent back on, where the plain spelling is no
     /// word of the language at all. The dictionary path needs three letters and never
     /// rewrites a word it knows, so these cannot come from it ("perche" is also the plural of
     /// a fish, but that is not a common word; "cosi" is the plural of "coso" and stays out).
     /// A pair whose plain spelling is a common word of its own is never here: "e" is "and",
     /// "ce" is "to us", "si" is "oneself", "ne" is "of it", "da" is "from", "la" is "the" and
-    /// "li" is "them"; `accentSuggestions` offers those in the strip instead, as Spanish's
-    /// "si"/"sí" and "tu"/"tú" are left alone, and English's `suggestOnlyContractions`.
+    /// "li" is "them"; the manifest's `accent_suggestions` offers those in the strip instead,
+    /// as Spanish's "si"/"sí" and "tu"/"tú" are left alone. The manifest's, read by the core.
     var accentRestorations: [String: String] {
-        switch self {
-        case .italian:
-            [
-                "perche": "perché", "poiche": "poiché", "affinche": "affinché",
-                "benche": "benché", "finche": "finché",
-                "piu": "più", "gia": "già", "puo": "può", "cioe": "cioè", "percio": "perciò",
-                "citta": "città", "societa": "società", "universita": "università",
-                "qualita": "qualità", "liberta": "libertà", "verita": "verità",
-                "realta": "realtà", "attivita": "attività", "possibilita": "possibilità",
-                "difficolta": "difficoltà", "opportunita": "opportunità",
-                "caffe": "caffè", "giu": "giù",
-                "lunedi": "lunedì", "martedi": "martedì", "mercoledi": "mercoledì",
-                "giovedi": "giovedì", "venerdi": "venerdì",
-            ]
-        case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .hungarian, .romanian, .russian, .ukrainian, .greek,
-             .serbianLatin, .korean:
-            [:]
-        }
-    }
-
-    /// Accented forms whose plain spelling is a common word of its own, offered in the
-    /// suggestion strip and never put in by space ("e" is "and", "ce" is "to us"; "c'è"
-    /// uses the same straight apostrophe as the English contractions).
-    var accentSuggestions: [String: String] {
-        switch self {
-        case .italian: ["e": "è", "ce": "c'è"]
-        case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .hungarian, .romanian, .russian, .ukrainian, .greek,
-             .serbianLatin, .korean:
-            [:]
-        }
+        let pairs = KeyboardCoreText.languageWords(rawValue, 5)
+        return Dictionary(uniqueKeysWithValues: stride(from: 0, to: pairs.count - 1, by: 2).map { (pairs[$0], pairs[$0 + 1]) })
     }
 
     /// Each letter's (row, column) for autocorrect's neighbouring-key cost on `letters`, with
