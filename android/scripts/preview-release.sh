@@ -98,7 +98,7 @@ retry ferry cp "$builder:$remote/android/app/build/outputs/apk/preview/app-previ
 # Check what was built before anything is published.
 tools=$(retry ferry sh "$builder" 'ls -d ~/Library/Android/sdk/build-tools/36.0.0')
 signer=$(retry ferry sh "$builder" "$jdk $tools/apksigner verify --print-certs ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | sed -n 's/.*SHA-256 digest: //p' | tr a-f A-F)
-badging=$(retry ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | head -1)
+badging=$(retry ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk | head -1")
 [ "$signer" = "$fingerprint" ] || { echo "APK is signed with $signer, not the Hex Preview key" >&2; exit 1; }
 case "$badging" in *"name='ly.anoma.hex.preview' versionCode='$build' versionName='$name'"*) ;; *) echo "unexpected APK: $badging" >&2; exit 1 ;; esac
 echo "checked: signed with the Hex Preview key, ly.anoma.hex.preview, version code $build, version $name"
