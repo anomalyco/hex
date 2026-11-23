@@ -2,6 +2,17 @@
     <!-- Hex Preview only (the APK outside Google Play): its name, its privacy note and its updater. Every
          translatable string here has a Simplified Chinese one in values-zh-rCN. -->
     <string name="app_name" translatable="false">Hex Preview</string>
+    <!-- Setup names the app as Android's lists do (the launcher, the keyboard list and picker, the microphone
+         prompt), so someone with Hex from Google Play as well picks the right one. "The Hex key" stays. -->
+    <string name="setup_welcome_detail">Hex Preview uses the internet only to download its speech model (190 MB) and to check GitHub for updates. Your voice and words stay on this device.</string>
+    <string name="setup_title">Set up Hex Preview</string>
+    <string name="setup_detail">Allow the microphone, then choose Hex Preview as your keyboard.</string>
+    <string name="setup_microphone_detail">So Hex Preview can hear you</string>
+    <string name="setup_keyboard">Hex Preview keyboard</string>
+    <string name="setup_keyboard_enabled">Choose Hex Preview in the list</string>
+    <string name="setup_keyboard_off">Turn on Hex Preview in Settings</string>
+    <string name="setup_choose_hex">Choose Hex Preview keyboard</string>
+    <string name="keyboard_hint_microphone">Allow the microphone in Hex Preview</string>
     <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type. It keeps no keystrokes or transcripts. To find updates, Hex Preview asks GitHub for its latest version when you open it and at most once a day from the keyboard. That request carries nothing about you or what you type, though GitHub sees your internet address, as with any website. Turn it off with Check for updates automatically.</string>
     <string name="updates_available">Hex Preview %1$s (build %2$d) is available</string>
     <string name="updates_update">Update</string>
