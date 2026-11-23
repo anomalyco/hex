@@ -132,8 +132,10 @@ class HexKeyboard : InputMethodService() {
     internal fun cancelSpeech() = capture.cancelLatest()
     private fun commitSpeech(text: String, options: SpeechOptions) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) return
-        // Read now, so a toggle or text changed while it transcribed applies to this dictation.
-        val signed = Signature.append(text, preferences.signatureText, preferences.signature)
+        // Read now, so a toggle or text changed while it transcribed applies to this dictation. Hex's own
+        // fields, such as Settings' practice box, never get the signature.
+        val own = currentInputEditorInfo?.packageName == packageName
+        val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
     }
     private fun leaveEditor() { view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }

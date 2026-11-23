@@ -105,6 +105,8 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
+    // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
+    LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }

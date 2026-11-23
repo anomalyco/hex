@@ -3155,11 +3155,13 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
-└── Labs > Output > Signature (off) -> "Sent from Hex" on its own line at the end of each
-    keyboard dictation, added once; a signed dictation and the one after it never continue
-    the signature line. Home's preview and Copy stay unsigned.
-    Unit tests only (`SignatureTest`, `DictationContinuationTest`): no CI compiles the
-    Android app
+└── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
+    nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
+    added once; the next dictation starts on a new line below it, and a signed dictation
+    never continues the signature line. Home's preview and Copy stay unsigned, and Hex's
+    own fields are never signed.
+    Unit tests plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+    on a GitHub-hosted runner; the repo has no Android CI.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

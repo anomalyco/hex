@@ -98,7 +98,8 @@ internal class SpeechPreferences(context: Context) {
         get() = prefs.getBoolean("signature", false)
         set(value) { prefs.edit().putBoolean("signature", value).apply() }
     var signatureText: String
-        get() = prefs.getString("signatureText", Signature.DEFAULT_TEXT) ?: Signature.DEFAULT_TEXT
+        get() = prefs.getString("signatureText", Signature.DEFAULT_TEXT)
+            ?.takeIf { Signature.textProblem(it) == null }?.trim() ?: Signature.DEFAULT_TEXT
         set(value) { prefs.edit().putString("signatureText", value).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
         translation && spoken == DictationLanguage.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,

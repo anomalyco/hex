@@ -28,19 +28,30 @@ internal interface KeyboardSurface {
     fun undoDictation(shown: Boolean)
 }
 
-/** Whether a dictation may be joined to the text at the cursor: Labs › Signature's dictation and the one
- * after it stand alone, so neither is lowercased or spaced onto the signature line. */
+/** Whether a dictation may be joined to the text at the cursor: a signed one (Labs › Signature), and the
+ * one after it while the signature is still right before the cursor, start on a line of their own, so
+ * neither is lowercased or spaced onto the signature line. */
 internal class DictationContinuation {
-    private var afterSignature = false
+    /** The signed dictation's inserted text, while the next dictation still starts a line below it. */
+    private var signed: String? = null
 
-    /** Whether this dictation gets [SpokenText.continuing]; [signature] when a signature was appended. */
-    fun joinable(signature: Boolean) = !signature && !afterSignature
+    /** How far back before the cursor to read to tell whether a signed dictation is still there. */
+    val reach get() = (signed?.length ?: 0) + 1
 
-    /** A dictation went in: only a signed one makes the one after it stand alone. */
-    fun record(signature: Boolean) { afterSignature = signature }
+    /** Whether the text before the cursor ([before], read back from its end) still ends with a signed
+     * dictation's text: the next dictation goes on a line below it, not on its line. The trailing space
+     * [insertion] may have added after the signed text is ignored. */
+    fun standalone(before: String?): Boolean {
+        val text = signed ?: return false
+        return before != null && (before.endsWith(text) || before.endsWith("$text "))
+    }
+
+    /** A dictation went in: [inserted] when a signature was appended, so the next one starts on a new line
+     * while that text stays before the cursor, or null when it was an ordinary dictation. */
+    fun record(inserted: String?) { signed = inserted?.trimEnd(' ') }
 
     /** Any edit, a new field or leaving the editor ends it. */
-    fun clear() { afterSignature = false }
+    fun clear() { signed = null }
 }
 
 /** Keys in, text out: the current word, autocorrection and its undo, spaces, shift and the key pages.
@@ -459,12 +470,14 @@ internal class KeyboardEngine(
 
     /** Dictated text with only the separators missing at the cursor; mid-sentence its first word loses
      * the capital Whisper gave it ([SpokenText.continuing], [language] as dictated or "en" translated).
-     * [signature] says a signature was appended (Labs › Signature): this dictation and the one after it
-     * go in as heard, never continuing the signature line. */
+     * [signature] says a signature was appended (Labs › Signature): it goes on a line of its own, and so
+     * does the next dictation while that signed text is still right before the cursor, so neither is
+     * lowercased or spaced onto the signature line. */
     fun insertDictation(text: String, language: String?, signature: Boolean = false) {
         if (!target.connected) return
-        val before = if (secure) null else target.before(64)
-        val joinable = continuation.joinable(signature)
+        val before = if (secure) null else target.before(maxOf(64, continuation.reach))
+        val standalone = continuation.standalone(before)
+        val joinable = !signature && !standalone
         val shaped = if (!joinable) text else {
             // The keyboard's own word list for that language, when loaded, knows far more ordinary words than
             // the speech side's short list: a word it has in lowercase and the books rarely capitalise
@@ -473,9 +486,9 @@ internal class KeyboardEngine(
             if (model == null) SpokenText.continuing(text, before, language)
             else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
         }
-        val result = insertion(shaped, before?.lastOrNull(), target.after(1)?.firstOrNull())
+        val result = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
         if (result.isNotEmpty() && target.commit(result)) {
-            continuation.record(signature)
+            continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
         }
     }
