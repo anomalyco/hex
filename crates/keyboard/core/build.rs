@@ -78,8 +78,16 @@ fn main() {
             .get("words_from")
             .and_then(Value::as_str)
             .map(|f| &manifests[f]);
-        // A field this manifest leaves out is read from `words_from`'s.
-        let field = |key: &str| m.get(key).or_else(|| from.and_then(|f| f.get(key)));
+        // A field this manifest leaves out is read from `words_from`'s, except `model`: a
+        // typing model is read only by the language it was built for ("fr-CA" reads no "fr"
+        // model, as the Swift engine's `model.language == language.rawValue`).
+        let field = |key: &str| {
+            m.get(key).or_else(|| {
+                (key != "model")
+                    .then(|| from.and_then(|f| f.get(key)))
+                    .flatten()
+            })
+        };
         let strings = |key: &str| -> String {
             let list: Vec<String> = match field(key) {
                 None => Vec::new(),

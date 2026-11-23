@@ -8,7 +8,7 @@ use std::sync::Arc;
 
 use super::text;
 
-/// One language's manifest, with `words_from`'s fields filled in.
+/// One language's manifest, with `words_from`'s fields filled in (all but `model`).
 #[derive(Debug, PartialEq)]
 pub struct LanguageConfig {
     pub id: &'static str,

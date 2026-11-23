@@ -58,6 +58,10 @@ fn a_regional_variant_reads_its_language() {
     let ca = LanguageConfig::for_tag("fr-CA");
     assert_eq!(ca.system_dictionaries, ["fr_CA", "fr", "fr_FR"]);
     assert_eq!(ca.elision_heads, fr.elision_heads);
-    assert_eq!(ca.model, Some("fr"));
+    assert_eq!(
+        ca.model, None,
+        "a model is read only by the language it was built for"
+    );
+    assert_eq!(fr.model, Some("fr"));
     assert_eq!(LanguageConfig::for_tag("ko").system_dictionaries.len(), 0);
 }
