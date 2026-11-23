@@ -927,22 +927,7 @@ final class FullKeyboardView: UIView {
             if case .code = clipboardOffer {} else { clipboardOffer = .dictation }
         }
         stripOffer = clipboardOffer
-        var suggestions = engine.suggestions
-        if let shortcodes = emojiShortcodeSuggestions() {
-            suggestions = shortcodes
-        } else if suggestions.isEmpty || suggestions.first?.kind == .nextWord {
-            if lastDictation != nil || status != nil || clipboardOffer != nil {
-                suggestions = []
-            } else {
-                let emoji = emojiForFinishedWord()
-                if !emoji.isEmpty {
-                    // The finished word's emoji, with next words beside it so every slot fills:
-                    // one emoji takes the centre.
-                    let words = Array(suggestions.prefix(max(0, 3 - emoji.count)))
-                    suggestions = emoji.count == 1 && words.count == 2 ? [words[0], emoji[0], words[1]] : emoji + words
-                }
-            }
-        }
+        var suggestions = withStripEmoji(engine.suggestions, quiet: lastDictation != nil || status != nil || clipboardOffer != nil)
         // The experiment hides the words, not the strip: Undo, Paste, status, notices and the
         // Hex key keep their places, and an empty strip offers the clipboard as it does when no
         // word is suggested. What you typed before a correction (`.revert`) stays, so Delete

@@ -393,6 +393,7 @@ final class FullKeyboardEngine {
             revertCorrection()
             return
         }
+        if suggestion.kind == .emoji { return acceptEmoji(suggestion) }
         // What the suggestion takes the place of: the word being typed, or a text
         // replacement's shortcut, which may hold digits or punctuation ("ad2").
         let before = textBefore
@@ -1118,7 +1119,7 @@ final class FullKeyboardEngine {
     }
 
     /// Keeps the autocorrection just typed (`corrected` then `ending`) for the strip's revert.
-    private func recordCorrection(original: String, corrected: String, ending: String, changes: [AutocorrectEngine.AppliedCorrection.Change]) {
+    func recordCorrection(original: String, corrected: String, ending: String, changes: [AutocorrectEngine.AppliedCorrection.Change]) {
         let before = textBefore ?? ""
         let anchor = before.range(of: corrected, options: .backwards).map { String(before[..<$0.upperBound]) } ?? before
         autocorrect.recordAppliedCorrection(original: original, corrected: corrected, anchor: anchor, changes: changes)

@@ -130,11 +130,15 @@ extension FullKeyboardView {
 
     // MARK: - Shortcodes (Settings › Experiments; EmojiShortcode)
 
-    /// A shortcode works where the finished word's emoji does: a text field that takes emoji
-    /// (the emoji key shows), with autocorrect on and no secure entry. The emoji search types
-    /// into its own query, so the keys there are not a field's either.
+    /// A shortcode, or a typed word's emoji, works where the finished word's emoji does: a text
+    /// field that takes emoji (the emoji key shows), with autocorrect on and no secure entry,
+    /// and not one for a password, a one-time code, a username, an email address or a web
+    /// address. The emoji search types into its own query, so the keys there are not a field's
+    /// either.
     var allowsEmojiShortcodes: Bool {
-        engine.target.autocorrectionType != .no && engine.target.isSecureTextEntry != true
+        let refused: Set<UITextContentType> = [.password, .newPassword, .oneTimeCode, .username, .emailAddress, .URL]
+        return engine.target.autocorrectionType != .no && engine.target.isSecureTextEntry != true
+            && !(engine.target.textContentType.map(refused.contains) ?? false)
     }
 
     /// The strip's emoji for the token right before the cursor, or nil (the strip shows what
@@ -338,6 +342,55 @@ extension FullKeyboardView {
             let emoji = tone > 0 ? item.tones[tone - 1] : item.emoji
             return KeyboardSuggestion(displayText: emoji, replacement: emoji, kind: .emoji)
         }
+    }
+
+    /// The strip's suggestions with its emoji (`refreshStrip`): a shortcode's in its place; in an
+    /// empty strip or one of next words, the finished word's, unless `quiet` (Undo, a status or
+    /// a clipboard chip has the strip, and the next words go too); else the typed word's.
+    func withStripEmoji(_ suggestions: [KeyboardSuggestion], quiet: Bool) -> [KeyboardSuggestion] {
+        if let shortcodes = emojiShortcodeSuggestions() { return shortcodes }
+        guard suggestions.isEmpty || suggestions.first?.kind == .nextWord else {
+            return withTypedWordEmoji(suggestions) ?? suggestions
+        }
+        guard !quiet else { return [] }
+        let emoji = emojiForFinishedWord()
+        guard !emoji.isEmpty else { return suggestions }
+        // The finished word's emoji, with next words beside it so every slot fills: one emoji
+        // takes the centre.
+        let words = Array(suggestions.prefix(max(0, 3 - emoji.count)))
+        return emoji.count == 1 && words.count == 2 ? [words[0], emoji[0], words[1]] : emoji + words
+    }
+
+    /// The strip while a word that names an emoji is typed ("smile" offers 😊, as Apple's
+    /// keyboard does): its emoji in the next empty slot, else in place of the right slot's
+    /// runner-up word, else the centre's; never in place of what you typed, a revert, the
+    /// word space will put in, or your own words, and never while space would put in another
+    /// word. Whole words only, as the finished word's emoji (`EmojiSuggester.forWord`), in a
+    /// field that takes them (`allowsEmojiShortcodes`), not for a swiped word (the strip
+    /// shows its readings). Nil leaves the strip as it is. A tap puts the emoji in the word's
+    /// place (`FullKeyboardEngine.acceptEmoji`).
+    func withTypedWordEmoji(_ suggestions: [KeyboardSuggestion]) -> [KeyboardSuggestion]? {
+        guard engine.showsEmoji, emojiPanel == nil, !routedTarget.isSearching, allowsEmojiShortcodes,
+              !suggestions.contains(where: { $0.kind == .swiped }),
+              let token = AutocorrectEngine.currentToken(in: engine.typingContext ?? engine.textBefore),
+              token.count >= 2, token.allSatisfy(\.isLetter),
+              !(engine.target.documentContextAfterInput?.first.map { $0.isLetter || $0.isNumber } ?? false),
+              !suggestions.contains(where: { $0.willAutoReplace && $0.replacement.caseInsensitiveCompare(token) != .orderedSame }),
+              let library = loadEmojiLibrary(),
+              let entry = EmojiSuggester.forWord(EmojiText.fold(token), library: library, limit: 1).first else { return nil }
+        let emoji = emojiText(entry, library: library, usage: makeEmojiUsage())
+        let chip = KeyboardSuggestion(displayText: emoji, replacement: emoji, kind: .emoji)
+        var strip = suggestions
+        if strip.count < 3 { return strip + [chip] }
+        let autocorrect = engine.autocorrect
+        func keeps(_ item: KeyboardSuggestion) -> Bool {
+            item.kind == .keepLiteral || item.kind == .revert || item.willAutoReplace
+                || autocorrect.isVocabularySpelling(item.replacement) || autocorrect.isOwnSpelling(item.replacement)
+                || autocorrect.vocabularyCompletion(for: token) == item.replacement
+        }
+        guard let slot = [2, 1].first(where: { !keeps(strip[$0]) }) else { return nil }
+        strip[slot] = chip
+        return strip
     }
 
     // MARK: - Fixtures
