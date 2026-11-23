@@ -110,9 +110,10 @@ final class KeyboardClipboardTests: XCTestCase {
         )
     }
 
-    /// Where Apple's keyboard is split (the Duo unfolded and upright) Code from Messages isn't
-    /// offered: its switch to the next keyboard can end the host app there (TestFlight build 121).
-    func testNoCodeFromMessagesWhereApplesKeyboardSplits() {
+    /// Where Apple's keyboard is split (the Duo unfolded and upright) Code from Messages opens
+    /// iOS's keyboard list instead of switching: the switch to the next keyboard can end the host
+    /// app there (TestFlight build 121), and the list's pick doesn't.
+    func testCodeFromMessagesOpensTheListWhereApplesKeyboardSplits() {
         let pasteboard = UIPasteboard.withUniqueName()
         defer { UIPasteboard.remove(withName: pasteboard.name) }
         let tracker = KeyboardClipboardTracker(defaults: defaults)
@@ -123,10 +124,10 @@ final class KeyboardClipboardTests: XCTestCase {
             )
         }
         XCTAssertEqual(offer(canSwitch: true), .code(canPaste: false))
-        XCTAssertNil(offer(canSwitch: false))
+        XCTAssertEqual(offer(canSwitch: false), .code(canPaste: false, opensList: true))
         pasteboard.string = "482913"
         XCTAssertEqual(offer(canSwitch: true), .code(canPaste: true))
-        XCTAssertEqual(offer(canSwitch: false), .paste, "a copied code still pastes")
+        XCTAssertEqual(offer(canSwitch: false), .code(canPaste: true, opensList: true), "a copied code still pastes")
         XCTAssertEqual(FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget()).currentPosture, .phone, "an iPhone knows at once")
     }
 

@@ -129,8 +129,8 @@ struct KeyboardClipboardTracker {
     /// those (TestFlight build 126). It needs no Full Access, which only Paste does.
     /// `canSwitchKeyboard` is false where Apple's keyboard is
     /// split (the Duo unfolded and upright, or not known yet): iOS 27.2's switch to the next
-    /// keyboard can end the app being typed in there (`InputModeListTouch`), so
-    /// only Paste is offered and the globe's list leads to Apple's keyboard.
+    /// keyboard can end the app being typed in there (`InputModeListTouch`), so there the chip
+    /// opens iOS's keyboard list, whose pick doesn't, rather than leaving only the globe.
     func offer(
         textContentType: UITextContentType?,
         keyboardType: UIKeyboardType?,
@@ -145,10 +145,9 @@ struct KeyboardClipboardTracker {
         guard fieldIsEmpty else { return nil }
         // Without Full Access a keyboard can't use the clipboard at all.
         let fresh = hasFullAccess && hasFreshCopy(pasteboard: pasteboard, now: now)
-        if canSwitchKeyboard,
-           Self.expectsCode(textContentType: textContentType, keyboardType: keyboardType, autocorrectionType: autocorrectionType),
+        if Self.expectsCode(textContentType: textContentType, keyboardType: keyboardType, autocorrectionType: autocorrectionType),
            let route = appleKeyboardRoute(Self.isNumberPad(keyboardType)) {
-            return .code(canPaste: fresh, opensList: route == .list)
+            return .code(canPaste: fresh, opensList: route == .list || !canSwitchKeyboard)
         }
         return fresh ? .paste : nil
     }

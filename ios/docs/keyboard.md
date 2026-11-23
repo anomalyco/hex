@@ -61,7 +61,8 @@ keeps its suggestions. On a number pad, or with only Apple's keyboards
 beside Hex, it switches to the next keyboard; elsewhere (Emoji or another
 third-party keyboard on, where that switch lands on them about half the
 time) a tap opens iOS's keyboard list, as the globe's hold does, to pick
-Apple's. It needs no Full Access, which only Paste does. When iOS prompts
+Apple's. Where Apple's keyboard is split (the Duo unfolded and upright, where the
+switch can end the app) it always opens the list. It needs no Full Access, which only Paste does. When iOS prompts
 Allow Paste (read ≥ 0.3 s) or refuses a paste read, the strip shows a
 tappable two-line notice (`Paste without asking` / `Paste from Other Apps ›
 Allow` with a **Settings** chip that routes through
