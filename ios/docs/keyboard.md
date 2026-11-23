@@ -12,6 +12,10 @@ Dictation itself is in [dictation.md](dictation.md).
 A tap, or a
 still hold of 0.35 s, starts dictation: in a warm session, else inside
 the keyboard (in-keyboard dictation, iOS 26+), else by opening Hex.
+In-keyboard dictation uses the keyboard's own speech model, so it also
+dictates while Hex's isn't ready (a first download, Continue without a
+model, a failed preparation); only without it does the Hex key open Hex
+to finish setup (`DictationRoute`).
 In-keyboard dictation listens from touch-down, so a tap's or hold's first
 words are kept; moving
 more than 10 pt first opens the style menu, dropping that capture; releasing over a row picks it, and releasing elsewhere leaves

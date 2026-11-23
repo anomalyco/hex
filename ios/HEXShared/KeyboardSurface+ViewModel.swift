@@ -8,7 +8,8 @@ import UIKit
 nonisolated enum DictationRoute: Equatable, Sendable {
     /// Full Access is off: open Hex's setup sheet or show the Full Access hint.
     case setUp
-    /// Full Access is on, but Hex's speech model isn't installed yet: open Hex to finish setup.
+    /// Full Access is on, but Hex's speech model isn't installed yet and the keyboard can't
+    /// dictate by itself: open Hex to finish setup.
     case needsModel
     /// Hex's warm session takes the dictation (including warm retry after a failure).
     case warm
@@ -27,7 +28,10 @@ nonisolated enum DictationRoute: Equatable, Sendable {
         opensHexReason: KeyboardSelfDictation.Reason?
     ) -> DictationRoute {
         guard hasFullAccess else { return .setUp }
-        guard isModelInstalled else { return .needsModel }
+        // In-keyboard dictation uses the keyboard's own speech model, not Hex's, so it still
+        // dictates while Hex's isn't installed (a first download, Continue without a model, a
+        // failed preparation), as 1.0.4 did. A warm session needs Hex's model.
+        guard isModelInstalled else { return localAvailable ? .inKeyboard : .needsModel }
         if isWarmAvailable { return .warm }
         if localAvailable { return .inKeyboard }
         return .opensHex(opensHexReason)
