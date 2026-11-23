@@ -69,10 +69,15 @@ class DictationContinuationTest {
         assertTrue(continuation.standalone(signed))
     }
 
-    @Test fun anUnsignedDictationEndsIt() {
+    @Test fun undoingAnUnsignedDictationLeavesTheSignatureStandaloneAgain() {
         val continuation = DictationContinuation()
         val signed = dictate(continuation, "a\nSent from Hex", before = "", signature = true)
-        dictate(continuation, "Good news.", before = signed)
-        assertFalse(continuation.standalone(signed + "\nGood news."))
+        val unsigned = dictate(continuation, "Good news.", before = signed)
+        assertEquals("\nGood news.", unsigned)
+        assertFalse(continuation.standalone(signed + unsigned))
+        // Undo dictation takes it away again: only the signature is left before the cursor.
+        assertTrue(continuation.standalone(signed))
+        // A new line, no leading space, and the capital stays.
+        assertEquals("\nGood news.", dictate(continuation, "Good news.", before = signed))
     }
 }

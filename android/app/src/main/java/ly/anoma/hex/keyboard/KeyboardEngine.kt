@@ -28,9 +28,10 @@ internal interface KeyboardSurface {
     fun undoDictation(shown: Boolean)
 }
 
-/** Whether a dictation may be joined to the text at the cursor: a signed one (Labs › Signature), and the
- * one after it while the signature is still right before the cursor, start on a line of their own, so
- * neither is lowercased or spaced onto the signature line. */
+/** Whether a dictation may be joined to the text at the cursor. A signed dictation (Labs › Signature) joins
+ * the text before it as usual, with its signature on a line of its own; the dictation after it starts on a
+ * new line below that signature while the signed text is still right before the cursor, so it is never
+ * lowercased or spaced onto the signature line. */
 internal class DictationContinuation {
     /** The signed dictation's inserted text, while the next dictation still starts a line below it. */
     private var signed: String? = null
@@ -47,8 +48,9 @@ internal class DictationContinuation {
     }
 
     /** A dictation went in: [inserted] when a signature was appended, so the next one starts on a new line
-     * while that text stays before the cursor, or null when it was an ordinary dictation. */
-    fun record(inserted: String?) { signed = inserted?.trimEnd(' ') }
+     * while that text stays before the cursor. An unsigned dictation leaves the text it followed, so undoing
+     * it puts the signature right before the cursor again. */
+    fun record(inserted: String?) { if (inserted != null) signed = inserted.trimEnd(' ') }
 
     /** Any edit, a new field or leaving the editor ends it. */
     fun clear() { signed = null }
@@ -470,9 +472,10 @@ internal class KeyboardEngine(
 
     /** Dictated text with only the separators missing at the cursor; mid-sentence its first word loses
      * the capital Whisper gave it ([SpokenText.continuing], [language] as dictated or "en" translated).
-     * [signature] says a signature was appended (Labs › Signature): it goes on a line of its own, and so
-     * does the next dictation while that signed text is still right before the cursor, so neither is
-     * lowercased or spaced onto the signature line. */
+     * [signature] says a signature was appended (Labs › Signature): it joins the text at the cursor as
+     * usual, with the signature on a line of its own. The next dictation starts on a new line below that
+     * signature while the signed text is still right before the cursor, so it is never lowercased or
+     * spaced onto the signature line. */
     fun insertDictation(text: String, language: String?, signature: Boolean = false) {
         if (!target.connected) return
         val before = if (secure) null else target.before(maxOf(64, continuation.reach))
@@ -498,7 +501,7 @@ internal class KeyboardEngine(
         val d = dictated ?: return
         offerUndo(null)
         if (undoable(d) && replace(d.text, "")) {
-            continuation.clear(); resetTyping(); clearSpaces(); showPredictions(before())
+            resetTyping(); clearSpaces(); showPredictions(before())
         }
     }
     private fun undoable(d: Dictated): Boolean {
