@@ -263,6 +263,7 @@ impl Drawing {
     }
 
     #[cfg(test)]
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     fn age_key_down(&mut self, by: Duration) {
         if let Mode::KeyDown { since, .. } = &mut self.mode {
             *since = Instant::now() - by;
@@ -369,6 +370,7 @@ pub(super) fn arm_pen_on_attach() {
 }
 
 #[cfg(test)]
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(super) fn age_key_down_for_test(by: Duration) {
     state().age_key_down(by);
 }

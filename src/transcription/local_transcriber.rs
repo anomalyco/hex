@@ -1351,7 +1351,8 @@ mod model_swap_tests {
             started.push(sel);
             Ok(rx)
         });
-        assert_eq!(started, [new.clone()]);
+        assert_eq!(started.len(), 1);
+        assert_eq!(started[0], new);
         // `loaded` has NOT advanced yet while the engine reload is in flight.
         assert_eq!(swap.loaded, old);
         assert!(matches!(swap.state, SwapState::Reloading { .. }));
