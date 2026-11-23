@@ -1111,7 +1111,7 @@ General                                  // settings
 │       ├── Turning it on without System Audio Recording -> ask now, never while dictating
 │       ├── On -> Screen & System Audio Recording row: Allow / waiting / Allowed
 │       └── Dictation -> browser_media sequence below
-├── Sounds -> one row ("Classic · 50%" or Off) opening a sheet: Sound volume slider in 5% steps, then each set to hear and pick
+├── Sounds -> one row ("Classic keys · 50%" or Off) opening a sheet: Sound volume slider in 5% steps, then each set to hear and pick
 │   ├── Slider release saves and previews start unless Off; only the sheet's previews play while Off
 │   ├── A saved zero displays Off; enabling sounds through the CLI restores the default level
 │   └── Default output changes or disappears (macOS) -> next tone reopens on the current default
@@ -2709,7 +2709,7 @@ Linux General > Sounds > Sound volume     // dictate.feedback.linux; X11 + Wayla
 ├── Slider at 0 -> No recording tones; the last level is kept
 └── Release above 0 -> Save and apply live; preview the start sound
 Linux General > Sounds > a set            // dictate.sound-theme
-└── Press it -> Save and apply live; play its dictation
+└── Classic keys (default), Kalimba, and five more sets -> Press to save and play; Play only previews
 
 Capture                                  // hex app and hex dictate
 ├── Shortcut starts capture -> Queue start sound immediately, before audio arrives

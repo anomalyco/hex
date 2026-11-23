@@ -2761,7 +2761,7 @@ Record -> Release -> Transcribing/processing/paste -> Finished // dictate.feedba
         -> a known microphone cause explains itself; other failures keep their wording
      -> Labs › Failure notices: why beside the HUD for ~6 s  // dictate.failure-notice, off by default
         -> a new capture dismisses it; no old failure is replayed at launch
-     -> Classic has none: macOS Basso, Signature's error on Windows and Linux
+     -> Classic keys has none: macOS Basso, Kalimba's error on Windows and Linux
      -> A lost microphone or input -> A kept clip: no tone; a shortcut or
         `hex dictation start` capture's audio is transcribed and copied
         instead of pasted    // recovery.md#keep-an-interrupted-dictation
@@ -2859,18 +2859,20 @@ unplugged and re-plugged.
 
 ```ts
 Settings > Sounds                                           // dictate.sound-set
-├── Default / older settings -> Classic at 50%
-├── Row shows the saved set and volume ("Classic · 50%"), or Off -> Opens the Sounds sheet
+├── No saved choice -> Classic keys at 50%; an existing choice stays selected
+├── Row shows the saved set and volume ("Classic keys · 50%"), or Off -> Opens the Sounds sheet
 │   ├── Sound volume -> slider in 5% steps; the value reads as a percent
 │   │   ├── Release above 0 -> Save; play the start sound at the new level
 │   │   └── Left end -> Sounds off; the last volume is kept
-│   ├── Each set -> Check on the chosen one, name, what it sounds like, play button
+│   ├── Sets -> Classic keys, Kalimba, Click, Soft tone, Wood, Warm synth, Thock
+│   │   ├── Each set -> Check on the chosen one, name, what it sounds like, play button
 │   │   ├── Play -> Plays its dictation (start, stop, done) without choosing it; again stops it
 │   │   └── Press the set -> Save and apply live; play its dictation
 │   ├── Any playback -> Stops the one before it (20 ms fade)
 │   ├── While Off -> Previews play at 50%; ordinary cues stay silent, and OS mute still applies
 │   └── Done / Escape / scrim / leaving the pane -> Stops playback
-├── hex settings set sound_theme <signature|classic|click|soft|wood|analog|thock>
+├── hex settings set sound_theme <classic|signature|click|soft|wood|analog|thock>
+│   └── classic -> Classic keys; signature -> Kalimba (same saved values)
 ├── hex settings set sound_effect_volume <0-1> (0 turns sounds off)
 └── Every set -> Same loudness per sound at a given volume
 ```
@@ -2886,7 +2888,7 @@ and Windows show the same sheet. Checks:
 `the_sounds_sheet_names_its_slider_and_play_buttons`, and the `sound-sets`
 and `sound-sets-playing` goldens.
 
-Hex signature (2026-10-27) is one kalimba-like FM voice playing one motif,
+Kalimba (formerly Hex signature) is one kalimba-like FM voice playing one motif,
 D-B-A-D (a sixth, since "hex" is six): start D5 to B5 (116 ms), stop B5 to A5
 (230 ms), done D6 over A5 (330 ms), error D4
 then a minor D4+Bb4 (280 ms), and onboarding success, the whole motif landing
@@ -2897,9 +2899,9 @@ mechanical keyboard key, from the team's vote on the start sound (its winner,
 an ElevenLabs take kept in `scripts/sounds/thock/`): start is the press, stop
 the same key's upstroke, error two keys at once,
 twice, and success a run of keys up to a full press; it has no done sound
-because the stop already says it. Classic is the
-sounds Hex played before the signature set (start clicks, stop swish),
-restored from git; it has no done tone, errors play macOS Basso as they
+because the stop already says it. Classic keys uses Hex's original sounds
+(two clicks to start, a swish to stop), restored from git;
+it has no done tone, errors play macOS Basso as they
 did, and onboarding success plays its stop sound (the other sets have their own).
 The done sound of every set plays only when the paste lands at least
 `DONE_MIN_AFTER_STOP` (2 s) after the stop sound, as after a slow rewrite; the
@@ -2910,10 +2912,10 @@ Each set is a folder in `resources/audio/sounds/` made by
 [`scripts/sounds/synth.py`](../../scripts/sounds/synth.py)
 (`uv run scripts/sounds/synth.py` rewrites them; signature regenerates
 byte-identical). Synthesized sounds are 48 kHz mono WAVs starting on their
-first sample; Classic keeps its 44.1 kHz stereo, trimmed to start at its first
+first sample; Classic keys keeps its 44.1 kHz stereo, trimmed to start at its first
 audible sample. Every sound is normalized to one loudness per kind (start
 -25.5 LUFS max momentary, stop and done -27, error -26.5, success
--25), so a volume sounds the same in every set. Classic's start and stop come
+-25), so a volume sounds the same in every set. The original start and stop come
 up 2.5 and 3 dB (a soft limiter touches 0.1% of the start's samples). There
 is a cancel sound for Toggle's cancel shortcut. Every OS plays the
 error sound for a failed dictation or paste (`fail` in `linux/dictation.rs`
@@ -2921,7 +2923,8 @@ and `windows/dictation.rs`), including an empty transcript, which macOS
 treats as nothing pasted. Checks:
 `bundled_sounds_are_short_and_sound_immediately` (each sound under its length
 budget; every start, and every synthesized sound, audible within 1 ms),
-`every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`. The
+`every_set_but_classic_has_every_sound`, `sound_set_offers_every_set`, and
+`sound_set_round_trips_by_name_and_index` (picker order, saved IDs, playback tags). The
 sounds were checked by waveform, spectrum and loudness only, never played
 aloud on a Mac.
 
