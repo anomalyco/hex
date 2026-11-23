@@ -51,6 +51,11 @@ internal data class Setup(val mic: Boolean = false, val enabled: Boolean = false
 }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** The keyboard's Settings tool opens Hex on this page, not Home: [PAGE_KEYBOARD] names it. */
+        const val EXTRA_PAGE = "ly.anoma.hex.extra.page"
+        const val PAGE_KEYBOARD = "keyboard"
+    }
     private val prefs by lazy { getSharedPreferences("setup", MODE_PRIVATE) }
     private val imm by lazy { getSystemService(InputMethodManager::class.java) }
     private var setup by mutableStateOf(Setup())
@@ -75,6 +80,12 @@ class MainActivity : ComponentActivity() {
             update = { next, reason -> phase = next; notice = speechNote(reason) },
             meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
+        // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.
+        // The task keeps its base intent, so a Recents relaunch still carries it: a restored or history
+        // launch ignores it.
+        val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        val startPage = if (savedInstanceState == null && !fromHistory) intent.getStringExtra(EXTRA_PAGE) else null
+        intent.removeExtra(EXTRA_PAGE)
         // Debug builds only: am start --ez feedback_drop_first_response true loses Send feedback's first answer, to
         // show that the retry, with the same Idempotency-Key, gets the same issue back.
         if (BuildConfig.DEBUG) ly.anoma.hex.feedback.Feedback.dropFirstResponse = intent.getBooleanExtra("feedback_drop_first_response", false)
@@ -88,7 +99,8 @@ class MainActivity : ComponentActivity() {
                 val model = ModelStore.state.collectAsState().value
                 if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.download(this) },
                     phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
-                    { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) })
+                    { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
+                    startPage = startPage)
                 else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     choose = { imm.showInputMethodPicker() }, model = model,

@@ -3198,23 +3198,39 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   KeyboardPageTest plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
 │   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45275591325, the
 │   latest observed verification); not tried on a device. The repo has no Android CI.
-└── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
-    that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
-    strip's last slot offers it beside the word suggestions, padded to that slot even when
-    it is the only one. Another layout's model never offers one. A tap replaces the word
-    and commits it with the same space rules as a word suggestion; continuing to type
-    keeps the word. Nothing matching leaves the strip unchanged. The list keeps the same
-    0.85 strong cut-off as the iPhone strip, plus a reviewed joy -> 😂 and a reviewed
-    exclusion list (number words that name clock faces, and ordinary words that name an
-    emoji's object in another sense), generated from the iOS keyboard's
-    emoji-index-en.txt (Unicode emoji-test.txt 18.0 and CLDR 49 annotations, Unicode
-    License v3, plus Hex's chat words). It is a compact word-to-emoji asset read lazily
-    only while the toggle is on; the loader keeps only emoji the device's `Paint.hasGlyph`
-    can draw (minSdk 31 draws up to Emoji 13.1), so the strip never shows tofu. Matching is
-    case-insensitive and whole-word.
+├── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
+│   that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
+│   strip's last slot offers it beside the word suggestions, padded to that slot even when
+│   it is the only one. Another layout's model never offers one. A tap replaces the word
+│   and commits it with the same space rules as a word suggestion; continuing to type
+│   keeps the word. Nothing matching leaves the strip unchanged. The list keeps the same
+│   0.85 strong cut-off as the iPhone strip, plus a reviewed joy -> 😂 and a reviewed
+│   exclusion list (number words that name clock faces, and ordinary words that name an
+│   emoji's object in another sense), generated from the iOS keyboard's
+│   emoji-index-en.txt (Unicode emoji-test.txt 18.0 and CLDR 49 annotations, Unicode
+│   License v3, plus Hex's chat words). It is a compact word-to-emoji asset read lazily
+│   only while the toggle is on; the loader keeps only emoji the device's `Paint.hasGlyph`
+│   can draw (minSdk 31 draws up to Emoji 13.1), so the strip never shows tofu. Matching is
+│   case-insensitive and whole-word.
+│   Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
+│   `EmojiKeywordsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
+│   Android CI.
+└── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
+    suggestion chips, Undo dictation, notice or dictation) and the field is not a password,
+    PIN or other secure field, the "Hold Hex to talk" hint becomes up to four icon buttons
+    without making the keyboard taller: Emoji (the bottom row's emoji key, so only on the
+    letters, never on a symbol page or a pad), Paste (the editor's own
+    `performContextMenuAction(android.R.id.paste)`, so Hex never reads the clipboard; shown
+    only while `clipboard.hasPrimaryClip()`), Settings (reopens Hex on its Keyboard page
+    through an intent extra MainActivity reads, NEW_TASK | CLEAR_TOP, replacing whatever Hex
+    screen was open) and Undo (the last autocorrection reverted exactly as the Delete right
+    after it does, shared through `KeyboardEngine.revert`; shown only while that correction is
+    still right before the cursor, and only when no next-word suggestions fill the strip, though
+    the Delete right after an autocorrection still undoes it when they do). Changing the toggle
+    redraws a visible strip at once; off, the strip is unchanged.
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
-    `EmojiKeywordsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
-    Android CI.
+    `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
+    Android CI. Not tried on a device or emulator.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

@@ -27,6 +27,8 @@ internal interface KeyboardSurface {
     fun suggestions(slots: List<Suggestion>)
     /** Offer Undo dictation, or stop offering it. */
     fun undoDictation(shown: Boolean)
+    /** The strip's tools changed (Labs › Keyboard › Keyboard tools): Undo follows the last autocorrection. */
+    fun toolsChanged() {}
 }
 
 /** Whether a dictation may be joined to the text at the cursor. A signed dictation (Labs › Signature) joins
@@ -97,6 +99,8 @@ internal class KeyboardEngine(
     private var more = false
     // A number, phone or date field's pad, or the number pad the symbol page's 1234 key opens.
     private var pad: Pad? = null
+    // Whether the keys' emoji key was on the page the strip's Emoji tool mirrors (the letters).
+    private var lastEmojiAvailable = true
     private var selStart = -1
     private var selEnd = -1
     // Spaces, each remembered with the text before the cursor it left, so anything else in between
@@ -170,6 +174,8 @@ internal class KeyboardEngine(
                 forgetSwipe(); retries.forget(); surface?.suggestions(emptyList())
             }
             refreshCaps()
+            // The strip's Undo tool follows the autocorrection still being right before the cursor.
+            if (feedback.keyboardTools && undo != null) surface?.toolsChanged()
         }
     }
 
@@ -187,6 +193,12 @@ internal class KeyboardEngine(
     /** Labs › Keyboard › Emoji suggestions changed: the current word's strip follows at once,
      * reading the bundled list then if it was never read. */
     fun emojiSuggestionsChanged() { word?.let { showSuggestions(it) } }
+
+    /** Labs › Keyboard › Keyboard tools changed: the strip follows at once. */
+    fun keyboardToolsChanged() { surface?.toolsChanged() }
+
+    /** The clipboard changed: the strip's Paste tool comes or goes at once. */
+    fun clipboardChanged() { surface?.toolsChanged() }
 
     /** Android's personal dictionary changed: every loaded language reads it again, off the main thread. */
     fun personalWordsChanged() { for (decoder in models.values) loadPersonal(decoder) }
@@ -211,6 +223,12 @@ internal class KeyboardEngine(
     private fun showPlane() {
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
             FieldKind.of(editor?.inputType ?: 0), pad, feedback.numberRow))
+        // The strip's Emoji tool follows the page (Labs › Keyboard › Keyboard tools): the keys' emoji key is
+        // on the letters only, never on a symbol page or a pad.
+        val emoji = emojiAvailable
+        val changed = emoji != lastEmojiAvailable
+        lastEmojiAvailable = emoji
+        if (changed && feedback.keyboardTools) surface?.toolsChanged()
     }
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */
     fun shiftDown() {
@@ -333,6 +351,10 @@ internal class KeyboardEngine(
     }
     /** Shift as the keys show it: letters type capitals while it is on or held. */
     val uppercase get() = shift.uppercase
+
+    /** Whether the keys' emoji key is there to open the panel: on the letters page only, never on the
+     * symbol pages or a number, phone or date pad, where it is the pad key or absent. */
+    val emojiAvailable get() = pad == null && !symbols
 
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid, explicit: Boolean = false) {
         if (!target.connected) return
@@ -476,12 +498,8 @@ internal class KeyboardEngine(
         clearSpaces()
         val last = undo
         undo = null
-        if (last != null && endsWith(last.replacement + " ") && replace(last.replacement + " ", last.original)) {
-            feedback.undo(last.language, last.original, last.replacement)
-            val typed = last.original.substringAfterLast(' ')
-            prefix = before().dropLast(typed.length).takeLast(40); word?.restored(typed, prefix)
-            if (expectedCaret >= 0) expectedCaret += last.original.length - last.replacement.length - 1
-            surface?.suggestions(listOf(Suggestion(typed, Suggestion.Kind.Typed))); return
+        if (last != null && revert(last)) {
+            surface?.suggestions(listOf(Suggestion(last.original.substringAfterLast(' '), Suggestion.Kind.Typed))); return
         }
         val w = word
         val track = w != null && w.token.isNotEmpty() && endsWith(prefix + w.token)
@@ -496,6 +514,10 @@ internal class KeyboardEngine(
         }
         if (w != null && w.token.isNotEmpty()) showSuggestions(w) else surface?.suggestions(emptyList())
     }
+    /** Text went in through the editor's own paste (the strip's Paste tool): the word in progress is not
+     * what is before the cursor any more. */
+    fun pasted() { edited(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList()) }
+
     fun enter() {
         edited()
         // A text replacement that ends the text goes in before the line break or the editor's action.
@@ -560,6 +582,32 @@ internal class KeyboardEngine(
             continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
         }
+    }
+
+    /** Whether the strip's Undo tool can revert the last autocorrection: it is still right before the
+     * cursor with nothing selected. */
+    val canUndoAutocorrection get() = undo?.let {
+        !secure && target.connected && target.selected()?.isNotEmpty() != true && endsWith(it.replacement + " ")
+    } == true
+
+    /** The strip's Undo tool: the last autocorrection goes back to exactly what was typed, as Delete
+     * right after it does, and what was typed shows as the literal chip. */
+    fun undoAutocorrection() {
+        if (!canUndoAutocorrection) { surface?.toolsChanged(); return }
+        edited(); clearSpaces()
+        val last = undo ?: return
+        undo = null
+        if (!revert(last)) { surface?.toolsChanged(); return }
+        surface?.suggestions(listOf(Suggestion(last.original.substringAfterLast(' '), Suggestion.Kind.Typed)))
+    }
+    /** Puts back what an autocorrection replaced, with its space, if it is still right before the cursor. */
+    private fun revert(last: Undo): Boolean {
+        if (!endsWith(last.replacement + " ") || !replace(last.replacement + " ", last.original)) return false
+        feedback.undo(last.language, last.original, last.replacement)
+        val typed = last.original.substringAfterLast(' ')
+        prefix = before().dropLast(typed.length).takeLast(40); word?.restored(typed, prefix)
+        if (expectedCaret >= 0) expectedCaret += last.original.length - last.replacement.length - 1
+        return true
     }
 
     /** Undo dictation: the last dictation goes, if it is still right before the cursor with nothing selected. */

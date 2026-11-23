@@ -77,8 +77,10 @@ private fun licenceFiles(context: Context) =
 internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: TypingPreferences,
                          model: ModelStore.State, download: () -> Unit, phase: SpeechPhase, transcript: String,
                          notice: String?, dictate: () -> Unit, cancel: () -> Unit, clear: () -> Unit, setupPage: (Int) -> Unit,
-                         systemSettings: () -> Unit) {
-    var page by rememberSaveable { mutableStateOf(Page.Home) }
+                         systemSettings: () -> Unit, startPage: String? = null) {
+    var page by rememberSaveable {
+        mutableStateOf(if (startPage == MainActivity.PAGE_KEYBOARD) Page.Keyboard else Page.Home)
+    }
     var licence by rememberSaveable { mutableStateOf("") }
     var practice by remember { mutableStateOf("") }
     val context = LocalContext.current
@@ -106,6 +108,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val signature = remember(revision) { speech.signature }
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
     val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
+    val keyboardTools = remember(revision) { typing.keyboardTools }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
@@ -340,6 +343,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.emoji_suggestions), stringResource(R.string.emoji_suggestions_detail),
                                     emojiSuggestions) { typing.emojiSuggestions = it }
+                                Rule()
+                                Toggle(stringResource(R.string.keyboard_tools), stringResource(R.string.keyboard_tools_detail),
+                                    keyboardTools) { typing.keyboardTools = it }
                             }
                         }
                     }

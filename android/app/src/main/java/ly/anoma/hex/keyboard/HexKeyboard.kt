@@ -1,7 +1,9 @@
 package ly.anoma.hex.keyboard
 
 import android.Manifest
+import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.database.ContentObserver
@@ -13,6 +15,7 @@ import android.inputmethodservice.InputMethodService
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.MicCapture
@@ -67,6 +70,20 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
+        if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
+    }
+    // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
+    // listener exists only while the lab is on and the input view is shown.
+    private val clipboard by lazy { getSystemService(ClipboardManager::class.java) }
+    private val clipboardChanged = ClipboardManager.OnPrimaryClipChangedListener { engine.clipboardChanged() }
+    private var viewing = false
+    private var watchingClipboard = false
+    private fun watchClipboard() {
+        val watch = viewing && feedback.keyboardTools
+        if (watch == watchingClipboard) return
+        watchingClipboard = watch
+        if (watch) clipboard.addPrimaryClipChangedListener(clipboardChanged)
+        else clipboard.removePrimaryClipChangedListener(clipboardChanged)
     }
     internal val previewAllowed get() = !engine.secure
 
@@ -80,7 +97,13 @@ class HexKeyboard : InputMethodService() {
             meter = { view?.setLevel(it) }, insert = ::commitSpeech)
     }
     override fun onEvaluateFullscreenMode() = false
-    override fun onCreateInputView(): View = KeyboardView(this, this).also { view = it; engine.surface = it }
+    override fun onCreateInputView(): View = KeyboardView(this, this).also {
+        it.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) = Unit
+            override fun onViewDetachedFromWindow(v: View) { viewing = false; watchClipboard() }
+        })
+        view = it; engine.surface = it
+    }
 
     /** The field's type as Hex last started in it: an app can change it in place (restarting the same box). */
     private var fieldType = 0 to 0
@@ -102,6 +125,8 @@ class HexKeyboard : InputMethodService() {
         view?.status(capture.phase, idleHint())
         // Hex Preview's update line (Play builds have none); never in a password field.
         Updates.keyboardShown(this, engine.secure) { view?.notice(it) }
+        viewing = true
+        watchClipboard()
     }
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
                                    candidatesStart: Int, candidatesEnd: Int) {
@@ -109,6 +134,14 @@ class HexKeyboard : InputMethodService() {
         engine.updateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd)
     }
 
+    /** The strip's Paste tool: the editor's own paste, so Hex never reads the clipboard itself. */
+    internal fun pasteClipboard() {
+        if (!engine.secure && currentInputConnection?.performContextMenuAction(android.R.id.paste) == true) engine.pasted()
+    }
+    /** The strip's Settings tool: Hex opens on its Keyboard page, not Home. */
+    internal fun openKeyboardSettings() = startActivity(Intent(this, MainActivity::class.java)
+        .putExtra(MainActivity.EXTRA_PAGE, MainActivity.PAGE_KEYBOARD)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
     internal fun nextIme() {
         capture.cancel()
         if (!switchToNextInputMethod(false)) getSystemService(InputMethodManager::class.java).showInputMethodPicker()
@@ -146,7 +179,10 @@ class HexKeyboard : InputMethodService() {
         val signed = if (own) null else Signature.append(text, preferences.signatureText, preferences.signature)
         engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
     }
-    private fun leaveEditor() { view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }
+    private fun leaveEditor() {
+        viewing = false; watchClipboard()
+        view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
+    }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }
     override fun onWindowHidden() { leaveEditor(); super.onWindowHidden() }
@@ -159,6 +195,7 @@ class HexKeyboard : InputMethodService() {
     override fun onDestroy() {
         getSharedPreferences("typing", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.unregisterContentObserver(dictionaryChanged); words.shutdownNow()
+        viewing = false; watchClipboard()
         view?.cancelGestures(); view = null; engine.surface = null; capture.close(); super.onDestroy()
     }
 }

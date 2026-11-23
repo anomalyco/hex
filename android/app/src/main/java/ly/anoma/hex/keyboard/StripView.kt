@@ -1,6 +1,7 @@
 package ly.anoma.hex.keyboard
 
 import android.animation.ValueAnimator
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -56,6 +57,14 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val dividers = List(2) { View(context) }
     private var offered = arrayOfNulls<String>(3)
     private val menuKey = TextView(context)
+    // The tools in the hint's place while the strip has nothing else to show (Labs › Keyboard ›
+    // Keyboard tools): emoji, paste, Hex's Keyboard settings and undo of the last autocorrection.
+    private val toolsRow = LinearLayout(context)
+    private val toolEmoji = toolButton(R.drawable.ic_emoji, R.string.keyboard_emoji) { host.openEmoji() }
+    private val toolPaste = toolButton(R.drawable.ic_paste, R.string.keyboard_tool_paste) { ime.pasteClipboard() }
+    private val toolSettings = toolButton(R.drawable.ic_settings, R.string.keyboard_tool_settings) { ime.openKeyboardSettings() }
+    private val toolUndo = toolButton(R.drawable.ic_undo, R.string.keyboard_tool_undo) { ime.engine.undoAutocorrection() }
+    private val clipboard = context.getSystemService(ClipboardManager::class.java)
     // Undo dictation, in the slots' place after a dictation (iPhone Hex's chip).
     private val undoChip = TextView(context)
     private var undoing = false
@@ -76,7 +85,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
 
     private var idle = true
     private var reveal: ValueAnimator? = null
-    var hint = context.getString(R.string.keyboard_hint_hold)
+    private val holdHint = context.getString(R.string.keyboard_hint_hold)
+    var hint = holdHint
         private set
     /** The Hex menu replaces the keys. */
     var choosing = false
@@ -134,6 +144,12 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             slotRow.addView(slotViews[i], LinearLayout.LayoutParams(0, -1, 1f))
         }
         idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
+        toolsRow.gravity = Gravity.CENTER_VERTICAL
+        listOf(toolEmoji, toolPaste, toolSettings, toolUndo).forEach {
+            toolsRow.addView(it, LinearLayout.LayoutParams(dp(40), -1))
+        }
+        toolsRow.visibility = GONE
+        idleRow.addView(toolsRow, LinearLayout.LayoutParams(0, -1, 1f))
         val undoBox = FrameLayout(context).apply {
             undoChip.apply {
                 text = context.getString(R.string.keyboard_undo_dictation); useInter(500); textSize = 14f; setTextColor(ink)
@@ -286,10 +302,18 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         val noted = idle && !choosing && notice != null
         val undo = idle && !choosing && undoing && !noted
         val show = idle && !choosing && !undo && !noted && offered.any { it != null }
+        val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
+            busy = !idle || choosing || show || undo || noted || hint != holdHint, secure = { ime.engine.secure },
+            emoji = { ime.engine.emojiAvailable }, canUndo = { ime.engine.canUndoAutocorrection },
+            clipboard = { clipboard.hasPrimaryClip() })
         noticeRow.visibility = if (noted) VISIBLE else GONE
         (undoChip.parent as View).visibility = if (undo) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
-        statusText.visibility = if (idle && !show && !undo && !noted) VISIBLE else GONE
+        toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
+        toolEmoji.visibility = if (StripTool.Emoji in tools) VISIBLE else GONE
+        toolPaste.visibility = if (StripTool.Paste in tools) VISIBLE else GONE
+        toolUndo.visibility = if (StripTool.Undo in tools) VISIBLE else GONE
+        statusText.visibility = if (idle && !show && !undo && !noted && tools.isEmpty()) VISIBLE else GONE
         menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
     }
@@ -370,6 +394,14 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         }
     }
 
+    /** One of the strip's tools: its icon on the strip's line, with the cancel key's round press. */
+    private fun toolButton(res: Int, label: Int, action: () -> Unit) = FrameLayout(context).apply {
+        isFocusable = true; contentDescription = context.getString(label)
+        addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(android.graphics.Color.TRANSPARENT) },
+            LayoutParams(pill, pill, Gravity.CENTER))
+        addView(icon(res), LayoutParams(dp(19), dp(19), Gravity.CENTER))
+        setOnClickListener { action() }
+    }
     private fun icon(res: Int) = ImageView(context).apply { setImageResource(res); imageTintList = ColorStateList.valueOf(ink) }
     private fun shape(fill: Int, radius: Float) = GradientDrawable().apply { setColor(fill); cornerRadius = radius }
     private fun pressable(fill: Int) = android.graphics.drawable.StateListDrawable().apply {

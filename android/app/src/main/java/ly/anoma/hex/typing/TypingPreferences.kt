@@ -44,6 +44,10 @@ internal class TypingPreferences(context: Context) {
     var emojiSuggestions: Boolean
         get() = prefs.getBoolean(EMOJI_SUGGESTIONS, false)
         set(value) { prefs.edit().putBoolean(EMOJI_SUGGESTIONS, value).apply() }
+    /** Labs › Keyboard › Keyboard tools: emoji, paste, settings and undo in the strip, off by default. */
+    var keyboardTools: Boolean
+        get() = prefs.getBoolean(KEYBOARD_TOOLS, false)
+        set(value) { prefs.edit().putBoolean(KEYBOARD_TOOLS, value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {
@@ -60,5 +64,6 @@ internal class TypingPreferences(context: Context) {
         const val SUGGEST_SWEAR_WORDS = "suggestSwearWords"
         const val NUMBER_ROW = "numberRow"
         const val EMOJI_SUGGESTIONS = "emojiSuggestions"
+        const val KEYBOARD_TOOLS = "keyboardTools"
     }
 }

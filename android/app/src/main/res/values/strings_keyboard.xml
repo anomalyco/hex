@@ -33,6 +33,9 @@
     <string name="keyboard_letters_label" translatable="false">ABC</string>
     <string name="keyboard_letters">Letters</string>
     <string name="keyboard_emoji">Emoji</string>
+    <string name="keyboard_tool_paste">Paste</string>
+    <string name="keyboard_tool_settings">Keyboard settings</string>
+    <string name="keyboard_tool_undo">Undo autocorrection</string>
     <string name="keyboard_next">Next keyboard</string>
     <string name="keyboard_hex">Hex dictation</string>
     <string name="keyboard_space">Space</string>
