@@ -100,3 +100,83 @@ are the product: a stranger's agent must be able to build a good config from the
   approximation for aim.
 - `check_config.py` re-runs both on the halves the config says it was tuned and checked on, and
   rejects any claim that doesn't match.
+
+## The app: a file arriving, its review, the history
+
+Everything Hex shows for a config, in `HEXMobile/TypingConfigs/`. A file opened while the
+experiment is off applies nothing and keeps nothing.
+
+### The file arriving (`HEXMobile/TypingConfigs/TypingConfigInbox.swift`)
+
+- **Type:** `anomaly.hex.typing-config`, exported by Hex (`project.yml`): extension
+  `mhexconfig`, conforming to `public.data` (not `public.json`, which AirDrop previews as text
+  and never hands to the app), Owner rank, opened in place
+  (`LSSupportsOpeningDocumentsInPlace`). Files shows it with Hex's icon.
+- **Routes:** a file tapped in Files or iCloud Drive opens Hex in one tap (in place,
+  security-scoped); a share sheet's Open in Hex, AirDrop and Mail hand Hex a copy in
+  `Documents/Inbox`, deleted once read. `.onOpenURL` sends every `.mhexconfig` to the inbox
+  before anything else.
+- **Reading:** off the main thread, through `NSFileCoordinator`. A file whose size is over
+  `TypingConfigLimits.maxBytes` (64 KB) is never read; one that reports no size is read one
+  byte past the limit and refused there. An empty or unreadable file says so. Nothing is
+  fetched or run, and the file's name and note are shown as plain text without control or
+  direction-changing characters (the note cut at 280 characters).
+- **The sheet** (`TypingConfigSheetPresenter`) is presented over whatever is on screen
+  (Home, a Settings page, the setup sheet, Typing logs), sized to its content, and can't be
+  swiped away: it stays until Apply, Not now or its close button. A second file arriving while
+  it is up waits in line ("1 more file waiting"); the same bytes twice are one. When one is
+  done the sheet shows the next.
+- **Experiment off:** "Typing configs are off" with the file's name, where the switch is and
+  that nothing changed; **Open Experiments** sets the sheet aside and opens Settings ›
+  Experiments at the switch, and turning it on brings the waiting files' sheet back. Close
+  drops them. Nothing is kept while the experiment is off.
+
+### The review (`TypingConfigReviewView.swift`, `TypingConfigWording.swift`)
+
+A rendering of `TypingConfigReview(data:keyboard:)` (`HEXShared/FullKeyboard/TypingConfig`),
+which decides every outcome; the app has no parser or clamps of its own. The keyboard it
+reviews for is Hex's letters keyboard on this iPhone held upright, in the language it opens
+in, with Settings › Keyboard's choices (`TypingConfigKeyboard`).
+
+- **Header:** the file's name, "Typing config · made from N days of typing", and "the one you
+  use now" or "opened before" when its bytes are already in the history.
+- **Needs Full Access**, before anything else when the keyboard hasn't reported Full Access:
+  where to turn it on, Open Settings, and Apply stays off.
+- **What it changes**, grouped (Words to keep, Never correct to, Typo fixes, Dictation fixes,
+  Where you aim, Touch areas), each group with one line on what it does and each part with its
+  own switch, on by default. A group of more than six has an All switch and Show all. A clamped
+  value shows the value used and what the file asked for. The file's evidence is shown under
+  each part as "The file says: …": the agent's claim, not checked here.
+- **For another keyboard:** each key block whose context doesn't match, field by field (the
+  file's value and this iPhone's) and which parts it holds, kept in the file, not applied.
+- **Skipped:** one row per reason, in the review's order, with a plain sentence and the parts
+  it covers (an entry Hex couldn't read by its list and number, an unknown field by its name).
+- **From the file:** the note.
+- "Hex can't check this config on your typing yet…": there is no on-phone replay in this
+  version; the regression watch comes later.
+- **Apply** (`TypingConfigActivation.apply`): keeps the file in the history, compiles the parts
+  left on (`compiled(switchedOn:)`) and writes `active.json` (`TypingConfigStore.writeActive`,
+  which bumps the generation), then "Typing config applied: takes effect the next time the
+  keyboard opens". **Not now** and the close button keep it in the history, unapplied.
+- **Refused files** (`notAConfig`, `tooLarge`): "This isn't a typing config", the reason, and
+  that nothing changed. Nothing is kept.
+
+### The history (`TypingConfigHistory.swift`)
+
+`TypingConfigs/history.json` and `TypingConfigs/history/<sha256>.mhexconfig` in the App Group:
+every config kept unchanged, keyed on the SHA-256 of its bytes (the same file twice is one
+entry; the file's own `id` isn't checked), with its name, size, source, when it arrived and was
+last applied, and the parts switched off (by their place in the file). One is active, or none
+(Hex defaults). At most 20: past that the oldest never applied goes first, and an applied one
+only when the person deletes it; with 20 applied, the review says to delete one first. Going
+back to a config compiles its kept file again on today's keyboard with the same parts off.
+
+### Checks
+
+- `TypingLogTests`: `testATypingConfigArrivesReadOnceAndNeverPastTheLimit`,
+  `testTypingConfigHistoryKeysOnTheBytesAndKeepsAppliedOnes`,
+  `testApplyingAConfigWritesOnlyItsSwitchedOnPartsAndGoingBackDeletesNothing`.
+- Simulator (iOS 27.2, iPhone 17 Pro and iPhone SE, English and 简体中文): each file opened from
+  Files › On My iPhone, cold and with Hex running, through every state above. AirDrop,
+  Messages, Mail, another app's Open in Hex, and Full Access off on a real iPhone are
+  unverified.

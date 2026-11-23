@@ -8,6 +8,7 @@ struct HEXMobileApp: App {
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
     @State private var showSetup = SettingsSnapshotFixture.showsSetupSheet
     @State private var openPage: SettingsPage?
+    @State private var typingConfigs = TypingConfigInbox.shared
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
@@ -50,6 +51,12 @@ struct HEXMobileApp: App {
                     openPage: $openPage
                 )
                 .onOpenURL { url in
+                    // A typing config (`.mhexconfig`) from Files or a share sheet: its own sheet.
+                    if TypingConfigInbox.handles(url) {
+                        openedFromKeyboard = false
+                        typingConfigs.receive(url)
+                        return
+                    }
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
                     if case .setup = request {
                         openedFromKeyboard = false
@@ -78,6 +85,11 @@ struct HEXMobileApp: App {
                         // Settings › Dictation › Speech model in keyboard: picks its download up.
                         dictation.startKeyboardParakeetDownloadIfWanted()
                     }
+                }
+                .onChange(of: typingConfigs.opensExperiments) { _, opens in
+                    guard opens else { return }
+                    typingConfigs.opensExperiments = false
+                    openPage = .experiments
                 }
             }
         }

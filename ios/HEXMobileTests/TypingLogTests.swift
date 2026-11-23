@@ -495,4 +495,100 @@ final class TypingLogTests: XCTestCase {
         ))
         XCTAssertLessThan(perTapOverhead, 500, "logging adds well under a millisecond per tap")
     }
+
+    // MARK: - Typing configs (the phone's side of a config made from these logs)
+
+    private let typingConfig = Data(#"{"format": "hex.typing-config", "version": 0, "note": "Kept your words.", "words": {"keep": [{"word": "eepy", "evidence": {"times": 3, "sessions": 3}}, {"word": "nightmail", "evidence": {"times": 2, "sessions": 2}}]}}"#.utf8)
+
+    /// A file opened from Files or a share sheet is read once, never past the 64 KB limit, and a
+    /// copy iOS put in Documents/Inbox is deleted once read; its name shows without control or
+    /// direction-changing characters, and the note is cut at 280 characters.
+    func testATypingConfigArrivesReadOnceAndNeverPastTheLimit() throws {
+        let inbox = directory.appendingPathComponent("Documents/Inbox", isDirectory: true)
+        try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
+        let small = inbox.appendingPathComponent("my typing.mhexconfig")
+        try typingConfig.write(to: small)
+        let arrival = TypingConfigInbox.read(small)
+        XCTAssertEqual(arrival.content, .file(typingConfig))
+        XCTAssertEqual(arrival.name, "my typing")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: small.path), "Inbox copy deleted")
+
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let big = directory.appendingPathComponent("logs.mhexconfig")
+        try Data(count: TypingConfigLimits.maxBytes + 1).write(to: big)
+        XCTAssertEqual(TypingConfigInbox.read(big).content, .tooLarge(bytes: TypingConfigLimits.maxBytes + 1))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: big.path), "a file in place is left alone")
+        let empty = directory.appendingPathComponent("empty.mhexconfig")
+        try Data().write(to: empty)
+        XCTAssertEqual(TypingConfigInbox.read(empty).content, .unreadable)
+
+        XCTAssertTrue(TypingConfigInbox.handles(URL(fileURLWithPath: "/a/b.MHEXCONFIG")))
+        XCTAssertFalse(TypingConfigInbox.handles(URL(string: "hex-dictation://config")!))
+        XCTAssertEqual(TypingConfigInbox.displayName("gift\u{202E}gpj.exe\u{0007}"), "giftgpj.exe")
+        XCTAssertEqual(TypingConfigInbox.noteText(String(repeating: "a", count: 400)).count, TypingConfigLimits.noteMaxCharacters)
+    }
+
+    /// The history keeps every config unchanged under the SHA-256 of its bytes (the same file
+    /// twice is one entry), keeps 20, drops the oldest never applied first and never one that was
+    /// applied; deleting the active one leaves Hex defaults.
+    func testTypingConfigHistoryKeysOnTheBytesAndKeepsAppliedOnes() throws {
+        let history = TypingConfigHistory(directory: directory)
+        let hash = TypingConfigReview(data: typingConfig, keyboard: KeyboardLayout(width: 402)).contentHash
+        guard case .added(let first) = history.add(typingConfig, hash: hash, name: "mine") else { return XCTFail("added") }
+        XCTAssertEqual(first.id, hash)
+        XCTAssertEqual(history.add(typingConfig, hash: hash, name: "again"), .existing(first))
+        XCTAssertEqual(history.data(hash), typingConfig, "kept unchanged")
+        history.setActive(hash, partsOff: ["words.keep[1]"])
+        XCTAssertEqual(TypingConfigHistory(directory: directory).active?.partsOff, ["words.keep[1]"], "survives a relaunch")
+
+        for n in 1..<TypingConfigHistory.limit {
+            _ = history.add(Data("\(n)".utf8), hash: "h\(n)", name: "n\(n)", now: Date(timeIntervalSince1970: Double(n)))
+        }
+        XCTAssertEqual(history.entries.count, TypingConfigHistory.limit)
+        _ = history.add(Data("new".utf8), hash: "new", name: "new")
+        XCTAssertNil(history.entry("h1"), "the oldest never applied went")
+        XCTAssertNotNil(history.entry(hash), "the applied one stays")
+        for entry in history.entries { history.setActive(entry.id) }
+        XCTAssertEqual(history.add(Data("more".utf8), hash: "more", name: "more"), .full)
+
+        history.setActive(hash)
+        history.delete(hash)
+        XCTAssertNil(history.activeID)
+        XCTAssertEqual(history.shareableCopy("new")?.lastPathComponent, "new.mhexconfig")
+        history.deleteAll()
+        XCTAssertTrue(history.entries.isEmpty)
+    }
+
+    /// Apply writes active.json with only the parts left on and bumps the generation; going back
+    /// to it compiles the kept file again with the same parts off; Hex defaults removes it.
+    func testApplyingAConfigWritesOnlyItsSwitchedOnPartsAndGoingBackDeletesNothing() throws {
+        let suite = "TypingLogTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TypingConfigStore(settings: TypingConfigSettings(defaults: defaults), directory: directory)
+        let history = TypingConfigHistory(directory: directory)
+        let keyboard = KeyboardLayout(width: 402)
+        let review = TypingConfigReview(data: typingConfig, keyboard: keyboard)
+        guard case .added(let entry) = history.add(typingConfig, hash: review.contentHash, name: "mine") else { return XCTFail("added") }
+
+        try TypingConfigActivation.apply(entry, review: review, partsOff: ["words.keep[1]"], history: history, store: store)
+        let active = try XCTUnwrap(store.activeURL.flatMap { try? Data(contentsOf: $0) })
+        let written = try JSONDecoder().decode(TypingConfigFile.self, from: active)
+        XCTAssertEqual(written.words?.keep?.compactMap(\.value?.word), ["eepy"])
+        XCTAssertNil(written.note, "no note in what the keyboard reads")
+        XCTAssertEqual(TypingConfigSettings(defaults: defaults).generation, 1)
+        XCTAssertEqual(history.activeID, entry.id)
+
+        TypingConfigActivation.useDefaults(history: history, store: store)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(store.activeURL).path))
+        XCTAssertNil(history.activeID)
+        XCTAssertNotNil(history.entry(entry.id), "Hex defaults deletes nothing")
+
+        let kept = try XCTUnwrap(history.entry(entry.id))
+        let again = TypingConfigReview(data: try XCTUnwrap(history.data(kept.id)), keyboard: keyboard)
+        try TypingConfigActivation.apply(kept, review: again, partsOff: Set(kept.partsOff), history: history, store: store)
+        let back = try JSONDecoder().decode(TypingConfigFile.self, from: try Data(contentsOf: try XCTUnwrap(store.activeURL)))
+        XCTAssertEqual(back.words?.keep?.compactMap(\.value?.word), ["eepy"], "the parts it had off stay off")
+    }
+
 }

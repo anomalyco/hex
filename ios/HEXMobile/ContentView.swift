@@ -352,7 +352,8 @@ struct ContentView: View {
         case .privacy:
             PrivacySettingsPage()
         case .experiments:
-            ExperimentsSettingsPage()
+            // A typing config's Open Experiments: starts at its switch.
+            ExperimentsSettingsPage(startsAt: TypingConfigInbox.shared.isParked ? ExperimentsSettingsPage.typingConfigsRow : nil)
         }
     }
 
