@@ -68,8 +68,8 @@ fn reads_the_models_words_and_costs() {
     let model = open_en();
     let core = core_en();
     let (info, characters, bases) = alphabet(model);
-    assert_eq!(info.word_count, 86_133);
-    assert_eq!(info.pair_count, 417_480);
+    assert_eq!(info.word_count, 86_247);
+    assert_eq!(info.pair_count, 417_182);
     assert_eq!(info.byte_count, core.byte_count());
     assert_eq!(
         unsafe { CStr::from_ptr(info.language.as_ptr()) }
@@ -103,14 +103,14 @@ fn reads_the_models_words_and_costs() {
             -2
         );
         let mut length = 7;
-        assert!(hk_model_word_codes(model, 86_133, &mut length).is_null());
+        assert!(hk_model_word_codes(model, 86_247, &mut length).is_null());
         assert_eq!(length, 0);
 
         assert_eq!(
             hk_model_unigram_cost(model, the as usize),
             core.unigram_cost(the as usize)
         );
-        assert!(hk_model_unigram_cost(model, 86_133).is_nan());
+        assert!(hk_model_unigram_cost(model, 86_247).is_nan());
         let mut cost = 0.0;
         assert_eq!(
             hk_model_cost(model, c("the").as_ptr(), c("of").as_ptr(), &mut cost),
