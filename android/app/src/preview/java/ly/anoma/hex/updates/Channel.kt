@@ -81,6 +81,10 @@ internal object Channel {
         } catch (e: IOException) { part.delete(); throw Failure(Updates.Problem.Connection) }
     }
 
+    /** The file [download] left for [release], if its size and SHA-256 still match; null if it's gone or changed. */
+    fun downloaded(context: Context, release: Release): File? =
+        File(File(context.cacheDir, "updates"), "${release.code}.apk").takeIf { it.length() == release.size && sha256(it) == release.sha256 }
+
     /** The APK must be Hex Preview itself, the build latest.json named, newer than what runs, and signed with
      * exactly the running app's key. */
     fun verify(context: Context, file: File, release: Release) {
