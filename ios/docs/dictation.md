@@ -635,7 +635,10 @@ Keyboard › Languages whose base language differs from it, mapped by the same r
 keyboard-follow language uses (`LanguageSettings.dictationLanguage(for:)`). Both must
 resolve to `SpeechTranscriber`, and the second language's model must already be installed
 (`AssetInventory.status`): dictation never downloads for it, and a language whose
-`SpeechTranscriber` model was set aside as failing is skipped. Two `SpeechAnalyzer`s
+`SpeechTranscriber` model was set aside as failing is skipped. So the switch does
+nothing for a language Apple reads only with `DictationTranscriber` (on macOS 27.2.1
+`SpeechTranscriber` lists 45 locales, without Ukrainian, Czech, Polish, Russian, Hebrew
+or Dutch), on either side of the pair. Two `SpeechAnalyzer`s
 read the same WAV, each with its own `AVAudioFile`, prepared with
 `prepareToAnalyze(in: nil)` before starting, and a `SpeechTranscriber(locale:`,
 `transcriptionOptions: [], reportingOptions: [],`
@@ -644,7 +647,12 @@ vocabulary's contextual strings. Each final result's timed runs give the merge i
 (the run's own characters, leading whitespace included, start, end, confidence), and a
 run without letters or without a time range keeps its characters on the word before it.
 `TwoLanguageMerger` cuts both readings at the earlier of two word ends within 150 ms,
-scores each reading in a segment by its confidence-weighted seconds clipped to the
+and at any word end of one reading that no word of the other spans (more than 150 ms
+either side): where the language really changes, the reading that can't follow it hears
+a few long garbled words or none, so the two rarely end a word together there, and
+without those cuts the speech on both sides of the change fell in one piece and one
+language's words were dropped (an English-then-Chinese clip lost its last 6 s of
+English). It scores each reading in a segment by its confidence-weighted seconds clipped to the
 segment, and picks a reading per segment with a two-state Viterbi that charges 0.35 s of
 confident audio for each language change, ties going to the primary. A word the new
 reading starts with is dropped only when it repeats the last word kept, case and

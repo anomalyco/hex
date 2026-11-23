@@ -174,9 +174,9 @@ nonisolated enum TwoLanguageMerger {
         )
     }
 
-    /// Every time the two readings agree on where a word ends, plus the start and end of the
-    /// audio, at the earlier of the two ends. A word belongs to the segment its midpoint
-    /// falls in.
+    /// Every time the two readings agree on where a word ends (at the earlier of the two
+    /// ends), every word end of one reading that falls between two words of the other, plus
+    /// the start and end of the audio. A word belongs to the segment its midpoint falls in.
     private static func cutPoints(
         primary: [TwoLanguageTimedWord],
         secondary: [TwoLanguageTimedWord]
@@ -185,6 +185,18 @@ nonisolated enum TwoLanguageMerger {
         for left in primary {
             for right in secondary where abs(left.end - right.end) <= cutTolerance {
                 cuts.append(min(left.end, right.end))
+            }
+        }
+        // Where the language really changes, the reading that can't follow it hears a few
+        // long words or none, so the two readings may never end a word together there. A word
+        // end of one reading that no word of the other spans cuts nothing in half either, so
+        // the change can happen there; without it, the speech before and after the change
+        // fell in one piece and one language's words were dropped.
+        for (reading, other) in [(primary, secondary), (secondary, primary)] {
+            for word in reading where !other.contains(where: {
+                $0.start < word.end - cutTolerance && $0.end > word.end + cutTolerance
+            }) {
+                cuts.append(word.end)
             }
         }
         cuts.append(max((primary + secondary).map(\.end).max() ?? 0, 0))
