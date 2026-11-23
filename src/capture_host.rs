@@ -118,8 +118,9 @@ pub use sink::{CaptureAudio, CaptureSinkClosed};
 use timeline::Timeline;
 use words::ChosenTranscriber;
 
-/// "While dictating" for a capture on Linux: its own audio suppressor, made
-/// when the capture starts and restoring what it changed when dropped.
+/// "While dictating" for a capture on Linux: a session on the shared audio
+/// suppressor, composing with dictation and restoring when the last session
+/// ends.
 #[cfg(target_os = "linux")]
 #[derive(Clone, Default)]
 pub struct Environment;
@@ -136,8 +137,8 @@ impl Environment {
     }
 }
 
-/// "While dictating" for a capture on Windows: its own suppressor, made when
-/// the capture starts and restoring what it changed when dropped.
+/// "While dictating" for a capture on Windows: a session on the shared audio
+/// suppressor, composing with dictation without preventing idle sleep.
 #[cfg(target_os = "windows")]
 #[derive(Clone, Default)]
 pub struct Environment;
@@ -148,7 +149,7 @@ type Quiet = crate::windows::audio_control::AudioSuppressor;
 #[cfg(target_os = "windows")]
 impl Environment {
     fn begin_capture(&self, behavior: crate::app_settings::RecordingAudioBehavior) -> Quiet {
-        let quiet = Quiet::start(behavior);
+        let quiet = Quiet::new(behavior);
         quiet.suppress();
         quiet
     }
@@ -162,7 +163,6 @@ const SAMPLE_RATE: u32 = 16_000;
 /// A capture keeps at most this much audio; the rest is recorded as a gap.
 /// It bounds disk use only: the audio streams to `audio.wav.partial`, never memory.
 const MAX_CAPTURE: Duration = Duration::from_secs(8 * 60 * 60);
-const GAP_TOLERANCE: Duration = Duration::from_millis(50);
 /// How long shutdown waits for capture threads, inside the quit deadline.
 const SHUTDOWN_WAIT: Duration = Duration::from_secs(2);
 /// Captures being written at once: the one finishing plus those queued

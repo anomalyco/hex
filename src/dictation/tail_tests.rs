@@ -12,8 +12,11 @@ use crate::audio::CaptureInstant;
 use crate::dictation::{DictationCapture, Finish, POST_RELEASE_TAIL, resample_for_parakeet};
 
 const LEAD: Duration = Duration::from_secs(1);
-const PRE_ROLL: Duration = Duration::from_millis(450);
 const RELEASE_OFFSETS_MS: [i64; 6] = [-150, -100, -50, 0, 50, 150];
+
+fn pre_roll() -> Duration {
+    crate::dictation::hotkey_pre_roll(crate::app_settings::RecordingAudioBehavior::DoNothing)
+}
 
 fn samples_for(duration: Duration, rate: u32) -> usize {
     (duration.as_nanos() * u128::from(rate) / 1_000_000_000) as usize
@@ -111,7 +114,7 @@ fn release_boundary_harness() {
         audio.extend_from_slice(&speech);
         audio.resize(audio.len() + rate as usize, 0.0);
         let reference = resample_for_parakeet(&audio, rate);
-        let reference_start = (lead - samples_for(PRE_ROLL, rate)) * 16_000 / rate as usize;
+        let reference_start = (lead - samples_for(pre_roll(), rate)) * 16_000 / rate as usize;
         println!(
             "== {path} rate={rate} speech_end_ms={}",
             end as u64 * 1_000 / u64::from(rate)
@@ -119,7 +122,7 @@ fn release_boundary_harness() {
         for offset_ms in RELEASE_OFFSETS_MS {
             let release = (end as i64 + offset_ms * i64::from(rate) / 1_000) as usize;
             let expected_len =
-                (samples_for(PRE_ROLL, rate) + release + samples_for(POST_RELEASE_TAIL, rate))
+                (samples_for(pre_roll(), rate) + release + samples_for(POST_RELEASE_TAIL, rate))
                     * 16_000
                     / rate as usize;
             let samples = capture(&audio, rate, release).into_transcription_samples();

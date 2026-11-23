@@ -7,8 +7,10 @@
 //! loop never blocks on audio plumbing; failures are logged and dictation
 //! proceeds unaffected.
 
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::thread::JoinHandle;
+use std::time::Duration;
 
 use windows::Media::Control::{
     GlobalSystemMediaTransportControlsSession, GlobalSystemMediaTransportControlsSessionManager,
@@ -37,15 +39,10 @@ fn wait<T: windows::core::RuntimeType>(
 }
 
 use crate::app_settings::RecordingAudioBehavior as WhileDictating;
+use crate::audio::effect_holds::{Effect, Hold, SessionRequest, next_session_id, serve_sessions};
 use crate::audio::idle_sleep::PreventSleep;
 use crate::audio::output_ducking;
 use crate::audio::output_route;
-
-enum Command {
-    Suppress,
-    Restore,
-    Shutdown,
-}
 
 /// Undo state for one suppression round.
 enum Suppressed {
@@ -54,71 +51,139 @@ enum Suppressed {
     Media(Vec<GlobalSystemMediaTransportControlsSession>),
 }
 
-/// What one recording holds until it is restored.
-struct Held {
-    audio: Option<Suppressed>,
-    _sleep: Option<PreventSleep>,
+/// One held environment effect; dropping it restores what it changed.
+enum HeldEffect {
+    Sleep(#[allow(dead_code)] Option<PreventSleep>),
+    Audio(Option<Suppressed>),
+}
+
+impl Drop for HeldEffect {
+    fn drop(&mut self) {
+        if let Self::Audio(audio) = self {
+            restore(audio.take());
+        }
+    }
+}
+
+fn hold_effect(effect: Effect) -> HeldEffect {
+    match effect {
+        Effect::Sleep => HeldEffect::Sleep(crate::audio::idle_sleep::prevent_sleep()),
+        Effect::Mute => HeldEffect::Audio(suppress(WhileDictating::Mute)),
+        Effect::Duck => HeldEffect::Audio(suppress(WhileDictating::Duck)),
+        Effect::Pause => HeldEffect::Audio(suppress(WhileDictating::PauseMedia)),
+    }
+}
+
+/// One shared COM MTA worker owns every held Windows audio/sleep effect so
+/// overlapping sessions (dictation + Annotate capture) compose cleanly and
+/// never double-duck or restore prematurely.
+fn shared_worker() -> Option<Sender<SessionRequest>> {
+    static WORKER: OnceLock<Option<Sender<SessionRequest>>> = OnceLock::new();
+    WORKER
+        .get_or_init(|| {
+            let (requests, receiver) = mpsc::channel();
+            let spawned = std::thread::Builder::new()
+                .name("windows-audio-suppressor".into())
+                .spawn(move || {
+                    unsafe {
+                        // Balanced implicitly at thread exit; MTA also covers the
+                        // agile WinRT media-session objects.
+                        let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
+                    }
+                    serve_sessions(receiver, Duration::ZERO, hold_effect);
+                });
+            if let Err(error) = &spawned {
+                tracing::warn!(%error, "could not start Windows audio control");
+            }
+            spawned.ok().map(|_| requests)
+        })
+        .clone()
 }
 
 pub struct AudioSuppressor {
-    commands: Sender<Command>,
-    worker: Option<JoinHandle<()>>,
+    id: u64,
+    hold: Hold,
+    requests: Option<Sender<SessionRequest>>,
+    active: AtomicBool,
 }
 
 impl AudioSuppressor {
-    /// A worker that applies the configured behavior and prevents idle
-    /// sleep while a dictation records.
+    /// "While dictating" for a capture, which does not prevent idle sleep.
+    pub fn new(mode: WhileDictating) -> Self {
+        Self::for_hold(Hold::capture(mode))
+    }
+
+    /// "While dictating" for a dictation, which also prevents idle sleep.
     pub fn start(mode: WhileDictating) -> Self {
-        let (commands, receiver) = mpsc::channel();
-        let worker = std::thread::Builder::new()
-            .name("windows-audio-suppressor".into())
-            .spawn(move || {
-                unsafe {
-                    // Balanced implicitly at thread exit; MTA also covers the
-                    // agile WinRT media-session objects.
-                    let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
-                }
-                let mut held: Option<Held> = None;
-                while let Ok(command) = receiver.recv() {
-                    match command {
-                        Command::Suppress if held.is_none() => {
-                            held = Some(Held {
-                                audio: suppress(mode),
-                                _sleep: crate::audio::idle_sleep::prevent_sleep(),
-                            });
-                        }
-                        Command::Suppress => {}
-                        Command::Restore => restore(held.take()),
-                        Command::Shutdown => {
-                            restore(held.take());
-                            return;
-                        }
-                    }
-                }
-            });
-        if let Err(error) = &worker {
-            tracing::warn!(%error, "could not start Windows audio control");
+        Self::for_hold(Hold::dictation(mode))
+    }
+
+    fn for_hold(hold: Hold) -> Self {
+        if hold.is_empty() {
+            return Self {
+                id: next_session_id(),
+                hold,
+                requests: None,
+                active: AtomicBool::new(false),
+            };
         }
         Self {
-            commands,
-            worker: worker.ok(),
+            id: next_session_id(),
+            hold,
+            requests: shared_worker(),
+            active: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_requests_for_test(hold: Hold, requests: Sender<SessionRequest>) -> Self {
+        Self {
+            id: next_session_id(),
+            hold,
+            requests: (!hold.is_empty()).then_some(requests),
+            active: AtomicBool::new(false),
         }
     }
 
     pub fn suppress(&self) {
-        let _ = self.commands.send(Command::Suppress);
+        if let Some(requests) = &self.requests {
+            self.active.store(true, Ordering::Release);
+            let _ = requests.send(SessionRequest::Suppress {
+                id: self.id,
+                hold: self.hold,
+            });
+        }
     }
 
     pub fn restore(&self) {
-        let _ = self.commands.send(Command::Restore);
+        if let Some(requests) = &self.requests {
+            self.active.store(false, Ordering::Release);
+            let _ = requests.send(SessionRequest::Restore { id: self.id });
+        }
     }
 }
 
 impl Drop for AudioSuppressor {
     fn drop(&mut self) {
-        let _ = self.commands.send(Command::Shutdown);
-        if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+        let Some(requests) = &self.requests else {
+            return;
+        };
+        if self.active.swap(false, Ordering::AcqRel) {
+            let (ack, done) = mpsc::sync_channel(1);
+            if requests
+                .send(SessionRequest::Drop {
+                    id: self.id,
+                    ack: Some(ack),
+                })
+                .is_ok()
+            {
+                let _ = done.recv();
+            }
+        } else {
+            let _ = requests.send(SessionRequest::Drop {
+                id: self.id,
+                ack: None,
+            });
         }
     }
 }
@@ -269,8 +334,8 @@ fn pause_playing_media() -> Option<Suppressed> {
     }
 }
 
-fn restore(held: Option<Held>) {
-    match held.and_then(|held| held.audio) {
+fn restore(audio: Option<Suppressed>) {
+    match audio {
         None => {}
         Some(Suppressed::Ducked(mut guard)) => guard.restore(),
         Some(Suppressed::Sessions(sessions)) => {
@@ -288,5 +353,99 @@ fn restore(held: Option<Held>) {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    fn barrier(requests: &Sender<SessionRequest>) {
+        let (ack, done) = mpsc::sync_channel(1);
+        requests.send(SessionRequest::Barrier(ack)).unwrap();
+        done.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
+    fn capture_do_nothing_starts_no_worker_and_never_prevents_sleep() {
+        let capture = AudioSuppressor::new(WhileDictating::DoNothing);
+        assert!(capture.requests.is_none());
+        assert!(!capture.hold.wants(Effect::Sleep));
+        capture.suppress();
+        capture.restore();
+
+        let capture_duck = AudioSuppressor::with_requests_for_test(
+            Hold::capture(WhileDictating::Duck),
+            mpsc::channel().0,
+        );
+        assert!(!capture_duck.hold.wants(Effect::Sleep));
+        assert!(capture_duck.hold.wants(Effect::Duck));
+    }
+
+    #[test]
+    fn overlapping_dictation_and_capture_restore_original_volume() {
+        let values = Arc::new(Mutex::new(vec![1.0_f32, 0.75]));
+        let effects = Arc::new(Mutex::new(Vec::new()));
+        struct SharedVolume(Arc<Mutex<Vec<f32>>>);
+        impl output_ducking::Volume for SharedVolume {
+            fn read(&self) -> Option<Vec<f32>> {
+                Some(self.0.lock().unwrap().clone())
+            }
+            fn write(&mut self, next: &[f32]) -> bool {
+                *self.0.lock().unwrap() = next.to_vec();
+                true
+            }
+        }
+        let (requests, receiver) = mpsc::channel();
+        let worker_values = values.clone();
+        let worker_effects = effects.clone();
+        let worker = std::thread::spawn(move || {
+            serve_sessions(receiver, Duration::ZERO, move |effect| {
+                worker_effects.lock().unwrap().push(effect);
+                if effect == Effect::Duck {
+                    let volume = SharedVolume(worker_values.clone());
+                    output_ducking::Guard::start(0.2, move || Some(volume))
+                } else {
+                    None
+                }
+            });
+        });
+
+        let dictation = AudioSuppressor::with_requests_for_test(
+            Hold::dictation(WhileDictating::Duck),
+            requests.clone(),
+        );
+        let capture = AudioSuppressor::with_requests_for_test(
+            Hold::capture(WhileDictating::Duck),
+            requests.clone(),
+        );
+
+        dictation.suppress();
+        barrier(&requests);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!((values.lock().unwrap()[0] - 0.2).abs() < 0.02);
+
+        // Capture overlaps: Duck is not re-acquired, Sleep is not touched again.
+        capture.suppress();
+        barrier(&requests);
+        assert_eq!(*effects.lock().unwrap(), vec![Effect::Sleep, Effect::Duck]);
+        assert!((values.lock().unwrap()[0] - 0.2).abs() < 0.02);
+
+        // Dictation ends first; volume stays lowered for the capture.
+        dictation.restore();
+        barrier(&requests);
+        assert!((values.lock().unwrap()[0] - 0.2).abs() < 0.02);
+
+        // Dropping capture synchronously restores the original 1.0/0.75 volume.
+        drop(capture);
+        let restored = values.lock().unwrap().clone();
+        assert!((restored[0] - 1.0).abs() < 0.01, "got {restored:?}");
+        assert!((restored[1] - 0.75).abs() < 0.01, "got {restored:?}");
+
+        drop(dictation);
+        drop(requests);
+        worker.join().unwrap();
     }
 }

@@ -126,8 +126,9 @@ pub const POST_RELEASE_TAIL: Duration = Duration::from_millis(200);
 /// The longest a release tail grows while speech carries on past
 /// [`POST_RELEASE_TAIL`] (a word still being said as the shortcut goes up).
 pub const MAX_RELEASE_TAIL: Duration = Duration::from_millis(600);
+/// How long past the tail itself a finish waits for the stream to deliver it.
+pub(crate) const TAIL_DELIVERY_GRACE: Duration = Duration::from_millis(100);
 /// A step in the microphone timeline larger than this is a gap.
-#[cfg_attr(target_os = "windows", allow(dead_code))]
 pub(crate) const CHUNK_GAP_TOLERANCE: Duration = Duration::from_millis(50);
 /// On macOS, gaps up to this long (a Bluetooth stream's startup hiccup is
 /// ~140 ms) are filled with silence so the capture keeps going; longer ones

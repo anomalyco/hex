@@ -4,9 +4,9 @@
 //! it the same way.
 
 use std::sync::mpsc::{SyncSender, TrySendError};
-use std::time::Duration;
 
 use crate::audio::CaptureInstant;
+use crate::dictation::CHUNK_GAP_TOLERANCE;
 
 /// Audio for the `capture` experiment's sink, on the dictation timeline.
 #[derive(Debug)]
@@ -32,9 +32,6 @@ pub struct CaptureSinkClosed {
     /// The end of the audio the sink accounted for, delivered or as a gap.
     pub accounted_through: CaptureInstant,
 }
-
-/// A gap shorter than this is jitter between chunks, not missing audio.
-const GAP_TOLERANCE: Duration = Duration::from_millis(50);
 
 /// The capture sink inside the owner. It never blocks the timeline: a full
 /// sink drops audio and records the span as a gap to send once it has room.
@@ -75,7 +72,7 @@ impl CaptureSink {
             samples = &samples[frames.min(samples.len())..];
             from = self.since;
         } else if from > self.accounted_through
-            && from.duration_since(self.accounted_through) > GAP_TOLERANCE
+            && from.duration_since(self.accounted_through) > CHUNK_GAP_TOLERANCE
         {
             self.extend_gap(self.accounted_through, from);
         }
