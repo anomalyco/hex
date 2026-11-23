@@ -93,6 +93,14 @@ internal class SpeechPreferences(context: Context) {
     var vocabularyTerms: List<String>
         get() = prefs.getString("vocabularyTerms", null)?.split('\n').orEmpty().filter(String::isNotEmpty)
         set(value) { prefs.edit().putString("vocabularyTerms", VocabularySpelling.sanitize(value).joinToString("\n")).apply() }
+    // Labs › Signature: the line added to each keyboard dictation, off by default.
+    var signature: Boolean
+        get() = prefs.getBoolean("signature", false)
+        set(value) { prefs.edit().putBoolean("signature", value).apply() }
+    var signatureText: String
+        get() = prefs.getString("signatureText", Signature.DEFAULT_TEXT)
+            ?.takeIf { Signature.textProblem(it) == null }?.trim() ?: Signature.DEFAULT_TEXT
+        set(value) { prefs.edit().putString("signatureText", value).apply() }
     fun options(nextEnglish: Boolean?) = SpeechOptions(style, spoken, clean,
         translation && spoken == DictationLanguage.Spanish && (nextEnglish ?: true), lowercase, endWithPeriod, formatLists, spokenPunctuation,
         if (customVocabulary) vocabularyTerms else emptyList())

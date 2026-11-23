@@ -28,6 +28,34 @@ internal interface KeyboardSurface {
     fun undoDictation(shown: Boolean)
 }
 
+/** Whether a dictation may be joined to the text at the cursor. A signed dictation (Labs › Signature) joins
+ * the text before it as usual, with its signature on a line of its own; the dictation after it starts on a
+ * new line below that signature while the signed text is still right before the cursor, so it is never
+ * lowercased or spaced onto the signature line. */
+internal class DictationContinuation {
+    /** The signed dictation's inserted text, while the next dictation still starts a line below it. */
+    private var signed: String? = null
+
+    /** How far back before the cursor to read to tell whether a signed dictation is still there. */
+    val reach get() = (signed?.length ?: 0) + 1
+
+    /** Whether the text before the cursor ([before], read back from its end) still ends with a signed
+     * dictation's text: the next dictation goes on a line below it, not on its line. The trailing space
+     * [insertion] may have added after the signed text is ignored. */
+    fun standalone(before: String?): Boolean {
+        val text = signed ?: return false
+        return before != null && (before.endsWith(text) || before.endsWith("$text "))
+    }
+
+    /** A dictation went in: [inserted] when a signature was appended, so the next one starts on a new line
+     * while that text stays before the cursor. An unsigned dictation leaves the text it followed, so undoing
+     * it puts the signature right before the cursor again. */
+    fun record(inserted: String?) { if (inserted != null) signed = inserted.trimEnd(' ') }
+
+    /** Any edit, a new field or leaving the editor ends it. */
+    fun clear() { signed = null }
+}
+
 /** Keys in, text out: the current word, autocorrection and its undo, spaces, shift and the key pages.
  * It talks to the editor only through [KeyboardTextTarget] and to the views through [KeyboardSurface]. */
 internal class KeyboardEngine(
@@ -79,6 +107,7 @@ internal class KeyboardEngine(
     private data class Dictated(val text: String, val after: String)
     private var dictated: Dictated? = null
     private val dropDictation = Runnable { offerUndo(null) }
+    private val continuation = DictationContinuation()
 
     fun startInput(attribute: EditorInfo) {
         edited()
@@ -434,32 +463,46 @@ internal class KeyboardEngine(
         target.commit(""); resetTyping(); surface?.suggestions(emptyList())
     }
 
-    /** Dictation starts: the word in progress is left as typed. */
-    fun clearForDictation() { edited(); resetTyping(); clearSpaces(); surface?.suggestions(emptyList()) }
+    /** Dictation starts: the word in progress is left as typed. The signed dictation before still makes this
+     * one stand alone, so its continuation is kept. */
+    fun clearForDictation() { offerUndo(null); resetTyping(); clearSpaces(); surface?.suggestions(emptyList()) }
 
     /** The editor or the keyboard went away: forget the word, never carry it to the next field. */
     fun leave() { edited(); resetTyping(); clearSpaces(); word = null; surface?.suggestions(emptyList()) }
 
     /** Dictated text with only the separators missing at the cursor; mid-sentence its first word loses
-     * the capital Whisper gave it ([SpokenText.continuing], [language] as dictated or "en" translated). */
-    fun insertDictation(text: String, language: String?) {
+     * the capital Whisper gave it ([SpokenText.continuing], [language] as dictated or "en" translated).
+     * [signature] says a signature was appended (Labs › Signature): it joins the text at the cursor as
+     * usual, with the signature on a line of its own. The next dictation starts on a new line below that
+     * signature while the signed text is still right before the cursor, so it is never lowercased or
+     * spaced onto the signature line. */
+    fun insertDictation(text: String, language: String?, signature: Boolean = false) {
         if (!target.connected) return
-        val before = if (secure) null else target.before(64)
-        // The keyboard's own word list for that language, when loaded, knows far more ordinary words than
-        // the speech side's short list: a word it has in lowercase and the books rarely capitalise
-        // loses Whisper's capital; a name keeps it (iOS asks UITextChecker the same).
-        val model = models[if (language == "no") "nb" else language]?.model
-        val shaped = if (model == null) SpokenText.continuing(text, before, language)
+        val before = if (secure) null else target.before(maxOf(64, continuation.reach))
+        val standalone = continuation.standalone(before)
+        val joinable = !signature && !standalone
+        val shaped = if (!joinable) text else {
+            // The keyboard's own word list for that language, when loaded, knows far more ordinary words than
+            // the speech side's short list: a word it has in lowercase and the books rarely capitalise
+            // loses Whisper's capital; a name keeps it (iOS asks UITextChecker the same).
+            val model = models[if (language == "no") "nb" else language]?.model
+            if (model == null) SpokenText.continuing(text, before, language)
             else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
-        val result = insertion(shaped, before?.lastOrNull(), target.after(1)?.firstOrNull())
-        if (result.isNotEmpty() && target.commit(result) && !secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
+        }
+        val result = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
+        if (result.isNotEmpty() && target.commit(result)) {
+            continuation.record(if (signature) result else null)
+            if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))
+        }
     }
 
     /** Undo dictation: the last dictation goes, if it is still right before the cursor with nothing selected. */
     fun undoDictation() {
         val d = dictated ?: return
         offerUndo(null)
-        if (undoable(d) && replace(d.text, "")) { resetTyping(); clearSpaces(); showPredictions(before()) }
+        if (undoable(d) && replace(d.text, "")) {
+            resetTyping(); clearSpaces(); showPredictions(before())
+        }
     }
     private fun undoable(d: Dictated): Boolean {
         if (secure || !target.connected || target.selected()?.isNotEmpty() == true || !endsWith(d.text)) return false
@@ -473,6 +516,6 @@ internal class KeyboardEngine(
         if (next != null) main.postDelayed(dropDictation, UNDO_MS)
         if (shown || next != null) surface?.undoDictation(next != null)
     }
-    /** Any edit through the keys ends the Undo dictation offer. */
-    private fun edited() { if (dictated != null) offerUndo(null) }
+    /** Any edit through the keys ends the Undo dictation offer, and a signed dictation's effect on the next. */
+    private fun edited() { if (dictated != null) offerUndo(null); continuation.clear() }
 }

@@ -48,6 +48,7 @@ import ly.anoma.hex.updates.Updates
 
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
+    Labs(R.string.settings_labs),
     Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
     Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
     Feedback(R.string.feedback_send_feedback);
@@ -102,6 +103,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val spokenPunctuation = remember(revision) { speech.spokenPunctuation }
     val customVocabulary = remember(revision) { speech.customVocabulary }
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
+    val signature = remember(revision) { speech.signature }
+    var signatureDraft by remember { mutableStateOf(speech.signatureText) }
+    // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
+    LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
     val autocorrect = remember(revision) { typing.autocorrect }
     val swearWords = remember(revision) { typing.suggestSwearWords }
@@ -202,7 +207,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         if (notice != null) Label(notice, muted = true, size = 14, lines = 3)
                         Updates.HomeCard()
                         Card {
-                            listOf(Page.Dictation, Page.Keyboard, Page.Privacy).forEachIndexed { i, dest ->
+                            listOf(Page.Dictation, Page.Keyboard, Page.Privacy, Page.Labs).forEachIndexed { i, dest ->
                                 if (i != 0) Rule()
                                 Entry(stringResource(dest.title), action = { open(dest) })
                             }
@@ -290,6 +295,37 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         }
                     }
                     Page.Feedback -> FeedbackForm(done = { open(Page.Home) })
+                    Page.Labs -> {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Label(stringResource(R.string.labs_output), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                Toggle(stringResource(R.string.signature), stringResource(R.string.signature_detail),
+                                    signature) { speech.signature = it }
+                                if (signature) {
+                                    Rule()
+                                    val ink = colorResource(R.color.ink)
+                                    val problem = Signature.textProblem(signatureDraft)
+                                    Column(Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                        BasicTextField(value = signatureDraft, onValueChange = {
+                                            signatureDraft = it
+                                            // An invalid draft never replaces the saved line.
+                                            if (Signature.textProblem(it) == null) speech.signatureText = it.trim()
+                                        }, singleLine = true, modifier = Modifier.fillMaxWidth(),
+                                            textStyle = TextStyle(color = ink, fontFamily = inter, fontSize = 16.sp),
+                                            cursorBrush = SolidColor(ink), decorationBox = { field ->
+                                                Box { if (signatureDraft.isEmpty()) Label(Signature.DEFAULT_TEXT, muted = true); field() }
+                                            })
+                                        if (problem != null) Label(stringResource(when (problem) {
+                                            Signature.Problem.Line -> R.string.signature_one_line
+                                            Signature.Problem.Length -> R.string.signature_too_long
+                                        }), size = 13, muted = true)
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Page.Styles -> Card {
                         Style.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()

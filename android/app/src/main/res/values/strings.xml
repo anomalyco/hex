@@ -107,4 +107,10 @@
     <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type with its keyboard. It keeps no keystrokes or transcripts. Feedback leaves the phone only when you tap Send in Send feedback: then your message, the pictures you keep, your email if you add one and details about Hex and this phone go to Anomaly’s feedback inbox (Bellhop). Your dictations, recordings, vocabulary and corrections are never included.</string>
     <string name="settings_privacy_policy">Privacy policy</string>
     <string name="settings_licences">Open-source licences</string>
+    <string name="settings_labs">Labs</string>
+    <string name="labs_output">Output</string>
+    <string name="signature">Signature</string>
+    <string name="signature_detail">Add a line to the end of each dictation, such as “Sent from Hex”</string>
+    <string name="signature_one_line">Use one line</string>
+    <string name="signature_too_long">Use 200 characters or fewer</string>
 </resources>

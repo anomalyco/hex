@@ -99,4 +99,10 @@
     <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。</string>
     <string name="settings_privacy_policy">隐私政策</string>
     <string name="settings_licences">开源许可</string>
+    <string name="settings_labs">实验室</string>
+    <string name="labs_output">输出</string>
+    <string name="signature">签名</string>
+    <string name="signature_detail">在每次听写末尾添加一行，例如“Sent from Hex”</string>
+    <string name="signature_one_line">请使用一行</string>
+    <string name="signature_too_long">请使用不超过 200 个字符</string>
 </resources>
