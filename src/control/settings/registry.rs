@@ -362,10 +362,10 @@ pub(super) const KEYS: &[Key] = &[
     key(
         "labs.stop_any_call_recording",
         Kind::Bool,
-        "Labs: an offered, calendar, or by-hand call recording stops 30 s after its call app \
-         leaves the microphone and goes quiet, without Stop when the call ends, which keeps \
-         governing Always record; a recording started by hand watches the one call app on the \
-         microphone when it starts (macOS)",
+        "Labs: an offered or by-hand call recording stops 30 s after its call app leaves the \
+         microphone and goes quiet, without Stop when the call ends, which keeps governing \
+         Always record; on macOS a calendar reminder's recording stops too; a recording \
+         started by hand watches the one call app on the microphone when it starts",
     ),
     key(
         "labs.playground",

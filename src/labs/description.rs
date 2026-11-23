@@ -252,8 +252,11 @@ impl Feature {
             Self::DictateWhileAnnotating => {
                 "While an Annotate capture records, the dictation shortcut dictates as usual: the text pastes into the app in front, History and Paste Last keep it, and the capture goes on recording, hearing the words too"
             }
+            Self::StopAnyCallRecording if !cfg!(target_os = "macos") => {
+                "An offered or by-hand call recording stops on its own 30 s after its call app leaves the microphone, as Always record's Stop when the call ends does, which still governs Always record; a recording started by hand watches the one call app holding the microphone when it starts"
+            }
             Self::StopAnyCallRecording => {
-                "An offered, calendar, or by-hand call recording stops on its own 30 s after its call app leaves the microphone, as Always record's Stop when the call ends does, which still governs Always record; a recording started by hand watches the one call app holding the microphone when it starts (macOS)"
+                "An offered, calendar, or by-hand call recording stops on its own 30 s after its call app leaves the microphone, as Always record's Stop when the call ends does, which still governs Always record; a recording started by hand watches the one call app holding the microphone when it starts"
             }
         }
     }

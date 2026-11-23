@@ -1166,7 +1166,10 @@ CoreAudio formats, AppleScript details, or event serialization.
   detected call app leaves the microphone, offer `Keep Recording` or
   `Stop & Transcribe`; never stop automatically, except a recording Hex
   started on its own while `meetings.stop_when_call_ends` (Detected calls ›
-  Stop when the call ends, default off) is on. An active recording stays
+  Stop when the call ends, default off) is on, or an offered, calendar, or
+  by-hand recording that watches a call app while the Labs switch
+  `labs.stop_any_call_recording` (Stop every call recording when the call
+  ends, default off) is on. An active recording stays
   visible and stoppable from the menu bar without the Settings window.
 - Calendar access is asked for only by Meetings › Settings' Connect calendar, never at
   launch, and only with Meetings on; Meetings off means no EventKit reads and

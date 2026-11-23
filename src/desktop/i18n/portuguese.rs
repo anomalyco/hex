@@ -1489,7 +1489,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Agent tools for captures", "Ferramentas de agente para capturas"),
     ("Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely", "Adiciona hex annotate zoom, inspect, frames e skill para que agentes de código leiam uma captura de perto"),
     ("Stop every call recording when the call ends", "Parar toda gravação de chamada quando a chamada termina"),
-    ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off (macOS)", "Também para uma gravação iniciada por oferta, pelo calendário ou à mão 30 s depois que o app da chamada deixa o microfone, mesmo com «Parar quando a chamada terminar» desligado (macOS)"),
+    ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Também para uma gravação iniciada por oferta, pelo calendário ou à mão 30 s depois que o app da chamada deixa o microfone, mesmo com «Parar quando a chamada terminar» desligado"),
+    ("Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Também para uma gravação iniciada por oferta ou à mão 30 s depois que o app da chamada deixa o microfone, mesmo com «Parar quando a chamada terminar» desligado"),
 ];
 
 #[cfg(test)]

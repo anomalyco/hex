@@ -632,6 +632,27 @@ fn stop_when_the_call_ends_shows_on_every_os() {
     }
 }
 
+/// Labs' Stop every call recording lab shows wherever Meetings is on, and
+/// its switch saves: Windows and Linux record offered and by-hand calls too,
+/// even though a calendar reminder is macOS only.
+#[test]
+fn the_stop_every_call_recording_lab_shows_on_every_os() {
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 2600.0));
+        rt.state.settings.meetings.enabled = true;
+        refresh(&mut rt);
+        open_labs(&mut rt);
+        assert!(
+            rt.find("lab-stop-any-call-recording").is_some(),
+            "no Stop every call recording lab on {scene}"
+        );
+        scroll_into_view(&mut rt, "lab-stop-any-call-recording", "scroll");
+        assert!(!rt.state.settings.labs.stop_any_call_recording, "{scene}");
+        tap(&mut rt, "lab-stop-any-call-recording");
+        assert!(rt.state.settings.labs.stop_any_call_recording, "{scene}");
+    }
+}
+
 /// Off a Mac, Summaries is a switch that turns OpenCode on.
 #[test]
 fn summaries_are_a_switch_off_a_mac() {

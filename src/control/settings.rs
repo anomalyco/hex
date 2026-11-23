@@ -654,6 +654,15 @@ mod tests {
         } else {
             assert_eq!(refused, Some("unsupported"));
         }
+        // Stop every call recording ships on all three OSes.
+        assert!(
+            unavailable_under(
+                "labs.stop_any_call_recording",
+                crate::policy::Policy::default()
+            )
+            .is_none(),
+            "the lab is refused on this OS"
+        );
     }
 
     /// A saved record shortcut and Annotate's shortcut can't share a chord

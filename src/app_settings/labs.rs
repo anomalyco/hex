@@ -253,9 +253,9 @@ pub struct LabsSettings {
     pub meeting_import: bool,
     /// A saved meeting's transcript offers line selection and deletion.
     pub transcript_edits: bool,
-    /// Meetings stops an offered, calendar, or by-hand call recording 30 s
-    /// after its call app leaves the microphone, as Always record's Stop when
-    /// the call ends does (macOS).
+    /// Meetings stops an offered or by-hand call recording (and a calendar
+    /// reminder's on macOS) 30 s after its call app leaves the microphone, as
+    /// Always record's Stop when the call ends does.
     pub stop_any_call_recording: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,

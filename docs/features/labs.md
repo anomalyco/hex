@@ -280,17 +280,19 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        entries too. The old summary, provisional title, and chapters go with them; Regenerate
 │                                        summary reads the edited file and the user Markdown copy is rewritten only while Hex still
 │                                        wrote it (see meetings.md)
-├── Stop every call recording when the call ends no labs.stop_any_call_recording (macOS, with Meetings on) an offered,
-│                                        calendar (Zoom, Teams, or Slack link), or by-hand call recording stops 3 s after
-│                                        its call app leaves the microphone, then 30 s of grace, even with Stop when the
-│                                        call ends off; a recording started by hand watches the one native call app on the
-│                                        microphone when it starts, and an on-request recording counts no absence until it
+├── Stop every call recording when the call ends no labs.stop_any_call_recording (every OS, with Meetings on) an
+│                                        offered, calendar (macOS; Zoom, Teams, or Slack link), or by-hand call recording
+│                                        stops 3 s after its call app leaves the microphone, then 30 s of grace, even with
+│                                        Stop when the call ends off; a recording started by hand watches the one native
+│                                        call app on the microphone when it starts (Windows and Linux map the executable
+│                                        name to the same keys), and an on-request recording counts no absence until it
 │                                        has seen that app on the microphone
 │                                        // checks: the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record,
 │                                        // a_calendar_recording_counts_no_absence_until_its_app_joins,
 │                                        // a_recording_kind_knows_whether_it_watches_a_call_app,
-│                                        // one_native_call_app_is_watched_and_a_browser_or_two_are_not
-│                                        // (meeting/watcher/call_end.rs); not observed on a real Mac
+│                                        // one_native_call_app_is_watched_and_a_browser_or_two_are_not,
+│                                        // windows_and_linux_executables_link_to_their_canonical_call_app
+│                                        // (meeting/watcher/call_end.rs); not observed on a real Mac, Windows, or Linux call
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
@@ -4155,8 +4157,8 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Meetings (beta): see [Meetings](meetings.md). Its toggle is
   `meetings.enabled`; on, Meetings is a top-level sidebar item (debug builds
   keep it available regardless).
-- Stop every call recording when the call ends (macOS, with Meetings on): the
-  recorders Hex did not start on its own stop the way Always record's do
+- Stop every call recording when the call ends (every OS, with Meetings on):
+  the recorders Hex did not start on its own stop the way Always record's do
   under Stop when the call ends. Its toggle is
   `labs.stop_any_call_recording` (off by default), and it needs nothing from
   `meetings.stop_when_call_ends`: that switch keeps governing Always record,
@@ -4167,27 +4169,32 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   ([Meetings › Stop Other Call Recordings](meetings.md#stop-other-call-recordings-labs)).
   A calendar link is watched only when it names a desktop app: Zoom, Teams, or
   Slack (`CallProvider::application` in
-  [calendar.rs](../../src/calendar.rs)), never Google Meet or Webex.
+  [calendar.rs](../../src/calendar.rs)), never Google Meet or Webex; a
+  calendar reminder is macOS only, so Windows and Linux stop only offered and
+  by-hand recordings.
   A recording Hex started on request counts no absence until a successful
   microphone read has found its app on the input at least once; playback and a
   failed read never count, so a calendar recording started before the call is
   answered, or while a waiting room holds, never arms a stop on its own. A recording started by hand (Meetings' Start recording, the menu bar,
   `hex meetings record`) takes its call app from the microphone at start: the
   one native call app holding it right then, by the canonical bundles
-  detection uses, with browsers left out so no page is read and none or
-  several leaving the recording unwatched. The recording keeps its own title,
+  detection uses (Windows and Linux map the executable name, such as
+  ms-teams.exe, teams-for-linux, or zoom, to the same keys), with browsers
+  left out so no page is read and none or several leaving the recording
+  unwatched. The recording keeps its own title,
   app, and capture; only its stop is associated. The absence rule is all it
   adds: a browser that never releases the microphone between calls (Arc) is
   still ended only for a recording Hex started itself. Turning the lab off
   while a stop counts drops it. Checks:
   `the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record`,
   `a_calendar_recording_counts_no_absence_until_its_app_joins`,
-  `a_recording_kind_knows_whether_it_watches_a_call_app`, and
-  `one_native_call_app_is_watched_and_a_browser_or_two_are_not`
+  `a_recording_kind_knows_whether_it_watches_a_call_app`,
+  `one_native_call_app_is_watched_and_a_browser_or_two_are_not`, and
+  `windows_and_linux_executables_link_to_their_canonical_call_app`
   ([meeting/watcher/call_end.rs](../../src/meeting/watcher/call_end.rs));
   `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`
   ([meeting/watcher.rs](../../src/meeting/watcher.rs)). Not observed on a real
-  Mac or a real Slack huddle.
+  Mac, Windows, or Linux call, or a real Slack huddle.
 - Import audio (macOS): Meetings offers **Import audio…** beside Start
   recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
   mono float WAV by the AVFoundation bridge, then transcribed with the

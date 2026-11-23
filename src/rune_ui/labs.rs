@@ -619,11 +619,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
     rows.push(row(Feature::Appearance, Some(&PANEL)));
     if caps.meetings {
         rows.push(row(Feature::LiveChapters, None));
-        // macOS stops these recordings, so a macOS scene shows it on every
-        // build (as Vocabulary menu does).
-        if caps.os == super::platform::Os::Macos {
-            rows.push(row(Feature::StopAnyCallRecording, None));
-        }
+        rows.push(row(Feature::StopAnyCallRecording, None));
         // macOS's status item lists them, from the meeting controller's own
         // calendar read.
         if cfg!(target_os = "macos") {
