@@ -335,27 +335,14 @@ pub fn lowered_first(s: &str) -> String {
     lowercased(f) + &s[f.len()..]
 }
 
-/// `s` decomposed and case-folded (full folding), as Foundation compares it, except the iota
-/// subscript (U+0345), which Foundation keeps: "ᾀ" is not the fold of "ἈΙ".
-fn folded(s: &str) -> String {
-    use caseless::Caseless;
-    let mut out = String::new();
-    for c in s.nfd() {
-        if c == '\u{345}' {
-            out.push(c);
-        } else {
-            out.extend(std::iter::once(c).default_case_fold());
-        }
-    }
-    out.nfd().collect()
-}
-
-/// `caseInsensitiveCompare(_:) == .orderedSame`: canonically equivalent once case-folded.
+/// `caseInsensitiveCompare(_:) == .orderedSame`, done right: canonically equivalent once
+/// case-folded (Unicode full case folding, both strings alike). Foundation's isn't symmetric
+/// for ß and Greek's iota subscript ("wußte" against "wüste"); the port's is.
 pub fn case_insensitive_eq(a: &str, b: &str) -> bool {
     if a.is_ascii() && b.is_ascii() {
         return a.eq_ignore_ascii_case(b);
     }
-    folded(a) == folded(b)
+    caseless::canonical_caseless_match_str(a, b)
 }
 
 /// `folding(options: .diacriticInsensitive, locale: nil)`: each character decomposed and the

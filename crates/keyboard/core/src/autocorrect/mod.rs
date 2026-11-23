@@ -29,7 +29,7 @@ use std::sync::Arc;
 pub use distance::{are_adjacent_keys, single_edit_keyboard_cost};
 pub use engine::Bundled;
 pub use german::GermanCapitals;
-pub use language::{Language, LetterLayout};
+pub use language::{KeyCell, KeyGrid, LanguageConfig, LanguageId};
 pub use learning::{AppliedCorrection, Change, LearnedList, TypingLearning};
 pub use offensive::{NeverSuggestList, OffensiveKind, OffensiveWords};
 pub use tokens::{
@@ -140,9 +140,9 @@ impl Autocorrect {
         self.learns_per_language
     }
 
-    fn list_for(&self, language: Language) -> LearnedList {
+    fn list_for(&self, language: &LanguageId) -> LearnedList {
         if self.learns_per_language {
-            LearnedList::Language(language)
+            LearnedList::Language(language.clone())
         } else {
             LearnedList::Shared
         }
@@ -151,13 +151,13 @@ impl Autocorrect {
     /// `scopeLearnedWords`: which list each engine reads, counting a change as a change of
     /// your words. The host then hands over the lists' words (`set_learned_words`).
     fn scope_learned_words(&mut self) {
-        let store = self.list_for(self.me.language);
+        let store = self.list_for(&self.me.language);
         if store != self.me.learned_list {
             self.me.learned_list = store;
             self.me.user_words_revision += 1;
         }
-        if let Some(language) = self.partner.as_ref().map(|p| p.language) {
-            let theirs = self.list_for(language);
+        if let Some(language) = self.partner.as_ref().map(|p| p.language.clone()) {
+            let theirs = self.list_for(&language);
             if let Some(partner) = &mut self.partner
                 && theirs != partner.learned_list
             {
@@ -168,12 +168,12 @@ impl Autocorrect {
     }
 
     /// The list of kept words this engine reads, and the partner's.
-    pub fn learned_list(&self) -> LearnedList {
-        self.me.learned_list
+    pub fn learned_list(&self) -> &LearnedList {
+        &self.me.learned_list
     }
 
-    pub fn partner_learned_list(&self) -> Option<LearnedList> {
-        self.partner.as_ref().map(|p| p.learned_list)
+    pub fn partner_learned_list(&self) -> Option<&LearnedList> {
+        self.partner.as_ref().map(|p| &p.learned_list)
     }
 
     /// The words of `learned_list()` (`LearnedWordsStore.words`), whenever they change.
@@ -187,9 +187,14 @@ impl Autocorrect {
         }
     }
 
-    /// Follows the keyboard layout (`setLanguage`); `available` is the device's dictionaries.
-    pub fn set_language<S: AsRef<str>>(&mut self, language: Language, available: &[S]) {
-        self.me.language = language;
+    /// Follows the keyboard layout (`setLanguage`): `tag` is the language's BCP 47 tag (an
+    /// unknown one turns everything off but your text replacements); `available` is the
+    /// device's dictionaries. The keys stay the host's: it hands the new language's grid over
+    /// with `set_keys`.
+    pub fn set_language<S: AsRef<str>>(&mut self, tag: &str, available: &[S]) {
+        let language = LanguageId::new(tag);
+        self.me.language = language.clone();
+        self.me.config = language.config();
         self.scope_learned_words();
         if self
             .partner
@@ -198,16 +203,16 @@ impl Autocorrect {
         {
             self.partner = None;
         } else if let Some(partner) = &mut self.partner {
-            partner.layout_language = language;
+            partner.layout_language = language.clone();
             partner.decoder_cache = None;
         }
-        if !self.me.set_language(language, available) {
+        if !self.me.set_language(&language, available) {
             self.partner = None;
         }
     }
 
-    pub fn language(&self) -> Language {
-        self.me.language
+    pub fn language(&self) -> &str {
+        self.me.language.as_str()
     }
 
     /// False when the device has no dictionary for the language: then only your text
@@ -216,28 +221,31 @@ impl Autocorrect {
         self.me.has_dictionary
     }
 
-    /// The keys the letters are typed on (`setKeys`); the partner types on the same ones.
-    pub fn set_keys(&mut self, language: Language, letters: LetterLayout) {
+    /// The keys the letters are typed on (`setKeys`): the layout's language (`layout`, whose
+    /// manifest says which accents a slip may leave out) and the grid of letters the host shows,
+    /// for the neighbouring-key cost. The partner types on the same ones.
+    pub fn set_keys(&mut self, layout: &str, cells: &[KeyCell]) {
+        let grid = Arc::new(KeyGrid::new(cells));
         for engine in std::iter::once(&mut self.me).chain(self.partner.as_mut()) {
-            engine.layout_language = language;
-            engine.layout_letters = Some(letters);
+            engine.layout_language = LanguageId::new(layout);
+            engine.grid = grid.clone();
         }
     }
 
     /// Bilingual autocorrect's second language (`setPartner`), with its own dictionary.
     pub fn set_partner<S: AsRef<str>>(
         &mut self,
-        other: Option<Language>,
+        other: Option<&str>,
         available: &[S],
         checker: Box<dyn TextChecker>,
     ) {
-        let Some(other) = other else {
+        let Some(other) = other.map(LanguageId::new) else {
             self.partner = None;
             return;
         };
         if other == self.me.language
             || !self.me.has_dictionary
-            || other.spell_check_language(available).is_none()
+            || other.config().spell_check_language(available).is_none()
         {
             self.partner = None;
             return;
@@ -246,10 +254,10 @@ impl Autocorrect {
             return;
         }
         let me = &self.me;
-        let mut engine = Engine::new(me.bundled.clone(), checker, self.list_for(other));
-        engine.set_language(other, available);
-        engine.layout_language = me.layout_language;
-        engine.layout_letters = me.layout_letters;
+        let mut engine = Engine::new(me.bundled.clone(), checker, self.list_for(&other));
+        engine.set_language(&other, available);
+        engine.layout_language = me.layout_language.clone();
+        engine.grid = me.grid.clone();
         engine.shortcuts = me.shortcuts.clone();
         engine.shortcut_index = me.shortcut_index.clone();
         engine.system_lexicon_terms = me.system_lexicon_terms.clone();
@@ -266,8 +274,8 @@ impl Autocorrect {
         self.partner = Some(engine);
     }
 
-    pub fn partner_language(&self) -> Option<Language> {
-        self.partner.as_ref().map(|p| p.language)
+    pub fn partner_language(&self) -> Option<&str> {
+        self.partner.as_ref().map(|p| p.language.as_str())
     }
 
     /// Your `UILexicon` entries: text replacements and terms (`loadLexiconEntries`).
@@ -416,12 +424,15 @@ impl Autocorrect {
 
     // MARK: what the engine answers directly
 
-    pub fn last_fix_language(&self) -> Option<Language> {
-        self.me.last_fix_language
+    pub fn last_fix_language(&self) -> Option<&str> {
+        self.me.last_fix_language.as_ref().map(LanguageId::as_str)
     }
 
-    pub fn last_revision_language(&self) -> Option<Language> {
-        self.me.last_revision_language
+    pub fn last_revision_language(&self) -> Option<&str> {
+        self.me
+            .last_revision_language
+            .as_ref()
+            .map(LanguageId::as_str)
     }
 
     pub fn may_offer(&self, candidate: &str, previous: Option<&str>) -> bool {

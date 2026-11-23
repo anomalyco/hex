@@ -20,7 +20,7 @@ extension ACParityGenerator {
         if rng.chance(0.3) { c.learned = (0..<(1 + rng.int(4))).map { _ in rng.chance(0.5) ? word(l).lowercased() : typo(word(l), l) } }
         if rng.chance(0.2) { c.ops.append(["op": "perlang", "on": true]) }
         c.ops.append(["op": "lang", "l": l.rawValue, "avail": available])
-        let letters = rng.pick(l.acoLetterLayouts)
+        let letters = rng.pick(l.letterLayouts)
         c.ops.append(["op": "keys", "l": l.rawValue, "letters": letters.rawValue])
         if rng.chance(0.1) { c.ops.append(["op": "enabled", "on": false]) }
         if rng.chance(0.25) { c.ops.append(["op": "swear", "on": true]) }
@@ -233,8 +233,9 @@ extension ACParityGenerator {
         case 4: return ["op": "matchcase", "typed": s, "target": rng.chance(0.5) ? word(language) : rng.pick(["I'm", "iPhone", "On my way!", "GitHub", "ß"])]
         case 5:
             let l = rng.pick(KeyboardLanguage.allCases)
+            let letters: KeyboardLetterLayout? = rng.chance(0.5) ? rng.pick(l.letterLayouts) : nil
             return ["op": "cost", "s": s.lowercased(), "t": rng.chance(0.5) ? typo(s.lowercased(), l) : word(language),
-                    "l": l.rawValue, "letters": rng.chance(0.5) ? rng.pick(l.acoLetterLayouts).rawValue as Any : NSNull()]
+                    "l": l.rawValue, "letters": letters?.rawValue ?? NSNull(), "grid": Self.grid(l, letters)]
         case 6: return ["op": "vowel", "w": s]
         default: return ["op": "vspell", "token": s, "term": rng.pick(ACParityWords.vocabulary)]
         }

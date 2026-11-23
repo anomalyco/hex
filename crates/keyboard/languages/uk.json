@@ -1,0 +1,8 @@
+{
+  "id": "uk",
+  "model": "uk",
+  "system_dictionaries": ["uk", "uk_UA"],
+  "sentence_starters": ["я", "це", "ми"],
+  "clause_starters": ["і", "але", "що"],
+  "common_words": ["і", "в", "не", "на", "що", "я"]
+}

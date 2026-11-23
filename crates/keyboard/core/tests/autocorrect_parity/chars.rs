@@ -1,20 +1,19 @@
 //! Swift's answers on characters and strings (the fixture's `chars` line) against the port's
 //! (`autocorrect::text`).
+//!
+//! Case-insensitive comparisons are checked against both strings case-folded (Foundation's
+//! `folding(options: .caseInsensitive)`), which the port does by Unicode case folding. Where
+//! Foundation's `caseInsensitiveCompare` answers otherwise (it isn't symmetric for ß and
+//! Greek's iota subscript: "wußte" is "wüste", "wüste" isn't "wußte"), the difference is the
+//! owner's decided change and is listed, not failed.
 
 use hex_keyboard_core::autocorrect::text;
 use serde_json::{Value, json};
 
-/// Where the port isn't Foundation: `caseInsensitiveCompare` folds its own way, and not
-/// symmetrically. A receiver's ß matches a precomposed umlaut before s ("wußte" is "wüste",
-/// "Maß" is "mäs", "Straße" is "Sträse", not the other way round), and Greek's iota subscript
-/// matches or not by case and side ("ἈΙ" is "ᾀ", "ᾀ" is not "ἈΙ"). The port folds both
-/// strings fully (Unicode case folding), keeping the iota subscript; these answers are
-/// listed, not failed, until the owner decides.
-const KNOWN: [&str; 3] = ["U+0345 ", "\"\u{1f08}\u{399}\" ", "pair "];
-
-/// The answers that differ, and those that differ as `KNOWN` says.
+/// The answers that differ, and where only Foundation's `caseInsensitiveCompare` does.
 pub fn check(v: &Value) -> (Vec<String>, Vec<String>) {
     let mut failures = Vec::new();
+    let mut foundation = Vec::new();
     for row in v["rows"].as_array().unwrap() {
         let code = u32::from_str_radix(row[0].as_str().unwrap(), 16).unwrap();
         let Some(c) = char::from_u32(code) else {
@@ -45,6 +44,7 @@ pub fn check(v: &Value) -> (Vec<String>, Vec<String>) {
                 ci |= bit;
             }
         }
+        let swift_ci = row[5].as_u64().unwrap();
         let got = json!([
             row[0],
             flags,
@@ -54,15 +54,19 @@ pub fn check(v: &Value) -> (Vec<String>, Vec<String>) {
             ci,
             text::trimmed(&s).is_empty()
         ]);
-        // Folding compares canonically: Swift's may come back decomposed.
         let same = got[1] == row[1]
             && got[2] == row[2]
             && got[3] == row[3]
             && text::eq(got[4].as_str().unwrap(), row[4].as_str().unwrap())
-            && got[5] == row[5]
+            && ci == (swift_ci >> 3) & 7
             && got[6] == row[6];
         if !same {
             failures.push(format!("U+{code:04X} rust {got} swift {row}"));
+        } else if ci != swift_ci & 7 {
+            foundation.push(format!(
+                "U+{code:04X} {s:?}: rust {ci:03b} foundation {:03b}",
+                swift_ci & 7
+            ));
         }
     }
     let strings = v["strings"].as_array().unwrap();
@@ -85,32 +89,35 @@ pub fn check(v: &Value) -> (Vec<String>, Vec<String>) {
             text::lowercased(s),
             text::uppercased(s),
             text::without_diacritics(s),
+            row[5],
             ci,
             text::trimmed(s),
             text::without_apostrophes(s)
         ]);
-        let same = (0..8).all(|i| {
-            if i == 4 {
-                text::eq(got[4].as_str().unwrap(), row[4].as_str().unwrap())
-            } else {
-                got[i] == row[i]
-            }
+        let same = (0..9).all(|i| match i {
+            4 => text::eq(got[4].as_str().unwrap(), row[4].as_str().unwrap()),
+            _ => got[i] == row[i],
         });
         if !same {
             failures.push(format!("{s:?} rust {got} swift {row}"));
+        } else if row[5] != row[6] {
+            foundation.push(format!(
+                "{s:?} against the list: rust {ci} foundation {}",
+                row[5]
+            ));
         }
     }
     for pair in v["pairs"].as_array().into_iter().flatten() {
         let (a, b) = (pair[0].as_str().unwrap(), pair[1].as_str().unwrap());
         let rust = text::case_insensitive_eq(a, b);
-        if json!(rust) != pair[2] {
-            failures.push(format!(
-                "pair {a:?}.caseInsensitiveCompare({b:?}): rust {rust} swift {}",
+        if json!(rust) != pair[3] {
+            failures.push(format!("pair {a:?} {b:?}: rust {rust} folded {}", pair[3]));
+        } else if json!(rust) != pair[2] {
+            foundation.push(format!(
+                "{a:?}.caseInsensitiveCompare({b:?}): rust {rust} foundation {}",
                 pair[2]
             ));
         }
     }
-    failures
-        .into_iter()
-        .partition(|f| !KNOWN.iter().any(|k| f.starts_with(k)))
+    (failures, foundation)
 }

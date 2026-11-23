@@ -16,6 +16,8 @@ struct ACParityRunner {
         var hash: UInt64 = 0
         var calls = 0
         var lines: [String]?
+        /// The keys' grid before the first operation.
+        var initialGrid = ""
     }
 
     static func language(_ code: Any?) -> KeyboardLanguage? {
@@ -59,6 +61,8 @@ struct ACParityRunner {
             learnedWords: ACOLearnedWords(defaults: storage)
         )
         var result = Result()
+        result.initialGrid = ACParityGenerator.grid(engine.layoutLanguage, engine.layoutLetters)
+        var lastGrid = result.initialGrid
         var lastLearned: [String]?
         var lastPartnerLearned: [String]?
         var lastPartner: ObjectIdentifier?
@@ -74,6 +78,15 @@ struct ACParityRunner {
             if key != lastState {
                 out["s"] = state
                 lastState = key
+            }
+            // The keys' grid as the host hands it over, written when it changed.
+            let grid = ACParityGenerator.grid(engine.layoutLanguage, engine.layoutLetters)
+            if grid != lastGrid {
+                out["g"] = grid
+                lastGrid = grid
+            }
+            if let partner = engine.partner {
+                precondition(partner.layoutLanguage == engine.layoutLanguage && partner.layoutLetters == engine.layoutLetters)
             }
             let words = engine.learnedWords.words
             if words != lastLearned {

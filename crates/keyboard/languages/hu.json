@@ -1,0 +1,11 @@
+{
+  "id": "hu",
+  "model": "hu",
+  "system_dictionaries": ["hu", "hu_HU"],
+  "fold_diacritics": true,
+  "fold_pairs": [],
+  "two_letter_words": ["az", "és", "is", "de", "ha", "ez", "el", "ki", "be", "rá", "én", "te", "mi", "ne", "se"],
+  "sentence_starters": ["ez", "én", "a"],
+  "clause_starters": ["és", "de", "hogy"],
+  "common_words": ["a", "az", "és", "hogy", "nem", "egy"]
+}

@@ -4,8 +4,9 @@
 //! space tapped as a letter (`merge`).
 
 use super::engine::Engine;
+use super::language::LanguageId;
 use super::replace::is_all_caps_or_mixed;
-use super::{Autocorrect, FieldKind, Language, Suggestion, SuggestionKind, lists, text, tokens};
+use super::{Autocorrect, FieldKind, Suggestion, SuggestionKind, lists, text, tokens};
 use crate::model::Model;
 
 /// `languageLean(_:before:commonFrom:)`: above zero the partner's language, below this one's.
@@ -112,11 +113,11 @@ impl Autocorrect {
         if !self.me.has_dictionary {
             return replacement_only();
         }
-        let language = self.me.language;
+        let language = self.me.config;
         if tokens::is_sentence_start(before_input, language) {
             return self
                 .me
-                .predictions(language.sentence_starters(), None, capitalizes_next);
+                .predictions(language.sentence_starters, None, capitalizes_next);
         }
         if let Some(before) = before_input
             && text::last(before) == " "
@@ -126,7 +127,7 @@ impl Autocorrect {
             if !mark.is_empty() && tokens::is_mid_sentence_mark(mark) {
                 return self
                     .me
-                    .predictions(language.clause_starters(), None, capitalizes_next);
+                    .predictions(language.clause_starters, None, capitalizes_next);
             }
             let Some(finished) = tokens::current_token(Some(before)) else {
                 return Vec::new();
@@ -134,11 +135,11 @@ impl Autocorrect {
             let previous = text::lowercased(&finished);
             let mut words: Vec<String> = Vec::new();
             if let Some(model) = prediction_model
-                && model.language() == language.code()
+                && language.reads_model(model.language())
             {
                 words = model.next_words(&previous, |w| self.me.may_offer(w, Some(&previous)));
             }
-            words.extend(language.common_words().iter().map(|w| (*w).to_owned()));
+            words.extend(language.common_words.iter().map(|w| (*w).to_owned()));
             return self
                 .me
                 .predictions(&words, Some(&previous), capitalizes_next);
@@ -287,11 +288,11 @@ impl Autocorrect {
             return tokens::vocabulary_spelling(token, &term);
         }
         if let Some(accented) = self.me.accent_restoration(token) {
-            self.me.last_fix_language = Some(self.me.language);
+            self.me.last_fix_language = Some(self.me.language.clone());
             return Some(accented);
         }
         if !self.working_partner() {
-            self.me.last_fix_language = Some(self.me.language);
+            self.me.last_fix_language = Some(self.me.language.clone());
             return self.me.own_replacement(token);
         }
         let (me, partner) = self.engines();
@@ -302,12 +303,12 @@ impl Autocorrect {
                 && me.is_sure_fix(token)
                 && let Some(own) = me.own_replacement(token)
             {
-                me.last_fix_language = Some(me.language);
+                me.last_fix_language = Some(me.language.clone());
                 return Some(own);
             }
             let replacement = if lean <= 0
                 && !is_all_caps_or_mixed(token)
-                && !(me.language.uses_english_fixes()
+                && !(me.config.english_rules
                     && lists::unambiguous_fix(&text::lowercased(token)).is_some())
             {
                 me.decoder_decision(token, true)
@@ -320,7 +321,7 @@ impl Autocorrect {
                 me.last_fix_language = None;
                 return None;
             };
-            me.last_fix_language = Some(me.language);
+            me.last_fix_language = Some(me.language.clone());
             return me.without_added_capitals(&me.cased(&replacement, token), token);
         }
         let own = me.own_replacement(token);
@@ -332,25 +333,25 @@ impl Autocorrect {
             None
         };
         let Some(theirs) = theirs else {
-            me.last_fix_language = own.as_ref().map(|_| me.language);
+            me.last_fix_language = own.as_ref().map(|_| me.language.clone());
             return own;
         };
         let own = match own {
             Some(own) if !text::case_insensitive_eq(&own, &theirs) => own,
             other => {
                 me.last_fix_language = Some(if other.is_none() {
-                    partner.language
+                    partner.language.clone()
                 } else {
-                    me.language
+                    me.language.clone()
                 });
                 return other.or(Some(theirs));
             }
         };
         if prefers_partner(me, lean, token, &own, &theirs) {
-            me.last_fix_language = Some(partner.language);
+            me.last_fix_language = Some(partner.language.clone());
             return Some(theirs);
         }
-        me.last_fix_language = Some(me.language);
+        me.last_fix_language = Some(me.language.clone());
         Some(own)
     }
 
@@ -379,7 +380,7 @@ impl Autocorrect {
         }
         let next_word = text::split_on(next, " ").first()?.to_string();
         let previous = tokens::previous_word(before, word);
-        self.me.last_revision_language = Some(self.me.language);
+        self.me.last_revision_language = Some(self.me.language.clone());
         if let Some(fixed) = self.bilingual_revision(word, before, &next_word) {
             return Some(fixed);
         }
@@ -409,7 +410,7 @@ impl Autocorrect {
     /// sentence's start, once the next word leans English.
     fn bilingual_revision(&mut self, word: &str, before: &str, next: &str) -> Option<String> {
         if !self.working_partner()
-            || !self.me.language.uses_english_fixes()
+            || !self.me.config.english_rules
             || text::contains_char(word, "'")
         {
             return None;
@@ -444,7 +445,7 @@ impl Autocorrect {
         word: &str,
         before: &str,
         next: &str,
-    ) -> Option<(String, Language)> {
+    ) -> Option<(String, LanguageId)> {
         let lower = text::lowercased(word);
         if !self.working_partner()
             || text::count(word) < 2
@@ -481,7 +482,7 @@ impl Autocorrect {
         if !into.may_offer(&accented, tokens::previous_word(before, word).as_deref()) {
             return None;
         }
-        let language = into.language;
+        let language = into.language.clone();
         me.without_added_capitals(&tokens::match_case(word, &accented), word)
             .map(|s| (s, language))
     }
@@ -506,7 +507,7 @@ impl Autocorrect {
             .as_ref()
             .or(me.decoder_keys.as_ref())?;
         let taps = me.decoder_taps.as_ref()?;
-        if decoder.model().language() != me.language.code()
+        if !me.config.reads_model(decoder.model().language())
             || text::contains_char(first, "'")
             || text::contains_char(second, "'")
         {
@@ -559,8 +560,8 @@ fn prefers_partner(me: &Engine, lean: i32, token: &str, own: &str, theirs: &str)
         super::distance::single_edit_keyboard_cost(
             &lower,
             &text::lowercased(&text::without_apostrophes(fix)),
-            me.layout_language,
-            me.layout_letters,
+            me.layout_language.config(),
+            &me.grid,
         )
         .unwrap_or(1.0)
     };

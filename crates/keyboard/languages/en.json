@@ -1,0 +1,10 @@
+{
+  "id": "en",
+  "model": "en",
+  "system_dictionaries": ["en_US", "en"],
+  "english_rules": true,
+  "two_letter_words": ["to", "of", "in", "it", "is", "be", "as", "at", "so", "we", "he", "by", "or", "on", "do", "if", "me", "my", "up", "an", "go", "no", "us", "am"],
+  "sentence_starters": ["I", "the", "I'm"],
+  "clause_starters": ["I", "but", "and"],
+  "common_words": ["the", "to", "and", "a", "I", "of"]
+}

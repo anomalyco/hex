@@ -81,11 +81,11 @@ impl Engine {
         next: Option<&str>,
         starts_sentence: bool,
     ) -> Option<String> {
-        if !self.is_enabled || !self.language.uses_english_fixes() {
+        if !self.is_enabled || !self.config.english_rules {
             return None;
         }
         let model = self.context_model.as_ref()?;
-        if model.language() != self.language.code() {
+        if !self.config.reads_model(model.language()) {
             return None;
         }
         let lower = text::lowercased(word);

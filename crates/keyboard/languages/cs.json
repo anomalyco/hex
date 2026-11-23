@@ -1,0 +1,10 @@
+{
+  "id": "cs",
+  "model": "cs",
+  "system_dictionaries": ["cs", "cs_CZ"],
+  "fold_diacritics": true,
+  "fold_pairs": [["l", "ł"]],
+  "sentence_starters": ["to", "já", "ale"],
+  "clause_starters": ["a", "ale", "že"],
+  "common_words": ["a", "se", "je", "v", "na", "to"]
+}

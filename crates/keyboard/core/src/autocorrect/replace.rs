@@ -4,7 +4,6 @@
 //! one-edit guess.
 
 use super::engine::{DecoderCache, Engine, model_id};
-use super::language::Language;
 use super::{distance, lists, text, tokens};
 use crate::decoder::{Decision, UserWords};
 use crate::never_suggest::NeverSuggest;
@@ -59,7 +58,7 @@ impl Engine {
                 return self.without_added_capitals(&choice, token);
             }
         }
-        if self.language.uses_english_fixes()
+        if self.config.english_rules
             && let Some(fixed) = lists::unambiguous_fix(&lower)
         {
             if all_caps && text::count(token) < 3 {
@@ -75,18 +74,16 @@ impl Engine {
                 && self.may_offer_replacing(&replacement, token)
             {
                 let mut cased = self.cased(&replacement, token);
-                if self.language.uses_english_fixes() && text::contains_char(&cased, " ") {
+                if self.config.english_rules && text::contains_char(&cased, " ") {
                     cased = text::split_on(&cased, " ")
                         .into_iter()
                         .map(|w| if w == "i" { "I" } else { w })
                         .collect::<Vec<_>>()
                         .join(" ");
                 }
-                let german_model = self
-                    .decoder
-                    .as_ref()
-                    .is_some_and(|d| d.model().language() == Language::German.code());
-                if self.adds_capitals && !text::contains_char(&cased, " ") && german_model {
+                // German: the manifest names its nouns' capitals.
+                let nouns = self.config.noun_capitals.is_some();
+                if self.adds_capitals && !text::contains_char(&cased, " ") && nouns {
                     cased = self.noun_capitalised(&cased, token).unwrap_or(cased);
                 }
                 return self.without_added_capitals(&cased, token);
@@ -107,7 +104,11 @@ impl Engine {
         if let Some(accented) = self.accent_restoration(token) {
             return Some(accented);
         }
-        if text::count(token) < 3 || text::contains_char(token, "'") {
+        // (a French elision's sides each as a word, `elision_fix`).
+        if text::contains_char(token, "'") {
+            return self.elision_fix(token);
+        }
+        if text::count(token) < 3 {
             return None;
         }
         if self.checker.is_word_valid(token) {
@@ -127,8 +128,8 @@ impl Engine {
             let Some(edit) = distance::single_edit_keyboard_cost(
                 &lower,
                 &normalized,
-                self.layout_language,
-                self.layout_letters,
+                self.layout_language.config(),
+                &self.grid,
             ) else {
                 continue;
             };
@@ -145,13 +146,69 @@ impl Engine {
         self.without_added_capitals(&self.cased(&best, token), token)
     }
 
+    /// `frenchElisionFix(for:)`: a word with an elision (the manifest's `elision_heads`) and a
+    /// slip on either side of its apostrophe: the word after it corrected as a word of its own
+    /// ("l'hpmme" -> "l'homme"), a head that is no elision the commonest one a key away
+    /// ("k'homme" -> "l'homme"). `None` when neither side changes, for a word the dictionary
+    /// knows whole, and for an apostrophe without a letter on both sides.
+    fn elision_fix(&mut self, token: &str) -> Option<String> {
+        let heads = self.config.elision_heads;
+        let chars = text::chars(token);
+        if heads.is_empty() || chars.iter().filter(|c| **c == "'").count() != 1 {
+            return None;
+        }
+        let mark = chars.iter().position(|c| *c == "'")?;
+        let head: String = chars[..mark].concat();
+        let tail: String = chars[mark + 1..].concat();
+        if head.is_empty()
+            || tail.is_empty()
+            || !text::chars(&head).into_iter().all(text::is_letter)
+            || !text::chars(&tail).into_iter().all(text::is_letter)
+            || self.checker.is_word_valid(token)
+        {
+            return None;
+        }
+        let mut fixed_head = head.clone();
+        let lower_head = text::lowercased(&head);
+        if !heads.iter().any(|h| text::eq(h, &lower_head)) {
+            let mut best: Option<(&str, f64)> = None;
+            for &word in heads {
+                let Some(cost) = distance::single_edit_keyboard_cost(
+                    &lower_head,
+                    word,
+                    self.layout_language.config(),
+                    &self.grid,
+                ) else {
+                    continue;
+                };
+                if !(cost > 0.0 && cost <= 0.65) {
+                    continue;
+                }
+                if best.is_none_or(|b| cost < b.1) {
+                    best = Some((word, cost));
+                }
+            }
+            fixed_head = tokens::match_case(&head, best?.0);
+        }
+        let mut fixed_tail = tail.clone();
+        if let Some(word) = self.own_replacement(&tail)
+            && text::chars(&word).into_iter().all(text::is_letter)
+        {
+            fixed_tail = word;
+        }
+        if text::eq(&fixed_head, &head) && text::eq(&fixed_tail, &tail) {
+            return None;
+        }
+        Some(format!("{fixed_head}'{fixed_tail}"))
+    }
+
     /// `accentRestoration(for:)`.
     pub fn accent_restoration(&self, token: &str) -> Option<String> {
         if is_all_caps(token) || text::any_char(text::drop_first(token), text::is_uppercase) {
             return None;
         }
         let lower = text::lowercased(token);
-        let accented = self.language.accent_restoration(&lower)?;
+        let accented = self.config.accent_restoration(&lower)?;
         if !self.may_offer_replacing(accented, token) {
             return None;
         }
@@ -161,19 +218,19 @@ impl Engine {
     /// `isSureFix`: a contraction or common slip, or a two-letter word.
     pub fn is_sure_fix(&self, token: &str) -> bool {
         text::count(token) == 2
-            || (self.language.uses_english_fixes()
+            || (self.config.english_rules
                 && lists::unambiguous_fix(&text::lowercased(token)).is_some())
     }
 
     /// `commonTwoLetterFix(for:)`.
     fn common_two_letter_fix(&self, lower: &str) -> Option<&'static str> {
         let mut best: Option<(&'static str, f64)> = None;
-        for &word in self.language.common_two_letter_words() {
+        for &word in self.config.two_letter_words {
             let Some(cost) = distance::single_edit_keyboard_cost(
                 lower,
                 word,
-                self.layout_language,
-                self.layout_letters,
+                self.layout_language.config(),
+                &self.grid,
             ) else {
                 continue;
             };
@@ -195,7 +252,7 @@ impl Engine {
         else {
             return None;
         };
-        if decoder.model().language() != self.language.code()
+        if !self.config.reads_model(decoder.model().language())
             || text::count(token) < 2
             || taps.len() != text::count(token)
             || text::contains_char(token, "'")
@@ -275,7 +332,7 @@ impl Engine {
 
     /// `nounCapitalised(for:typed:)`.
     pub fn noun_capitalised(&mut self, word: &str, token: &str) -> Option<String> {
-        if self.language == Language::German
+        if self.config.noun_capitals.is_some()
             && let Some(capitals) = self.german_nouns()
             && capitals.capitalises(word, self.previous_word_of(token).as_deref()) == Some(true)
             && !word.is_empty()
@@ -353,7 +410,7 @@ impl Engine {
         }
         if text::count(part) == 1 {
             let lower = text::lowercased(part);
-            return self.language.uses_english_fixes() && (lower == "a" || lower == "i");
+            return self.config.english_rules && (lower == "a" || lower == "i");
         }
         self.checker.is_word_valid(part)
     }
@@ -361,7 +418,7 @@ impl Engine {
     /// `rankedGuesses(for:)`: usable guesses, the cheapest slip first.
     pub fn ranked_guesses(&self, token: &str) -> Vec<String> {
         let lower = text::lowercased(token);
-        let (language, letters) = (self.layout_language, self.layout_letters);
+        let (language, grid) = (self.layout_language.config(), &*self.grid);
         let guesses = self.checker.guesses(token);
         let usable: Vec<String> = guesses
             .iter()
@@ -370,7 +427,7 @@ impl Engine {
         let count = text::count(token) as f64;
         let cost = |(offset, g): &(usize, String)| {
             let normalized = text::lowercased(&text::without_apostrophes(g));
-            distance::single_edit_keyboard_cost(&lower, &normalized, language, letters)
+            distance::single_edit_keyboard_cost(&lower, &normalized, language, grid)
                 .unwrap_or_else(|| 2.0 + (text::count(g) as f64 - count).abs() * 0.3)
                 + *offset as f64 * 0.08
         };

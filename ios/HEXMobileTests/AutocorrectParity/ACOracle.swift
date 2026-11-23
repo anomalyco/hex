@@ -1,11 +1,11 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// the engine's state, settings and strip, a copy of `AutocorrectEngine.swift` (up to `replacementOnSpace`) as of dev commit d6efeddb, renamed (`ACOracle`,
+// the engine's state, settings and strip, a copy of `AutocorrectEngine.swift` (up to `replacementOnSpace`) as of dev commit 8b879d8a, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
 // from the repository, and the two orders the owner fixed in the port go through
-// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. Delete with the exporter once iOS
-// runs the Rust autocorrect.
+// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. The keys' grid is the app's
+// (`KeyboardLanguage.keyCoordinates`, which stays the host's). Delete with the exporter.
 
 import CoreGraphics
 import Foundation
@@ -153,8 +153,8 @@ final class ACOracle {
     /// replacement), as Apple's keyboard offers those.
     func mayOffer(_ candidate: String, after previous: String? = nil) -> Bool {
         guard offensiveWords.blocks(candidate, allowSwearing: allowsSwearing, after: previous) else { return true }
-        return lexiconTerms.contains { $0.caseInsensitiveCompare(candidate) == .orderedSame }
-            || lexiconShortcuts.values.contains { $0.caseInsensitiveCompare(candidate) == .orderedSame }
+        return lexiconTerms.contains { ACOracle.sameIgnoringCase($0, candidate) }
+            || lexiconShortcuts.values.contains { ACOracle.sameIgnoringCase($0, candidate) }
     }
 
     /// `mayOffer` for a candidate in place of `token`, after the word before it.
@@ -418,12 +418,14 @@ final class ACOracle {
         case .portuguese: ["eu", "o", "a"]
         case .polish: ["ja", "to", "nie"]
         case .czech: ["to", "já", "ale"]
+        case .hungarian: ["ez", "én", "a"]
         case .romanian: ["eu", "nu", "am"]
         case .norwegian: ["jeg", "det", "vi"]
         case .russian: ["я", "это", "мы"]
         case .ukrainian: ["я", "це", "ми"]
         case .greek: ["θα", "δεν", "το"]
         case .serbianLatin: ["ja", "to", "da"]
+        case .korean: []
         }
     }
 
@@ -441,12 +443,14 @@ final class ACOracle {
         case .portuguese: ["e", "mas", "que"]
         case .polish: ["a", "ale", "że"]
         case .czech: ["a", "ale", "že"]
+        case .hungarian: ["és", "de", "hogy"]
         case .romanian: ["și", "dar", "că"]
         case .norwegian: ["og", "men", "jeg"]
         case .russian: ["и", "но", "что"]
         case .ukrainian: ["і", "але", "що"]
         case .greek: ["και", "αλλά", "που"]
         case .serbianLatin: ["i", "ali", "da"]
+        case .korean: []
         }
     }
 
@@ -461,12 +465,14 @@ final class ACOracle {
         case .portuguese: ["de", "que", "e", "o", "a", "do"]
         case .polish: ["nie", "i", "w", "się", "na", "to"]
         case .czech: ["a", "se", "je", "v", "na", "to"]
+        case .hungarian: ["a", "az", "és", "hogy", "nem", "egy"]
         case .romanian: ["de", "și", "în", "nu", "să", "la"]
         case .norwegian: ["og", "i", "det", "er", "på", "som"]
         case .russian: ["и", "в", "не", "на", "я", "что"]
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
         case .greek: ["και", "να", "το", "θα", "δεν", "η"]
         case .serbianLatin: ["i", "je", "da", "u", "se", "na"]
+        case .korean: []
         }
     }
 
@@ -477,7 +483,7 @@ final class ACOracle {
         for word in words where out.count < 3 {
             guard previous.map({ word.lowercased() != $0 }) ?? true, mayOffer(word, after: previous) else { continue }
             let text = capitalized && addsCapitals ? word.prefix(1).uppercased() + word.dropFirst() : word
-            guard !out.contains(where: { $0.replacement.caseInsensitiveCompare(text) == .orderedSame }) else { continue }
+            guard !out.contains(where: { ACOracle.sameIgnoringCase($0.replacement, text) }) else { continue }
             out.append(KeyboardSuggestion(displayText: text, replacement: text, kind: .nextWord))
         }
         return out
@@ -557,7 +563,7 @@ final class ACOracle {
             let ordered = lean < 0 ? [mine] : lean > 0 ? [theirs]
                 : (0..<max(mine.count, theirs.count)).map { i in [mine, theirs].compactMap { i < $0.count ? $0[i] : nil } }
             for item in ordered.joined()
-            where pool.count < 2 && !pool.contains(where: { $0.caseInsensitiveCompare(item) == .orderedSame }) {
+            where pool.count < 2 && !pool.contains(where: { ACOracle.sameIgnoringCase($0, item) }) {
                 pool.append(item)
             }
         } else {
@@ -597,7 +603,7 @@ final class ACOracle {
         let start = pool.count
         let end = start + max(0, limit)
         func has(_ item: String) -> Bool {
-            pool.contains { $0.caseInsensitiveCompare(item) == .orderedSame }
+            pool.contains { ACOracle.sameIgnoringCase($0, item) }
         }
 
         if corrects, autoFix == nil {
@@ -641,7 +647,7 @@ final class ACOracle {
             if !knowsAsTyped(token) {
                 for guess in rankedGuesses(for: token) {
                     let fixed = cased(guess, typed: token)
-                    if fixed.caseInsensitiveCompare(token) != .orderedSame, mayOffer(guess, replacing: token), !has(fixed) {
+                    if !ACOracle.sameIgnoringCase(fixed, token), mayOffer(guess, replacing: token), !has(fixed) {
                         pool.append(fixed)
                     }
                     if pool.count >= end { break }

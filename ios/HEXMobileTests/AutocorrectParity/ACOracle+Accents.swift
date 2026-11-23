@@ -1,11 +1,11 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// `+Accents`, a copy of `AutocorrectEngine+Accents.swift` as of dev commit d6efeddb, renamed (`ACOracle`,
+// `+Accents`, a copy of `AutocorrectEngine+Accents.swift` as of dev commit 8b879d8a, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
 // from the repository, and the two orders the owner fixed in the port go through
-// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. Delete with the exporter once iOS
-// runs the Rust autocorrect.
+// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. The keys' grid is the app's
+// (`KeyboardLanguage.keyCoordinates`, which stays the host's). Delete with the exporter.
 
 import Foundation
 @testable import HEX

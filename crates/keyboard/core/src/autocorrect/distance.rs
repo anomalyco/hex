@@ -1,31 +1,31 @@
 //! The keyboard-distance cost of a one-edit typo (`AutocorrectEngine+Distance`): what cautious
 //! autocorrect, bilingual choices and the strip's spelling guesses measure a slip by.
 
-use super::language::{Language, LetterLayout};
+use super::language::{KeyGrid, LanguageConfig};
 use super::text;
 
 /// A weighted cost when `source` and `target` are within one Damerau-Levenshtein edit
-/// (`singleEditKeyboardCost`), else `None`.
+/// (`singleEditKeyboardCost`), else `None`. `language` says which accents fold; `grid` holds
+/// the keys a slip is measured on.
 pub fn single_edit_keyboard_cost(
     source: &str,
     target: &str,
-    language: Language,
-    letters: Option<LetterLayout>,
+    language: &LanguageConfig,
+    grid: &KeyGrid,
 ) -> Option<f64> {
     if text::eq(source, target) {
         return Some(0.0);
     }
     let s = text::chars(source);
     let t = text::chars(target);
-    if matches!(
-        language,
-        Language::Polish | Language::Greek | Language::Czech
-    ) && s.len() == t.len()
-    {
-        let same = if language == Language::Greek {
-            same_greek_letter_ignoring_accents
-        } else {
-            same_polish_letter_ignoring_diacritics
+    // A language whose letters fold: accents left out, however many, cost as one missing
+    // Spanish accent, a little more for each further one (Polish "zolw" -> "żółw", Greek
+    // "καλημερα" -> "καλημέρα", Czech "cesky" -> "český", Hungarian "koszonom" ->
+    // "köszönöm"), and so do its `fold_pairs` ("l" for "ł", "σ" for "ς").
+    if language.fold_diacritics && s.len() == t.len() {
+        let same = |a: &str, b: &str| {
+            same_letter_ignoring_accents(a, b)
+                || language.fold_pairs.iter().any(|(x, y)| is_pair(a, b, x, y))
         };
         let missed: Vec<(&str, &str)> = s
             .iter()
@@ -56,7 +56,7 @@ pub fn single_edit_keyboard_cost(
             if same_letter_ignoring_accents(s[i], t[i]) {
                 return Some(0.15);
             }
-            return Some(if are_adjacent_keys(s[i], t[i], language, letters) {
+            return Some(if are_adjacent_keys(s[i], t[i], grid) {
                 0.65
             } else {
                 1.15
@@ -91,9 +91,9 @@ pub fn single_edit_keyboard_cost(
     }
     let extra_idx = skipped.unwrap_or(longer.len() - 1);
     let extra = longer[extra_idx];
-    let left = extra_idx > 0 && are_adjacent_keys(extra, longer[extra_idx - 1], language, letters);
-    let right = extra_idx + 1 < longer.len()
-        && are_adjacent_keys(extra, longer[extra_idx + 1], language, letters);
+    let left = extra_idx > 0 && are_adjacent_keys(extra, longer[extra_idx - 1], grid);
+    let right =
+        extra_idx + 1 < longer.len() && are_adjacent_keys(extra, longer[extra_idx + 1], grid);
     Some(if left || right { 0.70 } else { 0.90 })
 }
 
@@ -109,28 +109,9 @@ fn is_pair(a: &str, b: &str, x: &str, y: &str) -> bool {
     (text::eq(a, x) && text::eq(b, y)) || (text::eq(a, y) && text::eq(b, x))
 }
 
-/// One Polish letter with or without its diacritic (a/ą, z/ż, l/ł).
-pub fn same_polish_letter_ignoring_diacritics(a: &str, b: &str) -> bool {
-    same_letter_ignoring_accents(a, b) || is_pair(a, b, "l", "ł")
-}
-
-/// One Greek letter with or without its tonos or diaeresis, or σ and ς.
-pub fn same_greek_letter_ignoring_accents(a: &str, b: &str) -> bool {
-    same_letter_ignoring_accents(a, b) || is_pair(a, b, "σ", "ς")
-}
-
-/// Whether two keys neighbour on `language`'s keys in `letters`' arrangement.
-pub fn are_adjacent_keys(
-    a: &str,
-    b: &str,
-    language: Language,
-    letters: Option<LetterLayout>,
-) -> bool {
-    let keys = language.cached_key_coordinates(letters);
-    let (Some(pa), Some(pb)) = (
-        keys.get(text::nfc(a).as_ref()),
-        keys.get(text::nfc(b).as_ref()),
-    ) else {
+/// Whether two keys neighbour on the host's grid.
+pub fn are_adjacent_keys(a: &str, b: &str, grid: &KeyGrid) -> bool {
+    let (Some(pa), Some(pb)) = (grid.get(a), grid.get(b)) else {
         return false;
     };
     let dx = pa.1 - pb.1;

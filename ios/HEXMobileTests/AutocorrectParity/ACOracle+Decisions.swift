@@ -1,11 +1,11 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// what space puts in, context and the decoder, a copy of `AutocorrectEngine.swift` (from `replacementOnSpace`) as of dev commit d6efeddb, renamed (`ACOracle`,
+// what space puts in, context and the decoder, a copy of `AutocorrectEngine.swift` (from `replacementOnSpace`) as of dev commit 8b879d8a, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
 // from the repository, and the two orders the owner fixed in the port go through
-// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. Delete with the exporter once iOS
-// runs the Rust autocorrect.
+// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. The keys' grid is the app's
+// (`KeyboardLanguage.keyCoordinates`, which stays the host's). Delete with the exporter.
 
 import CoreGraphics
 import Foundation
@@ -97,7 +97,7 @@ extension ACOracle {
             lastFixLanguage = own == nil ? nil : language
             return own
         }
-        guard let own, own.caseInsensitiveCompare(theirs) != .orderedSame else {
+        guard let own, !ACOracle.sameIgnoringCase(own, theirs) else {
             lastFixLanguage = own == nil ? partner.language : language
             return own ?? theirs
         }
@@ -300,8 +300,10 @@ extension ACOracle {
             return accented
         }
 
-        // 5. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words.
-        guard token.count >= 3, !token.contains("'") else { return nil }
+        // 5. Single-edit `UITextChecker` typo on words of 3+ characters, never rewriting valid words
+        // (a French elision's sides each as a word, `frenchElisionFix`).
+        if token.contains("'") { return frenchElisionFix(for: token) }
+        guard token.count >= 3 else { return nil }
         guard !checker.isWordValid(token) else { return nil }
 
         var bestGuess: String?
@@ -633,7 +635,7 @@ extension ACOracle {
               parts.allSatisfy({ isSplitWord($0) })
         else { return nil }
         let spaced = parts.joined(separator: " ")
-        guard guesses.contains(where: { $0.caseInsensitiveCompare(spaced) == .orderedSame }) else { return nil }
+        guard guesses.contains(where: { ACOracle.sameIgnoringCase($0, spaced) }) else { return nil }
         return spaced
     }
 

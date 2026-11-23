@@ -15,6 +15,10 @@ caseless = "0.2"
 unicode-normalization = "0.1"
 unicode-segmentation = "1"
 
+[build-dependencies]
+# Reads the language manifests (`../languages`) into static data at build time.
+serde_json = "1"
+
 [dev-dependencies]
 # The parity fixtures (tests/swipe_parity.rs, tests/tap_parity.rs) and the replay benchmark's
 # sets are JSON Lines; the swipe fixture also checks the models' SHA-256.

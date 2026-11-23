@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::german::GermanCapitals;
-use super::language::{Language, LetterLayout};
+use super::language::{KeyGrid, LanguageConfig, LanguageId};
 use super::learning::{AppliedCorrection, LearnedList, LearnedWords, TypingLearning};
 use super::offensive::{NeverSuggestList, OffensiveWords};
 use super::{TextChecker, lists, text, tokens};
@@ -27,8 +27,8 @@ impl Bundled {
     /// The never-suggest list for `language`, by its base language: Apple's three French
     /// layouts read the "fr" rows (Swift read `OffensiveWords.bundled(language.rawValue)`, so
     /// French (Canada) and French (Switzerland) read none).
-    pub(crate) fn offensive_words(&self, language: Language) -> Arc<OffensiveWords> {
-        self.never_suggest.bundled(language.base_language())
+    pub(crate) fn offensive_words(&self, language: &LanguageId) -> Arc<OffensiveWords> {
+        self.never_suggest.bundled(language.base())
     }
 }
 
@@ -47,11 +47,15 @@ pub(crate) struct Engine {
     pub learned: LearnedWords,
     pub learned_list: LearnedList,
     pub is_enabled: bool,
-    pub language: Language,
+    pub language: LanguageId,
+    /// `language`'s manifest.
+    pub config: &'static LanguageConfig,
     pub has_dictionary: bool,
     pub accepts_any_letters: Option<bool>,
-    pub layout_language: Language,
-    pub layout_letters: Option<LetterLayout>,
+    /// The language of the keys typed on (`KeyboardLayout.language`), whose manifest says
+    /// which accents a slip may leave out, and the host's grid of those keys.
+    pub layout_language: LanguageId,
+    pub grid: Arc<KeyGrid>,
     /// Lowercased shortcut (composed) → your text, ordered by shortcut: the order your text
     /// replacements reach the decoder and Swipe typing in (Swift's was its dictionary's,
     /// random per process).
@@ -63,8 +67,8 @@ pub(crate) struct Engine {
     pub suppressed: HashSet<String>,
     pub learning: TypingLearning,
     pub last_correction: Option<AppliedCorrection>,
-    pub last_fix_language: Option<Language>,
-    pub last_revision_language: Option<Language>,
+    pub last_fix_language: Option<LanguageId>,
+    pub last_revision_language: Option<LanguageId>,
     pub decoder: Option<TypingDecoder>,
     pub context_model: Option<Arc<Model>>,
     pub decoder_keys: Option<Keys>,
@@ -88,18 +92,20 @@ pub(crate) fn model_id(model: &Arc<Model>) -> usize {
 
 impl Engine {
     pub fn new(bundled: Arc<Bundled>, checker: Box<dyn TextChecker>, list: LearnedList) -> Self {
-        let offensive = bundled.offensive_words(Language::English);
+        let english = LanguageId::new("en");
+        let offensive = bundled.offensive_words(&english);
         Self {
             bundled,
             checker,
             learned: LearnedWords::default(),
             learned_list: list,
             is_enabled: true,
-            language: Language::English,
+            config: english.config(),
+            language: english.clone(),
             has_dictionary: true,
             accepts_any_letters: None,
-            layout_language: Language::English,
-            layout_letters: None,
+            layout_language: english,
+            grid: Arc::default(),
             shortcuts: Vec::new(),
             shortcut_index: HashMap::new(),
             lexicon_terms: Vec::new(),
@@ -129,14 +135,15 @@ impl Engine {
     // MARK: settings
 
     /// `setLanguage` for this engine alone: the partner's part is `Autocorrect`'s.
-    pub fn set_language<S: AsRef<str>>(&mut self, language: Language, available: &[S]) -> bool {
-        self.language = language;
-        self.layout_language = language;
+    pub fn set_language<S: AsRef<str>>(&mut self, language: &LanguageId, available: &[S]) -> bool {
+        self.language = language.clone();
+        self.config = language.config();
+        self.layout_language = language.clone();
         self.accepts_any_letters = None;
         self.offensive = self.bundled.offensive_words(language);
         self.user_words_revision += 1;
         self.decoder_cache = None;
-        let code = language.spell_check_language(available);
+        let code = self.config.spell_check_language(available);
         self.has_dictionary = code.is_some();
         if let Some(code) = code {
             self.checker.use_language(code);
@@ -345,7 +352,7 @@ impl Engine {
         {
             return false;
         }
-        !(self.language == Language::German
+        !(self.config.noun_capitals.is_some()
             && self
                 .german_nouns()
                 .and_then(|g| g.capitalises(&lower, None))
@@ -361,7 +368,7 @@ impl Engine {
         else {
             return false;
         };
-        if model.language() != self.language.code() {
+        if !self.config.reads_model(model.language()) {
             return false;
         }
         match model.index(&text::lowercased(word)) {
@@ -375,7 +382,7 @@ impl Engine {
     /// `withoutStrayCapital(_:typed:)`.
     pub fn without_stray_capital(&self, word: &str, typed: &str) -> String {
         let first = text::first(word);
-        if self.language == Language::German
+        if self.config.noun_capitals.is_some()
             || !self.has_dictionary
             || text::is_uppercase(text::first(typed))
             || text::count(word) < 2
@@ -387,7 +394,7 @@ impl Engine {
             return word.to_owned();
         }
         let lower = text::lowered_first(word);
-        if self.language.uses_english_fixes()
+        if self.config.english_rules
             && (text::has_prefix(&lower, "i'") || text::has_prefix(&lower, "i\u{2019}"))
         {
             return word.to_owned();

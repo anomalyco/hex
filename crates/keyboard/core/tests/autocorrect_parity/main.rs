@@ -132,6 +132,8 @@ struct Tally {
     tie: usize,
     examples: Vec<String>,
     today_examples: Vec<String>,
+    foundation: usize,
+    foundation_examples: Vec<String>,
     shared: usize,
     shared_failures: usize,
     shared_examples: Vec<String>,
@@ -152,15 +154,15 @@ fn escaped(v: &Value) -> String {
         .collect()
 }
 
-/// The first answer the port's order of your own words changes.
-fn order_example(case: &Value, today: &Value, out: &[Value]) -> String {
+/// The first answer a decided change makes otherwise: Swift's (`today`) against the port's.
+fn order_example(case: &Value, today: &Value, out: &Value) -> String {
     let ops = case["ops"].as_array().unwrap();
-    let today = today.as_array().unwrap();
+    let (today, out) = (today.as_array().unwrap(), out.as_array().unwrap());
     let i = (0..out.len())
         .find(|&i| today[i]["r"] != out[i]["r"])
         .unwrap_or(0);
     format!(
-        "case {} ({}): op {i} {}\n    swift's order {}\n    port's order  {}",
+        "case {} ({}): op {i} {}\n    before {}\n    now    {}",
         case["id"], case["lang"], ops[i], today[i]["r"], out[i]["r"]
     )
 }
@@ -175,7 +177,7 @@ fn compare(
 ) -> bool {
     let ops = case["ops"].as_array().unwrap();
     let learned = strings(&case["learned"]);
-    let run = world.run(tsv, ops, expected, &learned, false);
+    let run = world.run(tsv, ops, expected, &learned, &case["grid0"], false);
     let mut differs = format!("{:x}", run.hash) != calls;
     let mut first = None;
     let mut want_state = Value::Null;
@@ -202,7 +204,7 @@ fn compare(
                         String::new()
                     } else {
                         let lines = world
-                            .run(tsv, ops, expected, &learned, true)
+                            .run(tsv, ops, expected, &learned, &case["grid0"], true)
                             .lines
                             .unwrap_or_default();
                         let at = lines
@@ -225,7 +227,7 @@ fn compare(
                 }
                 None => {
                     let lines = world
-                        .run(tsv, ops, expected, &learned, true)
+                        .run(tsv, ops, expected, &learned, &case["grid0"], true)
                         .lines
                         .unwrap_or_default();
                     let swift = strings(&case["log"]);
@@ -298,11 +300,17 @@ fn check(path: &str) {
                     keysets: HashMap::new(),
                     german: german.clone(),
                     available: strings(&v["available"]),
+                    grids: HashMap::new(),
                 });
             }
             "chars" => (char_failures, char_known) = chars::check(&v),
             "keys" => {
                 keysets.insert(v["id"].as_u64().unwrap(), keys(&v["keys"]));
+            }
+            "grid" => {
+                let world = world.as_mut().expect("a setup line first");
+                let name = v["ref"].as_str().unwrap().to_owned();
+                world.grids.insert(name, ops::grid(&v));
             }
             "case" => {
                 let world = world.as_mut().expect("a setup line first");
@@ -315,12 +323,23 @@ fn check(path: &str) {
                 if v.get("tie").is_some() {
                     tally.tie += 1;
                 }
+                // `foundation`: what Foundation's `caseInsensitiveCompare` gave instead.
+                if let Some(theirs) = v.get("foundation") {
+                    tally.foundation += 1;
+                    if tally.foundation_examples.len() < 3 {
+                        tally
+                            .foundation_examples
+                            .push(order_example(&v, theirs, &v["out"]));
+                    }
+                }
                 // Your own words reach the decoders by shortcut and typo, as `out`'s oracle run
                 // had them; `today` is what Swift's dictionary order gave instead.
                 if let Some(today) = v.get("today") {
                     tally.today += 1;
                     if tally.today_examples.len() < 3 {
-                        tally.today_examples.push(order_example(&v, today, out));
+                        tally
+                            .today_examples
+                            .push(order_example(&v, today, &v["out"]));
                     }
                 }
                 if compare(world, &ios, &v, out, calls, &mut tally) {
@@ -333,7 +352,7 @@ fn check(path: &str) {
                     if tally.shared_examples.len() < 3 {
                         tally
                             .shared_examples
-                            .push(order_example(&v, &v["shared"], out));
+                            .push(order_example(&v, &v["out"], &v["shared"]));
                     }
                 }
                 let shared_calls = v
@@ -364,8 +383,9 @@ fn check(path: &str) {
     }
     println!(
         "{path}: {} cases, {} operations, {} dictionary calls; {} differ ({} with the shared \
-         never-suggest list); {} answer otherwise with own words in Swift's dictionary order, {} \
-         with Swift's decoder tie order; {} change with the shared list",
+         never-suggest list). Counted apart: {} answer otherwise with own words in Swift's \
+         dictionary order, {} with Swift's decoder tie order, {} with Foundation's \
+         caseInsensitiveCompare, {} change with the shared list",
         tally.cases,
         tally.ops,
         tally.calls,
@@ -373,8 +393,12 @@ fn check(path: &str) {
         tally.shared_failures,
         tally.today,
         tally.tie,
+        tally.foundation,
         tally.shared
     );
+    for e in &tally.foundation_examples {
+        println!("  case folding: {e}");
+    }
     for e in &tally.today_examples {
         println!("  own words' order: {e}");
     }
@@ -390,8 +414,12 @@ fn check(path: &str) {
     for e in char_failures.iter().take(40) {
         println!("  chars: {e}");
     }
-    for e in &char_known {
-        println!("  chars (known, Foundation): {e}");
+    println!(
+        "  chars: {} answers where Foundation's caseInsensitiveCompare isn't case folding",
+        char_known.len()
+    );
+    for e in char_known.iter().take(12) {
+        println!("    {e}");
     }
     assert!(tally.cases > 0, "no cases in {path}");
     assert!(

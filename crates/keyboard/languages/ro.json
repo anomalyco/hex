@@ -1,0 +1,8 @@
+{
+  "id": "ro",
+  "model": "ro",
+  "system_dictionaries": ["ro", "ro_RO"],
+  "sentence_starters": ["eu", "nu", "am"],
+  "clause_starters": ["și", "dar", "că"],
+  "common_words": ["de", "și", "în", "nu", "să", "la"]
+}

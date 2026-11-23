@@ -1,11 +1,11 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// `+Distance`, a copy of `AutocorrectEngine+Distance.swift` as of dev commit d6efeddb, renamed (`ACOracle`,
+// `+Distance`, a copy of `AutocorrectEngine+Distance.swift` as of dev commit 8b879d8a, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
 // from the repository, and the two orders the owner fixed in the port go through
-// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. Delete with the exporter once iOS
-// runs the Rust autocorrect.
+// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. The keys' grid is the app's
+// (`KeyboardLanguage.keyCoordinates`, which stays the host's). Delete with the exporter.
 
 import Foundation
 @testable import HEX
@@ -91,9 +91,18 @@ extension ACOracle {
         // are as cheap as one missing Spanish accent, a little more for each further one. Greek
         // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
         // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
-        // čárky left out ("cesky" -> "český", "prilis" -> "příliš").
-        if language == .polish || language == .greek || language == .czech, s.count == t.count {
-            let same = language == .greek ? sameGreekLetterIgnoringAccents : samePolishLetterIgnoringDiacritics
+        // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), and Hungarian: its accented
+        // vowels left out ("koszonom" -> "köszönöm", "kesobb" -> "később", "szivesen" ->
+        // "szívesen"), ő and ű included, as o and u with the combining double acute.
+        if language == .polish || language == .greek || language == .czech || language == .hungarian,
+           s.count == t.count {
+            func same(_ a: Character, _ b: Character) -> Bool {
+                switch language {
+                case .greek: Self.sameGreekLetterIgnoringAccents(a, b)
+                case .hungarian: Self.sameLetterIgnoringAccents(a, b)
+                default: Self.samePolishLetterIgnoringDiacritics(a, b)
+                }
+            }
             let missed = zip(s, t).filter { $0 != $1 }
             if !missed.isEmpty, missed.allSatisfy({ same($0, $1) }) {
                 return 0.15 + 0.05 * Double(missed.count - 1)
@@ -171,7 +180,7 @@ extension ACOracle {
 
     static let keyCoordinates: [LayoutKey: [Character: (Double, Double)]] = Dictionary(
         uniqueKeysWithValues: KeyboardLanguage.allCases.flatMap { language in
-            language.acoLetterLayouts.map { (LayoutKey(language: language, letters: $0), language.acoKeyCoordinates($0)) }
+            language.letterLayouts.map { (LayoutKey(language: language, letters: $0), language.keyCoordinates($0)) }
         }
     )
 
@@ -181,7 +190,7 @@ extension ACOracle {
         language: KeyboardLanguage = .english,
         letters: KeyboardLetterLayout? = nil
     ) -> Bool {
-        let key = LayoutKey(language: language, letters: language.acoOffered(letters))
+        let key = LayoutKey(language: language, letters: language.offered(letters))
         guard let keys = keyCoordinates[key], let pa = keys[a], let pb = keys[b] else { return false }
         let dx = pa.1 - pb.1
         let dy = pa.0 - pb.0

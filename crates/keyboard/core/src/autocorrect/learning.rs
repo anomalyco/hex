@@ -5,7 +5,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use super::language::Language;
+use super::language::LanguageId;
 use super::text;
 
 /// `TypingLearning`: typos you fixed the same way twice, and words you turned down twice.
@@ -78,10 +78,10 @@ impl PartialEq for TypingLearning {
 
 /// Which list of kept words an engine reads: the shared one, or a language's own (Learn each
 /// language separately). The host keeps each list (`LearnedWordsStore`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LearnedList {
     Shared,
-    Language(Language),
+    Language(LanguageId),
 }
 
 /// An engine's copy of its kept words (`LearnedWordsStore.words` and `contains`).
@@ -115,7 +115,7 @@ pub struct Change {
     pub from: String,
     pub to: String,
     /// The language the fix was made in.
-    pub language: Option<Language>,
+    pub language: Option<LanguageId>,
 }
 
 /// The latest autocorrection, which the strip offers to revert while the cursor is right

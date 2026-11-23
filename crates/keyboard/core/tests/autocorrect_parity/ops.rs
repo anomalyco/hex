@@ -7,8 +7,8 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use hex_keyboard_core::autocorrect::{
-    self as ac, Autocorrect, Bundled, Change, FieldKind, GermanCapitals, Language, LetterLayout,
-    SuggestionKind, TypingLearning,
+    self as ac, Autocorrect, Bundled, Change, FieldKind, GermanCapitals, KeyCell, KeyGrid,
+    LanguageConfig, LanguageId, SuggestionKind, TypingLearning,
 };
 use hex_keyboard_core::decoder::Keys;
 use hex_keyboard_core::model::Model;
@@ -23,6 +23,8 @@ pub struct World {
     pub german: Option<Arc<GermanCapitals>>,
     /// The exporter's standard list of dictionaries (`"avail": "all"`).
     pub available: Vec<String>,
+    /// The letter grids by name ("fr-CA/qwerty"): the layout's language and its cells.
+    pub grids: HashMap<String, (String, Vec<KeyCell>)>,
 }
 
 pub struct Run {
@@ -69,8 +71,23 @@ fn pairs(v: &Value) -> Vec<(String, String)> {
         .unwrap_or_default()
 }
 
-fn language(v: &Value) -> Option<Language> {
-    v.as_str().and_then(Language::from_code)
+fn language(v: &Value) -> Option<&str> {
+    v.as_str()
+}
+
+/// A grid line: the layout's language and (letter, row, column) cells.
+pub fn grid(v: &Value) -> (String, Vec<KeyCell>) {
+    let cells = v["cells"]
+        .as_array()
+        .expect("cells")
+        .iter()
+        .map(|c| KeyCell {
+            letter: c[0].as_str().unwrap().chars().next().unwrap(),
+            row: bits(&c[1]),
+            column: bits(&c[2]),
+        })
+        .collect();
+    (v["l"].as_str().unwrap().to_owned(), cells)
 }
 
 fn field(v: &Value) -> FieldKind {
@@ -96,6 +113,11 @@ impl World {
         })
     }
 
+    fn grid(&self, name: &Value) -> (&str, &[KeyCell]) {
+        let (layout, cells) = &self.grids[name.as_str().expect("a grid's name")];
+        (layout, cells)
+    }
+
     fn available(&self, v: &Value) -> Vec<String> {
         if v.as_str() == Some("all") {
             self.available.clone()
@@ -108,12 +130,14 @@ impl World {
         v.as_str().and_then(|m| self.models.get(m).cloned())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn run(
         &self,
         tsv: &str,
         ops: &[Value],
         expected: &[Value],
         learned: &[String],
+        grid0: &Value,
         keep: bool,
     ) -> Run {
         let log = Rc::new(RefCell::new(CallLog::new(keep)));
@@ -123,14 +147,17 @@ impl World {
         });
         let mut e = Autocorrect::new(bundled, self.checker("p", &log, false));
         e.set_learned_words(learned);
+        // The host hands over the keys it shows before anything else, and whenever they change.
+        let (layout, cells) = self.grid(grid0);
+        e.set_keys(layout, cells);
         let mut outputs = Vec::new();
         for (i, op) in ops.iter().enumerate() {
             let r = self.perform(op, &mut e, &log);
             let s = json!([
-                e.last_fix_language().map(Language::code),
-                e.last_revision_language().map(Language::code),
+                e.last_fix_language(),
+                e.last_revision_language(),
                 e.own_words_revision(),
-                e.partner_language().map(Language::code),
+                e.partner_language(),
                 e.has_dictionary(),
             ]);
             outputs.push(json!({"r": r, "s": s}));
@@ -141,6 +168,10 @@ impl World {
                 }
                 if let Some(words) = out.get("plw") {
                     e.set_partner_learned_words(&strings(words));
+                }
+                if let Some(g) = out.get("g") {
+                    let (layout, cells) = self.grid(g);
+                    e.set_keys(layout, cells);
                 }
             }
         }
@@ -158,10 +189,8 @@ impl World {
         let b = |k: &str| op[k].as_bool().unwrap_or(false);
         match op["op"].as_str().expect("an op") {
             "lang" => e.set_language(language(&op["l"]).unwrap(), &self.available(&op["avail"])),
-            "keys" => e.set_keys(
-                language(&op["l"]).unwrap(),
-                LetterLayout::from_code(op["letters"].as_str().unwrap()).unwrap(),
-            ),
+            // The grid it makes comes after it, as the host hands it over.
+            "keys" => {}
             "partner" => {
                 let checker = self.checker(op["tag"].as_str().unwrap(), log, b("any"));
                 e.set_partner(language(&op["l"]), &self.available(&op["avail"]), checker);
@@ -305,7 +334,7 @@ impl World {
                     .map(|c| Change {
                         from: c[0].as_str().unwrap().to_owned(),
                         to: c[1].as_str().unwrap().to_owned(),
-                        language: language(&c[2]),
+                        language: language(&c[2]).map(LanguageId::new),
                     })
                     .collect();
                 e.record_applied_correction(
@@ -322,7 +351,9 @@ impl World {
                         let changes: Vec<Value> = c
                             .changes
                             .iter()
-                            .map(|x| json!([x.from, x.to, x.language.map(Language::code)]))
+                            .map(|x| {
+                                json!([x.from, x.to, x.language.as_ref().map(LanguageId::as_str)])
+                            })
                             .collect();
                         json!([c.original, c.corrected, c.anchor, changes])
                     });
@@ -336,7 +367,7 @@ impl World {
             "sentence" => {
                 return json!(ac::is_sentence_start(
                     s("before").as_deref(),
-                    language(&op["l"]).unwrap()
+                    LanguageConfig::for_tag(language(&op["l"]).unwrap())
                 ));
             }
             "prevword" => {
@@ -355,12 +386,12 @@ impl World {
                 return json!(ac::match_case(&s("typed").unwrap(), &s("target").unwrap()));
             }
             "cost" => {
-                let letters = s("letters").and_then(|l| LetterLayout::from_code(&l));
+                let (_, cells) = self.grid(&op["grid"]);
                 let cost = ac::single_edit_keyboard_cost(
                     &s("s").unwrap(),
                     &s("t").unwrap(),
-                    language(&op["l"]).unwrap(),
-                    letters,
+                    LanguageConfig::for_tag(language(&op["l"]).unwrap()),
+                    &KeyGrid::new(cells),
                 );
                 return cost.map_or(Value::Null, |c| json!(format!("{:x}", c.to_bits())));
             }

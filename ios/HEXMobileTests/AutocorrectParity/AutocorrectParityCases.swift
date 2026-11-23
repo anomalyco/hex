@@ -2,7 +2,7 @@ import CoreGraphics
 import Foundation
 @testable import HEX
 
-/// Makes parity cases (SplitMix64, a fixed seed per language): settings, your words, a
+/// Makes parity cases (TapParityRandom, a fixed seed per language): settings, your words, a
 /// bilingual partner, Spatial autocorrect with the keys and taps, then questions the keyboard
 /// asks with text before the cursor drawn from the language's words: typed right, slipped
 /// (neighbouring keys, swaps, letters too many or too few, read from noisy taps), without
@@ -19,7 +19,7 @@ struct ACParityGenerator {
     let language: KeyboardLanguage
     let dictionaries: [String: ACStubDictionary]
     let models: [String: TapOracleModel]
-    var rng: SplitMix64
+    var rng: TapParityRandom
     /// Keysets by "language/letters", shared by every generator (ids are global).
     var keysets: [String: KeySet]
     var keysetLines: [[String: Any]] = []
@@ -27,13 +27,13 @@ struct ACParityGenerator {
     var nextKeysetID: Int
     var partnerTags = 0
 
-    static let available = ["en_US", "en", "es", "de", "it", "fr", "fr_CA", "fr_CH", "pt_BR", "pl", "cs", "ro", "ru", "uk", "el", "nb"]
-    static let latin: [KeyboardLanguage] = [.english, .spanish, .german, .french, .frenchCanadian, .frenchSwiss, .italian, .portuguese, .polish, .czech, .norwegian, .romanian]
+    static let available = ["en_US", "en", "es", "de", "it", "fr", "fr_CA", "fr_CH", "pt_BR", "pl", "cs", "hu", "ro", "ru", "uk", "el", "nb"]
+    static let latin: [KeyboardLanguage] = [.english, .spanish, .german, .french, .frenchCanadian, .frenchSwiss, .italian, .portuguese, .polish, .czech, .hungarian, .norwegian, .romanian]
 
     // MARK: Words
 
     func words(_ l: KeyboardLanguage) -> [String] {
-        dictionaries[ACStub.dictionaryCode(l.acoSpellCheckCandidates[0])]?.ranked ?? []
+        dictionaries[ACStub.dictionaryCode(l.acoSpellCheckCandidates.first ?? l.rawValue)]?.ranked ?? []
     }
 
     mutating func word(_ l: KeyboardLanguage) -> String {
@@ -46,12 +46,12 @@ struct ACParityGenerator {
     }
 
     func rows(_ l: KeyboardLanguage) -> [[Character]] {
-        l.acoLetterRows(l.acoLetterLayouts[0]).map { $0.compactMap(\.first) }
+        l.letterRows(l.letterLayouts[0]).map { $0.compactMap(\.first) }
     }
 
     /// A key next to `c` on `l`'s own layout, or a random letter.
     mutating func neighbour(_ c: Character, _ l: KeyboardLanguage) -> Character {
-        let coordinates = l.acoKeyCoordinates()
+        let coordinates = l.keyCoordinates()
         guard let p = coordinates[c] else { return rng.pick(Array("etaoinsrhl")) }
         let near = coordinates.filter { $0.key != c && hypot($0.value.0 - p.0, $0.value.1 - p.1) <= 1.6 }.map(\.key).sorted()
         return near.isEmpty ? c : rng.pick(near)
@@ -150,7 +150,7 @@ struct ACParityGenerator {
         guard let personal = TapOracle.Keys(layout: layout, offsets: offsets) else { return nil }
         let set = KeySet(stock: nextKeysetID, personal: nextKeysetID + 1, keys: stock, letters: stock.centres.sorted { $0.key < $1.key }.map { ($0.key, $0.value) })
         for (id, keys) in [(set.stock, stock), (set.personal, personal)] {
-            keysetLines.append(["kind": "keys", "id": id, "keys": TapParityExporter.json(keys)])
+            keysetLines.append(["kind": "keys", "id": id, "keys": ACParityGenerator.json(keys)])
             keysetsByID[id] = keys
         }
         nextKeysetID += 2
@@ -181,4 +181,29 @@ struct ACParityGenerator {
     }
 
     static func json(_ taps: [CGPoint]) -> [[String]] { taps.map(bits) }
+
+    static func json(_ keys: TapOracle.Keys) -> [String: Any] {
+        [
+            "centres": keys.centres.sorted { $0.key < $1.key }.map { [String($0.key)] + bits($0.value) },
+            "pitch": [bits(Double(keys.pitch.width)), bits(Double(keys.pitch.height))],
+            "bottom": bits(Double(keys.bottomRowY)),
+            "space": keys.space.map { [$0.origin.x, $0.origin.y, $0.size.width, $0.size.height].map { bits(Double($0)) } } ?? NSNull(),
+        ]
+    }
+
+    /// The letter grid the host shows for `language` on `letters`, by name ("fr-CA/qwerty"):
+    /// the fixture writes each grid once (`gridLine`).
+    static func grid(_ language: KeyboardLanguage, _ letters: KeyboardLetterLayout?) -> String {
+        language.rawValue + "/" + (letters?.rawValue ?? "-")
+    }
+
+    /// A grid's line: the layout's language and (letter, row, column) by letter
+    /// (`keyCoordinates`).
+    static func gridLine(_ ref: String) -> [String: Any] {
+        let parts = ref.split(separator: "/").map(String.init)
+        let language = KeyboardLanguage(rawValue: parts[0])!
+        let letters = KeyboardLetterLayout(rawValue: parts[1])
+        let cells = language.keyCoordinates(letters).sorted { $0.key < $1.key }.map { [String($0.key), bits($0.value.0), bits($0.value.1)] }
+        return ["kind": "grid", "ref": ref, "l": language.rawValue, "cells": cells]
+    }
 }

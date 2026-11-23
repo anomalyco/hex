@@ -1,11 +1,11 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// `+Vocabulary`, a copy of `AutocorrectEngine+Vocabulary.swift` as of dev commit d6efeddb, renamed (`ACOracle`,
+// `+Vocabulary`, a copy of `AutocorrectEngine+Vocabulary.swift` as of dev commit 8b879d8a, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
 // from the repository, and the two orders the owner fixed in the port go through
-// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. Delete with the exporter once iOS
-// runs the Rust autocorrect.
+// `ACOracle.orderedValues` and `ACOOffensiveWords.bundled`. The keys' grid is the app's
+// (`KeyboardLanguage.keyCoordinates`, which stays the host's). Delete with the exporter.
 
 import Foundation
 @testable import HEX
@@ -28,7 +28,7 @@ extension ACOracle {
     /// The vocabulary word `token` spells, whatever its capitals; nil when it isn't one.
     func vocabularyTerm(for token: String) -> String? {
         guard !vocabulary.isEmpty else { return nil }
-        return Self.vocabularyWords(vocabulary).first { $0.caseInsensitiveCompare(token) == .orderedSame }
+        return Self.vocabularyWords(vocabulary).first { ACOracle.sameIgnoringCase($0, token) }
     }
 
     /// Whether `word` is in your vocabulary spelled exactly so, capitals and all: it keeps

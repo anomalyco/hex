@@ -1,8 +1,8 @@
 // The autocorrect oracle's own copies of what `AutocorrectEngine` reads beside itself, as of dev
-// commit d6efeddb: `TextChecking`, `LearnedWordsStore` (in memory, with the same JSON size cap
+// commit 8b879d8a: `TextChecking`, `LearnedWordsStore` (in memory, with the same JSON size cap
 // and seeding), `OffensiveWords`, `GermanCapitals`, `TypingLearning`,
 // `AutoCapitalization.shouldCapitalize`, `AppliedCorrection` and the `KeyboardLanguage` data
-// autocorrect reads (as `aco…`). Plus the two orders the owner fixed in the port: own words by
+// autocorrect reads (as `aco…`; the keys' grid is the app's `keyCoordinates`). Plus the two orders the owner fixed in the port: own words by
 // shortcut and typo (`ACOracle.ownWordsOrder`), and one never-suggest list read by base language
 // (`ACOOffensiveWords.sharedList`). Delete with the exporter once iOS runs the Rust autocorrect.
 
@@ -35,6 +35,26 @@ extension ACOracle {
     }
 
     nonisolated(unsafe) static var ownWordsOrder = OwnWordsOrder.dictionary
+
+    /// How `caseInsensitiveCompare(_:) == .orderedSame` compares: Foundation's (today's, which
+    /// isn't symmetric for ß and Greek's iota subscript) or both strings case-folded (the port's).
+    enum CaseComparison {
+        case foundation
+        case folding
+    }
+
+    nonisolated(unsafe) static var caseComparison = CaseComparison.foundation
+
+    static func sameIgnoringCase(_ a: String, _ b: String) -> Bool {
+        switch caseComparison {
+        case .foundation: a.caseInsensitiveCompare(b) == .orderedSame
+        case .folding: caseFolded(a) == caseFolded(b)
+        }
+    }
+
+    static func caseFolded(_ s: String) -> String {
+        s.folding(options: .caseInsensitive, locale: nil)
+    }
 
     static func orderedValues(_ dictionary: [String: String]) -> [String] {
         switch ownWordsOrder {
@@ -370,11 +390,13 @@ extension KeyboardLanguage {
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
         case .polish: ["pl", "pl_PL"]
         case .czech: ["cs", "cs_CZ"]
+        case .hungarian: ["hu", "hu_HU"]
         case .romanian: ["ro", "ro_RO"]
         case .russian: ["ru", "ru_RU"]
         case .ukrainian: ["uk", "uk_UA"]
         case .greek: ["el", "el_GR"]
         case .serbianLatin: ["sr_Latn", "sr_Latn_RS", "sr-Latn"]
+        case .korean: []
         }
     }
 
@@ -395,8 +417,10 @@ extension KeyboardLanguage {
         case .italian:
             ["di", "il", "la", "in", "un", "si", "le", "lo", "ha", "ho", "ma", "da", "mi", "ci",
              "ti", "se", "ne", "no", "io", "tu", "su", "al"]
+        case .hungarian:
+            ["az", "és", "is", "de", "ha", "ez", "el", "ki", "be", "rá", "én", "te", "mi", "ne", "se"]
         case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin:
+             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
             []
         }
     }
@@ -426,74 +450,5 @@ extension KeyboardLanguage {
         case .italian: ["e": "è", "ce": "c'è"]
         default: [:]
         }
-    }
-
-    var acoLetterLayouts: [KeyboardLetterLayout] {
-        switch self {
-        case .english: [.qwerty, .azerty, .qwertz, .dvorak]
-        case .german: [.own, .qwertz, .qwerty, .azerty]
-        case .spanish: [.own, .qwerty, .azerty, .qwertz]
-        case .french: [.azerty, .qwerty, .qwertz]
-        case .frenchCanadian: [.qwerty, .azerty, .qwertz]
-        case .frenchSwiss: [.qwertz, .azerty, .qwerty]
-        case .italian, .portuguese: [.qwerty, .azerty, .qwertz]
-        case .polish, .romanian: [.qwerty, .qwertz, .azerty]
-        case .czech: [.own, .qwerty]
-        case .serbianLatin: [.qwertz, .qwerty, .azerty]
-        case .norwegian, .russian, .ukrainian, .greek: [.own]
-        }
-    }
-
-    func acoOffered(_ letters: KeyboardLetterLayout?) -> KeyboardLetterLayout {
-        guard let letters, acoLetterLayouts.contains(letters) else { return acoLetterLayouts[0] }
-        return letters
-    }
-
-    func acoLetterRows(_ letters: KeyboardLetterLayout) -> [[String]] {
-        let rows: [String] = switch acoOffered(letters) {
-        case .own: acoOwnLetterRows
-        case .qwerty where self == .czech: ["qwertyuiop", "asdfghjkl\u{00B4}", "zxcvbnm\u{02C7}"]
-        case .qwerty: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        case .qwertz: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
-        case .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
-        case .dvorak: ["pyfgcrl", "aoeuidhtns", "qjkxbmwvz"]
-        }
-        return rows.map { $0.map(String.init) }
-    }
-
-    var acoOwnLetterRows: [String] {
-        switch self {
-        case .english, .italian, .frenchCanadian, .portuguese, .polish, .romanian:
-            ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
-        case .french: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
-        case .frenchSwiss: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
-        case .norwegian: ["qwertyuiopå", "asdfghjkløæ", "zxcvbnm"]
-        case .spanish: ["qwertyuiop", "asdfghjklñ", "zxcvbnm"]
-        case .german: ["qwertzuiopü", "asdfghjklöä", "yxcvbnm"]
-        case .russian: ["йцукенгшщзх", "фывапролджэ", "ячсмитьбю"]
-        case .ukrainian: ["йцукенгшщзхї", "фівапролджєʼ", "ячсмитьбюґ"]
-        case .greek: ["ερτυθιοπ\u{00B4}", "ασδφγηξκλ", "ζχψωβνμ"]
-        case .serbianLatin: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
-        case .czech: ["qwertzuiop", "asdfghjkl\u{00B4}", "yxcvbnm\u{02C7}"]
-        }
-    }
-
-    func acoKeyCoordinates(_ letters: KeyboardLetterLayout? = nil) -> [Character: (Double, Double)] {
-        var map: [Character: (Double, Double)] = [:]
-        let letters = acoOffered(letters)
-        let offsets = switch letters {
-        case .azerty: [0.0, 0.0, 2.0]
-        case .dvorak: [1.85, 0.0, 1.33]
-        case .own where self == .ukrainian || self == .greek || self == .czech: [0.0, 0.0, 1.0]
-        case .qwerty where self == .czech: [0.0, 0.0, 1.0]
-        default: [0.0, 0.5, 1.5]
-        }
-        for (row, letters) in acoLetterRows(letters).enumerated() {
-            for (column, letter) in letters.enumerated() {
-                guard let character = letter.first else { continue }
-                map[character] = (Double(row), Double(column) + offsets[row])
-            }
-        }
-        return map
     }
 }

@@ -1,0 +1,9 @@
+{
+  "id": "es",
+  "model": "es",
+  "system_dictionaries": ["es", "es_ES", "es_MX"],
+  "two_letter_words": ["de", "la", "el", "en", "no", "se", "lo", "es", "un", "su", "me", "te", "ya", "mi", "tu", "yo", "le", "si", "al", "ha", "ni"],
+  "sentence_starters": ["yo", "el", "la"],
+  "clause_starters": ["que", "pero", "y"],
+  "common_words": ["de", "que", "y", "la", "el", "en"]
+}

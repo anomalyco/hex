@@ -2,7 +2,7 @@
 //! sentence's start) and casing a fix like the word typed: `AutocorrectEngine`'s static
 //! helpers.
 
-use super::language::Language;
+use super::language::LanguageConfig;
 use super::text;
 
 /// The word right before the caret (`currentToken(in:)`): letters, with apostrophes between
@@ -39,8 +39,9 @@ pub fn current_token(before_input: Option<&str>) -> Option<String> {
     text::is_letter(text::first(&token)).then_some(token)
 }
 
-/// The empty field, or after a sentence's end and a space, or a new line (`isSentenceStart`).
-pub fn is_sentence_start(before_input: Option<&str>, language: Language) -> bool {
+/// The empty field, or after a sentence's end and a space, or a new line (`isSentenceStart`);
+/// `language`'s `extra_sentence_enders` end one too (Greek's ;).
+pub fn is_sentence_start(before_input: Option<&str>, language: &LanguageConfig) -> bool {
     let Some(before) = before_input else {
         return true;
     };
@@ -63,7 +64,10 @@ pub fn is_sentence_start(before_input: Option<&str>, language: Language) -> bool
         || written == "."
         || written == "!"
         || written == "?"
-        || (language == Language::Greek && text::eq(written, ";"))
+        || language
+            .extra_sentence_enders
+            .iter()
+            .any(|m| text::eq(written, m))
 }
 
 /// Marks after which a sentence goes on (`midSentenceMarks`).
@@ -103,14 +107,15 @@ pub fn starts_sentence(before: &str, token: &str) -> bool {
     } else {
         before
     };
-    should_capitalize_sentences(Some(rest), true, Language::English)
+    should_capitalize_sentences(Some(rest), true, &[])
 }
 
-/// `AutoCapitalization.shouldCapitalize(mode: .sentences, …)`.
+/// `AutoCapitalization.shouldCapitalize(mode: .sentences, …)`; `extra_enders` end a sentence
+/// besides . ! ?
 pub fn should_capitalize_sentences(
     before: Option<&str>,
     has_text: bool,
-    language: Language,
+    extra_enders: &[&str],
 ) -> bool {
     let Some(before) = before else {
         return !has_text;
@@ -148,7 +153,7 @@ pub fn should_capitalize_sentences(
         return false;
     };
     [".", "!", "?"].iter().any(|m| text::eq(ender, m))
-        || (language == Language::Greek && (text::eq(ender, ";") || text::eq(ender, "\u{37E}")))
+        || extra_enders.iter().any(|m| text::eq(ender, m))
 }
 
 /// `target` cased as `typed` was typed (`matchCase`).

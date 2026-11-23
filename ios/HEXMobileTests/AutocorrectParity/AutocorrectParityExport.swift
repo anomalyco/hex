@@ -12,10 +12,11 @@ import XCTest
 /// many for each other language (200 by default), and every `HEX_AUTOCORRECT_PARITY_LITERALS`th
 /// case from the iOS tests' inputs (all by default).
 ///
-/// Each case runs four times: with your own words in the port's order (by shortcut and typo)
-/// and the decoder's fixed tie order (`out`, `calls`: what Rust must match); with Swift's
-/// dictionary order (`today`, written only where it differs: the cases the port's order
-/// changes); with the decoder's own walk order (`tie` where it differs); and with the shared
+/// Each case runs five times: with your own words in the port's order (by shortcut and typo),
+/// the decoder's fixed tie order and case-folded comparisons (`out`, `calls`: what Rust must
+/// match); with Swift's dictionary order (`today`, written only where it differs: the cases
+/// the port's order changes); with the decoder's own walk order (`tie` where it differs); with
+/// Foundation's `caseInsensitiveCompare` (`foundation` where it differs); and with the shared
 /// never-suggest list read by base language (`shared`, `sharedCalls` where they differ).
 /// Lines: `setup` (the dictionaries), `chars` (Swift's answers for character properties and
 /// Foundation calls), `keys` (letter keys by id), then `case`s.
@@ -53,9 +54,11 @@ final class AutocorrectParityExport: XCTestCase {
         var keysetsByID: [Int: TapOracle.Keys] = [:]
         var nextID = 0
         var caseID = 0
+        var grids = Set<String>()
         var totals: [String: Int] = [:]
         let languages: [KeyboardLanguage] = [.english, .spanish, .german, .french, .frenchCanadian, .frenchSwiss, .italian,
-                                             .portuguese, .polish, .czech, .romanian, .norwegian, .russian, .ukrainian, .greek, .serbianLatin]
+                                             .portuguese, .polish, .czech, .hungarian, .romanian, .norwegian, .russian, .ukrainian, .greek,
+                                             .serbianLatin, .korean]
         // Cases are made, run and written one at a time; a case's keys are written before it.
         func emit(_ c: ACParityGenerator.Case, _ language: KeyboardLanguage, _ generator: inout ACParityGenerator) throws {
             for line in generator.keysetLines { try writer.write(line) }
@@ -67,22 +70,35 @@ final class AutocorrectParityExport: XCTestCase {
             var line: [String: Any] = ["kind": "case", "id": caseID, "lang": language.rawValue, "learned": c.learned, "ops": c.ops]
             caseID += 1
             if let only, !only.contains(caseID - 1) { return }
-            let fixed = Self.run(runner, c, order: .byKey, tie: .ascending, shared: false, keepCalls: keepCalls)
+            func useGrid(_ ref: Any?) throws {
+                guard let ref = ref as? String, grids.insert(ref).inserted else { return }
+                try writer.write(ACParityGenerator.gridLine(ref))
+            }
+            for op in c.ops { try useGrid(op["grid"]) }
+            let fixed = Self.run(runner, c, order: .byKey, tie: .ascending, shared: false, folding: true, keepCalls: keepCalls)
             line["out"] = fixed.outputs
+            line["grid0"] = fixed.initialGrid
+            try useGrid(fixed.initialGrid)
+            for out in fixed.outputs { try useGrid((out as? [String: Any])?["g"]) }
             line["calls"] = String(fixed.hash, radix: 16)
             line["ncalls"] = fixed.calls
             if let lines = fixed.lines { line["log"] = lines }
-            let today = Self.run(runner, c, order: .dictionary, tie: .ascending, shared: false)
+            let today = Self.run(runner, c, order: .dictionary, tie: .ascending, shared: false, folding: true)
             if !Self.same(today.outputs, fixed.outputs) {
                 line["today"] = today.outputs
                 totals["order", default: 0] += 1
             }
-            let swiftTies = Self.run(runner, c, order: .byKey, tie: .dictionary, shared: false)
+            let swiftTies = Self.run(runner, c, order: .byKey, tie: .dictionary, shared: false, folding: true)
             if !Self.same(swiftTies.outputs, fixed.outputs) {
                 line["tie"] = true
                 totals["tie", default: 0] += 1
             }
-            let shared = Self.run(runner, c, order: .byKey, tie: .ascending, shared: true)
+            let foundation = Self.run(runner, c, order: .byKey, tie: .ascending, shared: false, folding: false)
+            if !Self.same(foundation.outputs, fixed.outputs) {
+                line["foundation"] = foundation.outputs
+                totals["foundation", default: 0] += 1
+            }
+            let shared = Self.run(runner, c, order: .byKey, tie: .ascending, shared: true, folding: true)
             if !Self.same(shared.outputs, fixed.outputs) {
                 line["shared"] = shared.outputs
                 totals["shared", default: 0] += 1
@@ -93,7 +109,7 @@ final class AutocorrectParityExport: XCTestCase {
         }
         for (n, language) in languages.enumerated() {
             var generator = ACParityGenerator(
-                language: language, dictionaries: dictionaries, models: models, rng: SplitMix64(state: 0xAC_0C0E_0000 &+ UInt64(n)),
+                language: language, dictionaries: dictionaries, models: models, rng: TapParityRandom(state: 0xAC_0C0E_0000 &+ UInt64(n)),
                 keysets: keysets, keysetsByID: keysetsByID, nextKeysetID: nextID
             )
             let main = [KeyboardLanguage.english, .spanish, .german].contains(language)
@@ -103,7 +119,7 @@ final class AutocorrectParityExport: XCTestCase {
             }
         }
         var literalGenerator = ACParityGenerator(
-            language: .english, dictionaries: dictionaries, models: models, rng: SplitMix64(state: 0xAC_7E57),
+            language: .english, dictionaries: dictionaries, models: models, rng: TapParityRandom(state: 0xAC_7E57),
             keysets: keysets, keysetsByID: keysetsByID, nextKeysetID: nextID
         )
         for c in ACParityLiterals.cases(repo: repo, generator: &literalGenerator, stride: literalStride) {
@@ -115,9 +131,10 @@ final class AutocorrectParityExport: XCTestCase {
 
     static func run(
         _ runner: ACParityRunner, _ c: ACParityGenerator.Case, order: ACOracle.OwnWordsOrder, tie: TapOracle.TieOrder,
-        shared: Bool, keepCalls: Bool = false
+        shared: Bool, folding: Bool, keepCalls: Bool = false
     ) -> ACParityRunner.Result {
         ACOracle.ownWordsOrder = order
+        ACOracle.caseComparison = folding ? .folding : .foundation
         TapOracle.tieOrder = tie
         ACOOffensiveWords.sharedList = shared
         return runner.run(c.ops, initialLearned: c.learned, keepLines: keepCalls)
@@ -176,6 +193,10 @@ enum ACParityChars {
                 if s.caseInsensitiveCompare(s.lowercased()) == .orderedSame { ci |= 1 }
                 if s.caseInsensitiveCompare(s.uppercased()) == .orderedSame { ci |= 2 }
                 if s.caseInsensitiveCompare(fold) == .orderedSame { ci |= 4 }
+                // The same, case-folded (the port's comparison).
+                if ACOracle.caseFolded(s) == ACOracle.caseFolded(s.lowercased()) { ci |= 8 }
+                if ACOracle.caseFolded(s) == ACOracle.caseFolded(s.uppercased()) { ci |= 16 }
+                if ACOracle.caseFolded(s) == ACOracle.caseFolded(fold) { ci |= 32 }
                 rows.append([String(v, radix: 16), flags, s.lowercased(), s.uppercased(), fold, ci,
                              s.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty])
             }
@@ -185,6 +206,7 @@ enum ACParityChars {
         let strings: [[Any]] = tricky.map { s in
             [s, s.count, s.lowercased(), s.uppercased(), s.folding(options: .diacriticInsensitive, locale: nil),
              tricky.map { s.caseInsensitiveCompare($0) == .orderedSame ? "1" : "0" }.joined(),
+             tricky.map { ACOracle.caseFolded(s) == ACOracle.caseFolded($0) ? "1" : "0" }.joined(),
              s.trimmingCharacters(in: .whitespacesAndNewlines), s.replacingOccurrences(of: "'", with: "")]
         }
         // `caseInsensitiveCompare` both ways on pairs where Foundation's folding is its own: a
@@ -195,7 +217,8 @@ enum ACParityChars {
             ("İ", "i\u{307}"), ("İ", "i"), ("\u{345}", "ι"), ("ᾳ", "αι"), ("ᾼ", "ᾳ"), ("ΑΙ", "ᾳ"), ("ἈΙ", "ᾀ"),
         ]
         let pairRows: [[Any]] = pairs.flatMap { a, b in
-            [[a, b, a.caseInsensitiveCompare(b) == .orderedSame], [b, a, b.caseInsensitiveCompare(a) == .orderedSame]]
+            [[a, b, a.caseInsensitiveCompare(b) == .orderedSame, ACOracle.caseFolded(a) == ACOracle.caseFolded(b)],
+             [b, a, b.caseInsensitiveCompare(a) == .orderedSame, ACOracle.caseFolded(b) == ACOracle.caseFolded(a)]]
         }
         return ["kind": "chars", "rows": rows, "strings": strings, "pairs": pairRows]
     }
@@ -230,19 +253,20 @@ enum ACParityLiterals {
         let setups: [(KeyboardLanguage, KeyboardLanguage?)] = [
             (.english, nil), (.english, .french), (.french, .english), (.italian, nil), (.spanish, .english),
             (.german, .english), (.portuguese, .english), (.polish, nil), (.czech, .english), (.greek, nil), (.russian, nil),
+            (.hungarian, .english), (.frenchCanadian, nil), (.ukrainian, nil), (.korean, nil),
         ]
         var out: [ACParityGenerator.Case] = []
         for (i, text) in literals.enumerated() where i % max(1, stride) == 0 {
             let (language, partner) = setups[(i / max(1, stride)) % setups.count]
             var c = ACParityGenerator.Case()
             c.ops.append(["op": "lang", "l": language.rawValue, "avail": "all"])
-            c.ops.append(["op": "keys", "l": language.rawValue, "letters": language.acoLetterLayouts[0].rawValue])
+            c.ops.append(["op": "keys", "l": language.rawValue, "letters": language.letterLayouts[0].rawValue])
             c.ops.append(["op": "lexicon", "entries": [["omw", "On my way!"], ["addr", "123 Market St"], ["Kit", "Kit"]] + (i % 3 == 0 ? pairs : [])])
             if let partner { c.ops.append(g.partnerOp(partner, available: "all")) }
             if g.models[language.rawValue] != nil, i % 2 == 0 {
                 c.ops.append(["op": "decoder", "model": language.rawValue])
                 c.ops.append(["op": "context", "model": language.rawValue])
-                if let set = g.keyset(language, language.acoLetterLayouts[0]) {
+                if let set = g.keyset(language, language.letterLayouts[0]) {
                     c.ops.append(["op": "dkeys", "keys": set.stock])
                     let token = ACOracle.currentToken(in: text) ?? ""
                     let taps = g.taps(for: token, set, spread: 0).map { ACParityGenerator.json($0.1) }

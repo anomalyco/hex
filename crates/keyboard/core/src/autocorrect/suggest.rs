@@ -71,12 +71,12 @@ impl Engine {
                 .filter(|l| self.may_offer_replacing(l, token));
             if let Some(learned) = learned {
                 pool.push(self.cased(&learned, token));
-            } else if self.language.uses_english_fixes()
+            } else if self.config.english_rules
                 && let Some(suggested) = lists::suggest_only_contraction(&lower)
             {
                 pool.push(tokens::match_case(token, suggested));
             } else if !self.is_kept(&lower)
-                && let Some(accented) = self.language.accent_suggestion(&lower)
+                && let Some(accented) = self.config.accent_suggestion(&lower)
             {
                 pool.push(self.cased(accented, token));
             }
@@ -92,7 +92,7 @@ impl Engine {
         if pool.len() < end
             && text::count(token) <= 3
             && let Some(model) = model
-            && model.language() == self.language.code()
+            && self.config.reads_model(model.language())
         {
             let previous = self.previous_word_of(token);
             predictions = model

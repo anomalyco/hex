@@ -1,0 +1,9 @@
+{
+  "id": "de",
+  "model": "de",
+  "system_dictionaries": ["de", "de_DE"],
+  "noun_capitals": "de.capitals",
+  "sentence_starters": ["ich", "das", "die"],
+  "clause_starters": ["und", "aber", "ich"],
+  "common_words": ["und", "die", "der", "ich", "ist", "das"]
+}
