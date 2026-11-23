@@ -772,7 +772,11 @@ build never lists, accepts, or runs it, and `DisableLabs` holds it off. With it
 off, Paste Last pastes the newest dictation exactly as before; Windows and
 Linux are unchanged. The gate, `crate::labs::paste_last_picker()`, is where the
 work starts: the picker and its gesture, History's unified list and the rows it
-reads, and the cancel path's word writer.
+reads, and the cancel path's word writer. The listener reads it on every pass,
+so switching it on or off applies at once, without a restart; off drops the
+picker (closing one that is open) and the writer. Check:
+`toggling_the_lab_after_start_changes_what_holding_paste_last_does` in
+[recognition/paste_picker.rs](../../src/recognition/paste_picker.rs).
 
 ```ts
 Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation

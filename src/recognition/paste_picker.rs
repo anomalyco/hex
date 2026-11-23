@@ -10,8 +10,61 @@ use crate::paste::{
     recent::{self, Request, Target},
 };
 use crate::suppression::InputEvent;
-use std::sync::mpsc::{self, SyncSender};
+use crate::transcription::engine::TranscriptionEngine;
+use std::sync::{
+    Arc,
+    mpsc::{self, SyncSender},
+};
 use std::time::{Duration, Instant};
+
+/// Labs › Paste Last picker as the listener holds it: the picker and the
+/// cancel path's word writer exist only while the lab is on. `sync` runs on
+/// every listener pass, so the switch applies without a restart, and turning
+/// it off drops both (closing an open picker), leaving Paste Last and Cancel
+/// exactly as they are without the lab.
+pub(super) struct Lab {
+    history: Option<History>,
+    engine: Option<Arc<TranscriptionEngine>>,
+    picker: Option<Picker>,
+    writer: Option<super::cancelled_words::Writer>,
+}
+
+impl Lab {
+    pub fn new(history: Option<History>, engine: Option<Arc<TranscriptionEngine>>) -> Self {
+        Self {
+            history,
+            engine,
+            picker: None,
+            writer: None,
+        }
+    }
+    pub fn sync(&mut self, on: bool) {
+        if on {
+            if self.picker.is_none() {
+                self.picker = Some(Picker::new(self.history.clone()));
+            }
+        } else {
+            self.picker = None;
+            self.writer = None;
+        }
+    }
+    pub fn busy(&self) -> bool {
+        self.picker.as_ref().is_some_and(Picker::busy)
+    }
+    pub fn picker(&mut self) -> Option<&mut Picker> {
+        self.picker.as_mut()
+    }
+    /// Started on the first deliberate cancel after the lab turns on.
+    pub fn writer(&mut self) -> Option<&super::cancelled_words::Writer> {
+        self.picker.as_ref()?;
+        if self.writer.is_none() {
+            let history = self.history.clone()?;
+            let engine = self.engine.clone()?;
+            self.writer = super::cancelled_words::Writer::start(history, engine);
+        }
+        self.writer.as_ref()
+    }
+}
 
 struct Invocation {
     epoch: u64,
@@ -174,5 +227,38 @@ impl Picker {
 impl Drop for Picker {
     fn drop(&mut self) {
         self.cancel();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::paste::gesture::Effect;
+
+    #[test]
+    fn toggling_the_lab_after_start_changes_what_holding_paste_last_does() {
+        let binding = RuntimeHotkey {
+            modifiers: Default::default(),
+            key_code: Some(9),
+        };
+        let at = |ms| CaptureInstant::from_nanos(ms * 1_000_000u64);
+        // Off at listener start: no picker, so Paste Last repastes.
+        let mut lab = Lab::new(None, None);
+        lab.sync(false);
+        assert!(lab.picker().is_none() && lab.writer().is_none());
+        // Turned on later: the next pass builds the picker, and a hold browses.
+        lab.sync(true);
+        let picker = lab.picker().expect("picker once the lab is on");
+        assert_eq!(picker.hold.press(binding, at(0), true), Effect::Wait);
+        assert_eq!(picker.hold.tick(at(400)), Effect::Browse);
+        // Off again mid-hold: the picker and its pending hold are gone.
+        lab.sync(false);
+        assert!(lab.picker().is_none() && !lab.busy());
+        // On once more: a fresh gesture, nothing left of the old hold.
+        lab.sync(true);
+        assert_eq!(
+            lab.picker().unwrap().hold.press(binding, at(600), false),
+            Effect::PasteLatest
+        );
     }
 }

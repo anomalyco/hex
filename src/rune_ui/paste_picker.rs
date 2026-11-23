@@ -12,9 +12,8 @@ pub(crate) fn install<S: 'static>(app: &mut rune::App<S>) {
         DisplayTarget, KeyPolicy, OverlayInput, OverlayLevel, OverlayOptions, OverlaySpec,
         ScreenEdge,
     };
-    if !crate::paste::recent::enabled() {
-        return;
-    }
+    // Installed whatever the lab says, hidden until a picker opens, so turning
+    // Labs › Paste Last picker on applies without a restart.
     let spec = OverlaySpec {
         name: "Hex Paste Last",
         size: (422., 544.),

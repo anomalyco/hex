@@ -3822,8 +3822,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   off by default). Its switch is `labs.paste_last_picker`, and the gate,
   `labs::paste_last_picker()`, is where the work starts: the picker and its
   gesture, History's unified list and the rows it reads, and the words a
-  deliberate cancel keeps. Off, Paste Last and History behave exactly as
-  before. Checks: `paste_last_picker_is_its_own_switch_and_macos_only` in
+  deliberate cancel keeps. It applies live, without a restart. Off, Paste
+  Last and History behave exactly as before. Checks:
+  `toggling_the_lab_after_start_changes_what_holding_paste_last_does` in
+  [recognition/paste_picker.rs](../../src/recognition/paste_picker.rs); `paste_last_picker_is_its_own_switch_and_macos_only` in
   [labs.rs](../../src/labs.rs); the picker's `paste::browse`,
   `paste::recent`, `paste::gesture` and `paste::capture` tests; History's
   `history::` tests; `one_history_filters_and_searches_the_real_owners_without_enlarging_paste_last`

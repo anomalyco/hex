@@ -541,7 +541,8 @@ pub fn yolo_mode_apps() -> Option<Vec<String>> {
 
 /// Labs › Paste Last picker: holding Paste Last opens a picker of recent
 /// dictations and annotations, and History lists them together (macOS; read
-/// where the picker, History's unified list, and the cancel-path words start).
+/// on every listener pass for the picker and the cancel-path words, and
+/// where History's unified list starts, so it applies without a restart).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn paste_last_picker() -> bool {
     // The state word is full, so the switch has its own atomic, loaded here
