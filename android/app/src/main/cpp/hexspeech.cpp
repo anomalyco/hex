@@ -98,15 +98,20 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     params.no_timestamps = true;
     params.print_progress = params.print_realtime = params.print_timestamps = params.print_special = false;
     params.suppress_nst = true;
-    if (whisper_full(ctx, params, pcm.data(), count) != 0) return nullptr;
+    // A fresh decoding state for every dictation (3 ms), the weights staying loaded: a state kept from an
+    // earlier, longer dictation leaves encoder output past a shorter window's end, which its cross-attention
+    // still reads, so a short dictation after a long one could come out differently (even in another language).
+    std::unique_ptr<whisper_state, decltype(&whisper_free_state)> state(whisper_init_state(ctx), whisper_free_state);
+    if (!state) return nullptr;
+    if (whisper_full_with_state(ctx, state.get(), params, pcm.data(), count) != 0) return nullptr;
 #ifndef NDEBUG
     // Diagnostics identify the engine and task only; no audio or recognized text is logged.
     __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "%s %s complete, %d threads, window %d",
                         small ? "small" : "tiny", translate ? "translate" : "transcribe", params.n_threads, params.audio_ctx);
 #endif
     std::string text;
-    for (int i = 0; i < whisper_full_n_segments(ctx); ++i)
-        text += whisper_full_get_segment_text(ctx, i);
+    for (int i = 0; i < whisper_full_n_segments_from_state(state.get()); ++i)
+        text += whisper_full_get_segment_text_from_state(state.get(), i);
     // JNI's modified UTF-8 is not standard UTF-8 (notably for supplementary code points).
     auto result = env->NewByteArray(static_cast<jsize>(text.size()));
     if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(text.size()),
