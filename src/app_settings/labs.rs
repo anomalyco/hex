@@ -251,6 +251,8 @@ pub struct LabsSettings {
     pub copy_capture_zip: bool,
     /// Meetings offers Import audio…: a local audio file becomes a meeting (macOS).
     pub meeting_import: bool,
+    /// A saved meeting's transcript offers line selection and deletion.
+    pub transcript_edits: bool,
     /// Meetings stops an offered, calendar, or by-hand call recording 30 s
     /// after its call app leaves the microphone, as Always record's Stop when
     /// the call ends does (macOS).
@@ -562,6 +564,7 @@ impl Default for LabsSettings {
             screenshots: false,
             copy_capture_zip: false,
             meeting_import: false,
+            transcript_edits: false,
             stop_any_call_recording: false,
             groups: std::collections::BTreeMap::new(),
             stop_when_call_ends: None,

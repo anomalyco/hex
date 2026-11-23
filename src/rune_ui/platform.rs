@@ -592,6 +592,12 @@ pub(super) enum MeetingRequest {
     Stop,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
+    /// Delete selected lines from a saved meeting's transcript
+    /// (Labs › Delete transcript lines).
+    DeleteTranscript {
+        id: String,
+        entries: Vec<crate::meeting::TranscriptEntryKey>,
+    },
     Rename {
         id: String,
         title: String,

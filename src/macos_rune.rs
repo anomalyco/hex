@@ -1149,6 +1149,13 @@ impl Pump {
                     .update(move |ui, _| crate::rune_ui::meeting_import_failed(ui, message));
                 show(&self.window, Destination::Meetings(None));
             }
+            ControllerEvent::TranscriptEditFailed { error } => {
+                tracing::error!(%error, "could not delete meeting transcript lines");
+                let message = error.clone();
+                self.window
+                    .update(move |ui, _| crate::rune_ui::meeting_edit_failed(ui, message));
+                show(&self.window, Destination::Meetings(None));
+            }
         }
     }
 

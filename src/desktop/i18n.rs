@@ -32,6 +32,7 @@ mod strings;
 mod style;
 mod text_language;
 mod traditional_chinese;
+mod transcript_edits;
 mod voice_isolation;
 
 pub(crate) use clock::{clock_time, twelve_hour_clock};
@@ -610,6 +611,7 @@ mod tests {
         include_str!("../rune_ui/macos_host.rs"),
         include_str!("../rune_ui/meeting_capsules.rs"),
         include_str!("../rune_ui/meetings.rs"),
+        include_str!("../rune_ui/meetings/selection.rs"),
         include_str!("../rune_ui/models.rs"),
         include_str!("../rune_ui/found.rs"),
         include_str!("../rune_ui/found_choice.rs"),

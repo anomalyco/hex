@@ -51,6 +51,7 @@ pub(crate) use os::{open_folder, reveal};
 mod delete;
 mod delta;
 mod echo;
+mod edit;
 mod export_name;
 mod finish;
 pub(crate) mod finished_events;
@@ -182,6 +183,12 @@ pub enum MeetingRequest {
     Summarize(String),
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
+    /// Delete selected lines from a saved meeting's transcript
+    /// (Labs › Delete transcript lines).
+    DeleteTranscript {
+        id: String,
+        entries: Vec<TranscriptEntryKey>,
+    },
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -361,6 +368,32 @@ pub struct TranscriptEntry {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
+}
+
+/// Identifies one published transcript line by its speaker and exact span,
+/// not its text: the Meetings pane carries these keys so an edit deletes the
+/// lines it showed even if the words were rewritten meanwhile.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub struct TranscriptEntryKey {
+    pub source: MeetingSource,
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+impl TranscriptEntryKey {
+    pub fn of(entry: &TranscriptEntry) -> Self {
+        Self {
+            source: entry.source,
+            start_ms: entry.start_ms,
+            end_ms: entry.end_ms,
+        }
+    }
+
+    pub fn matches(self, entry: &TranscriptEntry) -> bool {
+        self.source == entry.source
+            && self.start_ms == entry.start_ms
+            && self.end_ms == entry.end_ms
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]

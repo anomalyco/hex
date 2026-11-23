@@ -784,6 +784,28 @@ fn apply_notes_to_export(
     Ok(())
 }
 
+/// Rewrites the whole user-facing Markdown copy from the current manifest
+/// and `entries` after transcript lines were deleted. Only a copy Hex still
+/// wrote is touched: a file the user edited, or one with no recorded hash,
+/// is left alone. The transcript edit clears notes and chapters first, so
+/// the new document has none of their old text.
+pub(super) fn rewrite_export_transcript(
+    manifest: &mut MeetingManifest,
+    entries: &[TranscriptEntry],
+) -> Result<()> {
+    let Some(path) = manifest.export_path.clone().filter(|path| path.exists()) else {
+        return Ok(());
+    };
+    let original =
+        fs::read_to_string(&path).wrap_err_with(|| format!("could not read {}", path.display()))?;
+    if manifest.export_sha256.as_deref() != Some(super::text_sha256(original.as_bytes()).as_str()) {
+        return Ok(());
+    }
+    let rendered = super::transcript::render_markdown(manifest, entries);
+    rewrite_markdown_file(&path, &mut manifest.export_sha256, |_| rendered)?;
+    Ok(())
+}
+
 /// The file is replaced atomically, and only if nothing changed it meanwhile.
 /// `written` is the SHA-256 of the copy Hex last wrote; it follows the
 /// rewrite only while the file was still that copy, so a file the user
@@ -826,10 +848,12 @@ fn rewrite_markdown_file(
 
 static IN_PROGRESS: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 
-struct InProgress(String);
+pub(super) struct InProgress(String);
 
 impl InProgress {
-    fn claim(id: &str) -> Option<Self> {
+    /// Claims the one writer slot for `id`: notes, or a transcript edit
+    /// (`super::edit`) that must not race a summary.
+    pub(super) fn claim(id: &str) -> Option<Self> {
         IN_PROGRESS
             .lock()
             .unwrap_or_else(|error| error.into_inner())

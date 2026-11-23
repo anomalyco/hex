@@ -393,6 +393,12 @@ pub fn meeting_import() -> bool {
     feature_on(Feature::MeetingImport)
 }
 
+/// A saved meeting's transcript lines may be deleted (read where the pane
+/// offers selection and where the controller starts an edit).
+pub fn transcript_edits() -> bool {
+    feature_on(Feature::TranscriptEdits)
+}
+
 /// "While dictating" applies only while the default output is speakers
 /// (read as each dictation or screen capture starts: by the recording
 /// environment on macOS, and by the audio-control worker on Linux and

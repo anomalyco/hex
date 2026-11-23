@@ -634,6 +634,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         if Feature::MeetingImport.on_this_os() {
             rows.push(row(Feature::MeetingImport, None));
         }
+        rows.push(row(Feature::TranscriptEdits, None));
     }
     rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
     // macOS's menu-bar menu offers it, right under Speech Model.
@@ -1006,6 +1007,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::AnnotateAgentInstall => "lab-annotate-agent-install",
         Feature::DictateWhileAnnotating => "lab-dictate-while-annotating",
         Feature::MeetingImport => "lab-meeting-import",
+        Feature::TranscriptEdits => "lab-transcript-edits",
         Feature::OpenCodeInWsl => "lab-opencode-in-wsl",
         Feature::YoloMode => "lab-yolo-mode",
         Feature::ApiProcessing => "lab-api-processing",

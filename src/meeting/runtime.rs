@@ -216,6 +216,11 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             });
             window.open();
         }
+        ControllerEvent::TranscriptEditFailed { error } => {
+            tracing::error!(%error, "could not delete meeting transcript lines");
+            let message = error.clone();
+            window.update(move |ui, _| crate::rune_ui::meeting_edit_failed(ui, message));
+        }
         ControllerEvent::CallEnded { app, .. } => {
             tracing::info!(%app, "the call ended; the recording continues until Stop");
         }

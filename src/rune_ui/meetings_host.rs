@@ -42,6 +42,9 @@ impl LocalMeetings {
             }
             MeetingRequest::Stop => crate::meeting::runtime::request(Controller::Stop),
             MeetingRequest::Import(_) => Err("Importing audio is only available on macOS.".into()),
+            MeetingRequest::DeleteTranscript { id, entries } => {
+                crate::meeting::runtime::request(Controller::DeleteTranscript { id, entries })
+            }
             MeetingRequest::Summarize(id) => {
                 crate::meeting::runtime::request(Controller::Summarize(id))
             }
@@ -203,9 +206,11 @@ fn pane_meeting(
     }
 }
 
-/// Speaker turns, marking silences of 30 s or more.
+/// Speaker turns, marking silences of 30 s or more. Each turn carries the
+/// published lines it covers so the pane can delete exactly those.
 fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
     let mut previous_end: Option<u64> = None;
+    let mut cursor = 0;
     crate::meeting::coalesce_transcript(entries.iter().cloned())
         .into_iter()
         .map(|turn| {
@@ -213,11 +218,25 @@ fn turns(entries: &[crate::meeting::TranscriptEntry]) -> Vec<Turn> {
                 .map(|end| turn.start_ms.saturating_sub(end))
                 .filter(|pause| *pause >= 30_000);
             previous_end = Some(previous_end.map_or(turn.end_ms, |end| end.max(turn.end_ms)));
+            // The entries are sorted and coalescing keeps their order, so a
+            // turn covers the next contiguous lines inside its own span.
+            let mut covered = Vec::new();
+            while let Some(entry) = entries.get(cursor) {
+                if entry.source != turn.source
+                    || entry.start_ms < turn.start_ms
+                    || entry.end_ms > turn.end_ms
+                {
+                    break;
+                }
+                covered.push(crate::meeting::TranscriptEntryKey::of(entry));
+                cursor += 1;
+            }
             Turn {
                 mine: turn.source == crate::meeting::MeetingSource::Microphone,
                 start_ms: turn.start_ms,
                 text: turn.text,
                 pause_before_ms,
+                entries: covered,
             }
         })
         .collect()
@@ -233,6 +252,11 @@ pub(crate) fn meeting_failed(ui: &mut Ui, error: String) {
     ui.meetings.start_pending = false;
     ui.meetings.stop_pending = false;
     ui.meetings.runtime_error = Some(error);
+}
+
+/// Transcript lines could not be deleted; the Meetings pane says why.
+pub(crate) fn meeting_edit_failed(ui: &mut Ui, error: String) {
+    ui.meetings.edit_error = Some(error);
 }
 
 #[cfg(test)]

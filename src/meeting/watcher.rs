@@ -26,9 +26,11 @@ use call_end::{CallEndStop, CallWatch, stops_when_call_ends};
 use call_switch::{
     disarm_call_stop_unless_watching, watching_call_switch, withdraw_call_switch_stop,
 };
+use import::{ImportWorker, poll_import, start_import};
 
 mod call_end;
 mod call_switch;
+mod import;
 mod publication;
 
 pub(crate) enum ControllerCommand {
@@ -40,6 +42,12 @@ pub(crate) enum ControllerCommand {
     Stop,
     /// Import a local audio file as a meeting (macOS; Labs › Import audio).
     Import(PathBuf),
+    /// Delete selected lines from a saved meeting's transcript
+    /// (Labs › Delete transcript lines).
+    DeleteTranscript {
+        id: String,
+        entries: Vec<meeting::TranscriptEntryKey>,
+    },
     Summarize(String),
     /// Record a calendar meeting from its reminder, first opening its call
     /// link when `join`.
@@ -118,6 +126,10 @@ pub(crate) enum ControllerEvent {
     },
     /// An audio file could not be imported as a meeting (macOS).
     ImportFailed {
+        error: String,
+    },
+    /// Transcript lines could not be deleted (Labs › Delete transcript lines).
+    TranscriptEditFailed {
         error: String,
     },
     NotesProgress(String),
@@ -227,6 +239,9 @@ pub(crate) fn controller_loop(
                 MeetingRequest::Stop => ControllerCommand::Stop,
                 MeetingRequest::Summarize(id) => ControllerCommand::Summarize(id),
                 MeetingRequest::Import(path) => ControllerCommand::Import(path),
+                MeetingRequest::DeleteTranscript { id, entries } => {
+                    ControllerCommand::DeleteTranscript { id, entries }
+                }
             });
         for command in commands.try_iter().take(8).chain(requested_commands) {
             handle_command(
@@ -397,6 +412,18 @@ fn handle_command(
             });
         }
         ControllerCommand::Import(path) => start_import(recording, importing, path, events),
+        ControllerCommand::DeleteTranscript { .. } if !enabled => {
+            tracing::warn!("ignored a transcript edit while meetings are off");
+        }
+        // The edit refuses on its own while the lab is off.
+        ControllerCommand::DeleteTranscript { id, entries } => {
+            if let Err(error) = meeting::edit::delete_entries(&id, &entries) {
+                tracing::warn!(%error, meeting = id, "could not delete transcript lines");
+                let _ = events.send(ControllerEvent::TranscriptEditFailed {
+                    error: error.message(),
+                });
+            }
+        }
         ControllerCommand::Record(candidate, offer)
             if recording.is_none() && (offer.is_none() || offer == detector.open_offer()) =>
         {
@@ -776,110 +803,6 @@ fn records_automatically(
                 .map_or(default, |choice| choice.policy)
                 == crate::app_settings::MeetingPolicy::AlwaysRecord
         })
-}
-
-/// An audio file being transcribed as a meeting on its own worker thread
-/// (macOS; Labs › Import audio).
-struct ImportWorker {
-    worker: JoinHandle<Result<meeting::MeetingManifest>>,
-    /// The chosen file's name, for the message when it held no speech.
-    file: String,
-}
-
-/// Starts importing `path`, refusing while a recording or another import
-/// runs. Failures reach the Meetings pane as an import error.
-fn start_import(
-    recording: &mut Option<ActiveRecording>,
-    importing: &mut Option<ImportWorker>,
-    path: PathBuf,
-    events: &SyncSender<ControllerEvent>,
-) {
-    if recording.is_some() {
-        let _ = events.send(ControllerEvent::ImportFailed {
-            error: "Stop the recording before importing audio".into(),
-        });
-        return;
-    }
-    if importing.is_some() {
-        let _ = events.send(ControllerEvent::ImportFailed {
-            error: "An audio import is already running".into(),
-        });
-        return;
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = path;
-        let _ = events.send(ControllerEvent::ImportFailed {
-            error: "Importing audio is only available on macOS".into(),
-        });
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let file = path.file_name().map_or_else(
-            || path.display().to_string(),
-            |name| name.to_string_lossy().into_owned(),
-        );
-        let started = thread::Builder::new()
-            .name("meeting-import".into())
-            .spawn(move || meeting::import::import(&path));
-        match started {
-            Ok(worker) => *importing = Some(ImportWorker { worker, file }),
-            Err(error) => {
-                let _ = events.send(ControllerEvent::ImportFailed {
-                    error: error.to_string(),
-                });
-            }
-        }
-    }
-}
-
-/// Finishes an import worker, starting notes as a finished recording would.
-fn poll_import(importing: &mut Option<ImportWorker>, events: &SyncSender<ControllerEvent>) {
-    if !importing
-        .as_ref()
-        .is_some_and(|worker| worker.worker.is_finished())
-    {
-        return;
-    }
-    let Some(worker) = importing.take() else {
-        return;
-    };
-    let file = worker.file;
-    match worker.worker.join() {
-        Ok(Ok(manifest)) if manifest.status == meeting::MeetingStatus::Complete => {
-            // An imported file with no speech leaves nothing to keep, exactly
-            // as an empty recording does; notes never run for it.
-            if !meeting::keep_or_discard(&manifest) {
-                let _ = events.send(ControllerEvent::ImportFailed {
-                    error: format!("No speech was found in {file}."),
-                });
-                return;
-            }
-            tracing::info!(meeting = manifest.id, "imported audio was transcribed");
-            if meeting::notes_wanted() {
-                start_notes(manifest.id, events);
-            }
-        }
-        Ok(Ok(manifest)) => {
-            tracing::info!(
-                meeting = manifest.id,
-                status = ?manifest.status,
-                "left an imported meeting for the next launch"
-            );
-        }
-        Ok(Err(error)) => {
-            tracing::warn!(%error, "could not import audio as a meeting");
-            let _ = events.send(ControllerEvent::ImportFailed {
-                error: format!("{error:#}"),
-            });
-        }
-        Err(_) => {
-            tracing::error!("an audio import panicked");
-            let _ = events.send(ControllerEvent::ImportFailed {
-                error: "the audio import stopped".into(),
-            });
-        }
-    }
 }
 
 fn start_recording(

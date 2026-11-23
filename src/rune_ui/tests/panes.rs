@@ -1679,6 +1679,51 @@ fn deleting_a_meeting_takes_the_menu_then_a_confirmation() {
 }
 
 #[test]
+fn deleting_transcript_lines_needs_the_lab_a_selection_and_a_confirmation() {
+    let mut rt = runtime("meetings", true, PANE_SIZE);
+    assert!(
+        rt.find("meeting-select-lines").is_none(),
+        "the lab is off: no selection UI"
+    );
+
+    rt.state.settings.labs.transcript_edits = true;
+    refresh(&mut rt);
+    tap(&mut rt, "meeting-select-lines");
+    assert!(rt.state.meetings.selection.active());
+    assert!(texts(&rt).iter().any(|text| text == "0 lines selected"));
+
+    // A mixed pair: one Them turn and one You turn, each one published line.
+    tap(&mut rt, "select-turn0");
+    tap(&mut rt, "select-turn2");
+    assert_eq!(rt.state.meetings.selection.len(), 2);
+    assert!(texts(&rt).iter().any(|text| text == "2 lines selected"));
+
+    tap(&mut rt, "meeting-delete-lines");
+    assert!(asked(&rt).is_empty(), "the first press only arms");
+    tap(&mut rt, "meeting-confirm-delete-lines");
+    assert_eq!(
+        asked(&rt),
+        [PlatformRequest::Meeting(MeetingRequest::DeleteTranscript {
+            id: "preview-notes".into(),
+            entries: vec![
+                crate::meeting::TranscriptEntryKey {
+                    source: crate::meeting::MeetingSource::System,
+                    start_ms: 1_000,
+                    end_ms: 2_000,
+                },
+                crate::meeting::TranscriptEntryKey {
+                    source: crate::meeting::MeetingSource::Microphone,
+                    start_ms: 9_000,
+                    end_ms: 10_000,
+                },
+            ],
+        })],
+        "exactly one request, for the lines under the two turns"
+    );
+    assert!(!rt.state.meetings.selection.active());
+}
+
+#[test]
 fn the_overflow_menu_copies_the_summary_and_asks_for_new_notes() {
     let mut rt = runtime("meetings-actions", true, PANE_SIZE);
     let copy = menu_item(&rt, "meeting-actions", "Copy summary");

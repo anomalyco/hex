@@ -254,6 +254,7 @@ impl PillModel {
             | ControllerEvent::Stopping
             | ControllerEvent::Chapters(_)
             | ControllerEvent::ImportFailed { .. }
+            | ControllerEvent::TranscriptEditFailed { .. }
             | ControllerEvent::NotesProgress(_)
             | ControllerEvent::NotesFinished(_) => {}
         }
@@ -985,6 +986,7 @@ impl MeetingCapsules {
             | ControllerEvent::SourceWarning { .. }
             | ControllerEvent::Failed { .. }
             | ControllerEvent::ImportFailed { .. }
+            | ControllerEvent::TranscriptEditFailed { .. }
             | ControllerEvent::Chapters(_) => {}
         }
     }

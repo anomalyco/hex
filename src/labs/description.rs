@@ -168,6 +168,9 @@ impl Feature {
             Self::MeetingImport => {
                 "Add an audio file to Meetings and turn it into text on this Mac"
             }
+            Self::TranscriptEdits => {
+                "Select lines in a saved meeting transcript and delete them; summaries, copies, and the Markdown file use what's left"
+            }
             Self::CapsLockDictation => {
                 "Press Caps Lock to start and stop dictation; its light shows when Hex records and writes the text"
             }

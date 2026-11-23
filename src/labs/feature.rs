@@ -199,6 +199,7 @@ define_features! {
     Screenshots => labs(screenshots), "screenshots", Annotate, Everyone, MACOS, 20261104;
     AnnotateReplay => labs(annotate_replay), "annotate-replay", Annotate, Everyone, MACOS, 20261104, extra: ["capture.replay_hotkey"];
     MeetingImport => labs(meeting_import), "meeting-import", Meetings, Everyone, MACOS, 20261106;
+    TranscriptEdits => labs(transcript_edits), "transcript-edits", Meetings, Everyone, EVERY, 20261123;
     CapsLockDictation => labs(caps_lock_dictation), "caps-lock-dictation", Shortcuts, Everyone, MACOS, 20261107, extra: ["labs.caps_lock_light"];
     OpenCodeInWsl => labs(opencode_in_wsl), "opencode-in-wsl", Output, Everyone, WINDOWS, 20261108;
     ApiProcessing => labs(api_processing), "api-processing", Output, Everyone, EVERY, 20261109;
