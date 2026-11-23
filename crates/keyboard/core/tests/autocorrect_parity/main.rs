@@ -269,7 +269,8 @@ fn compare(
 
 fn check(path: &str) {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
-    let ios = read("ios/HEXShared/FullKeyboard/never-suggest.tsv");
+    // iOS's own list as the oracle read it (dev's before iOS took Android's), from the set.
+    let mut ios = String::new();
     let shared = read("android/app/src/main/assets/typing/never-suggest.tsv");
     let german = GermanCapitals::new(Box::new(
         read("ios/HEXKeyboard/TypingModel/de.capitals").into_bytes(),
@@ -295,6 +296,10 @@ fn check(path: &str) {
         }
         match v["kind"].as_str().unwrap() {
             "setup" => {
+                ios = v["iosNeverSuggest"]
+                    .as_str()
+                    .expect("the set's setup has iOS's never-suggest list")
+                    .to_owned();
                 // The typing models the oracle read, from the repository.
                 let models: HashMap<String, Arc<Model>> = strings(&v["models"])
                     .iter()

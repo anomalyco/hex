@@ -136,6 +136,25 @@ enum ACStub {
         return h
     }
 
+    /// The stub dictionaries from a parity set's setup line, as `stub.rs` builds them: a typing
+    /// model's commonest `modelWords` words, less one in `dropEvery` by hash, and its extras, or
+    /// the language's list; with its names.
+    static func dictionaries(setup: [String: Any], models: [String: TypingDecoderModel]) -> [String: ACStubDictionary] {
+        let modelWords = setup["modelWords"] as! Int, dropEvery = UInt64(setup["dropEvery"] as! Int)
+        let names = setup["names"] as! [String: [String]], extras = setup["extras"] as! [String: [String]]
+        var out: [String: ACStubDictionary] = [:]
+        for (code, model) in models {
+            let order = (0..<model.wordCount).sorted { (model.unigramCost($0), $0) < (model.unigramCost($1), $1) }
+            var words = order.prefix(modelWords).map { model.word($0) }.filter { fnv($0) % dropEvery != 0 }
+            words += extras[code] ?? []
+            out[code] = ACStubDictionary(ranked: words, names: names[code] ?? [])
+        }
+        for (code, list) in setup["lists"] as! [String: [String]] where models[code] == nil {
+            out[code] = ACStubDictionary(ranked: list, names: names[code] ?? [])
+        }
+        return out
+    }
+
     /// The dictionary a `UITextChecker` code opens ("en_US" -> "en", "no" -> "nb").
     static func dictionaryCode(_ code: String) -> String {
         let base = String(code.prefix { $0 != "_" && $0 != "-" })
@@ -145,7 +164,7 @@ enum ACStub {
 
 /// One engine's dictionary (`TextChecking`), tagged for the call log.
 @MainActor
-final class ACStubChecker: ACOChecking {
+final class ACStubChecker: ACOChecking, TextChecking {
     let tag: String
     let log: ACCallLog
     let dictionaries: [String: ACStubDictionary]

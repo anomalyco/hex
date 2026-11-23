@@ -316,7 +316,7 @@ final class AutocorrectEngine {
     }
 
     /// Hands the core the kept words when a list changed, before it decides anything.
-    private func prepare() {
+    func prepare() {
         core.learnedWords(learnedWords, partner: partner?.learnedWords)
     }
 

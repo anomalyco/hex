@@ -10,6 +10,8 @@ struct ACParityRunner {
     let dictionaries: [String: ACStubDictionary]
     let models: [String: TapOracleModel]
     let keysets: [Int: TapOracle.Keys]
+    /// Apple's dictionary (`SystemTextChecker`) for every engine instead of the stub.
+    var system = false
 
     struct Result {
         var outputs: [Any] = []
@@ -57,7 +59,7 @@ struct ACParityRunner {
             storage.data[ACOLearnedWords.defaultsKey] = try! JSONEncoder().encode(initialLearned)
         }
         let engine = ACOracle(
-            checker: ACStubChecker(tag: "p", log: log, dictionaries: dictionaries, acceptsEverything: false),
+            checker: system ? ACSystemChecker() : ACStubChecker(tag: "p", log: log, dictionaries: dictionaries, acceptsEverything: false),
             learnedWords: ACOLearnedWords(defaults: storage)
         )
         var result = Result()
@@ -120,7 +122,9 @@ struct ACParityRunner {
         case "keys":
             e.setKeys(Self.language(op["l"])!, letters: KeyboardLetterLayout(rawValue: op["letters"] as! String)!)
         case "partner":
-            let checker = ACStubChecker(tag: op["tag"] as! String, log: log, dictionaries: dictionaries, acceptsEverything: op["any"] as? Bool ?? false)
+            let checker: ACOChecking = system
+                ? ACSystemChecker()
+                : ACStubChecker(tag: op["tag"] as! String, log: log, dictionaries: dictionaries, acceptsEverything: op["any"] as? Bool ?? false)
             e.setPartner(Self.language(op["l"]), available: Self.available(op["avail"]), checker: checker)
         case "perlang": e.learnsPerLanguage = op["on"] as! Bool
         case "enabled": e.isEnabled = op["on"] as! Bool
@@ -228,4 +232,16 @@ struct ACParityRunner {
         }
         return NSNull()
     }
+}
+
+/// The shipped `SystemTextChecker` as the oracle's dictionary: Apple's, with Hex's own words
+/// when `ACOracle.ownWordsHook` gives them, as dev's `useOwnWords` does.
+@MainActor
+final class ACSystemChecker: ACOChecking {
+    let system = SystemTextChecker()
+
+    func isWordValid(_ word: String) -> Bool { system.isWordValid(word) }
+    func guesses(for word: String) -> [String] { system.guesses(for: word) }
+    func completions(for prefix: String) -> [String] { system.completions(for: prefix) }
+    func useLanguage(_ code: String) { system.useLanguage(code) }
 }

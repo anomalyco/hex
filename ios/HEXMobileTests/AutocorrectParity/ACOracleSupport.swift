@@ -265,7 +265,9 @@ nonisolated struct ACOOffensiveWords: Equatable, Sendable {
         entries.compactMap { word, kind in kind == .slur || !allowSwearing ? word : nil }
     }
 
-    static let iosPath = "ios/HEXShared/FullKeyboard/never-suggest.tsv"
+    /// iOS's own list before this branch made it Android's (dev 06ac30af's, copied beside the
+    /// oracle), which the oracle answers with unless `sharedList`.
+    static let iosPath = "ios/HEXMobileTests/AutocorrectParity/never-suggest-ios.tsv"
     static let sharedPath = "android/app/src/main/assets/typing/never-suggest.tsv"
     nonisolated(unsafe) static var sharedList = false
 

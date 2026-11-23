@@ -163,6 +163,7 @@ final class AutocorrectParityExport: XCTestCase {
             "kind": "setup", "modelWords": modelWords, "dropEvery": dropEvery, "lists": ACParityWords.lists,
             "names": ACParityWords.names, "extras": ACParityWords.extras, "available": ACParityGenerator.available,
             "models": models.keys.sorted(),
+            "iosNeverSuggest": ACOracleFiles.read(ACOOffensiveWords.iosPath) ?? "",
         ]
         return (out, setup)
     }
