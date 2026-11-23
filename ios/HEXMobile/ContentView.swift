@@ -181,12 +181,6 @@ struct ContentView: View {
         .sheet(isPresented: $showSetup) {
             SetupSheet(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech)
         }
-        .task {
-            while !Task.isCancelled {
-                setupMonitor.refresh()
-                try? await Task.sleep(for: .seconds(1))
-            }
-        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 setupMonitor.refresh()
@@ -260,7 +254,7 @@ struct ContentView: View {
                             openURL(url)
                         }
                     } label: {
-                        SettingsLinkLabel(title: String(localized: "Keyboard settings"), icon: "gearshape", trailingIcon: "arrow.up.right")
+                        SettingsLinkLabel(title: String(localized: "iOS Settings"), icon: "gearshape", trailingIcon: "arrow.up.right")
                     }
                     .buttonStyle(.plain)
 
