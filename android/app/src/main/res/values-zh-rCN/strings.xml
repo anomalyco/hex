@@ -86,6 +86,8 @@
     <string name="settings_autocorrect_detail">按空格时修正拼写错误</string>
     <string name="settings_spatial">按触点自动改正</string>
     <string name="settings_spatial_detail">根据点按位置修正拼写错误</string>
+    <string name="settings_swipe">滑行输入</string>
+    <string name="settings_swipe_detail">滑过单词的字母即可输入</string>
     <string name="settings_swear_words">在建议中显示脏话</string>
     <string name="settings_swear_words_detail">绝不会建议歧视性词语</string>
     <string name="settings_personal_dictionary">个人字典</string>

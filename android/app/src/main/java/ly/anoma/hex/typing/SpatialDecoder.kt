@@ -24,6 +24,8 @@ internal class KeyGrid(val centres: Map<Char, KeyPoint>, val pitchX: Double, val
 internal class SpatialDecoder(val model: TypingModel) {
     /** Your own words (`PersonalWords`), read beside the model's; null or empty without any. */
     @Volatile var personal: PersonalWords? = null
+    /** Keyboard › Swipe typing's reader for this language, made at the first swipe. */
+    val swipe by lazy { SwipeReader(this) }
     /** `spaceCost`: what reading this tap as a space the finger missed costs when it landed on
      * the bottom row's upper half, or infinity (`spaceTapCost`). */
     class Tap(val cost: DoubleArray, val choices: IntArray, val belowLetters: Boolean, val missedSpaceCost: Double,

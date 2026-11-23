@@ -581,4 +581,108 @@ class NeverSuggestTest {
         assertEquals(listOf("Je", "Le", "La"), word("fr").predictions(""))
         assertEquals(listOf("e", "ma", "che"), word("it").predictions("ciao, "))
     }
+
+    // Keyboard › Swipe typing's decoder (SwipeDecoder, iPhone Hex's port) on the bundled models, with straight strokes
+    // through the centres of a word's keys as KeyPlaneView lays them out (the Pixel 8's 107 x 155 px pitch).
+    private fun swipeGrid(language: String): KeyGrid {
+        val rows = ly.anoma.hex.keyboard.KeyboardLetters.rows(language)
+        val columns = maxOf(rows[0].length, rows[1].length)
+        return KeyGrid(buildMap {
+            for ((r, row) in rows.withIndex()) for ((i, c) in row.withIndex())
+                if (c.isLetter()) put(c, KeyPoint(((columns - row.length) / 2.0 + i + 0.5) * 107.2, (r + 0.5) * 155.0))
+        }, 107.2, 155.0)
+    }
+    private fun swipeReader(language: String, swears: Boolean = false) =
+        SwipeReader(SpatialDecoder(TypingModel.file(File("src/main/assets/typing/$language.hextm"), language))).also { it.prepare(swears) }
+    /** The word's keys' centres in order (an accented letter on its base letter's key, ß on s, œ on o and e), repeats run
+     * together, a point every [step] px, moved by [dx], [dy]; with [pauses] (indexes into those keys) the finger stays
+     * 0.15 s on them, at an even 750 px a second otherwise. */
+    private fun swipe(word: String, grid: KeyGrid, dx: Double = 0.0, dy: Double = 0.0, step: Double = 16.0,
+                      pauses: Set<Int>? = null): Triple<DoubleArray, DoubleArray, DoubleArray?> {
+        val keys = ArrayList<KeyPoint>()
+        for (c in word.lowercase()) {
+            if (c == '\'') continue
+            val letters = when (c) { 'ß' -> "s"; 'œ' -> "oe"; else -> grid.centres[c]?.let { c.toString() }
+                ?: java.text.Normalizer.normalize(c.toString(), java.text.Normalizer.Form.NFD).take(1) }
+            for (l in letters) grid.centres[l]?.let { if (keys.lastOrNull() != it) keys.add(it) }
+        }
+        val xs = ArrayList<Double>(); val ys = ArrayList<Double>(); val ts = ArrayList<Double>()
+        xs.add(keys[0].x + dx); ys.add(keys[0].y + dy); ts.add(0.0)
+        for (k in 1 until keys.size) {
+            val a = keys[k - 1]; val b = keys[k]
+            val n = maxOf(1, kotlin.math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / step).toInt())
+            for (i in 1..n) {
+                xs.add(a.x + (b.x - a.x) * i / n + dx); ys.add(a.y + (b.y - a.y) * i / n + dy)
+                ts.add(ts.last() + step / 750 + if (i == 1 && pauses?.contains(k - 1) == true) 0.15 else 0.0)
+            }
+        }
+        return Triple(xs.toDoubleArray(), ys.toDoubleArray(), if (pauses == null) null else ts.toDoubleArray())
+    }
+    private fun SwipeReader.read(word: String, grid: KeyGrid, previous: String? = null, dx: Double = 0.0, dy: Double = 0.0,
+                                 pauses: Set<Int>? = null): List<String> {
+        val (xs, ys, ts) = swipe(word, grid, dx, dy, pauses = pauses)
+        return ranked(decode(xs, ys, ts, xs.size, grid, previous, 4).candidates)
+    }
+
+    @Test fun cleanSwipesReadAsTheirWordsInEveryLayout() {
+        val en = swipeReader("en"); val g = swipeGrid("en")
+        for (w in listOf("hello", "the", "keyboard", "world", "typing", "people", "because", "quick", "with", "you", "and"))
+            assertEquals(w, en.read(w, g).first())
+        // A finger that runs low all the way, or low and to the left, still reads.
+        for ((dx, dy) in listOf(0.0 to 155 * .3, -107.2 / 4 to 155.0 / 4))
+            for (w in listOf("hello", "keyboard", "people", "world", "because")) assertEquals("$dx,$dy", w, en.read(w, g, dx = dx, dy = dy).first())
+        val es = swipeReader("es"); val ge = swipeGrid("es")
+        for (w in listOf("año", "también", "gracias", "mañana", "teclado")) assertEquals(w, es.read(w, ge).first())
+        assertEquals(setOf("esta", "está"), es.read("esta", ge).take(2).toSet())
+        for ((language, w) in listOf("de" to "hallo", "nb" to "norsk", "fr" to "bonjour", "it" to "perché", "de" to "schön", "nb" to "kjøre"))
+            assertTrue("$language: $w", w in swipeReader(language).read(w, swipeGrid(language)).take(2))
+        // iPhone drops these: ß is swiped through s, œ through o and e.
+        assertTrue(swipeReader("de").read("straße", swipeGrid("de")).take(3).contains("straße"))
+        assertTrue(swipeReader("fr").read("cœur", swipeGrid("fr")).take(3).contains("cœur"))
+    }
+
+    @Test fun swipedContractionsTheWordBeforeAndTooShortAPath() {
+        val en = swipeReader("en"); val g = swipeGrid("en")
+        assertEquals("don't", en.read("dont", g).first())
+        assertEquals("I'm", en.read("im", g).first())
+        assertEquals(listOf("to", "too"), en.read("to", g).take(2))
+        assertEquals("too", en.read("too", g, previous = "far").first())
+        val h = g.centres.getValue('h')
+        assertTrue(en.decode(doubleArrayOf(h.x, h.x + 10), doubleArrayOf(h.y, h.y), null, 2, g, null, 4).candidates.isEmpty())
+    }
+
+    @Test fun aSwipeReadsSlursNeverAndSwearWordsOnlyWhenAsked() {
+        for ((language, probes) in listOf("en" to listOf("fuck", "shit", "bitch", "nigger", "faggot"), "es" to listOf("mierda", "maricón"))) {
+            for (swears in listOf(false, true)) {
+                val reader = swipeReader(language, swears)
+                for (probe in probes) for (reading in reader.read(probe, swipeGrid(language)))
+                    assertFalse("$probe read as $reading", reader.model.neverSuggest.blocks(reading, swears, -1))
+            }
+        }
+        assertEquals("fuck", swipeReader("en", swears = true).read("fuck", swipeGrid("en")).first())
+    }
+
+    /** A straight stroke runs over the letters between its ends; only where the finger slowed tells "tired" from "tied". */
+    @Test fun aPauseOnALetterTheStrokeCrossesReadsIt() {
+        val en = swipeReader("en"); val g = swipeGrid("en")
+        assertEquals("tired", en.read("tired", g, pauses = setOf(2)).first())
+        assertEquals("tied", en.read("tired", g, pauses = emptySet()).first())
+        assertEquals("wire", en.read("wire", g, pauses = setOf(2)).first())
+        assertEquals("write", en.read("write", g, pauses = setOf(1, 3)).first())
+        assertEquals("put", en.read("put", g, pauses = setOf(1)).first())
+        assertEquals("pit", en.read("pit", g, pauses = setOf(1)).first())
+    }
+
+    @Test fun aSwipedWordTakesTheCapitalsTheWordListGivesIt() {
+        val en = word("en")
+        assertEquals("I'm", en.swiped("i'm", null))
+        assertEquals("Monday", en.swiped("monday", null))
+        assertEquals("the", en.swiped("the", null))
+        en.addsCapitals = false
+        assertEquals("i'm", en.swiped("I'm", null))
+        val de = word("de")
+        assertEquals("Haus", de.swiped("haus", "das"))
+        assertEquals("leben", de.swiped("leben", "zu"))
+        assertEquals("Leben", de.swiped("leben", "das"))
+    }
 }
