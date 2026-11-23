@@ -20,7 +20,7 @@
     <string name="updates_auto">自动检查更新</string>
     <string name="updates_auto_detail">打开 Hex Preview 时，以及每天一次从键盘检查</string>
     <string name="updates_check_now">立即检查</string>
-    <string name="updates_installed">版本 %1$s · 版本号 %2$d</string>
+    <string name="updates_installed">版本 %1$s，版本号 %2$d</string>
     <string name="updates_checking">正在检查…</string>
     <string name="updates_current">已是最新版本</string>
     <string name="updates_check_failed">无法检查</string>

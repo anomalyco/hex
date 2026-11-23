@@ -273,7 +273,7 @@ internal object Updates {
                 auto = it; prefs(c).edit().putBoolean("automatic", it).apply()
             }
             Rule()
-            Entry(stringResource(R.string.updates_check_now), stringResource(R.string.updates_installed, info.versionName.orEmpty(), info.longVersionCode),
+            Entry(stringResource(R.string.updates_check_now), stringResource(R.string.updates_installed, info.versionName.orEmpty().substringBefore("-preview."), info.longVersionCode),
                 when (s) {
                     State.Checking -> stringResource(R.string.updates_checking)
                     State.Current -> stringResource(R.string.updates_current)

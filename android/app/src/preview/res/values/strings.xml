@@ -23,11 +23,11 @@
     <string name="updates_auto">Check for updates automatically</string>
     <string name="updates_auto_detail">When you open Hex Preview, and once a day from the keyboard</string>
     <string name="updates_check_now">Check now</string>
-    <string name="updates_installed">Version %1$s · build %2$d</string>
+    <string name="updates_installed">Version %1$s, build %2$d</string>
     <string name="updates_checking">Checking…</string>
     <string name="updates_current">Up to date</string>
     <string name="updates_check_failed">Couldn’t check</string>
     <string name="updates_ready">Update available</string>
-    <string name="updates_strip">A Hex Preview update is available</string>
+    <string name="updates_strip">Hex Preview update available</string>
     <string name="updates_strip_dismiss">Dismiss</string>
 </resources>
