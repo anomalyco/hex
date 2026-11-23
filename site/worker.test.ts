@@ -131,6 +131,22 @@ test("renders /hex/dev from the dev-notes branch", async () => {
   expect(body).toContain('href="https://github.com/anomalyco/hex/pull/2"')
 })
 
+test("sends /hex/download/android to the newest Hex Preview APK", async () => {
+  const apk = "https://github.com/anomalyco/hex/releases/download/android-preview-2305/HexPreview-0.2.2-preview.2305.apk"
+  notesFetch(() => new Response(JSON.stringify({ versionCode: 2305, apk: { url: apk } })))
+  const response = await get("/hex/download/android")
+  expect(response.status).toBe(302)
+  expect(response.headers.get("Location")).toBe(apk)
+  expect(response.headers.get("Cache-Control")).toBe("no-store")
+})
+
+test("never sends the Android download outside Hex Preview's own release files", async () => {
+  notesFetch(() => new Response(JSON.stringify({ apk: { url: "https://example.com/HexPreview.apk" } })))
+  expect((await get("/hex/download/android")).status).toBe(502)
+  notesFetch(() => new Response("Not found", { status: 404 }))
+  expect((await get("/hex/download/android")).status).toBe(404)
+})
+
 test("does not answer writes", async () => {
   const response = await get("/hex/files/install-linux.sh", environment(), "POST")
   expect(response.status).toBe(405)
