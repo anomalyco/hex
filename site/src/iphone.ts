@@ -6,8 +6,9 @@
 // their social cards at build, in the Labs pages' look (src/labs.ts).
 //
 // Every claim here is checked against ios/: Hex makes no network request of
-// its own except FluidAudio's English model download (ParakeetTranscriber),
-// Hex Keyboard makes none, and the Experiments that keep data are off by
+// its own except FluidAudio's English model download (ParakeetTranscriber)
+// and Send feedback's one POST to Bellhop, made only when the person taps Send
+// (HEXMobile/Feedback), Hex Keyboard makes none, and the Experiments that keep data are off by
 // default and write only to the App Group. The Android page is checked
 // against android/ the same way (the setup's labels, the 190 MB model,
 // Android 12, and Hex Preview's update check in src/preview).
@@ -21,10 +22,10 @@ export const ANDROID_PATH = withBase("/android")
 // when a card changes, so link previews that cached the old one fetch it again.
 export const CARDS = {
   iphone: { title: "A keyboard you talk to", line: "Dictate right inside the keyboard, in any app. Free, private, and on your iPhone." },
-  privacy: { title: "Privacy policy", line: "Hex doesn't collect any data. What you say and type stays on your iPhone." },
+  privacy: { title: "Privacy policy", line: "What you say and type stays on your iPhone. Hex sends only the feedback you choose to send." },
   android: { title: "A keyboard you talk to", line: "Dictate right inside the keyboard, in any app. Free, private, and on your phone." },
 }
-const CARD_VERSION = 1
+const CARD_VERSION = 2
 export const IPHONE_CARD_PATH = withBase(`/iphone.png?v=${CARD_VERSION}`)
 export const PRIVACY_CARD_PATH = withBase(`/privacy.png?v=${CARD_VERSION}`)
 export const ANDROID_CARD_PATH = withBase(`/android.png?v=${CARD_VERSION}`)
@@ -182,13 +183,13 @@ export function renderAndroid(origin: string): string {
 export function renderPrivacy(origin: string): string {
   const body = `<p class="eyebrow">Hex for iPhone and Android</p>
 <h1>Privacy policy</h1>
-<p class="summary">Hex doesn't collect any data. What you say and type stays on your iPhone.</p>
+<p class="summary">What you say and type stays on your iPhone. Hex sends only the feedback you choose to send.</p>
 <p class="updated">Last updated ${PRIVACY_UPDATED}</p>
 <div class="prose">
 <section>
 <h2>The short version</h2>
 <p>Hex for iPhone and Android is made by Anomaly Innovations, Inc. This policy covers the Hex app for iPhone, Hex Keyboard, and Hex's widgets and Live Activities, and <a href="#android">Hex for Android</a> and its keyboard.</p>
-<p>There's no account, no analytics, no advertising, and no tracking. Hex has no servers your words could be sent to.</p>
+<p>There's no account, no analytics, no advertising, and no tracking. Nothing you dictate or type is ever sent anywhere. The only thing Hex sends about you is feedback, and only when you write it and tap Send.</p>
 </section>
 <section>
 <h2>What happens on your iPhone</h2>
@@ -208,6 +209,18 @@ export function renderPrivacy(origin: string): string {
 <li><strong>Record typing logs</strong> keeps a detailed log of your typing in Hex Keyboard, including the text around your cursor, for 14 days, for testing the keyboard. It never logs password, one-time code, or card fields. The logs leave your iPhone only if you share them yourself, and you can delete them at any time.</li>
 </ul>
 </section>
+<section id="feedback">
+<h2>Feedback you send</h2>
+<p>Hex for iPhone has a Send feedback form, on Home and at the end of Settings › Experiments. Nothing is sent until you tap Send. Then Hex sends, to Anomaly's feedback inbox (Bellhop, run by Anomaly):</p>
+<ul>
+<li>What you wrote: your message, and a subject and kind if you chose them.</li>
+<li>The pictures shown in the form: a picture of Hex's own screen taken when you opened the form (never the rest of your iPhone's screen), and any photos you add. You can remove each one before sending.</li>
+<li>Hex's version, your iPhone's model, its iOS version and language, which screen of Hex you opened the form from, and the language and speech model Hex dictates with.</li>
+<li>Your email, only if you type one in, so Anomaly can reply. Nothing is emailed when you send: if Anomaly replies, you'll get an email and confirm your address once.</li>
+<li>A random install ID, made by Hex the first time you send feedback, so your reports can be kept together. It isn't tied to your iPhone or Apple account, and deleting Hex deletes it.</li>
+</ul>
+<p>With <strong>Send anonymously</strong> on, Hex sends no email and no install ID, so anonymous feedback can't be answered. Feedback never includes your dictations, what you type, your vocabulary, what Hex learned about your typing, typing logs, or recordings. Hex Keyboard never sends feedback. Anomaly uses feedback only to answer you and improve Hex. Like any request, the server sees your IP address.</p>
+</section>
 <section>
 <h2>Downloads</h2>
 <p>Hex downloads a speech model the first time you use a language: Apple's, through iOS, or, where Apple's isn't available (such as before iOS 26), Hex's own English model from Hugging Face. Apple Intelligence and translation languages also download through iOS.</p>
@@ -219,7 +232,7 @@ export function renderPrivacy(origin: string): string {
 </section>
 <section>
 <h2>Children</h2>
-<p>Hex is suitable for all ages and collects no data from anyone, including children.</p>
+<p>Hex is suitable for all ages and collects no data from anyone, including children, except feedback someone chooses to send.</p>
 </section>
 <section id="android">
 <h2>Hex for Android</h2>
@@ -252,7 +265,7 @@ export function renderPrivacy(origin: string): string {
     origin,
     {
       title: "Privacy policy · Hex for iPhone",
-      description: "Hex doesn't collect any data. What you say and type stays on your iPhone: no account, no analytics, no tracking.",
+      description: "What you say and type stays on your iPhone: no account, no analytics, no tracking. Hex sends only the feedback you choose to send.",
       url: PRIVACY_PATH,
       image: PRIVACY_CARD_PATH,
       imageAlt: "Hex for iPhone privacy policy: what you say and type stays on your iPhone.",
