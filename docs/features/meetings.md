@@ -1809,10 +1809,13 @@ Detail (a raised card beside the list)
 │   └── Copy summary (stays open to show "Copied"), Reveal Markdown (Finder
 │       selects the exported .md, when there is one), Reveal files (opens
 │       the recording folder), Summarize / Regenerate summary ("Summarizing…"
-│       disabled while running), separator, Delete… (finished meetings only
-│       for the last three)
+│       disabled while writing or regenerating), separator, Delete…
+│       (finished meetings only for the last three)
 ├── Errors at the top of the scroll area
-├── Summary: one paragraph, at most two sentences
+├── Summary: one paragraph, at most two sentences; while one is written or
+│   regenerated, a spinner and the writer's line above the summary already
+│   shown, and the row's meta line begins "Summarizing…"
+│   (check: regenerating_a_summary_shows_progress_above_the_old_summary)
 ├── Chapters (when present): start, name, line, and a Copy section icon
 └── Transcript: stacked turns, no bubbles; "You" in text colour, "Them"
     faint, each with its clock; merged turns; 30 s+ pause lines;
@@ -2037,8 +2040,11 @@ Final publication complete                               // meetings.notes
 
 Unavailable (not eligible / Apple Intelligence off / model not ready / macOS < 26)
   -> Settings row says why; nothing runs
-Meetings pane -> title in list and detail; Summary paragraph above the transcript;
-  "Summarize" / "Regenerate summary" / "Summarizing…" in the overflow menu
+Meetings pane -> title in list and detail; Summary paragraph above the transcript,
+  a spinner and the writer's line ("Writing a title and summary with OpenCode…",
+  or "…with Apple Intelligence…") above it while one is written or regenerated;
+  the list row and the disabled overflow item both say "Summarizing…"
+  (check: regenerating_a_summary_shows_progress_above_the_old_summary)
 Finished meeting panel -> the shown title; "Writing a title and summary with
   Apple Intelligence…" under it, then the summary (at most three lines)
 ```

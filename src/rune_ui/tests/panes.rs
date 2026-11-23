@@ -1699,6 +1699,50 @@ fn the_overflow_menu_copies_the_summary_and_asks_for_new_notes() {
     );
 }
 
+/// Regenerating a summary keeps the old one visible under a spinner and the
+/// writer's line, while the row and the menu say "Summarizing…" (#2556).
+#[test]
+fn regenerating_a_summary_shows_progress_above_the_old_summary() {
+    let mut rt = runtime("meetings-actions", true, PANE_SIZE);
+    let meeting = rt
+        .state
+        .meetings
+        .meetings
+        .iter_mut()
+        .find(|meeting| meeting.id == "preview-notes")
+        .unwrap();
+    meeting.notes_running = true;
+    refresh(&mut rt);
+    assert!(rt.find("notes-running").is_some(), "the spinner row");
+    let shown = texts(&rt);
+    assert!(
+        shown
+            .iter()
+            .any(|text| text.starts_with("Writing a title and summary with")),
+        "{shown:?}"
+    );
+    assert!(
+        shown
+            .iter()
+            .any(|text| text.starts_with("One login for every Anomaly Arcade game")),
+        "the old summary stays visible: {shown:?}"
+    );
+    assert!(
+        texts_under(&rt, "meeting-preview-notes")
+            .iter()
+            .any(|text| text.starts_with("Summarizing…")),
+        "the list row says so"
+    );
+    assert!(
+        shown.iter().any(|text| text == "Summarizing…"),
+        "the menu's disabled item: {shown:?}"
+    );
+    assert!(
+        !shown.iter().any(|text| text == "Regenerate summary"),
+        "nothing to ask for twice: {shown:?}"
+    );
+}
+
 #[test]
 fn reveal_markdown_asks_for_the_exported_file_and_reveal_files_for_the_recording() {
     let mut rt = runtime("meetings", true, PANE_SIZE);

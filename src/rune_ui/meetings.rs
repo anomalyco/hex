@@ -12,7 +12,9 @@
 //! [`MeetingRequest`]s back. Scenes feed [`MeetingsPane::fixture`].
 
 use rune::{El, TextEdit, Tx, col, row, text};
-use rune_kit::{IconButton, IconButtonVariant, Menu as KitMenu, MenuItem, Placement, TextInput};
+use rune_kit::{
+    IconButton, IconButtonVariant, Loader, Menu as KitMenu, MenuItem, Placement, TextInput,
+};
 
 use super::controls::{
     ButtonKind, DESCRIPTION, Paint, button, card, page, pulsing_dot, segmented_tx,
@@ -563,6 +565,7 @@ fn row_meta(pane: &MeetingsPane, meeting: &Meeting, p: Paint) -> (String, Option
         Status::Transcribing => (Some(tr("Transcribing")), None),
         Status::Failed => (Some(tr("Failed")), Some(p.danger())),
         Status::Interrupted => (Some(tr("Interrupted")), None),
+        Status::Complete if meeting.notes_running => (Some(tr("Summarizing…")), None),
         Status::Complete => (None, None),
     };
     let mut parts: Vec<String> = state.map(String::from).into_iter().collect();
@@ -879,36 +882,47 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
             Tone::Warning,
         ));
     }
-    if let Some(summary) = &meeting.summary {
-        let summary = summary.trim();
-        body = body.child(
+    if meeting.notes_running || meeting.summary.is_some() {
+        let mut notes =
             col()
                 .key("notes")
                 .gap(6.0)
-                .child(section_label(p, "summary-label", tr("Summary")))
-                .child(
-                    text(if summary.is_empty() {
-                        tr("Nothing to summarize.")
-                    } else {
-                        summary
-                    })
-                    .key("summary")
-                    .font(p.k.ty.body)
-                    .color(if summary.is_empty() {
-                        p.faint()
-                    } else {
-                        p.text()
-                    })
-                    .wrap(),
-                ),
-        );
-    } else if meeting.notes_running {
-        body = body.child(
-            text(notes_running_label(ui))
-                .key("notes-running")
-                .font(DESCRIPTION)
-                .color(p.faint()),
-        );
+                .child(section_label(p, "summary-label", tr("Summary")));
+        if meeting.notes_running {
+            // Writing or regenerating: the spinner and the writer's line
+            // above whatever summary is already shown (#2556).
+            notes = notes.child(
+                row()
+                    .key("notes-running")
+                    .gap(8.0)
+                    .center_y()
+                    .child(Loader::new().build(p.k))
+                    .child(
+                        text(notes_running_label(ui))
+                            .font(DESCRIPTION)
+                            .color(p.faint()),
+                    ),
+            );
+        }
+        if let Some(summary) = &meeting.summary {
+            let summary = summary.trim();
+            notes = notes.child(
+                text(if summary.is_empty() {
+                    tr("Nothing to summarize.")
+                } else {
+                    summary
+                })
+                .key("summary")
+                .font(p.k.ty.body)
+                .color(if summary.is_empty() {
+                    p.faint()
+                } else {
+                    p.text()
+                })
+                .wrap(),
+            );
+        }
+        body = body.child(notes);
     }
     if !meeting.chapters.is_empty() {
         body = body.child(chapters(p, meeting, &copied));
