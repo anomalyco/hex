@@ -1,6 +1,7 @@
 //! Insertion only. Neither selecting a capture nor preparing its two parts
 //! should take the clipboard, reactivate an app, or affect an Annotate send.
 
+use super::clipboard_restore::CLIPBOARD_RESTORE_DELAY;
 use super::{
     CLIPBOARD_MANAGER_MARKERS, ClipboardRestore, Paster, capture_clipboard, restore_clipboard,
     write_items,
@@ -228,14 +229,11 @@ fn transaction<B: Board>(
     })();
     if let Some(count) = owned {
         // Share the prior text paste's original, not its transient payload.
-        let previous = if pending.last_change_count == Some(initial) {
-            pending.original.take().unwrap_or(snapshot)
-        } else {
-            snapshot
-        };
-        pending.keep();
+        let previous = pending
+            .take_pending(|&last| last == initial)
+            .unwrap_or(snapshot);
         if attempted && board.generation() == count {
-            wait(Duration::from_millis(500));
+            wait(CLIPBOARD_RESTORE_DELAY);
         }
         if board.generation() == count {
             board

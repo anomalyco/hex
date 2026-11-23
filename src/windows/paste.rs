@@ -22,8 +22,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 
 use crate::continuation::{Continuation, InputActivity};
 use crate::dictation::paste_target::is_shell_target;
-
-const CLIPBOARD_RESTORE_DELAY: Duration = Duration::from_millis(500);
+use crate::paste::clipboard_restore::{
+    CLIPBOARD_RESTORE_DELAY, ClipboardRestore as SharedClipboardRestore, RestoreDecision,
+};
 
 /// How long a paste waits for the window its capture started in to come back
 /// to the front, and how often it asks.
@@ -222,37 +223,7 @@ pub struct WindowsPaster {
     continuation: Continuation,
 }
 
-#[derive(Default)]
-struct ClipboardRestore {
-    generation: u64,
-    original: Option<ClipboardSnapshot>,
-    last_sequence: Option<u32>,
-}
-
-impl ClipboardRestore {
-    fn register(
-        &mut self,
-        previous: Option<ClipboardSnapshot>,
-        previous_sequence: u32,
-        inserted_sequence: u32,
-    ) -> u64 {
-        self.generation = self.generation.wrapping_add(1);
-        if self.last_sequence != Some(previous_sequence) {
-            self.original = previous;
-        }
-        self.last_sequence = Some(inserted_sequence);
-        self.generation
-    }
-
-    /// Labs › Keep dictation on clipboard: the paste stays on the clipboard,
-    /// so no earlier snapshot may come back and any pending restore stands
-    /// down.
-    fn keep(&mut self) {
-        self.generation = self.generation.wrapping_add(1);
-        self.original = None;
-        self.last_sequence = None;
-    }
-}
+type ClipboardRestore = SharedClipboardRestore<ClipboardSnapshot, u32>;
 
 impl WindowsPaster {
     pub fn new(paste_with_shift: Arc<AtomicBool>, activity: InputActivity) -> Result<Self> {
@@ -473,19 +444,11 @@ fn restore_clipboard_generation(clipboard_restore: &Arc<Mutex<ClipboardRestore>>
     let mut restore = clipboard_restore
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    if restore.generation != generation {
-        return;
-    }
-    if restore.last_sequence != Some(clipboard_sequence()) {
-        restore.original = None;
-        restore.last_sequence = None;
-        return;
-    }
-    let Some(snapshot) = restore.original.take() else {
-        restore.last_sequence = None;
+    let RestoreDecision::Restore(snapshot) =
+        restore.decide_restore(generation, |&seq| clipboard_sequence() == seq)
+    else {
         return;
     };
-    restore.last_sequence = None;
     let result = arboard::Clipboard::new()
         .wrap_err("could not reopen the Windows clipboard")
         .and_then(|mut clipboard| snapshot.restore(&mut clipboard));
@@ -683,10 +646,13 @@ mod tests {
         let second = restore.register(Some(ClipboardSnapshot::Text("first paste".into())), 11, 12);
 
         assert_ne!(first, second);
-        assert_eq!(restore.last_sequence, Some(12));
         assert!(matches!(
-            restore.original.as_ref(),
-            Some(ClipboardSnapshot::Text(text)) if text == "original"
+            restore.decide_restore(first, |_| true),
+            RestoreDecision::Superseded
+        ));
+        assert!(matches!(
+            restore.decide_restore(second, |&seq| seq == 12),
+            RestoreDecision::Restore(ClipboardSnapshot::Text(text)) if text == "original"
         ));
     }
 
@@ -697,9 +663,10 @@ mod tests {
 
         restore.keep();
 
-        assert_ne!(restore.generation, generation);
-        assert!(restore.original.is_none());
-        assert_eq!(restore.last_sequence, None);
+        assert!(matches!(
+            restore.decide_restore(generation, |_| true),
+            RestoreDecision::Superseded
+        ));
     }
 
     #[test]
@@ -707,10 +674,12 @@ mod tests {
         let mut restore = ClipboardRestore::default();
         restore.register(Some(ClipboardSnapshot::Text("old".into())), 1, 2);
 
-        restore.register(None, 10, 11);
+        let generation = restore.register(None, 10, 11);
 
-        assert_eq!(restore.last_sequence, Some(11));
-        assert!(restore.original.is_none());
+        assert!(matches!(
+            restore.decide_restore(generation, |&seq| seq == 11),
+            RestoreDecision::NothingToRestore
+        ));
     }
 
     #[test]

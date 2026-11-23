@@ -15,7 +15,9 @@ use crate::dictation::context::ContextSnapshot;
 use crate::dictation::paste_last::LastDictation;
 use crate::dictation::processor::ProcessingObservation;
 use crate::dictation::{DictationClip, correction_watch, pad_for_parakeet};
-use crate::history::{History, HistoryDraft, HistoryKind};
+use crate::history::History;
+#[cfg(test)]
+use crate::history::HistoryKind;
 use crate::paste::{PasteMode, Paster};
 use crate::transcription::WarmTranscriber;
 use crate::transcription::engine::{PendingTranscript, TranscriptionEngine};
@@ -81,26 +83,7 @@ pub enum PasteKind {
     LastTranscript,
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum TranscriptionTarget {
-    Paste,
-    /// A recording microphone interrupted a shortcut dictation: processed
-    /// like a paste, but copied to the clipboard instead of pasted, still
-    /// available to Paste Last Dictation and kept in History.
-    CopyOnlyPaste,
-    /// The same interrupted recording from Dictate without processing: copied
-    /// as heard, skipping the Output pane's steps.
-    RawCopyOnlyPaste,
-    /// Dictate without processing: pasted as heard, skipping the Output
-    /// pane's steps.
-    RawPaste,
-    Service,
-    /// `hex dictation stop --print`: processed as a paste, then handed to
-    /// the waiting command instead of pasted.
-    Print,
-    /// A printing stop of a raw dictation: the transcript as heard.
-    RawPrint,
-}
+pub use crate::dictation::modes::output::OutputTarget as TranscriptionTarget;
 
 struct InferenceJob {
     ticket: OutputTicket,
@@ -833,19 +816,21 @@ fn run_inference_worker(
                 audio_ms,
                 "transcribed dictation"
             );
-            let text = transcribed.text;
+            let raw = transcribed.text;
             // Labs › Stop phrase: the words that finished this capture never
             // reach the text, and a capture that was only the phrase reads as
             // empty.
-            let text =
-                crate::dictation::stop_phrase::strip_finished(text, job.stop_phrase.as_deref());
-            let corrected = if matches!(job.target, TranscriptionTarget::Service) {
-                text.clone()
-            } else {
-                text.trim().to_string()
+            let corrected = match crate::dictation::modes::output::prepare_transcript(
+                raw.clone(),
+                job.stop_phrase.as_deref(),
+                job.target,
+            ) {
+                crate::dictation::modes::output::PreparedTranscript::Ready(text) => text,
+                crate::dictation::modes::output::PreparedTranscript::StopPhraseOnly
+                | crate::dictation::modes::output::PreparedTranscript::Empty => String::new(),
             };
             tracing::debug!(
-                raw_transcript = text,
+                raw_transcript = raw,
                 corrected_transcript = corrected,
                 "prepared local transcript"
             );
@@ -861,14 +846,7 @@ fn run_inference_worker(
         };
         let target = job.target;
         match result {
-            Ok(text)
-                if matches!(
-                    target,
-                    TranscriptionTarget::Paste
-                        | TranscriptionTarget::CopyOnlyPaste
-                        | TranscriptionTarget::Print
-                ) && !text.trim().is_empty() =>
-            {
+            Ok(text) if target.processes() && !text.trim().is_empty() => {
                 if processor_jobs
                     .send(ProcessorJob {
                         ticket: job.ticket,
@@ -1028,119 +1006,16 @@ fn finish_output(
                 .as_ref()
                 .ok()
                 .and_then(|result| result.processing.clone());
-            let result = result.and_then(|mut completed| {
-                let paste_started = Instant::now();
-                let mut sent = false;
-                let mut signed = false;
-                if !completed.nothing && !completed.text.trim().is_empty() {
-                    match target {
-                        TranscriptionTarget::Paste
-                        | TranscriptionTarget::CopyOnlyPaste
-                        | TranscriptionTarget::RawCopyOnlyPaste
-                        | TranscriptionTarget::RawPaste => {
-                            // A rescued microphone-loss dictation is always
-                            // copied: the disruption may have taken focus.
-                            let rescued = matches!(
-                                target,
-                                TranscriptionTarget::CopyOnlyPaste
-                                    | TranscriptionTarget::RawCopyOnlyPaste
-                            );
-                            let send_gate = completed.timings.send_gate.filter(|_| {
-                                !rescued && crate::dictation::yolo_mode::sends(
-                                    completed.application.as_deref(),
-                                    completed.bundle_name.as_deref(),
-                                )
-                            });
-                            // Labs › Copy dictation only, read as the output
-                            // commits: dictations go to the clipboard
-                            // unpasted; Paste last dictation still pastes.
-                            // A dictation YOLO mode sends is pasted anyway.
-                            let copy_only =
-                                rescued || (crate::labs::copy_only() && send_gate.is_none());
-                            signed = output_history::sign_output(target, &mut completed);
-                            let mode = if copy_only {
-                                PasteMode::CopyOnly
-                            } else if signed {
-                                PasteMode::Standalone
-                            } else if send_gate.is_some() {
-                                PasteMode::Send
-                            } else {
-                                PasteMode::Continue
-                            };
-                            // Labs › Return to app: the app the capture
-                            // started in comes back first. When it can't,
-                            // nothing is pasted; the text stays for Paste
-                            // last dictation, and History keeps only pasted
-                            // output, as on any failed paste.
-                            if !matches!(mode, PasteMode::CopyOnly)
-                                && let Err(error) =
-                                    crate::paste::return_to_app::bring_to_front(completed.return_to)
-                            {
-                                recover_output(
-                                    history,
-                                    last_transcript,
-                                    LastDictation::new(completed.text, signed),
-                                );
-                                tracing::warn!(
-                                    %error,
-                                    "a dictation found another app in front and couldn't return to its own"
-                                );
-                                return Err(error.to_string());
-                            }
-                            // A paste that fails (another app changed the
-                            // clipboard while Hex saved it) keeps the text
-                            // for Paste last dictation, as above, so the
-                            // dictation isn't lost.
-                            let pasted = match paste(&completed.text, mode) {
-                                Ok(pasted) => pasted,
-                                Err(error) => {
-                                    recover_output(
-                                        history,
-                                        last_transcript,
-                                        LastDictation::new(completed.text, signed),
-                                    );
-                                    return Err(error.to_string());
-                                }
-                            };
-                            if let Some(gate) = send_gate {
-                                sent = send_unless_escaped(gate, Instant::now(), paste);
-                            }
-                            #[cfg(target_os = "macos")]
-                            correction_watch::watch_paste(&pasted, target, mode, sent);
-                        }
-                        TranscriptionTarget::Service
-                        | TranscriptionTarget::Print
-                        | TranscriptionTarget::RawPrint => {}
-                    }
-                    let reusable = matches!(
-                        target,
-                        TranscriptionTarget::Paste
-                            | TranscriptionTarget::CopyOnlyPaste
-                            | TranscriptionTarget::RawCopyOnlyPaste
-                            | TranscriptionTarget::RawPaste
-                    );
-                    let recorded = history.and_then(|h| record_history(h, target, sent, &mut completed));
-                    if reusable {
-                        let kept = LastDictation::new(completed.text.clone(), signed);
-                        if recorded.is_some() { *last_transcript = Some(kept); }
-                        else { recover_output(history, last_transcript, kept); }
-                    }
-                }
-                tracing::info!(
-                    audio_ms = completed.timings.audio_ms,
-                    queue_ms = completed.timings.queue_ms,
-                    prepare_ms = completed.timings.prepare_ms,
-                    inference_ms = completed.timings.inference_ms,
-                    paste_ms = paste_started.elapsed().as_millis(),
-                    total_ms = completed.timings.total_started.elapsed().as_millis(),
-                    "dictation pipeline completed"
-                );
-                Ok(completed.text)
+            let result = result.and_then(|completed| {
+                output_history::deliver_completed(
+                    target,
+                    completed,
+                    paste,
+                    last_transcript,
+                    history,
+                )
             });
-            if matches!(
-                target,
-                TranscriptionTarget::Print | TranscriptionTarget::RawPrint
-            ) {
+            if target.is_print() {
                 control.answer_print(match &result {
                     Ok(text) if text.trim().is_empty() => {
                         crate::control::PrintedTranscript::NoSpeech
@@ -1172,7 +1047,8 @@ fn finish_output(
 }
 
 mod output_history;
-use output_history::{record_history, recover_output, send_unless_escaped};
+#[cfg(test)]
+use output_history::{record_history, send_unless_escaped};
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
     model_path(&crate::transcription::models::definition(
