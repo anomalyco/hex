@@ -204,6 +204,7 @@ final class ShiftStateMachineTests: XCTestCase {
         XCTAssertEqual(KeyboardFieldRouting.route(for: nil), .keys(.text, initialLayer: .letters))
         XCTAssertEqual(KeyboardFieldRouting.route(for: .URL), .keys(.url, initialLayer: .letters))
         XCTAssertEqual(KeyboardFieldRouting.route(for: .emailAddress), .keys(.email, initialLayer: .letters))
+        XCTAssertEqual(KeyboardFieldRouting.route(for: .webSearch), .keys(.webSearch, initialLayer: .letters))
         XCTAssertEqual(KeyboardFieldRouting.route(for: .numbersAndPunctuation), .keys(.text, initialLayer: .numbers))
         XCTAssertEqual(KeyboardFieldRouting.route(for: .numberPad), .handOff)
         XCTAssertEqual(KeyboardFieldRouting.route(for: .decimalPad), .handOff)

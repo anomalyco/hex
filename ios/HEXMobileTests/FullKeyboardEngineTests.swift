@@ -300,7 +300,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         engine.width = 402
         engine.letterLayout = .dvorak
         engine.dvorakPunctuation = true
-        for keyboardType in [UIKeyboardType.URL, .emailAddress] {
+        for keyboardType in [UIKeyboardType.URL, .emailAddress, .webSearch] {
             target.keyboardType = keyboardType
             engine.configureForField()
             XCTAssertNotEqual(engine.layout.field, .text, "\(keyboardType.rawValue)")
@@ -393,7 +393,7 @@ final class FullKeyboardEngineTests: XCTestCase {
         XCTAssertNil(engine.layout.keys.first { $0.row == 3 && $0.kind == .character(",") })
         XCTAssertNil(engine.layout.keys.first { $0.row == 3 && $0.kind == .character(".") })
         tap(.layerSwitch(.letters))
-        for keyboardType in [UIKeyboardType.URL, .emailAddress] {
+        for keyboardType in [UIKeyboardType.URL, .emailAddress, .webSearch] {
             target.keyboardType = keyboardType
             engine.configureForField()
             XCTAssertNotEqual(engine.layout.field, .text, "\(keyboardType.rawValue)")

@@ -105,10 +105,10 @@ extension FullKeyboardEngine {
         }
     }
 
-    /// Whether a letter touch may become a swipe now: on the letters page of a text field
-    /// (not an address or a URL), with no accent menu open.
+    /// Whether a letter touch may become a swipe now: on the letters page of a text or web
+    /// search field (not an address or a URL), with no accent menu open.
     var allowsSwipes: Bool {
-        layerState.layer == .letters && field == .text && activeAccentMenu == nil
+        layerState.layer == .letters && field.takesWords && activeAccentMenu == nil
     }
 
     /// The letter keys a swipe is read against, where they're drawn.

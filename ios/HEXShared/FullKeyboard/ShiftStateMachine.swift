@@ -216,6 +216,8 @@ nonisolated enum KeyboardFieldRouting {
             return .keys(.url, initialLayer: .letters)
         case .emailAddress?:
             return .keys(.email, initialLayer: .letters)
+        case .webSearch?:
+            return .keys(.webSearch, initialLayer: .letters)
         case .numberPad?, .decimalPad?, .asciiCapableNumberPad?, .phonePad?, .namePhonePad?:
             return .handOff
         case .numbersAndPunctuation?:

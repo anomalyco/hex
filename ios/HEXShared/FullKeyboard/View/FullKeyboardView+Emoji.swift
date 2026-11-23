@@ -18,7 +18,7 @@ extension FullKeyboardView {
     func refreshEmojiKey() {
         let document = routedTarget.document
         let takesEmoji: Bool = {
-            guard case .keys(.text, _) = KeyboardFieldRouting.route(for: document.keyboardType) else { return false }
+            guard case .keys(let kind, _) = KeyboardFieldRouting.route(for: document.keyboardType), kind.takesWords else { return false }
             return document.keyboardType != .asciiCapable
         }()
         let shows = emojiEnabled && takesEmoji

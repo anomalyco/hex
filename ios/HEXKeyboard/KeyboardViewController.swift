@@ -497,8 +497,8 @@ final class KeyboardViewController: UIInputViewController {
 
     // MARK: - Learn how I type
 
-    /// Dictations are followed only while Learn how I type is on, in plain text fields
-    /// that allow autocorrect.
+    /// Dictations are followed only while Learn how I type is on, in text and web search
+    /// fields that allow autocorrect.
     private var learnsFromDictation: Bool {
         guard TypingJournalSettings().isEnabled,
               case .keys(let kind, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType)
@@ -1419,7 +1419,7 @@ final class KeyboardViewController: UIInputViewController {
         }
         // As the full keyboard's emoji key: fields that take any text.
         let takesEmoji: Bool = {
-            guard case .keys(.text, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType) else { return false }
+            guard case .keys(let kind, _) = KeyboardFieldRouting.route(for: textDocumentProxy.keyboardType), kind.takesWords else { return false }
             return textDocumentProxy.keyboardType != .asciiCapable
         }()
         let showsEmoji = FullKeyboardSettings().emoji && takesEmoji

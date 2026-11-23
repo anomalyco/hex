@@ -94,7 +94,7 @@ extension FullKeyboardEngine {
         let point = pointOnKeys(point)
         guard let key = layout.hitTest(point) else { return nil }
         guard key.character != nil, !key.isNumberRow, let model = letterOdds, layerState.layer == .letters,
-              field == .text, autocorrect.isEnabled, target.autocorrectionType != .no,
+              field.takesWords, autocorrect.isEnabled, target.autocorrectionType != .no,
               shift.state != .locked, model.language == language.rawValue else { return key }
         let reach = letterReach
         let near = layout.keys.filter {

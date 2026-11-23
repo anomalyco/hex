@@ -600,8 +600,8 @@ narrow to start at the left margin and end at the same delete key, puts `;` just
 space bar where it can give up a letter's width, and types `<`, `>` and `:` with a shift you
 press or caps lock (auto-capitalization leaves the comma); on the split Duo the two
 punctuation keys join only the left half, on a pitch narrowed so it keeps its right edge (its
-top-row keys are narrower), and `;` takes from the left space bar. A URL or email field keeps its
-own `.` key instead of row 1's, and Experiments › Comma and period keys adds no second pair
+top-row keys are narrower), and `;` takes from the left space bar. A URL, email or web search
+field keeps its own `.` key instead of row 1's, and Experiments › Comma and period keys adds no second pair
 beside the space bar where this experiment put them on row 1. Off, every layout is key for key
 the one it was. Kept per
 language in the App Group
@@ -817,6 +817,26 @@ number row shrinks with the others (`KeyboardMetrics.fitted`). The iPad keeps Ap
 for now: its docked keyboards would need Apple's own number row on the 13-inch and room
 above the strip on the others.
 
+## Web search fields (full keyboard)
+
+A `.webSearch` field (Safari's address bar, and any search field that asks for it) has
+Apple's `.` key between the space bar and return, as Apple's keyboard has (iPhone 17 Pro,
+iOS 26.5 and 27.2 simulators). Upright on an iPhone (and on a floating iPad keyboard) the
+row stands on Apple's columns: 123 (and emoji) to z's right edge, the space bar from x, a
+letter-wide `.`, and a return 1.75 keys' pitch wide to the edge, so the bar ends a quarter
+pitch sooner than in a text field (Apple's: 6.7–99.3, 105.3–287, 293–326.7 and 332.3–395.7 pt
+on a 402 pt iPhone; Hex's within 0.5 pt). Turned, and on the Duo folded and split, it takes
+the URL and email fields' row, the `.` a letter wide beside the bar. A docked iPad keeps its
+text row, as Apple's does (its `.` stays on row 3, iPad mini, iPadOS 27.2). Only that key
+changes: everything else treats the field as text (`KeyboardFieldKind.takesWords`), so
+autocorrect, swipe typing, suggestions, smart punctuation, the emoji key and emoji
+shortcodes, Learn how I type and Adaptive touch work as the field's own traits allow, as
+they did before, and the Paste and Code chips read the field's content type as everywhere
+else. Holding the `.` offers `.` and `…` (the symbol pages' list); Apple's offers
+`.us .edu .com .net .org` there and in email fields, which Hex doesn't yet. Unit tests
+(`KeyboardLayoutTests`, `FullKeyboardEngineTests`, `ShiftStateMachineTests`) and simulator
+screenshots beside Apple's in Safari; no physical iPhone run checks it.
+
 ## Comma and period keys (full keyboard, iPhone)
 
 Settings › Experiments › Comma and
@@ -828,8 +848,8 @@ split keyboard the comma takes from the left half's bar and the period from the 
 half's, each bar keeping its inner edge. Neither is added unless the bar still holds a
 letter-wide space after them (on an upright iPhone showing both the globe and emoji keys
 with the Hex key beside space there isn't room, so they're skipped). They type `,` and `.`
-with shift on too (they have no shifted symbols). The 123 and #+= pages, a URL or email
-field (which keeps its own `.`), an iPad, and English's Dvorak letters while Dvorak
+with shift on too (they have no shifted symbols). The 123 and #+= pages, a URL, email or web
+search field (each keeps its own `.`, so there is never a second one), an iPad, and English's Dvorak letters while Dvorak
 punctuation puts both on row 1 are unchanged. Off, every layout is key for key the one it
 was. Unit tests only (`KeyboardLayoutTests`, `FullKeyboardEngineTests`): no CI compiles the
 iOS targets, and no physical iPhone run checks it.
@@ -1127,7 +1147,7 @@ it.
 On by default (stored as
 `experiments.emoji` from when it was an experiment off by default: unset or true is on,
 false off, so testers who turned it off keep it off). An emoji key
-right of 123 (after the globe) in plain text fields, not web address, email or
+right of 123 (after the globe) in text and web search fields, not web address, email or
 ASCII-only ones. It opens a panel in place of the strip and the keys: a row of
 emoji for the text before the cursor, then a grid that scrolls sideways through
 Frequently used (eight columns: your emoji, then common ones) and the eight

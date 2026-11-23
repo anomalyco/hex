@@ -119,6 +119,7 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(learnedTyping { $0.isSecureTextEntry = true }, 0)
         XCTAssertEqual(learnedTyping { $0.keyboardType = .URL }, 0)
         XCTAssertEqual(learnedTyping { $0.keyboardType = .emailAddress }, 0)
+        XCTAssertEqual(learnedTyping { $0.keyboardType = .webSearch }, 10, "web search learns as a plain field")
         XCTAssertEqual(learnedTyping { $0.autocorrectionType = .no }, 0)
 
         let (field, plane) = try swipeKeyboard()

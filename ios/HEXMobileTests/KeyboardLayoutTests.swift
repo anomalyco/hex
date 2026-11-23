@@ -5,7 +5,7 @@ import XCTest
 final class KeyboardLayoutTests: XCTestCase {
     private let portraitWidths: [CGFloat] = [320, 375, 393, 402, 430, 440]
     private let layers: [KeyboardLayer] = [.letters, .numbers, .symbols]
-    private let fields: [KeyboardFieldKind] = [.text, .url, .email]
+    private let fields: [KeyboardFieldKind] = [.text, .url, .email, .webSearch]
     /// Every layout here is Apple's iOS 27 keyboard, read on 27.0 and 27.2 simulators, while CI's
     /// newest simulator runtime is iOS 26.5. Pin the version the expectations describe
     /// (`KeyboardLanguage.systemMajorVersion` exists for this; the before-27 Ukrainian test sets
@@ -558,6 +558,54 @@ final class KeyboardLayoutTests: XCTestCase {
         XCTAssertEqual(
             bottomRow(KeyboardLayout(width: 393, field: .url)),
             [.layerSwitch(.numbers), .space, .character("."), .character("/"), .returnKey]
+        )
+        XCTAssertEqual(
+            bottomRow(KeyboardLayout(width: 393, field: .webSearch)),
+            [.layerSwitch(.numbers), .space, .character("."), .returnKey]
+        )
+        XCTAssertEqual(
+            bottomRow(KeyboardLayout(width: 393, field: .webSearch, showsEmoji: true)),
+            [.layerSwitch(.numbers), .emoji, .space, .character("."), .returnKey]
+        )
+    }
+
+    /// Apple's web search row (Safari's address bar, iPhone 17 Pro, iOS 26.5 and 27.2): its text
+    /// row's 123, a space bar from x a quarter pitch shorter, a letter-wide `.` and a return 1.75
+    /// pitches wide, measured at 6.7–99.3, 105.3–287, 293–326.7 and 332.3–395.7 pt on 402 pt.
+    /// Only that row changes; a docked iPad's web search row is its text row, as Apple's is.
+    func testWebSearchBottomRowHasApplesPeriodBeforeReturn() {
+        let apple: [(KeyKind, CGFloat, CGFloat)] = [
+            (.layerSwitch(.numbers), 6.7, 99.3), (.space, 105.3, 287), (.character("."), 293, 326.7), (.returnKey, 332.3, 395.7),
+        ]
+        let row = KeyboardLayout(width: 402, field: .webSearch).keys.filter { $0.row == 3 }.sorted { $0.frame.minX < $1.frame.minX }
+        XCTAssertEqual(row.map(\.kind), apple.map(\.0))
+        for (key, (kind, minX, maxX)) in zip(row, apple) {
+            XCTAssertEqual(key.frame.minX, minX, accuracy: 0.5, "\(kind)")
+            XCTAssertEqual(key.frame.maxX, maxX, accuracy: 0.5, "\(kind)")
+        }
+        for width in portraitWidths {
+            for emoji in [false, true] {
+                let text = KeyboardLayout(width: width, showsEmoji: emoji)
+                let search = KeyboardLayout(width: width, field: .webSearch, showsEmoji: emoji)
+                let label = "\(width) emoji \(emoji)"
+                XCTAssertEqual(search.keys.filter { $0.row < 3 }, text.keys.filter { $0.row < 3 }, label)
+                let letter = text.key(.character("z"))!.frame.width
+                let pitch = letter + text.metrics.gap
+                let dot = search.key(.character("."))!.frame
+                let space = search.key(.space)!.frame
+                let ret = search.key(.returnKey)!.frame
+                XCTAssertEqual(search.key(.layerSwitch(.numbers))!.frame, text.key(.layerSwitch(.numbers))!.frame, label)
+                XCTAssertEqual(space.minX, text.key(.space)!.frame.minX, accuracy: 0.001, label)
+                XCTAssertEqual(space.maxX, text.key(.space)!.frame.maxX - pitch / 4, accuracy: 0.001, label)
+                XCTAssertEqual(dot.width, letter, accuracy: 0.001, label)
+                XCTAssertEqual(dot.minX - space.maxX, text.metrics.gap, accuracy: 0.001, label)
+                XCTAssertEqual(ret.width, 1.75 * pitch - text.metrics.gap, accuracy: 0.001, label)
+                XCTAssertEqual(ret.maxX, text.key(.returnKey)!.frame.maxX, accuracy: 0.001, label)
+            }
+        }
+        XCTAssertEqual(
+            bottomRow(KeyboardLayout(width: 744, field: .webSearch, pad: .docked(.mini))),
+            bottomRow(KeyboardLayout(width: 744, pad: .docked(.mini)))
         )
     }
 
@@ -1156,6 +1204,10 @@ final class KeyboardLayoutTests: XCTestCase {
         )
         XCTAssertFalse(dvorakOn.commaPeriodKeys)
         XCTAssertEqual(dvorakOn.keys, dvorakOff.keys)
+        // A web search field keeps Apple's one `.` by the space bar, and gains no comma.
+        let search = KeyboardLayout(width: 402, field: .webSearch, commaPeriodKeys: true)
+        XCTAssertEqual(search.keys.filter { $0.kind == .character(".") }.count, 1)
+        XCTAssertNil(search.key(.character(",")))
         XCTAssertEqual(dvorakOn.key(.character(","))?.row, 0, "row 1's, not the bottom row's")
         XCTAssertEqual(dvorakOn.key(.character(";"))?.row, 3, "the semicolon stays")
     }
