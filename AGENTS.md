@@ -1617,7 +1617,9 @@ CoreAudio formats, AppleScript details, or event serialization.
   through XWayland, bounded reads); there is no consumption acknowledgment. The RemoteDesktop paste session closes 15 s after the last
   paste when its grant restores, so GNOME's remote-control indicator shows
   only around pastes (#718); the next paste reopens it without a dialog, and
-  only a session that showed the dialog waits the 250 ms focus settle.
+  only a session that showed the dialog waits the 250 ms focus settle. On KDE
+  it stays open for the paster's lifetime, since Plasma notifies on every
+  session start (#2508).
 
 ## Development
 

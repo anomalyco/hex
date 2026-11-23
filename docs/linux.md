@@ -671,7 +671,9 @@ ever overwritten.
 On GNOME, Hex pastes through the RemoteDesktop portal, and GNOME shows its
 remote-control indicator while that session is open. Hex closes it 15 seconds
 after the last paste and reopens it at the next one with the grant you
-approved, so you're asked only once.
+approved, so you're asked only once. On KDE Plasma, Hex keeps the session open
+for as long as it runs: Plasma posts a "Remote Control Started" notification
+whenever a session starts, so reopening it per paste would pop up constantly.
 
 ## Native Wayland Requirements
 
