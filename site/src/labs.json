@@ -413,6 +413,19 @@
       "title": "Dictation stats"
     },
     {
+      "added": "2026-11-23",
+      "group": "history",
+      "groupTitle": "History",
+      "id": "history-stats-strip",
+      "oses": [
+        "macos",
+        "windows",
+        "linux"
+      ],
+      "summary": "Show your dictation totals in a compact strip at the top of History. Needs Dictation stats.",
+      "title": "Stats on History"
+    },
+    {
       "added": "2026-11-01",
       "group": "history",
       "groupTitle": "History",

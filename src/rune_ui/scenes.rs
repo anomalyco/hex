@@ -101,6 +101,18 @@ pub(super) const SCENES: &[Scene] = &[
         crate::labs::apply(&ui.settings.labs);
         ui.pane = Pane::History;
     }),
+    // Labs › Stats on History: the dialog's six headline numbers as one
+    // compact strip above History's list.
+    ("history-stats-strip", |ui| {
+        *ui = portal_fixture();
+        ui.history = history::HistoryPane::fixture();
+        ui.history.stats = Some(history::HistoryPane::fixture_stats());
+        ui.history.usage = Some(history::HistoryPane::fixture_usage());
+        ui.settings.labs.history_stats = true;
+        ui.settings.labs.history_stats_strip = true;
+        crate::labs::apply(&ui.settings.labs);
+        ui.pane = Pane::History;
+    }),
     // Two entries selected, with the card
     // that copies or deletes them.
     ("history-selection", |ui| {

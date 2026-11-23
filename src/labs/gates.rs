@@ -233,6 +233,27 @@ pub fn history_stats() -> bool {
     feature_on(Feature::HistoryStats)
 }
 
+/// Labs › Stats on History: the Dictation stats dialog's six headline
+/// numbers as one compact strip above History's list (read as the History
+/// pane draws). It needs Labs › Dictation stats, which owns the numbers
+/// and the rollup.
+pub(crate) fn history_stats_strip_enabled(settings: &AppSettings) -> bool {
+    history_stats_strip_enabled_under(settings, crate::policy::Policy::current())
+}
+
+pub(crate) fn history_stats_strip_enabled_under(
+    settings: &AppSettings,
+    policy: crate::policy::Policy,
+) -> bool {
+    let on = |feature: Feature| {
+        feature.on(settings)
+            && feature.shipped()
+            && feature.on_this_os()
+            && policy.labs_lock(feature).is_none()
+    };
+    on(Feature::HistoryStatsStrip) && on(Feature::HistoryStats)
+}
+
 /// The menu bar's Copy Recent Dictation submenu (macOS; read each time the
 /// menu opens).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]

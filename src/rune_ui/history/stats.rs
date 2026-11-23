@@ -39,6 +39,13 @@ const COUNT_WIDTH: f32 = 34.0;
 const TILE_WIDTH: f32 = 136.0;
 /// Room beside the body's scroll bar.
 const SCROLL_BAR_INSET: f32 = 12.0;
+/// The Labs › Stats on History strip: hangs like History's rows, with its own
+/// inner padding, gaps, and room above the list.
+const STRIP_HANG: f32 = 16.0;
+const STRIP_PAD: f32 = 16.0;
+const STRIP_PAD_Y: f32 = 8.0;
+const STRIP_GAP: f32 = 24.0;
+const STRIP_BOTTOM: f32 = 12.0;
 
 /// The stats dialog's scrim and panel, while its button and stats show. Its
 /// body scrolls while the window is too short for the sections, and takes
@@ -53,21 +60,7 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         return None;
     }
     let c = &p.k.c;
-    let typing_wpm = ui
-        .history
-        .typing_speed_drag
-        .unwrap_or_else(|| crate::app_settings::clamp_typing_wpm(ui.settings.typing_wpm));
-    let usage = ui
-        .history
-        .usage
-        .as_ref()
-        .filter(|usage| usage.dictations() > 0);
-    // The headline tile and the hourly strip read the same hours: the
-    // rollup while Labs › Dictation stats has one, else retained entries.
-    let (hours, busiest_hour) = match usage {
-        Some(usage) => (usage.hours(), usage.busiest_hour()),
-        None => (stats.hours, stats.busiest_hour),
-    };
+    let numbers = headline_inputs(ui, stats);
     // The window is the layer the panel centers in; the title and footer are
     // measured so their real heights set the body's room.
     let window_height = cx
@@ -91,15 +84,18 @@ pub(super) fn modal(ui: &Ui, p: Paint, cx: &mut Cx<Ui>) -> Option<[El; 2]> {
         // Keep the bar off the counts and timings.
         sections = sections.pr(SCROLL_BAR_INSET);
     }
-    let mut sections = sections.child(tiles(p, stats, usage, typing_wpm, busiest_hour));
-    sections = sections.child(typing_speed(p, typing_wpm));
+    let mut sections = sections.child(tiles(p, &numbers));
+    sections = sections.child(typing_speed(p, numbers.typing_wpm));
     if let Some(daily) = daily(p, stats) {
         sections = sections.child(daily);
     }
-    if let Some(hours) = super::heatmap::hours(p, &hours, busiest_hour) {
+    if let Some(hours) = super::heatmap::hours(p, &numbers.hours, numbers.busiest_hour) {
         sections = sections.child(hours);
     }
-    if let Some(yearly) = usage.and_then(|usage| super::heatmap::yearly(p, usage)) {
+    if let Some(yearly) = numbers
+        .usage
+        .and_then(|usage| super::heatmap::yearly(p, usage))
+    {
         sections = sections.child(yearly);
     }
     if let Some(apps) = top_apps(p, stats) {
@@ -185,31 +181,62 @@ pub(crate) fn close_stats(ui: &mut Ui) {
     ui.history.stats_open = false;
 }
 
-/// The six headline numbers, each a large value over a muted label. With
-/// Labs › Dictation stats on, dictations, words, time saved, words per
-/// minute, the streak, and the busiest hour cover the rollup's whole span
-/// instead of only what History retains.
-fn tiles(
-    p: Paint,
-    stats: &HistoryStats,
-    usage: Option<&Usage>,
+/// The six headline numbers' inputs, read from the window's History: the
+/// rollup while it has a dictation, the typing speed in effect, and the hours
+/// both the heatmap and the busiest-hour tile use. The tiles and History's
+/// strip share it, so the two can't drift.
+struct Headline<'a> {
+    stats: &'a HistoryStats,
+    usage: Option<&'a Usage>,
     typing_wpm: u32,
+    hours: [u64; 24],
     busiest_hour: Option<u8>,
-) -> El {
-    let all = usage.filter(|usage| usage.dictations() > 0);
+}
+
+fn headline_inputs<'a>(ui: &'a Ui, stats: &'a HistoryStats) -> Headline<'a> {
+    let usage = ui
+        .history
+        .usage
+        .as_ref()
+        .filter(|usage| usage.dictations() > 0);
+    let typing_wpm = ui
+        .history
+        .typing_speed_drag
+        .unwrap_or_else(|| crate::app_settings::clamp_typing_wpm(ui.settings.typing_wpm));
+    // The headline tile and the hourly strip read the same hours: the
+    // rollup while Labs › Dictation stats has one, else retained entries.
+    let (hours, busiest_hour) = match usage {
+        Some(usage) => (usage.hours(), usage.busiest_hour()),
+        None => (stats.hours, stats.busiest_hour),
+    };
+    Headline {
+        stats,
+        usage,
+        typing_wpm,
+        hours,
+        busiest_hour,
+    }
+}
+
+/// The six headline numbers, each with its key, value, and translated label.
+/// The dialog's tiles and History's strip draw these, so they can't drift.
+fn headline(input: &Headline) -> [(&'static str, String, &'static str); 6] {
+    let all = input.usage;
+    let stats = input.stats;
     let dictations = all.map_or(stats.dictations, Usage::dictations);
     let words = all.map_or(stats.words, Usage::words);
     let audio_ms = all.map_or(stats.audio_ms, Usage::audio_ms);
-    let time_saved = crate::history::stats::time_saved_ms(words, audio_ms, typing_wpm);
+    let time_saved = crate::history::stats::time_saved_ms(words, audio_ms, input.typing_wpm);
     let words_per_minute = all.map_or(stats.words_per_minute, Usage::words_per_minute);
     let streak = all.map_or(stats.streak_days, |usage| {
         usage.streak_days(crate::history::stats::local_day(crate::history::now_ms()))
     });
     let wpm =
         words_per_minute.map_or_else(|| "–".to_owned(), |wpm| numbers::grouped(u64::from(wpm)));
-    let busiest =
-        busiest_hour.map_or_else(|| "–".to_owned(), |hour| clock_time(u32::from(hour), 0));
-    let values = [
+    let busiest = input
+        .busiest_hour
+        .map_or_else(|| "–".to_owned(), |hour| clock_time(u32::from(hour), 0));
+    [
         ("dictations", numbers::grouped(dictations), tr("Dictations")),
         ("words", numbers::grouped(words), tr("Words")),
         ("time-saved", length(time_saved), tr("Time saved")),
@@ -220,11 +247,66 @@ fn tiles(
             tr("Daily streak"),
         ),
         ("busiest-hour", busiest, tr("Busiest hour")),
-    ];
-    values.into_iter().fold(
+    ]
+}
+
+/// The six headline numbers, each a large value over a muted label.
+fn tiles(p: Paint, input: &Headline) -> El {
+    headline(input).into_iter().fold(
         row().key("tiles").w_full().gap(8.0).flex_wrap(),
         |tiles, value| tiles.child(tile(p, value.0, &value.1, value.2)),
     )
+}
+
+/// Labs › Stats on History: the dialog's six headline numbers as one
+/// compact row above History's list, while both labs and the stats are on.
+/// Off, History is exactly as before.
+pub(super) fn strip(ui: &Ui, p: Paint) -> Option<El> {
+    if !crate::labs::history_stats_strip_enabled(&ui.settings) || !ui.history.has_stats() {
+        return None;
+    }
+    let stats = ui.history.stats.as_ref()?;
+    let numbers = headline_inputs(ui, stats);
+    let cells = headline(&numbers).into_iter().fold(
+        row()
+            .key("bar")
+            .w_full()
+            .px(STRIP_PAD)
+            .py(STRIP_PAD_Y)
+            .gap(STRIP_GAP)
+            .radius(p.k.radius.md)
+            .fill(p.k.c.layer_01),
+        |cells, (key, value, label)| cells.child(strip_cell(p, key, &value, label)),
+    );
+    Some(
+        row()
+            .key("history-stats-strip")
+            .w_full()
+            .px(STRIP_HANG)
+            .mb(STRIP_BOTTOM)
+            .child(cells),
+    )
+}
+
+/// One of the strip's numbers: a compact value over its muted label.
+fn strip_cell(p: Paint, key: &str, value: &str, label: &str) -> El {
+    col()
+        .key(format!("strip-{key}"))
+        .gap(1.0)
+        .child(
+            text(value.to_owned())
+                .key("value")
+                .font(p.k.ty.small_medium)
+                .color(p.text())
+                .truncate(),
+        )
+        .child(
+            text(label.to_owned())
+                .key("label")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .truncate(),
+        )
 }
 
 /// The typing speed time saved is measured against, adjustable in place.

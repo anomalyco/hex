@@ -58,6 +58,16 @@ fn texts(rt: &Runtime<Ui>) -> Vec<String> {
         .collect()
 }
 
+/// The text under element `root` in the accessibility tree, in order,
+/// without the recorder's invisible sizing faces.
+fn texts_under(rt: &Runtime<Ui>, root: &str) -> Vec<String> {
+    rt.elements()
+        .into_iter()
+        .filter(|e| e.path.contains(root) && !e.path.contains("/faces/size"))
+        .filter_map(|e| e.text)
+        .collect()
+}
+
 /// Presses an element by key and lets every animation settle.
 fn tap(rt: &mut Runtime<Ui>, key: &str) {
     let (x, y) = rt.find(key).unwrap_or_else(|| panic!("no element {key}"));
@@ -1655,6 +1665,111 @@ fn history_stats_dialog_hides_sections_with_nothing_to_show() {
     }
     // With no Output changes at all, its meter still reads zero.
     assert!(rt.find("history-stats-changed").is_some());
+}
+
+/// Labs › Stats on History needs both labs and something to summarize.
+#[test]
+fn history_stats_strip_needs_both_labs_and_stats() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.history.stats = Some(history::HistoryPane::fixture_stats());
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-stats-strip").is_none(), "off by default");
+
+    rt.state.settings.labs.history_stats = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-stats-strip").is_none(),
+        "Dictation stats alone shows no strip"
+    );
+
+    rt.state.settings.labs.history_stats = false;
+    rt.state.settings.labs.history_stats_strip = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-stats-strip").is_none(),
+        "the strip's own switch alone shows nothing"
+    );
+
+    rt.state.settings.labs.history_stats = true;
+    rt.state.history.stats = None;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-stats-strip").is_none(),
+        "with no stats there is nothing to show"
+    );
+
+    rt.state.history.stats = Some(history::HistoryPane::fixture_stats());
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(
+        rt.find("history-stats-strip").is_some(),
+        "both labs on and stats present, the strip shows"
+    );
+}
+
+/// The strip and the dialog's tiles draw the same six numbers from one
+/// function, so they can't drift.
+#[test]
+fn history_stats_strip_shows_the_dialogs_six_headline_numbers() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.history.stats = Some(history::HistoryPane::fixture_stats());
+    rt.state.settings.labs.history_stats = true;
+    rt.state.settings.labs.history_stats_strip = true;
+    rt.invalidate();
+    settle(&mut rt);
+    let strip = texts_under(&rt, "history-stats-strip/");
+    assert_eq!(strip.len(), 12, "six values and six labels: {strip:?}");
+    for value in ["1,284", "128,402", "123"] {
+        assert!(
+            strip.iter().any(|text| text == value),
+            "{value} shows: {strip:?}"
+        );
+    }
+
+    tap(&mut rt, "history-stats-open");
+    let tiles = texts_under(&rt, "tiles/");
+    assert_eq!(
+        strip, tiles,
+        "the strip and the dialog show the same six values and labels"
+    );
+}
+
+/// The full Stats button and dialog stay exactly as they were with the strip
+/// on, and the strip stays behind them.
+#[test]
+fn history_stats_button_and_dialog_still_work_with_the_strip_on() {
+    let mut rt = runtime("history", true, PANE_SIZE);
+    rt.state.history.stats = Some(history::HistoryPane::fixture_stats());
+    rt.state.settings.labs.history_stats = true;
+    rt.state.settings.labs.history_stats_strip = true;
+    rt.invalidate();
+    settle(&mut rt);
+    assert!(rt.find("history-stats-strip").is_some());
+    assert!(rt.find("history-stats-open").is_some(), "Stats still shows");
+
+    tap(&mut rt, "history-stats-open");
+    assert!(rt.state.history.stats_open);
+    assert!(rt.find("history-stats-dialog").is_some());
+    for key in [
+        "tile-dictations",
+        "tile-words",
+        "tile-time-saved",
+        "tile-wpm",
+        "tile-streak",
+        "tile-busiest-hour",
+    ] {
+        assert!(rt.find(key).is_some(), "{key} shows");
+    }
+    tap(&mut rt, "history-stats-close");
+    assert!(!rt.state.history.stats_open);
+    assert!(
+        rt.find("history-stats-strip").is_some(),
+        "the strip stays above the list"
+    );
 }
 
 /// The dialog's worst case in the window's least size: it stays inside the

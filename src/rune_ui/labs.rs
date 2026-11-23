@@ -765,6 +765,7 @@ fn rows(ui: &Ui) -> Vec<Row> {
         });
     }
     rows.push(row(Feature::HistoryStats, None));
+    rows.push(row(Feature::HistoryStatsStrip, None));
     rows.push(row(Feature::KeepRecordings, None));
     rows.push(row(Feature::CopyDictationAudio, None));
     // The picker is a Mac gesture and History; elsewhere neither exists.
@@ -965,6 +966,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ParakeetUltra => "lab-parakeet-ultra",
         Feature::StandaloneSpecialKeys => "lab-special-keys",
         Feature::HistoryStats => "lab-history-stats",
+        Feature::HistoryStatsStrip => "lab-history-stats-strip",
         Feature::RecentDictations => "lab-recent-dictations",
         Feature::SkipPauses => "lab-skip-pauses",
         Feature::OutputFixes => "lab-output-fixes",

@@ -178,6 +178,7 @@ define_features! {
     ParakeetUltra => labs(parakeet_ultra), "parakeet-ultra", Models, Everyone, EVERY, 20261101;
     StandaloneSpecialKeys => labs(standalone_special_keys), "special-keys", Shortcuts, Everyone, WINDOWS_LINUX, 20261101;
     HistoryStats => labs(history_stats), "history-stats", History, Everyone, EVERY, 20261101;
+    HistoryStatsStrip => labs(history_stats_strip), "history-stats-strip", History, Everyone, EVERY, 20261123;
     RecentDictations => labs(recent_dictations), "recent-dictations", History, Everyone, MACOS, 20261101;
     SkipPauses => labs(skip_pauses), "skip-pauses", Dictation, Everyone, WINDOWS_LINUX, 20261101;
     OutputFixes => labs(output_fixes), "output-fixes", Output, Everyone, EVERY, 20261102;

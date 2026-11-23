@@ -457,6 +457,27 @@ mod tests {
     }
 
     #[test]
+    fn history_stats_strip_requires_dictation_stats_and_no_policy_lock() {
+        let none = crate::policy::Policy::default();
+        let locked = none.with(crate::policy::Lock::Labs);
+        for (stats, strip) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut settings = AppSettings::default();
+            settings.labs.history_stats = stats;
+            settings.labs.history_stats_strip = strip;
+            let expected = stats && strip;
+            assert_eq!(
+                history_stats_strip_enabled_under(&settings, none),
+                expected,
+                "stats={stats}, strip={strip}"
+            );
+            assert!(
+                !history_stats_strip_enabled_under(&settings, locked),
+                "Lock::Labs must hold the strip off"
+            );
+        }
+    }
+
+    #[test]
     fn an_audience_reaches_the_builds_it_names() {
         assert!(Audience::Everyone.reaches(false));
         assert!(Audience::Everyone.reaches(true));
