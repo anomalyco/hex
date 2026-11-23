@@ -420,8 +420,9 @@ fn use_model(
     let selection = super::model_selection(&load()?, model, language)?;
     let definition = crate::transcription::models::definition(selection.model);
     let installed = crate::transcription::models::is_installed(definition, &selection.language);
+    let ready = crate::transcription::models::is_ready(definition, &selection.language);
     let state = host.state()?;
-    if same_model(&state.settings.transcription, &selection) && installed {
+    if same_model(&state.settings.transcription, &selection) && ready {
         return Ok(ControlReply::unchanged(format!(
             "{} ({}) is already in use",
             definition.name, selection.language
@@ -459,22 +460,24 @@ fn wait_for_model(
     selection: &TranscriptionSelection,
 ) -> Result<ControlReply, ControlError> {
     let name = crate::transcription::models::definition(selection.model).name;
+    // What the listener runs: the saved selection, or a lost import's fallback.
+    let matches = |settings: &crate::app_settings::AppSettings| {
+        same_model(&settings.transcription, selection)
+            || same_model(
+                &crate::transcription::custom_models::runnable(&settings.transcription),
+                selection,
+            )
+    };
+    let ready = || {
+        crate::transcription::models::validate(selection)
+            .is_ok_and(|model| crate::transcription::models::is_ready(model, &selection.language))
+    };
     let started = Instant::now();
     let mut seen_preparing = false;
     while started.elapsed() < CONFIRM_WAIT {
         std::thread::sleep(Duration::from_millis(100));
         let state = host.state()?;
-        let preparing = state.transcription.preparing.is_some();
-        seen_preparing |= preparing;
-        if preparing {
-            continue;
-        }
-        if same_model(&state.settings.transcription, selection) {
-            return Ok(ControlReply::done(format!(
-                "Switched to {name} ({})",
-                selection.language
-            )));
-        }
+        // A check that failed reports its reason, never a switch.
         if let Some(error) = &state.transcription.error
             && (seen_preparing || started.elapsed() > Duration::from_secs(1))
         {
@@ -482,6 +485,19 @@ fn wait_for_model(
                 "failed",
                 format!("couldn't switch to {name}: {error}"),
             ));
+        }
+        let preparing = state.transcription.preparing.is_some();
+        seen_preparing |= preparing;
+        if preparing {
+            continue;
+        }
+        // Only a model Hex can actually run counts as switched: a saved
+        // file may still be waiting for its check.
+        if ready() && matches(&state.settings) {
+            return Ok(ControlReply::done(format!(
+                "Switched to {name} ({})",
+                selection.language
+            )));
         }
     }
     Ok(ControlReply::done(format!(

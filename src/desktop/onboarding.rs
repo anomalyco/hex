@@ -1034,13 +1034,43 @@ pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
     status_with_transcription_model(model_ready(selection))
 }
 
-/// Whether the model the listener runs for the saved `selection` is
-/// installed: the saved one, or the fallback in place of an import that
-/// can't run, so a lost import never holds dictation for setup.
+/// Whether the model the listener runs for the saved `selection` is ready:
+/// installed and checked against its pinned artifact, the saved one, or the
+/// fallback in place of an import that can't run, so a lost import never
+/// holds dictation for setup. Onboarding's completion and every listener's
+/// Enable decide with this one check (`models::is_ready`).
 pub fn model_ready(selection: &TranscriptionSelection) -> bool {
     let selection = crate::transcription::custom_models::runnable(selection);
     crate::transcription::models::validate(&selection)
+        .is_ok_and(|model| crate::transcription::models::is_ready(model, &selection.language))
+}
+
+/// Whether the listener's model file is here, even while it still awaits the
+/// pinned check. A launch decision uses this so an upgrade that only lacks a
+/// receipt never reopens setup.
+pub fn model_installed(selection: &TranscriptionSelection) -> bool {
+    let selection = crate::transcription::custom_models::runnable(selection);
+    crate::transcription::models::validate(&selection)
         .is_ok_and(|model| crate::transcription::models::is_installed(model, &selection.language))
+}
+
+/// Whether setup is settled: its own status, with a model whose file is here
+/// counted as ready. Permissions still decide, so an upgrade that only lacks
+/// a check receipt does not reopen setup (the model's check runs separately).
+pub fn setup_settled(status: SetupStatus, model_installed: bool) -> bool {
+    SetupStatus {
+        transcription_model: status.transcription_model || model_installed,
+        ..status
+    }
+    .ready()
+}
+
+/// Whether a macOS launch can proceed: every permission and a model whose
+/// file is here, even while its pinned check is pending. The macOS loader
+/// uses the installed file as it is, so recognition must not wait for the
+/// check that only Settings and `hex model use` run.
+pub fn launch_ready(selection: &TranscriptionSelection) -> bool {
+    setup_settled(status(selection), model_installed(selection))
 }
 
 #[cfg(target_os = "macos")]
@@ -1267,6 +1297,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn an_installed_model_never_settles_setup_without_permissions() {
+        let denied = SetupStatus {
+            microphone: PermissionState::NeedsRequest,
+            accessibility: PermissionState::Ready,
+            transcription_model: false,
+        };
+        assert!(!setup_settled(denied, true));
+        assert!(setup_settled(
+            SetupStatus {
+                microphone: PermissionState::Ready,
+                ..denied
+            },
+            true
+        ));
+        assert!(!setup_settled(denied, false));
+    }
+
+    #[test]
     fn a_lost_import_waits_only_for_a_downloaded_fallback_and_stays_saved() {
         use crate::transcription::custom_models::{self, CustomModelId, FallbackReason};
         use crate::transcription::models::{self, ModelRuntime, TranscriptionModelId};
@@ -1287,14 +1335,21 @@ mod tests {
         );
         // Nothing downloaded: setup waits to offer the recommendation.
         assert!(!model_ready(&saved));
+        assert!(!model_installed(&saved));
         let fallback = custom_models::fallback();
         let ModelRuntime::Gguf(artifact) = models::definition(fallback.model).runtime else {
             panic!("the fallback is a download");
         };
-        fs::File::create(directory.join(artifact.local_name()))
+        let path = directory.join(artifact.local_name());
+        fs::File::create(&path)
             .unwrap()
             .set_len(artifact.bytes)
             .unwrap();
+        // Readiness also needs the pinned artifact's receipt, which a
+        // download writes; a file merely present is installed, not ready.
+        assert!(model_installed(&saved));
+        assert!(!model_ready(&saved));
+        models::write_verification_receipt(&path, models::definition(fallback.model)).unwrap();
         assert!(model_ready(&saved));
         assert!(status(&saved).transcription_model);
         assert_eq!(custom_models::runnable(&saved), fallback);

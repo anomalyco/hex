@@ -148,8 +148,13 @@ impl Runtime {
             }
             Request::UseInstalledSelection(selection) => {
                 self.manual_choice();
-                // `hex model use` replies "already in use" on the same test.
-                if !same_model_and_language(&selection, &self.settings.transcription) {
+                // A saved file still needs its check even when the choice
+                // names it again; one with no file has nothing to load.
+                let same = same_model_and_language(&selection, &self.settings.transcription);
+                let check = crate::transcription::models::validate(&selection).is_ok_and(|model| {
+                    crate::transcription::models::needs_check(model, &selection.language)
+                });
+                if !same || check {
                     self.preparation.start(selection, true);
                 }
             }
@@ -308,6 +313,14 @@ impl Runtime {
             self.automatic_preparation = false;
             let result = result.and_then(|selection| {
                 crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
+                // Only a preparation that changes what Hex runs replaces the
+                // saved choice: a check of that same model, or of a lost
+                // import's fallback, leaves the saved selection alone.
+                let effective =
+                    crate::transcription::custom_models::runnable(&self.settings.transcription);
+                if same_model_and_language(&selection, &effective) {
+                    return Ok(());
+                }
                 let mut settings = AppSettings::load().map_err(|e| format!("{e:#}"))?;
                 settings
                     .save_transcription(selection)
@@ -324,7 +337,7 @@ impl Runtime {
             }
         }
         if self.recognition_start.is_some()
-            && crate::desktop::onboarding::status(&self.settings.transcription).ready()
+            && crate::desktop::onboarding::launch_ready(&self.settings.transcription)
             && let Some(start) = self.recognition_start.take()
         {
             let _ = start.try_send(());

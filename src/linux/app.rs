@@ -33,6 +33,7 @@ use crate::linux::service::{
 
 mod control;
 mod host;
+mod model;
 
 /// The host's refresh while it starts, stops, or prepares something.
 const REFRESH_INTERVAL: Duration = Duration::from_millis(20);
@@ -152,6 +153,9 @@ struct LinuxDesktopHost {
     shortcut_edit: Option<ShortcutEdit>,
     prepared_transcriber: Option<crate::transcription::local_transcriber::LocalTranscriber>,
     transcription_preparation: Option<TranscriptionPreparation>,
+    /// The preparation Enable started to check the selected model. Only this
+    /// one is canceled by Disable; a model download is left running.
+    checking: bool,
     transcription_error: Option<String>,
     updater: crate::updater::Updater,
     output: crate::linux::dictation::DictationOutput,
@@ -278,6 +282,9 @@ impl HostHandle {
                 HostRequest::CancelModel => {
                     host.manual_choice();
                     host.cancel_transcription_preparation();
+                    if !host.is_running() && host.status == ListenerStatus::Enabling {
+                        host.status = ListenerStatus::ModelRequired;
+                    }
                     Ok(())
                 }
             }
@@ -655,6 +662,7 @@ impl LinuxDesktopHost {
             shortcut_edit: None,
             prepared_transcriber: None,
             transcription_preparation: None,
+            checking: false,
             transcription_error: None,
             updater,
             output,
@@ -759,7 +767,9 @@ impl LinuxDesktopHost {
             return;
         }
         if !crate::desktop::onboarding::model_ready(&self.settings.transcription) {
-            self.status = ListenerStatus::ModelRequired;
+            if !self.check_selected_model() {
+                self.status = ListenerStatus::ModelRequired;
+            }
             return;
         }
         let stop = Arc::new(AtomicBool::new(false));
@@ -863,6 +873,16 @@ impl LinuxDesktopHost {
         if let Some(listener) = &self.listener {
             listener.stop();
             self.status = ListenerStatus::Disabling;
+            return;
+        }
+        // Disable during a model check: stop the check too, and never leave
+        // the listener card on Enabling with nothing to finish. A model
+        // download the person started keeps running.
+        if self.status == ListenerStatus::Enabling {
+            if self.checking {
+                self.cancel_transcription_preparation();
+            }
+            self.status = ListenerStatus::Disabled;
         }
     }
 
@@ -888,6 +908,7 @@ impl LinuxDesktopHost {
             .transcription_preparation
             .take_if(|preparation| preparation.worker.is_finished())
         {
+            self.checking = false;
             let was_canceled = preparation.canceled.load(Ordering::Relaxed);
             let result = preparation
                 .worker
@@ -899,7 +920,19 @@ impl LinuxDesktopHost {
                 match result {
                     Ok(prepared) => {
                         let selection = prepared.selection.clone();
-                        match save_with(|settings| settings.remember_transcription(selection)) {
+                        // Only a preparation that changes what Hex runs
+                        // replaces the saved choice: a check of that same
+                        // model, or of a lost import's fallback, leaves the
+                        // saved selection alone.
+                        let effective = crate::transcription::custom_models::runnable(
+                            &self.settings.transcription,
+                        );
+                        let saved = if selection == effective {
+                            Ok(self.settings.clone())
+                        } else {
+                            save_with(|settings| settings.remember_transcription(selection))
+                        };
+                        match saved {
                             Ok(candidate) => {
                                 // Read from disk, so it may carry an outside
                                 // edit the modes must pick up too.
@@ -917,6 +950,13 @@ impl LinuxDesktopHost {
                                     listener.update(ListenerUpdate::Settings(Box::new(
                                         self.settings.clone(),
                                     )));
+                                } else if !crate::desktop::onboarding::model_ready(
+                                    &self.settings.transcription,
+                                ) {
+                                    // One check per Enable: a finished check
+                                    // that did not make the model ready is
+                                    // not retried by itself.
+                                    self.status = ListenerStatus::ModelRequired;
                                 } else {
                                     self.prepared_transcriber = Some(prepared.transcriber);
                                     start_listener = self.listen_when_ready;
@@ -930,6 +970,7 @@ impl LinuxDesktopHost {
                         }
                     }
                     Err(error) => {
+                        self.note_model_check_failure();
                         self.transcription_error = Some(error);
                     }
                 }
@@ -950,6 +991,16 @@ impl LinuxDesktopHost {
                     self.error = Some(error);
                 }
             }
+        }
+
+        // A check canceled while waiting (a switch or an explicit cancel)
+        // must not leave the host on Enabling with nothing pending.
+        if self.listen_when_ready
+            && !self.is_running()
+            && self.status == ListenerStatus::Enabling
+            && self.transcription_preparation.is_none()
+        {
+            self.start();
         }
 
         self.refresh_shortcut_edit();
@@ -1160,76 +1211,7 @@ impl LinuxDesktopHost {
     ) -> Result<()> {
         self.manual_choice();
         let selection = crate::transcription::models::TranscriptionSelection { model, language };
-        self.prepare_transcription(selection, false)
-    }
-
-    /// Downloads (or, for a keyboard switch, only verifies) and loads a
-    /// model off the host thread.
-    fn prepare_transcription(
-        &mut self,
-        selection: crate::transcription::models::TranscriptionSelection,
-        automatic: bool,
-    ) -> Result<()> {
-        if self.shortcut_edit.is_some() {
-            let error = "Finish the shortcut change before changing the model".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
-        if self.transcription_preparation.is_some() {
-            self.cancel_transcription_preparation();
-            let error = "The previous model preparation is still stopping".to_string();
-            self.transcription_error = Some(error.clone());
-            return Err(color_eyre::eyre::eyre!(error));
-        }
-        let model = selection.model;
-        let definition = crate::transcription::models::validate(&selection)?;
-        // A running listener keeps the current model until the new one is ready.
-        let canceled = Arc::new(AtomicBool::new(false));
-        let progress = Arc::new(AtomicU64::new(0));
-        let stage = Arc::new(AtomicU8::new(
-            crate::transcription::models::ModelPreparationStage::Downloading as u8,
-        ));
-        let worker_canceled = canceled.clone();
-        let worker_progress = progress.clone();
-        let worker_stage = stage.clone();
-        let worker = std::thread::spawn(move || {
-            (|| {
-                if automatic {
-                    crate::transcription::models::verify_installed(definition, &worker_canceled)?;
-                } else {
-                    crate::transcription::models::download_with_stage_progress(
-                        definition,
-                        &worker_canceled,
-                        &worker_progress,
-                        &worker_stage,
-                    )?;
-                }
-                if worker_canceled.load(Ordering::Relaxed) {
-                    return Err(color_eyre::eyre::eyre!("model activation canceled"));
-                }
-                crate::transcription::models::ModelPreparationStage::Loading.store(&worker_stage);
-                let transcriber =
-                    crate::transcription::local_transcriber::LocalTranscriber::load(&selection)?;
-                if worker_canceled.load(Ordering::Relaxed) {
-                    return Err(color_eyre::eyre::eyre!("model activation canceled"));
-                }
-                Ok(PreparedTranscription {
-                    selection,
-                    transcriber,
-                })
-            })()
-            .map_err(|error| format!("{error:#}"))
-        });
-        self.transcription_preparation = Some(TranscriptionPreparation {
-            canceled,
-            model,
-            progress,
-            stage,
-            worker,
-            automatic,
-        });
-        self.transcription_error = None;
-        Ok(())
+        self.prepare_transcription(selection, false, false)
     }
 
     /// A layout change not yet polled counts as before this choice, so it
@@ -1297,7 +1279,7 @@ impl LinuxDesktopHost {
         if self.transcription_preparation.is_none()
             && self.shortcut_edit.is_none()
             && let Some(selection) = self.keyboard_switch.take()
-            && let Err(error) = self.prepare_transcription(selection, true)
+            && let Err(error) = self.prepare_transcription(selection, true, true)
         {
             self.transcription_error = Some(format!("{error:#}"));
         }
@@ -1307,6 +1289,7 @@ impl LinuxDesktopHost {
         if let Some(preparation) = &self.transcription_preparation {
             preparation.canceled.store(true, Ordering::Relaxed);
         }
+        self.checking = false;
         self.transcription_error = None;
     }
 }
@@ -1756,6 +1739,93 @@ mod tests {
                 }
             );
         }
+    }
+
+    #[test]
+    fn disabling_during_a_model_check_cancels_it_and_sets_disabled() {
+        let mut host = host_for_edit(false);
+        host.status = ListenerStatus::Enabling;
+        host.listen_when_ready = true;
+        let canceled = Arc::new(AtomicBool::new(false));
+        let worker_canceled = canceled.clone();
+        host.transcription_preparation = Some(TranscriptionPreparation {
+            canceled: canceled.clone(),
+            model: TranscriptionModelId::default(),
+            progress: Arc::new(AtomicU64::new(0)),
+            stage: Arc::new(AtomicU8::new(ModelPreparationStage::Verifying as u8)),
+            worker: std::thread::spawn(move || {
+                while !worker_canceled.load(Ordering::Relaxed) {
+                    std::thread::yield_now();
+                }
+                Err("check canceled".into())
+            }),
+            automatic: false,
+        });
+        // The preparation is Enable's own installed-only check.
+        host.checking = true;
+        host.stop();
+        assert_eq!(host.status, ListenerStatus::Disabled);
+        assert!(canceled.load(Ordering::Relaxed));
+        if let Some(preparation) = host.transcription_preparation.take() {
+            assert!(preparation.worker.join().unwrap().is_err());
+        }
+    }
+
+    #[test]
+    fn disabling_during_a_model_download_does_not_cancel_it() {
+        let mut host = host_for_edit(false);
+        host.status = ListenerStatus::Enabling;
+        host.listen_when_ready = true;
+        let canceled = Arc::new(AtomicBool::new(false));
+        host.transcription_preparation = Some(TranscriptionPreparation {
+            canceled: canceled.clone(),
+            model: TranscriptionModelId::default(),
+            progress: Arc::new(AtomicU64::new(10)),
+            stage: Arc::new(AtomicU8::new(ModelPreparationStage::Downloading as u8)),
+            worker: std::thread::spawn(|| Err("download finished".into())),
+            automatic: false,
+        });
+        host.checking = false;
+        host.stop();
+        assert!(!canceled.load(Ordering::Relaxed));
+        assert_eq!(host.status, ListenerStatus::Disabled);
+        assert!(
+            host.transcription_preparation
+                .take()
+                .unwrap()
+                .worker
+                .join()
+                .unwrap()
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn a_cancelled_model_check_does_not_leave_the_host_enabling() {
+        let mut host = host_for_edit(false);
+        host.listen_when_ready = true;
+        host.status = ListenerStatus::Enabling;
+        // The state a switch or an explicit cancel leaves behind: a canceled
+        // preparation whose worker has finished.
+        host.transcription_preparation = Some(TranscriptionPreparation {
+            canceled: Arc::new(AtomicBool::new(true)),
+            model: TranscriptionModelId::default(),
+            progress: Arc::new(AtomicU64::new(0)),
+            stage: Arc::new(AtomicU8::new(ModelPreparationStage::Verifying as u8)),
+            worker: std::thread::spawn(|| Err("check canceled".into())),
+            automatic: false,
+        });
+        while !host
+            .transcription_preparation
+            .as_ref()
+            .unwrap()
+            .worker
+            .is_finished()
+        {
+            std::thread::yield_now();
+        }
+        host.refresh();
+        assert_eq!(host.status, ListenerStatus::ModelRequired);
     }
 
     #[test]

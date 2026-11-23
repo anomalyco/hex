@@ -35,10 +35,10 @@ impl Tour {
 
     /// The tour from Welcome, as on a new install: Run setup again.
     pub(super) fn replay(settings: &AppSettings, platform: &PlatformState) -> Tour {
-        let installed = super::picker::Picker::default().selected_installed(settings);
+        let ready = super::picker::Picker::default().selected_ready(settings);
         Tour::new(Flow::new(
             Step::Welcome,
-            platform.setup_status(installed),
+            platform.setup_status(ready),
             platform.caps.permissions,
             platform.caps.practice_dictation,
         ))
@@ -46,8 +46,8 @@ impl Tour {
 
     /// The tour when this run still needs it.
     pub(super) fn start(settings: &AppSettings, platform: &PlatformState) -> Option<Tour> {
-        let installed = super::picker::Picker::default().selected_installed(settings);
-        let status = platform.setup_status(installed);
+        let ready = super::picker::Picker::default().selected_ready(settings);
+        let status = platform.setup_status(ready);
         let completed = crate::desktop::onboarding::completion_recorded();
         let resume = crate::desktop::onboarding::take_resume();
         let saved = (!completed)
@@ -65,7 +65,7 @@ impl Tour {
 }
 
 pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
-    let installed = ui.picker.selected_installed(&ui.settings);
+    let ready = ui.picker.selected_ready(&ui.settings);
     let selected = crate::transcription::models::validate(&ui.settings.transcription).ok();
     let transcription = ui.view.as_ref().map(|view| &view.transcription);
     let downloading = selected.and_then(|model| {
@@ -77,9 +77,9 @@ pub(super) fn progress(ui: &Ui) -> (bool, ModelProgress) {
         })
     });
     (
-        installed,
+        ready,
         ModelProgress {
-            installed,
+            installed: ready,
             downloading,
             failed: downloading.is_none() && transcription.is_some_and(|t| t.error.is_some()),
         },
@@ -113,8 +113,8 @@ pub(super) fn poll(ui: &mut Ui) -> bool {
             tour.flow.hold_download(held);
         }
     }
-    let (installed, model) = progress(ui);
-    let status = ui.platform.setup_status(installed);
+    let (ready, model) = progress(ui);
+    let status = ui.platform.setup_status(ready);
     let accessibility_stale = ui
         .platform
         .stale(crate::desktop::onboarding::PermissionKind::Accessibility);

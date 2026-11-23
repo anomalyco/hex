@@ -795,10 +795,19 @@ fn wait_for_model(
     selection: crate::transcription::models::TranscriptionSelection,
 ) -> Result<ControlReply, ControlError> {
     let name = crate::transcription::models::definition(selection.model).name;
+    // What the runtime runs: the saved selection, or a lost import's fallback.
     let matches = |settings: &AppSettings| {
         super::runtime::same_model_and_language(&settings.transcription, &selection)
+            || super::runtime::same_model_and_language(
+                &crate::transcription::custom_models::runnable(&settings.transcription),
+                &selection,
+            )
     };
-    if load().is_ok_and(|settings| matches(&settings)) {
+    let ready = || {
+        crate::transcription::models::validate(&selection)
+            .is_ok_and(|model| crate::transcription::models::is_ready(model, &selection.language))
+    };
+    if ready() && load().is_ok_and(|settings| matches(&settings)) {
         return Ok(ControlReply::unchanged(format!(
             "{name} ({}) is already in use",
             selection.language
@@ -811,17 +820,6 @@ fn wait_for_model(
         let Some(published) = runtime.published() else {
             continue;
         };
-        let preparing = published.preparation.model.is_some();
-        seen_preparing |= preparing;
-        if preparing {
-            continue;
-        }
-        if matches(&published.settings) {
-            return Ok(ControlReply::done(format!(
-                "Switched to {name} ({})",
-                selection.language
-            )));
-        }
         if let Some(error) = &published.preparation.error
             && (seen_preparing || started.elapsed() > Duration::from_secs(1))
         {
@@ -829,6 +827,17 @@ fn wait_for_model(
                 "failed",
                 format!("couldn't switch to {name}: {error}"),
             ));
+        }
+        let preparing = published.preparation.model.is_some();
+        seen_preparing |= preparing;
+        if preparing {
+            continue;
+        }
+        if ready() && matches(&published.settings) {
+            return Ok(ControlReply::done(format!(
+                "Switched to {name} ({})",
+                selection.language
+            )));
         }
     }
     Ok(ControlReply::done(format!(

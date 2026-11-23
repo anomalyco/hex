@@ -273,9 +273,17 @@ fn alternate_selection(
     }
 }
 
+/// Whether the file is on this computer: a found, unverified model has no
+/// download to show, even while Setup still waits for its check.
 fn installed(ui: &Ui, selection: &TranscriptionSelection) -> bool {
     transcription_models::validate(selection)
         .is_ok_and(|model| ui.picker.installed(model, &selection.language))
+}
+
+/// Whether Setup can move on: the installed file has passed its check.
+fn ready(ui: &Ui, selection: &TranscriptionSelection) -> bool {
+    transcription_models::validate(selection)
+        .is_ok_and(|model| ui.picker.ready(model, &selection.language))
 }
 
 /// Opens the first run over the tour, at the tour's step: at launch when
@@ -522,10 +530,11 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         Some(checked) => checked,
         None => {
             let installed = installed(ui, &choice);
+            let ready = ready(ui, &choice);
             Checked {
                 at: now,
                 installed,
-                status: ui.platform.setup_status(installed),
+                status: ui.platform.setup_status(ready),
             }
         }
     };
@@ -611,8 +620,9 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
         _ => {}
     }
     if live.model_step == ModelStep::Chosen && downloading_page {
-        // A model already on this computer needs no download pill.
-        s.had_model = tour_model == ItemStatus::Ready;
+        // A model already on this computer needs no download pill, even
+        // while its check still runs.
+        s.had_model = choice_installed;
     }
     let granted = granted(status, paste);
     if granted {
@@ -730,8 +740,10 @@ pub(in crate::rune_ui) fn continue_without_model(ui: &mut Ui) {
 /// "Start using Hex": closes the first run and the tour under it, and
 /// records the tour finished once setup is ready.
 pub(super) fn finish(ui: &mut Ui) {
-    let installed = ui.picker.selected_installed(&ui.settings);
-    let ready = ui.platform.setup_status(installed).ready();
+    let ready = ui
+        .platform
+        .setup_status(ui.picker.selected_ready(&ui.settings))
+        .ready();
     onboarding::close(ui, ready);
 }
 

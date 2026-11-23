@@ -951,11 +951,12 @@ CoreAudio formats, AppleScript details, or event serialization.
   missing or changed stays saved while the listener runs the default model;
   never rewrite it away.
 - Models found in the Hugging Face cache are scanned only when the picker or
-  onboarding opens (or `hex model list` runs), never in the background, and
-  only their headers are read. A found file is used in place and is
-  read-only: Hex never writes, moves, or deletes anything in the cache, keeps
-  its receipts in its own models folder, hashes a file in full once when it is
-  chosen (against the pin or the blob name), and removing one only forgets it.
+  onboarding opens (or `hex model list`/`hex model status` runs), never in the
+  background, and only their headers are read. A found file is used in place
+  and is read-only: Hex never writes, moves, or deletes anything in the cache,
+  keeps its receipts in its own models folder, hashes a file in full once when
+  it is chosen or when Enable's installed-only check finds it unverified
+  (against the pin or the blob name), and removing one only forgets it.
 - Hex has one onboarding, on every build and OS, stable and dev alike: the
   first-run story (`rune_ui/onboarding_kit/live.rs`) over the tour state
   machine (`rune_ui/onboarding.rs`, `desktop::onboarding::Flow`). No flag,

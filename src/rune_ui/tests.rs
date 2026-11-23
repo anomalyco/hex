@@ -2802,6 +2802,45 @@ fn the_transcription_picker_asks_the_service_for_a_model() {
     assert!(!rt.state.picker.open);
 }
 
+#[test]
+fn choosing_the_selected_installed_but_unchecked_model_checks_it() {
+    use crate::transcription::models::{self, ModelRuntime};
+
+    let directory =
+        std::env::temp_dir().join(format!("hex-picker-unchecked-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&directory);
+    std::fs::create_dir_all(&directory).unwrap();
+    models::set_test_models_dir(Some(directory.clone()));
+    let model = models::definition(TranscriptionModelId::ParakeetUnifiedEnglish);
+    let ModelRuntime::Gguf(artifact) = model.runtime else {
+        unreachable!("Parakeet Unified English is a GGUF model")
+    };
+    std::fs::File::create(directory.join(artifact.local_name()))
+        .unwrap()
+        .set_len(artifact.bytes)
+        .unwrap();
+
+    let mut rt = runtime("picker", true, PANE_SIZE);
+    rt.state.settings.transcription = TranscriptionSelection {
+        model: model.id,
+        language: "en".into(),
+    };
+    // Readiness here comes from the filesystem: the file is installed but
+    // has no verification receipt yet.
+    rt.state.picker.installed = None;
+    picker::choose(&mut rt.state, model);
+    assert_eq!(
+        sent(&rt),
+        [Request::ChooseModel {
+            model: model.id,
+            language: "en".into(),
+        }]
+    );
+
+    models::set_test_models_dir(None);
+    std::fs::remove_dir_all(directory).unwrap();
+}
+
 /// Scrolls the full model list until `key` is inside it, then presses it.
 fn tap_in_model_list(rt: &mut Runtime<Ui>, key: &str) {
     for _ in 0..400 {
