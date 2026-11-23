@@ -37,9 +37,11 @@ const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
 /// How long an existing portal session waits after setting the clipboard
 /// before its paste shortcut, so the target has the new selection (#578).
 const PORTAL_CLIPBOARD_SETTLE: Duration = Duration::from_millis(150);
-/// How long a RemoteDesktop session stays open after a paste. GNOME shows its
-/// remote-control indicator while one is open (#718), and a restored grant
-/// reopens it at the next paste without a dialog.
+/// How long a GNOME RemoteDesktop session stays open after a paste. GNOME
+/// shows its remote-control indicator while one is open (#718), and a restored
+/// grant reopens it at the next paste without a dialog. Other desktops keep
+/// one session for the paster's lifetime: KDE's portal shows a notification
+/// every time a session starts (#2508).
 const PORTAL_IDLE: Duration = Duration::from_secs(15);
 /// How long an X11 paste waits for modifiers no Hex shortcut holds.
 const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
@@ -78,17 +80,18 @@ enum WaylandKeys {
     Portal(Arc<Mutex<PortalSession>>),
 }
 
-/// The RemoteDesktop session: opened at a paste and, when its grant
+/// The RemoteDesktop session: opened at a paste and, on GNOME when its grant
 /// restores without a dialog, closed [`PORTAL_IDLE`] after the last one.
-/// A grant that cannot restore keeps its session for the paster's lifetime,
-/// so pastes never ask again.
+/// Everywhere else it stays for the paster's lifetime, so KDE's portal
+/// notifies once rather than at every quiet paste (#2508). A grant that cannot
+/// restore keeps its session, so pastes never ask again.
 struct PortalSession {
     session: Option<Box<RemoteDesktop>>,
     last_paste: Instant,
 }
 
-/// Closes the session once it has been idle for [`PORTAL_IDLE`]; ends when the
-/// session closes or the paster goes away.
+/// Closes the GNOME session once it has been idle for [`PORTAL_IDLE`]; ends
+/// when the session closes or the paster goes away.
 fn close_when_idle(shared: Weak<Mutex<PortalSession>>) {
     loop {
         let Some(shared) = shared.upgrade() else {
@@ -175,7 +178,7 @@ impl WaylandKeys {
                     } else {
                         Duration::ZERO
                     };
-                    if started.restorable() {
+                    if closes_when_idle(started.restorable(), crate::linux::portal::gnome()) {
                         let idle = Arc::downgrade(shared);
                         thread::spawn(move || close_when_idle(idle));
                     }
@@ -194,6 +197,14 @@ impl WaylandKeys {
             }
         }
     }
+}
+
+/// Whether a session closes [`PORTAL_IDLE`] after its last paste: only a
+/// restorable grant on GNOME, which shows its remote-control indicator while
+/// one is open (#718). KDE's portal instead notifies on every session start,
+/// so its session stays for the paster's lifetime (#2508).
+fn closes_when_idle(restorable: bool, gnome: bool) -> bool {
+    restorable && gnome
 }
 
 /// Whether this session pastes through the desktop's RemoteDesktop portal,
@@ -1000,6 +1011,17 @@ mod tests {
         command
     }
 
+    /// Only GNOME closes the idle RemoteDesktop session: its portal shows a
+    /// persistent indicator, while KDE's notifies whenever a session starts
+    /// (#718, #2508).
+    #[test]
+    fn only_a_restorable_gnome_session_closes_when_idle() {
+        assert!(closes_when_idle(true, true));
+        assert!(!closes_when_idle(false, true));
+        assert!(!closes_when_idle(true, false));
+        assert!(!closes_when_idle(false, false));
+    }
+
     #[test]
     fn a_file_is_one_percent_encoded_uri_list_line() {
         assert_eq!(
@@ -1388,7 +1410,7 @@ mod tests {
         wait_for("GTK to receive the second transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == twice
         });
-        thread::sleep(RESTORE_DELAY * 2);
+        thread::sleep(CLIPBOARD_RESTORE_DELAY * 2);
         assert!(
             !wl_paste(&["--list-types"]).status.success(),
             "the transcript stayed on a clipboard that was empty"
@@ -1408,7 +1430,7 @@ mod tests {
         wait_for("GTK to receive the kept transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == thrice
         });
-        thread::sleep(RESTORE_DELAY * 2);
+        thread::sleep(CLIPBOARD_RESTORE_DELAY * 2);
         let kept = wl_paste(&["--no-newline", "--type", "text/plain;charset=utf-8"]);
         assert!(
             kept.status.success() && kept.stdout == expected.as_bytes(),

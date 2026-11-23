@@ -2280,9 +2280,11 @@ Linux beta                               // not macOS feature parity
 │       │   // since the keysym path searches only the active group; else the
 │       │   // whole chord as keysyms; KWin 6.8's fake input and Mutter lose a
 │       │   // keysym outside the active group
-│       │   ├── 15 s after the last paste -> session closes when its grant restores, so
-│       │   │   GNOME's remote-control indicator shows only around pastes (#718); a grant
-│       │   │   that can't restore keeps its session
+│       │   ├── GNOME, 15 s after the last paste -> session closes when its grant
+│       │   │   restores, so its remote-control indicator shows only around pastes
+│       │   │   (#718); a grant that can't restore keeps its session
+│       │   ├── Elsewhere (KDE) -> one session for the paster's lifetime, so its
+│       │   │   "Remote Control Started" notification shows once (#2508)
 │       │   ├── Session showed the dialog -> 250 ms for it to hand focus back
 │       │   └── Restored or open session -> 150 ms after wl-copy (minus the reopen), so the target holds the new
 │       │       selection before Ctrl+V (GNOME pasted nothing or the old clipboard, #578)
@@ -2346,14 +2348,14 @@ keymap. Observed: the wtype path in the headless-Sway smoke and the
 virtual-keyboard probe on niri (apollo). niri's portal frontend advertises
 RemoteDesktop but its GNOME backend fails CreateSession, so wtype stays first
 there. The RemoteDesktop paste itself (KWin, Mutter) has unit tests for its key
-sequences and its keymap resolution only and is not yet observed on a real
-desktop: it sends evdev keycodes where the keymap confirms each letter and
-Ctrl, Shift, and Enter (`ctrl:swapcaps` and the like fall back to keysyms), and
-sends a letter no group has on its pc105 key, rather than keysyms, which fixes
-KWin 6.8's fake input, where a Latin `v` under a Russian layout arrived as a
-bare `v` with Ctrl stuck down (#1939), and Mutter, which drops a keysym outside
-the active group. Neither fix is observed on a real KDE or GNOME session
-either. The modifier wait (`ShortcutKeys` in
+sequences, its keymap resolution, and which session closes when idle, and is
+not yet observed on a real desktop: it sends evdev keycodes where the keymap
+confirms each letter and Ctrl, Shift, and Enter (`ctrl:swapcaps` and the like
+fall back to keysyms), and sends a letter no group has on its pc105 key, rather
+than keysyms, which fixes KWin 6.8's fake input, where a Latin `v` under a
+Russian layout arrived as a bare `v` with Ctrl stuck down (#1939), and Mutter,
+which drops a keysym outside the active group. Neither fix is observed on a real
+KDE or GNOME session either. The modifier wait (`ShortcutKeys` in
 [linux/input.rs](../../src/linux/input.rs)) has unit tests for its timing only;
 it is not yet observed on Hyprland, and a modifier held past the wait still
 changes the paste. wtype numbers its keymap from evdev code 1 in order of first

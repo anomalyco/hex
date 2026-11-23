@@ -1474,7 +1474,8 @@ CoreAudio formats, AppleScript details, or event serialization.
   Paste sends its shortcut through `wtype` when the compositor advertises
   `zwp_virtual_keyboard_manager_v1`, and otherwise through the
   RemoteDesktop portal, the general injection path: one keyboard-only session
-  approved once (restore token, persist mode 2) and kept with the paster.
+  approved once (restore token, persist mode 2), kept with the paster except
+  on GNOME, which closes it after 15 s idle (#718, #2508).
   With neither, the transcript stays copied and the failure names the
   missing portal. Shortcuts come from the GlobalShortcuts portal when the
   desktop offers it; otherwise the user binds the `hex dictation` and
@@ -1614,10 +1615,13 @@ CoreAudio formats, AppleScript details, or event serialization.
   ext-data-control (KWin) or wlr-data-control, or, without either, the
   explicit `gnome-clipboard-restore` Labs opt-in with XWayland already running
   (same generation and still-holds-the-paste rules, the same bytes read back
-  through XWayland, bounded reads); there is no consumption acknowledgment. The RemoteDesktop paste session closes 15 s after the last
-  paste when its grant restores, so GNOME's remote-control indicator shows
-  only around pastes (#718); the next paste reopens it without a dialog, and
-  only a session that showed the dialog waits the 250 ms focus settle.
+  through XWayland, bounded reads); there is no consumption acknowledgment.
+  On GNOME, the RemoteDesktop paste session closes 15 s after the last paste
+  when its grant restores, so its remote-control indicator shows only around
+  pastes (#718); the next paste reopens it without a dialog, and only a
+  session that showed the dialog waits the 250 ms focus settle. Every other
+  desktop keeps the session for the paster's lifetime: KDE's portal shows a
+  "Remote Control Started" notification each time one starts (#2508).
 
 ## Development
 
