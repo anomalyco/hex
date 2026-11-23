@@ -243,8 +243,9 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
      * otherwise the likeliest word in the middle and the next on the left, as Gboard and iPhone place
      * them. The emoji always keeps the last slot (Labs › Keyboard › Emoji suggestions). */
     fun suggestions(slots: List<Suggestion>) {
-        // Typing started: the suggestions matter more than the notice, which comes back in the next field.
-        if (slots.any { it.kind == Suggestion.Kind.Typed }) notice = null
+        // Typing or swiping started: the suggestions (a swipe's word so far) matter more than the notice, which comes
+        // back in the next field.
+        if (slots.any { it.kind == Suggestion.Kind.Typed } || ime.engine.swiping) notice = null
         val shown = Suggestion.place(slots)
         offered = Array(Suggestion.SLOTS) { shown[it]?.text }
         var chip = -1
@@ -314,9 +315,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             clipboard = { clipboard.hasPrimaryClip() })
         noticeRow.visibility = if (noted) VISIBLE else GONE
         undoBox.visibility = if (undo) VISIBLE else GONE
-        // A note that came with text ("Stopped at 1 minute") shares the line with Undo, which then takes only its width.
+        // A note that came with text ("Stopped at 1 minute") shares the line with Undo, which then takes only its width,
+        // and the menu key shrinks to ⋯ as it does beside suggestions, so the note isn't cut short.
+        val shared = undo && spoken
         (undoBox.layoutParams as LinearLayout.LayoutParams).apply {
-            val shared = undo && spoken
             if ((weight == 0f) != shared) { width = if (shared) LinearLayout.LayoutParams.WRAP_CONTENT else 0; weight = if (shared) 0f else 1f; undoBox.layoutParams = this }
         }
         slotRow.visibility = if (show) VISIBLE else GONE
@@ -325,7 +327,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         toolPaste.visibility = if (StripTool.Paste in tools) VISIBLE else GONE
         toolUndo.visibility = if (StripTool.Undo in tools) VISIBLE else GONE
         statusText.visibility = if (idle && !show && (!undo || spoken) && !noted && tools.isEmpty()) VISIBLE else GONE
-        menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
+        menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show || shared -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
     }
     /** The menu opened: the hint line shows its page's title and goes back a page when tapped. */
