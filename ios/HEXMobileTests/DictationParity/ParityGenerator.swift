@@ -107,6 +107,9 @@ enum ParityGenerator {
             "um, so, \(a), uh, \(b)", "Yeah, ok, \(a). \(b)?", "Shopping list: \(a), \(b), and \(c).",
             "Dr. \(a) called. Call her back.", "\(a) gonna \(b), wanna \(c)?", "i think i'm \(a), i.e. \(b)",
             "\(a) smiley face \(b) winky", "Note: \(a)", "Gonna rain. He said “gonna win”.",
+            "牛奶 ，然后 \(a)", "我用 iPhone 拍了", "如果天气好。", "买点水果 。 然后", "日本語 です \(a)",
+            "\(a) at sign \(b).com at sign \(c).com", "mail \(a) at the rate gmail dot com at the rate yahoo dot com",
+            "\(a) at sign gmail.com and \(b) at sign yahoo.com",
         ]
         return cased(random.pick(templates), &random)
     }
@@ -145,5 +148,6 @@ enum ParityGenerator {
                                         ".", " , ", " .", " ?", "\u{200B}", "\u{2009}", " - ", " — ", "\t\t", "\n \n"]
     private static let contexts = ["", " ", "Hello", "Hello ", "Hello.", "Hello. ", "and", "and ", "(", "“",
                                    "Note: ", "see (this)", "x\n", "Hi!” ", "\t", "¿", "Dijo «", " \u{301}", "Okay",
-                                   ".", "world", " world", ")", "”", "'", "\u{2028}", "end.)", "Wait…", "OK? "]
+                                   ".", "world", " world", ")", "”", "'", "\u{2028}", "end.)", "Wait…", "OK? ",
+                                   "我想", "，然后", "我到了。", "去超市", "「", "今天", "很好！", "iPhone", "한국어 "]
 }

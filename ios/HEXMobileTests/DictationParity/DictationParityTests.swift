@@ -5,10 +5,11 @@ import XCTest
 /// Exports the dictation rules' cases as JSON Lines: the committed fixture
 /// (crates/keyboard/core/tests/fixtures/dictation-parity.jsonl, which the Rust core's tests and
 /// `DictationGoldenTests` replay) and larger exports for the core's parity test. The outputs are
-/// what the shipped rules give, the keyboard core through the Swift API; the fixture was first
-/// written from copies of the Swift rules before the core (dev 93db6ad7), and refreshing it
-/// re-baselines on purpose (crates/keyboard/README.md). Off unless asked: xcodebuild passes
-/// `TEST_RUNNER_`-prefixed variables to the test with the prefix stripped.
+/// what the shipped rules give, the keyboard core through the Swift API; the fixture was
+/// written from copies of the Swift rules before the core (dev 93db6ad7, recorded again from
+/// dev 06ac30af's), and refreshing it re-baselines on purpose (crates/keyboard/README.md). Off
+/// unless asked: xcodebuild passes `TEST_RUNNER_`-prefixed variables to the test with the
+/// prefix stripped.
 ///
 ///     TEST_RUNNER_HEX_DICTATION_PARITY_OUT=/tmp/dictation-parity.jsonl \
 ///     TEST_RUNNER_HEX_DICTATION_PARITY_COUNT=150000 \

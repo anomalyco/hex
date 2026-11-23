@@ -206,7 +206,8 @@ typedef uint8_t (*HkIsWord)(void *context, HkStr word);
 int32_t hk_dictation_format(HkStr text, const HkLanguage *language, const HkFormatOptions *options,
                             HkText *out);
 /// The stages on their own, in the order the pipeline runs them: spoken symbols, spoken counts,
-/// then (Clean up on) the host's English tagger or, for Spanish, German and Norwegian,
+/// the host's own Numbers as digits, then (Clean up on) the host's English tagger or, for
+/// Spanish, German and Norwegian,
 /// hk_dictation_cleanup_rules; later the style (with Format lists and Spoken punctuation inside
 /// it), and French spacing last.
 int32_t hk_dictation_spoken_symbols(HkStr text, const HkLanguage *language, HkText *out);

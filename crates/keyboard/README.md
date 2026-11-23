@@ -71,10 +71,10 @@ file for `HEX_SWIPE_PARITY`.
 `TranscriptFormatter.swift`, `SpokenLists.swift`, `SpokenPunctuation.swift`,
 `SpokenCleanupRules.swift`, `CleanupReconstruction.swift`, `FrenchSpacing.swift`). The proof:
 
-- `core/tests/fixtures/dictation-parity.jsonl` (about 3,900 cases, 1 MB), first written from
-  copies of the Swift rules (dev 93db6ad7), replayed by `core/tests/dictation_parity.rs`, by
-  `ffi/tests/dictation_api.rs` through the C interface, and by iOS's `DictationGoldenTests`
-  through the shipped Swift API.
+- `core/tests/fixtures/dictation-parity.jsonl` (about 4,700 cases, 1 MB), written from copies
+  of the Swift rules (dev 93db6ad7, recorded again from dev 06ac30af's), replayed by
+  `core/tests/dictation_parity.rs`, by `ffi/tests/dictation_api.rs` through the C interface,
+  and by iOS's `DictationGoldenTests` through the shipped Swift API.
 - Larger exports: `HEX_DICTATION_PARITY=/tmp/dictation-parity.jsonl cargo test --release`.
 - iOS's Unicode data, per scalar: `HEX_DICTATION_UNICODE=/tmp/dictation-unicode.tsv cargo
   test --release`. The tables in `core/src/dictation/unicode_generated.rs` come from the same

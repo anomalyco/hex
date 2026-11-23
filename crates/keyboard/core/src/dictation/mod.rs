@@ -5,7 +5,8 @@
 //! spacing (`FrenchSpacing`).
 //!
 //! The host runs, as `DictationPipeline` does: [`spoken_symbols`] then [`spoken_counts`]
-//! (every style but Verbatim), then Clean up (its English tagger, or [`cleanup_rules`]),
+//! (every style but Verbatim), then its own Numbers as digits (`SpokenNumbers`), then Clean
+//! up (its English tagger, or [`cleanup_rules`]),
 //! then [`format`], then its custom vocabulary and Lowercase, then [`french_spacing`]
 //! (every style but Verbatim). A language is passed as the host's locale reads it
 //! ([`Language`]); `None` is Swift's `nil`, which most rules take as English.

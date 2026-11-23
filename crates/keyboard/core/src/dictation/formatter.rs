@@ -40,14 +40,16 @@ fn formatted(
     if style == Style::Verbatim {
         return collapse_horizontal_spaces(trimmed);
     }
-    let cleaned = spoken(
-        &strip_standalone_fillers(trimmed, fillers),
-        lists,
-        punctuation,
-        language,
-    );
+    let unspaced = writes_without_spaces(language);
+    let stripped = strip_standalone_fillers(trimmed, fillers);
+    let stripped = if unspaced {
+        closing_unspaced_gaps(&stripped)
+    } else {
+        stripped
+    };
+    let cleaned = spoken(&stripped, lists, punctuation, language);
     match style {
-        Style::Polished => polish_sentences(&cleaned, english),
+        Style::Polished => polish_sentences(&cleaned, english, unspaced),
         Style::Casual => casual::message(&cleaned, english),
         _ => notes::format(&cleaned, english),
     }
@@ -69,7 +71,9 @@ fn spoken(text: &str, lists: bool, punctuation: bool, language: Option<&Language
 
 /// `TranscriptFormatter.insertionText`: `formatted` joined to the text before and after the
 /// cursor. `is_word` says whether a lowercase word is in the dictation language's
-/// dictionary; none leaves the case alone.
+/// dictionary; none leaves the case alone. No space goes where either side is written without
+/// spaces (`is_unspaced_script`), and a Chinese or Japanese dictation inserted into a sentence
+/// that goes on after the cursor loses the "。" its style ended it with.
 pub fn insertion_text(
     formatted: &str,
     before: Option<&str>,
@@ -85,6 +89,14 @@ pub fn insertion_text(
     {
         output = continuing_sentence(&output, is_word);
     }
+    if t::has_suffix(&output, "。")
+        && let Some(next) = after.and_then(t::first)
+        && !t::is_whitespace(next)
+        && is_unspaced_script(next)
+        && (t::is_one_of(next, UNSPACED_CLOSERS) || !starts_sentence(before))
+    {
+        t::remove_last(&mut output);
+    }
     let last_before = before.and_then(t::last);
     match last_before {
         None => output = drop_leading_spaces(&output),
@@ -93,7 +105,9 @@ pub fn insertion_text(
             let needs = !t::is_one_of(c, "([{\"“‘«¿¡")
                 && !t::has_prefix(&output, " ")
                 && !t::has_prefix(&output, "\n")
-                && !is_closing_punctuation(t::first(&output));
+                && !is_closing_punctuation(t::first(&output))
+                && !is_unspaced_script(c)
+                && !t::first(&output).is_some_and(is_unspaced_script);
             if needs {
                 output.insert(0, ' ');
             }
@@ -103,7 +117,9 @@ pub fn insertion_text(
         let needs = !t::is_whitespace(first)
             && !is_closing_punctuation(Some(first))
             && !t::has_suffix(&output, "\n")
-            && !t::has_suffix(&output, " ");
+            && !t::has_suffix(&output, " ")
+            && !is_unspaced_script(first)
+            && !t::last(&output).is_some_and(is_unspaced_script);
         if needs {
             output.push(' ');
         }
@@ -130,10 +146,80 @@ pub fn starts_sentence(before: Option<&str>) -> bool {
         if t::is_whitespace(c) || t::is_one_of(c, "\"”’')]»") {
             continue;
         }
-        return t::is_one_of(c, ".!?…。");
+        return t::is_one_of(c, ".!?…。！？");
     }
     true
 }
+
+/// Whether a Character belongs to text written without spaces between words (its first
+/// scalar): Han, kana, bopomofo, and the CJK and full-width punctuation and forms. Not Hangul.
+pub fn is_unspaced_script(c: &str) -> bool {
+    let scalar = c.chars().next().map_or(0, |c| c as u32);
+    matches!(
+        scalar,
+        0x3000..=0x303F
+            | 0x3040..=0x30FF
+            | 0x3100..=0x312F
+            | 0x31A0..=0x31BF
+            | 0x31F0..=0x31FF
+            | 0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0xF900..=0xFAFF
+            | 0xFE10..=0xFE1F
+            | 0xFE30..=0xFE4F
+            | 0xFF00..=0xFF60
+            | 0xFF61..=0xFF9F
+            | 0x20000..=0x3134F
+    )
+}
+
+/// The languages written without spaces between words: their dictations lose the spaces
+/// Apple's speech model puts beside Chinese characters (`closing_unspaced_gaps`).
+pub fn writes_without_spaces(language: Option<&Language>) -> bool {
+    let Some(language) = language else {
+        return false;
+    };
+    let code = language.code.as_deref().unwrap_or(&language.identifier);
+    ["zh", "ja", "yue", "wuu", "cmn"].contains(&code)
+}
+
+/// `text` without a run of spaces or tabs that has Chinese or Japanese on either side.
+/// Spaces between two Latin words, and at a line's start or end, stay.
+pub fn closing_unspaced_gaps(text: &str) -> String {
+    let chars = t::chars(text);
+    let mut result: Vec<&str> = Vec::with_capacity(chars.len());
+    let mut index = 0;
+    while index < chars.len() {
+        let c = chars[index];
+        if !(t::is(c, ' ') || t::is(c, '\t')) {
+            result.push(c);
+            index += 1;
+            continue;
+        }
+        let mut end = index;
+        while end < chars.len() && (t::is(chars[end], ' ') || t::is(chars[end], '\t')) {
+            end += 1;
+        }
+        let before = result.last().copied();
+        let after = chars.get(end).copied();
+        let unspaced =
+            before.is_some_and(is_unspaced_script) || after.is_some_and(is_unspaced_script);
+        let keep = match (before, after) {
+            (Some(before), Some(after)) => {
+                !unspaced || t::is_newline(before) || t::is_newline(after)
+            }
+            _ => true,
+        };
+        if keep {
+            result.extend_from_slice(&chars[index..end]);
+        }
+        index = end;
+    }
+    t::join(&result)
+}
+
+/// Full-width marks that close or continue a clause, before which a dictation's "。" goes.
+const UNSPACED_CLOSERS: &str = "，。！？、；：」』）】》〉…—．｡､";
 
 /// German and Luxembourgish keep a dictation's case mid-sentence.
 pub fn lowercases_continuations(language: &Language) -> bool {
@@ -206,7 +292,7 @@ fn strip_standalone_fillers(text: &str, fillers: Option<&str>) -> String {
     }
 }
 
-fn polish_sentences(text: &str, english: bool) -> String {
+fn polish_sentences(text: &str, english: bool, unspaced: bool) -> String {
     if text.is_empty() {
         return String::new();
     }
@@ -220,13 +306,15 @@ fn polish_sentences(text: &str, english: bool) -> String {
     }
     t::lines(&normalized)
         .into_iter()
-        .map(ending_sentence)
+        .map(|line| ending_sentence(line, unspaced))
         .collect::<Vec<_>>()
         .join("\n")
 }
 
-/// `line` with a full stop unless it already ends a sentence, is empty, or is a lone address.
-fn ending_sentence(line: &str) -> String {
+/// `line` with a full stop unless it already ends a sentence, is empty, or is a lone address. A
+/// Chinese or Japanese line takes "。" even when it ends in a Latin word or a number, in a
+/// dictation in that language (`unspaced`).
+fn ending_sentence(line: &str, unspaced: bool) -> String {
     let Some(last) = t::last(line) else {
         return String::new();
     };
@@ -236,11 +324,9 @@ fn ending_sentence(line: &str) -> String {
     if t::contains(line, "@") && !t::chars(line).iter().any(|c| t::is_whitespace(c)) {
         return line.to_owned();
     }
-    let stop = if uses_ideographic_full_stop(last) {
-        "。"
-    } else {
-        "."
-    };
+    let ideographic = uses_ideographic_full_stop(last)
+        || (unspaced && t::chars(line).into_iter().any(uses_ideographic_full_stop));
+    let stop = if ideographic { "。" } else { "." };
     line.to_owned() + stop
 }
 
