@@ -639,5 +639,8 @@ pub(super) fn view(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             Tone::Danger,
         ));
     }
-    (actions, pane.child(body))
+    (
+        actions,
+        pane.children(super::stats::strip(ui, p)).child(body),
+    )
 }

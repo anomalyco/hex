@@ -829,6 +829,7 @@ pub(super) fn pane(ui: &Ui, p: Paint, cx: &mut Cx<Ui>, layer: &mut Vec<El>) -> (
             .grow(1.0)
             .shrink()
             .children((!notices.is_empty()).then(|| ld::notices(notices)))
+            .children(stats::strip(ui, p))
             .child(body),
     )
 }

@@ -182,6 +182,9 @@ pub struct LabsSettings {
     /// Menu, Pause, and Scroll Lock may be shortcut keys (Linux, issue 767).
     pub standalone_special_keys: bool,
     pub history_stats: bool,
+    /// History draws the Dictation stats dialog's headline numbers as one
+    /// compact strip above its list; it needs `history_stats` too.
+    pub history_stats_strip: bool,
     pub recent_dictations: bool,
     pub skip_pauses: bool,
     /// Output's Try card offers Vocabulary and Fix this beside its result (issue 989).
@@ -496,6 +499,7 @@ impl Default for LabsSettings {
             parakeet_ultra: false,
             standalone_special_keys: false,
             history_stats: false,
+            history_stats_strip: false,
             recent_dictations: false,
             skip_pauses: false,
             output_fixes: false,

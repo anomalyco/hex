@@ -555,6 +555,11 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: a summary of retained dictations at the top of History, with a year-long heatmap and all-time totals from a daily rollup in usage.json (counts only, no text or app names) kept beyond History's retention. While off, the rollup is never written or read; hex history stats prints it too",
     ),
     key(
+        "labs.history_stats_strip",
+        Kind::Bool,
+        "Labs: History draws the Dictation stats dialog's six headline numbers as one compact strip above its list; it needs Labs: history stats and changes nothing else, and off History is exactly as before",
+    ),
+    key(
         "labs.recent_dictations",
         Kind::Bool,
         "Labs: a Copy Recent Dictation submenu in the menu bar that copies one of the last five dictations (macOS)",

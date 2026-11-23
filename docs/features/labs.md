@@ -156,6 +156,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── § key alone no  labs.section_key_alone       (Linux, macOS) the key left of 1 on ISO keyboards, § or a dead key such as ^, may be a shortcut with no modifier (#1050)
 ├── Microphone key alone no labs.microphone_key        (macOS) the microphone (dictation) key in a laptop keyboard's top row, always reported as Fn with key code 176, may be a shortcut with no modifier (#181)
 ├── Dictation stats no    labs.history_stats           History's Stats button opens a summary of retained dictations, with headline tiles, a typing-speed slider and time saved, the busiest-hour strip, a daily chart, app and Output bars, and Output time; an owner-only daily rollup (counts only, no text or app names) outlives retention, so the dialog also charts a 53-week heatmap and its headline totals cover all time; Clear all history deletes the rollup even with no entries; hex history stats prints it (#790)
+├── Stats on History no  labs.history_stats_strip    History draws the Dictation stats dialog's six headline numbers (dictations, words, time saved, words per minute, daily streak, busiest hour) as one compact strip above its list; needs Dictation stats and changes nothing else
 ├── Copy recent dictations no labs.recent_dictations (macOS) the menu bar's Copy Recent Dictation submenu copies one of the last five dictations (#877)
 ├── Skip long pauses no    labs.skip_pauses             (Linux, Windows) a whole-clip dictation run hears only the head and tail of each long pause (#899)
 ├── Fix results in Output no labs.output_fixes           Output's Try card offers Vocabulary and Fix this, which copies an agent prompt naming the wrong result (#989)
@@ -2513,6 +2514,25 @@ heatmap, and hourly strip in both themes, and its fixture is the worst case
 (five apps, four modes, long names, a six-digit word count, a year of
 heatmap). Not yet observed: the dialog in a real window, its slider dragged by
 hand, and a real dictation written to `usage.json`.
+
+Stats on History (`history-stats-strip`, every OS): while it and Dictation
+stats are both on and History has stats, History draws one compact row above
+its list with the dialog's six headline numbers. Both draw
+`stats::headline` from `stats::headline_inputs`, so the strip and the tiles
+can't drift; the Stats button and dialog are unchanged, and with the strip off
+History is exactly as before. It is inserted into both History views
+(`rune_ui/history.rs` and `rune_ui/history/unified.rs`) and reads no data of
+its own: the gate is `labs::history_stats_strip_enabled(&settings)`, which requires
+both switches, this build and OS, and no managed lock, on top of
+`HistoryPane::has_stats`. Checks:
+`history_stats_strip_requires_dictation_stats_and_no_policy_lock`
+([labs.rs](../../src/labs.rs)),
+`history_stats_strip_needs_both_labs_and_stats`,
+`history_stats_strip_shows_the_dialogs_six_headline_numbers`, and
+`history_stats_button_and_dialog_still_work_with_the_strip_on`
+([rune_ui/tests.rs](../../src/rune_ui/tests.rs)); `history-stats-strip` in
+[rune_ui/scenes.rs](../../src/rune_ui/scenes.rs) renders it in both themes. Not
+yet observed in a real window.
 
 Copy recent dictations (`recent-dictations`, issue 877, macOS): while on,
 the menu-bar menu shows a Copy Recent Dictation submenu right under Paste
