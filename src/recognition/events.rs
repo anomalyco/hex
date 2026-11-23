@@ -85,7 +85,6 @@ pub(super) fn handle_dictation_event(
         } => {
             let phase = match kind {
                 PasteKind::LastTranscript => DictationPhase::Repasted,
-                PasteKind::MeetingDelta => DictationPhase::MeetingPasted,
             };
             events.dictation(phase, text)?;
         }

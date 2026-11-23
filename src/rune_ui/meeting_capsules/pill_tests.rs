@@ -40,6 +40,12 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
         let rest = (tx, tw);
 
         open_recording(&mut rt);
+        // A copy's ✓ Copied is the rows' one trailing word.
+        rt.update(|c, tx| {
+            c.live.copied = Some((LiveCopy::Prompt, Instant::now()));
+            tx.instant();
+        });
+        landed(&mut rt);
         let [px, _, pw, _] = laid_out(&rt, "pill");
         assert_eq!(pw, PANEL_WIDTH);
         let [tx, _, tw, _] = laid_out(&rt, "elapsed");
@@ -75,8 +81,9 @@ fn the_header_keeps_the_rows_inset_at_rest_open_and_finished() {
     }
 }
 
-/// The 2 pt gap sat only under Copy new. Stop's hover fill met Copy new's
-/// fill with none, so their corners pinched, while Copy all's kept its gap.
+/// The 2 pt gap sat only under the first copy. Stop's hover fill met the
+/// first copy's fill with none, so their corners pinched, while Copy all's
+/// kept its gap.
 #[test]
 fn rows_that_can_both_be_filled_are_one_gap_apart() {
     use MeetingIndicatorCorner::*;
@@ -86,21 +93,19 @@ fn rows_that_can_both_be_filled_are_one_gap_apart() {
         let [_, y, _, h] = laid_out(&rt, "pill");
         assert_eq!(h, panel::open_height_without_notice());
         let [_, sy, _, sh] = laid_out(&rt, "stop");
-        let [_, ny, _, nh] = laid_out(&rt, "copy-new");
-        let [_, ay, _, ah] = laid_out(&rt, "copy-all");
         let [_, py, _, ph] = laid_out(&rt, "copy-prompt");
-        assert_eq!([sh, nh, ah, ph], [ROW_HEIGHT; 4]);
-        // Copy new is always filled; Stop and Copy all fill under the pointer.
-        assert_eq!(ay - (ny + nh), ROW_GAP, "{corner:?}: Copy new to Copy all");
-        // Copy all and Copy agent prompt are never filled together.
-        assert_eq!(py - (ay + ah), 0., "{corner:?}");
+        let [_, ay, _, ah] = laid_out(&rt, "copy-all");
+        assert_eq!([sh, ph, ah], [ROW_HEIGHT; 3]);
+        // Copy agent prompt is always filled; Stop and Copy all fill under
+        // the pointer.
+        assert_eq!(ay - (py + ph), ROW_GAP, "{corner:?}: the prompt to Copy all");
         if corner.is_top() {
-            assert_eq!(ny - (sy + sh), ROW_GAP, "{corner:?}: Stop to Copy new");
-            assert_eq!(y + h - (py + ph), PANEL_PAD);
+            assert_eq!(py - (sy + sh), ROW_GAP, "{corner:?}: Stop to the prompt");
+            assert_eq!(y + h - (ay + ah), PANEL_PAD);
         } else {
             // A bottom corner keeps the copies' order and puts Stop under them.
-            assert_eq!(sy - (py + ph), ROW_GAP, "{corner:?}: the copies to Stop");
-            assert_eq!(ny - y, PANEL_PAD);
+            assert_eq!(sy - (ay + ah), ROW_GAP, "{corner:?}: the copies to Stop");
+            assert_eq!(py - y, PANEL_PAD);
         }
     }
 }

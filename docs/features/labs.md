@@ -933,8 +933,7 @@ Windows reports it as `copied`, not `pasted` (so does a dictation whose paste
 target was the desktop or a taskbar; see
 [dictation.md](dictation.md#windows-paste-target)).
 History and Paste last dictation
-update as for a paste, and Paste last dictation still pastes (meeting pastes
-on macOS too). With Labs › YOLO mode on, a dictation YOLO mode sends (its
+update as for a paste, and Paste last dictation still pastes. With Labs › YOLO mode on, a dictation YOLO mode sends (its
 chosen apps, or every app with none chosen) is pasted and sent anyway; a
 rescued microphone-loss dictation on macOS is always only copied. Off, output
 is exactly as before. Checks:
@@ -1788,7 +1787,7 @@ lone modifier keeps Double-tap, and the machine's own
 `labs::double_tap_modifiers()` check admits it; off, the row folds to Hold or
 double-tap as before, and turning the lab off folds the saved mode while the
 dictation shortcut's `double_tap_only` is cleared. It dictates and pastes with processing, as
-the dictation shortcut does; Paste last and meeting paste still come only
+the dictation shortcut does; Paste last still comes only
 from the main machine. The shortcut that starts a capture owns it, and the
 others stand down until its keys lift while it records. Escape cancels a
 recording row once it is locked, in Tap mode, or while a bare key or mouse
@@ -2875,8 +2874,8 @@ another app collides with Hex's shortcuts and who don't want to quit. With the
 lab on, the menu bar's action block starts with Pause Hex; pressing it pauses
 Hex and the row reads Resume Hex. A pause is runtime-only and never saved, so a
 restart starts unpaused. While paused every capture shortcut is inert:
-dictation (main, second, extra, Caps Lock, and raw), Paste Last Dictation and
-meeting paste, Annotate and Screenshots, and the Carbon hotkeys registered under
+dictation (main, second, extra, Caps Lock, and raw), Paste Last Dictation,
+Annotate and Screenshots, and the Carbon hotkeys registered under
 Secure Event Input. The event tap passes every key event through unmodified,
 exactly as while a new binding is recorded, because every suspension site reads
 `app_settings::shortcuts_suspended()` (a recording binding or a pause) instead

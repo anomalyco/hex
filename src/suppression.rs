@@ -1166,14 +1166,11 @@ impl ShortcutSuppression {
     ) -> bool {
         let mut paste_last = HotkeyBinding::paste_last_default().runtime();
         paste_last.key_code = Some(paste_key_code);
-        let mut paste_meeting = HotkeyBinding::paste_meeting_default().runtime();
-        paste_meeting.key_code = Some(paste_key_code);
         self.process_all(
             input,
             RuntimeHotkeys {
                 dictation: hotkey,
                 paste_last: Some(paste_last),
-                paste_meeting: Some(paste_meeting),
                 ..RuntimeHotkeys::default()
             },
             delivered,
@@ -1195,28 +1192,13 @@ fn paste_action(input: InputEvent, hotkeys: RuntimeHotkeys) -> Option<HotkeyActi
         .paste_last
         .filter(|binding| binding.matches_key_press(code, flags))
         .map(|_| HotkeyAction::PasteLast)
-        .or_else(|| {
-            hotkeys
-                .paste_meeting
-                .filter(|binding| binding.matches_key_press(code, flags))
-                .map(|_| HotkeyAction::PasteMeeting)
-        })
 }
 
 #[cfg(test)]
-fn paste_action_with_meetings(
-    input: InputEvent,
-    paste_key_code: u16,
-    meetings_enabled: bool,
-) -> Option<HotkeyAction> {
+fn paste_action_on(input: InputEvent, paste_key_code: u16) -> Option<HotkeyAction> {
     let mut hotkeys = RuntimeHotkeys::default();
     if let Some(binding) = &mut hotkeys.paste_last {
         binding.key_code = Some(paste_key_code);
     }
-    hotkeys.paste_meeting = meetings_enabled.then(|| {
-        let mut binding = HotkeyBinding::paste_meeting_default().runtime();
-        binding.key_code = Some(paste_key_code);
-        binding
-    });
     paste_action(input, hotkeys)
 }

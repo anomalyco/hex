@@ -53,9 +53,8 @@ const REPLAYS: &[Replay] = &[
             (96, Cue::Started),
             (172, Cue::Move(432., 23.)),
             (228, Cue::Over("stop")),
-            (276, Cue::Over("copy-new")),
+            (276, Cue::Over("copy-prompt")),
             (312, Cue::Over("copy-all")),
-            (336, Cue::Over("copy-prompt")),
             (396, Cue::Over("stop")),
             (404, Cue::PressStop),
             (415, Cue::Move(214., 91.)),
@@ -362,7 +361,7 @@ struct Shot {
     velocity: (f32, f32),
     veil: (f32, f32),
     /// Offer, "Starting…", meter, then Stop and the three copies.
-    presence: [f32; 7],
+    presence: [f32; 6],
     pending: Option<[f32; 4]>,
     elapsed: Option<[f32; 4]>,
     glyph: Option<[f32; 4]>,
@@ -679,7 +678,6 @@ fn play(
                 Layer::Action(0),
                 Layer::Action(1),
                 Layer::Action(2),
-                Layer::Action(3),
             ]
             .map(|layer| c.stage.presence(layer).opacity),
             pending: rect("pending"),
@@ -841,15 +839,15 @@ fn the_panel_opens_width_first_and_its_rows_follow_in_order() {
         }
         let rows = &shot.presence[3..];
         assert!(rows.windows(2).all(|p| p[0] >= p[1]), "{rows:?}");
-        ordered += usize::from(rows[0] > rows[3] && rows[3] > 0.0);
+        ordered += usize::from(rows[0] > rows[2] && rows[2] > 0.0);
         // A moving edge is soft; a resting one cuts nothing.
         assert_eq!(shot.veil.0 > 0.0, shot.velocity.0 != 0.0 || shot.veil.0 > 0.0);
     }
     assert!(led > 8 && ordered > 4, "{led} {ordered}");
-    assert!(open[1].presence[6] == 0.0, "the last row waits its turn");
+    assert!(open[1].presence[5] == 0.0, "the last row waits its turn");
     let rest = &shots[240];
     assert_eq!((rest.veil, rest.velocity), ((0., 0.), (0., 0.)));
-    assert_eq!(rest.presence[3..], [1.0; 4]);
+    assert_eq!(rest.presence[3..], [1.0; 3]);
 }
 
 /// The drafts dropped Stop's glyph in the frame of the press and moved its
@@ -999,7 +997,7 @@ fn hud_replay_frames() {
             rune::render::write_png(&dir.join(format!("{frame:03}.png")), w, h, &pixels).unwrap();
         });
         let mut trace = String::from(
-            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_new,copy_all,copy_prompt,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light,field_x,field_w,columns,shift,first_dot_x,light_resting_columns,light_new_columns,title_x,notice_right,notice_opacity\n",
+            "frame,phase,x,y,w,h,vw,vh,veil_x,veil_y,offer,pending,meter,stop,copy_prompt,copy_all,pending_x,elapsed_x,elapsed_y,label_x,title,field,elapsed_opacity,field_opacity,stop_opacity,pointer_x,pointer_y,surface,title_opacity,clock,light,field_x,field_w,columns,shift,first_dot_x,light_resting_columns,light_new_columns,title_x,notice_right,notice_opacity\n",
         );
         for (frame, s) in shots.iter().enumerate() {
             let [x, y, pw, ph] = s.pill.unwrap_or_default();
@@ -1007,7 +1005,7 @@ fn hud_replay_frames() {
             let at = |r: Option<[f32; 4]>, i: usize| r.map_or(String::new(), |r| r[i].to_string());
             writeln!(
                 trace,
-                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+                "{frame},{},{x},{y},{pw},{ph},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
                 s.phase,
                 s.velocity.0,
                 s.velocity.1,
@@ -1019,7 +1017,6 @@ fn hud_replay_frames() {
                 p[3],
                 p[4],
                 p[5],
-                p[6],
                 at(s.pending, 0),
                 at(s.elapsed, 0),
                 at(s.elapsed, 1),

@@ -28,7 +28,7 @@ Checks: `retention_expires_meetings_by_when_they_ended_and_skips_active_ones`,
 Labs > Meetings switch (macOS)                       // meetings.opt-in; off by default
 ├── Off -> only the Labs switch -> Turn on -> meetings.enabled = true
 ├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
-│   menu-bar items, call detection, Option-Control-V
+│   menu-bar items, call detection
 │   Settings view: When a call starts, After a meeting, Export, Advanced ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Untrusted row shown / Allow -> retired Hex IDs cleared (`ScreenCapture` + `AudioCapture`)
@@ -325,9 +325,8 @@ error showed. Check: `pane_requests_reach_the_window_s_own_meetings` in
 a real Windows PC has not been observed.
 
 Not on Linux yet: website names for browser calls (Windows reads its
-browsers' windows, macOS their tabs). Not on Linux and Windows yet: the
-Option-Control-V meeting paste shortcut, Copy section from the tray, and the
-`hex meetings` and `hex mcp` commands (shared-control). Dragging a capsule to
+browsers' windows, macOS their tabs). Not on Linux and Windows yet: Copy
+section from the tray, and the `hex meetings` and `hex mcp` commands (shared-control). Dragging a capsule to
 another corner works on Windows, on X11 desktops, and on a capsule floated on
 XWayland (GNOME with Labs › Call recording controls on GNOME), though none of
 that has been tried by hand on a real Windows PC or X11 desktop; only a native
@@ -997,8 +996,8 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   │   (`the_header_keeps_the_rows_inset_at_rest_open_and_finished`)
      │   └── "Microphone is silent" (warning) or, for its first 10 s, "Started
      │       automatically" shows beside the meter
-     ├── Hover -> the pill reveals four full-width actions beside the header:
-     │   Stop nearest the meter, Copy new, Copy all, Copy agent prompt; pointer
+     ├── Hover -> the pill reveals three full-width actions beside the header:
+     │   Stop nearest the meter, Copy agent prompt, Copy all; pointer
      │   leaving -> eases back to rest (a held press keeps it open). A bottom
      │   corner opens upward, its header nearest the screen edge
      │   ├── The field widens with the wall, from the rows' 14 pt inset to the
@@ -1103,22 +1102,15 @@ Record (offer, menu bar "Record Meeting", Meetings pane, or voice command)
      │   macOS, Windows, Linux X11, and XWayland when GNOME floats it there,
      │   though Windows and X11 have not been tried on a real machine; only a
      │   native Wayland capsule returns to the corner it started in)
-     ├── Copy new -> copies the turns not yet copied or pasted, through
-     │   the click (see meetings.copy-through-now)
-     │   ├── Shares Option-Control-V's cursor: either one advances both
-     │   ├── Hint: "4 min new" / "8 sec new" (capture time of the turns the
-     │   │   ticker has seen), "Up to date", or "No speech yet"; always enabled
-     │   │   while recording, since the latest speech may not be counted yet
-     │   ├── "Transcribing…" while it waits, then copies; "✓ Copied" for 1.5 s
-     │   └── The wait runs on its own thread, never on the main thread
-     ├── Copy all -> the in-call transcript so far as speaker-turn Markdown;
-     │   disabled until there is text
-     │   └── Both read the Parakeet in-call transcript (TranscriptReader) once a
-     │       second on the ticker thread, never on the main thread
-     ├── Copy agent prompt -> a prompt telling a coding agent to read this
-     │   meeting with `hex meetings show <id> --md`, catch up with
+     ├── Copy agent prompt (first, filled) -> a prompt telling a coding agent
+     │   to read this meeting with `hex meetings show <id> --md`, catch up with
      │   `--from <mm:ss>` from the last turn copied into it, and search with
      │   `hex meetings search` (agent_prompt; the hex path is this executable)
+     ├── Copy all -> the in-call transcript so far as speaker-turn Markdown;
+     │   disabled until there is text
+     │   └── It reads the Parakeet in-call transcript (TranscriptReader) once a
+     │       second on the ticker thread, never on the main thread
+     ├── Either copy shows "✓ Copied" for 1.5 s
      └── Stop -> Stop & Transcribe
   -> Settings window may stay closed
 
@@ -1424,15 +1416,14 @@ The capsules are Rune overlays in [meeting_capsules.rs](../../src/rune_ui/meetin
 interactive, non-activating `NSPanel`s at status level on every Space,
 fed by the controller events the menu-bar pump receives
 ([macos_rune.rs](../../src/macos_rune.rs)). The offer (20 s), "left the
-call", the finished meeting panel (15 s, title, summary, Copy new, Copy all,
-Copy agent prompt, notes refresh) and a recording pill (voice bars and
-elapsed time at rest; Stop, Copy new, Copy all, Copy agent prompt under the
-pointer; in the configured corner, dragged between corners) are ported. The
-copies are checked by `the_recording_capsule_copies_the_in_call_transcript`,
-`copy_new_copies_the_transcript_read_through_the_click`,
-`copy_new_says_how_much_is_new`, `the_agent_prompt_names_real_commands`, and
+call", the finished meeting panel (15 s, title, summary, Copy agent prompt,
+Copy all, notes refresh) and a recording pill (voice bars and elapsed time at
+rest; Stop, Copy agent prompt, Copy all under the pointer; in the configured
+corner, dragged between corners) are ported. The copies are checked by
+`the_recording_capsule_copies_the_in_call_transcript`,
+`the_agent_prompt_names_real_commands`, and
 `the_ready_panel_copies_the_finished_meeting`, and rendered by
-`capsule_snapshots` (`recording-rest`, `-hover`, `-copied`, `-transcribing`,
+`capsule_snapshots` (`recording-rest`, `-hover`, `-copied`,
 `-empty`, `-silent`, `-hover-bottom-left`, `ready-finished`); the minimal
 panel (2026-11-12) has not been clicked on a real Mac. Hover and the corner snap
 are checked by `the_recording_capsule_rests_compact_and_opens_under_the_pointer`,
@@ -1503,28 +1494,6 @@ While recording                                      // meetings.rolling
      └── Model failure -> transcript.rolling.error.txt -> "Live transcript unavailable."
   -> Every in-call view reads it: Meetings pane, `hex meetings show`, MCP,
      provisional titles (TranscriptReader)
-
-Copy new or Option-Control-V while recording       // meetings.copy-through-now
-  -> The capture writer sends its partial blocks, then the request, in
-     capture order, so the request covers every sample received
-  -> The rolling worker answers it before any later audio:
-     ├── Queued chunks as usual (published to the snapshot)
-     ├── Each track's audio not yet in a chunk (no 6 s minimum), into a copy
-     │   of its transcript: the snapshot and later chunks are unaffected
-     ├── Waits for dictation like every meeting chunk; never a second model
-     └── The same echo and You-waits-for-Them rules as the snapshot
-     ├── Every sample up to the request, even 100 ms past a hard cut; the
-     │   system track counts as transcribed through all its audio
-  -> Each track remembers where the copy ended; its sentence ends there
-     (between the words whose middles lie either side, as boundaries move
-     when a later chunk hears more), so the copied part and the rest of it
-     publish as separate entries and the paste cursor neither repeats nor
-     drops either. A track rebuilt from its WAV after Stop keeps the cuts
-  -> A copy pressed as capture ends is still answered; quitting ends the wait
-  -> Up to 3 s (COPY_TRANSCRIBE_WAIT): usually under 1 s; past that, or with
-     dictation holding the model, copies the in-call transcript as it is and
-     logs a warning
-  -> After Stop, or in another process: the in-call or final transcript
 
 Stop & Transcribe
   -> Flush tails -> finish pending chunks           // usually seconds
@@ -1629,8 +1598,9 @@ chunk that also holds speech is not addressed. Without the detector only the
 the vocabulary prompt is emptied too ([models](README.md#get-ready)).
 
 In-call text was a Moonshine draft until 2026-10-22: the pane showed Parakeet
-only for time rolling had covered, and Option-Control-V and the GPUI capsule's
-Copy new pasted the Moonshine draft alone, which garbled names and jargon. The
+only for time rolling had covered, and the meeting paste shortcut
+(Option-Control-V, since removed) and the GPUI capsule's Copy new pasted the
+Moonshine draft alone, which garbled names and jargon. The
 meeting now loads no Moonshine; short Parakeet chunks replace it. Always-on
 streaming Parakeet was rejected because one loaded model cannot serve it:
 transcribe-cpp (0.2.4, and still 0.4.1) allows one active stream per model
@@ -1775,8 +1745,8 @@ labels), `moonshine_command_update_latency`, and `dictation_latency` in
 [meeting/live_replay_tests.rs](../../src/meeting/live_replay_tests.rs): the
 production recorder fed a recording at real time beside the warm dictation
 engine, with a dictation every 30 s, reporting CPU, footprint, dictation
-latency, speech-to-copyable lag, mid-call Copy all and Option-Control-V text
-against the final transcript.
+latency, speech-to-copyable lag, and mid-call Copy all text against the final
+transcript.
 
 ### Save And Reuse
 
@@ -1808,26 +1778,14 @@ Finished meeting panel (15 s, kept open while the pointer is over it; it
     │   (the saved corner if there was no pill for this meeting)
     ├── × (Close) -> hide immediately, even under the pointer. Late notes do not
     │   reopen it; the saved meeting and transcript remain in Meetings
-    ├── Copy new -> the turns not yet copied or pasted, from the final
-    │   transcript read off the main thread after the panel shows
-    ├── Copy all -> Markdown, or speaker turns as a fallback
-    └── Copy agent prompt -> `hex meetings show <id> --md` and search
+    ├── Copy agent prompt (first) -> `hex meetings show <id> --md` and search
+    └── Copy all -> Markdown, or speaker turns as a fallback
     (the_ready_panel_copies_the_finished_meeting,
     a_ready_panel_whose_time_ran_out_closes_when_the_pointer_leaves)
 Meetings pane -> Copy icon on a completed row's hover, the card's Copy
     transcript icon, Reveal files (opens the recording folder), and Reveal
     Markdown (selects the exported .md) while the export exists
 Menu bar (idle) -> Copy Last Meeting Transcript
-Option-Control-V -> `MeetingPasteCursor` in `meeting/delta.rs` over the transcript
-│   through the press (meetings.copy-through-now)
-├── Pastes turns added since the last successful paste
-├── Runs in order with dictation output: a dictation finished during its
-│   wait (at most 3 s) pastes after it
-├── Remembers, per source, the capture time spans it pasted (spans within 1.5 s
-│   merge); an entry is new when its midpoint is outside them, so nothing
-│   repeats or drops when the final transcript replaces rolling after Stop, and
-│   text the final pass recovers for audio rolling skipped still pastes
-└── Resets when Hex restarts
 ```
 
 ### Meetings Pane
@@ -2414,14 +2372,8 @@ Granola import: see [granola-import.md](../plans/granola-import.md).
 - In-call text trails speech by one chunk plus its settling (seconds, see the
   replay numbers); nothing shows a partial sentence before then. A track that
   falls more than 120 s behind skips audio until Stop rebuilds it.
-- The recording capsule's Copy new / Copy all are unverified on a real Mac
-  screen; its count can trail the transcript by up to a second.
-- Copying through the click is checked with a fake model only; its real-Mac
-  latency and how often the 3 s wait runs out are unmeasured. Handing a
-  copy's cuts from the rolling worker to the WAV rebuild in `transcribe` has
-  no test of its own; the rebuild with cuts does. The copy waits
-  for the next audio packet to arrive, so with both sources stopped it runs
-  out of time and copies the in-call transcript.
+- The recording capsule's Copy agent prompt / Copy all are unverified on a
+  real Mac screen; Copy all can trail the transcript by up to a second.
 - The Meetings pane is verified by Rune goldens rendered offscreen (on Linux
   and on hailmary's Metal), not on a Mac screen; the capsules have no golden.
 - Echo thresholds are tuned on two speaker-mode calls (2026-10-15 and

@@ -86,17 +86,12 @@ pub(super) fn handle_hotkey_action(
                 indicator,
             )
         }
-        HotkeyAction::PasteLast | HotkeyAction::PasteMeeting => {
+        HotkeyAction::PasteLast => {
             // The paste chord's modifier press started a provisional capture.
             context.cancel();
             feedback::retract_start();
             dictation.cancel()?;
-            let paste_result = match action {
-                HotkeyAction::PasteLast => worker.paste_last(),
-                HotkeyAction::PasteMeeting => worker.paste_meeting(),
-                _ => unreachable!(),
-            };
-            if let Err(error) = paste_result {
+            if let Err(error) = worker.paste_last() {
                 feedback::play(Tone::Error);
                 events.dictation(DictationPhase::Failed(error.into()), "")?;
             }

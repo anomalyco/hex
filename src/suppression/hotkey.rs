@@ -16,7 +16,6 @@ pub enum HotkeyAction {
     /// or Escape while a Hold capture is held.
     CancelShortcut,
     PasteLast,
-    PasteMeeting,
 }
 
 impl HotkeyAction {

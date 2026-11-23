@@ -5,7 +5,7 @@
 //! Hex's included; modifier changes still reach them. Carbon hotkeys
 //! (`RegisterEventHotKey`) still fire then, so while secure input is on the
 //! key shortcuts that start something (Annotate and its replay, Paste last,
-//! Paste meeting, and the Screenshots shortcuts) are registered as Carbon
+//! and the Screenshots shortcuts) are registered as Carbon
 //! hotkeys, and each press and release goes where the tap would have sent
 //! it: a `Key` event into the listener's input, or `screenshots::key`.
 //! Only while secure input is on: a Carbon hotkey takes its key before the
@@ -104,7 +104,6 @@ enum Target {
     Capture,
     CaptureReplay,
     PasteLast,
-    PasteMeeting,
     #[cfg_attr(not(hex_capture), allow(dead_code))]
     Screenshot,
     #[cfg_attr(not(hex_capture), allow(dead_code))]
@@ -117,7 +116,6 @@ impl Target {
             Self::Capture => "annotate",
             Self::CaptureReplay => "annotate-replay",
             Self::PasteLast => "paste-last",
-            Self::PasteMeeting => "paste-meeting",
             Self::Screenshot => "screenshot",
             Self::ScreenshotRecord => "screenshot-record",
         }
@@ -165,7 +163,6 @@ fn chords(hotkeys: RuntimeHotkeys, screenshots: [Option<RuntimeHotkey>; 2]) -> V
         (Target::Capture, hotkeys.capture),
         (Target::CaptureReplay, hotkeys.capture_replay),
         (Target::PasteLast, hotkeys.paste_last),
-        (Target::PasteMeeting, hotkeys.paste_meeting),
         (Target::Screenshot, screenshot),
         (Target::ScreenshotRecord, screenshot_record),
     ];
@@ -741,7 +738,6 @@ mod tests {
         let hotkeys = RuntimeHotkeys {
             capture: Some(option_shift_s()),
             paste_last: Some(option_shift_s()),
-            paste_meeting: None,
             ..RuntimeHotkeys::default()
         };
         let registered = chords(hotkeys, [None, None]);

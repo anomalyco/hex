@@ -140,11 +140,11 @@ pub(super) enum Layer {
     Pending,
     /// The listening field and timer.
     Meter,
-    /// Stop and the three copies, in order of importance.
+    /// Stop and the two copies, in order of importance.
     Action(usize),
 }
 
-pub(super) const ACTIONS: usize = 4;
+pub(super) const ACTIONS: usize = 3;
 const LAYERS: usize = 3 + ACTIONS;
 
 impl Layer {
