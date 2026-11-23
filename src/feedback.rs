@@ -601,10 +601,10 @@ pub enum SoundSet {
 }
 
 impl SoundSet {
-    /// In the order Settings lists them.
+    /// In picker order, not the numeric order used by the playback worker.
     pub const ALL: [Self; 7] = [
-        Self::Signature,
         Self::Classic,
+        Self::Signature,
         Self::Click,
         Self::Soft,
         Self::Wood,
@@ -615,8 +615,8 @@ impl SoundSet {
     /// The English name Settings shows, translated where it is shown.
     pub fn name(self) -> &'static str {
         match self {
-            Self::Signature => "Hex signature",
-            Self::Classic => "Classic",
+            Self::Signature => "Kalimba",
+            Self::Classic => "Classic keys",
             Self::Click => "Click",
             Self::Soft => "Soft tone",
             Self::Wood => "Wood",
@@ -629,7 +629,7 @@ impl SoundSet {
     pub fn character(self) -> &'static str {
         match self {
             Self::Signature => "A kalimba motif that rises and comes home",
-            Self::Classic => "The tones Hex first shipped with",
+            Self::Classic => "Two clicks to start, a swish to stop",
             Self::Click => "Mechanical key clicks",
             Self::Soft => "Warm, rounded blips",
             Self::Wood => "Soft marimba and hollow wood blocks",
@@ -652,8 +652,8 @@ impl SoundSet {
 
     fn decode(value: u8) -> Self {
         Self::ALL
-            .get(usize::from(value))
-            .copied()
+            .into_iter()
+            .find(|&set| set as u8 == value)
             .unwrap_or_default()
     }
 }
@@ -841,7 +841,7 @@ macro_rules! synthesized_set {
     };
 }
 
-/// In [`SoundSet::ALL`]'s order.
+/// Indexed by the stable `SoundSet` discriminant, not its picker position.
 const BUNDLED_SETS: [BundledSet; 7] = [
     synthesized_set!("signature"),
     BundledSet {
@@ -903,7 +903,7 @@ use onboarding::OnboardingSounds;
 /// The decoded sounds the playback worker plays, every set at once so a new
 /// choice plays at once.
 struct Sounds {
-    /// In [`SoundSet::ALL`]'s order.
+    /// In [`BUNDLED_SETS`]' order.
     sets: Vec<SetSounds>,
     onboarding: OnboardingSounds,
     #[cfg(hex_capture)]
@@ -1646,16 +1646,23 @@ mod tests {
 
     #[test]
     fn sound_set_round_trips_by_name_and_index() {
-        for set in SoundSet::ALL {
-            assert_eq!(SoundSet::decode(set as u8), set);
-            let json = serde_json::to_string(&set).unwrap();
-            assert_eq!(serde_json::from_str::<SoundSet>(&json).unwrap(), set);
+        // The picker lists Classic first, but its stored tag is still 1.
+        let expected = [
+            (1, "classic"),
+            (0, "signature"),
+            (2, "click"),
+            (3, "soft"),
+            (4, "wood"),
+            (5, "analog"),
+            (6, "thock"),
+        ];
+        for (set, (tag, id)) in SoundSet::ALL.into_iter().zip(expected) {
+            assert_eq!(set as u8, tag);
+            assert_eq!(SoundSet::decode(tag), set);
+            assert_eq!(serde_json::to_value(set).unwrap(), id);
+            assert_eq!(serde_json::from_value::<SoundSet>(id.into()).unwrap(), set);
         }
         assert_eq!(SoundSet::decode(u8::MAX), SoundSet::Classic);
-        assert_eq!(
-            serde_json::to_string(&SoundSet::Analog).unwrap(),
-            "\"analog\""
-        );
     }
 
     #[test]
