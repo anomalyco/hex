@@ -66,15 +66,15 @@ ferry sh "$builder" '[ -f ~/.config/hex-android-preview/preview.jks ] && [ -f ~/
   ferry sh "$builder" 'chmod 600 ~/.config/hex-android-preview/*'
 }
 ferry cp "$work/android" "$builder:$remote/" >/dev/null
-ferry sh "$builder" --timeout 3600 "export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=\$HOME/Library/Android/sdk
-  cd ~/$remote/android && ./gradlew --no-daemon -q :app:assemblePreview -PhexPreviewBuild=$build -PhexPreviewChannel=$raw"
+jdk='export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=$HOME/Library/Android/sdk; export PATH=$JAVA_HOME/bin:$PATH;'
+ferry sh "$builder" --timeout 3600 "$jdk cd ~/$remote/android && ./gradlew --no-daemon -q :app:assemblePreview -PhexPreviewBuild=$build -PhexPreviewChannel=$raw"
 apk=HexPreview-$name.apk
 out=$root/android/build/preview/$build; mkdir -p "$out"
 ferry cp "$builder:$remote/android/app/build/outputs/apk/preview/app-preview.apk" "$out/$apk" >/dev/null
 
 # Check what was built before anything is published.
 tools=$(ferry sh "$builder" 'ls -d ~/Library/Android/sdk/build-tools/36.0.0')
-signer=$(ferry sh "$builder" "$tools/apksigner verify --print-certs ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | sed -n 's/.*SHA-256 digest: //p' | tr a-f A-F)
+signer=$(ferry sh "$builder" "$jdk $tools/apksigner verify --print-certs ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | sed -n 's/.*SHA-256 digest: //p' | tr a-f A-F)
 badging=$(ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | head -1)
 [ "$signer" = "$fingerprint" ] || { echo "APK is signed with $signer, not the Hex Preview key" >&2; exit 1; }
 case "$badging" in *"name='ly.anoma.hex.preview' versionCode='$build' versionName='$name'"*) ;; *) echo "unexpected APK: $badging" >&2; exit 1 ;; esac
@@ -89,7 +89,8 @@ latest = {"versionCode": $build, "versionName": "$name", "version": "$version", 
           "published": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d"), "commit": "$commit",
           "apk": {"url": "$url", "size": $size, "sha256": "$sha"}, "notes": notes}
 open(sys.argv[2] + "/latest.json", "w").write(json.dumps(latest, indent=2, ensure_ascii=False) + "\n")
-body = "\n".join("- " + n for n in notes) + "\n\nHex Preview for Android, built from ${commit:0:12}. Install it outside Google Play; it updates itself from [the channel](https://github.com/$repo/tree/$channel).\n\nAPK SHA-256: `$sha`  \nSigning certificate SHA-256: `$fingerprint`\n"
+tick = chr(96)  # a literal backtick: this heredoc is expanded by bash
+body = "\n".join("- " + n for n in notes) + "\n\nHex Preview for Android, built from ${commit:0:12}. Install it outside Google Play; it updates itself from [the channel](https://github.com/$repo/tree/$channel).\n\nAPK SHA-256: " + tick + "$sha" + tick + "  \nSigning certificate SHA-256: " + tick + "$fingerprint" + tick + "\n"
 open(sys.argv[2] + "/release.md", "w").write(body)
 PY
 
