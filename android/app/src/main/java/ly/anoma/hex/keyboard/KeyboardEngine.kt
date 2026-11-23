@@ -99,8 +99,8 @@ internal class KeyboardEngine(
     private var more = false
     // A number, phone or date field's pad, or the number pad the symbol page's 1234 key opens.
     private var pad: Pad? = null
-    // Whether the keys' emoji key is on the page the strip's Emoji tool mirrors (the letters).
-    private var emojiKeyShown = true
+    // Whether the keys' emoji key was on the page the strip's Emoji tool mirrors (the letters).
+    private var lastEmojiAvailable = true
     private var selStart = -1
     private var selEnd = -1
     // Spaces, each remembered with the text before the cursor it left, so anything else in between
@@ -226,8 +226,8 @@ internal class KeyboardEngine(
         // The strip's Emoji tool follows the page (Labs › Keyboard › Keyboard tools): the keys' emoji key is
         // on the letters only, never on a symbol page or a pad.
         val emoji = emojiAvailable
-        val changed = emoji != emojiKeyShown
-        emojiKeyShown = emoji
+        val changed = emoji != lastEmojiAvailable
+        lastEmojiAvailable = emoji
         if (changed && feedback.keyboardTools) surface?.toolsChanged()
     }
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */

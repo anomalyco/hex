@@ -80,9 +80,11 @@ class MainActivity : ComponentActivity() {
             update = { next, reason -> phase = next; notice = speechNote(reason) },
             meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
-        // The keyboard's Settings tool opens Hex on its Keyboard page once; a later Recents relaunch is
-        // Hex's own, so the extra goes with the launch that carried it.
-        val startPage = intent.getStringExtra(EXTRA_PAGE)
+        // The keyboard's Settings tool opens Hex on its Keyboard page for the launch that carried the extra.
+        // The task keeps its base intent, so a Recents relaunch still carries it: a restored or history
+        // launch ignores it.
+        val fromHistory = (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0
+        val startPage = if (savedInstanceState == null && !fromHistory) intent.getStringExtra(EXTRA_PAGE) else null
         intent.removeExtra(EXTRA_PAGE)
         // Debug builds only: am start --ez feedback_drop_first_response true loses Send feedback's first answer, to
         // show that the retry, with the same Idempotency-Key, gets the same issue back.
