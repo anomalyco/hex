@@ -1098,18 +1098,26 @@ final class KeyboardBridgeTests: XCTestCase {
         let t0 = 60_000.0
 
         // Quick tap before audio arrived: armed -> starting -> recording on first buffer.
-        var quickTap: KeyboardLocalCapturePhase = .armed(jobID: "tap", requestedAt: t0, audioStartedAt: nil)
+        var quickTap: KeyboardLocalCapturePhase = .armed(
+            jobID: "tap",
+            requestedAt: t0,
+            readiness: .starting(.awaitingFirstAudio)
+        )
         XCTAssertNil(quickTap.snapshot(now: t0 + 0.05, loudnessDB: -62), "armed stays unseen")
-        XCTAssertTrue(quickTap.keepArmed())
-        XCTAssertEqual(quickTap, .starting(jobID: "tap", requestedAt: t0))
+        XCTAssertEqual(quickTap.keepArmed(), .starting(.awaitingFirstAudio))
+        XCTAssertEqual(quickTap, .starting(jobID: "tap", requestedAt: t0, stage: .awaitingFirstAudio))
         XCTAssertTrue(quickTap.receiveAudio(jobID: "tap", at: t0 + 0.22))
         XCTAssertEqual(quickTap, .recording(jobID: "tap", startedAt: t0 + 0.22))
 
         // Hold where audio already flowed while armed: armed -> recording immediately.
-        var held: KeyboardLocalCapturePhase = .armed(jobID: "hold", requestedAt: t0, audioStartedAt: nil)
+        var held: KeyboardLocalCapturePhase = .armed(
+            jobID: "hold",
+            requestedAt: t0,
+            readiness: .starting(.awaitingFirstAudio)
+        )
         XCTAssertFalse(held.receiveAudio(jobID: "hold", at: t0 + 0.18))
         XCTAssertNil(held.snapshot(now: t0 + 0.20, loudnessDB: -30), "still unseen until kept")
-        XCTAssertTrue(held.keepArmed())
+        XCTAssertEqual(held.keepArmed(), .recording(startedAt: t0 + 0.18))
         XCTAssertEqual(held, .recording(jobID: "hold", startedAt: t0 + 0.18))
     }
 
