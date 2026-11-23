@@ -346,7 +346,7 @@ impl Feature {
                 "Dictate while a capture records: the text pastes as usual, and the capture keeps going"
             }
             Self::StopAnyCallRecording => {
-                "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off (macOS)"
+                "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off"
             }
         }
     }

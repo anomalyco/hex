@@ -921,9 +921,11 @@
       "groupTitle": "Meetings",
       "id": "stop-any-call-recording",
       "oses": [
-        "macos"
+        "macos",
+        "windows",
+        "linux"
       ],
-      "summary": "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off (macOS)",
+      "summary": "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off",
       "title": "Stop every call recording when the call ends"
     }
   ]

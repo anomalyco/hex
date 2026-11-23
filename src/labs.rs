@@ -553,6 +553,19 @@ mod tests {
     }
 
     #[test]
+    fn the_stop_any_call_recording_lab_ships_on_every_os_and_is_off_by_default() {
+        let feature = Feature::StopAnyCallRecording;
+        assert_eq!(feature.name(), "stop-any-call-recording");
+        assert_eq!(feature.group(), Group::Meetings);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos, Os::Windows, Os::Linux]);
+        assert_eq!(feature.added(), 20261123);
+        assert!(!feature.on(&AppSettings::default()));
+        assert!(feature.on_this_os());
+        assert_eq!(Feature::from_name("stop-any-call-recording"), Some(feature));
+    }
+
+    #[test]
     fn every_labs_feature_encodes_independently_in_the_switch_bank() {
         let default_bank = encode_where(&LabsSettings::default(), |_| true);
         for feature in Feature::ALL {

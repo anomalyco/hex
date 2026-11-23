@@ -307,6 +307,19 @@ Stop when the call ends -> the same row and 30 s grace as macOS
     └── A page naming a different call ends the recording after the same
         grace (#1775) on Windows too, untested there; never on Linux, which
         reads no site
+Labs › Stop every call recording when the call ends -> the same switch as
+    macOS (labs.stop_any_call_recording, off by default): an offered or
+    by-hand recording stops 30 s after the call app it watches leaves the
+    microphone, even with Stop when the call ends off. There is no calendar
+    here, so no calendar reminder's recording to stop. An offered recording
+    watches the app detection named (a browser holds the microphone until it
+    lets it go; its page is not read for this). A by-hand recording watches
+    the one native call app on the microphone when it starts: the executable
+    names (ms-teams.exe, teams-for-linux, zoom, ...) map to the same
+    canonical keys detection uses, with browsers left out
+    // check: windows_and_linux_executables_link_to_their_canonical_call_app
+    // (meeting/watcher/call_end.rs); not observed on a real Windows or
+    // Linux call
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -1266,13 +1279,13 @@ meetings.stop_when_call_ends) // meetings.auto-stop
 ### Stop Other Call Recordings (Labs)
 
 ```ts
-Labs › Stop every call recording when the call ends (macOS; off by default)
+Labs › Stop every call recording when the call ends (off by default; every OS)
 labs.stop_any_call_recording // meetings.auto-stop-any
   Off -> exactly as above: this switch is the only one that stops a
      recording Hex did not start, and Always record keeps its own
   On -> an offered recording (Ask each time -> Record), a calendar reminder's
-     recording (Zoom, Teams, or Slack links only), and a by-hand recording
-     that found a call app stop on their own exactly as Always record's
+     recording (macOS; Zoom, Teams, or Slack links only), and a by-hand
+     recording that found a call app stop on their own exactly as Always record's
      does: the app absent for 3 s, then 30 s of grace under the "Hex stops
      recording in 30 s unless you keep recording" capsule, with Keep
      recording and the call coming back dropping the stop
@@ -1282,9 +1295,10 @@ labs.stop_any_call_recording // meetings.auto-stop-any
   ├── A by-hand recording (Meetings' Start recording, the menu bar, hex
   │   meetings record) takes its call app from the microphone when it starts:
   │   the one native call app holding it then (Zoom, Slack, Teams, ... by the
-  │   same canonical bundle detection uses, helpers folded), browsers left
-  │   out so no page is read; none or several leaves the recording unwatched,
-  │   exactly as before
+  │   same canonical bundle detection uses, helpers folded; Windows and Linux
+  │   map the executable name, such as ms-teams.exe, teams-for-linux, or
+  │   zoom), browsers left out so no page is read; none or several leaves the
+  │   recording unwatched, exactly as before
   │   -> its title, app, and capture stay the recording's own: only the stop
   │      is associated
   ├── A calendar reminder's recording watches the app its link names: Zoom,
@@ -1308,10 +1322,12 @@ labs.stop_any_call_recording // meetings.auto-stop-any
   └── Checks: `the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record`,
       `a_calendar_recording_counts_no_absence_until_its_app_joins`,
       `a_recording_kind_knows_whether_it_watches_a_call_app`,
-      `one_native_call_app_is_watched_and_a_browser_or_two_are_not`
+      `one_native_call_app_is_watched_and_a_browser_or_two_are_not`,
+      `windows_and_linux_executables_link_to_their_canonical_call_app`
       (meeting/watcher/call_end.rs);
       `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`
-      (meeting/watcher.rs); not observed on a real Mac or a real Slack huddle
+      (meeting/watcher.rs); not observed on a real Mac, Windows, or Linux
+      call, or a real Slack huddle
 ```
 
 ### Import Audio (Labs)

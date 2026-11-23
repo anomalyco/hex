@@ -1492,7 +1492,7 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Agent tools for captures", "Инструменты агента для записей"),
     ("Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely", "Добавляет hex annotate zoom, inspect, frames и skill, чтобы агенты для кода могли внимательно изучить запись"),
     ("Stop every call recording when the call ends", "Останавливать любую запись звонка при завершении звонка"),
-    ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off (macOS)", "Также останавливает запись, начатую по предложению, из календаря или вручную, через 30 с после того, как её приложение звонка отпускает микрофон, даже если «Останавливать по окончании звонка» выключено (macOS)"),
+    ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off", "Также останавливает запись, начатую по предложению, из календаря или вручную, через 30 с после того, как её приложение звонка отпускает микрофон, даже если «Останавливать по окончании звонка» выключено"),
 ];
 
 #[cfg(test)]

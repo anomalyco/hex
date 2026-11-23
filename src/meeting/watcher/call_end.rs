@@ -284,6 +284,36 @@ mod tests {
     }
 
     #[test]
+    fn windows_and_linux_executables_link_to_their_canonical_call_app() {
+        // The microphone adapter names a process by its executable off a Mac;
+        // it maps to the same key detection and an offer use.
+        for (executable, canonical, label) in [
+            ("ms-teams.exe", "com.microsoft.teams2", "Microsoft Teams"),
+            ("teams-for-linux", "com.microsoft.teams2", "Microsoft Teams"),
+            ("zoom", "us.zoom.xos", "Zoom"),
+        ] {
+            assert_eq!(
+                manual_call_app_with(true, || Some(vec![microphone(executable, executable)])),
+                Some((canonical.into(), label.into())),
+                "{executable}"
+            );
+        }
+        // A browser keeps its own page watch, so a by-hand recording watches
+        // nothing, and two different call apps can't be told apart.
+        assert_eq!(
+            manual_call_app_with(true, || Some(vec![microphone("chrome", "Google Chrome")])),
+            None
+        );
+        assert_eq!(
+            manual_call_app_with(true, || Some(vec![
+                microphone("zoom", "zoom"),
+                microphone("ms-teams.exe", "ms-teams.exe"),
+            ])),
+            None
+        );
+    }
+
+    #[test]
     fn one_native_call_app_is_watched_and_a_browser_or_two_are_not() {
         assert_eq!(only_call_app(&[]), None);
         assert_eq!(

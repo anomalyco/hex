@@ -35,7 +35,7 @@ pub fn live_chapters() -> bool {
 }
 
 /// Stop an offered, calendar, or by-hand call recording once its call app
-/// leaves the microphone (macOS; read as each recording's start and every
+/// leaves the microphone (read as each recording's start and every
 /// controller pass while it runs).
 pub fn stop_any_call_recording() -> bool {
     feature_on(Feature::StopAnyCallRecording)

@@ -365,7 +365,7 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: an offered, calendar, or by-hand call recording stops 30 s after its call app \
          leaves the microphone and goes quiet, without Stop when the call ends, which keeps \
          governing Always record; a recording started by hand watches the one call app on the \
-         microphone when it starts (macOS)",
+         microphone when it starts",
     ),
     key(
         "labs.playground",
