@@ -53,7 +53,7 @@ its page's switches to the App Group: off by default, on with `-on`; switches th
 on by default (Spatial autocorrect, Swipe typing, Emoji) stay on.
 `-end` starts the page scrolled to the bottom. `settings-privacy-confirm`
 opens Record typing logs' consent dialog. `--experiment-keyboard-themes` turns
-Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember`
+Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|ember|burgundy`
 picks the theme the full keyboard draws;
 the dictation bar keeps the system look, and iOS draws its own strip above or below
 a third-party keyboard, which a theme can't color.

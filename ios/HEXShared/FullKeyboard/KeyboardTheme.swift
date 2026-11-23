@@ -12,6 +12,7 @@ nonisolated enum KeyboardTheme: String, CaseIterable, Sendable {
     case navy
     case forest
     case ember
+    case burgundy
 
     /// The theme's name, in Settings › Experiments' Theme menu.
     var name: String {
@@ -22,6 +23,7 @@ nonisolated enum KeyboardTheme: String, CaseIterable, Sendable {
         case .navy: String(localized: "Navy")
         case .forest: String(localized: "Forest")
         case .ember: String(localized: "Ember")
+        case .burgundy: String(localized: "Burgundy")
         }
     }
 
@@ -34,6 +36,7 @@ nonisolated enum KeyboardTheme: String, CaseIterable, Sendable {
         case .navy: KeyboardThemeColors.navy
         case .forest: KeyboardThemeColors.forest
         case .ember: KeyboardThemeColors.ember
+        case .burgundy: KeyboardThemeColors.burgundy
         }
     }
 }
@@ -213,5 +216,24 @@ fileprivate extension KeyboardThemeColors {
         accentSelectFill: 0x563026,
         actionFill: 0xC2410C,
         actionPressedFill: 0x9A3412
+    )
+
+    /// Deep wine red, leaning to purple (OKLCH hue 12°): each colour at the mean lightness of
+    /// Navy's, Forest's and Ember's for the same role, with the highest chroma of the three,
+    /// and a return key with the same contrast against its white label as theirs (5.2:1).
+    static let burgundy = KeyboardThemeColors(
+        isDark: true,
+        background: 0x1A090C,
+        keyFill: 0x3A1B20,
+        keyPressedFill: 0x512A2F,
+        keyHeldFill: 0x5A3035,
+        functionHeldFill: 0x68393F,
+        spaceHeldFill: 0x432126,
+        keyShadow: nil,
+        popupFill: 0x371B1F,
+        bubbleFill: 0x472227,
+        accentSelectFill: 0x61343A,
+        actionFill: 0xBC4059,
+        actionPressedFill: 0x9E354A
     )
 }
