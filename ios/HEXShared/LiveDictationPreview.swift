@@ -212,7 +212,9 @@ final class LiveDictationPreviewHost {
     private func sync(_ transcript: LiveTranscript?) {
         guard let keyboard else { return }
         let live = keyboard.model.liveText
-        guard keyboard.showsRecording, live.showsPreview, let transcript else {
+        let phase = keyboard.model.stagePhase
+        let isListening = phase == .recording || phase == .transcribing
+        guard keyboard.showsRecording, isListening, live.showsPreview, let transcript else {
             hide()
             return
         }

@@ -1063,6 +1063,146 @@ final class KeyboardBridgeTests: XCTestCase {
         return nil
     }
 
+    func testLocalCaptureStaysStartingUntilFirstAudioArrives() {
+        let t0 = 50_000.0
+        var phase: KeyboardLocalCapturePhase = .starting(jobID: "job-1", requestedAt: t0)
+
+        // While starting, the snapshot is .starting with no recording clock yet.
+        XCTAssertTrue(phase.isActive)
+        XCTAssertTrue(phase.isCapturing("job-1"))
+        XCTAssertEqual(phase.visibleStage, .starting)
+        let startingSnap = phase.snapshot(now: t0 + 0.15, loudnessDB: -25)
+        XCTAssertEqual(startingSnap?.state, .starting)
+        XCTAssertNil(startingSnap?.recordingStartedAt)
+
+        // Samples from another job never promote this start.
+        XCTAssertFalse(phase.receiveAudio(jobID: "other", at: t0 + 0.2))
+        XCTAssertEqual(phase.visibleStage, .starting)
+
+        // First real audio buffer promotes starting -> recording, stamped at first-audio time.
+        XCTAssertTrue(phase.receiveAudio(jobID: "job-1", at: t0 + 0.25))
+        XCTAssertEqual(phase, .recording(jobID: "job-1", startedAt: t0 + 0.25))
+        let recSnap = phase.snapshot(now: t0 + 1.25, loudnessDB: -28)
+        XCTAssertEqual(recSnap?.state, .recording)
+        XCTAssertEqual(recSnap?.recordingStartedAt, t0 + 0.25)
+        XCTAssertEqual(recSnap?.recordingElapsed(at: t0 + 1.25) ?? -1, 1.0, accuracy: 0.001)
+
+        // Later buffers keep the original startedAt timestamp.
+        XCTAssertFalse(phase.receiveAudio(jobID: "job-1", at: t0 + 0.40))
+        XCTAssertEqual(phase, .recording(jobID: "job-1", startedAt: t0 + 0.25))
+    }
+
+    func testArmedCapturePromotesToStartingOrRecordingBasedOnAudioArrival() {
+        let t0 = 60_000.0
+
+        // Quick tap before audio arrived: armed -> starting -> recording on first buffer.
+        var quickTap: KeyboardLocalCapturePhase = .armed(jobID: "tap", requestedAt: t0, audioStartedAt: nil)
+        XCTAssertNil(quickTap.snapshot(now: t0 + 0.05, loudnessDB: -62), "armed stays unseen")
+        XCTAssertTrue(quickTap.keepArmed())
+        XCTAssertEqual(quickTap, .starting(jobID: "tap", requestedAt: t0))
+        XCTAssertTrue(quickTap.receiveAudio(jobID: "tap", at: t0 + 0.22))
+        XCTAssertEqual(quickTap, .recording(jobID: "tap", startedAt: t0 + 0.22))
+
+        // Hold where audio already flowed while armed: armed -> recording immediately.
+        var held: KeyboardLocalCapturePhase = .armed(jobID: "hold", requestedAt: t0, audioStartedAt: nil)
+        XCTAssertFalse(held.receiveAudio(jobID: "hold", at: t0 + 0.18))
+        XCTAssertNil(held.snapshot(now: t0 + 0.20, loudnessDB: -30), "still unseen until kept")
+        XCTAssertTrue(held.keepArmed())
+        XCTAssertEqual(held, .recording(jobID: "hold", startedAt: t0 + 0.18))
+    }
+
+    func testKeyboardViewModelShowsStartingUntilAudioFlowsAndHandlesEarlyCancelAndFailure() {
+        let t0 = 70_000.0
+        let model = KeyboardViewModel()
+        func show(_ snap: KeyboardSnapshot, at now: TimeInterval) {
+            model.applyBridgeState(
+                hasFullAccess: true,
+                snapshot: snap,
+                isModelInstalled: true,
+                style: .polished,
+                now: now,
+                animated: false
+            )
+        }
+
+        // Starting snapshot keeps UI in .starting with no running clock and quiet scope.
+        let starting = KeyboardSnapshot(state: .starting, heartbeat: t0, expiresAt: t0 + 60, jobID: "j1")
+        show(starting, at: t0)
+        XCTAssertEqual(model.stagePhase, .starting)
+        XCTAssertEqual(model.dotScopePhase, .starting)
+        XCTAssertEqual(model.liveLoudnessDB, -62.0)
+        XCTAssertEqual(model.clock.recordingText, "0:00")
+
+        // First audio arrives -> .recording, and clock advances from first audio.
+        let recording = KeyboardSnapshot(
+            state: .recording,
+            heartbeat: t0 + 2.25,
+            expiresAt: t0 + 60,
+            recordingStartedAt: t0 + 0.25,
+            loudnessDB: -26,
+            jobID: "j1"
+        )
+        show(recording, at: t0 + 2.25)
+        XCTAssertEqual(model.stagePhase, .recording)
+        XCTAssertEqual(model.dotScopePhase, .recording)
+        XCTAssertEqual(model.liveLoudnessDB, -26)
+        XCTAssertEqual(model.clock.recordingText, "0:02")
+
+        // Early cancel while starting returns cleanly to idle.
+        let startingAgain = KeyboardSnapshot(state: .starting, heartbeat: t0 + 10, expiresAt: t0 + 70, jobID: "j2")
+        show(startingAgain, at: t0 + 10)
+        XCTAssertEqual(model.stagePhase, .starting)
+        model.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .cancel, jobID: "j2", sentAt: t0 + 10.05),
+            now: t0 + 10.05,
+            animated: false
+        )
+        XCTAssertEqual(model.stagePhase, .idle)
+        show(.offline, at: t0 + 10.1)
+        XCTAssertEqual(model.stagePhase, .idle)
+        XCTAssertNil(model.pendingCommand)
+
+        // Early stop while starting also returns cleanly to idle (never transcribing).
+        let startingThird = KeyboardSnapshot(state: .starting, heartbeat: t0 + 20, expiresAt: t0 + 80, jobID: "j3")
+        show(startingThird, at: t0 + 20)
+        model.setPendingCommand(
+            KeyboardViewModel.PendingCommand(kind: .stop, jobID: "j3", sentAt: t0 + 20.05),
+            now: t0 + 20.05,
+            animated: false
+        )
+        XCTAssertEqual(model.stagePhase, .idle)
+
+        // Startup failure shows failure briefly and returns cleanly to idle once expired.
+        let failed = KeyboardSnapshot(
+            state: .failed,
+            heartbeat: t0 + 30,
+            expiresAt: t0 + 36,
+            message: UserFacingError.Context.microphone.fallback,
+            messageAt: t0 + 30
+        )
+        show(failed, at: t0 + 30)
+        XCTAssertEqual(model.stagePhase, .failed)
+        XCTAssertEqual(model.statusMessage, UserFacingError.Context.microphone.fallback)
+        show(failed, at: t0 + 39)
+        XCTAssertEqual(model.stagePhase, .idle)
+        XCTAssertNil(model.statusMessage)
+
+        // Orphaned starting job drops cleanly to idle.
+        XCTAssertTrue(starting.isOrphanedJob(at: t0 + KeyboardSnapshot.orphanedJobTimeout + 1))
+        show(starting, at: t0 + KeyboardSnapshot.orphanedJobTimeout + 1)
+        XCTAssertEqual(model.stagePhase, .idle)
+
+        // Recording panel keeps spinner in Done's spot while starting, then shows checkmark when live.
+        let panel = HexKeyRecordingPanel(loudness: { -62 })
+        panel.update(phase: .starting, style: .polished)
+        XCTAssertEqual(panel.scope.phase, .starting)
+        XCTAssertEqual(panel.debugMotionSample()["doneSymbol"], 0)
+        panel.update(phase: .recording, style: .polished)
+        XCTAssertEqual(panel.scope.phase, .recording)
+        XCTAssertEqual(panel.debugMotionSample()["doneSymbol"], 1)
+        panel.tearDown()
+    }
+
     private func control(in view: UIView, titled title: String) -> UIButton? {
         for sub in view.subviews {
             if let button = sub as? UIButton, !button.isHidden, button.configuration?.title == title { return button }

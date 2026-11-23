@@ -135,7 +135,9 @@ extension FullKeyboardView {
         refreshStrip()
     }
 
-    private var isDictating: Bool { model.stagePhase == .recording || model.stagePhase == .transcribing }
+    private var isDictating: Bool {
+        model.stagePhase == .starting || model.stagePhase == .recording || model.stagePhase == .transcribing
+    }
 
     func openHexForModel() {
         KeyboardParakeetNotice().recordOpened()

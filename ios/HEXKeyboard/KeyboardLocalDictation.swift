@@ -10,24 +10,6 @@ import WebKit
 /// (`keyboard-capture-probe.log`) to measure permission and memory limits.
 @MainActor
 final class KeyboardLocalDictation {
-    private enum Phase {
-        case idle
-        /// The Hex key's touch-down, before the touch is a tap, a hold or a slide: capturing,
-        /// unseen (no snapshot), until `start` keeps it or `discard` drops it.
-        case armed(jobID: String, startedAt: TimeInterval)
-        case recording(jobID: String, startedAt: TimeInterval)
-        case transcribing(jobID: String)
-        case finished(
-            jobID: String,
-            resultID: String,
-            transcript: String,
-            heard: String?,
-            stages: DictationStages?,
-            translationFailure: TranslationFailure?
-        )
-        case failed(message: String, until: TimeInterval)
-    }
-
     /// The job being captured or transcribed, shared with its transcription task: whether the
     /// keyboard hid before it finished (its text is then held in the App Group for the next
     /// keyboard, `KeyboardHeldDictation`) and the field it was started in.
@@ -42,9 +24,15 @@ final class KeyboardLocalDictation {
         }
     }
 
-    private var phase: Phase = .idle {
-        didSet { if case .idle = phase { liveText?.end() } else if case .failed = phase { liveText?.end() } }
+    private var phase: KeyboardLocalCapturePhase = .idle {
+        didSet {
+            if case .idle = phase { liveText?.end() } else if case .failed = phase { liveText?.end() }
+            if phase.visibleStage != oldValue.visibleStage { onPhaseChange?() }
+        }
     }
+    /// Fired when the visible dictation stage changes (e.g. starting -> recording on first audio),
+    /// so the keyboard refreshes on the same frame without waiting for the next poll tick.
+    var onPhaseChange: (() -> Void)?
     private var job: Job?
     /// The words so far while recording (`KeyboardLiveDictation`), for the keyboard to show.
     var liveText: LiveDictationText?
@@ -134,55 +122,17 @@ final class KeyboardLocalDictation {
         return headroom == 0 || headroom >= (warm ? Self.restartHeadroomNeeded : Self.startHeadroomNeeded)
     }
 
-    var isActive: Bool {
-        switch phase {
-        case .armed, .recording, .transcribing: true
-        default: false
-        }
-    }
+    var isActive: Bool { phase.isActive }
 
-    /// The capture for `jobID` is the one running, armed or recording.
-    private func isCapturing(_ jobID: String) -> Bool {
-        switch phase {
-        case .armed(let current, _), .recording(let current, _): current == jobID
-        default: false
-        }
-    }
+    /// The capture for `jobID` is the one running: armed, starting, or recording.
+    private func isCapturing(_ jobID: String) -> Bool { phase.isCapturing(jobID) }
 
     func snapshot(now: TimeInterval) -> KeyboardSnapshot? {
-        switch phase {
-        case .idle, .armed:
+        if case .failed(_, let until) = phase, until <= now {
+            phase = .idle
             return nil
-        case .recording(let jobID, let startedAt):
-            return KeyboardSnapshot(
-                state: .recording,
-                heartbeat: now,
-                expiresAt: now + 60,
-                recordingStartedAt: startedAt,
-                loudnessDB: loudness,
-                jobID: jobID
-            )
-        case .transcribing(let jobID):
-            return KeyboardSnapshot(state: .transcribing, heartbeat: now, expiresAt: now + 60, jobID: jobID)
-        case .finished(let jobID, let resultID, let transcript, let heard, let stages, let translationFailure):
-            return KeyboardSnapshot(
-                state: .ready,
-                heartbeat: now,
-                expiresAt: now + 1,
-                jobID: jobID,
-                resultID: resultID,
-                transcript: transcript,
-                heard: heard,
-                stages: stages,
-                translationFailure: translationFailure
-            )
-        case .failed(let message, let until):
-            guard until > now else {
-                phase = .idle
-                return nil
-            }
-            return KeyboardSnapshot(state: .failed, heartbeat: now, expiresAt: until, message: message, messageAt: now)
         }
+        return phase.snapshot(now: now, loudnessDB: loudness)
     }
 
     func markDelivered(resultID: String) {
@@ -362,8 +312,8 @@ final class KeyboardLocalDictation {
     /// `pressedAt` is the Hex key's touch-down (wall clock), where the start's timeline begins.
     /// A capture armed at touch-down becomes this dictation.
     func start(in host: UIView, microphone: MicrophoneChoice, pressedAt: TimeInterval? = nil) {
-        if case .armed(let jobID, let startedAt) = phase {
-            keepArmed(jobID: jobID, startedAt: startedAt)
+        if case .armed(_, let requestedAt, _) = phase {
+            keepArmed(requestedAt: requestedAt)
             return
         }
         guard !isActive else { return }
@@ -378,7 +328,7 @@ final class KeyboardLocalDictation {
         guard !isActive, Self.microphoneAllowed else { return }
         guard let jobID = begin(in: host, microphone: microphone, pressedAt: pressedAt, armed: true) else { return }
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.armedTimeout) { [weak self] in
-            guard let self, case .armed(let current, _) = self.phase, current == jobID else { return }
+            guard let self, case .armed(let current, _, _) = self.phase, current == jobID else { return }
             self.discard(reason: "never kept")
         }
     }
@@ -386,7 +336,8 @@ final class KeyboardLocalDictation {
     /// The touch became a slide (the style menu) or was cancelled: the touch-down capture
     /// stops, its audio is deleted, and nothing is transcribed.
     func discard(reason: String = "slide or cancelled touch") {
-        guard case .armed(_, let startedAt) = phase else { return }
+        guard case .armed(_, let startedAt, _) = phase else { return }
+        startPending = nil
         noteCaptureStopped()
         if let capture, capture !== Self.sharedCapture || Self.ownership.owner == ownerID {
             listenWhileIdle(capture)
@@ -402,13 +353,16 @@ final class KeyboardLocalDictation {
         KeyboardProbeLog.shared.write("touch-down capture discarded after \(Int((Date().timeIntervalSince1970 - startedAt) * 1000)) ms (\(reason))")
     }
 
-    private func keepArmed(jobID: String, startedAt: TimeInterval) {
-        phase = .recording(jobID: jobID, startedAt: startedAt)
-        KeyboardProbeLog.shared.write("touch-down capture kept after \(Int((Date().timeIntervalSince1970 - startedAt) * 1000)) ms")
+    private func keepArmed(requestedAt: TimeInterval) {
         if let failure = armedFailure {
             armedFailure = nil
+            phase = .starting(jobID: job?.id ?? "", requestedAt: requestedAt)
             fail(failure.message, detail: failure.detail)
+            return
         }
+        phase.keepArmed()
+        let liveLabel: String = if case .recording = phase { "already live" } else { "waiting for first audio" }
+        KeyboardProbeLog.shared.write("touch-down capture kept after \(Int((Date().timeIntervalSince1970 - requestedAt) * 1000)) ms (\(liveLabel))")
     }
 
     /// This process keeps the permission it read when it started, so a keyboard opened before
@@ -437,8 +391,8 @@ final class KeyboardLocalDictation {
         loudness = -62
         armedFailure = nil
         phase = armed
-            ? .armed(jobID: jobID, startedAt: requestedAt.timeIntervalSince1970)
-            : .recording(jobID: jobID, startedAt: requestedAt.timeIntervalSince1970)
+            ? .armed(jobID: jobID, requestedAt: requestedAt.timeIntervalSince1970, audioStartedAt: nil)
+            : .starting(jobID: jobID, requestedAt: requestedAt.timeIntervalSince1970)
         timeline = CaptureTimeline(
             pressedAt: min(pressedAt ?? requestedAt.timeIntervalSince1970, requestedAt.timeIntervalSince1970),
             requestedAt: requestedAt.timeIntervalSince1970
@@ -484,7 +438,7 @@ final class KeyboardLocalDictation {
         DispatchQueue.main.asyncAfter(deadline: .now() + Self.resumeOtherAudioDelay) { [weak self] in
             guard let self else { return }
             switch self.phase {
-            case .armed, .recording:
+            case .armed, .starting, .recording:
                 // Another capture started: its end asks instead.
                 self.otherAudioAtStart = true
                 return
@@ -555,7 +509,9 @@ final class KeyboardLocalDictation {
                 fail(UserFacingError.Context.microphone.fallback, detail: "Could not create audio file: \(Self.describe(error))")
             }
         case .samples(let data, let peak):
-            if let line = timeline?.firstBuffer(at: Date().timeIntervalSince1970) {
+            guard isCapturing(jobID), !data.isEmpty else { return }
+            let now = Date().timeIntervalSince1970
+            if let line = timeline?.firstBuffer(at: now) {
                 log.write("\(line) \(KeyboardProbeLog.memory())")
                 timeline = nil
             }
@@ -565,9 +521,12 @@ final class KeyboardLocalDictation {
                 pcmFile?.append(data)
                 live?.append(data)
             }
-            lastProgressAt = Date().timeIntervalSince1970
-            watch.heardAudio(at: lastProgressAt)
+            lastProgressAt = now
+            watch.heardAudio(at: now)
             loudness = peak > 0 ? max(-62, 20 * log10(peak)) : -62
+            if pcmFile != nil {
+                phase.receiveAudio(jobID: jobID, at: now)
+            }
         case .state(let state):
             guard isCapturing(jobID) else { return }
             let now = Date().timeIntervalSince1970
@@ -584,8 +543,8 @@ final class KeyboardLocalDictation {
         case .stopped:
             finishRecording(jobID: jobID)
         case .failed(let message):
+            guard isCapturing(jobID) else { return }
             capture?.stop()
-            pcmFile = nil
             fail(
                 message.hasPrefix("NotAllowedError") ? "Allow the microphone in Hex first" : UserFacingError.Context.microphone.fallback,
                 detail: "Web capture: \(message)"
@@ -607,6 +566,7 @@ final class KeyboardLocalDictation {
     }
 
     func cancel() {
+        startPending = nil
         sendHeld = nil
         transcription?.cancel()
         transcription = nil
@@ -626,14 +586,33 @@ final class KeyboardLocalDictation {
     }
 
     func stop() {
-        guard case .recording(let jobID, _) = phase else { return }
-        guard startPending != jobID else {
-            // Done before the page was even asked to start: nothing was recorded.
-            startPending = nil
-            finishRecording(jobID: jobID)
-            return
+        switch phase {
+        case .starting:
+            // Stopped (e.g. push-to-talk lifted early) before any audio arrived: cancel startup quietly.
+            stopUnstartedCapture(reason: "stopped before audio arrived")
+        case .recording(let jobID, _):
+            guard startPending != jobID else {
+                startPending = nil
+                finishRecording(jobID: jobID)
+                return
+            }
+            capture?.stop()
+        default:
+            break
         }
-        capture?.stop()
+    }
+
+    private func stopUnstartedCapture(reason: String) {
+        startPending = nil
+        timeline = nil
+        if let capture, capture !== Self.sharedCapture || Self.ownership.owner == ownerID {
+            listenWhileIdle(capture)
+            capture.stop()
+        }
+        if let url = pcmFile?.url { try? FileManager.default.removeItem(at: url) }
+        pcmFile = nil
+        job = nil
+        endQuietly(reason)
     }
 
     /// Type as I speak's field just read empty with its words in it: the audio from here is held
@@ -690,6 +669,8 @@ final class KeyboardLocalDictation {
         switch phase {
         case .armed:
             discard(reason: "keyboard hidden")
+        case .starting:
+            stopUnstartedCapture(reason: "keyboard hidden before audio arrived")
         case .recording(let jobID, _):
             job?.interrupted = true
             KeyboardProbeLog.shared.write("keyboard hidden while recording: finishing with what was said")
@@ -722,6 +703,13 @@ final class KeyboardLocalDictation {
         runSimulatorScript()
         #endif
         switch phase {
+        case .starting where watch.isStalled(now: now):
+            KeyboardProbeLog.shared.write("capture timed out after \(Int(now - watch.lastAudio)) s before first audio")
+            if let capture, capture !== Self.sharedCapture || Self.ownership.owner == ownerID {
+                listenWhileIdle(capture)
+                capture.stop()
+            }
+            fail(UserFacingError.Context.microphone.fallback, detail: "capture timed out before first audio")
         case .recording(let jobID, _) where watch.isStalled(now: now):
             if let since = watch.interruptedSince {
                 KeyboardProbeLog.shared.write("capture interrupted for \(Int(now - since)) s: finishing with what it heard")
@@ -782,7 +770,11 @@ final class KeyboardLocalDictation {
 
     private func finishRecording(jobID: String) {
         releaseSend(sent: false)
-        guard case .recording(_, let startedAt) = phase else { return }
+        if case .starting(let current, _) = phase, current == jobID {
+            stopUnstartedCapture(reason: "stopped before audio arrived")
+            return
+        }
+        guard case .recording(let current, let startedAt) = phase, current == jobID else { return }
         noteCaptureStopped()
         guard let file = pcmFile else {
             endQuietly("stopped before the microphone started")
@@ -903,6 +895,11 @@ final class KeyboardLocalDictation {
             KeyboardProbeLog.shared.write("FAILED at touch-down (held): \(detail ?? message) \(KeyboardProbeLog.memory())")
             return
         }
+        startPending = nil
+        timeline = nil
+        if let url = pcmFile?.url { try? FileManager.default.removeItem(at: url) }
+        pcmFile = nil
+        job = nil
         releaseAudioSession()
         KeyboardProbeLog.shared.write("FAILED: \(detail ?? message) \(KeyboardProbeLog.memory())")
         phase = .failed(message: message, until: Date().timeIntervalSince1970 + 6)
