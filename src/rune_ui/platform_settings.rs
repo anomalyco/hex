@@ -31,6 +31,7 @@ use crate::labs::Feature;
 fn permission_copy(
     kind: PermissionKind,
     accessibility_renamed: bool,
+    accessibility_drag: bool,
 ) -> (&'static str, &'static str, &'static str) {
     match kind {
         PermissionKind::Microphone => (
@@ -40,7 +41,7 @@ fn permission_copy(
         ),
         PermissionKind::Accessibility => (
             "permission-accessibility",
-            accessibility_name(accessibility_renamed),
+            accessibility_name(accessibility_renamed, accessibility_drag),
             tr("Hex cannot recognize the dictation shortcut or paste into other apps."),
         ),
         PermissionKind::SystemAudio => (
@@ -56,9 +57,13 @@ fn permission_copy(
     }
 }
 
-/// What System Settings calls the Accessibility list; macOS 27 renamed it.
-pub(super) fn accessibility_name(renamed: bool) -> &'static str {
-    if renamed {
+/// What System Settings calls the Accessibility list: macOS 27 renamed it to
+/// Device Control and Data Access, and 27.3 renamed it and stopped taking a
+/// dragged tile, so the newer name goes with the copy that adds Hex with +.
+pub(super) fn accessibility_name(renamed: bool, drag_supported: bool) -> &'static str {
+    if renamed && !drag_supported {
+        tr("System & App Protection Override")
+    } else if renamed {
         tr("Device Control and Data Access")
     } else {
         tr("Accessibility")
@@ -88,8 +93,11 @@ pub(super) fn permissions_section(ui: &Ui, p: Paint) -> Option<El> {
     let rows = warnings
         .into_iter()
         .map(|warning: PermissionWarning| {
-            let (key, name, description) =
-                permission_copy(warning.kind, ui.platform.accessibility_renamed);
+            let (key, name, description) = permission_copy(
+                warning.kind,
+                ui.platform.accessibility_renamed,
+                ui.platform.accessibility_drag_supported,
+            );
             if warning.action == PermissionAction::Restart {
                 return setting_row(
                     p,

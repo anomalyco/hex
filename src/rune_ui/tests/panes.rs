@@ -3384,6 +3384,24 @@ fn macos_27_names_accessibility_as_system_settings_does() {
     );
 }
 
+/// macOS 27.3 renamed the Accessibility list and stopped taking a dragged
+/// tile; the name follows the list, and only that version says so.
+#[test]
+fn macos_27_3_names_accessibility_without_a_dragged_tile() {
+    assert_eq!(
+        platform_settings::accessibility_name(true, false),
+        "System & App Protection Override"
+    );
+    assert_eq!(
+        platform_settings::accessibility_name(true, true),
+        "Device Control and Data Access"
+    );
+    assert_eq!(
+        platform_settings::accessibility_name(false, true),
+        "Accessibility"
+    );
+}
+
 #[test]
 fn experiment_goldens() {
     let _goldens = Goldens::collect();

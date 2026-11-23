@@ -291,7 +291,12 @@ Launch Hex, setup incomplete              // setup.tour; every build and OS, ful
 │   │   │   ├── Returned from System Settings still untrusted (2 s, or 6 s side-by-side) ->
 │   │   │   │   "An older Hex entry can keep this off" + "Still grey? Fix it"
 │   │   │   │   -> resets the running bundle ID + retired IDs, prompts, and reopens the guide
-│   │   │   └── macOS 27 names the list "Device Control and Data Access"; the row follows
+│   │   │   ├── macOS 27 names the list "Device Control and Data Access"; the row follows
+│   │   │   └── macOS 27.3 renames it "System & App Protection Override" and takes no
+│   │   │       dragged tile: a compact bar sits below System Settings (above it when there
+│   │   │       is no room) out of the pane's + controls, and says to click the Privacy &
+│   │   │       Security notification or add Hex with +; the row and the pane's name follow.
+│   │   │       Check: `macos_27_3_names_accessibility_without_a_dragged_tile`
 │   │   ├── On in System Settings, unusable until relaunch -> "Needs a restart"
 │   │   │   └── Every permission on -> "Restart Hex" -> relaunch at setup  // setup.restart
 │   │   └── Each grant -> a beat with its check -> the card floats off -> on

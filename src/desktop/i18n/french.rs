@@ -979,6 +979,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("Other", "Autres"),
     ("Hex starts listening once the speech model has downloaded.", "Hex commence à écouter dès que le modèle vocal est téléchargé."),
     ("Device Control and Data Access", "Contrôle de l'appareil et accès aux données"),
+    ("System & App Protection Override", "Dérogation à la protection du système et des apps"),
+    ("Click the Privacy & Security notification, or add Hex with +", "Cliquez sur la notification Confidentialité et sécurité ou ajoutez Hex avec +"),
     ("Allowed", "Autorisé"),
     ("Back", "Retour"),
     ("Continue", "Continuer"),
