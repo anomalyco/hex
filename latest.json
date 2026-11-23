@@ -1,18 +1,18 @@
 {
-  "versionCode": 2325,
-  "versionName": "0.2.2-preview.2325",
+  "versionCode": 2332,
+  "versionName": "0.2.2-preview.2332",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-23",
-  "commit": "d83d73cf538a03af605c19fc7404229d49376293",
+  "commit": "e89c470684a708c64cd6fecaedc04712ececbe60",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2325/HexPreview-0.2.2-preview.2325.apk",
-    "size": 68925488,
-    "sha256": "c7ca0eb00f2095d72484cdfca9ade229ecc6acb4390df47e37db258fe682b674"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2332/HexPreview-0.2.2-preview.2332.apk",
+    "size": 68997104,
+    "sha256": "e6e52f9a95e2291fa5eade713f15ad488707d81ba40088411d4bdfca4532ebbc"
   },
   "notes": [
-    "Short dictations are about a quarter faster, and the speech model stays ready between dictations.",
-    "Portuguese dictation. On a Portuguese phone Hex no longer writes your Portuguese in English.",
-    "Setup and settings say what the speech model does instead of naming it."
+    "Send feedback, on Home: tell us what's broken or missing, with a picture if you like.",
+    "Russian and Polish dictation.",
+    "Fixes a short dictation coming out wrong after a long one."
   ]
 }
