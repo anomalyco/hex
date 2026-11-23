@@ -868,6 +868,16 @@ stays after Delete. With no words offered, tapping the left slot to keep what yo
 mid-word and holding a word to add it to Custom vocabulary are gone. Off, the strip suggests
 exactly as it did.
 
+A word that changes rolls to the new one, but only once the keyboard is on screen
+(`KeyboardStripView.appearing`, cleared by `FullKeyboardView.keyboardDidAppear` and set again
+by `prepareForField`). iOS hands the field's traits over as it brings the keyboard in, after
+the first words were chosen without them, so on every switch to Hex "the" became "The" and
+"I'm" became "I’m" in a roll the person saw (iPhone and iPad, iOS 26.5 and 27.2 simulators);
+changes before then just show. One frame of the switch is iOS's: on iOS 26 (26.5 simulator,
+iPhone and iPad mini) it sizes every third-party keyboard's view taller for about 25 ms as it
+switches in (448 pt for a 353 pt keyboard on an iPad mini), with the same frame in a keyboard
+that is a plain grey view; iOS 27.2 doesn't.
+
 ## Background (full keyboard and dictation bar)
 
 Hex draws nothing behind its keys, so
