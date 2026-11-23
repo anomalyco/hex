@@ -7,6 +7,8 @@ nonisolated struct TypingConfigSettings {
         static let enabled = "experiments.typingConfigs"
         /// Bumped whenever `TypingConfigs/active.json` is written or removed.
         static let generation = "typingConfig.generation"
+        /// The keyboards the keys have run on (`TypingConfigKeyboard`), JSON.
+        static let keyboards = "typingConfig.keyboards"
     }
 
     var defaults: UserDefaults? = UserDefaults(suiteName: KeyboardBridge.appGroup)

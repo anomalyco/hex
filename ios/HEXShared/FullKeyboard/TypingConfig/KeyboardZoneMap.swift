@@ -13,11 +13,43 @@ nonisolated struct KeyboardZoneMap: Equatable, Sendable {
     var isEmpty: Bool { regions.isEmpty }
 }
 
+/// What zones are compiled against: every key's id, row, keycap and touch area, the letter
+/// keycap's size and the touch area, from a live layout or as the keyboard recorded it
+/// (`TypingConfigKeyboard`), so the app can check a config against keyboards it can't draw.
+nonisolated struct KeyboardZoneGeometry: Codable, Equatable, Sendable {
+    struct Key: Codable, Equatable, Sendable {
+        var id: String
+        var row: Int
+        var frame: CGRect
+        var hitFrame: CGRect
+        var gapHitFrame: CGRect?
+    }
+
+    var keys: [Key]
+    var keyHeight: CGFloat
+    var letterWidth: CGFloat
+    var touchArea: CGRect
+
+    init(layout: KeyboardLayout) {
+        keys = layout.keys.map { Key(id: TypingLogger.keyID($0.kind), row: $0.row, frame: $0.frame, hitFrame: $0.hitFrame, gapHitFrame: $0.gapHitFrame) }
+        keyHeight = layout.metrics.keyHeight
+        letterWidth = layout.letterWidth
+        touchArea = layout.touchAreaFrame
+    }
+}
+
 nonisolated extension KeyboardLayout {
-    /// `zones` against these keys (letter keycaps: `letterWidth` across, `metrics.keyHeight`
-    /// down). Zones on an edge they may not move, or on a key this layout lacks, are skipped;
-    /// so are both of two zones whose strips meet, and every zone whose strip reaches into a
-    /// key that would keep too little.
+    /// `zones` against these keys (`KeyboardZoneGeometry.zoneMap`).
+    func zoneMap(_ zones: [KeyboardZone]) -> KeyboardZoneMap {
+        KeyboardZoneGeometry(layout: self).zoneMap(zones)
+    }
+}
+
+nonisolated extension KeyboardZoneGeometry {
+    /// `zones` against these keys (letter keycaps: `letterWidth` across, `keyHeight` down).
+    /// Zones on an edge they may not move, or on a key this keyboard lacks, are skipped; so are
+    /// both of two zones whose strips meet, and every zone whose strip reaches into a key that
+    /// would keep too little. Regions are by index into `keys`, the layout's own order.
     func zoneMap(_ zones: [KeyboardZone]) -> KeyboardZoneMap {
         var skipped = [TypingConfigReview.Reason?](repeating: nil, count: zones.count)
         let base = keys.map { [$0.hitFrame] + ($0.gapHitFrame.map { [$0] } ?? []) }
@@ -66,7 +98,7 @@ nonisolated extension KeyboardLayout {
     }
 
     /// The rectangle around a keycap's centre its key must keep.
-    private func keepRect(_ key: KeyboardKey) -> CGRect {
+    private func keepRect(_ key: Key) -> CGRect {
         let keep = TypingConfigLimits.zoneKeepFromCentre
         return CGRect(x: key.frame.midX - keep * key.frame.width, y: key.frame.midY - keep * key.frame.height,
                       width: 2 * keep * key.frame.width, height: 2 * keep * key.frame.height)
@@ -78,13 +110,13 @@ nonisolated extension KeyboardLayout {
         guard let edges = TypingConfigLimits.zoneEdges[letter ? "letter" : zone.key], edges.contains(zone.edge) else {
             return ([], .edgeNotAllowed)
         }
-        let targets = keys.indices.filter { keys[$0].row >= 0 && !keys[$0].isNumberRow && TypingLogger.keyID(keys[$0].kind) == zone.key }
+        let targets = keys.indices.filter { keys[$0].row >= 0 && keys[$0].id == zone.key }
         guard !targets.isEmpty else { return ([], .keyNotOnKeyboard) }
         let move = max(-TypingConfigLimits.zoneMaxMove, min(TypingConfigLimits.zoneMaxMove, zone.move))
         let vertical = zone.edge == .top || zone.edge == .bottom
-        let d = abs(move) * (vertical ? metrics.keyHeight : letterWidth)
+        let d = abs(move) * (vertical ? keyHeight : letterWidth)
         guard d > 0.01 else { return ([], nil) }
-        let area = touchAreaFrame
+        let area = touchArea
         var out: [(rect: CGRect, owner: Int)] = []
         for i in targets {
             let rects = base[i]

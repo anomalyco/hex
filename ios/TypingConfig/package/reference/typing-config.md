@@ -195,6 +195,16 @@ reason from a fixed list.
 - **Zones that break the keycap rule or overlap:** those zones are skipped and listed.
 - **`evidence` is never trusted:** Hex shows it as the file's claim and checks the config by
   replaying the person's own logs.
+- **Text is cleaned:** the note and every word, fix and dictation fix lose control characters,
+  bidirectional overrides, isolates and marks, and invisible format characters (zero-width
+  space, word joiner, soft hyphen, …).
+  - The zero-width joiner and non-joiner are kept where they belong to a spelling: between
+    letters of Arabic, Persian, Syriac, the Indic scripts, Sinhala, Myanmar or Khmer, and the
+    joiner between emoji.
+  - Words are then NFC-normalised and trimmed.
+  - A word that had anything removed from inside it is skipped (`hiddenCharacters`), not
+    applied: what it would type isn't what it shows.
+  - So don't write such characters.
 
 ## On the phone (the contract with Hex's import)
 
@@ -204,7 +214,12 @@ reason from a fixed list.
 - **What the keyboard reads:** only `TypingConfigs/active.json` in the App Group, and only with
   Full Access.
   - The app writes it atomically (write, then rename): the format-0 object with only the parts
-    the person switched on, and no `evidence` or `note`.
+    the person switched on, cleaned and clamped, and no `evidence` or `note`.
+  - It holds every key block that applies on one of the person's keyboards. The keyboard
+    applies the one for the keyboard it is on.
+- **Which keyboards:** the keyboard records each letters keyboard it runs on (context and key
+  geometry) in `typingConfig.keyboards`, most recent first, at most 8. The app reviews a file
+  against those.
   - After writing, the app increments `typingConfig.generation` (an integer in the App Group's
     defaults). The keyboard reloads when it changes.
 - **A missing or unreadable `active.json`** means no config, never a keyboard that fails to

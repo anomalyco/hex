@@ -32,21 +32,31 @@ iOS typing gate (`scripts/typing-gate.py`, en es de fr pl, deterministic hashing
 
 ## Reading a file: `TypingConfigReview`
 
-`TypingConfigReview(data:keyboard:checksEvidence:)` is the only parser, for the app and the
-keyboard alike. For one keyboard (a letters `KeyboardLayout`) it returns:
+`TypingConfigReview(data:keyboards:checksEvidence:)` is the only parser, for the app and the
+keyboard alike.
 
-- for every part, an `Item` with its path and an `Outcome`: `applied`, `clamped(from:to:)`,
-  `shortened` or `skipped(Reason)`;
+- The app passes the keyboards Hex's keys have run on, which the keyboard records in
+  `typingConfig.keyboards` (`TypingConfigKeyboard`: context and `KeyboardZoneGeometry`).
+- The keyboard passes its live layout.
+- Each key block applies on the first keyboard it matches; a second block for the same keyboard
+  is a duplicate.
+
+It returns:
+
+- for every part, an `Item` with its `Outcome` (`applied`, `clamped(from:to:)`, `shortened` or
+  `skipped(Reason)`), its path, list, position and block, the file's evidence for it, and its
+  cleaned text (`TypingConfigText`, the same string the keyboard loads);
 - for each key block, a `ContextCheck`: what it was made for, the keyboard, the fields that
   differ, and whether the hit model matches;
 - `Applied`: what the keyboard uses.
 
 `Reason` lists why a part is skipped, in the order a review shows them: `notAConfig`,
-`tooLarge`, `newerFormat`, `unknownField`, `invalidValue`, `tooMany`, `duplicate`,
+`tooLarge`, `newerFormat`, `unknownField`, `invalidValue`, `hiddenCharacters`, `tooMany`, `duplicate`,
 `notEnoughEvidence`, `forAnotherKeyboard`, `needsCheckingAgain`, `keyNotOnKeyboard`,
 `edgeNotAllowed`, `twoZonesClaimPoint`, `keyTooSmall`.
 
-`compiled(switchedOn:)` makes the file the keyboard reads. `TypingConfigStore.writeActive` writes
+`compiled(switchedOn:)` makes the file the keyboard reads, keeping every key block that applies on
+one of the keyboards. `TypingConfigStore.writeActive` writes
 it to `TypingConfigs/active.json` in the App Group atomically and bumps
 `typingConfig.generation`. `removeActive` goes back to Hex defaults.
 

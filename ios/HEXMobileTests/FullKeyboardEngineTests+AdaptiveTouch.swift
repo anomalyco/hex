@@ -384,6 +384,12 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(outcome(review, "words.keep[0]"), .applied)
         XCTAssertEqual(outcome(review, "words.keep[1]"), .skipped(.notEnoughEvidence))
         XCTAssertEqual(outcome(review, "words.keep[2]"), .skipped(.invalidValue))
+        let sixth = try XCTUnwrap(review.items.first { $0.path == "words.keep[2]" })
+        XCTAssertEqual(sixth.list, .keep)
+        XCTAssertEqual(sixth.position, 2, "the sheet can say which entry, from the result alone")
+        XCTAssertEqual(review.items.first { $0.path == "words.keep[0]" }?.evidence?.times, 3)
+        XCTAssertEqual(review.items.first { $0.path == "keys[0].zones[3]" }?.evidence?.tuned?.taps, 30)
+        XCTAssertEqual(review.items.first { $0.path == "colour" }?.list, .file)
         XCTAssertEqual(outcome(review, "words.keep[3]"), .skipped(.duplicate))
         XCTAssertEqual(review.applied.keep, ["eepy"])
         XCTAssertEqual(review.applied.neverCorrectTo, ["DONT"])
@@ -504,6 +510,68 @@ extension FullKeyboardEngineTests {
         engine.typingConfig = nil
         XCTAssertEqual(engine.autocorrect.learning, TypingLearning(), "removing the config removes exactly its words")
         XCTAssertEqual(typed("teh"), "the ")
+    }
+
+    func testTypingConfigReviewChecksEveryKeyboardAndKeepsEachBlockThatApplies() throws {
+        let upright = KeyboardLayout(width: 402), sideways = KeyboardLayout(width: 874, orientation: .landscape)
+        let french = KeyboardLayout(width: 402, language: .french)
+        let keyboards = [TypingConfigKeyboard(layout: upright), TypingConfigKeyboard(layout: sideways)]
+        let keys = """
+        [{"context": \(try contextJSON(upright)), "aim": {"o": {"offset": [0.0, 0.2], \(aimProof)}}},
+         {"context": \(try XCTUnwrap(String(data: JSONEncoder().encode(TypingConfigFile.Context(layout: french)), encoding: .utf8))), "aim": {"e": {"offset": [0.1, 0.0], \(aimProof)}}},
+         {"context": \(try XCTUnwrap(String(data: JSONEncoder().encode(TypingConfigFile.Context(layout: sideways)), encoding: .utf8))), "zones": [{"key": "space", "edge": "top", "move": 0.1, \(zoneProof)}]},
+         {"context": \(try contextJSON(upright)), "aim": {"p": {"offset": [0.0, 0.2], \(aimProof)}}}]
+        """
+        let review = TypingConfigReview(data: configData(keys: keys), keyboards: keyboards)
+        XCTAssertEqual(review.contexts.map(\.keyboardIndex), [0, nil, 1, nil])
+        XCTAssertEqual(review.contexts[1].differences, ["language", "letters"], "against the nearest keyboard")
+        XCTAssertEqual(outcome(review, "keys[0].aim.o"), .applied)
+        XCTAssertEqual(outcome(review, "keys[1].aim.e"), .skipped(.forAnotherKeyboard))
+        XCTAssertEqual(outcome(review, "keys[2].zones[0]"), .applied)
+        XCTAssertEqual(outcome(review, "keys[3].aim.p"), .skipped(.duplicate), "a second block for the same keyboard")
+        XCTAssertEqual(review.applied.blocks.map(\.block), [0, 2])
+        let compiled = try XCTUnwrap(review.compiled(switchedOn: Set(review.switchable)))
+        XCTAssertEqual(compiled.keys?.count, 2, "every block for one of the person's keyboards")
+        let active = try XCTUnwrap(TypingConfigActive(data: JSONEncoder().encode(compiled)))
+        XCTAssertEqual(active.keys(on: upright).aim, ["o": CGVector(dx: 0, dy: 0.2)])
+        XCTAssertEqual(active.keys(on: sideways).zones, [KeyboardZone(key: "space", edge: .top, move: 0.1)])
+        XCTAssertTrue(active.keys(on: french).isEmpty)
+
+        let suite = "typing-config-keyboards-\(UUID().uuidString)"
+        let settings = TypingConfigSettings(defaults: UserDefaults(suiteName: suite))
+        defer { UserDefaults().removePersistentDomain(forName: suite) }
+        settings.record(keyboards[0])
+        settings.record(keyboards[1])
+        settings.record(keyboards[0])
+        XCTAssertEqual(settings.keyboards.map(\.context.orientation), ["portrait", "landscape"], "most recent first, once each")
+    }
+
+    func testTypingConfigReviewCleansTheNoteAndEveryWord() throws {
+        let long = String(repeating: "a", count: 300)
+        let words = """
+        {"keep": [{"word": " eepy ", "evidence": {"times": 2, "sessions": 2}}, {"word": "ad\\u202Emin", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "pass\\u200Bword", "evidence": {"times": 2, "sessions": 2}}, {"word": "ab\\u200Dcd", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "\\u0645\\u06CC\\u200C\\u062E\\u0648\\u0627\\u0647\\u0645", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "\\u0915\\u094D\\u200D\\u0937\\u092E\\u093E", "evidence": {"times": 2, "sessions": 2}},
+                  {"word": "cafe\\u0301", "evidence": {"times": 2, "sessions": 2}}, {"word": "\\u200B\\u2066", "evidence": {"times": 2, "sessions": 2}}],
+         "fixes": [{"typo": "te\\u2067h", "word": "the", "mode": "apply", "evidence": {"times": 2, "sessions": 2}}]}
+        """
+        let data = Data(#"{"format": "hex.typing-config", "version": 0, "note": "line one\nline\u202Etwo \#(long)", "words": \#(words)}"#.utf8)
+        let review = TypingConfigReview(data: data, keyboard: KeyboardLayout(width: 402))
+        XCTAssertNil(review.refused)
+        XCTAssertEqual(review.note?.hasPrefix("line one linetwo "), true, "controls and overrides out of the note")
+        XCTAssertEqual(review.note?.count, TypingConfigLimits.noteMaxCharacters)
+        XCTAssertEqual(outcome(review, "words.keep[0]"), .applied)
+        XCTAssertEqual(outcome(review, "words.keep[1]"), .skipped(.hiddenCharacters), "a right-to-left override")
+        XCTAssertEqual(outcome(review, "words.keep[2]"), .skipped(.hiddenCharacters), "a zero-width space")
+        XCTAssertEqual(outcome(review, "words.keep[3]"), .skipped(.hiddenCharacters), "a joiner between Latin letters")
+        XCTAssertEqual(outcome(review, "words.keep[4]"), .applied, "Persian keeps its non-joiner")
+        XCTAssertEqual(outcome(review, "words.keep[5]"), .applied, "Devanagari keeps its joiner")
+        XCTAssertEqual(outcome(review, "words.keep[7]"), .skipped(.hiddenCharacters))
+        XCTAssertEqual(outcome(review, "words.fixes[0]"), .skipped(.hiddenCharacters))
+        XCTAssertEqual(review.applied.keep, ["eepy", "\u{0645}\u{06CC}\u{200C}\u{062E}\u{0648}\u{0627}\u{0647}\u{0645}", "\u{0915}\u{094D}\u{200D}\u{0937}\u{092E}\u{093E}", "caf\u{E9}"])
+        XCTAssertEqual(review.items.first { $0.path == "words.keep[6]" }?.text, "caf\u{E9}", "what the sheet shows is what the keyboard loads")
+        XCTAssertTrue(review.applied.fixes.isEmpty)
     }
 }
 

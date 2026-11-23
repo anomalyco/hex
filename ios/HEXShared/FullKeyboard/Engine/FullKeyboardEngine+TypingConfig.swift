@@ -15,6 +15,7 @@ extension FullKeyboardEngine {
 
     /// `layout` with the active config's zones, when it has a key block for these keys.
     func zoned(_ layout: KeyboardLayout) -> KeyboardLayout {
+        TypingConfigActive.record(layout)
         guard let config = typingConfig else { return layout }
         let zones = config.keys(on: layout).zones
         return zones.isEmpty ? layout : layout.applying(layout.zoneMap(zones))
