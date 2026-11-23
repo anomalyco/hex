@@ -1,24 +1,24 @@
 //! The runtime gate of each Labs feature: whether this process has its
-//! switch on and this OS has the feature at all. Split from
-//! [`super::Feature`] to keep the registry under the source cap.
+//! switch on, this build ships it, this OS has it, and no managed policy
+//! locks it. All four checks are folded into the switch bank in `super`.
 
 use super::*;
 
 /// Live text: provisional words beside the HUD (read as each dictation starts).
 pub fn live_text() -> bool {
-    on(LIVE_TEXT)
+    feature_on(Feature::LiveText)
 }
 
 /// A shorter lookahead for live text, so its words appear sooner (Parakeet
 /// buffered streaming; read as each live stream opens).
 pub fn faster_live_text() -> bool {
-    on(FASTER_LIVE_TEXT) && Feature::FasterLiveText.on_this_os()
+    feature_on(Feature::FasterLiveText)
 }
 
 /// A failed dictation's explanation beside the HUD (read as each failure
 /// reaches the HUD).
 pub fn failure_notices() -> bool {
-    on(FAILURE_NOTICES) && Feature::FailureNotices.on_this_os()
+    feature_on(Feature::FailureNotices)
 }
 
 /// Live typing: provisional words in the focused text field as an
@@ -26,17 +26,17 @@ pub fn failure_notices() -> bool {
 /// pasted (Linux; read as each hotkey capture starts).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn live_typing() -> bool {
-    on(LIVE_TYPING) && Feature::LiveTyping.on_this_os()
+    feature_on(Feature::LiveTyping)
 }
 
 /// Live chapters while a meeting records.
 pub fn live_chapters() -> bool {
-    on(LIVE_CHAPTERS)
+    feature_on(Feature::LiveChapters)
 }
 
 /// The playground in the window.
 pub fn playground() -> bool {
-    on(PLAYGROUND)
+    feature_on(Feature::Playground)
 }
 
 /// Names and terms visible in the focused window join one dictation's
@@ -45,10 +45,7 @@ pub fn playground() -> bool {
 /// microphone opening).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn screen_vocabulary() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    SCREEN_VOCABULARY.load(Ordering::Acquire) && Feature::ScreenVocabulary.on_this_os()
+    feature_on(Feature::ScreenVocabulary)
 }
 
 /// Names a person fixes in text Hex just pasted join Vocabulary, read from
@@ -56,16 +53,13 @@ pub fn screen_vocabulary() -> bool {
 /// paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn learn_from_corrections() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    LEARN_FROM_CORRECTIONS.load(Ordering::Acquire) && Feature::LearnFromCorrections.on_this_os()
+    feature_on(Feature::LearnFromCorrections)
 }
 
 /// Mouse buttons may be recorded as shortcuts (macOS).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn mouse_shortcuts() -> bool {
-    on(MOUSE_SHORTCUTS)
+    feature_on(Feature::MouseShortcuts)
 }
 
 /// The microphone (dictation) key in a laptop keyboard's top row may be a
@@ -73,10 +67,7 @@ pub fn mouse_shortcuts() -> bool {
 /// and by the tap on every press).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn microphone_key() -> bool {
-    // The state word is full: its own atomic, written by `labs::apply`, and
-    // loaded here first in a process that never applied.
-    let _ = state();
-    MICROPHONE_KEY.load(Ordering::Acquire) && Feature::MicrophoneKeyAlone.on_this_os()
+    feature_on(Feature::MicrophoneKeyAlone)
 }
 
 /// The mode's OpenCode rewrite is given the text around the cursor as
@@ -85,20 +76,14 @@ pub fn microphone_key() -> bool {
 /// microphone opening).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn cursor_context() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    CURSOR_CONTEXT.load(Ordering::Acquire) && Feature::CursorContext.on_this_os()
+    feature_on(Feature::CursorContext)
 }
 
 /// A finished Annotate capture copies to the clipboard as one light zip file
 /// rather than its image and summary (read where a written capture is copied).
 #[cfg_attr(not(hex_capture), allow(dead_code))]
 pub fn copy_capture_zip() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    COPY_CAPTURE_ZIP.load(Ordering::Acquire) && Feature::CopyCaptureZip.on_this_os()
+    feature_on(Feature::CopyCaptureZip)
 }
 
 /// While an Annotate capture records, the dictation shortcut dictates as it
@@ -108,10 +93,7 @@ pub fn copy_capture_zip() -> bool {
 /// capture would otherwise swallow, on every OS.
 #[cfg_attr(not(hex_capture), allow(dead_code))]
 pub fn dictate_while_annotating() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    DICTATE_WHILE_ANNOTATING.load(Ordering::Acquire) && Feature::DictateWhileAnnotating.on_this_os()
+    feature_on(Feature::DictateWhileAnnotating)
 }
 
 /// A kept dictation recording may be copied from History and the menu bar or
@@ -119,25 +101,20 @@ pub fn dictate_while_annotating() -> bool {
 /// menu or tray opens). It needs Labs › Keep recordings, which owns every
 /// file; this lab stores none of its own.
 pub fn copy_dictation_audio() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    COPY_DICTATION_AUDIO.load(Ordering::Acquire)
-        && Feature::CopyDictationAudio.on_this_os()
-        && keep_recordings()
+    feature_on(Feature::CopyDictationAudio) && keep_recordings()
 }
 
 /// A pasted dictation stays on the clipboard rather than the previous
 /// clipboard being restored (read as each paste commits).
 pub fn keep_on_clipboard() -> bool {
-    on(KEEP_ON_CLIPBOARD)
+    feature_on(Feature::KeepOnClipboard)
 }
 
 /// A dictation goes to the clipboard and is never pasted (macOS and
 /// Windows; read as each dictation's output commits).
 #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn copy_only() -> bool {
-    on(COPY_ONLY)
+    feature_on(Feature::CopyOnly)
 }
 
 /// A dictation pastes into the app its capture started in, bringing it back
@@ -145,61 +122,55 @@ pub fn copy_only() -> bool {
 /// (macOS; read as each capture starts and again before its paste).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn return_to_app() -> bool {
-    on(RETURN_TO_APP) && Feature::ReturnToApp.on_this_os()
+    feature_on(Feature::ReturnToApp)
 }
 
 /// Spoken formatting phrases become line breaks and quotation marks (read
 /// as each dictation's processing starts).
 pub fn spoken_formatting() -> bool {
-    on(SPOKEN_FORMATTING)
+    feature_on(Feature::SpokenFormatting)
 }
 
 /// Spoken punctuation and symbol words become characters joined to their
 /// neighbours (read as each dictation's processing starts).
 pub fn spoken_symbols() -> bool {
-    on(SPOKEN_SYMBOLS)
+    feature_on(Feature::SpokenSymbols)
 }
 
 /// Filler words such as "um" and "uh" leave dictations (read as each
 /// dictation's processing starts).
 pub fn filler_words() -> bool {
-    on(FILLER_WORDS)
+    feature_on(Feature::FillerWords)
 }
 
 /// Labs › Clean up with Apple Intelligence: one on-device pass over each
 /// macOS dictation (read as each dictation's processing starts, and for the
-/// HUD's processing stage). The state word has no bit for it: its own atomic,
-/// written by `labs::apply`, and loaded here first in a process that never
-/// applied.
+/// HUD's processing stage).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn clean_up() -> bool {
-    let _ = state();
-    CLEAN_UP.load(Ordering::Acquire) && Feature::CleanUpWithAppleIntelligence.on_this_os()
+    feature_on(Feature::CleanUpWithAppleIntelligence)
 }
 
 /// Labs › Neutral voice: a dictation in a mode that opts in is rewritten into
 /// plain, neutral wording on this Mac, instead of the OpenCode rewrite and
 /// the cleanup (read as each dictation's processing starts, and for the HUD's
-/// processing stage). The state word has no bit for it: its own atomic,
-/// written by `labs::apply`, and loaded here first in a process that never
-/// applied.
+/// processing stage).
 pub fn neutral_voice() -> bool {
-    let _ = state();
-    NEUTRAL_VOICE.load(Ordering::Acquire) && Feature::NeutralVoice.on_this_os()
+    feature_on(Feature::NeutralVoice)
 }
 
 /// A pasted dictation gets one leading space when the character before the
 /// cursor asks for one (macOS; read as each paste commits).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn smart_spacing() -> bool {
-    on(SMART_SPACING)
+    feature_on(Feature::SmartSpacing)
 }
 
 /// The shortcut recorder keeps each modifier's side in a modifier-only
 /// chord of two or more keys (macOS; read as each recording starts).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn sided_modifier_chords() -> bool {
-    on(SIDED_CHORDS)
+    feature_on(Feature::SidedChords)
 }
 
 /// In Toggle mode, a press held past the hold threshold finishes its capture
@@ -207,7 +178,7 @@ pub fn sided_modifier_chords() -> bool {
 /// Linux's listener reads the saved switch with its shortcut options).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn tap_or_hold() -> bool {
-    on(TAP_OR_HOLD)
+    feature_on(Feature::TapOrHold)
 }
 
 /// Double-tap shortcut mode accepts a shortcut without a key, such as
@@ -215,7 +186,7 @@ pub fn tap_or_hold() -> bool {
 /// configured).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn double_tap_modifiers() -> bool {
-    on(DOUBLE_TAP_MODIFIERS) && Feature::DoubleTapModifiers.on_this_os()
+    feature_on(Feature::DoubleTapModifiers)
 }
 
 /// A key or click joining a held modifier-only shortcut a second or more
@@ -224,13 +195,13 @@ pub fn double_tap_modifiers() -> bool {
 /// machine as the key or click arrives).
 #[cfg_attr(not(any(target_os = "macos", target_os = "windows")), allow(dead_code))]
 pub fn hold_through_keys() -> bool {
-    on(HOLD_THROUGH_KEYS) && Feature::HoldThroughKeys.on_this_os()
+    feature_on(Feature::HoldThroughKeys)
 }
 
 /// Parakeet Ultra joins the catalog (read wherever a model is listed,
 /// chosen, or run).
 pub fn parakeet_ultra() -> bool {
-    on(PARAKEET_ULTRA)
+    feature_on(Feature::ParakeetUltra)
 }
 
 /// Labs › Dictation stats: History's summary of retained dictations, the
@@ -238,42 +209,42 @@ pub fn parakeet_ultra() -> bool {
 /// each entry is recorded, when the History pane reloads, and when the
 /// command starts). Off, the rollup is never written or read.
 pub fn history_stats() -> bool {
-    on(HISTORY_STATS)
+    feature_on(Feature::HistoryStats)
 }
 
 /// The menu bar's Copy Recent Dictation submenu (macOS; read each time the
 /// menu opens).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn recent_dictations() -> bool {
-    on(RECENT_DICTATIONS)
+    feature_on(Feature::RecentDictations)
 }
 
 /// A whole-clip dictation transcription hears only the head and tail of
 /// each long pause (Linux and Windows; read as each whole-clip run starts).
 #[cfg_attr(target_os = "macos", allow(dead_code))]
 pub fn skip_pauses() -> bool {
-    on(SKIP_PAUSES) && Feature::SkipPauses.on_this_os()
+    feature_on(Feature::SkipPauses)
 }
 
 /// A dictation saved to History keeps its 16 kHz audio, and History offers
 /// Transcribe again for it (read as each capture is handed to the engine;
 /// the History pane reads the saved setting).
 pub fn keep_recordings() -> bool {
-    on(KEEP_RECORDINGS)
+    feature_on(Feature::KeepRecordings)
 }
 
 /// The menu-bar icon is hidden while nothing records (macOS; read each
 /// time the status item refreshes, about twice a second).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn hide_menu_bar_icon() -> bool {
-    on(HIDE_MENU_BAR_ICON) && Feature::HideMenuBarIcon.on_this_os()
+    feature_on(Feature::HideMenuBarIcon)
 }
 
 /// At either visible indicator position, the HUD grows out of the notch on
 /// a screen that has one (macOS; read each time the HUD is placed).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn notch_indicator() -> bool {
-    on(NOTCH_INDICATOR) && Feature::NotchIndicator.on_this_os()
+    feature_on(Feature::NotchIndicator)
 }
 
 /// Labs › HUD height: with the HUD position Bottom, its plate keeps a chosen
@@ -281,7 +252,7 @@ pub fn notch_indicator() -> bool {
 /// placed).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn hud_height() -> bool {
-    on(HUD_HEIGHT) && Feature::HudHeight.on_this_os()
+    feature_on(Feature::HudHeight)
 }
 
 /// The plate's gap above the Dock or the screen's bottom edge at the Bottom
@@ -289,7 +260,6 @@ pub fn hud_height() -> bool {
 /// lab is off (macOS; read each time the HUD is placed).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn hud_bottom_gap() -> f64 {
-    let _ = state();
     if hud_height() {
         HUD_BOTTOM_GAP.load(Ordering::Acquire) as f64
     } else {
@@ -302,7 +272,7 @@ pub fn hud_bottom_gap() -> f64 {
 /// stream opens, and when an idle one may be replaced).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn voice_isolation() -> bool {
-    on(VOICE_ISOLATION) && Feature::VoiceIsolation.on_this_os()
+    feature_on(Feature::VoiceIsolation)
 }
 
 /// A paste on a Wayland desktop without data-control (GNOME) snapshots and
@@ -310,7 +280,7 @@ pub fn voice_isolation() -> bool {
 /// as each paste starts).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn gnome_clipboard_restore() -> bool {
-    on(GNOME_CLIPBOARD_RESTORE) && Feature::GnomeClipboardRestore.on_this_os()
+    feature_on(Feature::GnomeClipboardRestore)
 }
 
 /// A shortcut runs the focused app's Output steps on the text already typed
@@ -318,14 +288,14 @@ pub fn gnome_clipboard_restore() -> bool {
 /// the Output pane's row).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn typed_text() -> bool {
-    on(TYPED_TEXT) && Feature::TypedText.on_this_os()
+    feature_on(Feature::TypedText)
 }
 
 /// On a Wayland desktop without layer-shell (GNOME), the meeting capsules
 /// float on an already running XWayland (Linux; read as each capsule shows).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn gnome_meeting_capsules() -> bool {
-    on(GNOME_MEETING_CAPSULES) && Feature::GnomeMeetingCapsules.on_this_os()
+    feature_on(Feature::GnomeMeetingCapsules)
 }
 
 /// On a Wayland desktop without layer-shell (GNOME), Annotate's capsule and
@@ -333,7 +303,7 @@ pub fn gnome_meeting_capsules() -> bool {
 /// shows).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn gnome_annotate() -> bool {
-    on(GNOME_ANNOTATE) && Feature::GnomeAnnotate.on_this_os()
+    feature_on(Feature::GnomeAnnotate)
 }
 
 /// On Wayland, a screen capture asks the desktop for the monitor under the
@@ -341,14 +311,14 @@ pub fn gnome_annotate() -> bool {
 /// each screen capture starts).
 #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub fn annotate_pointer_screen() -> bool {
-    on(ANNOTATE_POINTER_SCREEN) && Feature::AnnotatePointerScreen.on_this_os()
+    feature_on(Feature::AnnotatePointerScreen)
 }
 
 /// The screenshot shortcut takes an area or a window (macOS; read by the
 /// session tap on each key press, so nothing runs while it is off).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn screenshots() -> bool {
-    on(SCREENSHOTS) && Feature::Screenshots.on_this_os()
+    feature_on(Feature::Screenshots)
 }
 
 /// Annotate's rolling 15 s display replay buffer (`SCClipBufferingOutput`,
@@ -356,14 +326,14 @@ pub fn screenshots() -> bool {
 /// replay`).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn annotate_replay() -> bool {
-    on(ANNOTATE_REPLAY) && Feature::AnnotateReplay.on_this_os()
+    feature_on(Feature::AnnotateReplay)
 }
 
 /// Audio files may be imported as meetings (macOS; read where the Meetings
 /// pane offers Import audio and where an import starts).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn meeting_import() -> bool {
-    on(MEETING_IMPORT) && Feature::MeetingImport.on_this_os()
+    feature_on(Feature::MeetingImport)
 }
 
 /// "While dictating" applies only while the default output is speakers
@@ -371,7 +341,7 @@ pub fn meeting_import() -> bool {
 /// environment on macOS, and by the audio-control worker on Linux and
 /// Windows).
 pub fn speakers_only() -> bool {
-    on(SPEAKERS_ONLY) && Feature::SpeakersOnly.on_this_os()
+    feature_on(Feature::SpeakersOnly)
 }
 
 /// The menu bar offers Pause Hex, and every capture shortcut is inert while
@@ -380,7 +350,7 @@ pub fn speakers_only() -> bool {
 /// lab off resumes).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn pause_menu() -> bool {
-    on(PAUSE_MENU) && Feature::PauseMenu.on_this_os()
+    feature_on(Feature::PauseMenu)
 }
 
 /// The menu bar lists the next calendar meetings, and choosing one with a
@@ -389,10 +359,7 @@ pub fn pause_menu() -> bool {
 /// calendar).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn calendar_menu() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    CALENDAR_MENU.load(Ordering::Acquire) && Feature::CalendarMenu.on_this_os()
+    feature_on(Feature::CalendarMenu)
 }
 
 /// A physical Caps Lock press starts and stops dictation, and its light
@@ -400,7 +367,7 @@ pub fn calendar_menu() -> bool {
 /// every pass and by the event tap and HID tracker through their own flag).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn caps_lock_dictation() -> bool {
-    on(CAPS_LOCK_DICTATION) && Feature::CapsLockDictation.on_this_os()
+    feature_on(Feature::CapsLockDictation)
 }
 
 /// A spoken trigger phrase inside a dictation turns what follows it into a
@@ -414,17 +381,13 @@ pub fn voice_prompt() -> bool {
 /// [`voice_prompt`] under an explicit policy, so its managed lock is read
 /// where the gate is tested.
 pub(crate) fn voice_prompt_under(policy: crate::policy::Policy) -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    VOICE_PROMPT.load(Ordering::Acquire)
-        && Feature::VoicePrompt.on_this_os()
-        && !policy.locks(crate::policy::Lock::OpenCodeProcessing)
+    feature_on(Feature::VoicePrompt) && !policy.locks(crate::policy::Lock::OpenCodeProcessing)
 }
 
 /// The words that start a voice prompt (read as each dictation's processing
 /// starts, only while [`voice_prompt`] is on).
 pub fn voice_prompt_phrase() -> String {
+    ensure_loaded();
     VOICE_PROMPT_PHRASE
         .read()
         .unwrap_or_else(|error| error.into_inner())
@@ -436,16 +399,14 @@ pub fn voice_prompt_phrase() -> String {
 /// capture starts). The partials it matches are produced while this or Live
 /// text is on; the HUD's live-text line still needs [`live_text`].
 pub fn stop_phrase() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    STOP_PHRASE.load(Ordering::Acquire) && Feature::StopPhrase.on_this_os()
+    feature_on(Feature::StopPhrase)
 }
 
 /// The phrase that finishes a hands-free dictation (read where each OS's
 /// listener matches it, and once more when it fires so its job strips exactly
 /// the words it heard).
 pub fn stop_phrase_text() -> String {
+    ensure_loaded();
     STOP_PHRASE_TEXT
         .read()
         .unwrap_or_else(|error| error.into_inner())
@@ -457,18 +418,13 @@ pub fn stop_phrase_text() -> String {
 /// History, and remembered for Paste Last (every OS; read as each output
 /// commits).
 pub fn signature() -> bool {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    SIGNATURE.load(Ordering::Acquire) && Feature::Signature.on_this_os()
+    feature_on(Feature::Signature)
 }
 
 /// The signature line appended while [`signature`] is on (read as each
 /// output commits, only while the gate is on). Empty appends nothing.
 pub fn signature_text() -> String {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
+    ensure_loaded();
     SIGNATURE_TEXT
         .read()
         .unwrap_or_else(|error| error.into_inner())
@@ -479,24 +435,19 @@ pub fn signature_text() -> String {
 /// or None while the lab is off (every OS; read once as each dictation's
 /// processing starts).
 pub fn dictation_style() -> Option<crate::app_settings::DictationStyle> {
-    // The state word has no bit for it: its own atomic, written by
-    // `labs::apply`, and loaded here first in a process that never applied.
-    let _ = state();
-    DICTATION_STYLE
-        .load(Ordering::Acquire)
-        .then(|| {
-            *DICTATION_STYLE_CHOICE
-                .read()
-                .unwrap_or_else(|error| error.into_inner())
-        })
-        .filter(|_| Feature::DictationStyle.on_this_os())
+    feature_on(Feature::DictationStyle).then(|| {
+        *DICTATION_STYLE_CHOICE
+            .read()
+            .unwrap_or_else(|error| error.into_inner())
+    })
 }
 
 /// Whether the Caps Lock light blinks slowly while recording instead of
 /// staying solid (macOS; read by the light model for each pattern).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn caps_lock_slow_blink() -> bool {
-    on(CAPS_LOCK_SLOW_BLINK) && Feature::CapsLockDictation.on_this_os()
+    ensure_loaded();
+    CAPS_LOCK_SLOW_BLINK.load(Ordering::Acquire)
 }
 
 /// A service running in the default WSL distribution is used ahead of a
@@ -504,35 +455,32 @@ pub fn caps_lock_slow_blink() -> bool {
 /// WSL answers nothing (Windows; read as each service search starts).
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 pub fn opencode_in_wsl() -> bool {
-    on(OPENCODE_IN_WSL) && Feature::OpenCodeInWsl.on_this_os()
+    feature_on(Feature::OpenCodeInWsl)
 }
 
 /// The local API's `POST /transcriptions` and `POST /streams/{id}/finish`
 /// accept `process=global` (read where each request's route starts and by
 /// the capabilities answer).
 pub fn api_processing() -> bool {
-    on(API_PROCESSING) && Feature::ApiProcessing.on_this_os()
+    feature_on(Feature::ApiProcessing)
 }
 
 /// The local API's `POST /transcriptions` accepts `timestamps=segment|word`
 /// and returns the model's own times (read where each request's route starts).
 pub fn api_timestamps() -> bool {
-    on(API_TIMESTAMPS) && Feature::ApiTimestamps.on_this_os()
+    feature_on(Feature::ApiTimestamps)
 }
 
 /// Labs › Smaller model files: your own speech model imports may use Q6_K,
 /// Q5_K, or Q4_K weights (macOS, where Metal has their kernels; read where an
 /// import's header is checked and where a saved selection loads).
 pub fn k_quant_models() -> bool {
-    // The switch has its own atomic, loaded here
-    // first in a process that never applied its settings.
-    let _ = state();
-    K_QUANT_MODELS.load(Ordering::Acquire) && Feature::KQuantModels.on_this_os()
+    feature_on(Feature::KQuantModels)
 }
 
 /// The apps YOLO mode sends in (empty: everywhere), or None while off.
 pub fn yolo_mode_apps() -> Option<Vec<String>> {
-    let _ = state();
+    ensure_loaded();
     YOLO_MODE_APPS
         .read()
         .unwrap_or_else(|error| error.into_inner())
@@ -545,10 +493,7 @@ pub fn yolo_mode_apps() -> Option<Vec<String>> {
 /// where History's unified list starts, so it applies without a restart).
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub fn paste_last_picker() -> bool {
-    // The state word is full, so the switch has its own atomic, loaded here
-    // first in a process that never applied its settings.
-    let _ = state();
-    PASTE_LAST_PICKER.load(Ordering::Acquire) && Feature::PasteLastPicker.on_this_os()
+    feature_on(Feature::PasteLastPicker)
 }
 
 /// Labs › Agent tools for captures: `hex annotate inspect`, `zoom`, `frames`,
@@ -562,11 +507,7 @@ pub fn annotate_agent_tools() -> bool {
 /// [`annotate_agent_tools`] under an explicit policy, so its managed lock is
 /// read where the gate is tested.
 pub(crate) fn annotate_agent_tools_under(policy: crate::policy::Policy) -> bool {
-    // The state word is full, so the switch has its own atomic, loaded here
-    // first in a process that never applied its settings.
-    let _ = state();
-    ANNOTATE_AGENT_TOOLS.load(Ordering::Acquire)
-        && Feature::AnnotateAgentTools.on_this_os()
+    feature_on(Feature::AnnotateAgentTools)
         && policy.labs_lock(Feature::AnnotateAgentTools).is_none()
 }
 
@@ -575,18 +516,14 @@ pub(crate) fn annotate_agent_tools_under(policy: crate::policy::Policy) -> bool 
 /// as a text file beside it (read as each drop starts, and by the window's
 /// drop target).
 pub fn drop_transcribe() -> bool {
-    // The state word is full, so the switch has its own atomic, loaded here
-    // first in a process that never applied its settings.
-    let _ = state();
-    DROP_TRANSCRIBE.load(Ordering::Acquire) && Feature::DropTranscribe.on_this_os()
+    feature_on(Feature::DropTranscribe)
 }
 
 /// How long the speech model may sit unused before the engine unloads it,
 /// while Labs › Free memory when idle is on.
 pub fn unload_idle() -> Option<std::time::Duration> {
-    let state = state();
-    (state & UNLOAD_IDLE != 0)
-        .then(|| std::time::Duration::from_secs(((state >> MINUTES_SHIFT) & MINUTES_MASK) * 60))
+    feature_on(Feature::UnloadIdle)
+        .then(|| std::time::Duration::from_secs(UNLOAD_IDLE_MINUTES.load(Ordering::Acquire) * 60))
 }
 
 /// How long a capture's microphone keeps open after it ends, while Labs ›
@@ -594,8 +531,7 @@ pub fn unload_idle() -> Option<std::time::Duration> {
 /// on every pass that would release the microphone, so turning the lab off
 /// releases it. `None` leaves Release microphone while idle exactly as it was.
 pub fn microphone_linger() -> Option<std::time::Duration> {
-    let state = state();
-    if state & KEEP_MICROPHONE_OPEN == 0 {
+    if !feature_on(Feature::KeepMicrophoneOpen) {
         return None;
     }
     match MICROPHONE_LINGER_SECONDS.load(Ordering::Acquire) {

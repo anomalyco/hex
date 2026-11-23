@@ -844,6 +844,87 @@ mod tests {
         assert_eq!(names.len(), keys().count(), "a key is listed twice");
     }
 
+    /// Fails when a Labs feature's `settings_key()` is missing from `keys()`,
+    /// is not a boolean key, or points to a different `AppSettings` field than
+    /// `Feature::on` / `Feature::set`.
+    #[test]
+    fn every_labs_feature_has_a_matching_bool_cli_key() {
+        for feature in crate::labs::Feature::ALL {
+            let name = feature.settings_key();
+            let key = keys().find(|key| key.key == name).unwrap_or_else(|| {
+                panic!(
+                    "Labs feature `{}` names no `hex settings` key `{name}`",
+                    feature.name()
+                )
+            });
+            assert!(
+                matches!(key.kind, Kind::Bool),
+                "Labs feature `{}` key `{name}` is {:?}, expected Bool",
+                feature.name(),
+                key.kind
+            );
+
+            let default = AppSettings::default();
+            assert!(!feature.on(&default), "{} defaults on", feature.name());
+            assert_eq!(
+                get(&default, name).unwrap()[0].value,
+                Value::Bool(false),
+                "`{name}` did not read false for default {}",
+                feature.name()
+            );
+
+            let mut via_feature = default.clone();
+            feature.set(&mut via_feature, true);
+            assert!(feature.on(&via_feature), "{}", feature.name());
+            assert_eq!(
+                get(&via_feature, name).unwrap()[0].value,
+                Value::Bool(true),
+                "`{name}` does not read the bool `Feature::set` wrote for {}",
+                feature.name()
+            );
+
+            let via_cli = apply(&default, name, "true", &rules()).unwrap().settings;
+            assert!(
+                feature.on(&via_cli),
+                "applying `{name} true` did not turn on `Feature::on` for {}",
+                feature.name()
+            );
+            assert_eq!(
+                via_cli,
+                via_feature,
+                "applying `{name} true` diverged from `Feature::set(true)` for {}",
+                feature.name()
+            );
+
+            let mut off_via_feature = via_feature.clone();
+            feature.set(&mut off_via_feature, false);
+            let off_via_cli = apply(&via_feature, name, "false", &rules())
+                .unwrap()
+                .settings;
+            assert!(!feature.on(&off_via_cli), "{}", feature.name());
+            assert_eq!(
+                off_via_cli,
+                off_via_feature,
+                "applying `{name} false` diverged from `Feature::set(false)` for {}",
+                feature.name()
+            );
+
+            for extra in feature.extra_settings_keys() {
+                assert!(
+                    keys().any(|key| key.key == *extra),
+                    "Labs feature `{}` companion key `{extra}` is missing from `keys()`",
+                    feature.name()
+                );
+                assert_eq!(
+                    crate::labs::Feature::for_settings_key(extra),
+                    Some(feature),
+                    "companion key `{extra}` did not map back to `{}`",
+                    feature.name()
+                );
+            }
+        }
+    }
+
     #[test]
     fn ui_language_accepts_traditional_chinese_in_any_case() {
         for raw in ["zh-Hant", "zh-hant", "ZH_HANT"] {
