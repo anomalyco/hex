@@ -23,6 +23,7 @@
     <string name="keyboard_literal" translatable="false">“%1$s”</string>
     <string name="keyboard_keep">Keep %1$s</string>
     <string name="keyboard_suggest">Suggest %1$s</string>
+    <string name="keyboard_suggest_emoji">Suggest emoji %1$s</string>
     <string name="keyboard_menu">Hex menu</string>
     <string name="keyboard_menu_open">"Hex menu  ›"</string>
     <string name="keyboard_menu_done">Done</string>

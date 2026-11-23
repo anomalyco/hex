@@ -7,9 +7,37 @@ internal data class Correction(val original: String, val replacement: String)
 
 /** One slot of the suggestion strip. [Kind.Typed] keeps what was typed as typed; [Kind.Fix] is what
  * space will put in its place (shown highlighted); [Kind.Word] a completion or another reading;
- * [Kind.Next] a word that may follow, offered after a space. */
+ * [Kind.Next] a word that may follow, offered after a space; [Kind.Emoji] the word's own emoji
+ * (Labs › Keyboard › Emoji suggestions), kept in the last slot. */
 internal data class Suggestion(val text: String, val kind: Kind) {
-    enum class Kind { Typed, Fix, Word, Next }
+    enum class Kind { Typed, Fix, Word, Next, Emoji }
+
+    companion object {
+        /** The strip shows three slots. */
+        const val SLOTS = 3
+        /** [slots] with [emoji] appended, dropping the least likely word to make room. A null
+         * [emoji] leaves [slots] exactly as they were. */
+        fun withEmoji(slots: List<Suggestion>, emoji: String?): List<Suggestion> =
+            if (emoji == null) slots else slots.take(SLOTS - 1) + Suggestion(emoji, Kind.Emoji)
+
+        /** The strip's [SLOTS] slots in display order. With a [Kind.Typed] slot they show as given,
+         * except that the emoji is padded into the last slot (so `[Typed]` plus an emoji leaves the
+         * middle empty rather than putting it there). Without one, the likeliest word takes the
+         * middle and the next the left, as Gboard and iPhone place them; the emoji keeps the last. */
+        fun place(slots: List<Suggestion>): List<Suggestion?> {
+            val shown = arrayOfNulls<Suggestion>(SLOTS)
+            val emoji = slots.firstOrNull { it.kind == Kind.Emoji }
+            val words = slots.filter { it.kind != Kind.Emoji }
+            if (slots.any { it.kind == Kind.Typed }) {
+                words.take(if (emoji == null) SLOTS else SLOTS - 1).forEachIndexed { i, slot -> shown[i] = slot }
+            } else {
+                shown[1] = words.getOrNull(0); shown[0] = words.getOrNull(1)
+                shown[2] = words.getOrNull(2)
+            }
+            if (emoji != null) shown[2] = emoji
+            return shown.toList()
+        }
+    }
 }
 
 /** The current word, and the one a space just finished while the next is typed. Both the keyboard
