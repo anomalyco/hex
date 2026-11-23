@@ -1,0 +1,19 @@
+{
+  "versionCode": 2305,
+  "versionName": "0.2.2-preview.2305",
+  "version": "0.2.2",
+  "minSdk": 31,
+  "published": "2026-11-23",
+  "commit": "f1d965ae5c0b402613184795e8a35cff78cbb250",
+  "apk": {
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2305/HexPreview-0.2.2-preview.2305.apk",
+    "size": 68922576,
+    "sha256": "8e41fcf2e37d1cb46e7e150b6fd23207222c3e559a6315d948519f58b31b66eb"
+  },
+  "notes": [
+    "Hex Preview is the Hex keyboard for Android, with dictation that runs on your phone.",
+    "It installs beside Hex from Google Play, as its own app with its own settings.",
+    "It updates itself: it shows what changed and installs a new version when you tap Update.",
+    "Your voice and what you type stay on your phone."
+  ]
+}
