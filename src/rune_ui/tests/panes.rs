@@ -64,7 +64,7 @@ fn settings_rows_follow_each_os() {
         "toggle-listening",
         "enable-on-launch",
         "meetings-enabled",
-        "detected-calls",
+        "calls",
         "hex-mic-driver",
         "command-model-notice",
     ] {
@@ -582,7 +582,7 @@ fn keep_audio_shows_with_meetings_and_saves_its_window() {
     );
 }
 
-/// Export's two switches and Detected calls' Stop when the call ends save
+/// Export's two switches and the Calls sheet's Stop when the call ends save
 /// their meeting settings; the Stop row names the grace it waits.
 #[test]
 fn meeting_export_and_stop_when_call_ends_save_their_settings() {
@@ -595,16 +595,17 @@ fn meeting_export_and_stop_when_call_ends_save_their_settings() {
     assert!(rt.state.settings.meetings.export.descriptive_filenames);
     tap(&mut rt, "meeting-notes-file");
     assert!(rt.state.settings.meetings.export.notes_file);
+    // Slack huddles record automatically, so the sheet offers Stop.
+    tap(&mut rt, "calls");
     tap(&mut rt, "meeting-stop-when-call-ends");
     assert!(rt.state.settings.meetings.stop_when_call_ends);
     let grace = format!(
-        " {} s ",
+        "{} seconds after",
         crate::meeting::detection::AUTO_STOP_GRACE.as_secs()
     );
     assert!(
-        super::super::platform_settings::STOP_WHEN_CALL_ENDS_CAPTION.contains(&grace),
-        "{}",
-        super::super::platform_settings::STOP_WHEN_CALL_ENDS_CAPTION
+        texts(&rt).iter().any(|text| text.starts_with(&grace)),
+        "the Stop row names its {grace}"
     );
 }
 
@@ -1388,33 +1389,50 @@ fn meetings_settings_save_and_ask_for_system_audio() {
     refresh(&mut rt);
     tap(&mut rt, "meeting-system-audio-allow");
     assert_eq!(asked(&rt), [PlatformRequest::SystemAudio]);
-    use crate::app_settings::MeetingPolicy;
-    let policy = |rt: &Runtime<Ui>, key: &str| {
-        rt.state
-            .settings
-            .meetings
-            .providers
-            .iter()
-            .find(|choice| choice.key == key)
-            .map(|choice| choice.policy)
-    };
-    // Known services first (Zoom is second), then the sites and apps chosen for.
-    pick(&mut rt, "call1-policy", 1);
-    assert_eq!(
-        policy(&rt, "us.zoom.xos"),
-        Some(MeetingPolicy::AlwaysRecord)
-    );
-    let chosen = format!(
-        "call{}",
-        crate::app_settings::known_meeting_providers().count()
-    );
-    pick(&mut rt, &format!("{chosen}-policy"), 0);
-    assert_eq!(policy(&rt, "example.com"), Some(MeetingPolicy::Ask));
-    assert!(rt.find(&chosen).is_some());
     tap(&mut rt, "meetings-enabled");
     assert!(!rt.state.settings.meetings.enabled);
     assert!(rt.find("meeting-folder").is_none());
+    assert!(rt.find("calls").is_none());
     assert!(rt.find("meetings-enabled").is_some(), "the opt-in remains");
+}
+
+/// The Calls row opens the sheet; its radios set the answer every call
+/// gets, and each row's menu gives one app or website its own.
+#[test]
+fn the_calls_sheet_saves_the_default_and_each_answer() {
+    use crate::app_settings::MeetingPolicy;
+    let mut rt = runtime("meetings-settings", true, (980.0, 2400.0));
+    let policy = |rt: &Runtime<Ui>, key: &str| rt.state.settings.meetings.policy_for(key);
+    assert_eq!(
+        a11y_value(&rt, "calls-control").as_deref(),
+        Some("Ask each time")
+    );
+    tap(&mut rt, "calls");
+    assert!(rt.state.calls.open);
+    // Seen calls newest first (Slack, Zoom, Google Meet, a website), then
+    // the saved answer Hex hasn't seen a call in.
+    pick(&mut rt, "call1-policy", 1);
+    assert_eq!(policy(&rt, "us.zoom.xos"), MeetingPolicy::AlwaysRecord);
+    pick(&mut rt, "call4-policy", 0);
+    assert_eq!(policy(&rt, "example.com"), MeetingPolicy::Ask);
+    assert!(rt.find("call4").is_some(), "a saved answer stays listed");
+    // A new default carries the calls that followed the old one.
+    tap(&mut rt, "default-never");
+    let meetings = &rt.state.settings.meetings;
+    assert_eq!(meetings.default_policy, MeetingPolicy::NeverOffer);
+    assert_eq!(policy(&rt, "meet.google.com"), MeetingPolicy::NeverOffer);
+    assert_eq!(policy(&rt, "example.com"), MeetingPolicy::NeverOffer);
+    assert_eq!(policy(&rt, "us.zoom.xos"), MeetingPolicy::AlwaysRecord);
+    tap(&mut rt, "close-calls");
+    assert!(!rt.state.calls.open);
+}
+
+/// Before Hex has seen a call, the sheet says where they'll come from.
+#[test]
+fn an_empty_calls_sheet_says_what_fills_it() {
+    let rt = runtime("meetings-calls-empty", true, (980.0, 2400.0));
+    assert!(rt.find("calls-empty").is_some());
+    assert!(rt.find("call0").is_none());
 }
 
 #[test]
@@ -2002,6 +2020,9 @@ fn platform_goldens() {
     check_golden("meetings-delete", false, PANE_SIZE);
     check_golden("meetings-rename", true, PANE_SIZE);
     check_golden("meetings-empty", false, PANE_SIZE);
+    check_golden("meetings-calls", true, PANE_SIZE);
+    check_golden("meetings-calls", false, PANE_SIZE);
+    check_golden("meetings-calls-empty", true, PANE_SIZE);
 }
 
 #[test]

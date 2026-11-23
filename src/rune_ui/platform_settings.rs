@@ -9,7 +9,7 @@ use rune::{El, Icon, row, text};
 
 use super::controls::{
     ButtonKind, CardRow, Choice, DESCRIPTION, Paint, button, card, folder_label, folding, icon_row,
-    icon_toggle_row, note, section, select, setting_row, toggle_row,
+    icon_toggle_row, note, section, select, setting_row,
 };
 use super::lists::{PermissionControl, permission_control, small_button};
 use super::paste_access::PasteAccess;
@@ -17,8 +17,8 @@ use super::platform::{CalendarRequest, MeetingRequest, NotesAvailability, Os, Pl
 use super::settings::toggle_menu;
 use super::{Menu, Pane, ShortcutTarget, Ui, icons};
 use crate::app_settings::{
-    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, MeetingPolicy, MeetingProviderChoice,
-    MeetingRetention, MeetingSummaries, ModifierSide,
+    AppSettings, CALENDAR_LEAD_MINUTES, HotkeyBinding, MeetingRetention, MeetingSummaries,
+    ModifierSide,
 };
 use crate::audio::hex_microphone::DriverActionState;
 use crate::calendar::{CalendarAccess, CallProvider};
@@ -447,10 +447,10 @@ pub(super) fn meetings_toggle(ui: &Ui, p: Paint) -> El {
 }
 
 /// Meetings › Settings: the opt-in (and the system-audio permission while
-/// it's missing); once on, summaries and how long meetings and their audio
-/// are kept, the export folder and file choices, Calendar, and each
-/// detected call provider's Ask / Always record / Never offer choice; behind
-/// Advanced the indicator and the granted permission.
+/// it's missing); once on, When a call starts (the Calls row and calendar
+/// reminders), summaries and how long meetings and their audio are kept, the
+/// export folder and file choices; behind Advanced the indicator and the
+/// granted permission.
 pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<El> {
     use super::general::advanced_toggle;
     let meetings = &ui.settings.meetings;
@@ -588,10 +588,9 @@ pub(super) fn meetings_settings(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Vec<E
     }
     let mut sections = vec![card(p, "meetings", rows)];
     if meetings.enabled {
+        sections.push(call_start_section(ui, p, layer));
         sections.push(section(p, "after-meeting", tr("After a meeting"), after));
         sections.push(section(p, "meeting-export", tr("Export"), export));
-        sections.extend(calendar_section(ui, p, layer));
-        sections.push(detected_calls_section(ui, p, layer));
         sections.push(advanced_toggle(ui, p, Pane::Meetings));
         if super::general::advanced_open(ui, Pane::Meetings) {
             sections.push(card(p, "advanced", more));
@@ -751,16 +750,21 @@ pub(super) fn provider_icon(provider: CallProvider) -> &'static Icon {
     }
 }
 
-/// Calendar reminders: Connect calendar (the only thing that asks macOS for
-/// access), then the reminder switch, lead time, included calendars, and
-/// the next few meetings.
-fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
-    if !ui.platform.caps.calendar {
-        return None;
+/// When a call starts: the Calls row, then, where calendars are read,
+/// Connect calendar (the only thing that asks macOS for access), the
+/// reminder switch, lead time, included calendars, and the next few
+/// meetings.
+fn call_start_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
+    let mut rows = vec![super::calls::settings_row(ui, p)];
+    if ui.platform.caps.calendar {
+        calendar_rows(ui, p, layer, &mut rows);
     }
+    section(p, "call-start", tr("When a call starts"), rows)
+}
+
+fn calendar_rows(ui: &Ui, p: Paint, layer: &mut Vec<El>, rows: &mut Vec<El>) {
     let view = &ui.platform.calendar;
     let calendar = &ui.settings.meetings.calendar;
-    let mut rows = Vec::new();
     if view.access.blocked() {
         rows.push(icon_row(
             p,
@@ -885,7 +889,6 @@ fn calendar_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> Option<El> {
     if let Some(error) = &view.error {
         rows.push(note("calendar-error", error, p.danger()));
     }
-    Some(section(p, "calendar", tr("Calendar"), rows))
 }
 
 /// Which calendars remind: all by default, each one switched in the menu.
@@ -997,90 +1000,6 @@ fn bulk_select_on(ui: &Ui) -> bool {
     let feature = Feature::CalendarSelectAll;
     feature.shipped() && feature.managed().is_none() && feature.on(&ui.settings)
 }
-
-/// The caption of Detected calls' Stop when the call ends, naming
-/// [`crate::meeting::detection::AUTO_STOP_GRACE`].
-pub(super) const STOP_WHEN_CALL_ENDS_CAPTION: &str = "Stop a recording Hex started on its own 30 s after the call app leaves the microphone and goes quiet";
-
-/// Stop when the call ends (macOS), then the known services and every other
-/// website or app the user chose for, each with Ask / Always record / Never
-/// offer.
-fn detected_calls_section(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
-    let choices = &ui.settings.meetings.providers;
-    let providers = crate::app_settings::known_meeting_providers().collect::<Vec<_>>();
-    let known = providers
-        .iter()
-        .map(|(key, label)| (key.to_string(), label.to_string(), tr(label).to_owned()));
-    let others = choices
-        .iter()
-        .filter(|choice| !providers.iter().any(|(key, _)| *key == choice.key))
-        .map(|choice| {
-            (
-                choice.key.clone(),
-                choice.label.clone(),
-                choice.label.clone(),
-            )
-        });
-    let labels = [tr("Ask"), tr("Always record"), tr("Never offer")];
-    let mut rows = Vec::new();
-    if ui.platform.caps.os == Os::Macos {
-        rows.push(toggle_row(
-            p,
-            "meeting-stop-when-call-ends",
-            tr("Stop when the call ends"),
-            tr(STOP_WHEN_CALL_ENDS_CAPTION),
-            ui.settings.meetings.stop_when_call_ends,
-            |ui: &mut Ui| {
-                let on = !ui.settings.meetings.stop_when_call_ends;
-                ui.update(|settings| settings.meetings.stop_when_call_ends = on);
-            },
-        ));
-    }
-    rows.extend(
-        known
-            .chain(others)
-            .enumerate()
-            .map(|(index, (key, label, shown))| {
-                let policy = choices
-                    .iter()
-                    .find(|choice| choice.key == key)
-                    .map_or(MeetingPolicy::Ask, |choice| choice.policy);
-                let selected = POLICIES.iter().position(|known| *known == policy);
-                let control = super::general::quiet_select(
-                    ui,
-                    p,
-                    Menu::Call(index),
-                    format!("call{index}-policy-control"),
-                    &shown,
-                    labels.iter().map(|label| (*label).to_owned()).collect(),
-                    selected.unwrap_or(0),
-                    move |ui, index| {
-                        let choice = MeetingProviderChoice {
-                            key: key.clone(),
-                            label: label.clone(),
-                            policy: POLICIES[index],
-                        };
-                        ui.update(|settings| {
-                            crate::app_settings::set_meeting_provider(
-                                &mut settings.meetings,
-                                choice,
-                            );
-                        });
-                    },
-                    layer,
-                );
-                setting_row(p, &format!("call{index}"), &shown, None, control)
-            }),
-    );
-    section(p, "detected-calls", tr("Detected calls"), rows)
-}
-
-/// In the order of the Detected calls segments.
-const POLICIES: [MeetingPolicy; 3] = [
-    MeetingPolicy::Ask,
-    MeetingPolicy::AlwaysRecord,
-    MeetingPolicy::NeverOffer,
-];
 
 /// The virtual microphone driver's row: install, update, or uninstall it.
 pub(super) fn driver_row(ui: &Ui, p: Paint) -> El {

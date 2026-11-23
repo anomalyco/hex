@@ -54,6 +54,23 @@ pub fn desktop_application_name(app_id: &str) -> Option<String> {
     platform::desktop_application_name(app_id)
 }
 
+/// The application whose bundle ID (macOS) or executable (Windows, Linux)
+/// is `id`, as a call's provider names it.
+pub fn find<'a>(
+    applications: &'a [InstalledApplication],
+    id: &str,
+) -> Option<&'a InstalledApplication> {
+    applications
+        .iter()
+        .find(|a| a.bundle_id.as_deref() == Some(id))
+        .or_else(|| {
+            applications.iter().find(|a| {
+                let key = a.bundle_id.as_deref().unwrap_or(&a.name);
+                crate::microphone_activity::canonical_bundle_id_for(key, None) == Some(id)
+            })
+        })
+}
+
 /// One entry per application: macOS bundles by identifier (or path), and
 /// executables by name, since Windows modes match the executable name.
 fn normalize(applications: &mut Vec<InstalledApplication>) {

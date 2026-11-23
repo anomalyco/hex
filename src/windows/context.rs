@@ -109,7 +109,7 @@ const MAX_MEETING_WINDOWS: usize = 6;
 /// Chromium-family browsers behind another app expose a page only through
 /// their own windows' UI Automation Documents. A page or window title naming
 /// a call (a Google Meet call, a Teams page) reports that call's site; a
-/// browser with no readable call page keeps the "Call in <browser>" fallback.
+/// browser with no readable call page keeps the "<browser> call detected" fallback.
 pub(crate) fn capture_for_meeting(
     canonical_bundle_id: &str,
 ) -> color_eyre::Result<ContextSnapshot> {

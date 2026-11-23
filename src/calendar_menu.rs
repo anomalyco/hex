@@ -104,7 +104,7 @@ fn day_prefix(
     Some(weekday_name(start.weekday()))
 }
 
-fn weekday_name(weekday: usize) -> &'static str {
+pub(crate) fn weekday_name(weekday: usize) -> &'static str {
     match weekday {
         0 => tr("Sun"),
         1 => tr("Mon"),

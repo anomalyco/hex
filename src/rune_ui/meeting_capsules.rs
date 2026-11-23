@@ -302,7 +302,7 @@ impl Live {
 
 struct Capsule {
     kind: Option<Kind>,
-    /// The offer shows its Never offer / Always record choices in place of
+    /// The offer shows its Don't offer / Always record choices in place of
     /// its actions.
     more_open: bool,
     /// Arms another 20 s if Cancel returns to an offer whose timer already fired.
@@ -787,7 +787,7 @@ impl Pill {
 }
 
 impl MeetingCapsules {
-    /// `choose` saves a "Never offer" or "Always record" choice (the window
+    /// `choose` saves a "Don't offer" or "Always record" choice (the window
     /// keeps the settings it saves).
     pub(crate) fn install<S: 'static>(
         app: &mut rune::App<S>,

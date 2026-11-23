@@ -3,9 +3,9 @@
 Record a call locally: Hex captures the other participants (system audio) and
 you (microphone) as separate tracks, transcribes them on this Mac, and saves a
 Markdown transcript with `You` and `Them` turns. Recording starts automatically
-only for calls from a website or app set to Always record, and never stops
-automatically unless Meetings › Settings › Detected calls › Stop when the call
-ends is on (see
+only for calls answered Always record (Meetings › Settings › Calls), and
+never stops automatically unless the Calls sheet's Stop when the call ends is
+on (see
 [meetings.auto-stop](#record)). This map describes macOS; [Linux and Windows](#linux-and-windows)
 lists where they differ.
 
@@ -29,7 +29,7 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 ├── Off -> only the Labs switch -> Turn on -> meetings.enabled = true
 ├── On -> Meetings joins the sidebar; header switch Recordings | Settings;
 │   menu-bar items, call detection, Option-Control-V
-│   Settings view: Call recording, After a meeting, Calendar, Detected calls, Advanced ▸
+│   Settings view: When a call starts, After a meeting, Export, Advanced ▸
 │   ├── System Audio Recording                  // meetings.permission; asked only now
 │   │   ├── Untrusted row shown / Allow -> retired Hex IDs cleared (`ScreenCapture` + `AudioCapture`)
 │   │   ├── Allow -> macOS prompt the first time (tour's permission_control)
@@ -71,17 +71,43 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │   │       // meetings-summaries-unavailable, meetings-summary-model
 │   ├── Advanced -> Show recording indicator (on by default; corner-snapping
 │   │   capsule) and the System Audio Recording row once allowed
-│   ├── Calendar -> Connect calendar; reminders before meetings // meetings.calendar
-│   │   ├── Labs › Select all calendars -> one Select all / Deselect all button
-│   │   │   beside the Calendars row // labs.calendar_bulk_select
-│   │   └── Labs › Upcoming meetings in menu bar -> the same meetings in the status menu // labs.calendar_menu
-│   └── Detected calls -> Stop when the call ends (macOS, off;
-│       │   meetings.stop_when_call_ends), then Ask / Always record / Never
-│       │   offer per provider // meetings.policy
-│       ├── Slack huddles, Zoom, Google Meet, Microsoft Teams, FaceTime, WhatsApp,
-│       │   Gather, Discord, Signal, Telegram, WeChat, LINE, Webex, Element,
-│       │   Phone, Google Voice, Messenger, and GroupMe (always listed)
-│       └── then each website or app chosen for from an offer's "…"
+│   └── When a call starts -> the Calls row, then (macOS) Connect calendar
+│       │   and reminders before meetings // meetings.calendar
+│       ├── Calls row -> the answer every call gets ("Ask each time"), the
+│       │   icons of up to four apps and websites with their own answer
+│       │   (then "+N"), and a line naming them ("Slack huddles: Record
+│       │   automatically", or "2 apps and websites answer differently");
+│       │   the whole row opens the Calls sheet // meetings.policy
+│       │   └── Calls sheet
+│       │       ├── When a call starts -> Ask each time (default) / Record
+│       │       │   automatically / Don't offer, each with what it does
+│       │       │   (meetings.default_policy). Choosing one moves every app
+│       │       │   and website that followed the old answer with it.
+│       │       │   └── Stop when the call ends (macOS, off;
+│       │       │       meetings.stop_when_call_ends) nests under Record
+│       │       │       automatically while it is the answer or any app or
+│       │       │       website records automatically; its line names the
+│       │       │       grace (AUTO_STOP_GRACE, 30 s)
+│       │       ├── Apps and websites -> every app and website Hex has seen
+│       │       │   a call in, newest first, then those with a saved answer
+│       │       │   it hasn't seen since; each row: icon, name, last seen
+│       │       │   (Today, Yesterday, weekday, else date) and its answer.
+│       │       │   Rows that follow the default read dimmed; Don't offer
+│       │       │   rows stay listed
+│       │       │   └── nothing yet -> "Apps and websites show up here after
+│       │       │       Hex sees a call in them."
+│       │       └── Done / Escape -> close (Escape closes an open row menu
+│       │           first)
+│       │       // checks: the_calls_sheet_saves_the_default_and_each_answer,
+│       │       // an_empty_calls_sheet_says_what_fills_it (tests/panes.rs);
+│       │       // scenes meetings-calls, meetings-calls-empty
+│       ├── Icons: the app's own icon from the application catalog (macOS
+│       │   bundles, Linux .desktop entries, Windows executables), loaded
+│       │   off the UI thread and cached; a website gets its service's
+│       │   mark when known, else a globe; nothing is fetched
+│       ├── Labs › Select all calendars -> one Select all / Deselect all button
+│       │   beside the Calendars row // labs.calendar_bulk_select
+│       └── Labs › Upcoming meetings in menu bar -> the same meetings in the status menu // labs.calendar_menu
 └── Off -> Controller idles; no microphone-activity inspection or shortcut;
            the pane leaves the sidebar
 
@@ -233,16 +259,16 @@ Browser calls -> a browser holding the microphone is a browser call after 20 s
     │   included), msedge, vivaldi (vivaldi-bin, vivaldi-stable,
     │   vivaldi-snapshot; a Vivaldi web app runs in Vivaldi's process);
     │   others are not detected (#1105)
-    ├── Linux -> offered as "Call in <browser>": no site is read yet, so a
+    ├── Linux -> offered as "<browser> call detected": no site is read yet, so a
     │   call on any website (Teams on the web, a Teams web app/PWA, Meet, ...)
     │   is a browser call, never the Microsoft Teams (or other service's)
-    │   choice; Always record can't be set for it from an offer
+    │   choice; Always record isn't offered for it
     └── Windows -> the microphone-holding browser's visible windows are read
         through UI Automation, at most six, one read in flight and 2 s for
         the whole read (a hung provider leaves their titles): a page address
         or window title naming a call (Meet, a Teams page, ...) offers that
         service with its site, and Always record follows it like any known
-        call; a page that names no call stays "Call in <browser>"
+        call; a page that names no call stays "<browser> call detected"
         └── the browser executable's windows, not the microphone process's:
             a Chromium audio utility process has none; each window's search
             stops at its first Document, so a page's content is not
@@ -347,17 +373,21 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      │   stretches the time
      └── Browser on a page that is not a known call site -> 20 s,
          so voice notes and dictation fields are not offered
-  -> Provider = the website when known, else the app; the website's choice
-     when it has one, else the app's (a browser's choice covers its other
-     sites), else Ask. A Teams page uses the Microsoft Teams app's choice.
-     ├── Never offer -> nothing shown; an earlier offer stays snoozed
+  -> Provider = the website when known, else the app; the website's answer
+     when it has one, else the app's (a browser's answer covers its other
+     sites), else the default (meetings.default_policy, Ask each time).
+     A Teams page uses the Microsoft Teams app's answer.
+     The watcher records the provider in the seen list (below).
+     ├── Don't offer -> nothing shown; an earlier offer stays snoozed
      ├── Always record -> starts recording, no offer   // meetings.auto-record
+     │   └── a default of Always record starts only calls Hex can
+     │       name (not a browser on an unknown page); those are offered
      │   └── recording capsule says "Started automatically" for 10 s; with the
      │       indicator off, a "Recording automatically" capsule with Stop
      │       and ✕ (✕ only hides it; the recording goes on, in the menu bar)
      └── Ask -> Capsule below the menu bar, focus-free  // meetings.offer
-         ├── Title: "Google Meet call detected", "Call on meet.jit.si",
-         │   "Call in Brave Browser" (site unknown), or the meeting's name
+         ├── Title: the app named first, "Google Meet call detected", "meet.jit.si call detected",
+         │   "Brave Browser call detected" (site unknown), or the meeting's name
           ├── The app's local icon, or the website's bundled service mark when
           │   known. Otherwise a neutral call icon, never the hosting browser's.
           │   The same 24 pt slot keeps the title aligned as a local icon loads.
@@ -376,8 +406,10 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
          ├── … -> "<provider>" · "Change anytime in Settings" (capsule widens)
          │   │   No rule is saved and no recording starts. The choices stay
          │   │   open past the timeout, until answered or the offer is withdrawn.
-         │   ├── Never offer -> saved, close
-         │   ├── Always record -> saved, records this call too
+         │   ├── Don't offer -> saved, close; the app's row shows
+         │   │   in the Calls sheet at once
+         │   ├── Always record -> saved, records
+         │   │   this call too; the row shows in the Calls sheet at once
          │   │   └── not offered for a browser on an unknown page
          │   └── Cancel -> Back to Record / Not now; if the original timer
          │       already fired, the compact offer gets another 20 s
@@ -431,10 +463,19 @@ Signal / Telegram / WeChat / LINE / Webex / Element / Phone call, or a browser c
      └── A call off the microphone for at most 2 s (a missed check) keeps
          its run; a longer release starts it over
 
-Choices persist as `meetings.providers` (`key`, `label`, `policy`:
-`ask` / `always_record` / `never_offer`) in `settings.json`. Missing means Ask.
-The older `meetings.never_offer` list reads as Never offer entries and is
-rewritten as `providers` on the next load.
+Answers persist as `meetings.providers` (`key`, `label`, `policy`:
+`ask` / `always_record` / `never_offer`, shown as Ask each time / Record
+automatically / Don't offer) in `settings.json`; a call without one takes
+`meetings.default_policy` (same values, `ask` by default, so a file from
+before it keeps asking). The older `meetings.never_offer` list reads as
+Don't offer entries and is rewritten as `providers` on the next load.
+
+The seen list is `seen-calls.json` in the data folder: owner-only, at most
+64 apps and websites (key, name, app ID, last seen), oldest dropped first,
+written by the meeting watcher when it detects a call and read by the window
+only while Meetings › Settings or the Calls sheet shows. It is not a setting:
+not in `settings.json`, with no `hex settings` key. Check:
+`src/meeting/seen_calls.rs` tests.
 ```
 
 Call detection knows Brave, Chrome, Safari, Firefox, Edge, Arc
@@ -459,9 +500,9 @@ Vivaldi, Ardia, or Zen call.
 Teams pages (`teams.microsoft.com`, `teams.cloud.microsoft`, and
 `teams.live.com`) are known call sites: a browser on one is a
 Microsoft Teams call after 2 s. They use the Microsoft Teams app's
-`com.microsoft.teams2` choice, so Always record set for the app covers its
-website too; a choice other than Ask saved earlier for a Teams page's own
-address still applies to that host. Check:
+`com.microsoft.teams2` answer, so Always record set for the app covers its
+website too; an answer saved earlier for a Teams page's own address still
+applies to that host until the app's answer is set, which drops it. Check:
 `teams_web_calls_are_the_teams_service`; not observed on a
 real browser Teams call.
 
@@ -480,13 +521,10 @@ microphone too; Webex and Phone take the normal 2 s. On macOS, where Hex reads
 the browser's page, pages on `voice.google.com` (Google Voice), `messenger.com`,
 `facetime.apple.com` (FaceTime), and `web.groupme.com` are named, and any
 `webex.com` subdomain is Webex, with one `webex.com` provider choice covering
-them all. Settings › Meetings › Detected calls always lists the seven apps,
-Google Voice, Messenger, and GroupMe
-(`app_settings::known_meeting_providers`). A FaceTime page gets its own
-`facetime.apple.com` choice from an offer's "…", shown as "FaceTime (web)",
-which does not follow the FaceTime app's choice. A Webex page's `webex.com`
-choice is made the same way and covers every subdomain, so those two have no
-always-listed row. Their Ask / Always record / Never offer choices work as the
+them all. The Calls sheet lists them once Hex has seen a call in them. A
+FaceTime page gets its own `facetime.apple.com` answer, shown as
+"FaceTime (web)", which does not follow the FaceTime app's. A Webex page's
+`webex.com` answer covers every subdomain. Their answers work as the
 existing services' do. The microphone app list in `hex meeting probe` and the
 logs resolves and merges these apps' helpers under the parent app. Phone calls are not verified on a real
 call: Continuity call audio may be held by `com.apple.avconferenced` instead
@@ -561,8 +599,7 @@ site survives a failed query, Hex being in front, or the 30 s between slow
 queries. Safari, Chrome, Firefox and
 Edge expose no URL, so their calls are unnamed unless the foreground context
 says otherwise. Banshee has no recognised room path, so any `banshee.app` page
-counts; it is not in Settings' always-listed providers, but appears under
-Detected calls once its choice is set from an offer's "…". Not observed: the
+counts; it appears in the Calls sheet once Hex sees a call there. Not observed: the
 new tab query against a live Brave with a Banshee call (the script compiles, and
 the thread and memory are unit-tested with fake queries); the Banshee URL shape
 was not available, so the host rule is a guess at "any page".
@@ -582,7 +619,7 @@ space in its own name removed) before detection reads it.
 page from what was read, by the same rule macOS uses for its Accessibility
 pages: a page address that names a call wins, and a call's tab title outranks
 another window's address. A window titled `Meet - …` names a Meet call when no
-address does; with neither, the call stays a plain "Call in <browser>". Not
+address does; with neither, the call stays a plain "<browser> call detected". Not
 observed on a real Windows Meet or Teams call.
 
 On 2026-10-21 Brave opened the microphone for 3-6 s at a time on
@@ -1120,7 +1157,7 @@ Panel capsules move like the recording capsule (#1093, graduated from Labs; only
   around it (#1305); a click on the body outside its buttons still stops
   there
 
-Meetings › Settings › Detected calls › Stop when the call ends (macOS, off by default; #835;
+Meetings › Settings › Calls › Stop when the call ends (macOS, off by default; #835;
 meetings.stop_when_call_ends) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
   and calendar recordings are never stopped
@@ -1401,7 +1438,7 @@ panel (2026-11-12) has not been clicked on a real Mac. Hover and the corner snap
 are checked by `the_recording_capsule_rests_compact_and_opens_under_the_pointer`,
 `dragging_the_recording_capsule_moves_it_and_snaps_to_a_corner`, and
 `a_released_capsule_snaps_to_the_corner_nearest_its_centre`; neither has been
-tried with a real pointer. A "Never offer" or "Always record" choice is saved and
+tried with a real pointer. A "Don't offer" or "Always record" answer is saved and
 also written into the window's live settings. On 2026-10-22 a signed build on a MacBook Pro
 showed the recording capsule (Open opened the meeting while it kept
 recording; Stop transcribed) and the ready capsule (Copy copied the

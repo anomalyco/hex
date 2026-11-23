@@ -143,7 +143,7 @@ fn known_provider_label(key: &str) -> Option<&'static str> {
 /// The provider key a website's calls use. Teams pages are the Microsoft
 /// Teams app's own service, so the app's choice covers them instead of a
 /// separate row per website host.
-fn provider_key_for_site(host: &str) -> &str {
+pub(crate) fn provider_key_for_site(host: &str) -> &str {
     if matches!(
         host,
         "teams.microsoft.com" | "teams.cloud.microsoft" | "teams.live.com"
@@ -154,8 +154,8 @@ fn provider_key_for_site(host: &str) -> &str {
     }
 }
 
-/// A website or app whose calls share one Ask / Always record / Never offer
-/// choice.
+/// A website or app whose calls share one answer (Ask each time, Record
+/// automatically, or Don't offer).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct MeetingProvider {
     pub key: String,
@@ -238,8 +238,8 @@ impl MeetingCandidate {
         }
         match self.source {
             MeetingSource::BrowserCall => match (&self.site, &self.application_name) {
-                (Some(site), _) => format!("Call on {site}"),
-                (None, Some(application)) => format!("Call in {application}"),
+                (Some(site), _) => format!("{site} call detected"),
+                (None, Some(application)) => format!("{application} call detected"),
                 (None, None) => "Call detected".into(),
             },
             MeetingSource::SlackHuddle => "Slack huddle detected".into(),
@@ -247,8 +247,8 @@ impl MeetingCandidate {
         }
     }
 
-    /// Whose call this is, for the user's Ask / Always record / Never offer
-    /// choice: the website when known, else the app. Known services use the
+    /// Whose call this is, for the user's answer: the website when known,
+    /// else the app. Known services use the
     /// name Settings lists them under; a Teams page is the Teams app's
     /// service, so it carries the app's key.
     pub fn provider(&self) -> Option<MeetingProvider> {
@@ -262,18 +262,37 @@ impl MeetingCandidate {
         Some(MeetingProvider { key, label })
     }
 
-    /// Whether one click may set this provider to Always record: not for a
-    /// browser whose page is unknown, which would record every page.
+    /// Whether this call may record automatically: not for a browser whose
+    /// page is unknown, which would record every page.
     pub fn can_always_record(&self) -> bool {
         self.provider().is_some()
             && !(self.source == MeetingSource::BrowserCall && self.site.is_none())
     }
 
-    /// The user's choice for this call: the website's when it has one, else
-    /// the app's (a browser's choice covers its other sites), else Ask. A
-    /// Teams page keeps a choice other than Ask saved for its own earlier
-    /// host key; an Ask there no longer shadows the Teams app's choice.
-    pub fn policy(&self, choices: &[MeetingProviderChoice]) -> MeetingPolicy {
+    /// Whether the call is on a website rather than in an app of its own.
+    pub fn on_web(&self) -> bool {
+        self.site.is_some()
+            || crate::microphone_activity::is_browser_id(self.application.as_deref())
+            || matches!(
+                self.source,
+                MeetingSource::BrowserCall | MeetingSource::GoogleMeet | MeetingSource::Banshee
+            )
+    }
+
+    /// The user's answer for this call, or `default` when it has none.
+    pub fn policy(
+        &self,
+        choices: &[MeetingProviderChoice],
+        default: MeetingPolicy,
+    ) -> MeetingPolicy {
+        self.own_policy(choices).unwrap_or(default)
+    }
+
+    /// The answer saved for this call: the website's when it has one, else
+    /// the app's (a browser's answer covers its other sites). A Teams page
+    /// keeps an answer other than Ask saved for its own earlier host key; an
+    /// Ask there no longer shadows the Teams app's answer.
+    fn own_policy(&self, choices: &[MeetingProviderChoice]) -> Option<MeetingPolicy> {
         let chosen = |key: Option<&str>| {
             let key = key?;
             choices
@@ -293,7 +312,6 @@ impl MeetingCandidate {
         legacy
             .or_else(|| chosen(site))
             .or_else(|| chosen(self.application.as_deref()))
-            .unwrap_or_default()
     }
 
     fn required_stability(&self) -> Duration {
@@ -893,18 +911,21 @@ impl MeetingDetector {
         self.switched_from = None;
     }
 
-    /// One observation under the user's choices. A Never offer call shows
-    /// nothing but still counts as present; Always record ones pass the same
-    /// stability time and snooze as an offer, so a stopped or dismissed call
-    /// never starts again until its app leaves the microphone.
+    /// One observation under the user's answers, `default` for calls with
+    /// none of their own. A Don't offer call shows nothing but still counts
+    /// as present; Always record ones pass the same stability time and
+    /// snooze as an offer, so a stopped or dismissed call never starts again
+    /// until its app leaves the microphone.
     pub fn detect(
         &mut self,
         candidate: Option<MeetingCandidate>,
         choices: &[MeetingProviderChoice],
+        default: MeetingPolicy,
     ) -> Option<Detection> {
         self.detect_at(
             candidate,
             choices,
+            default,
             Instant::now(),
             crate::calendar::wall_clock_ms(),
         )
@@ -914,26 +935,31 @@ impl MeetingDetector {
         &mut self,
         candidate: Option<MeetingCandidate>,
         choices: &[MeetingProviderChoice],
+        default: MeetingPolicy,
         now: Instant,
         now_ms: i64,
     ) -> Option<Detection> {
         let candidate = self.substitute_switched(candidate, now);
-        if candidate
-            .as_ref()
-            .is_some_and(|candidate| candidate.policy(choices) == MeetingPolicy::NeverOffer)
-        {
+        if candidate.as_ref().is_some_and(|candidate| {
+            candidate.policy(choices, default) == MeetingPolicy::NeverOffer
+        }) {
             // Still on the microphone: an earlier offer stays snoozed.
             self.pending = None;
             self.last_present = Some(now);
             return None;
         }
         let candidate = self.observe_at(candidate, now, now_ms)?;
-        Some(match candidate.policy(choices) {
-            MeetingPolicy::AlwaysRecord => Detection::Record(candidate),
-            _ => {
-                self.open_offer = Some(OfferId::at(now));
-                Detection::Offer(candidate)
-            }
+        // A default of Always record starts only calls Hex can name;
+        // a browser page it can't is offered instead of recording every page.
+        let records = match candidate.own_policy(choices) {
+            Some(policy) => policy == MeetingPolicy::AlwaysRecord,
+            None => default == MeetingPolicy::AlwaysRecord && candidate.can_always_record(),
+        };
+        Some(if records {
+            Detection::Record(candidate)
+        } else {
+            self.open_offer = Some(OfferId::at(now));
+            Detection::Offer(candidate)
         })
     }
 
@@ -1463,6 +1489,8 @@ mod tests {
         base: Instant,
         elapsed_ms: u64,
         wall_ms: i64,
+        /// The answer for calls without their own.
+        default: MeetingPolicy,
     }
 
     impl Watch {
@@ -1472,6 +1500,7 @@ mod tests {
                 base: Instant::now(),
                 elapsed_ms: 0,
                 wall_ms: 0,
+                default: MeetingPolicy::Ask,
             }
         }
 
@@ -1488,10 +1517,13 @@ mod tests {
             let end = self.elapsed_ms + ms;
             while self.elapsed_ms < end {
                 let now = self.base + Duration::from_millis(self.elapsed_ms);
-                if let Some(detection) =
-                    self.detector
-                        .detect_at(candidate.cloned(), choices, now, self.wall_ms)
-                {
+                if let Some(detection) = self.detector.detect_at(
+                    candidate.cloned(),
+                    choices,
+                    self.default,
+                    now,
+                    self.wall_ms,
+                ) {
                     found.push((self.elapsed_ms, detection));
                 }
                 self.elapsed_ms += step_ms;
@@ -1899,7 +1931,7 @@ mod tests {
             policy: MeetingPolicy::AlwaysRecord,
         };
         assert_eq!(
-            teams.policy(std::slice::from_ref(&app)),
+            teams.policy(std::slice::from_ref(&app), MeetingPolicy::Ask),
             MeetingPolicy::AlwaysRecord
         );
         // A choice other than Ask saved for the page's own host before pages
@@ -1910,11 +1942,11 @@ mod tests {
             policy: MeetingPolicy::NeverOffer,
         };
         assert_eq!(
-            teams.policy(std::slice::from_ref(&web)),
+            teams.policy(std::slice::from_ref(&web), MeetingPolicy::Ask),
             MeetingPolicy::NeverOffer
         );
         assert_eq!(
-            teams.policy(&[app.clone(), web]),
+            teams.policy(&[app.clone(), web], MeetingPolicy::Ask),
             MeetingPolicy::NeverOffer,
             "the page's own saved choice wins"
         );
@@ -1925,7 +1957,10 @@ mod tests {
             label: "Teams (web)".into(),
             policy: MeetingPolicy::Ask,
         };
-        assert_eq!(teams.policy(&[app, asked_web]), MeetingPolicy::AlwaysRecord);
+        assert_eq!(
+            teams.policy(&[app, asked_web], MeetingPolicy::Ask),
+            MeetingPolicy::AlwaysRecord
+        );
 
         let facetime = candidate_from_microphone(
             &brave(),
@@ -1981,7 +2016,7 @@ mod tests {
             assert_eq!(provider.key, "com.microsoft.teams2", "{url}");
             assert_eq!(provider.label, "Microsoft Teams", "{url}");
             assert_eq!(
-                call.policy(std::slice::from_ref(&always)),
+                call.policy(std::slice::from_ref(&always), MeetingPolicy::Ask),
                 MeetingPolicy::AlwaysRecord,
                 "{url} follows the Teams app's choice"
             );
@@ -2837,7 +2872,7 @@ mod tests {
         assert_eq!(call.source, MeetingSource::BrowserCall);
         assert_eq!(call.application.as_deref(), Some("com.vivaldi.Vivaldi"));
         assert_eq!(call.application_name.as_deref(), Some("Vivaldi"));
-        assert_eq!(call.offer_title(), "Call in Vivaldi");
+        assert_eq!(call.offer_title(), "Vivaldi call detected");
         assert_eq!(call.required_stability(), BROWSER_STABLE_FOR);
     }
 
@@ -2869,7 +2904,7 @@ mod tests {
         // browser.
         let other = candidate_from_microphone(&helium_helper, &ContextSnapshot::default()).unwrap();
         assert_eq!(other.source, MeetingSource::BrowserCall);
-        assert_eq!(other.offer_title(), "Call in Helium");
+        assert_eq!(other.offer_title(), "Helium call detected");
     }
 
     #[test]
@@ -2901,7 +2936,7 @@ mod tests {
         // browser.
         let other = candidate_from_microphone(&ardia_helper, &ContextSnapshot::default()).unwrap();
         assert_eq!(other.source, MeetingSource::BrowserCall);
-        assert_eq!(other.offer_title(), "Call in Ardia");
+        assert_eq!(other.offer_title(), "Ardia call detected");
     }
 
     #[test]
@@ -2933,7 +2968,7 @@ mod tests {
         // browser.
         let other = candidate_from_microphone(&zen_helper, &ContextSnapshot::default()).unwrap();
         assert_eq!(other.source, MeetingSource::BrowserCall);
-        assert_eq!(other.offer_title(), "Call in Zen");
+        assert_eq!(other.offer_title(), "Zen call detected");
 
         // On Linux the microphone's process names Zen by its binary: `zen` for
         // the Flatpak and the tarball launcher, `zen-bin` for the tarball's own
@@ -2949,7 +2984,7 @@ mod tests {
             assert_eq!(call.source, MeetingSource::BrowserCall, "{binary}");
             assert_eq!(call.application.as_deref(), Some("app.zen-browser.zen"));
             assert_eq!(call.application_name.as_deref(), Some("Zen"));
-            assert_eq!(call.offer_title(), "Call in Zen");
+            assert_eq!(call.offer_title(), "Zen call detected");
         }
     }
 
@@ -2994,11 +3029,11 @@ mod tests {
         );
         let site = candidate_from_microphone(&brave(), &problems).unwrap();
         assert_eq!(site.source, MeetingSource::BrowserCall);
-        assert_eq!(site.offer_title(), "Call on example.com");
+        assert_eq!(site.offer_title(), "example.com call detected");
         assert_eq!(site.recording_start().app.as_deref(), Some("example.com"));
 
         let unknown = candidate_from_microphone(&brave(), &ContextSnapshot::default()).unwrap();
-        assert_eq!(unknown.offer_title(), "Call in Brave Browser");
+        assert_eq!(unknown.offer_title(), "Brave Browser call detected");
 
         let meet = candidate_from_microphone(
             &brave(),
@@ -3038,7 +3073,10 @@ mod tests {
         let provider = site.provider().unwrap();
         assert_eq!(provider.key, "example.com");
         assert_eq!(
-            site.policy(&[provider.choose(MeetingPolicy::NeverOffer)]),
+            site.policy(
+                &[provider.choose(MeetingPolicy::NeverOffer)],
+                MeetingPolicy::Ask
+            ),
             MeetingPolicy::NeverOffer
         );
         assert!(site.can_always_record());
@@ -3051,23 +3089,32 @@ mod tests {
         );
         assert!(!unknown.can_always_record());
         let never_site = [choice("example.com", MeetingPolicy::NeverOffer)];
-        assert_eq!(unknown.policy(&never_site), MeetingPolicy::Ask);
+        assert_eq!(
+            unknown.policy(&never_site, MeetingPolicy::Ask),
+            MeetingPolicy::Ask
+        );
         // A browser's choice covers its sites unless the site has its own.
         let never_brave = choice("com.brave.Browser", MeetingPolicy::NeverOffer);
         assert_eq!(
-            site.policy(std::slice::from_ref(&never_brave)),
+            site.policy(std::slice::from_ref(&never_brave), MeetingPolicy::Ask),
             MeetingPolicy::NeverOffer
         );
         assert_eq!(
-            site.policy(&[
-                never_brave.clone(),
-                choice("example.com", MeetingPolicy::AlwaysRecord)
-            ]),
+            site.policy(
+                &[
+                    never_brave.clone(),
+                    choice("example.com", MeetingPolicy::AlwaysRecord)
+                ],
+                MeetingPolicy::Ask
+            ),
             MeetingPolicy::AlwaysRecord
         );
         // A site set back to Ask asks, whatever its browser's choice.
         assert_eq!(
-            site.policy(&[never_brave, choice("example.com", MeetingPolicy::Ask)]),
+            site.policy(
+                &[never_brave, choice("example.com", MeetingPolicy::Ask)],
+                MeetingPolicy::Ask
+            ),
             MeetingPolicy::Ask
         );
 
@@ -3154,6 +3201,50 @@ mod tests {
         );
     }
 
+    /// The default answers calls with none of their own; a call's own answer
+    /// still wins, and a browser page Hex can't name is offered rather than
+    /// recorded, which would record every page.
+    #[test]
+    fn the_default_answers_calls_without_their_own() {
+        let slack = slack_huddle();
+        let mut watch = Watch::new();
+        watch.default = MeetingPolicy::AlwaysRecord;
+        assert_eq!(
+            watch.run(Some(&slack), &[], 2_500).pop().unwrap().1,
+            Detection::Record(slack.clone())
+        );
+
+        let mut watch = Watch::new();
+        watch.default = MeetingPolicy::AlwaysRecord;
+        let ask = [choice("com.tinyspeck.slackmacgap", MeetingPolicy::Ask)];
+        assert_eq!(
+            watch.run(Some(&slack), &ask, 2_500).pop().unwrap().1,
+            Detection::Offer(slack.clone())
+        );
+
+        let unknown = candidate_from_microphone(&brave(), &ContextSnapshot::default()).unwrap();
+        let mut watch = Watch::new();
+        watch.default = MeetingPolicy::AlwaysRecord;
+        assert_eq!(
+            watch.run(Some(&unknown), &[], 31_000).pop().unwrap().1,
+            Detection::Offer(unknown)
+        );
+
+        let mut watch = Watch::new();
+        watch.default = MeetingPolicy::NeverOffer;
+        assert!(watch.run(Some(&slack), &[], 8_000).is_empty());
+        let always = [choice(
+            "com.tinyspeck.slackmacgap",
+            MeetingPolicy::AlwaysRecord,
+        )];
+        let mut watch = Watch::new();
+        watch.default = MeetingPolicy::NeverOffer;
+        assert_eq!(
+            watch.run(Some(&slack), &always, 2_500).pop().unwrap().1,
+            Detection::Record(slack)
+        );
+    }
+
     #[test]
     fn never_offer_and_snoozed_calls_never_start() {
         let slack = slack_huddle();
@@ -3177,7 +3268,7 @@ mod tests {
         )];
         assert!(watch.run(None, &always, 20_000).is_empty());
         assert!(watch.run(Some(&slack), &always, 8_000).is_empty());
-        // Never offer, then Always record, while the call stays on the
+        // Don't offer, then Always record, while the call stays on the
         // microphone well past the snooze reset: still nothing.
         let never = [choice(
             "com.tinyspeck.slackmacgap",

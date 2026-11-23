@@ -124,7 +124,7 @@ pub(super) fn actions(
             action("offer-cancel", tr("Cancel"), false, |c| {
                 c.set_more_open(false)
             }),
-            action("never-offer", tr("Never offer"), false, |c| {
+            action("never-offer", tr("Don't offer"), false, |c| {
                 c.choose(MeetingPolicy::NeverOffer);
                 c.send(ControllerCommand::Dismiss);
                 c.close();

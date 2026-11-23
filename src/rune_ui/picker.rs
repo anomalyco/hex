@@ -136,6 +136,7 @@ pub(super) fn open(ui: &mut Ui) {
     super::explainer::close(ui);
     super::sound_sets::close(ui);
     super::vocabulary::close(ui);
+    super::calls::close(ui);
     ui.open = None;
     ui.picker.open = true;
     ui.picker.clear_deletion();

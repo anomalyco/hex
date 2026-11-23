@@ -13,6 +13,7 @@ use strings::TRANSLATIONS;
 
 mod agents;
 mod annotate_dictation;
+mod calls;
 mod clock;
 mod failures;
 mod french;
@@ -669,6 +670,8 @@ mod tests {
         include_str!("../rune_ui/settings.rs"),
         include_str!("../rune_ui/shortcut_mode.rs"),
         include_str!("../rune_ui/sound_sets.rs"),
+        include_str!("../rune_ui/calls.rs"),
+        include_str!("../rune_ui/meeting_capsules/offer.rs"),
         include_str!("../rune_ui/speech_model.rs"),
         include_str!("../rune_ui/vocabulary.rs"),
         include_str!("../rune_ui/windows_host.rs"),

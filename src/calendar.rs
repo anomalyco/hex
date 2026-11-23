@@ -138,8 +138,8 @@ impl CallProvider {
         }
     }
 
-    /// The Detected calls key whose Ask / Always record / Never offer
-    /// choice applies to this service's calls.
+    /// The key the Calls sheet saves this service's answer under (Ask each
+    /// time, Always record, or Don't offer).
     pub fn choice_key(self) -> Option<&'static str> {
         match self {
             Self::Zoom => Some("us.zoom.xos"),

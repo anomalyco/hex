@@ -1,0 +1,590 @@
+//! Calls: Meetings › Settings' Calls row and the sheet it opens. The row
+//! names the answer every call gets and stacks the icons of the apps and
+//! websites with their own; the sheet chooses that answer and lists every
+//! app and website Hex has seen a call in, plus any with a saved answer,
+//! newest first, each with its own menu.
+//!
+//! The meeting watcher writes the seen list (`meeting::seen_calls`); the
+//! window only reads it, every few seconds while Meetings › Settings shows.
+
+use std::sync::mpsc::{Receiver, sync_channel};
+
+use rune::{El, col, el, row, text};
+use rune_kit::RadioItem;
+
+use super::controls::{
+    ButtonKind, CardRow, METRICS, Paint, button, card, icon_row, modal_scrim_transition,
+    modal_transition, nested, note, toggle_row,
+};
+use super::platform::Os;
+use super::{Menu, Pane, Ui, icons};
+use crate::app_settings::{MeetingPolicy, MeetingProviderChoice};
+use crate::calendar::CallProvider;
+use crate::calendar::date::{LocalDate, local_date};
+use crate::desktop::i18n::{tr, tr_fill, tr_named};
+use crate::meeting::seen_calls::{self, SeenCall};
+
+const MODAL_WIDTH: f32 = 560.0;
+const PADDING: f32 = 18.0;
+const ICON: f32 = 20.0;
+/// The last-seen column, right-aligned.
+const WHEN_WIDTH: f32 = 92.0;
+/// The answer column, wide enough for the longest answer.
+const ANSWER_WIDTH: f32 = 180.0;
+/// How dim an answer that follows the default reads.
+const FOLLOWING: f32 = 0.55;
+/// The Calls row's icons before the rest become "+N".
+const STACKED: usize = 4;
+const STACK_ICON: f32 = 18.0;
+/// Seconds between reads of the seen list while it shows.
+const RELOAD_EVERY: f64 = 5.0;
+
+#[derive(Default)]
+pub(super) struct Calls {
+    pub(super) open: bool,
+    /// The apps and websites Hex has seen a call in, newest first.
+    seen: Vec<SeenCall>,
+    loader: Option<Receiver<Vec<SeenCall>>>,
+    /// The poll clock at the last read.
+    read_at: Option<f64>,
+    /// A fixed now for snapshots, in milliseconds since the Unix epoch.
+    now_ms: Option<i64>,
+}
+
+/// One row of the sheet's table.
+struct CallRow {
+    key: String,
+    label: String,
+    /// The app's bundle ID (macOS) or executable, for its icon.
+    application: Option<String>,
+    web: bool,
+    last_seen_ms: Option<i64>,
+}
+
+impl CallRow {
+    /// The key a service's mark is found by: the call's own, else its name
+    /// (an app's bundle ID may not name its service).
+    fn glyph_key(&self) -> &str {
+        if CallProvider::from_meeting_app(&self.key).is_some() {
+            &self.key
+        } else {
+            &self.label
+        }
+    }
+}
+
+/// Every app and website seen, newest first, then those with a saved
+/// answer Hex hasn't seen a call in since it began keeping the list.
+fn rows(ui: &Ui) -> Vec<CallRow> {
+    let mut rows: Vec<CallRow> = ui
+        .calls
+        .seen
+        .iter()
+        .map(|seen| CallRow {
+            key: seen.key.clone(),
+            label: seen.label.clone(),
+            application: seen.application.clone(),
+            web: seen.application.is_none(),
+            last_seen_ms: Some(seen.last_seen_ms),
+        })
+        .collect();
+    for choice in &ui.settings.meetings.providers {
+        if !rows.iter().any(|row| row.key == choice.key) {
+            rows.push(CallRow {
+                key: choice.key.clone(),
+                label: choice.label.clone(),
+                // A saved app's key is its bundle ID; a website's is its
+                // host, which it is also named by.
+                application: Some(choice.key.clone()),
+                web: choice.label == choice.key && choice.key.contains('.'),
+                last_seen_ms: None,
+            });
+        }
+    }
+    rows
+}
+
+/// The glyph for a call without an app icon: its service's mark, a globe
+/// for any other website, else a call.
+pub(crate) fn glyph(web: bool, key: &str) -> &'static rune::Icon {
+    match CallProvider::from_meeting_app(key) {
+        Some(provider) => super::platform_settings::provider_icon(provider),
+        None if web => &icons::GLOBE,
+        None => &icons::CALL,
+    }
+}
+
+/// The app's icon when the catalog has it, else its glyph.
+fn row_icon(ui: &Ui, p: Paint, call: &CallRow, size: f32) -> El {
+    let pixels = call
+        .application
+        .as_deref()
+        .and_then(|id| ui.modes.app_icon(id));
+    match pixels {
+        Some(pixels) => super::modes::application_icon("icon", &pixels, size),
+        None => el().key("icon").size(size, size).center().child(
+            rune::icon(glyph(call.web, call.glyph_key()), size - 4.0)
+                .key("glyph")
+                .color(p.muted()),
+        ),
+    }
+    .a11y_hidden()
+}
+
+/// Opens the sheet, alone: it ends a shortcut recording and closes the
+/// other sheets and any menu, and reads the seen list at once.
+pub(super) fn open(ui: &mut Ui) {
+    super::settings::cancel_capture(ui);
+    super::picker::close(ui);
+    super::explainer::close(ui);
+    super::vocabulary::close(ui);
+    super::sound_sets::close(ui);
+    ui.open = None;
+    ui.calls.open = true;
+    ui.calls.read_at = None;
+}
+
+pub(super) fn close(ui: &mut Ui) {
+    if matches!(ui.open, Some(Menu::Call(_))) {
+        ui.open = None;
+    }
+    ui.calls.open = false;
+}
+
+/// Shows `seen` at a fixed `now_ms`, the sheet open when `open`.
+pub(super) fn fixture(ui: &mut Ui, seen: Vec<SeenCall>, now_ms: i64, open: bool) {
+    ui.calls.seen = seen;
+    ui.calls.now_ms = Some(now_ms);
+    if open {
+        self::open(ui);
+    }
+}
+
+/// Reads the seen list off the UI thread while Meetings › Settings or the
+/// sheet shows, and the app catalog for their icons. True when the list
+/// changed.
+pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool) -> bool {
+    let mut changed = false;
+    if let Some(loader) = &ui.calls.loader
+        && let Ok(seen) = loader.try_recv()
+    {
+        ui.calls.loader = None;
+        if seen != ui.calls.seen {
+            ui.calls.seen = seen;
+            changed = true;
+        }
+    }
+    let showing = ui.calls.open
+        || (ui.pane == Pane::Meetings
+            && ui.meetings.view == super::meetings::View::Settings
+            && ui.settings.meetings.enabled);
+    if !(showing && visible && ui.live()) {
+        return changed;
+    }
+    ui.modes.ensure_applications();
+    if ui.calls.loader.is_none() && ui.calls.read_at.is_none_or(|at| clock - at >= RELOAD_EVERY) {
+        ui.calls.read_at = Some(clock);
+        let (sender, receiver) = sync_channel(1);
+        std::thread::spawn(move || {
+            let _ = sender.send(seen_calls::load());
+        });
+        ui.calls.loader = Some(receiver);
+    }
+    changed
+}
+
+fn last_seen(ms: i64, now_ms: i64) -> String {
+    match (local_date(ms), local_date(now_ms)) {
+        (Some(date), Some(today)) => day_label(date, today),
+        _ => String::new(),
+    }
+}
+
+/// A day a call was seen: Today, Yesterday, its weekday within a week, else
+/// its date.
+fn day_label(date: LocalDate, today: LocalDate) -> String {
+    match today.days() - date.days() {
+        ..=0 => tr("Today").into(),
+        1 => tr("Yesterday").into(),
+        2..=6 => crate::calendar_menu::weekday_name(date.weekday()).into(),
+        _ => {
+            let months = tr("Jan Feb Mar Apr May Jun Jul Aug Sep Oct Nov Dec");
+            let month = months
+                .split_whitespace()
+                .nth((date.month - 1) as usize)
+                .unwrap_or("");
+            let fields = [
+                ("month", month),
+                ("day", &date.day.to_string()),
+                ("year", &date.year.to_string()),
+            ];
+            if today.year == date.year {
+                tr_named("{month} {day}", &fields)
+            } else {
+                tr_named("{month} {day}, {year}", &fields)
+            }
+        }
+    }
+}
+
+/// Meetings › Settings' Calls row: the default's name, the icons of the
+/// apps and websites that answer otherwise, and a chevron. Pressed
+/// anywhere, it opens the sheet.
+pub(super) fn settings_row(ui: &Ui, p: Paint) -> El {
+    let meetings = &ui.settings.meetings;
+    let default = tr(meetings.default_policy.label());
+    let own: Vec<CallRow> = rows(ui)
+        .into_iter()
+        .filter(|call| meetings.has_own_answer(&call.key))
+        .collect();
+    let description = match own.as_slice() {
+        [] => default.to_owned(),
+        [call] => format!(
+            "{default} · {}",
+            tr_named(
+                "{name}: {answer}",
+                &[
+                    ("name", tr(&call.label)),
+                    ("answer", tr(meetings.policy_for(&call.key).label())),
+                ],
+            )
+        ),
+        own => format!(
+            "{default} · {}",
+            tr_fill(
+                "{} apps and websites answer differently",
+                &own.len().to_string()
+            )
+        ),
+    };
+    let c = &p.k.c;
+    let ring = STACK_ICON + 3.0;
+    let stack = row()
+        .key("stack")
+        .center_y()
+        .a11y_hidden()
+        .children(own.iter().take(STACKED).enumerate().map(|(index, call)| {
+            el().key(format!("own{index}"))
+                .size(ring, ring)
+                .ml(if index == 0 { 0.0 } else { -6.0 })
+                .radius(ring / 2.0)
+                .fill(c.bg_base)
+                .center()
+                .child(row_icon(ui, p, call, STACK_ICON))
+        }))
+        .children((own.len() > STACKED).then(|| {
+            text(format!("+{}", own.len() - STACKED))
+                .key("more")
+                .font(p.k.ty.small)
+                .color(p.muted())
+                .ml(4.0)
+        }));
+    let control = row()
+        .key("calls-controls")
+        .gap(6.0)
+        .center_y()
+        .child(stack)
+        .child(super::controls::value_button(
+            p,
+            "calls-control",
+            tr("Calls"),
+            default,
+            &rune_theme_opencode::icons::CHEVRON_RIGHT,
+            open,
+        ));
+    icon_row(
+        p,
+        "calls",
+        &icons::CALL,
+        tr("Calls"),
+        Some(&description),
+        control,
+    )
+    .on_press(open)
+}
+
+/// What each default answer does, under its radio. Only a Mac has a menu
+/// bar to name.
+fn outcome(policy: MeetingPolicy, mac: bool) -> &'static str {
+    match (policy, mac) {
+        (MeetingPolicy::Ask, true) => tr("A small offer appears beside the menu bar"),
+        (MeetingPolicy::Ask, false) => tr("A small offer appears on screen"),
+        (MeetingPolicy::AlwaysRecord, true) => {
+            tr("Recording starts with the call; you'll see it in the menu bar")
+        }
+        (MeetingPolicy::AlwaysRecord, false) => tr("Recording starts with the call"),
+        (MeetingPolicy::NeverOffer, true) => tr("Start recordings yourself from the menu bar"),
+        (MeetingPolicy::NeverOffer, false) => tr("Start recordings yourself from Hex"),
+    }
+}
+
+fn policy_key(policy: MeetingPolicy) -> &'static str {
+    match policy {
+        MeetingPolicy::Ask => "default-ask",
+        MeetingPolicy::AlwaysRecord => "default-record",
+        MeetingPolicy::NeverOffer => "default-never",
+    }
+}
+
+fn set_default(ui: &mut Ui, policy: MeetingPolicy) {
+    if ui.settings.meetings.default_policy != policy {
+        ui.update(|settings| settings.meetings.set_default_policy(policy));
+    }
+}
+
+/// The default's radios, with Stop when the call ends under Record
+/// automatically while anything records on its own (macOS).
+fn answers(ui: &Ui, p: Paint) -> Vec<CardRow> {
+    let meetings = &ui.settings.meetings;
+    let default = meetings.default_policy;
+    let mac = ui.platform.caps.os == Os::Macos;
+    let records = default == MeetingPolicy::AlwaysRecord
+        || meetings
+            .providers
+            .iter()
+            .any(|choice| choice.policy == MeetingPolicy::AlwaysRecord);
+    let mut answers: Vec<CardRow> = Vec::new();
+    for policy in MeetingPolicy::ALL {
+        // The radio is the choice assistive technology reads; the row only
+        // widens where a press lands.
+        answers.push(
+            row()
+                .key(policy_key(policy))
+                .role("none")
+                .min_h(METRICS.row_h_described)
+                .px(METRICS.row_px)
+                .py(10.0)
+                .center_y()
+                .on_press(move |ui: &mut Ui| set_default(ui, policy))
+                .child(
+                    RadioItem::new(tr(policy.label()), policy == default)
+                        .description(outcome(policy, mac))
+                        .on_select(move |ui: &mut Ui| set_default(ui, policy))
+                        .build(p.k)
+                        .key("radio")
+                        .grow(1.0),
+                )
+                .into(),
+        );
+        if policy == MeetingPolicy::AlwaysRecord && records && mac {
+            let grace = crate::meeting::detection::AUTO_STOP_GRACE.as_secs();
+            answers.push(
+                nested(toggle_row(
+                    p,
+                    "meeting-stop-when-call-ends",
+                    tr("Stop when the call ends"),
+                    tr_fill(
+                        "{} seconds after the call app leaves the microphone",
+                        &grace.to_string(),
+                    )
+                    .as_str(),
+                    meetings.stop_when_call_ends,
+                    |ui: &mut Ui| {
+                        let on = !ui.settings.meetings.stop_when_call_ends;
+                        ui.update(|settings| settings.meetings.stop_when_call_ends = on);
+                    },
+                ))
+                .into(),
+            );
+        }
+    }
+    answers
+}
+
+/// One app or website: its icon, name, when Hex last saw a call in it, and
+/// its answer, dimmed while it follows the default.
+fn call_row(
+    ui: &Ui,
+    p: Paint,
+    index: usize,
+    call: &CallRow,
+    now_ms: i64,
+    menus: &mut Vec<El>,
+) -> El {
+    let meetings = &ui.settings.meetings;
+    let name = tr(&call.label).to_owned();
+    let policy = meetings.policy_for(&call.key);
+    let following = !meetings.has_own_answer(&call.key);
+    let (key, label) = (call.key.clone(), call.label.clone());
+    let select = super::general::quiet_select(
+        ui,
+        p,
+        Menu::Call(index),
+        format!("call{index}-policy-control"),
+        &name,
+        MeetingPolicy::ALL
+            .iter()
+            .map(|policy| tr(policy.label()).to_owned())
+            .collect(),
+        MeetingPolicy::ALL
+            .iter()
+            .position(|known| *known == policy)
+            .unwrap_or(0),
+        move |ui, index| {
+            let choice = MeetingProviderChoice {
+                key: key.clone(),
+                label: label.clone(),
+                policy: MeetingPolicy::ALL[index],
+            };
+            ui.update(|settings| {
+                crate::app_settings::set_meeting_provider(&mut settings.meetings, choice);
+            });
+        },
+        menus,
+    );
+    let when = call
+        .last_seen_ms
+        .map(|ms| last_seen(ms, now_ms))
+        .unwrap_or_default();
+    row()
+        .key(format!("call{index}"))
+        .role("group")
+        .label(name.clone())
+        .min_h(44.0)
+        .px(METRICS.row_px)
+        .gap(12.0)
+        .center_y()
+        .child(row_icon(ui, p, call, ICON))
+        .child(
+            text(name)
+                .key("name")
+                .font(p.k.ty.ui)
+                .color(p.text())
+                .grow(1.0)
+                .shrink()
+                .truncate()
+                .a11y_hidden(),
+        )
+        .child(
+            row().key("when").w(WHEN_WIDTH).justify_end().child(
+                text(when)
+                    .key("when-text")
+                    .font(p.k.ty.small)
+                    .color(p.faint()),
+            ),
+        )
+        .child(
+            row()
+                .key("answer")
+                .w(ANSWER_WIDTH)
+                .justify_end()
+                .opacity(if following { FOLLOWING } else { 1.0 })
+                .child(select),
+        )
+}
+
+/// The sheet's scrim and panel, then the menus its rows opened. None while
+/// it's closed.
+pub(super) fn modal(ui: &Ui, p: Paint) -> Option<Vec<El>> {
+    if !ui.calls.open {
+        return None;
+    }
+    let c = &p.k.c;
+    let mut menus = Vec::new();
+    let now_ms = ui
+        .calls
+        .now_ms
+        .unwrap_or_else(|| crate::history::now_ms() as i64);
+    let table: Vec<El> = rows(ui)
+        .iter()
+        .enumerate()
+        .map(|(index, call)| call_row(ui, p, index, call, now_ms, &mut menus))
+        .collect();
+    let section = |key: &str, title: &str, body: El| {
+        col()
+            .key(key)
+            .gap(METRICS.label_gap)
+            .child(p.section_label(title).mx(METRICS.row_px))
+            .child(body)
+    };
+    let list = if table.is_empty() {
+        note(
+            "calls-empty",
+            tr("Apps and websites show up here after Hex sees a call in them."),
+            p.muted(),
+        )
+        .mx(METRICS.row_px)
+    } else {
+        section("seen", tr("Apps and websites"), card(p, "card", table))
+    };
+    let footer = row().key("footer").justify_end().child(
+        button(
+            p,
+            "close-calls",
+            tr("Done"),
+            ButtonKind::Secondary,
+            |ui: &mut Ui, _| close(ui),
+        )
+        .default_button(),
+    );
+    let mut panel = col()
+        .key("calls-sheet")
+        .role("dialog")
+        .label(tr("Calls"))
+        .w(MODAL_WIDTH)
+        .pt(PADDING)
+        .px(PADDING)
+        .pb(14.0)
+        .gap(16.0)
+        .radius(p.k.radius.xl)
+        .fill(c.bg_base)
+        .border(p.hair, c.border_weak)
+        // Presses inside the panel stay inside.
+        .on_press(|_: &mut Ui| {})
+        .child(
+            text(tr("Calls"))
+                .key("title")
+                .font(p.k.ty.body_medium)
+                .color(p.text()),
+        )
+        .child(section(
+            "default",
+            tr("When a call starts"),
+            card(p, "card", answers(ui, p)),
+        ))
+        .child(list)
+        .child(footer);
+    for shadow in &p.k.elevation.overlay {
+        panel = panel.box_shadow(*shadow);
+    }
+    let layer = |key: &str| {
+        el().key(key)
+            .role("none")
+            .absolute(0.0, 0.0)
+            .w_full()
+            .h_full()
+    };
+    let mut layers = vec![
+        layer("calls-scrim")
+            .fill(c.scrim)
+            .on_press(close)
+            .transition(modal_scrim_transition(p)),
+        layer("calls-layer")
+            .center()
+            .transition(modal_transition(p))
+            // Keys stay inside, Escape or a press outside closes, and focus
+            // returns to the row that opened it.
+            .child(panel.modal(true, close)),
+    ];
+    // A row's menu opens above the sheet.
+    layers.extend(menus);
+    Some(layers)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_call_reads_as_today_yesterday_its_weekday_or_its_date() {
+        // Saturday, 21 November 2026.
+        let today = LocalDate::from_ymd(20261121);
+        let label = |ymd| day_label(LocalDate::from_ymd(ymd), today);
+        assert_eq!(label(20261121), "Today");
+        assert_eq!(label(20261120), "Yesterday");
+        assert_eq!(label(20261119), "Thu");
+        assert_eq!(label(20261115), "Sun");
+        assert_eq!(label(20261114), "Nov 14");
+        assert_eq!(label(20251231), "Dec 31, 2025");
+    }
+}

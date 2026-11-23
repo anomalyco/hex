@@ -399,6 +399,15 @@ impl ModesPane {
         self.icon(&application.path)
     }
 
+    /// The icon for an application by its bundle ID (macOS) or executable,
+    /// once the catalog lists it.
+    pub(super) fn app_icon(&self, id: &str) -> Option<rune::Pixels> {
+        let Applications::Loaded(applications) = &self.applications else {
+            return None;
+        };
+        self.icon(&crate::application_catalog::find(applications, id)?.path)
+    }
+
     pub(super) fn ensure_applications(&mut self) {
         if matches!(self.applications, Applications::NotLoaded) {
             let (sender, receiver) = sync_channel(1);
@@ -1412,6 +1421,33 @@ pub(super) fn fixture_catalog(ui: &mut Ui) {
             icon,
         )
     });
+    ui.modes.icons.get_mut().extend(icons);
+}
+
+/// The catalog with the call apps the Calls fixtures name by bundle ID,
+/// each with a stand-in icon.
+pub(super) fn fixture_call_catalog(ui: &mut Ui) {
+    fixture_catalog(ui);
+    let calls = [
+        ("Slack", "com.tinyspeck.slackmacgap", [74, 21, 75]),
+        ("zoom.us", "us.zoom.xos", [11, 92, 255]),
+    ];
+    let cache = ui
+        .modes
+        .icon_cache
+        .get_or_insert_with(|| rune::ImageCache::new(std::sync::Arc::new(|| {})));
+    let icons = calls.map(|(name, _, rgb)| {
+        let icon = cache.rgba(FIXTURE_ICON, FIXTURE_ICON, fixture_icon(rgb));
+        let _ = icon.wait();
+        (PathBuf::from(format!("/Applications/{name}.app")), icon)
+    });
+    if let Applications::Loaded(applications) = &mut ui.modes.applications {
+        applications.extend(calls.map(|(name, id, _)| InstalledApplication {
+            name: name.into(),
+            bundle_id: Some(id.into()),
+            path: PathBuf::from(format!("/Applications/{name}.app")),
+        }));
+    }
     ui.modes.icons.get_mut().extend(icons);
 }
 
