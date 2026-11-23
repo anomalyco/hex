@@ -2,6 +2,7 @@
     <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或输入的内容，也不保存任何按键记录或转录内容。为了查找更新，Hex Preview 会在你打开它时，以及每天最多一次在键盘上，向 GitHub 询问最新版本。这个请求不包含任何关于你或你输入内容的信息，不过和访问任何网站一样，GitHub 会看到你的网络地址。可以用“自动检查更新”关闭。</string>
     <string name="updates_available">Hex Preview %1$s（版本号 %2$d）已可更新</string>
     <string name="updates_update">更新</string>
+    <string name="updates_keyboard_note">更新时键盘会暂时关闭，点按文本框即可重新打开。</string>
     <string name="updates_metered">你正在使用移动数据。这次下载需要 %1$s。</string>
     <string name="updates_download">下载</string>
     <string name="updates_not_now">以后再说</string>

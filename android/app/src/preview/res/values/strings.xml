@@ -5,6 +5,7 @@
     <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type. It keeps no keystrokes or transcripts. To find updates, Hex Preview asks GitHub for its latest version when you open it and at most once a day from the keyboard. That request carries nothing about you or what you type, though GitHub sees your internet address, as with any website. Turn it off with Check for updates automatically.</string>
     <string name="updates_available">Hex Preview %1$s (build %2$d) is available</string>
     <string name="updates_update">Update</string>
+    <string name="updates_keyboard_note">Updating closes the keyboard for a moment. Tap a text field to bring it back.</string>
     <string name="updates_metered">You’re on mobile data. This download uses %1$s.</string>
     <string name="updates_download">Download</string>
     <string name="updates_not_now">Not now</string>

@@ -232,7 +232,11 @@ internal object Updates {
                 r.notes.forEach { Label(it, size = 14, lines = 4) }
                 Spacer(Modifier.height(4.dp))
                 when (s) {
-                    is State.Available -> Primary(stringResource(R.string.updates_update)) { update(c) }
+                    is State.Available -> {
+                        Primary(stringResource(R.string.updates_update)) { update(c) }
+                        // Android closes an open keyboard while it replaces the app; Hex Preview stays the chosen one.
+                        Label(stringResource(R.string.updates_keyboard_note), muted = true, size = 13, lines = 3)
+                    }
                     is State.Confirm -> {
                         Label(stringResource(R.string.updates_metered, Formatter.formatShortFileSize(c, r.size)), size = 14, lines = 3)
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -246,7 +250,10 @@ internal object Updates {
                             color = colorResource(R.color.ink), trackColor = colorResource(R.color.rule))
                     }
                     is State.Verifying -> Label(stringResource(R.string.updates_verifying), muted = true, size = 14)
-                    is State.Installing -> Label(stringResource(R.string.updates_installing), muted = true, size = 14)
+                    is State.Installing -> {
+                        Label(stringResource(R.string.updates_installing), muted = true, size = 14)
+                        Label(stringResource(R.string.updates_keyboard_note), muted = true, size = 13, lines = 3)
+                    }
                     is State.NeedsPermission -> {
                         Label(stringResource(R.string.updates_permission), size = 14, lines = 6)
                         Primary(stringResource(R.string.updates_open_settings)) {
