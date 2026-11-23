@@ -39,7 +39,9 @@ const PORTAL_FOCUS_SETTLE: Duration = Duration::from_millis(250);
 const PORTAL_CLIPBOARD_SETTLE: Duration = Duration::from_millis(150);
 /// How long a RemoteDesktop session stays open after a paste. GNOME shows its
 /// remote-control indicator while one is open (#718), and a restored grant
-/// reopens it at the next paste without a dialog.
+/// reopens it at the next paste without a dialog. KDE keeps its session for
+/// the paster's lifetime instead, since it notifies on every session start
+/// (#2508).
 const PORTAL_IDLE: Duration = Duration::from_secs(15);
 /// How long an X11 paste waits for modifiers no Hex shortcut holds.
 const MODIFIER_WAIT_LIMIT: Duration = Duration::from_secs(2);
@@ -80,8 +82,8 @@ enum WaylandKeys {
 
 /// The RemoteDesktop session: opened at a paste and, when its grant
 /// restores without a dialog, closed [`PORTAL_IDLE`] after the last one.
-/// A grant that cannot restore keeps its session for the paster's lifetime,
-/// so pastes never ask again.
+/// A grant that cannot restore, and KDE, keep its session for the paster's
+/// lifetime, so pastes never ask again.
 struct PortalSession {
     session: Option<Box<RemoteDesktop>>,
     last_paste: Instant,
@@ -175,7 +177,7 @@ impl WaylandKeys {
                     } else {
                         Duration::ZERO
                     };
-                    if started.restorable() {
+                    if started.restorable() && crate::linux::session::closes_idle_remote_desktop() {
                         let idle = Arc::downgrade(shared);
                         thread::spawn(move || close_when_idle(idle));
                     }
@@ -1388,7 +1390,7 @@ mod tests {
         wait_for("GTK to receive the second transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == twice
         });
-        thread::sleep(RESTORE_DELAY * 2);
+        thread::sleep(CLIPBOARD_RESTORE_DELAY * 2);
         assert!(
             !wl_paste(&["--list-types"]).status.success(),
             "the transcript stayed on a clipboard that was empty"
@@ -1408,7 +1410,7 @@ mod tests {
         wait_for("GTK to receive the kept transcript", &mut || {
             std::fs::read_to_string(&path).unwrap_or_default() == thrice
         });
-        thread::sleep(RESTORE_DELAY * 2);
+        thread::sleep(CLIPBOARD_RESTORE_DELAY * 2);
         let kept = wl_paste(&["--no-newline", "--type", "text/plain;charset=utf-8"]);
         assert!(
             kept.status.success() && kept.stdout == expected.as_bytes(),
