@@ -4162,10 +4162,10 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   A calendar link is watched only when it names a desktop app: Zoom, Teams, or
   Slack (`CallProvider::application` in
   [calendar.rs](../../src/calendar.rs)), never Google Meet or Webex.
-  A recording Hex started on request counts no absence until it has seen its
-  app on the microphone at least once, so a calendar recording started before
-  the call is answered, or while a waiting room holds, never arms a stop on
-  its own. A recording started by hand (Meetings' Start recording, the menu bar,
+  A recording Hex started on request counts no absence until a successful
+  microphone read has found its app on the input at least once; playback and a
+  failed read never count, so a calendar recording started before the call is
+  answered, or while a waiting room holds, never arms a stop on its own. A recording started by hand (Meetings' Start recording, the menu bar,
   `hex meetings record`) takes its call app from the microphone at start: the
   one native call app holding it right then, by the canonical bundles
   detection uses, with browsers left out so no page is read and none or

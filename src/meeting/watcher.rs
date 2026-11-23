@@ -1023,24 +1023,13 @@ fn poll_recording(
             crate::labs::stop_any_call_recording(),
         );
         let applications = active_microphone_applications();
-        let on_microphone = match &applications {
-            Ok(applications) => applications
-                .iter()
-                .any(|candidate| candidate.canonical_bundle_id() == Some(application)),
-            Err(error) => {
-                tracing::warn!(%error, "could not inspect microphone activity during a meeting");
-                true
-            }
-        };
-        // Muting keeps a call on the microphone in some apps and off it in
-        // others, but its audio output stays open until it hangs up (#835).
-        let present = on_microphone || (auto_stop && call_app_playing(application));
-        if present {
+        let pass = call_end::watched_pass(application, auto_stop, &applications, call_app_playing);
+        if pass.present {
             detector.keep_snooze_alive();
         }
         // The call came back (or its setting went off mid-count): the stop it
         // armed is gone, and its notice goes with the last one counting.
-        if (present || !auto_stop)
+        if (pass.present || !auto_stop)
             && withdraw_stop(&mut active.auto_stop, &active.call_stop, events)
         {
             tracing::info!(application, "the pending automatic stop is withdrawn");
@@ -1048,8 +1037,10 @@ fn poll_recording(
         // A recording started on request counts no absence before its app has
         // been on the microphone: a calendar reminder records before the call
         // is answered, and stopping it there would end a call it never saw.
-        if active.watch.counts_absence(start, auto_stop, present)
-            && active.presence.observe(present)
+        if active
+            .watch
+            .counts_absence(start, auto_stop, pass.on_microphone)
+            && active.presence.observe(pass.present)
         {
             tracing::info!(
                 application,
@@ -1582,42 +1573,6 @@ mod tests {
                 .poll(std::slice::from_ref(&meeting), 100 * MINUTE, MINUTE),
             None
         );
-    }
-
-    /// Turns Labs › Stop every call recording off for one test, and back off
-    /// after, so the by-hand association never reads another test's gate.
-    struct CallEndLabOff;
-
-    /// Serializes the tests that turn this process's global Labs gate on or
-    /// off, as each module's gate tests do.
-    static CALL_END_LABS: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    impl CallEndLabOff {
-        fn off() -> Self {
-            crate::labs::apply(&crate::app_settings::LabsSettings {
-                stop_any_call_recording: false,
-                ..crate::app_settings::LabsSettings::default()
-            });
-            assert!(!crate::labs::stop_any_call_recording());
-            Self
-        }
-    }
-
-    impl Drop for CallEndLabOff {
-        fn drop(&mut self) {
-            crate::labs::apply(&crate::app_settings::LabsSettings::default());
-        }
-    }
-
-    #[test]
-    fn a_by_hand_recording_watches_no_call_app_while_its_lab_is_off() {
-        let _lock = CALL_END_LABS
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let _lab = CallEndLabOff::off();
-        let start = Start::from_candidate(&MeetingCandidate::manual());
-        assert_eq!(start.watched, None);
-        assert_eq!(start.meeting.application, None);
     }
 
     #[test]

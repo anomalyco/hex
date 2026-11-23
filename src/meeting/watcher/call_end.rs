@@ -2,6 +2,8 @@
 //! (Labs › Stop every call recording when the call ends): whether one stops,
 //! and the one call app a recording started by hand watches.
 
+use color_eyre::eyre::Result;
+
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::candidate_from_microphone;
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
@@ -55,20 +57,22 @@ pub(super) struct CallWatch {
 
 impl CallWatch {
     /// Whether this pass reads the watched app's absence as the call ending,
-    /// recording that a present app has now been seen. A recording Hex
-    /// started on request knows its app before that app joins — a calendar
-    /// reminder records before the call is answered, and its app can be slow
-    /// to launch — so its absence counts only once the app has been on the
-    /// microphone. `auto_stop` says whether that absence could stop it at
-    /// all: with no stop to arm (the lab off, or Always record's setting
-    /// off) the "left the call" notice shows every pass, exactly as before.
+    /// recording that a successful microphone read found the app on the
+    /// input (`on_microphone`). A recording Hex started on request knows its
+    /// app before that app joins — a calendar reminder records before the
+    /// call is answered, and its app can be slow to launch — so its absence
+    /// counts only once the app has been on the microphone. Playback and a
+    /// failed read never mark it seen. `auto_stop` says whether that absence
+    /// could stop it at all: with no stop to arm (the lab off, or Always
+    /// record's setting off) the "left the call" notice shows every pass,
+    /// exactly as before.
     pub(super) fn counts_absence(
         &mut self,
         start: CallEndStop,
         auto_stop: bool,
-        present: bool,
+        on_microphone: bool,
     ) -> bool {
-        self.seen_present |= present;
+        self.seen_present |= on_microphone;
         match start {
             CallEndStop::Automatic => true,
             CallEndStop::OnRequest => !auto_stop || self.seen_present,
@@ -77,16 +81,66 @@ impl CallWatch {
     }
 }
 
+/// One pass's reading of the call app a recording watches.
+pub(super) struct WatchedPass {
+    /// Whether the app counts as present: on the microphone, playing output
+    /// while a stop could count it (muting keeps a call on the microphone in
+    /// some apps and off it in others, but its output stays open until
+    /// hang-up, #835), or a read that failed, so an error never ends a
+    /// recording.
+    pub(super) present: bool,
+    /// A successful read found it on the microphone. Only this, never
+    /// playback or a failed read, marks the app seen for
+    /// [`CallWatch::counts_absence`].
+    pub(super) on_microphone: bool,
+}
+
+/// Reads the call app `application` for one pass. `auto_stop` says whether a
+/// stop could be armed, so playback counts as present only when it could;
+/// `playing` is the app's own audio-output read.
+pub(super) fn watched_pass(
+    application: &str,
+    auto_stop: bool,
+    applications: &Result<Vec<ActiveMicrophoneApplication>>,
+    playing: impl FnOnce(&str) -> bool,
+) -> WatchedPass {
+    let on_microphone = match applications {
+        Ok(applications) => Some(
+            applications
+                .iter()
+                .any(|candidate| candidate.canonical_bundle_id() == Some(application)),
+        ),
+        Err(error) => {
+            tracing::warn!(%error, "could not inspect microphone activity during a meeting");
+            None
+        }
+    };
+    WatchedPass {
+        present: on_microphone.unwrap_or(true) || (auto_stop && playing(application)),
+        on_microphone: on_microphone == Some(true),
+    }
+}
+
 /// The call app a recording started by hand watches: the one native call app
 /// holding the microphone, or nothing when none is or when more than one is
 /// and they can't be told apart. Browsers are left out, since Hex reads a
 /// page only for a call its own detection named.
 pub(super) fn manual_call_app() -> Option<(String, String)> {
-    if !crate::labs::stop_any_call_recording() {
+    manual_call_app_with(crate::labs::stop_any_call_recording(), || {
+        active_microphone_applications().ok()
+    })
+}
+
+/// [`manual_call_app`] over an explicit gate and a read given by the caller,
+/// so a test can check that the lab off reads nothing.
+fn manual_call_app_with(
+    lab_on: bool,
+    applications: impl FnOnce() -> Option<Vec<ActiveMicrophoneApplication>>,
+) -> Option<(String, String)> {
+    if !lab_on {
         return None;
     }
-    let applications = active_microphone_applications().ok()?;
-    only_call_app(&applications)
+    only_call_app(&applications()?)
 }
 
 /// One observation's call app: its canonical bundle ID and the label an
@@ -147,19 +201,41 @@ mod tests {
 
     #[test]
     fn a_calendar_recording_counts_no_absence_until_its_app_joins() {
-        // 33 s of a recording Hex started on request before its app joined
-        // (a calendar reminder's Zoom call, not answered yet): every pass is
-        // absent, and none may count, so nothing arms a stop.
+        let zoom = vec![microphone("us.zoom.xos", "zoom.us")];
         let mut watch = CallWatch::default();
+        // 33 s of a recording Hex started on request before its app joined
+        // (a calendar reminder's Zoom call, not answered yet): every read
+        // finds it off the microphone, and none counts, so nothing arms.
         for _ in 0..66 {
             assert!(
                 !watch.counts_absence(CallEndStop::OnRequest, true, false),
                 "an absence counted before the app was ever on the microphone"
             );
         }
-        // The app joins, then leaves: its absence counts from then on, and the
-        // call coming back keeps counting after it leaves again.
-        assert!(watch.counts_absence(CallEndStop::OnRequest, true, true));
+        // The app plays audio — a Zoom window waiting to join, a Slack
+        // notification — but has not taken the microphone: present to the
+        // controller, still not seen, so 33 more seconds count nothing.
+        let playing = watched_pass("com.tinyspeck.slackmacgap", true, &Ok(zoom.clone()), |_| {
+            true
+        });
+        assert!(playing.present, "playback keeps the call present");
+        assert!(!playing.on_microphone);
+        for _ in 0..66 {
+            assert!(!watch.counts_absence(CallEndStop::OnRequest, true, playing.on_microphone));
+        }
+        // A read that failed is present too, and never marks the app seen.
+        let failed: Result<Vec<ActiveMicrophoneApplication>> =
+            Err(color_eyre::eyre::eyre!("no audio"));
+        let unread = watched_pass("us.zoom.xos", true, &failed, |_| false);
+        assert!(unread.present);
+        assert!(!unread.on_microphone);
+        assert!(!watch.counts_absence(CallEndStop::OnRequest, true, unread.on_microphone));
+
+        // The app joins, then leaves: its absence counts from then on, and
+        // the call coming back keeps counting after it leaves again.
+        let joined = watched_pass("us.zoom.xos", true, &Ok(zoom), |_| false);
+        assert!(joined.on_microphone);
+        assert!(watch.counts_absence(CallEndStop::OnRequest, true, joined.on_microphone));
         assert!(watch.counts_absence(CallEndStop::OnRequest, true, false));
         assert!(watch.counts_absence(CallEndStop::OnRequest, true, true));
         assert!(watch.counts_absence(CallEndStop::OnRequest, true, false));
@@ -185,6 +261,26 @@ mod tests {
             CallEndStop::OnRequest
         );
         assert_eq!(CallEndStop::of(false, None), CallEndStop::Unwatched);
+    }
+
+    #[test]
+    fn a_by_hand_recording_reads_no_microphone_while_its_lab_is_off() {
+        let mut read = false;
+        assert_eq!(
+            manual_call_app_with(false, || {
+                read = true;
+                Some(vec![microphone("us.zoom.xos", "zoom.us")])
+            }),
+            None
+        );
+        assert!(!read, "the microphone was read with the lab off");
+        assert_eq!(
+            manual_call_app_with(true, || Some(vec![microphone("us.zoom.xos", "zoom.us")])),
+            Some(("us.zoom.xos".into(), "Zoom".into()))
+        );
+        // Nothing on the microphone, or a read that failed, watches nothing.
+        assert_eq!(manual_call_app_with(true, || Some(Vec::new())), None);
+        assert_eq!(manual_call_app_with(true, || None), None);
     }
 
     #[test]

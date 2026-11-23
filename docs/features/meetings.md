@@ -1250,9 +1250,11 @@ labs.stop_any_call_recording // meetings.auto-stop-any
   ├── A calendar reminder's recording watches the app its link names: Zoom,
   │   Teams, or Slack (CallProvider::application, calendar.rs). A Google Meet
   │   or Webex link, or a meeting with no call link, has nothing to watch
-  ├── A recording Hex started on request counts an absence only after it has
-  │   seen its app on the microphone at least once (CallWatch in
-  │   meeting/watcher/call_end.rs): a calendar recording started before the
+  ├── A recording Hex started on request counts an absence only after a
+  │   successful microphone read has found its app on the input at least once
+  │   (CallWatch in meeting/watcher/call_end.rs): playback, such as a
+  │   notification sound or a call window still joining, and a read that
+  │   failed never count as seen, so a calendar recording started before the
   │   call is answered, or while a waiting room or a slow launch holds, never
   │   arms a stop for an absence it never sat through. Always record counts
   │   from its first pass, and with the lab off the "left the call" notice
