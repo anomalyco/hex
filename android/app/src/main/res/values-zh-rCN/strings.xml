@@ -88,6 +88,8 @@
     <string name="settings_spatial_detail">根据点按位置修正拼写错误</string>
     <string name="settings_swear_words">在建议中显示脏话</string>
     <string name="settings_swear_words_detail">绝不会建议歧视性词语</string>
+    <string name="settings_swipe_typing">滑行键入</string>
+    <string name="settings_swipe_typing_detail">仅限英语和西班牙语</string>
     <string name="settings_personal_dictionary">个人字典</string>
     <string name="settings_personal_dictionary_detail">自动改正会保留并推荐的词</string>
     <string name="settings_popups">字符预览</string>

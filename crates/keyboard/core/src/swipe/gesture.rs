@@ -92,7 +92,7 @@ fn evidence(raw: &[Point], times: Option<&[f64]>, length: f64, p: &Parameters) -
         for i in k..(count - k) {
             let a = Point::new(points[i].x - points[i - k].x, points[i].y - points[i - k].y);
             let b = Point::new(points[i + k].x - points[i].x, points[i + k].y - points[i].y);
-            let angle = (a.x * b.y - a.y * b.x).abs().atan2(a.x * b.x + a.y * b.y) * 180.0
+            let angle = libm::atan2((a.x * b.y - a.y * b.x).abs(), a.x * b.x + a.y * b.y) * 180.0
                 / std::f64::consts::PI;
             score[i] = min(
                 1.0,
@@ -134,12 +134,15 @@ fn evidence(raw: &[Point], times: Option<&[f64]>, length: f64, p: &Parameters) -
         sort_by_less(&mut middle, |a, b| a < b);
         let median = middle[middle.len() / 2];
         if median > 0.0 {
-            let (from, full) = (p.dwell_from.ln(), p.dwell_full.ln());
+            let (from, full) = (libm::log(p.dwell_from), libm::log(p.dwell_full));
             for i in guard..(count - guard) {
                 if per_pitch[i] > 0.0 {
                     let dwell = min(
                         1.0,
-                        max(0.0, ((per_pitch[i] / median).ln() - from) / (full - from)),
+                        max(
+                            0.0,
+                            (libm::log(per_pitch[i] / median) - from) / (full - from),
+                        ),
                     );
                     score[i] = max(score[i], dwell);
                 }
@@ -194,7 +197,7 @@ pub(crate) fn evidence_cost(
     }
     let reach = p.evidence_reach * p.evidence_reach;
     let spread = 2.0 * p.evidence_sigma * p.evidence_sigma;
-    let straight = (p.straight_angle * std::f64::consts::PI / 180.0).cos();
+    let straight = libm::cos(p.straight_angle * std::f64::consts::PI / 180.0);
     let missing = |i: usize| -> f64 {
         if i == 0 || i >= m - 1 {
             return 0.0;

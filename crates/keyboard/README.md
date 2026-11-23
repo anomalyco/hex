@@ -42,10 +42,16 @@ Tune Swipe typing here, in `core/src/swipe`: iOS's `SwipeDecoder` is a wrapper o
 decoder was ported from the Swift one it replaced, and proven to read every swipe as it did
 (the same candidates in the same order, costs equal bit for bit) on 200,000 generated swipes,
 in a separate run and in one process, and on recorded FUTO swipes typed through the keyboard.
-The committed `core/tests/fixtures/swipe-parity.jsonl` holds 800 of those swipes per language
-with the Swift decoder's readings: `core/tests/swipe_parity.rs` checks the core against it
-(and, with `HEX_SWIPE_PARITY=<file>`, a larger export), and iOS's `SwipeFixtureTests` checks
-the shipped path through the C interface. A change that reads any swipe differently fails
+Since then it computes exp, log, atan2, cos and hypot with the pure-Rust `libm` crate rather
+than each platform's own, so iOS and Android read every swipe alike, bit for bit; against
+Apple's libm, 2 of those 200,000 readings changed order (1-ulp near-ties) and about 2% of
+costs moved by 1 or 2 ulps. The committed `core/tests/fixtures/swipe-parity.jsonl` holds 800
+of those swipes per language with the Swift decoder's words, order and `scored`, and the
+core's costs (its header's `"costs"`): `core/tests/swipe_parity.rs` checks the core against it
+bit for bit (and, with `HEX_SWIPE_PARITY=<file>`, a larger export; on one the Swift decoder
+recorded, changed costs are counted rather than failed), iOS's `SwipeFixtureTests` checks
+the shipped path through the C interface, and Android's tests the JNI path on the host and
+on an emulator. A change that reads any swipe differently fails
 both: if it's intended, refresh the fixture from the app's decoder (the simulator writes to
 the Mac's `/tmp`) and commit it with the change:
 
@@ -61,3 +67,22 @@ cd ../crates/keyboard && cargo test --release --test swipe_parity -- --nocapture
 
 `TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1` adds each read's time; a larger count makes a larger
 file for `HEX_SWIPE_PARITY`.
+
+What a swipe types is the core's too (`core/src/swipe/typing.rs`): the space before the word
+and the capital it brings, the word's casing (caps lock, shift, a name the dictionary knows
+only capitalised, your own words' capitals, Auto-capitalization off), the strip's
+alternatives with text replacements, the rare-name ranking and the slid tap. The host answers
+what only it knows: whether the dictionary knows a word (a callback), your text replacements
+and words, and the field, shift and auto-capitalization state with the text before the
+cursor; which readings may be offered at all stays its filter. Ported from iOS's Swift and
+proven alike on 1,000,000 generated cases in one process, it's held to
+`core/tests/fixtures/swipe-rules.jsonl` (5,000 of those cases) by `core/tests/swipe_rules.rs`
+and iOS's `SwipeRulesFixtureTests`. Refresh it for an intended change the same way:
+
+```sh
+TEST_RUNNER_HEX_SWIPE_RULES_OUT=/tmp/swipe-rules.jsonl TEST_RUNNER_HEX_SWIPE_RULES_COUNT=5000 \
+  xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile \
+  -destination 'platform=iOS Simulator,name=<simulator>' \
+  -only-testing:HEXMobileTests/SwipeRulesFixtureTests/testExportSwipeRulesFixture
+cp /tmp/swipe-rules.jsonl ../crates/keyboard/core/tests/fixtures/swipe-rules.jsonl
+```

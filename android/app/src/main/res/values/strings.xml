@@ -96,6 +96,8 @@
     <string name="settings_spatial_detail">Uses where you tap to fix typos</string>
     <string name="settings_swear_words">Suggest swear words</string>
     <string name="settings_swear_words_detail">Slurs are never suggested</string>
+    <string name="settings_swipe_typing">Swipe typing</string>
+    <string name="settings_swipe_typing_detail">English and Spanish only</string>
     <string name="settings_personal_dictionary">Personal dictionary</string>
     <string name="settings_personal_dictionary_detail">Words autocorrect keeps and suggests</string>
     <string name="settings_popups">Key pop-ups</string>

@@ -3090,7 +3090,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 └── Proof limits: unit tests only; no CI compiles the iOS targets
 Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
-└── Type a listed word in full -> keep its spelling on space or tap its literal chip
+├── Type a listed word in full -> keep its spelling on space or tap its literal chip
+└── Keyboard > Swipe typing (on; English and Spanish layouts) -> slide through a word's
+    letters and lift: the keyboard's Rust core (crates/keyboard) reads, spaces and cases it
+    as on iPhone; the strip offers three more readings; delete takes it back whole
+    (SwipeParityTest on the host core, SwipeParityDeviceTest on an emulator)
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

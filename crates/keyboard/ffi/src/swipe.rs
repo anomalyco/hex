@@ -5,8 +5,8 @@ use std::ptr;
 
 use hex_keyboard_core::never_suggest::NeverSuggest;
 use hex_keyboard_core::swipe::{
-    CONTRACTION_COST, ExtraWord, Keys, OWN_WORD_COST, Parameters, Reading, SwipeDecoder,
-    cost_of_contraction,
+    CONTRACTION_COST, ENGLISH_CONTRACTIONS, ExtraWord, Keys, OWN_WORD_COST, Parameters, Reading,
+    SwipeDecoder, cost_of_contraction,
 };
 
 use crate::model::HkModel;
@@ -138,7 +138,7 @@ pub struct HkKeys {
 }
 
 pub struct HkSwipeDecoder {
-    decoder: SwipeDecoder,
+    pub(crate) decoder: SwipeDecoder,
 }
 
 #[repr(C)]
@@ -257,6 +257,46 @@ pub extern "C" fn hk_swipe_contraction_cost() -> f64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn hk_swipe_own_word_cost() -> f64 {
     OWN_WORD_COST
+}
+
+/// `swipe::ENGLISH_CONTRACTIONS` as C strings, made once.
+struct Contractions {
+    _texts: Vec<CString>,
+    pointers: Vec<*const c_char>,
+}
+
+// SAFETY: built once and never changed; the pointers point into `_texts`, which it owns.
+unsafe impl Sync for Contractions {}
+// SAFETY: as above.
+unsafe impl Send for Contractions {}
+
+static CONTRACTIONS: std::sync::OnceLock<Contractions> = std::sync::OnceLock::new();
+
+/// # Safety
+/// `count` is NULL or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn hk_swipe_english_contractions(count: *mut usize) -> *const *const c_char {
+    let contractions = guard(None, || {
+        Some(CONTRACTIONS.get_or_init(|| {
+            let texts: Vec<CString> = ENGLISH_CONTRACTIONS
+                .iter()
+                .map(|w| CString::new(*w).expect("no NUL in a contraction"))
+                .collect();
+            let pointers = texts.iter().map(|t| t.as_ptr()).collect();
+            Contractions {
+                _texts: texts,
+                pointers,
+            }
+        }))
+    });
+    let (pointer, n) = contractions.map_or((ptr::null(), 0), |c| {
+        (c.pointers.as_ptr(), c.pointers.len())
+    });
+    // SAFETY: NULL or writable, as the caller promises.
+    if let Some(count) = unsafe { count.as_mut() } {
+        *count = n;
+    }
+    pointer
 }
 
 /// `swipe::cost_of_contraction`; a NULL or non-UTF-8 `word` is no contraction (`base` + 2), as

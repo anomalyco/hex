@@ -453,3 +453,194 @@ fn reads_a_swipe_through_the_c_interface() {
         hk_swipe_free(decoder);
     }
 }
+
+/// The test dictionary: "monday" only capitalised, "bell" in both cases.
+unsafe extern "C" fn is_word_valid(
+    _context: *mut std::ffi::c_void,
+    word: *const std::ffi::c_char,
+) -> u8 {
+    let word = unsafe { CStr::from_ptr(word) }.to_str().unwrap();
+    u8::from(matches!(word, "Monday" | "bell" | "Bell" | "the"))
+}
+
+#[test]
+fn types_a_swipe_through_the_c_interface() {
+    unsafe {
+        let (shortcut, replacement) = (
+            CString::new("omw").unwrap(),
+            CString::new("On my way!").unwrap(),
+        );
+        let replacements = [HkTextReplacement {
+            shortcut: shortcut.as_ptr(),
+            replacement: replacement.as_ptr(),
+        }];
+        let own = CString::new("Bell").unwrap();
+        let own = [own.as_ptr()];
+        let en = CString::new("en").unwrap();
+        let words = hk_swipe_words_new(
+            en.as_ptr(),
+            1,
+            replacements.as_ptr(),
+            1,
+            own.as_ptr(),
+            1,
+            ptr::null(),
+            0,
+        );
+        assert!(!words.is_null());
+
+        let texts: Vec<CString> = ["monday", "omw", "bell"]
+            .iter()
+            .map(|t| CString::new(*t).unwrap())
+            .collect();
+        let readings: Vec<*const std::ffi::c_char> = texts.iter().map(|t| t.as_ptr()).collect();
+        let before = CString::new("see you").unwrap();
+        let context = HkSwipeContext {
+            before: before.as_ptr(),
+            shift: 0,
+            shift_held: 0,
+            auto_capitalization: 2,
+            auto_capitalizes: 1,
+            autocorrection: 1,
+        };
+        let mut typed = HkSwipeTyped {
+            space: 0,
+            word: ptr::null_mut(),
+            alternatives: ptr::null_mut(),
+            alternative_count: 0,
+        };
+        let status = hk_swipe_typed(
+            words,
+            readings.as_ptr(),
+            3,
+            &context,
+            Some(is_word_valid),
+            ptr::null_mut(),
+            &mut typed,
+        );
+        assert_eq!(status, 0);
+        assert_eq!(typed.space, 1, "after \"see you\"");
+        assert_eq!(
+            CStr::from_ptr(typed.word).to_str().unwrap(),
+            "Monday",
+            "a name the dictionary knows capitalised"
+        );
+        let alternatives: Vec<&str> =
+            std::slice::from_raw_parts(typed.alternatives, typed.alternative_count)
+                .iter()
+                .map(|&a| CStr::from_ptr(a).to_str().unwrap())
+                .collect();
+        assert_eq!(
+            alternatives,
+            ["On my way!", "bell"],
+            "a replacement, and your own word in lowercase mid-sentence"
+        );
+        hk_swipe_typed_free(&mut typed);
+        assert!(typed.word.is_null());
+        assert_ne!(
+            hk_swipe_typed(
+                words,
+                readings.as_ptr(),
+                0,
+                &context,
+                Some(is_word_valid),
+                ptr::null_mut(),
+                &mut typed
+            ),
+            0
+        );
+
+        let monday = CString::new("monday").unwrap();
+        assert_eq!(
+            hk_swipe_reads_as_name(words, monday.as_ptr(), Some(is_word_valid), ptr::null_mut()),
+            1
+        );
+        let open = CString::new("(").unwrap();
+        assert_eq!(hk_swipe_needs_space(open.as_ptr()), 0);
+        assert_eq!(hk_swipe_needs_space(before.as_ptr()), 1);
+        assert_eq!(hk_swipe_needs_space(ptr::null()), 0);
+        let attachment = CString::new("Look \u{FFFC}").unwrap();
+        assert_eq!(hk_swipe_needs_space(attachment.as_ptr()), 0);
+        let (l, lol, a, r#as) = (
+            CString::new("l").unwrap(),
+            CString::new("lol").unwrap(),
+            CString::new("a").unwrap(),
+            CString::new("as").unwrap(),
+        );
+        assert_eq!(hk_swipe_starts_and_ends_with(lol.as_ptr(), l.as_ptr()), 1);
+        let points = [100.0, 100.0, 110.0, 104.0, 101.0, 100.0];
+        assert_eq!(
+            hk_swipe_is_slid_tap(points.as_ptr(), 3, 38.3, a.as_ptr(), r#as.as_ptr()),
+            1,
+            "\"a\" slid, read as \"as\""
+        );
+        assert_eq!(
+            hk_swipe_is_slid_tap(points.as_ptr(), 3, 38.3, l.as_ptr(), lol.as_ptr()),
+            0,
+            "\"lol\" comes back to l"
+        );
+        assert_eq!(
+            hk_swipe_is_slid_tap(points.as_ptr(), 3, 38.3, ptr::null(), r#as.as_ptr()),
+            0,
+            "lifted on another key"
+        );
+
+        let model = open_en();
+        let mut parameters = HkSwipeParameters::default();
+        hk_swipe_default_parameters(&mut parameters);
+        let decoder = hk_swipe_new(
+            model,
+            &parameters,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+            ptr::null(),
+            0,
+        );
+        hk_model_free(model);
+        let (kent, many) = (CString::new("kent").unwrap(), CString::new("many").unwrap());
+        let candidates = [kent.as_ptr(), many.as_ptr()];
+        let mut order = [0usize; 2];
+        unsafe extern "C" fn knows_kent(
+            _context: *mut std::ffi::c_void,
+            word: *const std::ffi::c_char,
+        ) -> u8 {
+            u8::from(matches!(
+                unsafe { CStr::from_ptr(word) }.to_str().unwrap(),
+                "Kent" | "many"
+            ))
+        }
+        let status = hk_swipe_rank(
+            decoder,
+            words,
+            candidates.as_ptr(),
+            [10.0, 12.0].as_ptr(),
+            2,
+            Some(knows_kent),
+            ptr::null_mut(),
+            order.as_mut_ptr(),
+        );
+        assert_eq!(status, 0);
+        assert_eq!(order, [1, 0], "a rare name costs 4 more: \"many\" first");
+        hk_swipe_free(decoder);
+        hk_swipe_words_free(words);
+    }
+}
+
+#[test]
+fn the_english_contractions_come_through_the_c_interface() {
+    let mut count = 0usize;
+    let words = unsafe { hk_swipe_english_contractions(&mut count) };
+    assert!(!words.is_null());
+    let words: Vec<&str> = unsafe { std::slice::from_raw_parts(words, count) }
+        .iter()
+        .map(|&w| unsafe { CStr::from_ptr(w) }.to_str().unwrap())
+        .collect();
+    assert_eq!(words, hex_keyboard_core::swipe::ENGLISH_CONTRACTIONS);
+    assert_eq!(words[..3], ["I'd", "I'll", "I'm"]);
+    assert_eq!(
+        unsafe { hk_swipe_english_contractions(ptr::null_mut()) },
+        unsafe { hk_swipe_english_contractions(&mut count) }
+    );
+}

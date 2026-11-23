@@ -3,6 +3,7 @@ package ly.anoma.hex.keyboard
 import android.content.Context
 import android.content.res.ColorStateList
 import android.content.res.Configuration
+import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
@@ -100,6 +101,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private val deleteGesture = DeleteGesture(KeyboardMetrics.DELETE_START * density, KeyboardMetrics.DELETE_STEP * density,
         KeyboardMetrics.DELETE_CANCEL * density, slop.toFloat())
     private var deleteSlide: DeleteSlide? = null
+    // Swipe typing's trail, drawn over the keys: the action keys' fill, lighter (white in the dark).
+    private val trail = SwipeTrail(this, if (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES)
+        Color.argb(128, 255, 255, 255) else (modifier and 0xFFFFFF) or (107 shl 24), 6 * density)
+    private val swiping by lazy { SwipeTyping(this, ime.engine, trail) }
     private val repeatDelete = object : Runnable {
         override fun run() {
             if (deleting) { repeated = true; ime.engine.delete(); postDelayed(this, KeyboardMetrics.DELETE_REPEAT_EVERY) }
@@ -223,6 +228,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         // Another kind of field in the same box (the app changed its type): the keys, not the emoji panel over them.
         if (emojiOpen) host.closeEmoji()
         current = page
+        swiping.cancelAll()
         clearCallout(); endSlide(); grid = null; letters.clear(); caseKeys.clear(); slides.clear(); shiftIcon = null
         rows.removeAllViews()
         page.pad?.let { showPad(page, it); return }
@@ -297,7 +303,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                             if (g != null && p != null) ime.engine.letter(option, p.x, p.y, g, explicit = true) else ime.engine.type(option)
                         } else k.performClick()
                     },
-                    done = { touch = null; downText = null })
+                    done = { touch = null; downText = null },
+                    swipe = if (!symbols && c.isLetter()) c else null)
             }
             if (index == 2) deleteKey = newDeleteKey().also { row.add(it, columns - side, side) }
         }
@@ -523,7 +530,7 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
      * options to slide over, and on lifting (or when another key goes down first) [type] with the option
      * chosen, or null for the key's own. */
     private fun typesOnLift(k: KeyCap, preview: () -> String?, holds: () -> List<List<String>>, default: () -> Int = { 0 },
-                            down: (MotionEvent) -> Unit = {}, type: (String?) -> Unit, done: () -> Unit = {}) {
+                            down: (MotionEvent) -> Unit = {}, type: (String?) -> Unit, done: () -> Unit = {}, swipe: Char? = null) {
         fun finish(): Boolean {
             val option = if (feedback.choosing) feedback.selected() else null
             val pressed = k.isPressed; k.isPressed = false; clearCallout()
@@ -535,6 +542,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
             when (e.actionMasked) {
                 // A second finger on the same key is a second press: the first types now.
                 MotionEvent.ACTION_DOWN, MotionEvent.ACTION_POINTER_DOWN -> {
+                    // A second finger on a swiping key ends the swipe first.
+                    if (swiping.owns(k)) swiping.finishActive()
                     if (e.actionMasked == MotionEvent.ACTION_POINTER_DOWN && roll.up(k)) finish()
                     roll.down(k) { finish() }
                     clearCallout(); v.isPressed = true
@@ -546,8 +555,14 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                         pendingAccents = Runnable { if (v.isPressed) feedback.hold(k.face, options, default()) }
                         postDelayed(pendingAccents!!, KeyboardMetrics.HOLD_MS)
                     }
+                    if (swipe != null && e.actionMasked == MotionEvent.ACTION_DOWN) swiping.began(k, inRows(k, e.x, e.y), e.eventTime)
                 }
                 MotionEvent.ACTION_MOVE -> {
+                    // A letter's touch that travels past a key's pitch is a swipe (SwipeTyping), and its key types nothing.
+                    if (swipe != null && swiping.moved(k, e, inRows(k, 0f, 0f), geometry(), !feedback.choosing, swipe,
+                            liftedOn = { p -> p.x >= k.left && p.x < k.right && p.y >= (k.parent as View).top && p.y < (k.parent as View).bottom },
+                            tap = { p -> slides[k]?.invoke(p) },
+                            start = { v.isPressed = false; clearCallout(); roll.down(k) { swiping.finishActive() } })) return@setOnTouchListener true
                     if (feedback.choosing && v.isPressed) { val (x, y) = inHost(v, e); feedback.move(x, y) }
                     else if (e.x < -slop || e.x > v.width + slop || e.y < -slop || e.y > v.height + slop) {
                         if (v.isPressed) clearCallout()
@@ -555,8 +570,16 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                     }
                 }
                 // Gboard's lighter second tick when a key types as it lifts, but not for a held option.
-                MotionEvent.ACTION_UP -> if (roll.up(k) && finish()) k.typedOnLift()
-                MotionEvent.ACTION_CANCEL -> if (roll.up(k)) { v.isPressed = false; clearCallout(); done() }
+                MotionEvent.ACTION_UP -> if (swiping.owns(k)) {
+                    roll.up(k); swiping.ended(k, inRows(k, e.x, e.y), e.eventTime); done()
+                } else {
+                    swiping.forget(k)
+                    if (roll.up(k) && finish()) k.typedOnLift()
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    swiping.cancelled(k)
+                    if (roll.up(k)) { v.isPressed = false; clearCallout(); done() }
+                }
             }
             true
         }
@@ -588,6 +611,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         }
         return null
     }
+    /** A point of a key's touch in the rows' coordinates, which the touch model and Swipe typing use. */
+    private fun inRows(k: View, x: Float, y: Float) = KeyPoint((k.left + x).toDouble(), ((k.parent as View).top + y).toDouble())
     /** A touch in the host's coordinates, where the pop-ups are drawn. */
     private fun inHost(v: View, e: MotionEvent): Pair<Float, Float> {
         host.getLocationInWindow(hostAt); v.getLocationInWindow(onScreen)
@@ -676,7 +701,15 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
         spaceKey.label?.text = if (next.translate) context.getString(R.string.keyboard_space_translate, next.spoken.label) else next.spoken.label
         spaceKey.label?.textSize = if (next.translate) 12f else 14f
     }
+    override fun dispatchDraw(canvas: Canvas) {
+        super.dispatchDraw(canvas)
+        val saved = canvas.save()
+        canvas.translate(rows.left.toFloat(), rows.top.toFloat())
+        trail.draw(canvas)
+        canvas.restoreToCount(saved)
+    }
     fun cancelGestures() {
+        swiping.cancelAll()
         clearCallout(); endSlide(); roll.clear()
         removeCallbacks(repeatDelete); removeCallbacks(switchLanguage)
         spaceKey.isPressed = false

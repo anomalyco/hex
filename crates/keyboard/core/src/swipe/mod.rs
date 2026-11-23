@@ -36,10 +36,12 @@
 // too, and the loops index as Swift's do.
 #![allow(clippy::neg_cmp_op_on_partial_ord, clippy::needless_range_loop)]
 
+mod characters;
 mod geometry;
 mod gesture;
 #[cfg(test)]
 mod tests;
+pub mod typing;
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -187,9 +189,9 @@ impl Parameters {
     fn cost(&self, squared: f64, sigma: f64, straying_sigma: f64) -> f64 {
         let near = (1.0 - self.stray) / (sigma * sigma);
         let far = self.stray / (straying_sigma * straying_sigma);
-        let density = near * (-squared / (2.0 * sigma * sigma)).exp()
-            + far * (-squared / (2.0 * straying_sigma * straying_sigma)).exp();
-        ((near + far) / max(density, f64::MIN_POSITIVE)).ln()
+        let density = near * libm::exp(-squared / (2.0 * sigma * sigma))
+            + far * libm::exp(-squared / (2.0 * straying_sigma * straying_sigma));
+        libm::log((near + far) / max(density, f64::MIN_POSITIVE))
     }
 }
 
@@ -666,6 +668,71 @@ impl KeyGrid {
 pub const CONTRACTION_COST: f64 = 7.5;
 /// The cost of one of your own words (`SwipeDecoder.ownWordCost`).
 pub const OWN_WORD_COST: f64 = 11.0;
+
+/// The English contractions Hex corrects to or offers ("I'm", "don't", "we'll"), which Swipe
+/// typing reads as common words: iOS's `AutocorrectEngine.englishContractions`, in its order
+/// (iOS's `SwipeDecoderParametersTests` checks the two are the same).
+pub const ENGLISH_CONTRACTIONS: [&str; 59] = [
+    "I'd",
+    "I'll",
+    "I'm",
+    "I've",
+    "ain't",
+    "aren't",
+    "c'mon",
+    "can't",
+    "could've",
+    "couldn't",
+    "didn't",
+    "doesn't",
+    "don't",
+    "hadn't",
+    "hasn't",
+    "haven't",
+    "he'll",
+    "he's",
+    "here's",
+    "how's",
+    "isn't",
+    "it'll",
+    "it's",
+    "let's",
+    "ma'am",
+    "might've",
+    "must've",
+    "mustn't",
+    "needn't",
+    "o'clock",
+    "she'll",
+    "she's",
+    "should've",
+    "shouldn't",
+    "that's",
+    "there's",
+    "they'd",
+    "they'll",
+    "they're",
+    "they've",
+    "wasn't",
+    "we'd",
+    "we'll",
+    "we're",
+    "we've",
+    "weren't",
+    "what's",
+    "when's",
+    "where's",
+    "who's",
+    "why's",
+    "won't",
+    "would've",
+    "wouldn't",
+    "y'all",
+    "you'd",
+    "you'll",
+    "you're",
+    "you've",
+];
 
 const COMMONEST_CONTRACTIONS: [&str; 10] = [
     "i'm", "don't", "it's", "i'll", "can't", "that's", "didn't", "you're", "i've", "doesn't",

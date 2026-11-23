@@ -19,6 +19,10 @@ internal class TypingPreferences(context: Context) {
     var suggestSwearWords: Boolean
         get() = prefs.getBoolean(SUGGEST_SWEAR_WORDS, false)
         set(value) { prefs.edit().putBoolean(SUGGEST_SWEAR_WORDS, value).apply() }
+    /** Settings › Keyboard › Swipe typing: a slide through a word's letters types it (English and Spanish). On by default. */
+    var swipeTyping: Boolean
+        get() = prefs.getBoolean("swipeTyping", true)
+        set(value) { prefs.edit().putBoolean("swipeTyping", value).apply() }
     var spatial: Boolean
         get() = prefs.getBoolean("spatial", true)
         set(value) { prefs.edit().putBoolean("spatial", value).apply() }

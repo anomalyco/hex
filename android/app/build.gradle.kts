@@ -72,6 +72,7 @@ android {
         versionCode = 5
         versionName = "0.2.2"
         ndk { abiFilters += "arm64-v8a" }
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         externalNativeBuild.cmake {
             arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
             targets += "hexspeech"
@@ -105,6 +106,10 @@ android {
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.
     sourceSets["main"].assets.srcDir(rootProject.file("play/policy"))
+    // The swipe parity fixture's reader, for the JVM test on the host core and the instrumented one on bionic's.
+    sourceSets["testDebug"].java.srcDir("src/swipeParity/java")
+    sourceSets["androidTest"].java.srcDir("src/swipeParity/java")
+    sourceSets["androidTest"].assets.srcDir(rootProject.file("../crates/keyboard/core/tests/fixtures"))
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
@@ -142,8 +147,8 @@ val verifyTypingModels by tasks.registering {
 }
 tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, verifyTypingModels) }
 
-// The keyboard's Rust core (crates/keyboard), debug builds only for now: libhex_keyboard.so
-// for the APK and a host build for the JVM unit tests. Release builds don't include it.
+// The keyboard's Rust core (crates/keyboard): libhex_keyboard.so for every variant's APK and a
+// host build for the JVM unit tests.
 // rustup's cargo, found as iOS's build-keyboard-core.sh finds it (crates/keyboard/tools/
 // rustup-env.sh: on PATH, in CARGO_HOME or ~/.cargo, or Homebrew's rustup), run from the crate
 // so its pinned toolchain (rust-toolchain.toml) is used; Cargo tracks the sources, so the tasks
@@ -187,11 +192,6 @@ fun CargoBuild.cargo(vararg tools: String, arguments: (File) -> List<String>) {
         args("--manifest-path", keyboardCrate.resolve("Cargo.toml").path, "-p", "hex-keyboard-ffi", "--features", "jni")
     }
 }
-// Its output directory is the debug variant's (addGeneratedSourceDirectory below).
-val buildKeyboardCore by tasks.registering(CargoBuild::class) {
-    environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
-    cargo("cargo-ndk") { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
-}
 val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
     outputDirectory.set(layout.buildDirectory.dir("rustHost"))
     cargo {
@@ -199,8 +199,13 @@ val buildHostKeyboardCore by tasks.registering(CargoBuild::class) {
         listOf("build", "--release")
     }
 }
-androidComponents.onVariants(androidComponents.selector().withBuildType("debug")) { variant ->
-    variant.sources.jniLibs?.addGeneratedSourceDirectory(buildKeyboardCore, CargoBuild::outputDirectory)
+// One per variant, its output directory the variant's (addGeneratedSourceDirectory); always optimised.
+androidComponents.onVariants(androidComponents.selector().all()) { variant ->
+    val build = tasks.register<CargoBuild>("build${variant.name.replaceFirstChar(Char::uppercase)}KeyboardCore") {
+        environment("ANDROID_NDK_HOME", android.ndkDirectory.path)
+        cargo("cargo-ndk") { listOf("ndk", "-t", "arm64-v8a", "-P", "31", "-o", it.path, "build", "--release") }
+    }
+    variant.sources.jniLibs?.addGeneratedSourceDirectory(build, CargoBuild::outputDirectory)
 }
 tasks.withType<Test>().matching { it.name == "testDebugUnitTest" }.configureEach {
     dependsOn(buildHostKeyboardCore)
@@ -216,4 +221,6 @@ dependencies {
     // The keyboard's emoji panel (Apache 2.0): categories, recents and skin tones, all kept on the device.
     implementation("androidx.emoji2:emoji2-emojipicker:1.7.0")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }
