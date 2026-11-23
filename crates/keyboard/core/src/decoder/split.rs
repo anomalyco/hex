@@ -61,6 +61,11 @@ impl TypingDecoder {
                 .filter(|&(w, _)| self.can_stand_alone(w))
                 .collect();
             for &(l, ls) in &lefts {
+                // The first word after the word before is checked as `decide`'s one-word
+                // readings and `slipped_second_word` check theirs.
+                if never.follows(l, prev) {
+                    continue;
+                }
                 let lcost = ls + p.lm_weight * self.lm_cost(l, prev);
                 for &(r, rs) in &rights {
                     if never.follows(r, Some(l)) {

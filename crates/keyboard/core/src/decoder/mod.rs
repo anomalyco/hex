@@ -483,6 +483,43 @@ mod tests {
         );
     }
 
+    /// A split's first word that would make a never-suggest pair with the word before is
+    /// never offered, as a one-word reading isn't.
+    #[test]
+    fn a_split_never_starts_a_blocked_pair() {
+        let model = model("en");
+        let keys = keys();
+        let typed = "jobdone";
+        let readings = |decoder: &TypingDecoder| {
+            let d = decoder
+                .decide(&taps(typed, &keys), typed, Some("blow"), false, &keys)
+                .expect("a decision");
+            (
+                d.replacement,
+                d.readings.into_iter().map(|r| r.text).collect::<Vec<_>>(),
+            )
+        };
+        let mut decoder = TypingDecoder::new(model.clone(), None);
+        let (_, open) = readings(&decoder);
+        assert!(open.iter().any(|r| r == "job done"), "{open:?}");
+        decoder.never_suggest = NeverSuggest::new(["blow job"], &model);
+        let (blocked_replacement, blocked) = readings(&decoder);
+        assert!(
+            !blocked.iter().any(|r| r.starts_with("job ")),
+            "{blocked:?}"
+        );
+        assert_ne!(blocked_replacement.as_deref(), Some("job done"));
+        // After another word the pair isn't blocked.
+        let d = decoder
+            .decide(&taps(typed, &keys), typed, Some("the"), false, &keys)
+            .expect("a decision");
+        assert!(
+            d.readings.iter().any(|r| r.text == "job done"),
+            "{:?}",
+            d.readings
+        );
+    }
+
     #[test]
     fn tuned_for_each_language() {
         assert_eq!(Parameters::tuned("en").lm_weight, 1.5);
