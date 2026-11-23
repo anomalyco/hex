@@ -309,14 +309,22 @@ Stop when the call ends -> the same row and 30 s grace as macOS
         reads no site
 Labs › Stop every call recording when the call ends -> the same switch as
     macOS (labs.stop_any_call_recording, off by default): an offered or
-    by-hand recording stops 30 s after the call app it watches leaves the
-    microphone, even with Stop when the call ends off. There is no calendar
-    here, so no calendar reminder's recording to stop. An offered recording
-    watches the app detection named (a browser holds the microphone until it
-    lets it go; its page is not read for this). A by-hand recording watches
-    the one native call app on the microphone when it starts: the executable
-    names (ms-teams.exe, teams-for-linux, zoom, ...) map to the same
-    canonical keys detection uses, with browsers left out
+    by-hand recording stops 3 s after the call app it watches leaves the
+    microphone and goes quiet, then 30 s of grace under the "Hex stops
+    recording in 30 s unless you keep recording" capsule, with Keep
+    recording and the call coming back dropping the stop, even with Stop
+    when the call ends off. There is no calendar here, so no calendar
+    reminder's recording to stop. An offered recording watches the app
+    detection named (a browser holds the microphone until it lets it go;
+    its page is not read for this). A by-hand recording watches the one
+    native call app on the microphone when it starts: the executable names
+    (ms-teams.exe, teams-for-linux, zoom, ...) map to the same canonical
+    keys detection uses, with browsers left out
+    └── On GNOME Wayland without Labs › Call recording controls on GNOME
+        the capsule can't show: an offered call is started with the
+        Meetings pane's Start recording, a by-hand start, so a browser call
+        isn't watched, and a by-hand recording stops about 30 s after its
+        call ends with no Keep recording prompt shown
     // check: windows_and_linux_executables_link_to_their_canonical_call_app
     // (meeting/watcher/call_end.rs); not observed on a real Windows or
     // Linux call

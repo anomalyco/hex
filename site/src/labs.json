@@ -925,7 +925,7 @@
         "windows",
         "linux"
       ],
-      "summary": "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off",
+      "summary": "Also stop an offered or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off; on macOS a calendar reminder's recording stops the same way",
       "title": "Stop every call recording when the call ends"
     }
   ]

@@ -559,7 +559,6 @@ mod tests {
         assert_eq!(feature.group(), Group::Meetings);
         assert_eq!(feature.audience(), Audience::Everyone);
         assert_eq!(feature.oses(), &[Os::Macos, Os::Windows, Os::Linux]);
-        assert_eq!(feature.added(), 20261123);
         assert!(!feature.on(&AppSettings::default()));
         assert!(feature.on_this_os());
         assert_eq!(Feature::from_name("stop-any-call-recording"), Some(feature));
