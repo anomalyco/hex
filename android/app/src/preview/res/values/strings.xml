@@ -1,0 +1,34 @@
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <!-- Hex Preview only (the APK outside Google Play): its name, its privacy note and its updater. Every
+         translatable string here has a Simplified Chinese one in values-zh-rCN. -->
+    <string name="app_name" translatable="false">Hex Preview</string>
+    <string name="settings_privacy_detail">Hex turns speech into text on this phone and never uploads your voice or what you type. It keeps no keystrokes or transcripts. To find updates, Hex Preview asks GitHub for its latest version when you open it and at most once a day from the keyboard. That request carries nothing about you or what you type, though GitHub sees your internet address, as with any website. Turn it off with Check for updates automatically.</string>
+    <string name="updates_available">Hex Preview %1$s (build %2$d) is available</string>
+    <string name="updates_update">Update</string>
+    <string name="updates_keyboard_note">Updating closes the keyboard for a moment. Tap a text field to bring it back.</string>
+    <string name="updates_metered">You’re on mobile data. This download uses %1$s.</string>
+    <string name="updates_download">Download</string>
+    <string name="updates_not_now">Not now</string>
+    <string name="updates_downloading">Downloading… %1$d%%</string>
+    <string name="updates_verifying">Checking the download…</string>
+    <string name="updates_installing">Installing…</string>
+    <string name="updates_permission">Android asks once whether Hex Preview may install its own updates. Turn on Allow from this source, then come back here.</string>
+    <string name="updates_open_settings">Open settings</string>
+    <string name="updates_failed_connection">The download stopped. Check your connection and try again.</string>
+    <string name="updates_failed_server">GitHub didn’t answer as expected. Try again later.</string>
+    <string name="updates_failed_space">There isn’t enough free space for the download.</string>
+    <string name="updates_failed_mismatch">The download didn’t match what was published, so nothing was installed.</string>
+    <string name="updates_failed_signature">The download wasn’t signed with Hex Preview’s key, so nothing was installed.</string>
+    <string name="updates_failed_install">Android didn’t install the update.</string>
+    <string name="updates_retry">Try again</string>
+    <string name="updates_auto">Check for updates automatically</string>
+    <string name="updates_auto_detail">When you open Hex Preview, and once a day from the keyboard</string>
+    <string name="updates_check_now">Check now</string>
+    <string name="updates_installed">Version %1$s, build %2$d</string>
+    <string name="updates_checking">Checking…</string>
+    <string name="updates_current">Up to date</string>
+    <string name="updates_check_failed">Couldn’t check</string>
+    <string name="updates_ready">Update available</string>
+    <string name="updates_strip">Hex Preview update available</string>
+    <string name="updates_strip_dismiss">Dismiss</string>
+</resources>

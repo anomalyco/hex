@@ -54,6 +54,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     // Undo dictation, in the slots' place after a dictation (iPhone Hex's chip).
     private val undoChip = TextView(context)
     private var undoing = false
+    // A dismissible line in the hint's place (Hex Preview's update): it goes for this field once typing starts.
+    private val noticeRow = LinearLayout(context)
+    private val noticeText = TextView(context)
+    private val noticeClose = FrameLayout(context)
+    private var notice: StripNotice? = null
 
     private val well = FrameLayout(context)
     private val scope = DotScopeView(context)
@@ -94,6 +99,20 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             setOnClickListener { if (choosing) host.backInMenu() }
         }
         idleRow.addView(statusText, LinearLayout.LayoutParams(0, -1, 1f))
+        noticeText.apply {
+            useInter(500); setTextColor(ink); textSize = 14f; maxLines = 1; ellipsize = TextUtils.TruncateAt.END
+            gravity = Gravity.CENTER_VERTICAL; setPadding(dp(10), 0, dp(4), 0); isFocusable = true
+            setOnClickListener { notice?.let { notice = null; update(); it.tap() } }
+        }
+        noticeClose.apply {
+            isFocusable = true
+            addView(icon(R.drawable.ic_cancel), LayoutParams(dp(16), dp(16), Gravity.CENTER))
+            setOnClickListener { notice?.let { notice = null; update(); it.dismiss() } }
+        }
+        noticeRow.addView(noticeText, LinearLayout.LayoutParams(0, -1, 1f))
+        noticeRow.addView(noticeClose, LinearLayout.LayoutParams(dp(40), -1))
+        noticeRow.visibility = GONE
+        idleRow.addView(noticeRow, LinearLayout.LayoutParams(0, -1, 1f))
         for (i in 0..2) {
             if (i > 0) slotRow.addView(dividers[i - 1].apply { setBackgroundColor(color(R.color.rule)) },
                 LinearLayout.LayoutParams(maxOf(1, dp(1) / 2 + 1), dp(20)).apply { gravity = Gravity.CENTER_VERTICAL })
@@ -199,6 +218,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
      * in quotes on the left, then the fix (in a chip) or the likeliest word in the middle. Without it,
      * the likeliest word takes the middle, the next the left, as Gboard and iPhone place them. */
     fun suggestions(slots: List<Suggestion>) {
+        // Typing started: the suggestions matter more than the notice, which comes back in the next field.
+        if (slots.any { it.kind == Suggestion.Kind.Typed }) notice = null
         val shown = arrayOfNulls<Suggestion>(3)
         if (slots.any { it.kind == Suggestion.Kind.Typed }) slots.take(3).forEachIndexed { i, slot -> shown[i] = slot }
         else { shown[1] = slots.getOrNull(0); shown[0] = slots.getOrNull(1); shown[2] = slots.getOrNull(2) }
@@ -226,12 +247,21 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     }
     /** Undo dictation shows in the slots' place, or goes. */
     fun undo(shown: Boolean) { undoing = shown; update() }
+    /** Shows [notice] (or none) in the hint's place until typing starts, a tap or its ✕. */
+    fun notice(notice: StripNotice?) {
+        this.notice = notice
+        noticeText.text = notice?.text; noticeText.contentDescription = notice?.text
+        noticeClose.contentDescription = notice?.dismissLabel
+        update()
+    }
     fun update() {
-        val undo = idle && !choosing && undoing
-        val show = idle && !choosing && !undo && offered.any { it != null }
+        val noted = idle && !choosing && notice != null
+        val undo = idle && !choosing && undoing && !noted
+        val show = idle && !choosing && !undo && !noted && offered.any { it != null }
+        noticeRow.visibility = if (noted) VISIBLE else GONE
         (undoChip.parent as View).visibility = if (undo) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
-        statusText.visibility = if (idle && !show && !undo) VISIBLE else GONE
+        statusText.visibility = if (idle && !show && !undo && !noted) VISIBLE else GONE
         menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
     }

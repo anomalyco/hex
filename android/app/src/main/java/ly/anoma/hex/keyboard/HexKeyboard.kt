@@ -24,6 +24,7 @@ import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
 import ly.anoma.hex.typing.TypingPreferences
+import ly.anoma.hex.updates.Updates
 
 /** The input method: the editor's lifecycle, the views and dictation. Typing lives in [KeyboardEngine]. */
 /** Dictation's notes arrive from MicCapture as English sentences: the ones a person sees, in the phone's
@@ -89,6 +90,8 @@ class HexKeyboard : InputMethodService() {
         if (typeChanged) view?.closeMenu(configure = false)
         engine.configureTyping()
         view?.status(capture.phase, idleHint())
+        // Hex Preview's update line (Play builds have none); never in a password field.
+        Updates.keyboardShown(this, engine.secure) { view?.notice(it) }
     }
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int,
                                    candidatesStart: Int, candidatesEnd: Int) {
