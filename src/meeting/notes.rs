@@ -256,6 +256,12 @@ pub(super) fn summarize_entries(
     summarize_with_calendar(entries, None, &[], max_chars, deadline, generate)
 }
 
+/// The published lines a summary is generated from, read fresh so an edit
+/// that landed first is what the prompt sees.
+pub(super) fn summary_entries(directory: &Path) -> Result<Vec<TranscriptEntry>> {
+    super::read_ndjson(&directory.join("transcript.ndjson"))
+}
+
 /// Whether these entries hold any speech worth summarizing. An empty
 /// transcript is not a notes failure: there is simply nothing to write.
 fn has_speech(entries: &[TranscriptEntry]) -> bool {
@@ -928,7 +934,7 @@ fn summarize_with(
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("only completed meetings can be summarized"));
     }
-    let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
+    let entries = summary_entries(directory)?;
     if !has_speech(&entries) {
         tracing::info!(
             meeting = id,

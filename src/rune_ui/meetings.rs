@@ -286,6 +286,7 @@ impl MeetingsPane {
             && !meetings.iter().any(|meeting| &meeting.id == selected)
         {
             self.selected = None;
+            self.selection.stop();
         }
         self.meetings = meetings;
         self.error = None;
@@ -762,6 +763,37 @@ fn recordings(ui: &Ui, p: Paint, layer: &mut Vec<El>, action: El) -> (Vec<El>, E
     )
 }
 
+/// Whether the pane offers selection for this meeting: the lab is on, and
+/// the meeting is a finished transcript with turns and no summary running.
+fn selectable(ui: &Ui, meeting: &Meeting) -> bool {
+    available(ui)
+        && crate::labs::Feature::TranscriptEdits.on(&ui.settings)
+        && crate::labs::Feature::TranscriptEdits.managed().is_none()
+        && meeting.status == Status::Complete
+        && !meeting.notes_running
+        && !meeting.turns().is_empty()
+}
+
+/// Drops a selection the pane no longer offers, before it is drawn: the lab
+/// went off, the selected meeting left Complete, or its notes started
+/// running. Returns whether anything was dropped.
+pub(super) fn settle_selection(ui: &mut Ui) -> bool {
+    if !ui.meetings.selection.active() {
+        return false;
+    }
+    let offered = ui
+        .meetings
+        .selected
+        .as_deref()
+        .and_then(|id| ui.meetings.meeting(id))
+        .is_some_and(|meeting| selectable(ui, meeting));
+    if offered {
+        return false;
+    }
+    ui.meetings.selection.stop();
+    true
+}
+
 fn day_label(day: &str) -> &str {
     match day {
         "Today" => tr("Today"),
@@ -780,11 +812,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     };
     let armed = pane.delete_armed.as_deref() == Some(meeting.id.as_str());
     let renaming = pane.renaming.as_deref() == Some(meeting.id.as_str());
-    let can_select = crate::labs::Feature::TranscriptEdits.on(&ui.settings)
-        && crate::labs::Feature::TranscriptEdits.managed().is_none()
-        && meeting.status == Status::Complete
-        && !meeting.notes_running
-        && !meeting.turns().is_empty();
+    let can_select = selectable(ui, meeting);
     let selecting = can_select && pane.selection.active();
     let mut actions = Vec::new();
     let mut confirm = None;

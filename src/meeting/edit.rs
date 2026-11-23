@@ -1,7 +1,7 @@
 //! Deleting selected transcript lines from a finished meeting. One path for
 //! the Meetings pane on every OS: the final NDJSON and Markdown are rewritten
-//! atomically, the rolling draft loses the same lines, and the user-facing
-//! Markdown copy is refreshed only while Hex still wrote it.
+//! atomically, rolling-draft entries that match a deleted key are dropped, and
+//! the user-facing Markdown copy is refreshed only while Hex still wrote it.
 //!
 //! A transcript edit clears what was generated *from* the old lines: the
 //! notes title and summary, the provisional title, and the chapters. Their
@@ -135,8 +135,11 @@ pub(super) fn delete_in(
     if !directory.join("manifest.json").is_file() {
         return Err(EditRefusal::Unknown.into());
     }
+    // The claim comes first: a summary that finished between reading the
+    // manifest and claiming it would otherwise be lost to the manifest
+    // written below, with a stale export hash and its fields gone.
+    let _claim = InProgress::claim(id).ok_or(EditRefusal::Notes)?;
     let mut manifest = read_manifest(&directory).map_err(EditError::Failed)?;
-    let _claim = InProgress::claim(&manifest.id).ok_or(EditRefusal::Notes)?;
     match meeting_is_active(&directory) {
         Some(false) => {}
         Some(true) => return Err(EditRefusal::from(refusal_for(manifest.status)).into()),
@@ -167,8 +170,13 @@ pub(super) fn delete_in(
     manifest.chapters.clear();
     manifest.chapters_refined = false;
 
+    // The cleared manifest goes down first: a crash before the transcript
+    // rewrite leaves notes that mention nothing the transcript no longer has,
+    // never notes that describe deleted lines.
+    write_manifest(&directory, &manifest).map_err(EditError::Failed)?;
     remove_from_rolling(&directory, keys).map_err(EditError::Failed)?;
-    write_transcript(&directory, &manifest, &entries).map_err(EditError::Failed)?;
+    super::publish_transcript_files(&directory, &display_title(&manifest), &entries)
+        .map_err(EditError::Failed)?;
 
     let had_export = manifest
         .export_path
@@ -199,9 +207,10 @@ pub(super) fn delete_in(
     Ok(removed)
 }
 
-/// Removes the same lines from the rolling draft beside the final transcript.
-/// The rolling file covers only a recording, but it outlives one, so the
-/// lines must not come back if a reader falls back to it.
+/// Drops the rolling draft's entries whose key matches a deleted line, keeping
+/// its coverage line. The draft chunks the same audio differently, so an entry
+/// it keeps can still hold words from a deleted final line; no reader shows
+/// the draft while the final transcript exists.
 fn remove_from_rolling(directory: &Path, keys: &[TranscriptEntryKey]) -> Result<()> {
     let path = directory.join(ROLLING_FILE);
     if !path.exists() {
@@ -223,36 +232,6 @@ fn remove_from_rolling(directory: &Path, keys: &[TranscriptEntryKey]) -> Result<
     file.flush()?;
     file.get_ref().sync_all()?;
     fs::rename(&temporary, &path)?;
-    sync_directory(directory)?;
-    Ok(())
-}
-
-/// Replaces `transcript.ndjson` and `transcript.md` atomically, exactly as
-/// final publication writes them.
-fn write_transcript(
-    directory: &Path,
-    manifest: &super::MeetingManifest,
-    entries: &[TranscriptEntry],
-) -> Result<()> {
-    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
-    let markdown_temporary = directory.join("transcript.md.tmp");
-    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
-    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
-    set_owner_only(&ndjson_temporary, false)?;
-    set_owner_only(&markdown_temporary, false)?;
-    writeln!(markdown, "# {}\n", display_title(manifest))?;
-    for entry in entries {
-        serde_json::to_writer(&mut ndjson, entry)?;
-        ndjson.write_all(b"\n")?;
-        writeln!(markdown, "{}", super::markdown_line(entry))?;
-    }
-    ndjson.flush()?;
-    markdown.flush()?;
-    ndjson.get_ref().sync_all()?;
-    markdown.get_ref().sync_all()?;
-    sync_directory(directory)?;
-    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
-    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
     sync_directory(directory)?;
     Ok(())
 }
@@ -407,8 +386,9 @@ mod tests {
         ];
         delete_in(&root, id, &keys).unwrap();
 
-        // A fresh read, as `summarize_claimed` does before generating notes.
-        let entries = lines(&root.join(id));
+        // A fresh read through the same helper `summarize_with` uses before
+        // generating notes.
+        let entries = crate::meeting::notes::summary_entries(&root.join(id)).unwrap();
         let mut prompts = Vec::new();
         let summary = crate::meeting::notes::summarize_with_calendar(
             &entries,

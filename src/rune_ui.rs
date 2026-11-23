@@ -1484,6 +1484,9 @@ fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
             changed |= leave_hidden_pane(ui);
         }
     }
+    // The lab, the selected meeting's status, or its notes can take the
+    // selection away between frames.
+    changed |= meetings::settle_selection(ui);
     let preparing = ui
         .view
         .as_ref()

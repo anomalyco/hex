@@ -967,27 +967,7 @@ fn transcribe(
     manifest.echo_suppressed_utterances = echo_suppressed;
     // Transcription takes a while; the headings use a rename made meanwhile.
     keep_rename(directory, manifest);
-
-    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
-    let markdown_temporary = directory.join("transcript.md.tmp");
-    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
-    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
-    set_owner_only(&ndjson_temporary, false)?;
-    set_owner_only(&markdown_temporary, false)?;
-    writeln!(markdown, "# {}\n", display_title(manifest))?;
-    for entry in &transcript {
-        serde_json::to_writer(&mut ndjson, entry)?;
-        ndjson.write_all(b"\n")?;
-        writeln!(markdown, "{}", markdown_line(entry))?;
-    }
-    ndjson.flush()?;
-    markdown.flush()?;
-    ndjson.get_ref().sync_all()?;
-    markdown.get_ref().sync_all()?;
-    sync_directory(directory)?;
-    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
-    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
-    sync_directory(directory)?;
+    publish_transcript_files(directory, &display_title(manifest), &transcript)?;
 
     match transcript::export_markdown(
         &crate::app_settings::meeting_output_folder(),
@@ -1006,6 +986,37 @@ fn transcribe(
         }
     }
     let _ = fs::remove_file(directory.join(FINAL_PENDING_FILE));
+    Ok(())
+}
+
+/// Replaces `transcript.ndjson` and `transcript.md` atomically: both
+/// temporary files are written and synced, then renamed over the published
+/// pair. Final publication and a transcript edit write the same files.
+pub(super) fn publish_transcript_files(
+    directory: &Path,
+    title: &str,
+    entries: &[TranscriptEntry],
+) -> Result<()> {
+    let ndjson_temporary = directory.join("transcript.ndjson.tmp");
+    let markdown_temporary = directory.join("transcript.md.tmp");
+    let mut ndjson = BufWriter::new(File::create(&ndjson_temporary)?);
+    let mut markdown = BufWriter::new(File::create(&markdown_temporary)?);
+    set_owner_only(&ndjson_temporary, false)?;
+    set_owner_only(&markdown_temporary, false)?;
+    writeln!(markdown, "# {title}\n")?;
+    for entry in entries {
+        serde_json::to_writer(&mut ndjson, entry)?;
+        ndjson.write_all(b"\n")?;
+        writeln!(markdown, "{}", markdown_line(entry))?;
+    }
+    ndjson.flush()?;
+    markdown.flush()?;
+    ndjson.get_ref().sync_all()?;
+    markdown.get_ref().sync_all()?;
+    sync_directory(directory)?;
+    fs::rename(&ndjson_temporary, directory.join("transcript.ndjson"))?;
+    fs::rename(&markdown_temporary, directory.join("transcript.md"))?;
+    sync_directory(directory)?;
     Ok(())
 }
 

@@ -2,7 +2,8 @@
 //! the selection bar, and the one confirmed request that removes them.
 //!
 //! A displayed turn can cover several published entries; selecting it selects
-//! all of them, and the request carries their exact keys.
+//! all of them, and the request carries their exact keys. Counts speak of
+//! turns, which is what the person clicked, not the lines underneath.
 
 use rune::{Drag, El, Icon, Phase, Tx, col, row, text};
 
@@ -35,13 +36,14 @@ static CHECKED_BOX: Icon = Icon {
     body: r#"<rect x="2.75" y="2.75" width="10.5" height="10.5" rx="2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M5.2 8.2l1.8 1.8 3.8-4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>"#,
 };
 
-/// The selected published lines, and whether the delete asks for its
-/// confirmation.
+/// The selected turns, each with the published lines it covers, and whether
+/// the delete asks for its confirmation.
 #[derive(Default)]
 pub(in crate::rune_ui) struct Selection {
     /// A saved transcript is showing its selection checkboxes.
     active: bool,
-    keys: Vec<TranscriptEntryKey>,
+    /// Every selected turn's published lines, in the order they were chosen.
+    turns: Vec<Vec<TranscriptEntryKey>>,
     /// Delete asks, and waits for its confirmation.
     pub(in crate::rune_ui) delete_armed: bool,
     /// The turn a pointer press already toggled on the way down, whose
@@ -54,8 +56,9 @@ impl Selection {
         self.active
     }
 
+    /// How many turns are selected, which is what the bar counts.
     pub(in crate::rune_ui) fn len(&self) -> usize {
-        self.keys.len()
+        self.turns.len()
     }
 
     /// Starts selecting, replacing any earlier selection.
@@ -63,7 +66,7 @@ impl Selection {
         self.active = true;
         self.delete_armed = false;
         self.pressed = None;
-        self.keys.clear();
+        self.turns.clear();
     }
 
     /// Leaves selection mode.
@@ -71,39 +74,37 @@ impl Selection {
         self.active = false;
         self.delete_armed = false;
         self.pressed = None;
-        self.keys.clear();
+        self.turns.clear();
     }
 
-    /// Whether every line under this turn is selected.
+    /// Whether this turn, with exactly these lines, is selected.
     pub(super) fn contains(&self, turn: &Turn) -> bool {
-        !turn.entries.is_empty() && turn.entries.iter().all(|key| self.keys.contains(key))
+        !turn.entries.is_empty() && self.turns.iter().any(|keys| keys == &turn.entries)
     }
 
-    /// Selects the keys, or clears them when all were already selected.
-    fn toggle(&mut self, keys: &[TranscriptEntryKey]) {
-        if keys.is_empty() {
+    /// Selects the turn's lines, or clears them when it was already selected.
+    fn toggle(&mut self, entries: &[TranscriptEntryKey]) {
+        if entries.is_empty() {
             return;
         }
-        if keys.iter().all(|key| self.keys.contains(key)) {
-            self.keys.retain(|key| !keys.contains(key));
-        } else {
-            for key in keys {
-                if !self.keys.contains(key) {
-                    self.keys.push(*key);
-                }
+        match self.turns.iter().position(|keys| keys == entries) {
+            Some(index) => {
+                self.turns.remove(index);
             }
+            None => self.turns.push(entries.to_vec()),
         }
         self.delete_armed = false;
     }
 
+    /// Every selected turn's lines, for the one request that removes them.
     fn keys(&self) -> Vec<TranscriptEntryKey> {
-        self.keys.clone()
+        self.turns.iter().flatten().copied().collect()
     }
 
-    /// Selects `keys`, as a preview's representative state.
+    /// Selects `keys`, one turn per key, as a preview's representative state.
     pub(in crate::rune_ui) fn select_lines(&mut self, keys: &[TranscriptEntryKey]) {
         self.start();
-        self.keys = keys.to_vec();
+        self.turns = keys.iter().map(|key| vec![*key]).collect();
     }
 
     /// Escape: the confirmation first, then selection mode itself. False
@@ -136,7 +137,13 @@ pub(super) fn action(p: Paint) -> El {
 /// one confirmation.
 pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
     let selection = &ui.meetings.selection;
-    let count = selection.len().to_string();
+    let count = selection.len();
+    let count_text = count.to_string();
+    let armed_label = if count == 1 {
+        tr("Delete 1 line").to_string()
+    } else {
+        tr_fill("Delete {} lines", &count_text)
+    };
     let id = meeting.id.clone();
     let mut actions = row().key("selection-actions").gap(8.0);
     if selection.delete_armed {
@@ -145,7 +152,7 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
                 button(
                     p,
                     "meeting-confirm-delete-lines",
-                    &tr_fill("Delete {} lines", &count),
+                    &armed_label,
                     ButtonKind::Danger,
                     move |ui: &mut Ui, _| confirm(ui, &id),
                 )
@@ -184,19 +191,25 @@ pub(super) fn bar(ui: &Ui, p: Paint, meeting: &Meeting) -> El {
         .radius(p.k.radius.md)
         .fill(p.k.c.layer_01)
         .child(
-            text(tr_fill("{} lines selected", &count))
-                .key("count")
-                .font(p.k.ty.body_medium)
-                .color(p.text()),
+            text(if count == 1 {
+                tr("1 line selected").to_string()
+            } else {
+                tr_fill("{} lines selected", &count_text)
+            })
+            .key("count")
+            .font(p.k.ty.body_medium)
+            .color(p.text()),
         )
-        .child(
-            text(tr(
-                "Its summary and chapters will be removed. Summarize again for a fresh one.",
-            ))
-            .key("hint")
-            .font(DESCRIPTION)
-            .color(p.muted())
-            .wrap(),
+        .children(
+            (meeting.summary.is_some() || !meeting.chapters.is_empty()).then(|| {
+                text(tr(
+                    "Its summary and chapters will be removed. Summarize again for a fresh one.",
+                ))
+                .key("hint")
+                .font(DESCRIPTION)
+                .color(p.muted())
+                .wrap()
+            }),
         )
         .children((selection.len() == 0).then(|| {
             text(tr("Select the lines to delete."))

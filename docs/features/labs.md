@@ -276,9 +276,10 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
 ├── Delete transcript lines no labs.transcript_edits (every OS) a finished meeting's detail puts Select lines beside Copy; turns become
 │                                        checkable (You and Them together), and Delete lines… asks once before removing every line under
-│                                        the selected turns from transcript.ndjson, transcript.md, and the rolling draft. The old
-│                                        summary, provisional title, and chapters go with them; Regenerate summary reads the edited file
-│                                        and the user Markdown copy is rewritten only while Hex still wrote it (see meetings.md)
+│                                        the selected turns from transcript.ndjson and transcript.md, dropping matching rolling-draft
+│                                        entries too. The old summary, provisional title, and chapters go with them; Regenerate
+│                                        summary reads the edited file and the user Markdown copy is rewritten only while Hex still
+│                                        wrote it (see meetings.md)
 ├── Stop every call recording when the call ends no labs.stop_any_call_recording (macOS, with Meetings on) an offered,
 │                                        calendar (Zoom, Teams, or Slack link), or by-hand call recording stops 3 s after
 │                                        its call app leaves the microphone, then 30 s of grace, even with Stop when the

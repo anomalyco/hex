@@ -262,6 +262,44 @@ pub(crate) fn meeting_edit_failed(ui: &mut Ui, error: String) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::meeting::{MeetingSource, TranscriptEntry, TranscriptEntryKey};
+
+    /// Each displayed turn carries exactly the published lines under it, in
+    /// transcript order, however the speakers interleave.
+    #[test]
+    fn turns_carry_exactly_their_own_published_lines() {
+        let line = |source, start_ms: u64, end_ms: u64, text: &str| TranscriptEntry {
+            source,
+            start_ms,
+            end_ms,
+            text: text.into(),
+        };
+        let entries = vec![
+            line(MeetingSource::Microphone, 0, 4_000, "First."),
+            line(MeetingSource::Microphone, 4_000, 8_000, "Second."),
+            line(MeetingSource::System, 8_000, 12_000, "In between."),
+            line(
+                MeetingSource::Microphone,
+                12_000,
+                16_000,
+                "After the reply.",
+            ),
+            line(MeetingSource::Microphone, 20_000, 23_000, "A pause later."),
+        ];
+        let keys = |turn: &Turn| turn.entries.clone();
+        let of = TranscriptEntryKey::of;
+        let turns = turns(&entries);
+        assert_eq!(
+            turns.iter().map(|turn| turn.start_ms).collect::<Vec<_>>(),
+            [0, 8_000, 12_000, 20_000],
+            "adjacent same-speaker lines join, the other speaker splits them, \
+             and more than three seconds apart stays apart"
+        );
+        assert_eq!(keys(&turns[0]), [of(&entries[0]), of(&entries[1])]);
+        assert_eq!(keys(&turns[1]), [of(&entries[2])]);
+        assert_eq!(keys(&turns[2]), [of(&entries[3])]);
+        assert_eq!(keys(&turns[3]), [of(&entries[4])]);
+    }
 
     #[test]
     fn the_meeting_feed_lists_stored_meetings_once_until_they_change() {
