@@ -1,17 +1,18 @@
 {
-  "versionCode": 2314,
-  "versionName": "0.2.2-preview.2314",
+  "versionCode": 2325,
+  "versionName": "0.2.2-preview.2325",
   "version": "0.2.2",
   "minSdk": 31,
   "published": "2026-11-23",
-  "commit": "81d058fcfec379867c8f51db71c6e40a4018ed70",
+  "commit": "d83d73cf538a03af605c19fc7404229d49376293",
   "apk": {
-    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2314/HexPreview-0.2.2-preview.2314.apk",
-    "size": 68925180,
-    "sha256": "15b409317a40dfb91797d1901a7c899ec1ccae6023975661c221d4badea55e0e"
+    "url": "https://github.com/anomalyco/hex/releases/download/android-preview-2325/HexPreview-0.2.2-preview.2325.apk",
+    "size": 68925488,
+    "sha256": "c7ca0eb00f2095d72484cdfca9ade229ecc6acb4390df47e37db258fe682b674"
   },
   "notes": [
-    "Setup now calls the app Hex Preview, the name Android's lists use.",
-    "An update keeps downloading if you leave Hex Preview (Android 14 and later)."
+    "Short dictations are about a quarter faster, and the speech model stays ready between dictations.",
+    "Portuguese dictation. On a Portuguese phone Hex no longer writes your Portuguese in English.",
+    "Setup and settings say what the speech model does instead of naming it."
   ]
 }
