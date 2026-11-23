@@ -857,11 +857,12 @@ iOS targets, and no physical iPhone run checks it.
 ## Word suggestions (full keyboard)
 
 The strip above the keys shows the words the engine
-offers as you type, and after a space the finished word's emoji. Settings › Experiments ›
+offers as you type, the emoji of the word being typed, and after a space the finished
+word's emoji (Emoji below). Settings › Experiments ›
 Hide word suggestions (off by default, `experiments.hideWordSuggestions`, App Group) stops
 the suggestions: the strip keeps its height, the Hex key, Undo, status, notices and the Paste
-chip, but shows no typing or next-word suggestions, swipe readings, finished-word emoji, or
-the chip that keeps what you typed while a correction is still ahead (keep literal).
+chip, but shows no typing or next-word suggestions, swipe readings, typed or finished-word
+emoji, or the chip that keeps what you typed while a correction is still ahead (keep literal).
 Autocorrect still corrects on space, and the chip that puts back what it replaced (`.revert`)
 stays after Delete. With no words offered, tapping the left slot to keep what you typed
 mid-word and holding a word to add it to Custom vocabulary are gone. Off, the strip suggests
@@ -1171,16 +1172,30 @@ language and English and against Hex's own chat words ("congrats", "bday"), one
 emoji per family ("woman running", "man running"); your emoji break ties and fill
 the rest (`EmojiSuggester`). Search (the magnifier) types with the letter keys into
 a field in the strip, results above it, by name first. Holding an emoji with skin
-tones offers five; the one you pick is typed and kept for that emoji. After a space,
-an empty strip offers the finished word's own emoji ("pizza " → 🍕), never in place
-of word suggestions. The App Group keeps a use count per emoji that halves every 10
+tones offers five; the one you pick is typed and kept for that emoji. While a word that
+names an emoji is typed ("smile" → 😊, "fuego" → 🔥 on the Spanish layout), the strip
+offers that one emoji: in the next empty slot, else in place of the right slot's runner-up
+word, else the centre's. A word names an emoji when it is the emoji's whole name or one of
+Hex's chat words, in the layout's language or English, plurals and endings too, never a
+prefix ("smil") or a word only part of several names ("face", "heart"). The emoji never
+takes the place of what you typed, a revert, the word space will put in, or your own
+words, and isn't offered while space would put in another word, for a swiped word, or in a
+password, one-time code, username, email address or web address field, a secure one or
+one with autocorrect off (`FullKeyboardView.withTypedWordEmoji`). A tap types it with a
+space in the word's place ("smile" → "😊 "); Delete then takes the space and the left slot
+offers the word back, as after an autocorrection, and Learn how I type records nothing
+(`FullKeyboardEngine.acceptEmoji`). Testers describe Apple's keyboard doing this on an
+iPhone; in the iOS 26.5 and 27.2 simulators it offers no emoji for "smile", "pizza" or
+"love", before or after the space, so the slot follows Hex's strip, not a measurement.
+After a space, an empty strip offers the finished word's own emoji ("pizza " → 🍕),
+never in place of word suggestions, and a tap adds it after the word. The App Group keeps a use count per emoji that halves every 10
 days and each emoji's skin tone, no words (`EmojiUsageStore`); Clear emoji history
 empties it. The index is `HEXShared/FullKeyboard/Emoji/emoji-index-<lang>.txt`,
 built by `scripts/build-emoji-data.py` from Unicode's emoji-test.txt 18.0 and CLDR
 49 (Unicode License v3, `LICENSE-Unicode.txt` beside it, which permits commercial
 use with the notice) and `scripts/emoji-aliases-en.txt`; the keyboard maps it and
 binary-searches it in place (about 0.7 MB on the heap), loading it on the first
-emoji key press or finished word. Emoji newer than 15.1 are listed only where the
+emoji key press or word typed in a field that takes emoji. Emoji newer than 15.1 are listed only where the
 emoji font draws them. Nothing leaves the iPhone.
 
 ## GPU Dot Scope (`HEXShared/DotScope.swift`, `DotScopeShader.metal`)
