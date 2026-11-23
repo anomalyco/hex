@@ -24,6 +24,7 @@ import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
 import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.speech.SpeechEdges
 import ly.anoma.hex.speech.speechSpan
 
 class InsertionTest {
@@ -493,6 +494,20 @@ class InsertionTest {
         assertEquals(0 until 2 * second, speechSpan(second / 10, 2 * second - 640, 2 * second))
         // Nothing voiced: the recording as it was (MicCapture says "No speech heard" before it gets here).
         assertEquals(0 until 5 * second, speechSpan(-1, 0, 5 * second))
+    }
+    @Test fun aClickAwayFromTheSpeechIsNotSpeech() {
+        val block = 640
+        fun edges(vararg voiced: IntRange) = SpeechEdges().apply {
+            for (i in 0 until 1500) block(i * block, block, voiced.any { i in it })
+        }
+        // A tap on the key (one block), then words from 1 s to 4 s, then the tap on ✓ (two blocks) at 12 s.
+        val e = edges(2..2, 25..99, 300..301)
+        assertEquals(25 * block, e.first)
+        assertEquals(100 * block, e.last)
+        // Syllables with short gaps between them are one stretch; a short word on its own still counts.
+        assertEquals(40 * block, edges(10..12, 15..17, 20..22, 37..39).last)
+        // Only clicks: no speech found, so Whisper gets the whole recording.
+        assertEquals(-1, edges(5..6, 200..201).first)
     }
     @Test fun frenchItalianAndDutchAreDictationLanguages() {
         assertEquals(DictationLanguage.French, DictationLanguage.automatic(Spoken.French, listOf("en")))

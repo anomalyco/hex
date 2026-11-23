@@ -23,13 +23,36 @@ private const val LOG_TAG = "HexSpeech"
 internal const val SPEECH_LEAD_MS = 300
 internal const val SPEECH_TAIL_MS = 500
 
-/** The part of a recording Whisper transcribes: from [SPEECH_LEAD_MS] before the first voiced block ([first],
- * -1 for none) to [SPEECH_TAIL_MS] after the last ([last], where it ends), within the [count] samples recorded.
+/** The part of a recording Whisper transcribes: from [SPEECH_LEAD_MS] before the speech ([first], -1 for none:
+ * all of it) to [SPEECH_TAIL_MS] after it ([last], where it ends), within the [count] samples recorded ([SpeechEdges]).
  * Quiet around the speech only slows Whisper (3 s of speech in a 60 s recording took 8.5× as long) and
  * invites stray words ("you", a repeated sentence); pauses between words stay. */
 internal fun speechSpan(first: Int, last: Int, count: Int, rate: Int = 16_000): IntRange =
     if (first < 0) 0 until count
     else maxOf(0, first - rate * SPEECH_LEAD_MS / 1000) until minOf(count, last + rate * SPEECH_TAIL_MS / 1000)
+
+/** Voiced 40 ms blocks less than SPEECH_GAP_MS apart form a stretch, which is speech once it holds SPEECH_MIN_MS of
+ * voice. A click, a knock or the tap on ✓ (one or two loud blocks) away from the speech never is, so it doesn't stretch
+ * what Whisper hears; any word is longer. */
+internal const val SPEECH_GAP_MS = 300
+internal const val SPEECH_MIN_MS = 120
+
+/** Where speech starts ([first], -1 for none yet) and ends ([last]) in a recording, fed its blocks in order. */
+internal class SpeechEdges(private val rate: Int = 16_000) {
+    var first = -1
+        private set
+    var last = 0
+        private set
+    private var start = -1
+    private var end = 0
+    private var voice = 0
+    fun block(at: Int, n: Int, voiced: Boolean) {
+        if (!voiced) return
+        if (start < 0 || at - end > rate * SPEECH_GAP_MS / 1000) { start = at; voice = 0 }
+        voice += n; end = at + n
+        if (voice >= rate * SPEECH_MIN_MS / 1000) { if (first < 0) first = start; last = end }
+    }
+}
 
 /** Names a dictation's decode to whisper.cpp, in this process (Home and the keyboard share the model). */
 private val jobs = AtomicLong()
@@ -190,8 +213,7 @@ internal class MicCapture(
             .setBufferSizeInBytes(maxOf(minBuffer, rate * 2 * 2)).build()
         var count = 0
         var voiced = 0
-        var first = -1
-        var last = 0
+        val edges = SpeechEdges(rate)
         var lastUpdate = 0L
         try {
             check(record.state == AudioRecord.STATE_INITIALIZED)
@@ -206,7 +228,8 @@ internal class MicCapture(
                 var energy = 0.0
                 for (i in count until count + n) energy += pcm[i].toDouble() * pcm[i]
                 val rms = sqrt(energy / n) / 32768.0
-                if (rms > .004) { voiced += n; if (first < 0) first = count; last = count + n }
+                if (rms > .004) voiced += n
+                edges.block(count, n, rms > .004)
                 count += n
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastUpdate >= 75) {
@@ -219,7 +242,7 @@ internal class MicCapture(
                 if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) record.stop()
             } finally { record.release() }
         }
-        val span = speechSpan(first, last, count, rate)
+        val span = speechSpan(edges.first, edges.last, count, rate)
         // Only with "setprop log.tag.HexSpeech DEBUG": how much audio arrived, never the audio or its words.
         if (Log.isLoggable(LOG_TAG, Log.DEBUG)) Log.d(LOG_TAG, "captured $count samples, $voiced voiced, kept ${span.first}..${span.last + 1}")
         if (ticket.cancelled) return
