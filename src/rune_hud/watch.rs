@@ -23,36 +23,46 @@ pub(super) struct Watch {
     pub(super) first_frame: FirstFrame,
 }
 
+/// Consecutive failure count and reason carried across a retry after its
+/// backoff expires, until the new attempt resolves.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct PriorFailure {
+    failures: u32,
+    reason: String,
+}
+
 /// The first-frame watch behind a Windows HUD show: each start opens one
 /// attempt, which resolves once and asks for at most one recovery hide. A
 /// resolved attempt that presented no frame starts (or lengthens) a show
 /// backoff, so a HUD that can't show is not rebuilt on every dictation.
 #[cfg(any(target_os = "windows", test))]
-#[derive(Default)]
-pub(super) struct FirstFrame {
-    /// The attempt a start began: when, and the presents before it.
-    attempt: Option<Attempt>,
-    /// How many attempts have begun. The newest one's number tags its
-    /// recovery hide, so a hide decided for an older attempt never runs against
-    /// a HUD a later start showed (#1793).
-    attempts: u64,
-    /// The last attempt that presented nothing: why, for Settings and the log.
-    unpresented: Option<String>,
-    /// This attempt asked for its recovery hide.
-    released: bool,
-    /// This attempt already presented nothing: its recording gets no further
-    /// show, so a failed HUD is not rebuilt mid-dictation (#2175).
-    failed: bool,
-    /// Consecutive attempts that presented nothing, for the backoff.
-    failures: u32,
-    /// No show begins before this while the HUD backs off a failed show.
-    backoff_until: Option<Instant>,
-}
-
-#[cfg(any(target_os = "windows", test))]
-struct Attempt {
-    started: Instant,
-    presents: u64,
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(super) enum FirstFrame {
+    /// No start has opened an attempt yet.
+    #[default]
+    Idle,
+    /// A show is in flight, waiting up to [`FIRST_FRAME`] for its first present.
+    /// `attempt` tags any recovery hide so a hide decided for an older attempt
+    /// never runs against a HUD a later start showed (#1793).
+    Waiting {
+        attempt: u64,
+        started: Instant,
+        presents: u64,
+        /// Carried from an earlier failed attempt until this one resolves.
+        prior: Option<PriorFailure>,
+    },
+    /// The last attempt presented a frame; consecutive failures are reset.
+    Presented { attempt: u64 },
+    /// The last attempt presented nothing and issued its one recovery hide: its
+    /// recording gets no further show (#2175), and later starts back off until
+    /// `until`.
+    Failed {
+        attempt: u64,
+        failures: u32,
+        until: Instant,
+        reason: String,
+    },
 }
 
 /// A recovery hide a [`FirstFrame`] poll decided for, and the presents it read.
@@ -116,31 +126,66 @@ impl FirstFrame {
         if self.backing_off(at) {
             return false;
         }
-        self.attempts += 1;
-        self.attempt = Some(Attempt {
+        let (attempt, prior) = match std::mem::take(self) {
+            Self::Idle => (1, None),
+            Self::Waiting { attempt, prior, .. } => (attempt + 1, prior),
+            Self::Presented { attempt } => (attempt + 1, None),
+            Self::Failed {
+                attempt,
+                failures,
+                reason,
+                ..
+            } => (attempt + 1, Some(PriorFailure { failures, reason })),
+        };
+        *self = Self::Waiting {
+            attempt,
             started: at,
             presents,
-        });
-        self.released = false;
-        self.failed = false;
+            prior,
+        };
         true
     }
 
     /// Whether the HUD is backing off a failed show at `now`: no window,
     /// swapchain or device is made until it ends.
     pub(super) fn backing_off(&self, now: Instant) -> bool {
-        self.backoff_until.is_some_and(|until| now < until)
+        matches!(self, Self::Failed { until, .. } if now < *until)
     }
 
     /// Whether this attempt already presented nothing, so its recording gets no
     /// further show.
     pub(super) fn failed(&self) -> bool {
-        self.failed
+        matches!(self, Self::Failed { .. })
     }
 
     /// How many attempts in a row presented nothing, for the backoff's log.
     pub(super) fn failed_attempts(&self) -> u32 {
-        self.failures
+        match self {
+            Self::Failed { failures, .. } => *failures,
+            Self::Waiting {
+                prior: Some(prior), ..
+            } => prior.failures,
+            Self::Idle | Self::Waiting { prior: None, .. } | Self::Presented { .. } => 0,
+        }
+    }
+
+    fn current_attempt(&self) -> Option<u64> {
+        match self {
+            Self::Idle => None,
+            Self::Waiting { attempt, .. }
+            | Self::Presented { attempt }
+            | Self::Failed { attempt, .. } => Some(*attempt),
+        }
+    }
+
+    fn unpresented(&self) -> Option<&str> {
+        match self {
+            Self::Failed { reason, .. } => Some(reason.as_str()),
+            Self::Waiting {
+                prior: Some(prior), ..
+            } => Some(prior.reason.as_str()),
+            Self::Idle | Self::Waiting { prior: None, .. } | Self::Presented { .. } => None,
+        }
     }
 
     /// Whether a recovery hide still applies where it lands: no start has opened
@@ -149,7 +194,7 @@ impl FirstFrame {
     /// one means the hide would take away a HUD that is up or on its way
     /// (#1793).
     pub(super) fn should_apply_hide(&self, hide: HideAttempt, presents: u64) -> bool {
-        hide.attempt == self.attempts && hide.presents == presents
+        self.current_attempt() == Some(hide.attempt) && hide.presents == presents
     }
 
     /// One poll: resolves the attempt once `FIRST_FRAME` has passed, then
@@ -167,48 +212,55 @@ impl FirstFrame {
         failure: Option<&str>,
         surface: Option<&str>,
     ) -> FirstFrameCheck {
-        let resolved = self
-            .attempt
-            .as_ref()
-            .is_some_and(|attempt| now.saturating_duration_since(attempt.started) >= FIRST_FRAME);
-        let attempt = if resolved { self.attempt.take() } else { None };
-        let mut presented_nothing = false;
-        let mut backoff = None;
-        if let Some(attempt) = attempt {
-            presented_nothing = presents == attempt.presents;
-            self.failed = presented_nothing;
-            self.unpresented = presented_nothing.then(|| {
-                format!(
+        let ready = matches!(
+            self,
+            Self::Waiting { started, .. } if now.saturating_duration_since(*started) >= FIRST_FRAME
+        );
+        if ready {
+            let Self::Waiting {
+                attempt,
+                presents: baseline,
+                prior,
+                ..
+            } = std::mem::take(self)
+            else {
+                unreachable!();
+            };
+            if presents == baseline {
+                let failures = prior.map_or(0, |prior| prior.failures).saturating_add(1);
+                let cooldown = backoff_after(failures);
+                let reason = format!(
                     "shown but presented no frame in {} ms; surface: {}",
                     FIRST_FRAME.as_millis(),
                     surface.unwrap_or("none")
-                )
-            });
-            if presented_nothing {
-                self.failures = self.failures.saturating_add(1);
-                let cooldown = backoff_after(self.failures);
-                self.backoff_until = Some(now + cooldown);
-                backoff = Some(cooldown);
-            } else {
-                // A frame presented: the HUD works again, so the next failure
-                // starts from the first cooldown.
-                self.failures = 0;
-                self.backoff_until = None;
+                );
+                *self = Self::Failed {
+                    attempt,
+                    failures,
+                    until: now + cooldown,
+                    reason: reason.clone(),
+                };
+                return FirstFrameCheck {
+                    reason: failure.map(str::to_owned).or(Some(reason)),
+                    hide: Some(HideAttempt { attempt, presents }),
+                    backoff: Some(cooldown),
+                };
             }
-        }
-        let hide = (!self.released && presented_nothing).then_some(HideAttempt {
-            attempt: self.attempts,
-            presents,
-        });
-        if hide.is_some() {
-            self.released = true;
+            // A frame presented: the HUD works again, so the next failure
+            // starts from the first cooldown.
+            *self = Self::Presented { attempt };
+            return FirstFrameCheck {
+                reason: failure.map(str::to_owned),
+                hide: None,
+                backoff: None,
+            };
         }
         FirstFrameCheck {
             reason: failure
                 .map(str::to_owned)
-                .or_else(|| self.unpresented.clone()),
-            hide,
-            backoff,
+                .or_else(|| self.unpresented().map(str::to_owned)),
+            hide: None,
+            backoff: None,
         }
     }
 }

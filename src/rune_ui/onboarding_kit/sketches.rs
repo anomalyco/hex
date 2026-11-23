@@ -97,7 +97,7 @@ pub(crate) fn playing(s: &Onboard) -> bool {
 
 /// `"Watch another one"` would play something.
 fn offered(s: &Onboard) -> bool {
-    s.step == Step::Waiting
+    s.step() == Step::Waiting
         && !s.can_hear()
         && !playing(s)
         && s.sketches.played < SKETCHES.len()
@@ -142,7 +142,7 @@ pub(super) fn advance(s: &mut Onboard, now: f64, tx: &mut Tx) {
             samples.pop_front();
         }
     }
-    if s.step == Step::Waiting {
+    if s.step() == Step::Waiting {
         let since = *s.sketches.waiting_since.get_or_insert(now);
         if s.autoplay && s.sketches.played == 0 && now - since >= AUTOPLAY_WATCH {
             watch(s);
@@ -330,7 +330,7 @@ mod tests {
     fn waiting() -> Onboard {
         let mut s = Onboard::new(Flow::FirstRun);
         s.speech = Speech::AfterDownload;
-        s.step = Step::Waiting;
+        s.enter_waiting();
         s.download = Some(Download {
             language: Language::English,
             downloaded: 300_000_000,

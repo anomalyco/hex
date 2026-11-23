@@ -174,7 +174,7 @@ fn entrance(dark: bool, reduced: bool) -> Recording {
 }
 
 fn parked(s: &Onboard) -> bool {
-    s.step == Step::Parked
+    s.step() == Step::Parked
 }
 
 fn beat(beat: fn(&Onboard) -> bool, before: f64, length: f64) -> Window {
@@ -194,7 +194,7 @@ fn windows() -> Vec<(&'static str, Window)> {
         (
             "opens",
             Window {
-                beat: |s| s.parked_from.is_some_and(|at| s.now >= at + 1.0),
+                beat: |s| s.parked_from().is_some_and(|at| s.now >= at + 1.0),
                 before: 0.0,
                 length: 3.0,
                 act: None,
@@ -205,7 +205,7 @@ fn windows() -> Vec<(&'static str, Window)> {
             "autocorrect",
             beat(
                 |s| {
-                    s.typing_from.is_some_and(|from| {
+                    s.typing_from().is_some_and(|from| {
                         s.scene
                             .slams()
                             .next()
@@ -216,18 +216,18 @@ fn windows() -> Vec<(&'static str, Window)> {
                 2.5,
             ),
         ),
-        ("with-hex", beat(|s| s.step == Step::YourTurn, 0.5, 3.0)),
-        ("words", beat(|s| s.step == Step::Hearing, 0.2, 4.0)),
+        ("with-hex", beat(|s| s.step() == Step::YourTurn, 0.5, 3.0)),
+        ("words", beat(|s| s.step() == Step::Hearing, 0.2, 4.0)),
         (
             "almost-ready",
-            beat(|s| s.step == Step::Microphone, 0.5, 5.0),
+            beat(|s| s.step() == Step::Microphone, 0.5, 5.0),
         ),
         ("sketch", beat(super::super::sketches::playing, 1.5, 3.5)),
         (
             "handoff",
             beat(|s| s.download.is_some_and(|d| d.done()), 0.5, 9.0),
         ),
-        ("game", beat(|s| s.step == Step::Try, 0.5, 8.0)),
+        ("game", beat(|s| s.step() == Step::Try, 0.5, 8.0)),
     ]
 }
 

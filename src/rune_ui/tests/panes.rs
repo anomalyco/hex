@@ -1037,7 +1037,7 @@ fn the_practice_game_follows_hex_s_own_dictation_on_every_os() {
             rt.state
                 .first_run
                 .as_ref()
-                .is_some_and(|s| s.live_hold_from.is_some())
+                .is_some_and(|s| s.live_hold_from().is_some())
         };
         assert!(rt.find("done").is_some(), "{scene}: the game shows Done");
         assert!(!holding(&rt));

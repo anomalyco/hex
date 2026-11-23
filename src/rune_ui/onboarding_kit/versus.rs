@@ -142,15 +142,15 @@ fn field_origin() -> [f32; 2] {
 
 /// Seconds into `"Without Hex"`, once it has started.
 fn scene_time(s: &Onboard) -> Option<f64> {
-    s.typing_from.map(|from| s.now - from)
+    s.demo()?.typing_from().map(|from| s.now - from)
 }
 
 /// The thread's time: [`scene_time`], or before the button, Jay's question
 /// arriving as the stage settles.
 fn thread_time(s: &Onboard) -> Option<f64> {
     scene_time(s).or_else(|| {
-        s.parked_from
-            .map(|from| (s.now - from - PRE_ROLL).min(-1e-3))
+        s.demo()
+            .map(|demo| (s.now - demo.parked_from - PRE_ROLL).min(-1e-3))
     })
 }
 
@@ -160,7 +160,8 @@ fn scene_over(s: &Onboard) -> bool {
 
 /// `"Without Hex"` is waiting for the Launch Room's row.
 pub(crate) fn waiting_to_start(s: &Onboard) -> bool {
-    s.step == Step::Parked && s.typing_from.is_none()
+    s.demo()
+        .is_some_and(|demo| demo.step() == Step::Parked && demo.typing.is_none())
 }
 
 /// When each of `take`'s words is heard after the shortcut.
@@ -212,7 +213,8 @@ pub(crate) fn launches(streams: bool) -> Vec<f64> {
 }
 
 fn flights(s: &Onboard) -> Vec<(Flight, field_text::Slot<'static>)> {
-    s.take_from
+    s.demo()
+        .and_then(|demo| demo.take_from())
         .map_or_else(Vec::new, |from| flights_from(s.streams(), from))
 }
 
@@ -243,10 +245,7 @@ pub(crate) fn reply_secs(s: &Onboard) -> f64 {
 
 /// Seconds since the shortcut went down on `"With Hex"`.
 fn take_time(s: &Onboard) -> Option<f64> {
-    matches!(s.step, Step::Hearing | Step::Heard | Step::Done)
-        .then_some(s.take_from)
-        .flatten()
-        .map(|from| s.now - from)
+    s.demo()?.take_from().map(|from| s.now - from)
 }
 
 /// How long the comedy plays before `Skip →` shows, on a first watch.
@@ -255,20 +254,24 @@ const SKIP_AFTER: f64 = 2.0;
 /// The comedy is playing and `Skip →` shows: two seconds in, or at once
 /// for someone who has seen it before, until the answer sends.
 pub(super) fn skippable(s: &Onboard) -> bool {
-    let Some(from) = s.typing_from else {
+    let Some(demo) = s.demo() else {
         return false;
     };
+    let Some(from) = demo.typing_from() else {
+        return false;
+    };
+    let step = demo.step();
     // Once the answer is out there's nothing left to skip, but for the
     // first run's celebration on the way to the microphone.
-    let playing = matches!(s.step, Step::Parked | Step::YourTurn | Step::Hearing) && !hex_sent(s)
-        || s.flow == Flow::FirstRun && s.step == Step::Heard;
+    let playing = matches!(step, Step::Parked | Step::YourTurn | Step::Hearing) && !hex_sent(s)
+        || s.flow == Flow::FirstRun && step == Step::Heard;
     playing && (s.had_model && s.granted || s.now - from >= SKIP_AFTER)
 }
 
 /// The camera is pushed in on the draft (autocorrect's slow motion), the
 /// stage larger than its place on the page.
 pub(super) fn pushed_in(s: &Onboard) -> bool {
-    s.step == Step::Parked && scene_time(s).is_some_and(|t| camera(s, t).0 > 1.0)
+    s.step() == Step::Parked && scene_time(s).is_some_and(|t| camera(s, t).0 > 1.0)
 }
 
 /// `"With Hex"`'s answer has left the field.
@@ -279,13 +282,13 @@ pub(crate) fn hex_sent(s: &Onboard) -> bool {
 /// How many `"Without Hex"` replies have been sent.
 pub(super) fn sent_count(s: &Onboard) -> usize {
     match scene_time(s) {
-        Some(t) if s.step == Step::Parked => s.scene.sent(t),
+        Some(t) if s.step() == Step::Parked => s.scene.sent(t),
         _ => 0,
     }
 }
 
 pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
-    if s.step == Step::Ready {
+    if s.step() == Step::Ready {
         return vec![
             top_bar()
                 .justify_center()
@@ -302,13 +305,13 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
             )),
         ];
     }
-    let parked = s.step >= Step::Parked;
+    let parked = s.step() >= Step::Parked;
     let top = top_bar().justify_end().child(if parked {
         pill(p, download(s), s.closed)
     } else {
         slot()
     });
-    let act = match s.step {
+    let act = match s.step() {
         Step::Pick => language_pick(p, Onboard::pick),
         Step::Started => pill(p, download(s), s.closed),
         Step::Heard if !s.downloaded() => text(tr("Finishing the download…"))
@@ -335,7 +338,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
                     .child(row().key("action").h(ACTION_H).center().child(act))
                     .child(mic_line(
                         p,
-                        s.can_hear() && s.step >= Step::YourTurn,
+                        s.can_hear() && s.step() >= Step::YourTurn,
                         s.listening_peak(),
                     )),
             ),
@@ -369,10 +372,10 @@ pub(super) fn heading(p: Paint, s: &Onboard) -> El {
             .center_y()
             .transition(Transition::opacity())
             .child(text("Hold").key("hold").font(LEAD).color(p.muted()))
-            .child(keys(p, "keys", &s.caps, s.step == Step::Hearing))
+            .child(keys(p, "keys", &s.caps, s.step() == Step::Hearing))
             .child(text("and say it.").key("rest").font(LEAD).color(p.muted()))
     };
-    let (key, title, lead) = match s.step {
+    let (key, title, lead) = match s.step() {
         Step::Pick | Step::Started => (
             "intro",
             tr("Talk instead of typing").to_string(),
@@ -505,20 +508,18 @@ fn smoothstep(u: f32) -> f32 {
 
 /// Seconds into `"With Hex"`, from the rewind.
 fn hex_time(s: &Onboard) -> Option<f64> {
-    (s.step >= Step::YourTurn)
-        .then_some(s.voice_from)
-        .flatten()
-        .map(|from| s.now - from)
+    s.demo()?.voice_from().map(|from| s.now - from)
 }
 
 /// When the Launch Room was clicked open, or came on screen open.
 fn opened_at(s: &Onboard) -> Option<f64> {
-    let lead_in = if s.in_place {
+    let typing = s.demo()?.typing?;
+    let lead_in = if typing.in_place {
         s.scene.lead_in()
     } else {
         s.timing.opening
     };
-    s.typing_from.map(|from| from - lead_in)
+    Some(typing.from - lead_in)
 }
 
 /// Where the Launch Room's row waits on the stage.
@@ -542,9 +543,13 @@ const HEADER_FACE: f32 = 17.0;
 /// Seconds since the conversation opened, while the row still grows into
 /// it. Reduce Motion opens it with a fade instead.
 fn opening(s: &Onboard) -> Option<f64> {
+    let demo = s.demo()?;
+    if demo.step() != Step::Parked || s.reduced.get() || demo.in_place() {
+        return None;
+    }
     opened_at(s)
         .map(|at| s.now - at)
-        .filter(|&age| age < OPEN_SECS && s.step == Step::Parked && !s.reduced.get() && !s.in_place)
+        .filter(|&age| age < OPEN_SECS)
 }
 
 /// Whether the row finished growing into the conversation after `from`
@@ -608,7 +613,8 @@ fn look(p: Paint, opening: Option<f64>) -> Look {
 }
 
 pub(super) fn stage(p: Paint, s: &Onboard) -> El {
-    let since_parked = s.parked_from.map_or(0.0, |from| s.now - from);
+    let parked_from = s.demo().map(|demo| demo.parked_from);
+    let since_parked = parked_from.map_or(0.0, |from| s.now - from);
     if waiting_to_start(s) {
         return el()
             .key("stage")
@@ -624,7 +630,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     }
     let opening = opening(s);
     let (kw, kh) = keyboard::size();
-    let voice_phase = s.step >= Step::YourTurn;
+    let voice_phase = s.step() >= Step::YourTurn;
     let reduced = s.reduced.get();
     let t = scene_time(s);
     let focus = t.map_or(Focus::Waiting, |t| s.scene.focus(t));
@@ -636,7 +642,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
         1.0
     } else {
         opened_at(s)
-            .or(s.parked_from)
+            .or(parked_from)
             .map_or(1.0, |from| s.motion.keyboard_progress(s.now - from))
     };
     // As the rewind settles, every key but the shortcut melts away.
@@ -717,9 +723,9 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
                 "onboard-dot-hud",
                 hud_centre(),
                 HUD_SCALE * keys_place.k,
-                s.step == Step::YourTurn,
+                s.step() == Step::YourTurn,
                 take(),
-                s.take_from,
+                s.demo().and_then(|demo| demo.take_from()),
                 s,
             )
             .0
@@ -741,7 +747,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
     let fade = Transition::opacity();
     let enter = if reduced {
         fade
-    } else if s.in_place {
+    } else if s.demo().is_some_and(|demo| demo.in_place()) {
         Transition::opacity()
             .combined(Transition::offset(0.0, 14.0))
             .combined(Transition::scale(0.98))
@@ -769,10 +775,7 @@ pub(super) fn stage(p: Paint, s: &Onboard) -> El {
 
     // The pointer stays to lift off the row it clicked, unless the user's
     // own click opened it first.
-    let clicked = |at: f64| {
-        s.parked_from
-            .is_some_and(|from| at - from >= inbox::CLICK_AT - 0.05)
-    };
+    let clicked = |at: f64| parked_from.is_some_and(|from| at - from >= inbox::CLICK_AT - 0.05);
     let pointer = opened_at(s)
         .filter(|&at| clicked(at))
         .and_then(|at| inbox::pointer(INBOX_AT, since_parked, Some(s.now - at), reduced));
@@ -1220,7 +1223,7 @@ fn with_hex_card(p: Paint, s: &Onboard, since: f64) -> El {
         );
     }
     // The field waits, unfocused, until the shortcut goes down.
-    let listening = s.step >= Step::Hearing && !sent;
+    let listening = s.step() >= Step::Hearing && !sent;
     let cleared = t.is_some_and(|t| t >= beats.send + CLEAR);
     // The pill can change, or go, as the payoff lands.
     let banner = match beats.pill(t.unwrap_or(f64::NEG_INFINITY), script().pill) {
@@ -1291,10 +1294,10 @@ fn shortcut_keys(s: &Onboard) -> impl Iterator<Item = &'static str> + '_ {
 }
 
 fn key_depth(s: &Onboard, id: &str) -> f32 {
-    if s.step == Step::Hearing && shortcut_keys(s).any(|k| k == id) {
+    if s.step() == Step::Hearing && shortcut_keys(s).any(|k| k == id) {
         return 1.0;
     }
-    match (s.step, scene_time(s)) {
+    match (s.step(), scene_time(s)) {
         (Step::Parked, Some(t)) if t >= 0.0 => s.scene.depth(t, id),
         _ => 0.0,
     }
@@ -1302,7 +1305,7 @@ fn key_depth(s: &Onboard, id: &str) -> f32 {
 
 fn key_glow(s: &Onboard, id: &str, melt_u: f32) -> f32 {
     // Caps Lock's light, once an elbow knocks it on.
-    if id == "caps" && s.step == Step::Parked {
+    if id == "caps" && s.step() == Step::Parked {
         return match scene_time(s) {
             Some(t) if s.scene.caps(t) => CAPS_LIGHT,
             _ => 0.0,
@@ -1311,14 +1314,17 @@ fn key_glow(s: &Onboard, id: &str, melt_u: f32) -> f32 {
     if !shortcut_keys(s).any(|k| k == id) {
         return 0.0;
     }
-    match s.step {
+    match s.step() {
         Step::YourTurn => 0.85 * melt_u,
         Step::Hearing => 1.0,
         // It cools to an ember that stays through the score.
         Step::Heard => {
-            let fade = s.take_from.map_or(0.0, |from| {
-                1.0 - smoothstep(((s.now - from - take().release) / 0.45) as f32)
-            });
+            let fade = s
+                .demo()
+                .and_then(|demo| demo.take_from())
+                .map_or(0.0, |from| {
+                    1.0 - smoothstep(((s.now - from - take().release) / 0.45) as f32)
+                });
             EMBER + (0.70 - EMBER) * fade
         }
         Step::Done => EMBER,
@@ -1383,7 +1389,7 @@ fn words(p: Paint, s: &Onboard, nudge: [f32; 2]) -> El {
         && flights
             .iter()
             .any(|(f, _)| s.now >= f.start() && s.now < f.arrives() + SETTLE);
-    if s.step == Step::Hearing && !settling {
+    if s.step() == Step::Hearing && !settling {
         out = out.child(
             el().key("caret-at")
                 .absolute(origin[0], origin[1])
