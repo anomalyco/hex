@@ -7,14 +7,16 @@ import UIKit
 extension FullKeyboardEngine {
     /// The letter keys Spatial autocorrect scores taps against: this layout's, moved by
     /// `tapOffsets`; with Adaptive touch on, by its personal centres instead (none while it
-    /// has too little evidence), with the others beside them as the baseline no correction
-    /// may go past (`AutocorrectEngine.decoderBaselineKeys`). Off the letters page the last
+    /// has too little evidence), and for a typing config's letters by its aim, with the others
+    /// beside them as the baseline no correction may go past (`AutocorrectEngine.decoderBaselineKeys`). Off the letters page the last
     /// letters page's stay: a closing mark from the 123 page still reads the word's taps
     /// ("ofthe." -> "of the.").
     func syncDecoderKeys() {
         guard let keys = TypingDecoder.Keys(layout: layout, offsets: tapOffsets) else { return }
-        guard let adaptive = adaptiveTouch?.offsets(for: layout),
-              let personal = TypingDecoder.Keys(layout: layout, offsets: adaptive) else {
+        // A typing config's aim replaces what Hex learned for the letters it names.
+        let aim = typingConfigAim()
+        guard let adaptive = adaptiveTouch?.offsets(for: layout) ?? (aim.isEmpty ? nil : tapOffsets),
+              let personal = TypingDecoder.Keys(layout: layout, offsets: adaptive.merging(aim) { _, config in config }) else {
             autocorrect.decoderKeys = keys
             autocorrect.decoderBaselineKeys = nil
             return
@@ -98,7 +100,7 @@ extension FullKeyboardEngine {
               shift.state != .locked, model.language == language.rawValue else { return key }
         let reach = letterReach
         let near = layout.keys.filter {
-            $0.character != nil && !$0.isNumberRow && $0.kind != key.kind && Self.distance(from: point, to: $0.hitFrame) < reach
+            $0.character != nil && !$0.isNumberRow && $0.kind != key.kind && touchDistance(from: point, to: $0) < reach
         }
         guard !near.isEmpty, let continuations = continuationMass(model) else { return key }
         // An accented letter without a key of its own is typed from its base letter's (é from e).
@@ -119,7 +121,7 @@ extension FullKeyboardEngine {
         var bestScore = own
         for other in near {
             guard let theirs = odds(other) else { continue }
-            let score = theirs - letterOddsPerPoint * Double(Self.distance(from: point, to: other.hitFrame))
+            let score = theirs - letterOddsPerPoint * Double(touchDistance(from: point, to: other))
             if score > bestScore {
                 best = other
                 bestScore = score

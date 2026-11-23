@@ -571,6 +571,8 @@ final class FullKeyboardView: UIView {
         if engine.adaptiveTouch !== adaptive {
             engine.adaptiveTouch = adaptive
         }
+        // Settings › Experiments › Typing configs: the App Group's active config, with Full Access only.
+        engine.typingConfig = TypingConfigActive.current(fullAccess: hostController?.hasFullAccess == true)
         engine.korean.isEnabled = FullKeyboardSettings().koreanKeyboard
         engine.showsKeyPopups = FullKeyboardSettings().keyPopups
         engine.autoCapitalizes = FullKeyboardSettings().autoCapitalization

@@ -159,6 +159,40 @@ nonisolated struct TypingLearning: Equatable, Sendable {
     /// Lowercased words you kept as typed at least twice (undoing autocorrect with
     /// backspace, or tapping what you typed); autocorrect never rewrites them again.
     var rejected: Set<String> = []
+    /// A typing config's own words, as spelled (also in `rejected`): offered and read as yours.
+    var keepWords: [String] = []
+    /// A typing config's fixes it only offers: lowercased typo → word.
+    var suggestedFixes: [String: String] = [:]
+    /// Words a typing config says autocorrect may never put in place of what you typed.
+    var neverCorrectTo: [String] = []
+
+    /// Whether autocorrect may not replace a word with `fix` (`neverCorrectTo`): exactly, for
+    /// one with capitals ("DONT"), else in any case.
+    func blocksCorrection(to fix: String) -> Bool {
+        neverCorrectTo.contains { $0 == $0.lowercased() ? $0 == fix.lowercased() : $0 == fix }
+    }
+
+    /// One of a typing config's own words (`keepWords`).
+    func keeps(_ lower: String) -> Bool { !keepWords.isEmpty && keepWords.contains { $0.lowercased() == lower } }
+
+    /// This learning with a typing config's words on top, in memory only: what you taught Hex
+    /// yourself wins (a typo you fixed another way, a word you kept).
+    func adding(_ words: TypingConfigReview.Applied) -> TypingLearning {
+        guard !words.keep.isEmpty || !words.neverCorrectTo.isEmpty || !words.fixes.isEmpty else { return self }
+        var out = self
+        out.keepWords = words.keep
+        out.rejected.formUnion(words.keep.map { $0.lowercased() })
+        out.neverCorrectTo = words.neverCorrectTo
+        for fix in words.fixes {
+            let typo = fix.typo.lowercased()
+            guard out.typos[typo] == nil, !out.rejected.contains(typo) else { continue }
+            switch fix.mode {
+            case .apply: out.typos[typo] = fix.word
+            case .suggest: out.suggestedFixes[typo] = fix.word
+            }
+        }
+        return out
+    }
 
     static func derive(from corrections: [TypingJournalCorrection]) -> TypingLearning {
         var rejections: [String: Int] = [:]

@@ -177,3 +177,13 @@ nonisolated extension KeyboardLayout {
         return area >= target.width * target.height - 0.5
     }
 }
+
+nonisolated extension KeyboardLayout {
+    /// These keys with `map`'s touch areas.
+    func applying(_ map: KeyboardZoneMap) -> KeyboardLayout {
+        guard !map.isEmpty else { return self }
+        var out = self
+        for (k, rects) in map.regions where k < out.keys.count { out.keys[k].zoneRects = rects }
+        return out
+    }
+}

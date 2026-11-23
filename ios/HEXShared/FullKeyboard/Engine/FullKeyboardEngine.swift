@@ -55,6 +55,8 @@ final class FullKeyboardEngine {
     var tapOffsets: [Character: CGVector] = [:] {
         didSet { if tapOffsets != oldValue { syncDecoderKeys() } }
     }
+    /// Settings › Experiments › Typing configs: the active config (`FullKeyboardEngine+TypingConfig`).
+    var typingConfig: TypingConfigActive? { didSet { if typingConfig !== oldValue { typingConfigChanged() } } }
 
     /// The layout language's word list, which lets the likelier of two neighbouring letters
     /// claim a few points of the other's touch target, as Apple's keyboard does ("th" then a
@@ -116,8 +118,8 @@ final class FullKeyboardEngine {
     /// Adaptive touch where this field lets it learn (text or web search allowing autocorrect).
     private var adaptiveLearning: AdaptiveTouch?
 
-    private func syncAdaptiveField() {
-        adaptiveLearning = adaptiveTouch.flatMap { AdaptiveTouch.allows(field: field, target: target) ? $0 : nil }
+    func syncAdaptiveField() {
+        adaptiveLearning = adaptiveTouch.flatMap { AdaptiveTouch.allows(field: field, target: target) && typingConfig?.hasZones != true ? $0 : nil }
     }
     var width: CGFloat = 375 { didSet { if width != oldValue { rebuildLayout() } } }
     var orientation: KeyboardOrientation = .portrait { didSet { if orientation != oldValue { rebuildLayout() } } }
@@ -1290,10 +1292,10 @@ final class FullKeyboardEngine {
 
     /// Hands what the journal learned (typos, rejected corrections) to autocorrect;
     /// nothing while Learn how I type is off.
-    private func syncLearning() {
+    func syncLearning() {
         autocorrect.applyLearning(
-            journal?.typingLearning(for: autocorrect.language) ?? TypingLearning(),
-            partner: journal?.typingLearning(for: autocorrect.partner?.language) ?? TypingLearning()
+            withTypingConfig(journal?.typingLearning(for: autocorrect.language) ?? TypingLearning()),
+            partner: withTypingConfig(journal?.typingLearning(for: autocorrect.partner?.language) ?? TypingLearning())
         )
     }
 
@@ -1466,8 +1468,8 @@ final class FullKeyboardEngine {
         }
     }
 
-    private func rebuildLayout(cause: String = "layout") {
-        layout = KeyboardLayout(
+    func rebuildLayout(cause: String = "layout") {
+        layout = zoned(KeyboardLayout(
             width: width,
             orientation: orientation,
             layer: layerState.layer,
@@ -1487,7 +1489,7 @@ final class FullKeyboardEngine {
             dvorakPunctuation: dvorakPunctuation,
             commaPeriodKeys: commaPeriodKeys,
             availableHeight: availableHeight
-        )
+        ))
         autocorrect.setKeys(layout.language, letters: layout.letters)
         syncDecoderKeys()
         logState(cause)

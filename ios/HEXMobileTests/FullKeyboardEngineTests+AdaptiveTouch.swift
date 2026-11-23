@@ -466,6 +466,45 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(store.settings.generation, 2)
         XCTAssertNil(store.activeData(fullAccess: true))
     }
+
+    func testATypingConfigMovesWhereTapsCountAndItsAimOnlyInTheKeyboard() throws {
+        engine.width = 402
+        let layout = engine.layout
+        let here = try contextJSON(layout)
+        let b = try XCTUnwrap(layout.keys.first { $0.character == "b" })
+        let low = CGPoint(x: b.frame.midX, y: b.frame.maxY - 3)
+        XCTAssertEqual(engine.layout.hitTest(low)?.kind, b.kind)
+        let before = try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["o"])
+        let data = configData(keys: #"[{"context": \#(here), "aim": {"o": {"offset": [0.0, 0.2]}}, "zones": [{"key": "space", "edge": "top", "move": 0.15}]}]"#)
+        engine.typingConfig = TypingConfigActive(data: data)
+        XCTAssertEqual(engine.layout.hitTest(low)?.kind, .space, "the zone gives the space bar b's lowest 3 pt")
+        let o = try XCTUnwrap(layout.keys.first { $0.character == "o" })
+        let after = try XCTUnwrap(engine.autocorrect.decoderKeys?.centres["o"])
+        XCTAssertEqual(after.y - before.y, 0.2 * o.frame.height, accuracy: 0.01, "the aim replaces o's centre")
+        XCTAssertNotNil(engine.autocorrect.decoderBaselineKeys, "the baseline stays what Hex learned")
+        engine.typingConfig = nil
+        XCTAssertEqual(engine.layout, layout, "removing it puts every edge back")
+        XCTAssertEqual(engine.autocorrect.decoderKeys?.centres["o"], before)
+        XCTAssertNil(engine.autocorrect.decoderBaselineKeys)
+    }
+
+    func testATypingConfigsWordsAreTheirOwnLayerAndLeaveWithIt() throws {
+        func typed(_ word: String) -> String {
+            let start = target.text.count
+            type(word + " ")
+            return String(target.text.dropFirst(start))
+        }
+        XCTAssertEqual(typed("teh"), "the ", "autocorrect fixes it without a config")
+        engine.typingConfig = TypingConfigActive(data: configData(words: #"{"keep": [{"word": "teh"}]}"#))
+        XCTAssertTrue(engine.autocorrect.learning.keeps("teh"))
+        XCTAssertNil(engine.journal, "nothing was written into what Hex learned")
+        XCTAssertEqual(typed("teh"), "teh ", "a word of yours is left alone")
+        engine.typingConfig = TypingConfigActive(data: configData(words: #"{"neverCorrectTo": [{"word": "the"}]}"#))
+        XCTAssertEqual(typed("hte"), "hte ", "never corrected to a word the config rules out")
+        engine.typingConfig = nil
+        XCTAssertEqual(engine.autocorrect.learning, TypingLearning(), "removing the config removes exactly its words")
+        XCTAssertEqual(typed("teh"), "the ")
+    }
 }
 
 // MARK: - Adaptive touch (Settings › Experiments)

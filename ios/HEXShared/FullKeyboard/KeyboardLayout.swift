@@ -36,6 +36,8 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
     var hitFrame: CGRect
     /// The space bar's band of the gap above it, under row 3's keys over it (`buildKeys`).
     var gapHitFrame: CGRect?
+    /// A typing config's zones moved this key's touch area: these rectangles instead (`KeyboardZoneMap`).
+    var zoneRects: [CGRect]?
     let label: String
     /// What the key types with shift instead of its character: the docked iPad's two-symbol
     /// keys (, and !, . and ?), which show both (`KeyboardLayout.padPairs`), and the Dvorak
@@ -50,7 +52,7 @@ nonisolated struct KeyboardKey: Equatable, Sendable {
     /// One of Settings › Keyboard › Number row's digits (`KeyboardLayout.numberRowIndex`).
     var isNumberRow: Bool { row == KeyboardLayout.numberRowIndex }
     /// Whether a touch at `point` is this key's.
-    func takes(_ point: CGPoint) -> Bool { hitFrame.contains(point) || gapHitFrame?.contains(point) == true }
+    func takes(_ point: CGPoint) -> Bool { zoneRects.map { $0.contains { $0.contains(point) } } ?? (hitFrame.contains(point) || gapHitFrame?.contains(point) == true) }
 }
 
 /// The pop-up balloon over a pressed key: a wider bubble joined to the key by a neck.
@@ -622,7 +624,7 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
     /// (Right) or leading (Left) end.
     let hexPlacement: HexKeyPlacement
     let metrics: KeyboardMetrics
-    let keys: [KeyboardKey]
+    var keys: [KeyboardKey]
     /// The two halves' inner edges while the keyboard is split (the Duo unfolded upright, as
     /// Apple's is there); nil otherwise.
     let split: SplitGeometry?
