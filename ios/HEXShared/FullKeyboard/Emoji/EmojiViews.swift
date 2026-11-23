@@ -1,5 +1,16 @@
 import UIKit
 
+extension UIColor {
+    /// A fill no one can see (0.1% black) that makes the area under it take touches. iOS hands a
+    /// keyboard extension only the touches that land on something its layers draw: on the emoji
+    /// panel's clear background a touch between two emoji, between two rows or beside a category
+    /// icon never reached the keyboard at all (iOS 27.2 simulator, iPhone 17 Pro and 15 Pro; a
+    /// keyboard of opaque cells and an app's own grid lost none), so a swipe that started there
+    /// did nothing and a glide couldn't be caught (TestFlight build 147: "the animation in the emoji
+    /// section is not cancelable"). Any fill at all is enough.
+    static let keyboardTouchFill = UIColor(white: 0, alpha: 0.001)
+}
+
 extension UIScrollView {
     /// iOS 26 softens and blurs a scroll view's edges where it meets the keyboard's glass.
     /// On a real keyboard the top and bottom effects blurred every emoji in the 44 pt rows,
@@ -143,6 +154,8 @@ final class EmojiRowView: UIView, UICollectionViewDataSource, UICollectionViewDe
         layout.minimumInteritemSpacing = 0
         collection = UICollectionView(frame: .zero, collectionViewLayout: layout)
         super.init(frame: frame)
+        // The search's results sit outside the panel: their gaps take touches too.
+        backgroundColor = .keyboardTouchFill
         collection.backgroundColor = .clear
         collection.showsHorizontalScrollIndicator = false
         collection.delaysContentTouches = false

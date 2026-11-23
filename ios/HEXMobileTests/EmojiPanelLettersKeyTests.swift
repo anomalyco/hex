@@ -124,4 +124,44 @@ final class EmojiPanelLettersKeyTests: XCTestCase {
         XCTAssertEqual(letters.frame.minX, panel.horizontalInset + panel.metrics.side, accuracy: 0.5)
         XCTAssertEqual(letters.frame.width, keyWidth, accuracy: 0.5)
     }
+
+    /// iOS hands a keyboard extension only the touches that land on something its layers draw, so
+    /// a touch between two emoji, between two rows or beside a category icon used to reach nothing:
+    /// a swipe started there did nothing and a glide couldn't be caught (TestFlight build 147).
+    /// Every point of the open panel, and of the search's results row, is drawn on, if invisibly.
+    func testEveryPointOfThePanelAndTheSearchResultsTakesTouches() throws {
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: FixtureTextTarget())
+        view.emojiOverride = true
+        view.makeEmojiUsage = { EmojiUsageStore(defaults: self.defaults) }
+        view.frame = CGRect(x: 0, y: 0, width: 402, height: 306)
+        view.layoutIfNeeded()
+        view.debugOpenEmoji()
+        view.layoutIfNeeded()
+        let panel = try XCTUnwrap(view.emojiPanel)
+        panel.layoutIfNeeded()
+        assertDrawnEverywhere(panel, "the panel")
+
+        view.debugOpenEmoji(search: "cat")
+        view.layoutIfNeeded()
+        let results = try XCTUnwrap(view.emojiResults)
+        results.layoutIfNeeded()
+        assertDrawnEverywhere(results, "the search's results")
+    }
+
+    /// Every point 4 pt apart in `view` lies on a layer that draws (a fill or contents), as iOS
+    /// needs before it routes a touch there to the keyboard.
+    private func assertDrawnEverywhere(_ view: UIView, _ what: String, file: StaticString = #filePath, line: UInt = #line) {
+        func draws(_ layer: CALayer, at point: CGPoint) -> Bool {
+            guard !layer.isHidden, layer.opacity > 0, layer.bounds.contains(point) else { return false }
+            if (layer.backgroundColor?.alpha ?? 0) > 0 || layer.contents != nil { return true }
+            return (layer.sublayers ?? []).contains { draws($0, at: $0.convert(point, from: layer)) }
+        }
+        var missed: [CGPoint] = []
+        for x in stride(from: CGFloat(1), to: view.bounds.width, by: 4) {
+            for y in stride(from: CGFloat(1), to: view.bounds.height, by: 4) where !draws(view.layer, at: CGPoint(x: x, y: y)) {
+                missed.append(CGPoint(x: x, y: y))
+            }
+        }
+        XCTAssertTrue(missed.isEmpty, "\(what): \(missed.count) points draw nothing, as \(missed.prefix(3))", file: file, line: line)
+    }
 }
