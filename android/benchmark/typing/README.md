@@ -70,13 +70,14 @@ It writes the paths, each set's summary and each word's readings to `android/bui
 
 "Typed or in the strip" is the word among the first four readings: the one typed and the three the strip offers. The emulator is the Studio's API 36 Pixel 8 (4 cores, ARM64), timing `SwipeReader` alone as the keyboard calls it when the finger lifts. iPhone Hex has no Bokmål or Italian model. English with neat and sloppy fingers: 99.0% / 99.9% and 82.0% / 92.2%, the same as iPhone; Spanish 96.1% / 99.9% and 83.3% / 93.4% (iPhone 83.2%).
 
-On the same paths, the Android and iPhone decoders give the same four readings for every English and Spanish swipe. They differ where Android reads more:
-- **German:** a word with ß is swiped through s ("straße", "groß"), so ß words join the candidates. The first reading differs on 86 of 13,206 swipes (Android right on 34, iPhone on 36).
+On the same paths, the Android and iPhone decoders give the same four readings for every English and Spanish swipe. They differ in three ways:
+- **German pitch:** iPhone reads German with too wide a key pitch, a ten-column keyboard's (38.3 pt) where its eleven-key rows are 34.8 pt apart (`TypingDecoder.Keys`, `KeyboardLayout.letterWidth`). Android reads the keys as drawn. With that pitch corrected, iPhone gives Android's first reading on all 13,206 German swipes (Android with ß read as iPhone reads it, below): 96.0% first word right against 95.9% as iPhone ships.
+- **ß:** Android swipes a word with ß through s ("straße", "groß"); iPhone can't read one. The test set above has no ß, so there it only adds candidates: German 95.9% against 96.0% without it. On the 500 [accent-de.tsv](held-out/accent-de.tsv) sentences, each with a ß, Android gets 71.4% of the 518 ß words first and 98.3% typed or in the strip; iPhone can't read any of them. Most of the misses are old spellings ("daß") the model ranks below today's ("dass"). The other words there are unchanged (96.3% against 96.4%).
 - **French:** Android leaves out French swear words, which iPhone's never-suggest list lacks ("con", "salaud"). The first reading differs on 4 of 12,666.
 
 The keyboard ranks a rare name ("kent", "ut") 4 nats lower, as iPhone does, except in German, whose capitals list marks nouns. That costs Italian 0.2 points of first word right against the decoder alone; the other layouts are unchanged.
 
-Taps are unaffected: `quality-gate.py all` gives the same report, field for field, with swipe typing as without it. Separately, 60 English held-out sentences tapped into Messages on the emulator came out the same with Swipe typing on and off. The taps were real touches that drift up to 8 px while down, moved onto Hex's keys.
+Taps are unaffected: `quality-gate.py all` gives the same report, field for field, with swipe typing as without it. Separately, 30 English held-out sentences were tapped into Messages on the emulator with Swipe typing off and then on. Each run started from fresh typing preferences, and the taps were real touches that drift up to 8 px while down, moved onto Hex's keys. 29 came out the same. The first sentence after the keyboard restarted lost a tap in the run with swipe typing on ("Mnnae" for "Men as"). Typed twice more with it on, that sentence came out as it did with it off.
 
 ## Against today's iOS engine
 
