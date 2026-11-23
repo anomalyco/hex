@@ -4761,16 +4761,6 @@
         }
       }
     },
-    "Hex keeps %lld typing configs, and you've applied all of them. Delete one in Typing configs to keep this one." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Hex 最多保留 %lld 个输入配置，而且你都已启用过。请在“输入配置”中删除一个，才能保留这个。"
-          }
-        }
-      }
-    },
     "For another keyboard" : {
       "localizations" : {
         "zh-Hans" : {
@@ -5847,6 +5837,426 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$@，%2$@"
+          }
+        }
+      }
+    },
+    "Hex keeps %lld typing configs. Keeping this one removes “%@”, the oldest one you're not using." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 最多保留 %1$lld 个输入配置。保留这个会移除“%2$@”，即你没在使用的最早的一个。"
+          }
+        }
+      }
+    },
+    "Turn on typing configs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开输入配置"
+          }
+        }
+      }
+    },
+    "Using “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用“%@”"
+          }
+        }
+      }
+    },
+    "Hex defaults" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 默认设置"
+          }
+        }
+      }
+    },
+    "No typing configs yet. Export your typing logs for your agent from Settings › Privacy › Typing logs, then open the file it makes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有输入配置。请在“设置 › 隐私 › 打字日志”中把打字日志导出给你的 AI 助手，然后打开它制作的文件。"
+          }
+        }
+      }
+    },
+    "Going back deletes nothing. Hex keeps your last %lld typing configs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退回不会删除任何内容。Hex 会保留你最近的 %lld 个输入配置。"
+          }
+        }
+      }
+    },
+    "No typing config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不使用输入配置"
+          }
+        }
+      }
+    },
+    "Delete all typing configs?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除所有输入配置？"
+          }
+        }
+      }
+    },
+    "Delete all typing configs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除所有输入配置"
+          }
+        }
+      }
+    },
+    "The keyboard goes back to Hex defaults, and every typing config is deleted from this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘会恢复为 Hex 默认设置，所有输入配置都会从这台 iPhone 上删除。"
+          }
+        }
+      }
+    },
+    "In use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用"
+          }
+        }
+      }
+    },
+    "Best so far" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前最佳"
+          }
+        }
+      }
+    },
+    "applied %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@启用"
+          }
+        }
+      }
+    },
+    "Applied %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@启用过"
+          }
+        }
+      }
+    },
+    "Not applied" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未启用"
+          }
+        }
+      }
+    },
+    "opened %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@打开"
+          }
+        }
+      }
+    },
+    "Hex couldn't use “%@”. Nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法使用“%@”。没有任何更改。"
+          }
+        }
+      }
+    },
+    "Use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用"
+          }
+        }
+      }
+    },
+    "Rename typing config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名输入配置"
+          }
+        }
+      }
+    },
+    "Switches here take effect the next time the keyboard opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里的开关会在下次打开键盘时生效。"
+          }
+        }
+      }
+    },
+    "1 change switched on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打开 1 项更改"
+          }
+        }
+      }
+    },
+    "%lld changes switched on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打开 %lld 项更改"
+          }
+        }
+      }
+    },
+    "Based on “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基于“%@”"
+          }
+        }
+      }
+    },
+    "Made from another iPhone's typing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据另一台 iPhone 的打字记录制作"
+          }
+        }
+      }
+    },
+    "Use Hex defaults instead" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改用 Hex 默认设置"
+          }
+        }
+      }
+    },
+    "Use this config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用这个配置"
+          }
+        }
+      }
+    },
+    "Rename" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名"
+          }
+        }
+      }
+    },
+    "Share" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享"
+          }
+        }
+      }
+    },
+    "Delete “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除“%@”？"
+          }
+        }
+      }
+    },
+    "Delete this config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这个配置"
+          }
+        }
+      }
+    },
+    "The keyboard goes back to Hex defaults, and this config is deleted from this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘会恢复为 Hex 默认设置，这个配置会从这台 iPhone 上删除。"
+          }
+        }
+      }
+    },
+    "This config is deleted from this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个配置会从这台 iPhone 上删除。"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称"
+          }
+        }
+      }
+    },
+    "Export for your agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出给你的 AI 助手"
+          }
+        }
+      }
+    },
+    "One file with your typing logs and a skill your own AI agent follows to make a typing config for you. Open the file it makes on this iPhone to review it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一个文件，包含你的打字日志，以及让你自己的 AI 助手为你制作输入配置的技能说明。在这台 iPhone 上打开它制作的文件即可查看。"
+          }
+        }
+      }
+    },
+    "Days" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日期"
+          }
+        }
+      }
+    },
+    "This holds everything you typed and dictated with Hex in the last 14 days, including any password you typed outside a password field. Give it only to an agent you trust, and don't upload it anywhere you wouldn't share your messages." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里包含你过去 14 天用 Hex 输入和听写的所有内容，包括你在密码栏以外输入的密码。只把它交给你信任的 AI 助手，也不要上传到你不愿分享自己消息的地方。"
+          }
+        }
+      }
+    },
+    "This holds everything you typed and dictated with Hex on the days you chose, including any password you typed outside a password field. Give it only to an agent you trust, and don't upload it anywhere you wouldn't share your messages." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里包含你在所选日期用 Hex 输入和听写的所有内容，包括你在密码栏以外输入的密码。只把它交给你信任的 AI 助手，也不要上传到你不愿分享自己消息的地方。"
+          }
+        }
+      }
+    },
+    "Preparing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备…"
+          }
+        }
+      }
+    },
+    "Hex couldn't prepare the export. Nothing was shared." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法准备导出内容。没有共享任何内容。"
+          }
+        }
+      }
+    },
+    "For your own AI agent to make a typing config from. It holds everything you typed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供你自己的 AI 助手制作输入配置。其中包含你输入的所有内容。"
+          }
+        }
+      }
+    },
+    "This also deletes your typing configs, which hold your words, and the keyboard goes back to Hex defaults." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这也会删除你的输入配置（其中包含你的词语），键盘会恢复为 Hex 默认设置。"
           }
         }
       }

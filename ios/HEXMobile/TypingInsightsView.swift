@@ -60,12 +60,22 @@ struct TypingInsightsView: View {
                 Text("Delete what Hex learned")
                     .font(.system(size: 13, weight: .medium))
             }
-            .disabled(snapshot.isEmpty && disabledFixes.isEmpty)
-            .confirmationDialog("Delete what Hex learned?", isPresented: $confirmingDelete) {
+            .disabled(snapshot.isEmpty && disabledFixes.isEmpty && !hasTypingConfigs)
+            .confirmationDialog("Delete what Hex learned?", isPresented: $confirmingDelete, titleVisibility: hasTypingConfigs ? .visible : .automatic) {
                 Button("Delete", role: .destructive) {
                     TypingJournal.delete()
                     AdaptiveTouchSettings().requestReset()
+                    // Typing configs hold your words too, so they go with it.
+                    if hasTypingConfigs {
+                        let history = TypingConfigHistory()
+                        TypingConfigActivation.useDefaults(history: history)
+                        history.deleteAll()
+                    }
                     reload()
+                }
+            } message: {
+                if hasTypingConfigs {
+                    Text("This also deletes your typing configs, which hold your words, and the keyboard goes back to Hex defaults.")
                 }
             }
         }
@@ -155,7 +165,10 @@ struct TypingInsightsView: View {
         }
     }
 
+    @State private var hasTypingConfigs = false
+
     private func reload() {
+        hasTypingConfigs = !TypingConfigHistory().entries.isEmpty
         snapshot = TypingJournal.load(from: FileManager.default
             .containerURL(forSecurityApplicationGroupIdentifier: KeyboardBridge.appGroup)?
             .appendingPathComponent(TypingJournal.fileName))

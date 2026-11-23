@@ -28,22 +28,28 @@ struct TypingConfigEntry: Codable, Equatable, Identifiable, Sendable {
 /// reads only `TypingConfigs/active.json` (`TypingConfigStore`).
 @MainActor
 final class TypingConfigHistory {
-    /// At most this many kept. Past it the oldest never applied goes first; one that was
-    /// applied goes only when the person deletes it.
+    /// At most this many kept. A new one is never refused: past the limit the oldest that is
+    /// neither active nor best so far goes (`removedByAdding`), and the review names it first.
     static let limit = 20
 
     enum AddResult: Equatable {
         case added(TypingConfigEntry)
         /// The same bytes were kept before: the entry they already have.
         case existing(TypingConfigEntry)
-        /// `limit` entries, every one of them applied at some point.
-        case full
+        /// The file couldn't be written.
+        case failed
     }
 
     private struct Index: Codable {
         var version = 1
         var active: String?
+        /// The config with the lowest trouble rate over enough words (the regression watch
+        /// sets it); kept past the limit like the active one.
+        var best: String?
         var entries: [TypingConfigEntry] = []
+        /// This phone's exports (`state/phone.json` `exportId`), so a config made from
+        /// another iPhone's typing can say so.
+        var exportIDs: [String] = []
     }
 
     static var defaultDirectory: URL? {
@@ -64,7 +70,20 @@ final class TypingConfigHistory {
     var entries: [TypingConfigEntry] { index.entries.sorted { $0.addedAt > $1.addedAt } }
     var activeID: String? { index.active }
     var active: TypingConfigEntry? { index.active.flatMap { entry($0) } }
-    var isFull: Bool { index.entries.count >= Self.limit && !index.entries.contains { $0.appliedAt == nil && $0.id != index.active } }
+    var bestID: String? { index.best }
+    var exportIDs: [String] { index.exportIDs }
+
+    /// The entry keeping a config with `hash` would remove: none unless it is new and the
+    /// history is full.
+    func removedByAdding(_ hash: String) -> TypingConfigEntry? {
+        guard entry(hash) == nil, index.entries.count >= Self.limit else { return nil }
+        return index.entries.filter { $0.id != index.active && $0.id != index.best }.min { $0.addedAt < $1.addedAt }
+    }
+
+    func recordExport(_ id: String) {
+        index.exportIDs = Array((index.exportIDs + [id]).suffix(50))
+        save()
+    }
 
     func entry(_ id: String) -> TypingConfigEntry? {
         index.entries.first { $0.id == id }
@@ -73,13 +92,11 @@ final class TypingConfigHistory {
     /// Keeps `data` unchanged as a new entry, unapplied. `hash` is the review's.
     func add(_ data: Data, hash: String, name: String, source: TypingConfigEntry.Source = .file, now: Date = Date()) -> AddResult {
         if let existing = entry(hash) { return .existing(existing) }
-        if index.entries.count >= Self.limit {
-            let unapplied = index.entries.filter { $0.appliedAt == nil && $0.id != index.active }
-            guard let oldest = unapplied.min(by: { $0.addedAt < $1.addedAt }) else { return .full }
+        let entry = TypingConfigEntry(id: hash, name: name, bytes: data.count, source: source, addedAt: now)
+        guard let url = fileURL(entry.id), (try? data.write(to: url, options: .atomic)) != nil else { return .failed }
+        while index.entries.count >= Self.limit, let oldest = removedByAdding(hash) {
             remove(oldest.id)
         }
-        let entry = TypingConfigEntry(id: hash, name: name, bytes: data.count, source: source, addedAt: now)
-        guard let url = fileURL(entry.id), (try? data.write(to: url, options: .atomic)) != nil else { return .full }
         index.entries.append(entry)
         save()
         return .added(entry)
@@ -116,9 +133,17 @@ final class TypingConfigHistory {
         save()
     }
 
+    func setPartsOff(_ id: String, _ partsOff: [String]) {
+        guard let i = index.entries.firstIndex(where: { $0.id == id }) else { return }
+        index.entries[i].partsOff = partsOff
+        save()
+    }
+
     func deleteAll() {
         if let directory { try? FileManager.default.removeItem(at: directory.appendingPathComponent("history", isDirectory: true)) }
+        let exports = index.exportIDs
         index = Index()
+        index.exportIDs = exports
         save()
     }
 
@@ -145,6 +170,7 @@ final class TypingConfigHistory {
         if let url = fileURL(id) { try? FileManager.default.removeItem(at: url) }
         index.entries.removeAll { $0.id == id }
         if index.active == id { index.active = nil }
+        if index.best == id { index.best = nil }
     }
 
     private func load() {
@@ -192,10 +218,24 @@ enum TypingConfigActivation {
     }
 
     /// One tap back to a config in the history (deletes nothing).
-    static func goBack(to entry: TypingConfigEntry, history: TypingConfigHistory, keyboard: KeyboardLayout = TypingConfigKeyboard.current()) throws {
+    static func goBack(to entry: TypingConfigEntry, history: TypingConfigHistory, keyboards: [TypingConfigKeyboard] = TypingConfigSettings().keyboards,
+                       store: TypingConfigStore = TypingConfigStore()) throws {
         guard let data = history.data(entry.id) else { throw Failure.nothingToApply }
-        let review = TypingConfigReview(data: data, keyboard: keyboard)
-        try apply(entry, review: review, partsOff: Set(entry.partsOff), history: history)
+        let review = TypingConfigReview(data: data, keyboards: keyboards)
+        try apply(entry, review: review, partsOff: Set(entry.partsOff), history: history, store: store)
+    }
+
+    /// The active config compiled again for the keyboards recorded since it was applied (a block
+    /// for a keyboard first used afterwards joins then); written only when that changes it.
+    static func refreshActive(history: TypingConfigHistory = TypingConfigHistory(), keyboards: [TypingConfigKeyboard] = TypingConfigSettings().keyboards,
+                              store: TypingConfigStore = TypingConfigStore()) {
+        guard let entry = history.active, let data = history.data(entry.id) else { return }
+        let review = TypingConfigReview(data: data, keyboards: keyboards)
+        let on = Set(review.items.filter { $0.outcome.applies && !entry.partsOff.contains($0.path) }.map(\.part))
+        guard let compiled = review.compiled(switchedOn: on) else { return }
+        let current = store.activeURL.flatMap { try? Data(contentsOf: $0) }.flatMap { try? JSONDecoder().decode(TypingConfigFile.self, from: $0) }
+        guard current != compiled else { return }
+        try? store.writeActive(compiled)
     }
 
     static func useDefaults(history: TypingConfigHistory, store: TypingConfigStore = TypingConfigStore()) {

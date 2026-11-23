@@ -120,14 +120,6 @@ final class TypingConfigInbox {
         return data.isEmpty ? .unreadable : .file(data)
     }
 
-    /// The file's note as the sheet shows it: plain text, no control or direction-changing
-    /// characters, cut at `TypingConfigLimits.noteMaxCharacters` (the review says it was).
-    nonisolated static func noteText(_ raw: String) -> String {
-        let cleaned = safe(raw, keepsNewlines: true)
-        let limit = TypingConfigLimits.noteMaxCharacters
-        return cleaned.count > limit ? String(cleaned.prefix(limit - 1)) + "…" : cleaned
-    }
-
     nonisolated private static func safe(_ raw: String, keepsNewlines: Bool) -> String {
         let scalars = raw.unicodeScalars.filter { scalar in
             (keepsNewlines && scalar == "\n") || (!CharacterSet.controlCharacters.contains(scalar)

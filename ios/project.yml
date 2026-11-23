@@ -26,6 +26,10 @@ targets:
       - HEXActivity
       - path: ../app/AppIcon.icon
         buildPhase: resources
+      # Typing configs' Export for your agent: the agent package, copied in as one folder.
+      - path: TypingConfig/package
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
       - target: HEXKeyboard

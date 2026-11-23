@@ -502,7 +502,7 @@ final class TypingLogTests: XCTestCase {
 
     /// A file opened from Files or a share sheet is read once, never past the 64 KB limit, and a
     /// copy iOS put in Documents/Inbox is deleted once read; its name shows without control or
-    /// direction-changing characters, and the note is cut at 280 characters.
+    /// direction-changing characters.
     func testATypingConfigArrivesReadOnceAndNeverPastTheLimit() throws {
         let inbox = directory.appendingPathComponent("Documents/Inbox", isDirectory: true)
         try FileManager.default.createDirectory(at: inbox, withIntermediateDirectories: true)
@@ -525,12 +525,12 @@ final class TypingLogTests: XCTestCase {
         XCTAssertTrue(TypingConfigInbox.handles(URL(fileURLWithPath: "/a/b.MHEXCONFIG")))
         XCTAssertFalse(TypingConfigInbox.handles(URL(string: "hex-dictation://config")!))
         XCTAssertEqual(TypingConfigInbox.displayName("gift\u{202E}gpj.exe\u{0007}"), "giftgpj.exe")
-        XCTAssertEqual(TypingConfigInbox.noteText(String(repeating: "a", count: 400)).count, TypingConfigLimits.noteMaxCharacters)
     }
 
     /// The history keeps every config unchanged under the SHA-256 of its bytes (the same file
-    /// twice is one entry), keeps 20, drops the oldest never applied first and never one that was
-    /// applied; deleting the active one leaves Hex defaults.
+    /// twice is one entry) and never refuses one: past 20 the oldest that is neither active nor
+    /// best so far goes, and the review can name it first; deleting the active one leaves Hex
+    /// defaults.
     func testTypingConfigHistoryKeysOnTheBytesAndKeepsAppliedOnes() throws {
         let history = TypingConfigHistory(directory: directory)
         let hash = TypingConfigReview(data: typingConfig, keyboard: KeyboardLayout(width: 402)).contentHash
@@ -545,11 +545,13 @@ final class TypingLogTests: XCTestCase {
             _ = history.add(Data("\(n)".utf8), hash: "h\(n)", name: "n\(n)", now: Date(timeIntervalSince1970: Double(n)))
         }
         XCTAssertEqual(history.entries.count, TypingConfigHistory.limit)
+        history.setActive(hash)
+        XCTAssertEqual(history.removedByAdding("new")?.id, "h1", "named before it goes")
+        XCTAssertNil(history.removedByAdding("h2"), "one already kept removes nothing")
         _ = history.add(Data("new".utf8), hash: "new", name: "new")
-        XCTAssertNil(history.entry("h1"), "the oldest never applied went")
-        XCTAssertNotNil(history.entry(hash), "the applied one stays")
-        for entry in history.entries { history.setActive(entry.id) }
-        XCTAssertEqual(history.add(Data("more".utf8), hash: "more", name: "more"), .full)
+        XCTAssertNil(history.entry("h1"), "the oldest went")
+        XCTAssertNotNil(history.entry(hash), "the active one stays, though it is the oldest")
+        XCTAssertEqual(history.entries.count, TypingConfigHistory.limit)
 
         history.setActive(hash)
         history.delete(hash)
@@ -589,6 +591,12 @@ final class TypingLogTests: XCTestCase {
         try TypingConfigActivation.apply(kept, review: again, partsOff: Set(kept.partsOff), history: history, store: store)
         let back = try JSONDecoder().decode(TypingConfigFile.self, from: try Data(contentsOf: try XCTUnwrap(store.activeURL)))
         XCTAssertEqual(back.words?.keep?.compactMap(\.value?.word), ["eepy"], "the parts it had off stay off")
+
+        // Hex's own dictation takes a config's dictation fixes, never for a translated dictation.
+        let off = TypingConfigSettings(defaults: defaults)
+        XCTAssertEqual(TypingConfigDictation.corrections(translating: false, settings: off), [], "experiment off")
+        off.isEnabled = true
+        XCTAssertEqual(TypingConfigDictation.corrections(translating: true, settings: off), [], "translated")
     }
 
 }

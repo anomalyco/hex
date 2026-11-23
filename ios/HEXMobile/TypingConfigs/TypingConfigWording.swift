@@ -20,6 +20,7 @@ extension TypingConfigReview.Reason {
         case .edgeNotAllowed: String(localized: "That edge of the key can't move.")
         case .twoZonesClaimPoint: String(localized: "Two changes claim the same spot, so neither applies.")
         case .keyTooSmall: String(localized: "It would leave a key too small to tap reliably.")
+        case .hiddenCharacters: String(localized: "It has hidden characters, so what it types wouldn't be what you see.")
         }
     }
 }
@@ -81,10 +82,10 @@ struct TypingConfigItemWords {
             title = String(localized: "Note")
             detail = nil
         case .keep(let word), .neverCorrectTo(let word):
-            title = word
+            title = item.text ?? word
             detail = nil
         case .fix(let typo, let word):
-            title = "\(typo) → \(word)"
+            title = item.text ?? "\(typo) → \(word)"
             let mode = review.applied.fixes.first { $0.typo == typo && $0.word == word }?.mode
             detail = mode == .apply
                 ? String(localized: "Put in when you press space")
@@ -92,9 +93,11 @@ struct TypingConfigItemWords {
         case .dictation(let heard, let meant):
             title = "“\(heard)” → “\(meant)”"
             detail = nil
-        case .aim(_, let letter):
+        case .aim(let block, let letter):
             title = Self.keyName(letter)
-            let offset = Self.clampedTo(item.outcome) ?? review.applied.aim[Character(letter)].map { [Double($0.dx), Double($0.dy)] }
+            let applied = review.applied.blocks.first { $0.block == block }?.aim[Character(letter)]
+            let offset = Self.clampedTo(item.outcome) ?? applied.map { [Double($0.dx), Double($0.dy)] }
+                ?? review.file?.keys?[safe: block]?.value?.aim?[letter]?.value?.offset
             detail = offset.map(Self.aimWords)
         case .zone(let block, let index):
             let zone = review.file?.keys?[safe: block]?.value?.zones?[safe: index]?.value
@@ -102,20 +105,30 @@ struct TypingConfigItemWords {
             let move = Self.clampedTo(item.outcome)?.first ?? zone?.move
             detail = zone.flatMap { z in move.map { Self.zoneWords(edge: z.edge, move: $0) } }
         case .unreadable(let path):
-            title = Self.entryName(path)
+            title = Self.entryName(item, path: path)
             detail = nil
         }
     }
 
     /// An entry Hex couldn't read, by its list and place ("Words to keep, number 6"); a field
     /// Hex doesn't know keeps its name in the file.
-    static func entryName(_ path: String) -> String {
-        let lists: [(String, TypingConfigGroup)] = [("words.keep", .keep), ("words.neverCorrectTo", .neverCorrectTo),
-                                                     ("words.fixes", .fixes), ("words.dictation", .dictation)]
-        for (prefix, group) in lists where path.hasPrefix(prefix + "[") && path.hasSuffix("]") {
-            if let i = Int(path.dropFirst(prefix.count + 1).dropLast()) {
-                return String(localized: "\(group.title), number \(i + 1)")
-            }
+    static func entryName(_ item: TypingConfigReview.Item, path: String) -> String {
+        let group: TypingConfigGroup? = switch item.list {
+        case .keep: .keep
+        case .neverCorrectTo: .neverCorrectTo
+        case .fixes: .fixes
+        case .dictation: .dictation
+        case .aim: .aim
+        case .zones: .zones
+        case .file, .keyBlocks: nil
+        }
+        // A field Hex doesn't know, even inside an entry, is named as the file names it.
+        if case .skipped(let reason) = item.outcome, reason == .unknownField || reason == .newerFormat { return path }
+        if let group, let position = item.position {
+            return String(localized: "\(group.title), number \(position + 1)")
+        }
+        if item.list == .keyBlocks, let position = item.position {
+            return String(localized: "Key positions, number \(position + 1)")
         }
         return path
     }
@@ -181,12 +194,13 @@ struct TypingConfigItemWords {
     static func aimParts(_ offset: [Double]) -> String? {
         guard offset.count == 2 else { return nil }
         var parts: [String] = []
-        if abs(offset[0]) >= 0.005 {
+        // A value that rounds to 0 at two decimals isn't named.
+        if number(offset[0]) != "0" {
             parts.append(offset[0] > 0
                 ? String(localized: "\(number(offset[0])) key to the right")
                 : String(localized: "\(number(offset[0])) key to the left"))
         }
-        if abs(offset[1]) >= 0.005 {
+        if number(offset[1]) != "0" {
             parts.append(offset[1] > 0
                 ? String(localized: "\(number(offset[1])) key lower")
                 : String(localized: "\(number(offset[1])) key higher"))
@@ -211,7 +225,7 @@ struct TypingConfigItemWords {
 
     /// The file's own numbers, labelled as its claim.
     static func evidence(_ item: TypingConfigReview.Item, review: TypingConfigReview) -> String? {
-        guard let e = Self.evidenceEntry(item, review: review) else { return nil }
+        guard let e = item.evidence else { return nil }
         let claim: String?
         switch item.part {
         case .keep:
@@ -229,31 +243,19 @@ struct TypingConfigItemWords {
         }
         return claim.map { String(localized: "The file says: \($0)") }
     }
-
-    private static func evidenceEntry(_ item: TypingConfigReview.Item, review: TypingConfigReview) -> TypingConfigFile.Evidence? {
-        guard let file = review.file else { return nil }
-        func index(_ prefix: String) -> Int? {
-            guard item.path.hasPrefix(prefix + "["), item.path.hasSuffix("]") else { return nil }
-            return Int(item.path.dropFirst(prefix.count + 1).dropLast())
-        }
-        switch item.part {
-        case .keep: return index("words.keep").flatMap { file.words?.keep?[safe: $0]?.value?.evidence }
-        case .neverCorrectTo: return index("words.neverCorrectTo").flatMap { file.words?.neverCorrectTo?[safe: $0]?.value?.evidence }
-        case .fix: return index("words.fixes").flatMap { file.words?.fixes?[safe: $0]?.value?.evidence }
-        case .dictation: return index("words.dictation").flatMap { file.words?.dictation?[safe: $0]?.value?.evidence }
-        case .aim(let block, let letter): return file.keys?[safe: block]?.value?.aim?[letter]?.value?.evidence
-        case .zone(let block, let i): return file.keys?[safe: block]?.value?.zones?[safe: i]?.value?.evidence
-        case .note, .unreadable: return nil
-        }
-    }
 }
 
 /// A key block's keyboard in words: each field that differs, the file's and this iPhone's.
 enum TypingConfigContextWords {
     static func differences(_ check: TypingConfigReview.ContextCheck) -> [String] {
-        check.differences.map { field in
+        guard let keyboard = check.keyboard else {
+            // No keyboard of theirs recorded yet: what it was made for.
+            let made = ["width", "language", "letters"].map { "\(fieldName($0)): \(value($0, check.madeFor))" }.joined(separator: " · ")
+            return [String(localized: "Made for \(made)")]
+        }
+        return check.differences.map { field in
             let name = fieldName(field)
-            return String(localized: "\(name): \(value(field, check.madeFor)) in the file, \(value(field, check.keyboard)) here")
+            return String(localized: "\(name): \(value(field, check.madeFor)) in the file, \(value(field, keyboard)) here")
         }
     }
 

@@ -58,7 +58,7 @@ struct TypingConfigSheet: View {
                 TypingConfigReviewView(
                     arrival: arrival,
                     data: data,
-                    keyboard: TypingConfigKeyboard.current(),
+                    keyboards: TypingConfigSettings().keyboards,
                     fullAccessOn: KeyboardSetupMonitor().fullAccessOn,
                     done: inbox.finishCurrent
                 )
@@ -76,10 +76,14 @@ struct TypingConfigSheet: View {
                 .foregroundStyle(HexTheme.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
             VStack(spacing: 4) {
-                OnboardingPrimaryButton(title: "Open Experiments") {
+                // Turns the experiment on here and shows the file's review at once.
+                OnboardingPrimaryButton(title: "Turn on typing configs") {
+                    TypingConfigSettings().isEnabled = true
+                    enabled = true
+                }
+                OnboardingQuietButton(title: "Open Experiments") {
                     inbox.parkForExperiments()
                 }
-                OnboardingQuietButton(title: "Close", action: inbox.closeAll)
             }
             .padding(.top, 4)
         }

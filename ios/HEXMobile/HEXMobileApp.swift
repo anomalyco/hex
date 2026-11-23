@@ -84,6 +84,8 @@ struct HEXMobileApp: App {
                         dictation.appBecameActive()
                         // Settings › Dictation › Speech model in keyboard: picks its download up.
                         dictation.startKeyboardParakeetDownloadIfWanted()
+                        // Typing configs: a keyboard first used since the config was applied.
+                        if TypingConfigSettings().isEnabled { TypingConfigActivation.refreshActive() }
                     }
                 }
                 .onChange(of: typingConfigs.opensExperiments) { _, opens in
