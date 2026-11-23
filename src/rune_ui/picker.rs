@@ -27,8 +27,8 @@ use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::transcription::models::{
     self as transcription_models, AUTO_LANGUAGE, BenchmarkRecord, ModelDefinition,
-    ModelPreparationStage, ModelRef, ModelRuntime, Recommendation, TranscriptionModelId,
-    TranscriptionSelection, language_name,
+    ModelPreparationStage, ModelRef, Recommendation, TranscriptionModelId, TranscriptionSelection,
+    language_name,
 };
 
 const PANEL_WIDTH: f32 = compare::WIDTH;
@@ -635,7 +635,7 @@ pub(super) fn preparation(ui: &Ui, model: &ModelDefinition) -> Option<(String, O
             });
             (
                 tr_fill("Downloading {}%", &format!("{:.0}", fraction * 100.0)),
-                matches!(model.runtime, ModelRuntime::Gguf(_)).then_some(fraction),
+                model.runtime.is_gguf().then_some(fraction),
             )
         }
     })

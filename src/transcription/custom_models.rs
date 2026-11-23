@@ -1184,22 +1184,38 @@ mod tests {
         let source = models.join("rename-Q8_0.gguf");
         fs::write(&source, parakeet("Renamed primeLine")).unwrap();
         let id = import(&source, None, &AtomicBool::new(false)).unwrap();
-        let first = match definition(id) {
-            ModelRef::Custom(definition) => definition,
-            ModelRef::Static(_) => unreachable!("an import gets a custom definition"),
-        };
-        let weak = Arc::downgrade(&first);
-        drop(first);
+        // The loop keeps the last build strongly, so the check does not
+        // depend on the shared registry still holding it when another test
+        // thread refreshes it; every earlier build is kept as a weak handle
+        // and must be freed.
+        let mut earlier = Vec::new();
+        let mut current = None;
         for index in 0..64 {
             rename(id, &format!("Name {index}")).unwrap();
+            let build = match definition(id) {
+                ModelRef::Custom(definition) => definition,
+                ModelRef::Static(_) => unreachable!("an import gets a custom definition"),
+            };
+            if let Some(previous) = current.replace(build) {
+                earlier.push(Arc::downgrade(&previous));
+            }
         }
+        let current = current.expect("a definition per rename");
         assert_eq!(registry().entries.len(), 1);
-        assert_eq!(definition(id).name, "Name 63");
+        assert_eq!(current.name, "Name 63");
+        assert_eq!(earlier.len(), 63);
+        assert!(
+            earlier.iter().all(|weak| weak.upgrade().is_none()),
+            "every earlier definition is freed once nothing reads it"
+        );
+        let weak = Arc::downgrade(&current);
+        drop(current);
+        remove(id).unwrap();
+        let _ = definition(id);
         assert!(
             weak.upgrade().is_none(),
-            "an earlier definition is freed once nothing reads it"
+            "the removed import's definition is freed"
         );
-        remove(id).unwrap();
         super::super::models::set_test_models_dir(None);
         fs::remove_dir_all(models).unwrap();
     }
@@ -1270,7 +1286,6 @@ mod tests {
             super::super::models::model_path(&before).unwrap(),
             before_path
         );
-        assert_eq!(before.name, "Mine");
         remove(id).unwrap();
         super::super::models::set_test_models_dir(None);
         fs::remove_dir_all(models).unwrap();

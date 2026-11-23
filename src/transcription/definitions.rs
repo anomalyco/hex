@@ -34,7 +34,7 @@ pub struct ModelDefinition {
     pub name: Cow<'static, str>,
     pub realtime: &'static str,
     /// Word error rate on the model's own benchmark, in percent;
-    /// None when the system manages the model and publishes none.
+    /// `None` when the system manages the model and publishes none.
     pub word_error_rate: Option<f64>,
     /// The pinned artifact advertises streaming, so dictation can transcribe
     /// while the shortcut is held. It still streams only on a GPU device and
@@ -97,18 +97,18 @@ pub struct GgufArtifact {
     /// The file name in its repository, which every download URL uses.
     pub filename: Cow<'static, str>,
     /// The name Hex stores it under in its one flat models folder, when that
-    /// must differ from filename. None keeps filename. Only a collision
+    /// must differ from `filename`. `None` keeps `filename`. Only a collision
     /// needs one: KBLab's and NbAiLab's Whisper medium files are both called
-    /// ggml-model-q5_0.bin and are both 539,212,484 bytes, and the folder's
+    /// `ggml-model-q5_0.bin` and are both 539,212,484 bytes, and the folder's
     /// installed check compares size alone.
     pub stored_as: Option<&'static str>,
     pub revision: &'static str,
     pub repository: &'static str,
     pub bytes: u64,
     pub sha256: Cow<'static, str>,
-    /// Every import is checked against this list when it is added, so it is
-    /// always one of the catalog's names, or "unknown" for a hand-edited
-    /// manifest.
+    /// Every import is checked against `custom_models::ARCHITECTURES` when it
+    /// is added, so it is always one of the catalog's names, or "unknown" for
+    /// a hand-edited manifest.
     pub architecture: &'static str,
     pub variant: Cow<'static, str>,
 }
@@ -133,8 +133,8 @@ impl ModelDefinition {
         self.available_where(crate::labs::k_quant_models())
     }
 
-    /// available against k_quants rather than this process's Labs switch, so
-    /// a test can run either side of Labs › Smaller model files.
+    /// [`available`] against `k_quants` rather than this process's Labs
+    /// switch, so a test can run either side of Labs › Smaller model files.
     pub(crate) fn available_where(&self, k_quants: bool) -> bool {
         match (&self.runtime, self.id) {
             (ModelRuntime::AppleSpeech, _) => false,
@@ -160,7 +160,7 @@ impl ModelDefinition {
     pub fn runtime_language<'a>(&self, language: &'a str) -> &'a str {
         match self.id {
             TranscriptionModelId::WhisperLargeV3Turbo if language == "fil" => "tl",
-            // Its prompt and advertised languages are locales: de-DE.
+            // Its prompt and advertised languages are locales: `de-DE`.
             TranscriptionModelId::Nemotron35Asr => NEMOTRON_3_5_LOCALES
                 .iter()
                 .find_map(|(code, locale)| (*code == language).then_some(*locale))
@@ -174,7 +174,7 @@ impl ModelDefinition {
             .then(|| self.runtime_language(language))
     }
 
-    /// The languages Settings offers for this model, in LANGUAGES order,
+    /// The languages Settings offers for this model, in [`LANGUAGES`] order,
     /// Auto first when the model detects the language, then the other
     /// languages the model declares (an import's Norwegian, #1148).
     pub fn language_choices(&self) -> Vec<&'static str> {
@@ -201,7 +201,7 @@ impl ModelDefinition {
         }
     }
 
-    /// language when this model supports it, else its default language, so
+    /// `language` when this model supports it, else its default language, so
     /// a model switch always yields a valid selection.
     pub fn language_for<'a>(&self, language: &'a str) -> &'a str {
         if self.supports_language(language) {
@@ -229,7 +229,7 @@ impl ModelDefinition {
         }
     }
 
-    /// How transcription feeds this model the vocabulary (gguf_session
+    /// How transcription feeds this model the vocabulary (`gguf_session`
     /// checks the model itself before it adds the list to a run). Rewriting
     /// and search use the vocabulary with every model.
     pub fn vocabulary_use(&self) -> VocabularyUse {
@@ -241,8 +241,8 @@ impl ModelDefinition {
         }
     }
 
-    /// How many of entries, first in list order, this model's transcription
-    /// reads (dictation::vocabulary::terms_read).
+    /// How many of `entries`, first in list order, this model's
+    /// transcription reads (`dictation::vocabulary::terms_read`).
     pub fn vocabulary_terms_read(
         &self,
         entries: &[crate::dictation::vocabulary::VocabularyEntry],
@@ -327,7 +327,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // keeps v3's figure.
         realtime: "~33x",
         // LibriSpeech test-clean, transcribe.cpp's published conversion
-        // benchmark (catalog/orukeet.json); not measured in Hex.
+        // benchmark (`catalog/orukeet.json`); not measured in Hex.
         word_error_rate: Some(1.86),
         streams: false,
         runtime: gguf(&ORUKEET_ARTIFACT),
@@ -458,7 +458,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // on a FLEURS English clip), so it keeps v3's figure.
         realtime: "~33x",
         // LibriSpeech test-clean, transcribe.cpp's published conversion
-        // benchmark (model_benchmarks); not measured in Hex.
+        // benchmark (`model_benchmarks`); not measured in Hex.
         word_error_rate: Some(1.80),
         streams: false,
         runtime: gguf(&PARAKEET_ULTRA_ARTIFACT),
@@ -474,7 +474,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // On apollo's Vulkan GPU it ran 0.55 to 0.97 times as fast as
         // Parakeet v3 (17.9 s and 54.6 s German clips), against v3's ~33x.
         realtime: "~25x",
-        // LibriSpeech test-clean, Hex's run (model_benchmarks). On the same
+        // LibriSpeech test-clean, Hex's run (`model_benchmarks`). On the same
         // runs Parakeet v3 made fewer errors: 1.95% here, and on FLEURS 4.88%
         // English and 5.17% German against 7.91% and 10.39% (8.77% and
         // 10.46% with Auto). It is here to stream with the language set.
@@ -482,7 +482,7 @@ pub const MODELS: &[ModelDefinition] = &[
         streams: true,
         runtime: gguf(&NEMOTRON_3_5_ASR_ARTIFACT),
         languages: languages(NEMOTRON_3_5_LANGUAGES),
-        // Its prompt takes the language (runtime_language), and Auto leaves
+        // Its prompt takes the language (`runtime_language`), and Auto leaves
         // it to the model.
         accepts_language_hint: true,
         supports_language_detection: true,
@@ -493,7 +493,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // On apollo's Vulkan GPU it ran 1.2 to 1.4 times as fast as Parakeet
         // v3 (the FLEURS Russian test split, and a 10 s clip of it).
         realtime: "~40x",
-        // FLEURS Russian test, Hex's run (model_benchmarks): Parakeet v3
+        // FLEURS Russian test, Hex's run (`model_benchmarks`): Parakeet v3
         // scored 6.52% on the same run and Whisper large-v3-turbo 5.36%.
         word_error_rate: Some(5.37),
         streams: false,
@@ -509,12 +509,12 @@ pub const MODELS: &[ModelDefinition] = &[
         // On apollo's Vulkan GPU it ran FLEURS Norwegian at 0.89 times
         // Whisper large-v3-turbo's speed (37x and 41x real time).
         realtime: "~17x",
-        // FLEURS Norwegian test, Hex's run (model_benchmarks): Whisper
+        // FLEURS Norwegian test, Hex's run (`model_benchmarks`): Whisper
         // large-v3-turbo scored 8.94% on the same run.
         word_error_rate: Some(6.68),
         streams: false,
         runtime: gguf(&NB_WHISPER_MEDIUM_ARTIFACT),
-        // Measured only for Bokmal with the no hint, which it always gets.
+        // Measured only for Bokmål with the `no` hint, which it always gets.
         languages: languages(&["no"]),
         accepts_language_hint: true,
         supports_language_detection: false,
@@ -527,11 +527,11 @@ pub const MODELS: &[ModelDefinition] = &[
         // at ~17x on apollo's Vulkan GPU.
         realtime: "~17x",
         // KBLab's model card for its default (standard) checkpoint on the
-        // FLEURS Swedish test (model_benchmarks); Hex has not measured it.
+        // FLEURS Swedish test (`model_benchmarks`); Hex has not measured it.
         word_error_rate: Some(6.6),
         streams: false,
         runtime: gguf(&KB_WHISPER_MEDIUM_ARTIFACT),
-        // The card's only language; the pinned file takes the sv hint.
+        // The card's only language; the pinned file takes the `sv` hint.
         languages: languages(&["sv"]),
         accepts_language_hint: true,
         supports_language_detection: false,
@@ -543,7 +543,7 @@ pub const MODELS: &[ModelDefinition] = &[
         // large-v3-turbo and 0.4 to 0.64 times Parakeet v3's speed (an 11 s
         // clip, and the FLEURS English and Japanese test splits).
         realtime: "~25x",
-        // FLEURS English test, Hex's run (model_benchmarks).
+        // FLEURS English test, Hex's run (`model_benchmarks`).
         word_error_rate: Some(4.77),
         streams: false,
         runtime: gguf(&GRANITE_SPEECH_5_ARTIFACT),

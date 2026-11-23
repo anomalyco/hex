@@ -1120,10 +1120,7 @@ fn stream_model_prepare(
     let preparer: ModelPreparer = Box::new({
         let model = model.clone();
         move |canceled, downloaded, stage| {
-            if matches!(
-                &model.runtime,
-                crate::transcription::models::ModelRuntime::Gguf(_)
-            ) {
+            if model.runtime.is_gguf() {
                 crate::transcription::models::download_with_stage_progress(
                     &model,
                     &canceled,
