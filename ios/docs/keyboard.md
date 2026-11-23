@@ -589,7 +589,15 @@ suggestions; the apostrophe and quotation keys keep Hex's default English curly 
 Arabic letters never see. With the experiment off, العربية is not listed, Automatic never
 picks it (an Arabic dictation language falls back to English), and a stored "ar" is ignored.
 Unit tests only (`ArabicKeyboardTests`): no CI compiles the iOS targets and no device run
-checks it.
+checks it. Beside Apple's Arabic keyboard on the iOS 26.5 and 27.2 simulators (iPhone 17 Pro,
+iPhone SE, Duo unfolded upright; 2026-11-23), the letter keys sit on the same frames, and these
+differ: Apple's ه holds هـ, not ة; its ء lists ئ before ؤ; its callouts open leftward from
+the key, Hex's rightward; its harakat strip has the tatweel ـ where Hex has ◌ٖ, and its harakat
+key is about 10 pt wider; its letters key reads ابج, without the hamza; its #+= page's bottom
+key goes back to the letters, where Hex's goes to 123; on iOS 27.2 that page has ٪ and the
+Arabic ، and ؟ (Latin on 26.5); its return key's arrow points right; its space bar carries no
+language name; and split, its third row repeats no letter and its right half keeps the harakat
+key.
 
 ## Layout per language (Settings › Keyboard › Languages › Layout)
 
@@ -1075,8 +1083,9 @@ simulator, 20 / 40 / 60 pt up: Apple's 1 / 2 / 3 lines, Hex's 2 / 5 / 7 in a fie
 width; on the Duo's cover screen an app gets 382 pt of the 466 while the keyboard spans 452,
 so even a full-width field skips one going down). In an Arabic run its UTF-16 offsets are
 logical, so the cursor steps through the run's characters in writing order rather than its
-right-to-left display order: a known limit, not a bidi-aware cursor. The keys blank to keycaps 60%
-of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
+right-to-left display order: a known limit, not a bidi-aware cursor (Apple's moves the way the
+finger does: dragging right moves into the Arabic word on its right, where Hex's moves the other
+way). The keys blank to keycaps 60% of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
 tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
 selection but not make one. Off (the default), a second finger does nothing. Settings ›
 Experiments › Two-thumb selection (off by default, `experiments.twoThumbSelection`, App Group)
