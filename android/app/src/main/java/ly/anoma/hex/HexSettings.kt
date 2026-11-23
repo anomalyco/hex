@@ -113,6 +113,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val spatial = remember(revision) { typing.spatial }
     val popups = remember(revision) { typing.popups }
     val haptics = remember(revision) { typing.haptics }
+    val letterSymbols = remember(revision) { typing.letterSymbols }
     var copied by remember(transcript) { mutableStateOf(false) }
     fun open(next: Page) {
         // A send in progress keeps the form; leaving it otherwise drops what was written.
@@ -323,6 +324,12 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                         }), size = 13, muted = true)
                                     }
                                 }
+                            }
+                            Label(stringResource(R.string.labs_keyboard), muted = true, size = 14,
+                                mod = Modifier.padding(start = 16.dp))
+                            Card {
+                                Toggle(stringResource(R.string.letter_symbols), stringResource(R.string.letter_symbols_detail),
+                                    letterSymbols) { typing.letterSymbols = it }
                             }
                         }
                     }

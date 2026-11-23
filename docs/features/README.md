@@ -3155,6 +3155,13 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
+├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home and
+│   bottom rows (a–l, z–m) for its symbol first, SwiftKey-style (m for /, a for @), with the
+│   letter's accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none,
+│   and row 1 (including AZERTY a/z) keeps its digits; off, the keys are unchanged.
+│   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt passed in
+│   https://github.com/anomalyco/hex/actions/runs/45273240353 (testDebugUnitTest + compileDebugKotlin,
+│   GitHub-hosted); not tried on a device or emulator.
 └── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
     nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
     added once; the next dictation starts on a new line below it, and a signed dictation

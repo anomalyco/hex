@@ -138,11 +138,20 @@ internal class LetterFeedback(private val host: ViewGroup) {
         }
 
         /** What a held letter offers: on row 1 its digit first, under the finger (Gboard types the digit
-         * when a held q to p lifts), then its accents with the letter itself. */
-        fun holds(c: Char, language: String, digit: Char?): List<String> {
+         * when a held q to p lifts), then its accents with the letter itself. With [symbolsOnLetters], a
+         * second or third row letter offers its symbol first instead, as SwiftKey does. */
+        fun holds(c: Char, language: String, digit: Char?, symbolsOnLetters: Boolean = false): List<String> {
             val accents = options(c, language)
-            return if (digit == null) accents else listOf(digit.toString()) + accents
+            val first = digit?.toString() ?: (if (symbolsOnLetters) letterSymbol(c)?.toString() else null)
+            return if (first == null) accents else listOf(first) + accents
         }
+
+        // SwiftKey's symbols on the second and third letter rows, keyed by letter so every layout keeps
+        // them wherever it draws that letter. Row 1's letters keep the digit Hex already offers.
+        private val letterSymbols = mapOf('a' to '@', 's' to '#', 'd' to '&', 'f' to '*', 'g' to '-',
+            'h' to '+', 'j' to '=', 'k' to '(', 'l' to ')', 'z' to '_', 'x' to '$', 'c' to '"', 'v' to '\'',
+            'b' to ':', 'n' to ';', 'm' to '/')
+        fun letterSymbol(c: Char): Char? = letterSymbols[c.lowercaseChar()]
 
         // Gboard's held symbols (Pixel 8 emulator, API 36, black box) on the keys Hex's pages share with
         // its: the option Gboard selects first, then the rest left to right. Digits offer themselves first.

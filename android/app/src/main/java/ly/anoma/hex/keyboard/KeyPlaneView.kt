@@ -94,6 +94,8 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
     private var current: KeyboardPage? = null
     private val caseKeys = ArrayList<Pair<Char, KeyCap>>()
     private var shiftIcon: ImageView? = null
+    // The Labs letter-symbol setting the keys were drawn with, so a change draws them when next shown.
+    private var letterSymbolsDrawn = false
     private val switchLanguage = Runnable {
         if (spaceKey.isPressed && spaceGesture.still) { spaceKey.isPressed = false; spaceKey.performLongClick() }
     }
@@ -215,20 +217,24 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
 
     fun showPage(page: KeyboardPage) {
         val shown = current
+        val letterSymbols = ime.feedback.letterSymbols
         // Shift only recases the letters and changes nothing on the symbol pages: neither draws the keys again,
         // which would drop a key a second finger is already on (typing the first of a sentence turns shift off).
-        if (shown != null && page.copy(shifted = shown.shifted, locked = shown.locked) == shown) {
+        // A changed Labs letter-symbol setting draws them again, so the next showing picks it up.
+        if (shown != null && page.copy(shifted = shown.shifted, locked = shown.locked) == shown &&
+            letterSymbols == letterSymbolsDrawn) {
             current = page; if (!page.symbols) relabel(page); return
         }
         // Another kind of field in the same box (the app changed its type): the keys, not the emoji panel over them.
         if (emojiOpen) host.closeEmoji()
-        current = page
+        current = page; letterSymbolsDrawn = letterSymbols
         clearCallout(); endSlide(); grid = null; letters.clear(); caseKeys.clear(); slides.clear(); shiftIcon = null
         rows.removeAllViews()
         page.pad?.let { showPad(page, it); return }
         bottom.visibility = VISIBLE
         val language = page.language
         val symbols = page.symbols
+        val letterHolds = !symbols && letterSymbols
         val lines = page.lines
         val columns = KeyboardMetrics.columns(lines).toFloat()
         val side = KeyboardMetrics.sideWidth(page, lines)
@@ -275,8 +281,10 @@ internal class KeyPlaneView(context: Context, private val ime: HexKeyboard, priv
                 row.add(k, at, width); at += width
                 if (!symbols) { letters[c] = k; caseKeys.add(c to k) }
                 val digit = if (symbols) null else KeyboardLetters.digit(index, position)
-                k.hint(digit?.toString())
-                fun holds() = if (symbols) LetterFeedback.symbolHolds(c) else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit)
+                val symbol = if (letterHolds) LetterFeedback.letterSymbol(c) else null
+                k.hint(digit?.toString() ?: symbol?.toString())
+                fun holds() = if (symbols) LetterFeedback.symbolHolds(c)
+                    else LetterFeedback.holds(cased(c).single(), language.layoutCode, digit, letterHolds)
                 if (holds().isNotEmpty()) {
                     k.setOnLongClickListener { host.openAccents(holds(), it); true }
                     k.longClickLabel = context.getString(R.string.keyboard_more_characters)

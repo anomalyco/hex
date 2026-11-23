@@ -558,6 +558,20 @@ class InsertionTest {
         assertEquals(",", LetterFeedback.periodHolds[0][LetterFeedback.PERIOD_DEFAULT])
         assertEquals(emptyList<String>(), LetterFeedback.symbolHolds('@'))
     }
+    @Test fun heldLettersOfferSymbolsWhenTheLabIsOn() {
+        // Off, every key offers exactly what it did: accents alone, and none on a letter without them.
+        assertEquals(LetterFeedback.options('a', "en"), LetterFeedback.holds('a', "en", null))
+        assertEquals(emptyList<String>(), LetterFeedback.holds('m', "en", null))
+        // On, a second or third row key offers its symbol first, then the same accents after it.
+        val a = LetterFeedback.holds('a', "en", null, symbolsOnLetters = true)
+        assertEquals("@", a.first())
+        assertEquals(LetterFeedback.options('a', "en"), a.drop(1))
+        assertEquals(listOf("/"), LetterFeedback.holds('m', "en", null, symbolsOnLetters = true))
+        assertEquals(LetterFeedback.options('e', "en"), LetterFeedback.holds('e', "en", null, symbolsOnLetters = true))
+        // A capital offers the same symbol, and row 1 keeps its digit first.
+        assertEquals("@", LetterFeedback.holds('A', "en", null, symbolsOnLetters = true).first())
+        assertEquals("1", LetterFeedback.holds('q', "en", '1', symbolsOnLetters = true).first())
+    }
     @Test fun emailAndWebAddressFieldsSwapTheComma() {
         val text = android.text.InputType.TYPE_CLASS_TEXT
         assertEquals("@", FieldKind.of(text or android.text.InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS).mark)
