@@ -281,12 +281,72 @@ impl PendingInputEvents {
     }
 }
 
+/// Extra keys the session tap keeps from the app in front besides Hex's
+/// always-bound shortcuts. Published as one policy so Escape and Toggle's
+/// cancel shortcut cannot disagree across a listener pass, and a programmatic
+/// dictation claims neither.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TapPolicy {
+    /// No extra keys claimed (idle, or a programmatic dictation owns input).
+    #[default]
+    None,
+    /// Extra keys claimed by an active capture or dictation.
+    Claim {
+        /// Keep Escape from the app in front (held Hold dictation past the
+        /// hold threshold, or Annotate's pre-start shortcut / picker).
+        takes_escape: bool,
+        /// Keep the recording machine's cancel shortcut from the app in front.
+        cancel: Option<RuntimeHotkey>,
+    },
+}
+
+impl TapPolicy {
+    /// The policy for one listener pass. While a programmatic dictation
+    /// records, the listener ignores every key so Escape and cancel keys stay
+    /// with the owner app.
+    pub fn for_listener(
+        programmatic: bool,
+        capture_escape: bool,
+        held_dictation_escape: bool,
+        recording_cancel: Option<RuntimeHotkey>,
+    ) -> Self {
+        if programmatic {
+            return Self::None;
+        }
+        let takes_escape = capture_escape || held_dictation_escape;
+        if !takes_escape && recording_cancel.is_none() {
+            Self::None
+        } else {
+            Self::Claim {
+                takes_escape,
+                cancel: recording_cancel,
+            }
+        }
+    }
+
+    pub fn takes_escape(self) -> bool {
+        matches!(
+            self,
+            Self::Claim {
+                takes_escape: true,
+                ..
+            }
+        )
+    }
+
+    pub fn cancel(self) -> Option<RuntimeHotkey> {
+        match self {
+            Self::None => None,
+            Self::Claim { cancel, .. } => cancel,
+        }
+    }
+}
+
 pub struct InputMonitor {
     pub events: Receiver<ObservedInputEvent>,
     pub activity: InputActivity,
     pending: PendingInputEvents,
-    takes_escape: Arc<AtomicBool>,
-    cancel: Arc<Mutex<Option<RuntimeHotkey>>>,
+    policy: Arc<Mutex<TapPolicy>>,
     run_loop: Arc<AtomicPtr<c_void>>,
     worker: Option<JoinHandle<()>>,
     /// Held only so dropping the input monitor stops the HID tracker.
@@ -325,20 +385,15 @@ impl InputMonitor {
         let tap_activity = activity.clone();
         let run_loop = Arc::new(AtomicPtr::new(ptr::null_mut()));
         let tap_run_loop = run_loop.clone();
-        let takes_escape = Arc::new(AtomicBool::new(false));
-        let tap_takes_escape = takes_escape.clone();
-        let cancel = Arc::new(Mutex::new(None));
-        let tap_cancel = cancel.clone();
+        let policy = Arc::new(Mutex::new(TapPolicy::None));
+        let tap_policy = policy.clone();
         let pending = PendingInputEvents::default();
         let tap_pending = pending.clone();
         let worker = thread::spawn(move || {
             run_event_tap(
                 sender,
                 tap_activity,
-                TapFlags {
-                    takes_escape: tap_takes_escape,
-                    cancel: tap_cancel,
-                },
+                tap_policy,
                 tap_pending,
                 tap_run_loop,
                 ready_sender,
@@ -355,25 +410,20 @@ impl InputMonitor {
             events,
             activity,
             pending,
-            takes_escape,
-            cancel,
+            policy,
             run_loop,
             worker: Some(worker),
             _physical_keys: physical_keys,
         })
     }
 
-    pub fn set_takes_escape(&self, enabled: bool) {
-        self.takes_escape.store(enabled, Ordering::Release);
-    }
-
-    /// The cancel shortcut the tap keeps from the app in front: the
-    /// recording's own, only while it records.
-    pub fn set_cancel(&self, cancel: Option<RuntimeHotkey>) {
+    /// Updates what extra keys (Escape, Toggle's cancel shortcut) the session
+    /// tap keeps from the app in front.
+    pub fn set_tap_policy(&self, policy: TapPolicy) {
         *self
-            .cancel
+            .policy
             .lock()
-            .unwrap_or_else(|error| error.into_inner()) = cancel;
+            .unwrap_or_else(|error| error.into_inner()) = policy;
     }
 
     pub fn pending_events(&self) -> PendingInputEvents {
@@ -492,8 +542,7 @@ impl InputSink {
 struct EventTapContext {
     sink: Arc<InputSink>,
     activity: InputActivity,
-    takes_escape: Arc<AtomicBool>,
-    cancel: Arc<Mutex<Option<RuntimeHotkey>>>,
+    policy: Arc<Mutex<TapPolicy>>,
     key_tap: AtomicPtr<c_void>,
     observation_tap: AtomicPtr<c_void>,
     physical_tap: AtomicPtr<c_void>,
@@ -787,16 +836,12 @@ unsafe extern "C" fn event_callback(
         .lock()
         .unwrap_or_else(|error| error.into_inner());
     let mut hotkeys = crate::app_settings::runtime_hotkeys();
-    hotkeys.cancel = *context
-        .cancel
+    let policy = *context
+        .policy
         .lock()
         .unwrap_or_else(|error| error.into_inner());
-    let suppress = suppression.process_all(
-        input,
-        hotkeys,
-        delivered,
-        context.takes_escape.load(Ordering::Acquire),
-    );
+    hotkeys.cancel = policy.cancel();
+    let suppress = suppression.process_all(input, hotkeys, delivered, policy.takes_escape());
     context.activity.observe(input, suppress);
     // A key Hex consumed (its shortcuts, Escape) was never the app's chord.
     #[cfg(hex_capture)]

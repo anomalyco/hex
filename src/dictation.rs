@@ -118,8 +118,20 @@ impl DictationFlavour {
 pub const MINIMUM_HOLD_DURATION: Duration = Duration::from_millis(300);
 /// A second press of the shortcut this soon after the first's release is a
 /// double tap. Equal to the hold threshold today, but its own setting.
-#[cfg_attr(target_os = "linux", allow(dead_code))]
 pub const DOUBLE_TAP_WINDOW: Duration = Duration::from_millis(300);
+/// How long a modifier-only shortcut is held before a key or button joining it
+/// is meant for the app in front rather than a chord (Labs › Hold through
+/// other keys). Shared by macOS and Windows.
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub const HOLD_THROUGH_KEYS_AFTER: Duration = Duration::from_secs(1);
+
+/// Whether a key or button joining a held modifier-only capture passes through
+/// to the app in front instead of discarding it (Labs › Hold through other
+/// keys).
+#[cfg_attr(target_os = "linux", allow(dead_code))]
+pub fn holds_through_joining_keys(enabled: bool, toggle: bool, held_for: Duration) -> bool {
+    enabled && !toggle && held_for >= HOLD_THROUGH_KEYS_AFTER
+}
 /// Audio kept after a shortcut release that finishes a capture, because a
 /// release often lands while the last word is still sounding.
 pub const POST_RELEASE_TAIL: Duration = Duration::from_millis(200);
