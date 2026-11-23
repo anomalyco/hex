@@ -3158,7 +3158,9 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home and
 │   bottom rows (a–l, z–m) for its symbol first, SwiftKey-style (m for /, a for @), with the
 │   letter's accents after it; symbols follow the letter, so AZERTY q/w and QWERTZ y get none,
-│   and row 1 (including AZERTY a/z) keeps its digits; off, the keys are unchanged.
+│   and row 1 (including AZERTY a/z) keeps its digits; off, the keys are unchanged. With
+│   Number row on, row 1's AZERTY a/z and QWERTZ z show their symbols (@, _) as hint and hold
+│   instead of digits.
 │   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt passed in
 │   https://github.com/anomalyco/hex/actions/runs/45273240353 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device or emulator.
@@ -3173,11 +3175,14 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 └── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
     every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
     corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
-    the Symbols on letter keys hints and holds still work. The keyboard is one row taller and
-    the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys and
-    are a row shorter than the letters while it is on. Off, the page is unchanged.
-    KeyboardPageTest plus `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` on a
-    GitHub-hosted runner: pending rerun. Not tried on a device. The repo has no Android CI.
+    the Symbols on letter keys hints and holds still work, with row 1 letters that have a
+    symbol (AZERTY a/z, QWERTZ z) showing it instead of the digit. The keyboard is one row
+    taller and the Hex menu matches that height; ?123, the symbols pages and the pads keep
+    their keys and are a row shorter than the letters while it is on. Off, the page is
+    unchanged.
+    KeyboardPageTest plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+    on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45275591325, the
+    latest observed verification); not tried on a device. The repo has no Android CI.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 
