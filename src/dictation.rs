@@ -307,6 +307,11 @@ pub enum ShortcutMode {
     Toggle,
 }
 
+#[cfg(test)]
+impl ShortcutMode {
+    pub const ALL: [Self; 2] = [Self::Hold, Self::Toggle];
+}
+
 /// Where a clip's audio came from, filled in by the audio owner so a
 /// discarded clip's log line can tell a dead stream from a quiet room.
 #[derive(Clone, Debug, Default)]

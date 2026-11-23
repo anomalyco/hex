@@ -1181,23 +1181,26 @@ fn again_section(ui: &Ui, p: Paint, id: u64, layer: &mut Vec<El>) -> El {
                 .child(section_label(p, "label", tr("Saved recording")).grow(1.0))
                 // Labs › Copy dictation audio: the kept WAV as a file on the
                 // clipboard, ready to attach.
-                .children(ui.settings.labs.copy_dictation_audio.then(|| {
-                    let audio = ui.history.audio.as_ref().filter(|audio| audio.id == id);
-                    let copying = audio.is_some_and(|audio| audio.worker.is_some());
-                    let copied = audio.is_some_and(|audio| matches!(audio.result, Some(Ok(()))));
-                    small_button(
-                        p,
-                        "again-copy-audio",
-                        if copying {
-                            tr("Copying…")
-                        } else if copied {
-                            tr("Copied")
-                        } else {
-                            tr("Copy audio")
-                        },
-                        move |ui: &mut Ui, _| copy_audio(ui, id),
-                    )
-                }))
+                .children(
+                    crate::labs::copy_dictation_audio_enabled(&ui.settings).then(|| {
+                        let audio = ui.history.audio.as_ref().filter(|audio| audio.id == id);
+                        let copying = audio.is_some_and(|audio| audio.worker.is_some());
+                        let copied =
+                            audio.is_some_and(|audio| matches!(audio.result, Some(Ok(()))));
+                        small_button(
+                            p,
+                            "again-copy-audio",
+                            if copying {
+                                tr("Copying…")
+                            } else if copied {
+                                tr("Copied")
+                            } else {
+                                tr("Copy audio")
+                            },
+                            move |ui: &mut Ui, _| copy_audio(ui, id),
+                        )
+                    }),
+                )
                 .child(small_button(
                     p,
                     "again-play",

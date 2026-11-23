@@ -995,12 +995,11 @@ fn refresh_copy_dictation_audio() {
 /// is on (the row is hidden otherwise) and the newest History entry that
 /// kept its audio still has its WAV.
 fn copy_last_dictation_audio_enabled() -> bool {
-    crate::labs::copy_dictation_audio()
-        && crate::labs::keep_recordings()
-        && crate::macos_rune::runtime()
-            .and_then(|runtime| runtime.history())
-            .and_then(|history| history.newest_recording(crate::history::now_ms()))
-            .is_some()
+    crate::macos_rune::runtime()
+        .and_then(|runtime| runtime.history())
+        .as_ref()
+        .and_then(crate::history::recordings::newest_copyable)
+        .is_some()
 }
 
 /// Shows Restore Last Capture while Labs › Screenshots is on, as the menu

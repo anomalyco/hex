@@ -92,7 +92,8 @@ pub(super) fn run_host(
         let dictation_audio = if tray.is_some() && crate::labs::copy_dictation_audio() {
             Some(
                 host.history()
-                    .and_then(|history| history.newest_recording(crate::history::now_ms()))
+                    .as_ref()
+                    .and_then(crate::history::recordings::newest_copyable)
                     .is_some(),
             )
         } else {

@@ -357,76 +357,27 @@ pub(super) fn validate(
     target: ShortcutTarget,
     binding: &HotkeyBinding,
 ) -> Result<(), &'static str> {
-    // A bare left click would swallow every click, this window's included.
-    if binding.is_bare_primary_click() {
-        return Err(tr("Add a modifier"));
-    }
-    // Plain ⌫ turns a shortcut off rather than binding (`record`). Windows'
-    // cancel key may be any key alone, as it always could.
-    if binding.is_bare_erase() && !(cfg!(target_os = "windows") && target == ShortcutTarget::Cancel)
-    {
-        return Err(tr("Add a modifier"));
-    }
-    // Menu, Pause, and Scroll Lock need Labs › Special keys alone (Linux).
-    if cfg!(target_os = "linux")
-        && binding.key.as_ref().is_some_and(HotkeyKey::is_special)
-        && !settings.special_keys_allowed()
-    {
-        return Err(if binding.modifiers.is_empty() {
-            tr("Add a modifier")
-        } else {
-            tr("Unsupported key")
-        });
-    }
-    // The ISO section key alone needs Labs › § key alone (Linux,
-    // macOS).
-    if cfg!(any(target_os = "linux", target_os = "macos"))
-        && binding.is_lone_section_key()
-        && !settings.section_key_allowed()
-    {
-        return Err(tr("Add a modifier"));
-    }
-    // Any shortcut on the microphone key needs Labs › Microphone key alone
-    // (macOS); a modifier doesn't excuse it.
-    if cfg!(target_os = "macos")
-        && binding.uses_microphone_key()
-        && !settings.microphone_key_allowed()
-    {
-        return Err(tr("Unsupported key"));
-    }
-    // macOS reads the microphone key at Hex's own session tap, before the
-    // annotated-session tap Screenshots' keys go through, so a shot never sees
-    // it however the labs are set.
-    if cfg!(target_os = "macos") && binding.uses_microphone_key() && is_screenshot(target) {
-        return Err(tr("Unsupported key"));
-    }
-    // A navigation key alone needs Labs › Special keys alone (Windows).
-    if cfg!(target_os = "windows")
-        && binding.is_lone_navigation_key()
-        && !settings.special_keys_allowed()
-    {
-        return Err(tr("Add a modifier"));
-    }
-    host::validate_hotkey(target, binding)?;
-    if conflicts(settings, target, binding) {
-        return Err(tr("Already in use"));
-    }
-    Ok(())
-}
-
-/// Whether `target` is one of the Screenshots keys, which read the keyboard at
-/// the annotated session, after Hex's microphone-key tap has taken the press.
-#[cfg(target_os = "macos")]
-fn is_screenshot(target: ShortcutTarget) -> bool {
-    matches!(
-        target,
-        ShortcutTarget::Screenshot | ShortcutTarget::ScreenshotRecord
-    )
-}
-
-#[cfg(not(target_os = "macos"))]
-fn is_screenshot(_: ShortcutTarget) -> bool {
-    false
+    use crate::app_settings::{ShortcutRefusal, ShortcutValidationError, validate_shortcut};
+    let slot = super::shortcut_rule::slot_of(target);
+    validate_shortcut(settings, settings, slot, binding, |_, binding| {
+        host::validate_hotkey(target, binding)
+    })
+    .map_err(|error| match error {
+        ShortcutValidationError::Host(message) => message,
+        ShortcutValidationError::Policy(refusal) => match refusal {
+            ShortcutRefusal::BarePrimaryClick
+            | ShortcutRefusal::BareErase
+            | ShortcutRefusal::NeedsSectionKeyLab
+            | ShortcutRefusal::NeedsNavigationKeyLab { .. }
+            | ShortcutRefusal::NeedsSpecialKeysLab { alone: true, .. }
+            | ShortcutRefusal::NeedsModifierForKey { .. } => tr("Add a modifier"),
+            ShortcutRefusal::NeedsMouseShortcutsLab
+            | ShortcutRefusal::NeedsMicrophoneKeyLab
+            | ShortcutRefusal::MicrophoneKeyOnScreenshot
+            | ShortcutRefusal::NeedsSpecialKeysLab { alone: false, .. } => tr("Unsupported key"),
+            ShortcutRefusal::InUse => tr("Already in use"),
+        },
+    })
 }
 
 /// Whether `binding` overlaps a shortcut `target` must not share: the other
@@ -436,29 +387,7 @@ pub(super) fn conflicts(
     target: ShortcutTarget,
     binding: &HotkeyBinding,
 ) -> bool {
-    use crate::app_settings::HotkeySlot;
-    let slot = match target {
-        ShortcutTarget::Dictation => HotkeySlot::Dictation,
-        ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
-        ShortcutTarget::RawDictation => HotkeySlot::RawDictation,
-        #[cfg(target_os = "linux")]
-        ShortcutTarget::TypedText => HotkeySlot::TypedText,
-        ShortcutTarget::Cancel => HotkeySlot::Cancel,
-        #[cfg(hex_capture)]
-        ShortcutTarget::Capture => HotkeySlot::Capture,
-        #[cfg(all(hex_capture, target_os = "macos"))]
-        ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
-        ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::ExtraDictation(index) => HotkeySlot::ExtraDictation(index),
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        ShortcutTarget::TerminalPaste => HotkeySlot::TerminalPaste,
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::ScreenshotRecord => HotkeySlot::ScreenshotRecord,
-    };
-    settings.hotkey_in_use(slot, binding)
+    settings.hotkey_in_use(super::shortcut_rule::slot_of(target), binding)
 }
 
 pub(super) fn desktop_shortcut(binding: &HotkeyBinding) -> DesktopShortcut {
@@ -478,31 +407,7 @@ pub(super) fn desktop_shortcut(binding: &HotkeyBinding) -> DesktopShortcut {
 }
 
 pub(super) fn binding(settings: &AppSettings, target: ShortcutTarget) -> Option<&HotkeyBinding> {
-    match target {
-        ShortcutTarget::Dictation => Some(&settings.dictation_hotkey),
-        ShortcutTarget::PasteLast => settings.paste_last_hotkey.as_ref(),
-        ShortcutTarget::RawDictation => settings.raw_dictation_hotkey.as_ref(),
-        #[cfg(target_os = "linux")]
-        ShortcutTarget::TypedText => settings.typed_text_hotkey.as_ref(),
-        ShortcutTarget::Cancel => Some(&settings.cancel_hotkey),
-        #[cfg(hex_capture)]
-        ShortcutTarget::Capture => Some(&settings.capture.hotkey),
-        #[cfg(all(hex_capture, target_os = "macos"))]
-        ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey.as_ref(),
-        ShortcutTarget::SecondDictation => settings.second_dictation_hotkey.as_ref(),
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::ExtraDictation(index) => settings
-            .extra_dictation_hotkeys
-            .get(index)?
-            .binding
-            .as_ref(),
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey.as_ref(),
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::Screenshot => Some(&settings.screenshots.hotkey),
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::ScreenshotRecord => settings.screenshots.record_hotkey.as_ref(),
-    }
+    super::shortcut_rule::slot_of(target).get(settings)
 }
 
 pub(super) fn set_binding(
@@ -510,61 +415,18 @@ pub(super) fn set_binding(
     target: ShortcutTarget,
     binding: HotkeyBinding,
 ) {
-    match target {
-        ShortcutTarget::Dictation => settings.dictation_hotkey = binding,
-        ShortcutTarget::PasteLast => settings.paste_last_hotkey = Some(binding),
-        ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = Some(binding),
-        #[cfg(target_os = "linux")]
-        ShortcutTarget::TypedText => settings.typed_text_hotkey = Some(binding),
-        ShortcutTarget::Cancel => settings.cancel_hotkey = binding,
-        #[cfg(hex_capture)]
-        ShortcutTarget::Capture => settings.capture.hotkey = binding,
-        #[cfg(all(hex_capture, target_os = "macos"))]
-        ShortcutTarget::CaptureReplay => settings.capture.replay_hotkey = Some(binding),
-        ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = Some(binding),
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::ExtraDictation(index) => {
-            // A row removed while its recorder commits keeps the rest.
-            if let Some(row) = settings.extra_dictation_hotkeys.get_mut(index) {
-                row.binding = Some(binding);
-            }
-        }
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey = Some(binding),
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::Screenshot => settings.screenshots.hotkey = binding,
-        #[cfg(target_os = "macos")]
-        ShortcutTarget::ScreenshotRecord => settings.screenshots.record_hotkey = Some(binding),
-    }
+    super::shortcut_rule::slot_of(target).set(settings, binding);
 }
 
 /// The shortcuts in General and Output that can be off: plain ⌫ while
 /// recording one turns it off.
 pub(super) fn can_turn_off(target: ShortcutTarget) -> bool {
-    match target {
-        ShortcutTarget::PasteLast
-        | ShortcutTarget::RawDictation
-        | ShortcutTarget::SecondDictation => true,
-        #[cfg(target_os = "linux")]
-        ShortcutTarget::TypedText => true,
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        ShortcutTarget::TerminalPaste => true,
-        _ => false,
-    }
+    super::shortcut_rule::slot_of(target).can_turn_off()
 }
 
 /// Turns off a shortcut [`can_turn_off`] allows; others keep their binding.
 pub(super) fn turn_off(settings: &mut AppSettings, target: ShortcutTarget) {
-    match target {
-        ShortcutTarget::PasteLast => settings.paste_last_hotkey = None,
-        ShortcutTarget::RawDictation => settings.raw_dictation_hotkey = None,
-        ShortcutTarget::SecondDictation => settings.second_dictation_hotkey = None,
-        #[cfg(target_os = "linux")]
-        ShortcutTarget::TypedText => settings.typed_text_hotkey = None,
-        #[cfg(any(target_os = "windows", target_os = "linux"))]
-        ShortcutTarget::TerminalPaste => settings.terminal_paste_hotkey = None,
-        _ => {}
-    }
+    super::shortcut_rule::slot_of(target).turn_off(settings);
 }
 
 /// A shortcut row's Reset: puts `default` back as `target`'s

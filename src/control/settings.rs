@@ -10,6 +10,8 @@ use crate::app_settings::{
     AppSettings, HotkeyBinding, HotkeyKey, HotkeySlot, MAX_EXTRA_DICTATION_SHORTCUTS,
 };
 
+#[cfg(test)]
+mod choice_tests;
 mod hotkeys;
 mod registry;
 
@@ -333,39 +335,11 @@ pub fn apply(
             }
         }
         "labs.double_tap_modifiers" => candidate.normalize_double_tap_settings(),
-        "dictation_hotkey"
-        | "paste_last_hotkey"
-        | "raw_dictation_hotkey"
-        | "typed_text_hotkey"
-        | "second_dictation_hotkey"
-        | "terminal_paste_hotkey"
-        | "cancel_hotkey"
-        | "screenshots.hotkey"
-        | "screenshots.record_hotkey"
-        | "capture.hotkey"
-        | "capture.replay_hotkey" => {
+        _ if matches!(key.kind, Kind::Shortcut(_)) => {
             let Kind::Shortcut(slot) = key.kind else {
                 unreachable!("shortcut keys have the shortcut kind");
             };
-            let binding = match slot {
-                HotkeySlot::Dictation => Some(&candidate.dictation_hotkey),
-                HotkeySlot::PasteLast => candidate.paste_last_hotkey.as_ref(),
-                HotkeySlot::RawDictation => candidate.raw_dictation_hotkey.as_ref(),
-                HotkeySlot::TypedText => candidate.typed_text_hotkey.as_ref(),
-                HotkeySlot::SecondDictation => candidate.second_dictation_hotkey.as_ref(),
-                // Each row of `extra_dictation_hotkeys` is validated from
-                // its own JSON list, not a shortcut key.
-                HotkeySlot::ExtraDictation(_) => None,
-                HotkeySlot::TerminalPaste => candidate.terminal_paste_hotkey.as_ref(),
-                HotkeySlot::Cancel => Some(&candidate.cancel_hotkey),
-                HotkeySlot::Screenshot => Some(&candidate.screenshots.hotkey),
-                HotkeySlot::ScreenshotRecord => candidate.screenshots.record_hotkey.as_ref(),
-                #[cfg(hex_capture)]
-                HotkeySlot::Capture => Some(&candidate.capture.hotkey),
-                #[cfg(hex_capture)]
-                HotkeySlot::CaptureReplay => candidate.capture.replay_hotkey.as_ref(),
-            };
-            if let Some(binding) = binding {
+            if let Some(binding) = slot.get(&candidate) {
                 check_shortcut(settings, &candidate, name, slot, binding, shortcuts)?;
             }
             if candidate.dictation_hotkey.key.is_none() && !candidate.double_tap_modifiers_allowed()

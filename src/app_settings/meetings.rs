@@ -16,6 +16,14 @@ pub enum MeetingIndicatorCorner {
 }
 
 impl MeetingIndicatorCorner {
+    #[cfg(test)]
+    pub const ALL: [Self; 4] = [
+        Self::TopRight,
+        Self::TopLeft,
+        Self::BottomRight,
+        Self::BottomLeft,
+    ];
+
     pub const fn is_right(self) -> bool {
         matches!(self, Self::TopRight | Self::BottomRight)
     }
@@ -116,6 +124,9 @@ pub enum MeetingSummaries {
 }
 
 impl MeetingSummaries {
+    #[cfg(test)]
+    pub const ALL: [Self; 3] = [Self::Off, Self::Mac, Self::OpenCode];
+
     /// On this Mac on macOS, otherwise off.
     pub const fn platform_default() -> Self {
         if cfg!(target_os = "macos") {

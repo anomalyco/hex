@@ -30,6 +30,7 @@ mod screenshots;
 pub(crate) use persistence::LaunchLoad;
 pub(crate) use persistence::LaunchNote;
 mod shortcut_repair;
+mod slots;
 mod typing_speed;
 
 #[cfg(hex_capture)]
@@ -47,13 +48,14 @@ pub(crate) use microphone_key::{MicrophoneKey, MicrophoneKeyTap};
 #[cfg_attr(not(target_os = "macos"), allow(unused_imports))]
 pub use screenshots::{
     ExportSize, MaxResolution, RECORD_MICROPHONE_DEFAULT, RECORD_MICROPHONE_NONE, RecordKind,
-    RecordingQuality, ScreenshotSettings, screenshot_hotkey, screenshot_record_hotkey,
-    screenshot_settings,
+    RecordingQuality, SCREENSHOT_FRAME_RATES, ScreenshotSettings, screenshot_hotkey,
+    screenshot_record_hotkey, screenshot_settings,
 };
 #[cfg(target_os = "macos")]
 pub use screenshots::{
     pending_screenshot_choices, queue_screenshot_choice, settle_screenshot_choices,
 };
+pub use slots::{HotkeySlot, ShortcutRefusal, ShortcutValidationError, validate_shortcut};
 pub use typing_speed::{
     DEFAULT_TYPING_WPM, MAX_TYPING_WPM, MIN_TYPING_WPM, clamp as clamp_typing_wpm,
 };
@@ -166,6 +168,11 @@ pub enum TranscriptionDevice {
     Cpu,
 }
 
+#[cfg(test)]
+impl TranscriptionDevice {
+    pub const ALL: [Self; 3] = [Self::Auto, Self::Gpu, Self::Cpu];
+}
+
 /// Where the recording HUD appears while dictating.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -175,6 +182,11 @@ pub enum IndicatorPosition {
     Top = 0,
     Bottom = 1,
     Hidden = 2,
+}
+
+#[cfg(test)]
+impl IndicatorPosition {
+    pub const ALL: [Self; 3] = [Self::Top, Self::Bottom, Self::Hidden];
 }
 
 /// Which release-service channel a direct install updates from
@@ -1193,103 +1205,6 @@ impl AppSettings {
             .as_ref()
             .filter(|binding| !self.hotkey_in_use(HotkeySlot::CaptureReplay, binding))
     }
-
-    /// A shortcut saved as a bare left click swallowed every click, so its
-    /// owner couldn't change it in Settings. Such a shortcut goes back to its
-    /// default when settings load.
-    fn repair_bare_primary_clicks(&mut self) {
-        if self.dictation_hotkey.is_bare_primary_click() {
-            tracing::warn!("replaced a left-click dictation shortcut with the default");
-            self.dictation_hotkey = HotkeyBinding::default();
-        }
-        if self
-            .paste_last_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("replaced a left-click paste-last shortcut with the default");
-            self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
-        }
-        if self.cancel_hotkey.is_bare_primary_click() {
-            tracing::warn!("replaced a left-click cancel shortcut with the default");
-            self.cancel_hotkey = HotkeyBinding::cancel_default();
-        }
-        if self
-            .raw_dictation_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("cleared a left-click raw dictation shortcut");
-            self.raw_dictation_hotkey = None;
-        }
-        if self
-            .typed_text_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("cleared a left-click typed text shortcut");
-            self.typed_text_hotkey = None;
-        }
-        if self
-            .second_dictation_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("cleared a left-click second dictation shortcut");
-            self.second_dictation_hotkey = None;
-        }
-        if self
-            .terminal_paste_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("cleared a left-click terminal paste shortcut");
-            self.terminal_paste_hotkey = None;
-        }
-        #[cfg(hex_capture)]
-        if self.capture.hotkey.is_bare_primary_click() {
-            tracing::warn!("replaced a left-click capture shortcut with the default");
-            self.capture.hotkey = HotkeyBinding::capture_default();
-        }
-        #[cfg(hex_capture)]
-        if self
-            .capture
-            .replay_hotkey
-            .as_ref()
-            .is_some_and(HotkeyBinding::is_bare_primary_click)
-        {
-            tracing::warn!("cleared a left-click capture replay shortcut");
-            self.capture.replay_hotkey = None;
-        }
-        self.screenshots.clear_left_click_record();
-    }
-}
-
-/// A shortcut Settings and `hex settings` record.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum HotkeySlot {
-    Dictation,
-    PasteLast,
-    RawDictation,
-    /// Labs › Transform typed text's shortcut (Linux).
-    TypedText,
-    #[cfg(hex_capture)]
-    Capture,
-    /// Labs › Annotate last 15 seconds shortcut (macOS 27+).
-    #[cfg(hex_capture)]
-    CaptureReplay,
-    /// Labs › Second dictation shortcut.
-    SecondDictation,
-    /// Labs › More dictation shortcuts (macOS): row `index`'s binding.
-    ExtraDictation(usize),
-    /// Labs › Terminal paste shortcut (Windows, Linux).
-    TerminalPaste,
-    /// Toggle mode's cancel shortcut.
-    Cancel,
-    /// Labs › Screenshots (macOS).
-    Screenshot,
-    /// Labs › Screenshots' record shortcut (macOS, with Annotate).
-    ScreenshotRecord,
 }
 
 fn set_microphone_selection(device: Option<&str>) {

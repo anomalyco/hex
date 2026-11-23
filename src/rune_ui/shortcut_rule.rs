@@ -6,6 +6,31 @@ use super::host;
 use super::host::ShortcutTarget;
 use crate::app_settings::{HotkeyBinding, HotkeySlot};
 
+/// The one mapping from a window's `ShortcutTarget` to its `HotkeySlot`.
+pub(super) fn slot_of(target: ShortcutTarget) -> HotkeySlot {
+    match target {
+        ShortcutTarget::Dictation => HotkeySlot::Dictation,
+        ShortcutTarget::PasteLast => HotkeySlot::PasteLast,
+        ShortcutTarget::RawDictation => HotkeySlot::RawDictation,
+        #[cfg(target_os = "linux")]
+        ShortcutTarget::TypedText => HotkeySlot::TypedText,
+        ShortcutTarget::Cancel => HotkeySlot::Cancel,
+        #[cfg(hex_capture)]
+        ShortcutTarget::Capture => HotkeySlot::Capture,
+        #[cfg(all(hex_capture, target_os = "macos"))]
+        ShortcutTarget::CaptureReplay => HotkeySlot::CaptureReplay,
+        ShortcutTarget::SecondDictation => HotkeySlot::SecondDictation,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::ExtraDictation(index) => HotkeySlot::ExtraDictation(index),
+        #[cfg(any(target_os = "windows", target_os = "linux"))]
+        ShortcutTarget::TerminalPaste => HotkeySlot::TerminalPaste,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::Screenshot => HotkeySlot::Screenshot,
+        #[cfg(target_os = "macos")]
+        ShortcutTarget::ScreenshotRecord => HotkeySlot::ScreenshotRecord,
+    }
+}
+
 pub(crate) fn shortcut_rule(slot: HotkeySlot, binding: &HotkeyBinding) -> Result<(), &'static str> {
     let target = match slot {
         HotkeySlot::Dictation => ShortcutTarget::Dictation,
