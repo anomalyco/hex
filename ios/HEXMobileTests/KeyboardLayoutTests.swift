@@ -3339,6 +3339,23 @@ final class FullKeyboardSettingsTests: XCTestCase {
         XCTAssertTrue(settings.hexKeyOnLeft)
     }
 
+    /// Key haptics are Light until a strength is chosen; a chosen one stays, Medium included.
+    func testKeyHapticStrengthIsLightUntilChosen() throws {
+        let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let settings = FullKeyboardSettings(defaults: defaults)
+
+        XCTAssertEqual(settings.hapticStrength, .light)
+        XCTAssertEqual(FullKeyboardSettings(defaults: nil).hapticStrength, .light, "without the App Group")
+        for strength in KeyHapticStrength.allCases {
+            settings.hapticStrength = strength
+            XCTAssertEqual(FullKeyboardSettings(defaults: defaults).hapticStrength, strength)
+        }
+        defaults.set("medium", forKey: "settings.keyboardHapticStrength")
+        XCTAssertEqual(settings.hapticStrength, .medium, "a stored Medium stays Medium")
+    }
+
     /// The experiment is off until its switch is turned on, and it keeps its App Group key.
     func testHideWordSuggestionsIsOffByDefaultAndKeepsItsAppGroupKey() throws {
         let suite = "FullKeyboardSettingsTests-\(UUID().uuidString)"

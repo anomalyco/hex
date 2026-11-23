@@ -28,7 +28,8 @@ policy**, **Support** and **Acknowledgements**. Privacy policy (App Review
   an iPad follows the same choice, where until build 117 it always showed the bar), Auto-start (Never, On
   switch by default, or Always) while the dictation bar is chosen, then Languages, Number row (off by default), Auto-capitalization, Autocorrect (with Spatial autocorrect below it while it's
   on), Suggest swear words, Vocabulary (Hex's custom vocabulary list, how many words it
-  holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too),
+  holds) and Key pop-ups only while Full is chosen, Haptics (the dictation bar uses it too;
+  Strength below it while it's on: Light, the default until you choose, Medium or Strong),
   then Swipe typing and Emoji (Clear emoji history while it's on), which say they need the
   full keyboard while the dictation bar is chosen, and a field to try the keyboard in.
 - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it

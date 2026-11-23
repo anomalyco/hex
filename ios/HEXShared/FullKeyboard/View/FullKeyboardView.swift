@@ -88,18 +88,18 @@ final class FullKeyboardView: UIView {
     /// Every key's touch-down tick (letters, space, delete and its repeats, shift, 123,
     /// return, suggestions), as hard as Settings › Keyboard › Strength asks. The Hex key's hold
     /// and its menu keep `haptics`' fuller thud.
-    var hapticStrength: KeyHapticStrength = .medium {
+    var hapticStrength: KeyHapticStrength = .light {
         didSet {
             guard hapticStrength != oldValue else { return }
             keyTicks = UIImpactFeedbackGenerator(style: Self.keyTickStyle(hapticStrength))
             if allowsHaptics() { keyTicks.prepare() }
         }
     }
-    private var keyTicks = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(.medium))
+    private var keyTicks = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(.light))
 
     /// Apple's key haptic is a crisp tick, so every strength is a rigid impact (the sharpest
-    /// style) but Strong, a fuller medium one. Medium, the default, is 0.8 of a rigid tap;
-    /// Hex's was a 0.65 light impact, which testers found much weaker than Apple's.
+    /// style) but Strong, a fuller medium one. Light, the default, is 0.5 of a rigid tap and
+    /// Medium 0.8; before both, a 0.65 light impact felt much weaker than Apple's to testers.
     static func keyTickStyle(_ strength: KeyHapticStrength) -> UIImpactFeedbackGenerator.FeedbackStyle {
         strength == .strong ? .medium : .rigid
     }
