@@ -1,5 +1,6 @@
 package ly.anoma.hex
 
+import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
@@ -22,8 +23,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.layout.boundsInWindow
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.pluralStringResource
@@ -36,6 +40,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ly.anoma.hex.feedback.Feedback
+import ly.anoma.hex.feedback.FeedbackForm
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
 import ly.anoma.hex.updates.Updates
@@ -43,7 +49,8 @@ import ly.anoma.hex.updates.Updates
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
     Language(R.string.settings_dictation_language), Layout(R.string.settings_keyboard_layout), Styles(R.string.settings_style),
-    Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences);
+    Policy(R.string.settings_privacy_policy), Licences(R.string.settings_licences), Licence(R.string.settings_licences),
+    Feedback(R.string.feedback_send_feedback);
     val parent get() = when (this) {
         Language, Styles -> Dictation
         Layout -> Keyboard
@@ -102,8 +109,30 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     val popups = remember(revision) { typing.popups }
     val haptics = remember(revision) { typing.haptics }
     var copied by remember(transcript) { mutableStateOf(false) }
-    fun open(next: Page) { if (phase != SpeechPhase.Idle) cancel(); page = next }
+    fun open(next: Page) {
+        // A send in progress keeps the form; leaving it otherwise drops what was written.
+        if (page == Page.Feedback && next != Page.Feedback) { if (Feedback.sending) return; Feedback.close() }
+        if (phase != SpeechPhase.Idle) cancel(); page = next
+    }
     BackHandler(page != Page.Home) { open(page.parent) }
+    // Home's dictation result, painted over in the form's picture of Hex: a transcript never leaves the phone.
+    var transcriptCard by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var transcriptCut by remember { mutableStateOf(false) }
+    var capturing by remember { mutableStateOf(false) }
+    val cardRadius = with(LocalDensity.current) { 14.dp.toPx() }
+    fun sendFeedback() {
+        val activity = context as? Activity ?: return
+        if (capturing) return
+        capturing = true
+        val hide = transcriptCard?.takeIf { transcript.isNotEmpty() }
+        // Square when scrolled part out of view, so the cut edge's corners are covered too.
+        Feedback.captureWindow(activity, hide?.let { android.graphics.RectF(it.left, it.top, it.right, it.bottom) },
+            if (transcriptCut) 0f else cardRadius) { picture ->
+            capturing = false
+            Feedback.start("Home", picture)
+            open(Page.Feedback)
+        }
+    }
 
     Box(Modifier.fillMaxSize().background(colorResource(R.color.page)).safeDrawingPadding(),
         contentAlignment = Alignment.TopCenter) {
@@ -121,7 +150,11 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 colorFilter = ColorFilter.tint(colorResource(R.color.ink)))
                         }
                         if (page == Page.Home) Spacer(Modifier.width(10.dp))
-                        Label(if (page == Page.Licence) licence else stringResource(page.title), size = 26, weight = FontWeight.SemiBold,
+                        Label(when {
+                            page == Page.Licence -> licence
+                            page == Page.Feedback && Feedback.phase is Feedback.Phase.Sent -> stringResource(R.string.feedback_thanks_title)
+                            else -> stringResource(page.title)
+                        }, size = 26, weight = FontWeight.SemiBold,
                             lines = 2, mod = Modifier.semantics { heading() })
                     }
                     if (page == Page.Home) {
@@ -151,7 +184,10 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             if (phase != SpeechPhase.Idle) Box(Modifier.fillMaxHeight().width(68.dp).clickable(role = Role.Button) { cancel() },
                                 contentAlignment = Alignment.Center) { Label(stringResource(R.string.home_cancel), inverted = true, size = 14) }
                         }
-                        if (transcript.isNotEmpty()) Card {
+                        if (transcript.isNotEmpty()) Card(Modifier.onGloballyPositioned {
+                            transcriptCard = it.boundsInWindow()
+                            transcriptCut = transcriptCard!!.height < it.size.height - 1 || transcriptCard!!.width < it.size.width - 1
+                        }) {
                             SelectionContainer { Label(transcript, mod = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 4.dp), lines = Int.MAX_VALUE) }
                             // iPhone Hex's Copy and Clear. Android 13 and later show their own copied preview.
                             Row(Modifier.padding(horizontal = 4.dp)) {
@@ -174,6 +210,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                         Card {
                             Entry(stringResource(R.string.home_keyboard_settings), value = "↗", action = systemSettings)
                             Rule(); Entry(stringResource(R.string.home_run_setup), action = { setupPage(0) })
+                            if (Feedback.available) { Rule(); Entry(stringResource(R.string.feedback_send_feedback), action = ::sendFeedback) }
                         }
                         Updates.SettingsCard()
                     }
@@ -252,6 +289,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Rule(); Entry(stringResource(R.string.settings_licences), action = { open(Page.Licences) })
                         }
                     }
+                    Page.Feedback -> FeedbackForm(done = { open(Page.Home) })
                     Page.Styles -> Card {
                         Style.entries.forEachIndexed { i, it ->
                             if (i != 0) Rule()
@@ -319,8 +357,8 @@ private fun reflow(lines: List<String>) = buildString {
     Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center) { Label(text, weight = FontWeight.Medium, size = 15) }
 }
-@Composable internal fun Card(content: @Composable ColumnScope.() -> Unit) {
-    Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.sheet)), content = content)
+@Composable internal fun Card(mod: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(mod.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.sheet)), content = content)
 }
 @Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))

@@ -79,6 +79,10 @@ val requirePreviewKey by tasks.registering {
 val previewBuild = providers.gradleProperty("hexPreviewBuild").orNull?.toInt() ?: 1
 val previewChannel = providers.gradleProperty("hexPreviewChannel").orNull
     ?: "https://raw.githubusercontent.com/anomalyco/hex/android-preview/latest.json"
+// Send feedback's Bellhop report key (gradle.properties, or -PhexFeedbackKey=…): publishable, it can only send feedback
+// to Hex's inbox, and kept out of the source so it can be rotated. Empty: the build has no Send feedback.
+val feedbackKey = providers.gradleProperty("hexFeedbackKey").orNull?.trim().orEmpty()
+check(feedbackKey.isEmpty() || Regex("bh_pub_[0-9a-f]{64}").matches(feedbackKey)) { "hexFeedbackKey must be a Bellhop report key (bh_pub_…)" }
 
 android {
     namespace = "ly.anoma.hex"
@@ -91,6 +95,7 @@ android {
         targetSdk = 36
         versionCode = 5
         versionName = "0.2.2"
+        buildConfigField("String", "FEEDBACK_KEY", "\"$feedbackKey\"")
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild.cmake {
             arguments += listOf("-DANDROID_STL=c++_static", "-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON")
@@ -137,7 +142,7 @@ android {
     sourceSets["debug"].java.srcDir("src/play/java")
     sourceSets["release"].java.srcDir("src/play/java")
     packaging.resources.excludes += "DebugProbesKt.bin"
-    buildFeatures { compose = true }
+    buildFeatures { compose = true; buildConfig = true }
     androidResources { noCompress += listOf("bin", "hextm", "valid", "capitals") }
     sourceSets["main"].assets.srcDir(modelAssets)
     // The same plain-text Android policy ships in Settings and in the Play listing drafts.

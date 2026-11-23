@@ -1,0 +1,37 @@
+<resources>
+    <!-- “发送反馈”，与 iPhone 版 Hex 的表单用词相同（沿用其 Localizable.xcstrings 的译文，iPhone 改为手机）。 -->
+    <string name="feedback_send_feedback">发送反馈</string>
+    <string name="feedback_problem">问题</string>
+    <string name="feedback_idea">建议</string>
+    <string name="feedback_question">提问</string>
+    <string name="feedback_other">其他</string>
+    <string name="feedback_subject">主题（可选）</string>
+    <string name="feedback_message">发生了什么，或者你希望怎样？</string>
+    <string name="feedback_count">%1$s / %2$s 个字符</string>
+    <string name="feedback_pictures">图片</string>
+    <string name="feedback_add">添加</string>
+    <string name="feedback_add_picture">添加图片</string>
+    <string name="feedback_picture">图片 %1$d</string>
+    <string name="feedback_remove_picture">移除图片 %1$d</string>
+    <string name="feedback_window_note">第一张图片是你打开此页面时的 Hex 画面。首页上显示的听写内容不会出现在图片中。</string>
+    <string name="feedback_picture_unreadable">无法打开那张图片。</string>
+    <string name="feedback_email">用于回复的邮箱（可选）</string>
+    <string name="feedback_sends_email">点按“发送”后，Hex 会把你的留言、上面的图片、你的邮箱、Hex 的版本及其听写所用的语言和语音模型、你的手机型号、Android 版本和语言、打开此页面的位置，以及一个把你的反馈归在一起的随机安装 ID 发送到 Anomaly 的反馈收件箱（Bellhop）。你在别处听写或输入的内容都不会发送。</string>
+    <string name="feedback_sends_anonymous">点按“发送”后，Hex 会把你的留言、上面的图片、Hex 的版本及其听写所用的语言和语音模型、你的手机型号、Android 版本和语言，以及打开此页面的位置发送到 Anomaly 的反馈收件箱（Bellhop）。不填邮箱即为匿名：不发送安装 ID，也无法回复。你在别处听写或输入的内容都不会发送。</string>
+    <string name="feedback_send">发送</string>
+    <string name="feedback_sending">正在发送… %1$d%%</string>
+    <string name="feedback_retrying">正在发送… 正在重试</string>
+    <string name="feedback_message_too_long">留言太长了，请控制在 20,000 个字符以内。</string>
+    <string name="feedback_pictures_too_large">图片加起来太大了。请移除一张后再试。</string>
+    <string name="feedback_invalid_email">这个邮箱地址似乎不正确。请改正，或清空后不带邮箱发送。</string>
+    <string name="feedback_offline">无法发送：你的手机似乎没有联网。留言仍保留在这里，联网后再试一次。</string>
+    <string name="feedback_too_large">内容太大，无法发送。请移除一张图片或换一张更小的，然后再试。</string>
+    <string name="feedback_unsupported_image">有一张图片无法读取。请移除它后再试。</string>
+    <string name="feedback_try_later">当前反馈过多，请稍后再试。</string>
+    <string name="feedback_unavailable">此版本的 Hex 暂时无法发送反馈。</string>
+    <string name="feedback_failed">无法发送你的反馈，请稍后再试。</string>
+    <string name="feedback_thanks_title">感谢你的反馈</string>
+    <string name="feedback_thanks_email">反馈已送达 Hex 团队。如果团队回复，你会在 %1$s 收到邮件，并需要通过那封邮件确认一次你的地址。目前还没有发送任何邮件。</string>
+    <string name="feedback_thanks_anonymous">反馈已送达 Hex 团队。你没有填写邮箱，所以它是匿名发送的，无法回复。</string>
+    <string name="feedback_thanks">反馈已送达 Hex 团队。</string>
+</resources>

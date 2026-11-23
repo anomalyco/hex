@@ -1,0 +1,38 @@
+<resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
+    <!-- Send feedback (src/main/java/ly/anoma/hex/feedback), worded as iPhone Hex's form. Like strings.xml, English and
+         Simplified Chinese (values-zh-rCN) only; every string here has a Chinese one. -->
+    <string name="feedback_send_feedback">Send feedback</string>
+    <string name="feedback_problem">Problem</string>
+    <string name="feedback_idea">Idea</string>
+    <string name="feedback_question">Question</string>
+    <string name="feedback_other">Other</string>
+    <string name="feedback_subject">Subject (optional)</string>
+    <string name="feedback_message">What happened, or what would you like?</string>
+    <string name="feedback_count">%1$s of %2$s characters</string>
+    <string name="feedback_pictures">Pictures</string>
+    <string name="feedback_add">Add</string>
+    <string name="feedback_add_picture">Add a picture</string>
+    <string name="feedback_picture">Picture %1$d</string>
+    <string name="feedback_remove_picture">Remove picture %1$d</string>
+    <string name="feedback_window_note">The first picture is Hex as it was when you opened this. A dictation shown on Home is left out of it.</string>
+    <string name="feedback_picture_unreadable">That picture couldn’t be opened.</string>
+    <string name="feedback_email">Email for a reply (optional)</string>
+    <string name="feedback_sends_email">When you tap Send, Hex sends your message, the pictures above, your email, Hex’s version and the language and speech model it dictates with, your phone’s model, Android version and language, the screen you opened this from, and a random install ID that keeps your reports together, to Anomaly’s feedback inbox (Bellhop). Nothing you dictate or type elsewhere is sent.</string>
+    <string name="feedback_sends_anonymous">When you tap Send, Hex sends your message, the pictures above, Hex’s version and the language and speech model it dictates with, your phone’s model, Android version and language, and the screen you opened this from to Anomaly’s feedback inbox (Bellhop). Without an email it’s anonymous: no install ID is sent, and it can’t be answered. Nothing you dictate or type elsewhere is sent.</string>
+    <string name="feedback_send">Send</string>
+    <string name="feedback_sending">Sending… %1$d%%</string>
+    <string name="feedback_retrying">Sending… trying again</string>
+    <string name="feedback_message_too_long">The message is too long. Keep it under 20,000 characters.</string>
+    <string name="feedback_pictures_too_large">The pictures are too large together. Remove one and try again.</string>
+    <string name="feedback_invalid_email">That email doesn’t look right. Fix it, or clear it to send without one.</string>
+    <string name="feedback_offline">Couldn’t send: your phone seems to be offline. Your message is still here; try again when you’re connected.</string>
+    <string name="feedback_too_large">That’s too large to send. Remove a picture, or add a smaller one, and try again.</string>
+    <string name="feedback_unsupported_image">One of the pictures couldn’t be read. Remove it and try again.</string>
+    <string name="feedback_try_later">Too many reports right now. Try again in a little while.</string>
+    <string name="feedback_unavailable">Feedback is unavailable in this version of Hex.</string>
+    <string name="feedback_failed">Couldn’t send your feedback. Try again in a little while.</string>
+    <string name="feedback_thanks_title">Thanks for your feedback</string>
+    <string name="feedback_thanks_email">It’s with the Hex team. If they reply, you’ll get an email at %1$s, and you’ll need to confirm your address once from that email. Nothing has been emailed yet.</string>
+    <string name="feedback_thanks_anonymous">It’s with the Hex team. You didn’t add an email, so it was sent anonymously and can’t be answered.</string>
+    <string name="feedback_thanks">It’s with the Hex team.</string>
+</resources>

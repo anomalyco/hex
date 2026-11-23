@@ -1,7 +1,20 @@
 package ly.anoma.hex.keyboard
 
+import java.net.ServerSocket
+import kotlin.concurrent.thread
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import ly.anoma.hex.feedback.FeedbackContext
+import ly.anoma.hex.feedback.FeedbackDraft
+import ly.anoma.hex.feedback.FeedbackFailure
+import ly.anoma.hex.feedback.FeedbackKind
+import ly.anoma.hex.feedback.FeedbackOutcome
+import ly.anoma.hex.feedback.FeedbackRequest
+import ly.anoma.hex.feedback.FeedbackRetry
+import ly.anoma.hex.feedback.FeedbackSender
 import ly.anoma.hex.speech.DictationLanguage
 import ly.anoma.hex.speech.FrenchSpacing
 import ly.anoma.hex.speech.Spoken
@@ -584,5 +597,123 @@ class InsertionTest {
         }
         assertEquals("+", KeyPads.rows(Pad.Phone)[3][1].hold)
         assertEquals(listOf(",", "0", "."), KeyPads.rows(Pad.Number)[3].take(3).map { it.label })
+    }
+
+    // Send feedback (ly.anoma.hex.feedback): what the app sends Bellhop, checked before it goes out, and its retries.
+    private val feedbackContext = FeedbackContext("0.2.2", "5", "Android 16", "Google Pixel 9", "en-US",
+        linkedMapOf("screen" to "Home", "channel" to "play"))
+
+    @Test fun feedbackWithAnEmailSendsItAndTheInstallId() {
+        val draft = FeedbackDraft(" It \"froze\"\n", subject = "[test] Hi", kind = FeedbackKind.Problem, email = " a@b.co ")
+        assertEquals("""{"subject":"[test] Hi","message":"It \"froze\"","category":"bug","email":"a@b.co","install_id":"id-1",""" +
+            """"app":{"name":"Hex","version":"0.2.2","build":"5"},"device":{"platform":"android","os":"Android 16",""" +
+            """"model":"Google Pixel 9","locale":"en-US"},"metadata":{"screen":"Home","channel":"play"}}""",
+            FeedbackRequest(draft, feedbackContext, installId = { "id-1" }).payload)
+    }
+    @Test fun feedbackWithoutAnEmailIsAnonymousAndMakesNoInstallId() {
+        var made = false
+        val payload = FeedbackRequest(FeedbackDraft("Hello", kind = FeedbackKind.Other), feedbackContext, installId = { made = true; "id" }).payload
+        assertFalse(made)
+        assertTrue(payload.contains(""""anonymous":true"""))
+        for (field in listOf("email", "install_id", "user", "logs", "category")) assertFalse(payload.contains(""""$field""""))
+    }
+    @Test fun feedbackIsCheckedBeforeItGoesOut() {
+        assertEquals(FeedbackDraft.Problem.InvalidEmail, FeedbackDraft("Hi", email = "ryan@anoma").problem)
+        assertEquals(FeedbackDraft.Problem.InvalidEmail, FeedbackDraft("Hi", email = "ryan anoma.ly").problem)
+        assertNull(FeedbackDraft("Hi", email = "ryan@anoma.ly").problem)
+        assertEquals(FeedbackDraft.Problem.EmptyMessage, FeedbackDraft("  \n").problem)
+        assertEquals(FeedbackDraft.Problem.MessageTooLong, FeedbackDraft("x".repeat(20_001)).problem)
+        assertNull(FeedbackDraft("x".repeat(20_000)).problem)
+        assertEquals(FeedbackDraft.Problem.SubjectTooLong, FeedbackDraft("Hi", subject = "s".repeat(201)).problem)
+        assertEquals(FeedbackDraft.Problem.TooManyPictures, FeedbackDraft("Hi", pictures = List(6) { ByteArray(1) }).problem)
+        assertEquals(FeedbackDraft.Problem.PicturesTooLarge, FeedbackDraft("Hi", pictures = listOf(ByteArray(10 * 1024 * 1024 + 1))).problem)
+        assertEquals(FeedbackDraft.Problem.PicturesTooLarge, FeedbackDraft("Hi", pictures = List(3) { ByteArray(7 * 1024 * 1024) }).problem)
+    }
+    @Test fun feedbackIsMultipartWithThePayloadThenEachPicture() {
+        val request = FeedbackRequest(FeedbackDraft("Hi", pictures = listOf(byteArrayOf(1, 2), byteArrayOf(3))), feedbackContext,
+            installId = { "" }, idempotencyKey = "k", boundary = "b")
+        val body = String(request.body, Charsets.ISO_8859_1)
+        assertEquals("--b\r\nContent-Disposition: form-data; name=\"payload\"\r\nContent-Type: application/json\r\n\r\n${request.payload}\r\n" +
+            "--b\r\nContent-Disposition: form-data; name=\"screenshot\"; filename=\"hex-1.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\u0001\u0002\r\n" +
+            "--b\r\nContent-Disposition: form-data; name=\"screenshot\"; filename=\"hex-2.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\u0003\r\n--b--\r\n", body)
+        assertEquals(mapOf("Content-Type" to "multipart/form-data; boundary=b", "Idempotency-Key" to "k", "Accept" to "application/json"), request.headers)
+    }
+    @Test fun feedbackRetriesOnlyWhatBellhopSaysToRetry() {
+        assertEquals(1000L, FeedbackRetry.delay(null, null, null, 1))
+        assertEquals(4000L, FeedbackRetry.delay(null, null, null, 3))
+        assertNull(FeedbackRetry.delay(null, null, null, 4))
+        assertEquals(2000L, FeedbackRetry.delay(503, "misconfigured", null, 2))
+        assertEquals(3000L, FeedbackRetry.delay(409, "request_pending", "3", 1))
+        assertEquals(5000L, FeedbackRetry.delay(429, "rate_limited", "5", 1))
+        assertNull(FeedbackRetry.delay(429, "feedback_daily_limit", "3600", 1))
+        for (status in listOf(400, 401, 403, 404, 413, 415, 422)) assertNull(FeedbackRetry.delay(status, null, "1", 1))
+        assertEquals(FeedbackFailure.Unavailable, FeedbackRetry.failure(403, "feedback_disabled"))
+        assertEquals(FeedbackFailure.Unavailable, FeedbackRetry.failure(401, "invalid_report_key"))
+        assertEquals(FeedbackFailure.Other, FeedbackRetry.failure(403, "blocked"))
+        assertEquals(FeedbackFailure.Offline, FeedbackRetry.failure(null, null))
+    }
+    /** A one-connection-at-a-time HTTP server on localhost: each request gets the next answer. */
+    private class Bellhop(answers: List<Pair<Int, String>>) : AutoCloseable {
+        val seen = mutableListOf<Triple<String, Map<String, String>, ByteArray>>()
+        private val socket = ServerSocket(0)
+        val url = "http://127.0.0.1:${socket.localPort}/v1/feedback"
+        init {
+            thread(isDaemon = true) {
+                for ((status, body) in answers) runCatching {
+                    socket.accept().use { client ->
+                        val input = client.getInputStream().buffered()
+                        fun line() = generateSequence { input.read().takeIf { it >= 0 } }.takeWhile { it != '\n'.code }
+                            .map { it.toChar() }.joinToString("").trimEnd('\r')
+                        val start = line()
+                        val headers = generateSequence(::line).takeWhile { it.isNotEmpty() }
+                            .associate { it.substringBefore(':').lowercase() to it.substringAfter(':').trim() }
+                        val sent = ByteArray(headers["content-length"]?.toInt() ?: 0).also { var n = 0; while (n < it.size) n += input.read(it, n, it.size - n) }
+                        synchronized(seen) { seen += Triple(start, headers, sent) }
+                        client.getOutputStream().write(("HTTP/1.1 $status X\r\nContent-Type: application/json\r\nRetry-After: 2\r\n" +
+                            "Content-Length: ${body.length}\r\nConnection: close\r\n\r\n$body").toByteArray())
+                    }
+                }
+            }
+        }
+        override fun close() = socket.close()
+    }
+
+    @Test fun feedbackRetriesWithTheSameBodyAndIdempotencyKey() {
+        // A lost answer, a 409 and a 429 with Retry-After, then the issue: four identical requests.
+        Bellhop(listOf(201 to """{"number":7}""", 409 to """{"error":{"code":"request_pending"}}""",
+            429 to """{"error":{"code":"rate_limited"}}""", 201 to """{"number":7,"received_at":"x","email":"pending"}""")).use { server ->
+            val waits = mutableListOf<Long>()
+            val progress = mutableListOf<Float>()
+            val request = FeedbackRequest(FeedbackDraft("Hi", pictures = listOf(ByteArray(40_000))), feedbackContext, installId = { "" })
+            val outcome = FeedbackSender("bh_pub_test", server.url, sleep = { waits += it }, dropFirstResponse = true)
+                .send(request) { _, fraction -> progress += fraction }
+            assertEquals(FeedbackOutcome.Sent(7, emailPending = true), outcome)
+            assertEquals(listOf(1000L, 2000L, 2000L), waits)
+            assertEquals(4, server.seen.size)
+            for ((start, headers, body) in server.seen) {
+                assertEquals("POST /v1/feedback HTTP/1.1", start)
+                assertEquals("Bearer bh_pub_test", headers["authorization"])
+                assertEquals(request.idempotencyKey, headers["idempotency-key"])
+                assertEquals(request.contentType, headers["content-type"])
+                assertTrue(body.contentEquals(request.body))
+            }
+            assertTrue(progress.any { it > 0f && it < 1f } && progress.last() == 1f)
+        }
+    }
+    @Test fun feedbackDoesNotRetryAClientError() {
+        for ((status, failure) in listOf(400 to FeedbackFailure.Other, 401 to FeedbackFailure.Unavailable,
+            413 to FeedbackFailure.TooLarge, 415 to FeedbackFailure.UnsupportedImage, 422 to FeedbackFailure.Other)) {
+            Bellhop(listOf(status to """{"error":{"code":"x"}}""", 201 to """{"number":1}""")).use { server ->
+                val outcome = FeedbackSender("bh_pub_test", server.url, sleep = { error("no retry") })
+                    .send(FeedbackRequest(FeedbackDraft("Hi"), feedbackContext, installId = { "" })) { _, _ -> }
+                assertEquals(FeedbackOutcome.Failed(failure), outcome)
+                assertEquals(1, server.seen.size)
+            }
+        }
+        // 403 feedback_disabled is the app's setup: unavailable, and not retried.
+        Bellhop(listOf(403 to """{"error":{"code":"feedback_disabled","message":"no"}}""")).use { server ->
+            assertEquals(FeedbackOutcome.Failed(FeedbackFailure.Unavailable), FeedbackSender("bh_pub_test", server.url, sleep = { error("no retry") })
+                .send(FeedbackRequest(FeedbackDraft("Hi"), feedbackContext, installId = { "" })) { _, _ -> })
+        }
     }
 }

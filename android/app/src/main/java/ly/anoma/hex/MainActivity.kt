@@ -75,6 +75,9 @@ class MainActivity : ComponentActivity() {
             update = { next, reason -> phase = next; notice = speechNote(reason) },
             meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
+        // Debug builds only: am start --ez feedback_drop_first_response true loses Send feedback's first answer, to
+        // show that the retry, with the same Idempotency-Key, gets the same issue back.
+        if (BuildConfig.DEBUG) ly.anoma.hex.feedback.Feedback.dropFirstResponse = intent.getBooleanExtra("feedback_drop_first_response", false)
         for (name in listOf(Settings.Secure.DEFAULT_INPUT_METHOD, Settings.Secure.ENABLED_INPUT_METHODS))
             contentResolver.registerContentObserver(Settings.Secure.getUriFor(name), false, changed)
         refresh()
