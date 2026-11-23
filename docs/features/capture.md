@@ -1503,3 +1503,14 @@ from a folder name. They remain available through their existing actions.
 The [Mac picker](dictation.md#paste-last-picker-labs-macos) (Labs › Paste Last
 picker) reads the mark; failure to write it does not fail the capture or affect
 its send.
+
+## Repeated recording resources (`capture.encoder-memory`)
+
+The macOS HEVC and AAC writer drains native autoreleased objects at creation,
+start, append, finish and cancel, including on Rust workers with no AppKit
+run loop. The opt-in `video_writer::tests::headless_encoder_memory` probe
+and `perf/run-encoder-memory.py` exercise 51 synthetic movies and check
+IOSurface growth. Observed: writer-owned pools kept resident IOSurfaces at
+zero; before the fix they reached 22.3 MiB by movie 31 and encoding then
+failed. See [the measurement](../../perf/encoder-memory.md). This is encoder
+ownership evidence, not a live ScreenCaptureKit or full Annotate test.
