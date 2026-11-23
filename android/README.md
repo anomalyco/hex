@@ -81,4 +81,12 @@ On the headless Studio, start an ARM64 AVD with `-audio none -grpc 8566 -grpc-us
 
 For the upload bundle, run `./gradlew :app:bundleRelease`. Release packaging requires a private properties file at `~/.config/hex-android/keystore.properties` or the path in `HEX_ANDROID_KEYSTORE_PROPERTIES`. It must contain `storeFile` (relative to that file, or absolute), `keyAlias`, `storePassword` and `keyPassword`. Release uses R8 and resource shrinking and never falls back to the debug key. Gradle writes `app/build/outputs/bundle/release/app-release.aab`.
 
+## Hex Preview (outside Google Play)
+
+Hex Preview is the `preview` build type: the release build as an APK, application id `ly.anoma.hex.preview`, named Hex Preview in the launcher and in Android's keyboard list, so it installs beside Hex from Google Play with its own settings, words and speech model. It is signed with its own key (never the Play upload key), read from `~/.config/hex-android-preview/keystore.properties` or `HEX_ANDROID_PREVIEW_KEYSTORE_PROPERTIES`; every build must be, because Android refuses an update signed with any other. The certificate's SHA-256 is `13:35:68:F6:F0:61:4F:E5:7B:C8:8D:AE:CA:32:AF:A7:2C:6A:B7:40:20:26:29:F7:52:FA:A0:33:BE:35:D9:8E`.
+
+Its updater lives only in `app/src/preview` (code, permissions, strings); debug and release build `app/src/play`'s empty `Updates`, which is inlined away, because Google Play forbids an app updating itself. It reads `latest.json` on the `android-preview` branch when the app opens and at most once a day when the keyboard opens (never in a password field; Settings › Check for updates automatically). An update downloads only after Update is tapped, and goes to `PackageInstaller` only once its size, SHA-256 and signing certificate match.
+
+[`scripts/preview-release.sh`](scripts/preview-release.sh) publishes a build: the build number is the count of commits up to the built commit of `dev`, the version name `<versionName>-preview.<build>`, the tag `android-preview-<build>` (a pre-release, never moved), and the channel branch `android-preview` holds only `latest.json` and the README people land on.
+
 **Scope:** Android 12+ (min API 31), target 36, ARM64, four typing models and four dictation languages. See the [Play release evidence, listing drafts, phone screenshots and real-device checklist](play/README.md). The Studio also exercised offline fallback, all four styles, per-dictation translation, both appearances and insertion into a separate app with music playing in earlier phases.
