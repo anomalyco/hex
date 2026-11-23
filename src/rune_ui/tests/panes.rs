@@ -2769,6 +2769,41 @@ fn output_shows_the_style_row_while_its_lab_is_on() {
     );
 }
 
+/// The style menu shows every name whole. Each hint sits on its own line
+/// under it, so a long hint can truncate but never squeezes the name.
+#[test]
+fn the_style_menu_shows_every_name_whole_beside_its_hint() {
+    let mut rt = runtime("output-style", true, (980.0, 760.0));
+    settle(&mut rt);
+    tap(&mut rt, "dictation-style-choice-field-trigger");
+    let names = ["Polished", "Casual", "Notes", "Verbatim"];
+    let mut widths = Vec::new();
+    for (index, name) in names.iter().enumerate() {
+        let label = element(
+            &rt,
+            &format!("dictation-style-choice-item{index}/content/text/label"),
+        );
+        assert_eq!(label.text.as_deref(), Some(*name));
+        let hint = element(
+            &rt,
+            &format!("dictation-style-choice-item{index}/content/text/description"),
+        );
+        assert!(hint.text.is_some());
+        assert_eq!(hint.rect[2], label.rect[2], "the hint shares the column");
+        widths.push(label.rect[2]);
+    }
+    assert!(
+        widths
+            .windows(2)
+            .all(|pair| (pair[0] - pair[1]).abs() < 0.5),
+        "the names share one column: {widths:?}"
+    );
+    assert!(
+        widths[0] >= 100.0,
+        "the name column fits the longest name: {widths:?}"
+    );
+}
+
 #[test]
 fn appearance_shows_its_theme_on_its_card_while_on() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
