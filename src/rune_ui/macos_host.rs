@@ -834,6 +834,10 @@ impl NativeHost for MacHost {
                 != "Accessibility",
         );
         changed |= update(
+            &mut state.accessibility_drag_supported,
+            crate::desktop::permission_guide::drag_supported(PermissionKind::Accessibility),
+        );
+        changed |= update(
             &mut state.activity_log,
             crate::app_paths::logs_dir()
                 .ok()

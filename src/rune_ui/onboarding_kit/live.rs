@@ -70,8 +70,12 @@ pub(crate) struct Live {
     /// macOS asks for Microphone and Accessibility; Windows only shows the
     /// Microphone row while its privacy switch is off.
     pub(crate) accessibility_row: bool,
-    /// macOS 27 calls Accessibility "Device Control and Data Access".
+    /// macOS 27 calls Accessibility "Device Control and Data Access", and
+    /// 27.3 calls it "System & App Protection Override".
     pub(crate) accessibility_renamed: bool,
+    /// Whether System Settings takes a tile dragged into the Accessibility
+    /// list; macOS 27.3 adds Hex with + instead.
+    pub(crate) accessibility_drag_supported: bool,
     /// The shortcut listener failed after setup and Hex won't relaunch by
     /// itself again: Reopen Hex.
     pub(crate) reopen: bool,
@@ -385,6 +389,7 @@ pub(in crate::rune_ui) fn open(ui: &mut Ui) {
         restart: false,
         accessibility_row: ui.platform.caps.permissions,
         accessibility_renamed: ui.platform.accessibility_renamed,
+        accessibility_drag_supported: ui.platform.accessibility_drag_supported,
         reopen: false,
         relaunch_failed: false,
         paste: ui.platform.paste,
@@ -600,6 +605,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
     let asks_permissions = ui.platform.caps.permissions;
     let login = super::login::of(&ui.platform);
     let accessibility_renamed = ui.platform.accessibility_renamed;
+    let accessibility_drag_supported = ui.platform.accessibility_drag_supported;
     let relaunch_failed = ui.platform.relaunch_failed;
     let paste = ui.platform.paste;
     let live_window = !ui.is_fixture();
@@ -636,6 +642,7 @@ pub(in crate::rune_ui) fn poll(ui: &mut Ui, tx: &mut Tx) -> bool {
             s.taps = s.taps.saturating_add(1);
         }
         live.accessibility_renamed = accessibility_renamed;
+        live.accessibility_drag_supported = accessibility_drag_supported;
         live.relaunch_failed = relaunch_failed;
         live.reopen = view.reopen;
         live.practice = view.practice;
