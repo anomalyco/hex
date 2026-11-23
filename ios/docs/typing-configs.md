@@ -93,7 +93,10 @@ are the product: a stranger's agent must be able to build a good config from the
   (`state/phone.json` `layout`, which `TypingConfigExportState.layout` writes).
 - `key_clouds.py` and `zone_edges.py` find aim and edges worth moving.
 - `simulate_zones.py` says exactly which key every logged tap would press under proposed edges,
-  using the phone's zone compiler ported to `geometry.py`. `simulate_aim.py` is the touch-model
+  using the phone's zone compiler ported to `geometry.py`, and scores the zones on words: the
+  words their changed taps are expected to make right and wrong, from what the log says Hex did
+  with each word and how often Hex repaired each kind of slip (the package reference, "How a
+  zone is scored"). A zone is kept on words, not taps. `simulate_aim.py` is the touch-model
   approximation for aim.
 - `check_config.py` re-runs both on the halves the config says it was tuned and checked on, and
   rejects any claim that doesn't match.

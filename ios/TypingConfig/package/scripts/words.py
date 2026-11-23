@@ -21,6 +21,7 @@ Classes (w["cls"]):
   swipe                  typed with a swipe
   uncommitted            never got a space (e.g. sent with the app's button): Hex never saw it end
   abandoned              deleted and never retyped in place (intent unknown)
+  retyped_as_two         run together (a space read as a letter), deleted and typed again as two words
   revised_by_next_word, merged_into_next, changed_after_commit, case_fixed_by_hand
 """
 import json, os, collections, re, sys
@@ -348,6 +349,32 @@ def build(export, half=None):
             w["hex_right"] = norm(H) == norm(F)
             w["hex_right_letters"] = re.sub(r"[^a-z ]", "", norm(H)) == re.sub(r"[^a-z ]", "", norm(F))
 
+
+    # A run-in deleted and typed again as two words ("gazingvat", then "gazing" and "at"): the
+    # first was meant as both, with a space read as a letter. Without this, every run-in the
+    # person fixed by retyping would be missing from what Hex got wrong.
+    pos = {w["id"]: i for i, w in enumerate(words)}
+    for w in words:
+        if "abandoned" not in w["cls"] or w["swiped"] or not w.get("typed") or " " in w["typed"]:
+            continue
+        kid = next((x for x in words if x.get("rewrite_of") == w["id"]), None)
+        if kid is None or not kid.get("final") or " " in kid["final"]:
+            continue
+        nxt = words[pos[kid["id"]] + 1] if pos[kid["id"]] + 1 < len(words) else None
+        if nxt is None or nxt["session"] != w["session"] or not nxt.get("final") or " " in nxt["final"]:
+            continue
+        meant = norm(kid["final"]) + " " + norm(nxt["final"])
+        typed = norm(w["typed"])
+        ops = align(typed, meant)
+        space = next((op for op in ops if op[2] == len(norm(kid["final"])) and op[0] != "x"), None)
+        if len(typed) != len(meant) or space is None or space[0] != "s" or lev(typed, meant) > 2:
+            continue
+        w["final"] = kid["final"] + " " + nxt["final"]
+        w["known"] = True
+        w["cls"] = [c for c in w["cls"] if c != "abandoned"] + ["retyped_as_two"]
+        if w["hex_saw"]:
+            w["hex_right"] = norm(w["hex_out"]) == norm(w["final"])
+            w["hex_right_letters"] = re.sub(r"[^a-z ]", "", norm(w["hex_out"])) == re.sub(r"[^a-z ]", "", norm(w["final"]))
 
     sessions = D["sessions"]
     for w in words:

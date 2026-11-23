@@ -52,8 +52,16 @@
       "maxMove": 0.25,
       "keepFromCentre": 0.3,
       "minTunedTaps": 15,
-      "minNetCheckedTaps": 3,
-      "maxLostShare": 0.34,
+      "minCheckedTaps": 10,
+      "minNetCheckedWords": 2,
+      "maxWrongShare": 0.34,
+      "repair": {
+        "letter": 0.75,
+        "spaceAsLetter": 0.5,
+        "letterAsSpace": 0.35,
+        "otherKey": 0.25
+      },
+      "repairPrior": 10,
       "step": 0.05,
       "edges": {
         "letter": [

@@ -93,13 +93,19 @@ You hand back **one file**, `typing-config.mhexconfig`, plus a short `report.md`
    - Keep a letter only if B gains at least as many taps as it loses, and B's own mean is within
      0.1 keycap.
    - Keep only letters whose aim differs from Hex's by 0.05 keycap or more.
-5. **Zones:**
-   1. For the top edges from `zone_edges.py`, run `python3 scripts/simulate_zones.py --sweep
-      key:edge --half A` and pick the move with the best net (prefer the smaller of two close
-      ones).
-   2. Simulate the chosen zones **together** on A, then on B. Drop any zone that doesn't gain at
-      least 3 net on B, or loses more than a third of what it gains.
-   3. Re-simulate the rest together and write the per-zone numbers it prints.
+5. **Zones:** judge them by **words**, not taps. A letter tap pressed as its neighbour is often
+   repaired by Hex; a space pressed as a letter runs two words together and rarely is.
+   `simulate_zones.py` prints both: the taps gained and lost, and the words the change is
+   expected to make right and wrong (`reference/typing-config.md`, "How a zone is scored").
+   1. `python3 scripts/simulate_zones.py --repair --half A`: how often Hex still got a word
+      right with each kind of slip, for this person.
+   2. For the top edges from `zone_edges.py`, run `python3 scripts/simulate_zones.py --sweep
+      key:edge --half A` and pick the move with the best net **words** (prefer the smaller of
+      two close ones). Skip a move with under 15 taps in its strip.
+   3. Simulate the chosen zones **together** on A, then on B. Keep a zone only if on B it has at
+      least 10 taps in its strip, makes at least 2 more words right than wrong, and makes no more
+      than a third as many wrong as right.
+   4. Re-simulate the rest together and write the per-zone numbers it prints (`evidence json`).
 6. **Write** `typing-config.mhexconfig`, following the worked examples in
    `reference/typing-config.md`:
    - the envelope: `exportId`, `formats.typingConfig` and `activeTypingConfig` from

@@ -1,8 +1,10 @@
 """Check a typing config before handing it over: the format (reference/typing-config.md), the
 phone it is for, and every claim in it against the logs. Words: their counts are recomputed.
 Aim and zones: simulate_aim.py and simulate_zones.py are re-run on the halves the config says
-it was tuned and checked on, and every tally must match what the file claims, exactly. A zone
-you didn't simulate can't pass. Exits 1 on any problem; --write fills in "id".
+it was tuned and checked on, and every tally must match what the file claims, exactly (a zone's
+taps and its expected words made right and wrong). A zone you didn't simulate can't pass, and
+one must make more words right than wrong on the check half (simulate_zones.holds). Exits 1 on
+any problem; --write fills in "id".
 
     python3 scripts/check_config.py typing-config.mhexconfig [EXPORT_DIR] [--write]
 """
@@ -145,13 +147,16 @@ for b, block in enumerate(cfg.get("keys") or []):
                 if "skipped" in p:
                     problems.append("%s: Hex would skip it: %s" % (label, p["skipped"])); continue
                 said = ((block["zones"][i].get("evidence") or {}).get(name) or {})
-                keys_ = ("taps", "gained", "lost") if name == "tuned" else ("gained", "lost")
-                if {x: said.get(x) for x in keys_} != {x: p[x] for x in keys_}:
-                    problems.append("%s evidence.%s says %s; simulate_zones.py (all of this block's zones) --half %s gives %s. Simulate it, then write what it prints" % (label, name, said, half, {x: p[x] for x in keys_}))
+                want = SZ.evidence(p)
+                if {x: said.get(x) for x in want} != want:
+                    problems.append("%s evidence.%s says %s; simulate_zones.py (all of this block's zones) --half %s gives %s. Simulate it, then write what it prints" % (label, name, said, half, want))
                 if name == "tuned" and p["taps"] < Z["minTunedTaps"]:
                     problems.append("%s: %d taps in its strip on half %s; needs %d" % (label, p["taps"], half, Z["minTunedTaps"]))
-                if name == "checked" and (p["gained"] - p["lost"] < Z["minNetCheckedTaps"] or p["lost"] > Z["maxLostShare"] * p["gained"]):
-                    problems.append("%s: on the check half it gains %d and loses %d; needs %d net with at most %d%% lost" % (label, p["gained"], p["lost"], Z["minNetCheckedTaps"], 100 * Z["maxLostShare"]))
+                if name == "tuned" and SZ.net_words(p) <= 0:
+                    problems.append("%s: on the tuning half it makes no more words right than wrong (%.1f, %.1f)" % (label, p["wordsRight"], p["wordsWrong"]))
+                if name == "checked" and not SZ.holds(p):
+                    problems.append("%s: on the check half %d taps in its strip, words right %.1f and wrong %.1f; needs %d taps, %g net words, and wrong at most %d%% of right" % (
+                        label, p["taps"], p["wordsRight"], p["wordsWrong"], Z["minCheckedTaps"], Z["minNetCheckedWords"], 100 * Z["maxWrongShare"]))
 
 canon = json.dumps({k: v for k, v in cfg.items() if k != "id"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 cid = "cfg-" + hashlib.sha256(canon.encode()).hexdigest()[:16]

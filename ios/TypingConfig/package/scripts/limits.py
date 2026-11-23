@@ -56,10 +56,18 @@ LIMITS = {
     ]
    },
    "keepFromCentre": 0.3,
-   "maxLostShare": 0.34,
    "maxMove": 0.25,
-   "minNetCheckedTaps": 3,
+   "maxWrongShare": 0.34,
+   "minCheckedTaps": 10,
+   "minNetCheckedWords": 2,
    "minTunedTaps": 15,
+   "repair": {
+    "letter": 0.75,
+    "letterAsSpace": 0.35,
+    "otherKey": 0.25,
+    "spaceAsLetter": 0.5
+   },
+   "repairPrior": 10,
    "step": 0.05
   }
  },

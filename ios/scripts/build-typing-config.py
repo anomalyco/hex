@@ -70,8 +70,10 @@ def swift(t):
         '    static let aimMinTunedTaps = %d' % a['minTunedTaps'],
         '    static let aimMinCheckedTaps = %d' % a['minCheckedTaps'],
         '    static let zoneMinTunedTaps = %d' % z['minTunedTaps'],
-        '    static let zoneMinNetCheckedTaps = %d' % z['minNetCheckedTaps'],
-        '    static let zoneMaxLostShare: Double = %g' % z['maxLostShare'],
+        '    static let zoneMinCheckedTaps = %d' % z['minCheckedTaps'],
+        '    /// A zone\'s words made right less words made wrong on the check half (expected counts).',
+        '    static let zoneMinNetCheckedWords: Double = %g' % z['minNetCheckedWords'],
+        '    static let zoneMaxWrongShare: Double = %g' % z['maxWrongShare'],
         '}',
         '',
     ]
@@ -93,6 +95,9 @@ def schema(t):
                                                     'properties': {e: count for e in evidence}})}}
     pair = {'type': 'array', 'items': {'type': 'number', 'minimum': -k['aim']['bound'], 'maximum': k['aim']['bound']}, 'minItems': 2, 'maxItems': 2}
     tally = {'type': 'object', 'additionalProperties': True, 'required': ['gained', 'lost'], 'properties': {'taps': count, 'gained': count, 'lost': count}}
+    words = {'type': 'number', 'minimum': 0}
+    zone_tally = {'type': 'object', 'additionalProperties': True, 'required': ['taps', 'gained', 'lost', 'wordsRight', 'wordsWrong'],
+                  'properties': {'taps': count, 'gained': count, 'lost': count, 'wordsRight': words, 'wordsWrong': words}}
     edge_names = sorted({e for sides in k['zones']['edges'].values() for e in sides})
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
@@ -130,7 +135,7 @@ def schema(t):
                 'zones': {'type': 'array', 'items': {'type': 'object', 'additionalProperties': False, 'required': ['key', 'edge', 'move', 'evidence'], 'properties': {
                     'key': {'type': 'string'}, 'edge': {'enum': edge_names},
                     'move': {'type': 'number', 'minimum': -k['zones']['maxMove'], 'maximum': k['zones']['maxMove']},
-                    'evidence': {'type': 'object', 'required': ['tuned', 'checked'], 'properties': {'tuned': tally, 'checked': tally}}}}},
+                    'evidence': {'type': 'object', 'required': ['tuned', 'checked'], 'properties': {'tuned': zone_tally, 'checked': zone_tally}}}}},
             }}},
         },
     }

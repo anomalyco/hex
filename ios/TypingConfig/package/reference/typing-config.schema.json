@@ -444,8 +444,11 @@
                       "type": "object",
                       "additionalProperties": true,
                       "required": [
+                        "taps",
                         "gained",
-                        "lost"
+                        "lost",
+                        "wordsRight",
+                        "wordsWrong"
                       ],
                       "properties": {
                         "taps": {
@@ -458,6 +461,14 @@
                         },
                         "lost": {
                           "type": "integer",
+                          "minimum": 0
+                        },
+                        "wordsRight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "wordsWrong": {
+                          "type": "number",
                           "minimum": 0
                         }
                       }
@@ -466,8 +477,11 @@
                       "type": "object",
                       "additionalProperties": true,
                       "required": [
+                        "taps",
                         "gained",
-                        "lost"
+                        "lost",
+                        "wordsRight",
+                        "wordsWrong"
                       ],
                       "properties": {
                         "taps": {
@@ -480,6 +494,14 @@
                         },
                         "lost": {
                           "type": "integer",
+                          "minimum": 0
+                        },
+                        "wordsRight": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "wordsWrong": {
+                          "type": "number",
                           "minimum": 0
                         }
                       }

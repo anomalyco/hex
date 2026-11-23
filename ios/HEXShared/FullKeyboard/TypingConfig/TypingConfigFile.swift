@@ -79,6 +79,10 @@ nonisolated struct TypingConfigFile: Codable, Equatable, Sendable {
         var taps: Int?
         var gained: Int?
         var lost: Int?
+        /// For a zone: the words its taps' changes are expected to make right and wrong
+        /// (`simulate_zones.py`).
+        var wordsRight: Double?
+        var wordsWrong: Double?
     }
 
     /// Key positions for one keyboard (`Context`): aim by letter, and zones.

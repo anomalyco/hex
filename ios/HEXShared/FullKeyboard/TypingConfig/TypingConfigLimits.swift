@@ -36,6 +36,8 @@ nonisolated enum TypingConfigLimits {
     static let aimMinTunedTaps = 40
     static let aimMinCheckedTaps = 20
     static let zoneMinTunedTaps = 15
-    static let zoneMinNetCheckedTaps = 3
-    static let zoneMaxLostShare: Double = 0.34
+    static let zoneMinCheckedTaps = 10
+    /// A zone's words made right less words made wrong on the check half (expected counts).
+    static let zoneMinNetCheckedWords: Double = 2
+    static let zoneMaxWrongShare: Double = 0.34
 }

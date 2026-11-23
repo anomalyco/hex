@@ -355,7 +355,7 @@ extension FullKeyboardEngineTests {
         return try XCTUnwrap(String(data: JSONEncoder().encode(c), encoding: .utf8))
     }
 
-    private var zoneProof: String { #""evidence": {"tuned": {"taps": 30, "gained": 14, "lost": 2}, "checked": {"gained": 11, "lost": 1}}"# }
+    private var zoneProof: String { #""evidence": {"tuned": {"taps": 30, "gained": 14, "lost": 2, "wordsRight": 12.5, "wordsWrong": 1.3}, "checked": {"taps": 24, "gained": 11, "lost": 1, "wordsRight": 9.6, "wordsWrong": 0.7}}"# }
     private var aimProof: String { #""evidence": {"tuned": {"taps": 200, "gained": 20, "lost": 4}, "checked": {"taps": 150, "gained": 18, "lost": 3}}"# }
 
     private func outcome(_ review: TypingConfigReview, _ path: String) -> TypingConfigReview.Outcome? {
@@ -375,7 +375,8 @@ extension FullKeyboardEngineTests {
         let keys = """
         [{"context": \(here), "aim": {"o": {"offset": [0.0, 0.5], \(aimProof)}, "1": {"offset": [0, 0], \(aimProof)}},
           "zones": [{"key": "space", "edge": "top", "move": 0.1, \(zoneProof)}, {"key": "space", "edge": "bottom", "move": 0.1, \(zoneProof)},
-                    {"key": "n", "edge": "bottom", "move": -0.1, \(zoneProof)}, {"key": "o", "edge": "bottom", "move": 0.4, \(zoneProof)}]},
+                    {"key": "n", "edge": "bottom", "move": -0.1, \(zoneProof)}, {"key": "o", "edge": "bottom", "move": 0.4, \(zoneProof)},
+                    {"key": "e", "edge": "right", "move": 0.1, "evidence": {"tuned": {"taps": 30, "gained": 14, "lost": 2}, "checked": {"gained": 11, "lost": 1}}}]},
          {"context": \(elsewhere), "aim": {"e": {"offset": [0.1, 0.0], \(aimProof)}}}]
         """
         let review = TypingConfigReview(data: configData(words: words, keys: keys, extra: #""colour": "blue","#), keyboard: layout)
@@ -402,6 +403,7 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(outcome(review, "keys[0].zones[0]"), .skipped(.twoZonesClaimPoint))
         XCTAssertEqual(outcome(review, "keys[0].zones[2]"), .skipped(.twoZonesClaimPoint))
         XCTAssertEqual(outcome(review, "keys[0].zones[3]"), .clamped(from: [0.4], to: [0.25]))
+        XCTAssertEqual(outcome(review, "keys[0].zones[4]"), .skipped(.notEnoughEvidence), "taps alone don't say what the words gain")
         XCTAssertEqual(outcome(review, "keys[1].aim.e"), .skipped(.forAnotherKeyboard))
         XCTAssertEqual(review.contexts.map(\.differences), [[], ["width"]])
         XCTAssertEqual(review.applied.aim, ["o": CGVector(dx: 0, dy: 0.3)])

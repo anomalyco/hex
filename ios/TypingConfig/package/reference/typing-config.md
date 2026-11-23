@@ -155,10 +155,39 @@ removing the config removes exactly their effect. Each entry is 2–32 letters, 
 | Key | `key`: a letter, `space`, `layer:numbers` (123), `return`, `shift` or `delete` |
 | Edge | letters: `top`, `bottom`, `left`, `right`; `space`: `top`, `left`, `right`; `layer:numbers`: `top`, `right`; `return`: `top`, `left`; `shift`: `top`, `right`; `delete`: `top`, `left`. Never the keyboard's outer edge or the strip above row 1 |
 | Value | `move`, −0.25…0.25, in letter keycap heights (top, bottom) or widths (left, right). Positive grows the key. Use steps of 0.05 |
-| Measure it as | `scripts/simulate_zones.py`: for the proposed edges, the key every logged tap would press, against the key it was meant for: taps gained and taps lost, per key |
-| Set it when | ≥ 15 taps fall in the moved strip on the tuning half, and on the check half the gain is ≥ 3 taps net with lost ≤ 34% of gained |
-| Evidence | `{"tuned": {"taps", "gained", "lost"}, "checked": {"gained", "lost"}}`, exactly as `simulate_zones.py` printed them. `check_config.py` re-runs the simulation and rejects a zone whose numbers don't match |
+| Measure it as | `scripts/simulate_zones.py`: for the proposed edges, the key every logged tap would press against the key it was meant for (taps gained and lost), and what that does to the logged words: words made right and words made wrong, as expected counts (below) |
+| Set it when | ≥ 15 taps fall in the moved strip on the tuning half and it makes more words right than wrong there; on the check half ≥ 10 taps in the strip, words right − words wrong ≥ 2, and words wrong ≤ 34% of words right |
+| Evidence | `{"tuned": {"taps", "gained", "lost", "wordsRight", "wordsWrong"}, "checked": {…the same}}`, exactly as `simulate_zones.py` printed them (`evidence json`). `check_config.py` re-runs the simulation and rejects a zone whose numbers don't match |
 | Rule | **Never write a zone you haven't simulated.** Simulate all of a block's zones together: they interact |
+
+#### How a zone is scored
+
+Taps overstate what a zone costs and understate what it gives. Hex's next-letter odds and
+autocorrect repair many letter taps that press a neighbour, while a space pressed as a letter
+runs two words together, and Hex splits that less often. So `simulate_zones.py` scores each
+zone on the logged **words**, using what the log says Hex did with each one (`words.py`):
+
+- A word whose taps the zones don't change keeps the outcome the log shows.
+- A word Hex got wrong whose every tap now presses the key it was meant for becomes right, as
+  often as Hex leaves an exactly typed word right for this person (nearly always).
+- A word Hex got right that gets a new slip stays right only as often as Hex repaired a word
+  with one slip of that kind in the same half of the log. The kinds are:
+  - a letter pressed as another letter;
+  - a space pressed as a letter, which also runs the next word into it, so both count;
+  - a letter pressed as a space;
+  - a tap on another key (shift, delete, off the keys).
+- A word that was wrong and still has a slip counts as no change either way.
+- With few examples of a kind in this person's log, the rate leans toward Hex's own rate on 106
+  people of two public recordings (`repair` in the limits: 0.75, 0.5, 0.35 and 0.25), by 10
+  words' weight. `--repair` prints the rates used.
+
+What it can't see, so treat the numbers as estimates:
+
+- Context: a slip that changes one word can change how Hex reads the next.
+- A word the person deleted and retyped differently counts only when `words.py` can tell what
+  was meant (a run-in typed again as two words is recognised).
+- Two slips in one word are assumed independent. A word that was wrong and gets fewer slips
+  gets no credit, even when Hex would now repair it.
 
 Which edge is which:
 
@@ -255,19 +284,23 @@ reason from a fixed list.
 - 10.5% land above the keycap;
 - 12 bottom-row letter taps in the band just above the space bar were meant as spaces.
 
-`--half B` agrees (9.0 pt, 11.0%). Simulating `space` `top` at +0.10, +0.15 and +0.20 on half A:
+`--half B` agrees (9.0 pt, 11.0%). `simulate_zones.py --repair --half A` shows Hex split only 4 of
+the 12 run-together words. Sweeping `space` `top` on half A:
 
-| move | gained | lost | net |
-|---|---|---|---|
-| +0.10 | 9 | 1 | +8 |
-| +0.15 | 14 | 2 | +12 |
-| +0.20 | 15 | 6 | +9 |
+| move | taps gained | taps lost | words right | words wrong | net words |
+|---|---|---|---|---|---|
+| +0.10 | 9 | 1 | 12.0 | 0.6 | +11.4 |
+| +0.15 | 14 | 2 | 18.7 | 1.3 | +17.4 |
+| +0.20 | 15 | 6 | 20.0 | 3.9 | +16.1 |
 
-+0.15 is the best on half A. On half B, +0.15 gains 11 and loses 1.
+Each space it gives back fixes two words, and Hex had split only a third of them. +0.15 is the
+best on half A. On half B it has 27 taps in its strip, gains 11 taps and loses 1, and makes
+14.7 words right and 0.7 wrong.
 
 ```json
 "zones": [{"key": "space", "edge": "top", "move": 0.15,
-           "evidence": {"tuned": {"taps": 31, "gained": 14, "lost": 2}, "checked": {"gained": 11, "lost": 1}}}]
+           "evidence": {"tuned": {"taps": 31, "gained": 14, "lost": 2, "wordsRight": 18.7, "wordsWrong": 1.3},
+                        "checked": {"taps": 27, "gained": 11, "lost": 1, "wordsRight": 14.7, "wordsWrong": 0.7}}}]
 ```
 
 ### 3. A right hand that lands low
@@ -280,14 +313,17 @@ halves.
   gained 23, lost 4; checked gained 19, lost 3.
 - **Zones** for the top row's right side, where the landing clouds cross into the row below:
   `o` `bottom` +0.10 and `p` `bottom` +0.10, simulated together.
-  - Tuned: 48 taps in the strips, gained 31, lost 7.
-  - Checked: gained 26, lost 5.
-  - `i` `bottom` +0.10 lost more than it gained on half B, so it was left out.
+  - Tuned: 48 taps in the strips, gained 31, lost 7; 9.1 words made right, 1.2 wrong (Hex
+    already repaired most of those letters).
+  - Checked: gained 26, lost 5; 7.4 words right, 0.9 wrong.
+  - `i` `bottom` +0.10 made more words wrong than right on half B, so it was left out.
 
 ```json
 "aim": {"o": {"offset": [0.0, 0.28], "evidence": {"tuned": {"taps": 212, "gained": 23, "lost": 4}, "checked": {"taps": 190, "gained": 19, "lost": 3}}}},
 "zones": [
-  {"key": "o", "edge": "bottom", "move": 0.10, "evidence": {"tuned": {"taps": 30, "gained": 19, "lost": 4}, "checked": {"gained": 16, "lost": 3}}},
-  {"key": "p", "edge": "bottom", "move": 0.10, "evidence": {"tuned": {"taps": 18, "gained": 12, "lost": 3}, "checked": {"gained": 10, "lost": 2}}}
+  {"key": "o", "edge": "bottom", "move": 0.10, "evidence": {"tuned": {"taps": 30, "gained": 19, "lost": 4, "wordsRight": 5.6, "wordsWrong": 0.7},
+                                                            "checked": {"taps": 26, "gained": 16, "lost": 3, "wordsRight": 4.6, "wordsWrong": 0.5}}},
+  {"key": "p", "edge": "bottom", "move": 0.10, "evidence": {"tuned": {"taps": 18, "gained": 12, "lost": 3, "wordsRight": 3.5, "wordsWrong": 0.5},
+                                                            "checked": {"taps": 15, "gained": 10, "lost": 2, "wordsRight": 2.8, "wordsWrong": 0.4}}}
 ]
 ```

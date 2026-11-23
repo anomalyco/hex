@@ -452,10 +452,11 @@ private nonisolated struct Builder {
                 let outcome: R.Outcome = if let blockReason { .skipped(blockReason) }
                     else if !check.hitModelMatches { .skipped(.needsCheckingAgain) }
                     else if !enough(zone.evidence, { e in
-                        let gained = e.checked?.gained ?? 0, lost = e.checked?.lost ?? 0
+                        let right = e.checked?.wordsRight ?? 0, wrong = e.checked?.wordsWrong ?? .infinity
                         return (e.tuned?.taps ?? 0) >= TypingConfigLimits.zoneMinTunedTaps
-                            && gained - lost >= TypingConfigLimits.zoneMinNetCheckedTaps
-                            && Double(lost) <= TypingConfigLimits.zoneMaxLostShare * Double(gained)
+                            && (e.checked?.taps ?? 0) >= TypingConfigLimits.zoneMinCheckedTaps
+                            && right - wrong >= TypingConfigLimits.zoneMinNetCheckedWords
+                            && wrong <= TypingConfigLimits.zoneMaxWrongShare * right
                     }) { .skipped(.notEnoughEvidence) }
                     else if to != zone.move { .clamped(from: [zone.move], to: [to]) }
                     else { .applied }
