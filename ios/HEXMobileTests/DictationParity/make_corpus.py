@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Writes ParityCorpus.generated.swift: every string literal in the dictation tests (the parity
+exporter's corpus) and the words the rules themselves know (its generator's vocabulary, read
+from the keyboard core's tables). Rerunning it changes the generated transcripts, so refresh the
+fixture after (crates/keyboard/README.md).
+
+    python3 ios/HEXMobileTests/DictationParity/make_corpus.py
+"""
+
+import os
+import re
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+IOS = os.path.dirname(os.path.dirname(HERE))
+TESTS = [
+    "TranscriptCleanupTests.swift",
+    "DictationLanguageTests.swift",
+    "CustomVocabularyTests.swift",
+    "DictationLearningTests.swift",
+    "KeyboardBridgeTests.swift",
+    "CleanupTaggerTests.swift",
+    "DictationControllerTests.swift",
+    "FullKeyboardEngineTests.swift",
+    "SpokenSymbolsBackToBackTests.swift",
+]
+# The rules' words, in the keyboard core (Rust string literals read as Swift's do).
+RULES = [
+    "punctuation/tables.rs",
+    "lists_tables.rs",
+    "cleanup.rs",
+    "symbols.rs",
+    "formatter.rs",
+    "casual.rs",
+    "notes.rs",
+    "reconstruct.rs",
+]
+# Interpolations the dictation tests use, as their values.
+VARIABLES = {"nbsp": " ", "thin": " "}
+
+
+def literals(source):
+    """The decoded string literals of a Swift file (single-line and multi-line, raw or not)."""
+    found = []
+    i = 0
+    n = len(source)
+    while i < n:
+        if source.startswith("//", i):
+            i = source.find("\n", i)
+            if i < 0:
+                break
+            continue
+        hashes = 0
+        j = i
+        while j < n and source[j] == "#":
+            hashes += 1
+            j += 1
+        if j < n and source[j] == '"' and (hashes > 0 or source[i] == '"'):
+            multi = source.startswith('"""', j)
+            quote = '"""' if multi else '"'
+            close = quote + "#" * hashes
+            start = j + len(quote)
+            k = start
+            out = []
+            ok = True
+            while k < n:
+                if source.startswith(close, k):
+                    break
+                ch = source[k]
+                if ch == "\n" and not multi:
+                    ok = False
+                    break
+                escape = "\\" + "#" * hashes
+                if source.startswith(escape, k):
+                    k += len(escape)
+                    e = source[k]
+                    if e == "n":
+                        out.append("\n")
+                    elif e == "t":
+                        out.append("\t")
+                    elif e == "r":
+                        out.append("\r")
+                    elif e == "0":
+                        out.append("\0")
+                    elif e in "\"'\\":
+                        out.append(e)
+                    elif e == "u":
+                        end = source.index("}", k)
+                        out.append(chr(int(source[k + 2 : end], 16)))
+                        k = end
+                    elif e == "(":
+                        depth = 1
+                        m = k + 1
+                        while depth:
+                            depth += {"(": 1, ")": -1}.get(source[m], 0)
+                            m += 1
+                        out.append(VARIABLES.get(source[k + 1 : m - 1].strip(), " "))
+                        k = m - 1
+                    else:
+                        out.append(e)
+                    k += 1
+                    continue
+                out.append(ch)
+                k += 1
+            if ok:
+                text = "".join(out)
+                if multi:
+                    lines = text.split("\n")[1:-1]
+                    indent = min((len(l) - len(l.lstrip()) for l in lines if l.strip()), default=0)
+                    text = "\n".join(l[indent:] for l in lines)
+                found.append(text)
+                i = k + len(close)
+            else:
+                i = j + 1
+            continue
+        i += 1
+    return found
+
+
+def swift(text):
+    out = []
+    for ch in text:
+        if ch == "\\":
+            out.append("\\\\")
+        elif ch == '"':
+            out.append('\\"')
+        elif ord(ch) < 0x20 or ord(ch) in (0x7F, 0x85, 0x2028, 0x2029) or 0xD800 <= ord(ch) <= 0xDFFF:
+            out.append("\\u{%X}" % ord(ch))
+        elif 0x300 <= ord(ch) <= 0x36F or ord(ch) in (0xA0, 0x202F, 0x200D, 0xFE0F):
+            out.append("\\u{%X}" % ord(ch))
+        else:
+            out.append(ch)
+    return '"' + "".join(out) + '"'
+
+
+def main():
+    corpus = []
+    seen = set()
+    for name in TESTS:
+        for text in literals(open(os.path.join(IOS, "HEXMobileTests", name), encoding="utf-8").read()):
+            if text not in seen and len(text) <= 4000:
+                seen.add(text)
+                corpus.append(text)
+    words = []
+    seen = set()
+    for name in RULES:
+        path = os.path.join(IOS, "..", "crates", "keyboard", "core", "src", "dictation", name)
+        for text in literals(open(path, encoding="utf-8").read()):
+            text = text.strip()
+            if text and len(text) <= 40 and text not in seen and "\\" not in text:
+                seen.add(text)
+                words.append(text)
+    with open(os.path.join(HERE, "ParityCorpus.generated.swift"), "w", encoding="utf-8") as out:
+        out.write("// Generated by make_corpus.py from the dictation tests and rules; don't edit.\n")
+        out.write("// The parity exporter's inputs (DictationParityTests).\n\n")
+        out.write("enum ParityCorpus {\n")
+        out.write("    /// Every string literal in the dictation tests.\n")
+        out.write("    static let tests: [String] = [\n")
+        for text in corpus:
+            out.write("        " + swift(text) + ",\n")
+        out.write("    ]\n\n")
+        out.write("    /// The words and phrases the rules know.\n")
+        out.write("    static let vocabulary: [String] = [\n")
+        for text in words:
+            out.write("        " + swift(text) + ",\n")
+        out.write("    ]\n}\n")
+    print(len(corpus), "test strings,", len(words), "vocabulary entries")
+
+
+if __name__ == "__main__":
+    main()

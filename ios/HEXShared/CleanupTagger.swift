@@ -1,5 +1,6 @@
 import CoreML
 import Foundation
+import HexKeyboardCore
 import os
 import UIKit
 
@@ -289,9 +290,22 @@ nonisolated final class CleanupTagger: @unchecked Sendable {
         var firstTokens: [Int?]
     }
 
-    /// The transcript's whitespace-separated words.
+    /// The transcript's whitespace-separated words (`hk_dictation_words`, the keyboard core's
+    /// split, which the rules it runs share).
     static func words(in text: String) -> [String] {
-        text.split(whereSeparator: \.isWhitespace).map(String.init)
+        DictationCore.withText(text) { string in
+            var list = HkTextList(items: nil, count: 0)
+            defer { hk_text_list_free(&list) }
+            let status = hk_dictation_words(string, &list)
+            guard status == HK_DICTATION_OK else {
+                assertionFailure("CleanupTagger.words: the keyboard core's word split failed (status \(status))")
+                return text.split(whereSeparator: \.isWhitespace).map(String.init)
+            }
+            guard let items = list.items else { return [] }
+            return UnsafeBufferPointer(start: items, count: list.count).map { item in
+                String(decoding: UnsafeRawBufferPointer(start: item.bytes, count: item.length), as: UTF8.self)
+            }
+        }
     }
 
     /// Whole words per chunk, each chunk within `maxTokens` with [CLS] and [SEP]. A single

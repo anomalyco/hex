@@ -10,9 +10,11 @@ name = "hex_keyboard_core"
 
 [dependencies]
 unicode-normalization = "0.1"
+unicode-segmentation = "1.13"
 
 [dev-dependencies]
-# The swipe parity test's fixture (tests/swipe_parity.rs): JSON Lines, and the models' SHA-256.
+# The parity tests' fixtures (tests/swipe_parity.rs, tests/dictation_parity.rs): JSON Lines, and
+# the swipe models' SHA-256.
 serde_json = "1"
 sha2 = "0.10"
 

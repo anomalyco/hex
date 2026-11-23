@@ -16,8 +16,9 @@
 extern "C" {
 #endif
 
-/// Bumped whenever a signature or struct below changes.
-#define HK_ABI_VERSION 1
+/// Bumped whenever a signature or struct below changes. 2 is the tap decoder's (PR 2); 3 adds
+/// the dictation rules (hk_dictation_*).
+#define HK_ABI_VERSION 3
 
 uint32_t hk_abi_version(void);
 
@@ -141,6 +142,111 @@ int32_t hk_swipe_read(const HkSwipeDecoder *decoder, const double *points, size_
                       const double *times, const HkKeys *keys, const char *previous, size_t limit,
                       HkSwipeReading *out);
 void hk_swipe_reading_free(HkSwipeReading *reading);
+
+// MARK: - Dictation's text rules
+
+// Text goes both ways as UTF-8 bytes and a length, never NUL-terminated, so a transcript
+// holding U+0000 survives. Each hk_dictation_* call writes its result to `out` and returns one
+// of these; on any other status `out` is left empty. Text the core writes is released with
+// hk_text_free (hk_text_list_free for a list).
+
+/// `out` holds the result.
+#define HK_DICTATION_OK 0
+/// A NULL pointer where one is needed, text that isn't UTF-8, or an unknown style or convention.
+#define HK_DICTATION_INVALID 1
+/// The core failed (a panic, caught).
+#define HK_DICTATION_FAILED 2
+
+/// UTF-8 text the caller owns: `length` bytes at `bytes` (NULL when `length` is 0).
+typedef struct {
+    const char *bytes;
+    size_t length;
+} HkStr;
+
+/// UTF-8 text the core wrote; release it with hk_text_free.
+typedef struct {
+    char *bytes;
+    size_t length;
+} HkText;
+
+/// Texts the core wrote; release them with hk_text_list_free.
+typedef struct {
+    HkText *items;
+    size_t count;
+} HkTextList;
+
+/// A dictation language as the host's locale reads its identifier (iOS:
+/// Locale(identifier:).language.languageCode and .region); `code` or `region` with NULL bytes
+/// is none. Functions taking a `const HkLanguage *` read NULL as no language (Swift's nil),
+/// which most rules take as English.
+typedef struct {
+    HkStr identifier;
+    HkStr code;
+    HkStr region;
+} HkLanguage;
+
+/// The dictation style: 0 Polished, 1 Casual, 2 Notes, 3 Verbatim.
+typedef struct {
+    uint32_t style;
+    /// Settings › Dictation › Format lists, Spoken punctuation, End with a period: nonzero on.
+    uint8_t lists;
+    uint8_t punctuation;
+    uint8_t ends_with_period;
+} HkFormatOptions;
+
+/// Whether a lowercase word is in the dictation language's dictionary: nonzero for yes. Called
+/// on the calling thread during the call, with `word` valid only while it runs.
+typedef uint8_t (*HkIsWord)(void *context, HkStr word);
+
+/// The style (TranscriptFormatter.format): fillers trimmed, Format lists and Spoken
+/// punctuation, the style's sentences, and End with a period.
+int32_t hk_dictation_format(HkStr text, const HkLanguage *language, const HkFormatOptions *options,
+                            HkText *out);
+/// The stages on their own, in the order the pipeline runs them: spoken symbols, spoken counts,
+/// the host's own Numbers as digits, then (Clean up on) the host's English tagger or, for
+/// Spanish, German and Norwegian,
+/// hk_dictation_cleanup_rules; later the style (with Format lists and Spoken punctuation inside
+/// it), and French spacing last.
+int32_t hk_dictation_spoken_symbols(HkStr text, const HkLanguage *language, HkText *out);
+int32_t hk_dictation_spoken_counts(HkStr text, const HkLanguage *language, HkText *out);
+int32_t hk_dictation_cleanup_rules(HkStr text, const HkLanguage *language, HkText *out);
+int32_t hk_dictation_spoken_lists(HkStr text, const HkLanguage *language, HkText *out);
+int32_t hk_dictation_spoken_punctuation(HkStr text, const HkLanguage *language, HkText *out);
+int32_t hk_dictation_french_spacing(HkStr text, const HkLanguage *language, HkText *out);
+/// French spacing by convention: 0 France, 1 Canada, 2 Switzerland.
+int32_t hk_dictation_french_spacing_with(HkStr text, uint32_t convention, HkText *out);
+/// The convention for `language` (0 France, 1 Canada, 2 Switzerland), or -1 when it isn't French.
+int32_t hk_dictation_french_convention(const HkLanguage *language);
+
+/// CleanupReconstruction.reconstruct: the words with one delete flag each (nonzero deletes;
+/// fewer flags than words keep the rest), joined and repaired. Also the tagger's last step.
+int32_t hk_dictation_reconstruct(const HkStr *words, size_t word_count, const uint8_t *deletes,
+                                 size_t delete_count, HkText *out);
+/// CleanupTagger.words(in:): the whitespace-separated words.
+int32_t hk_dictation_words(HkStr text, HkTextList *out);
+/// SpokenCleanupRules.bare: lowercased, without opening marks or trailing punctuation.
+int32_t hk_dictation_bare(HkStr text, HkText *out);
+/// SpokenCleanupRules.supports: `out` nonzero when Spanish, German or Norwegian rules apply.
+int32_t hk_dictation_cleanup_supports(const HkLanguage *language, uint8_t *out);
+/// TranscriptFormatter.fillerPattern(for:): a NUL-terminated pattern the core keeps, or NULL.
+const char *hk_dictation_filler_pattern(const HkLanguage *language);
+
+/// TranscriptFormatter.insertionText: `formatted` joined to the text around the cursor.
+/// `before` and `after` are NULL for none; `is_word` NULL leaves the case alone.
+int32_t hk_dictation_insertion_text(HkStr formatted, const HkStr *before, const HkStr *after,
+                                    HkIsWord is_word, void *context, HkText *out);
+/// TranscriptFormatter.continuingSentence.
+int32_t hk_dictation_continuing_sentence(HkStr text, HkIsWord is_word, void *context, HkText *out);
+/// TranscriptFormatter.startsSentence(after:); `before` NULL for none. `out` nonzero for yes.
+int32_t hk_dictation_starts_sentence(const HkStr *before, uint8_t *out);
+/// TranscriptFormatter.lowercasesContinuations(in:); `language` is needed.
+int32_t hk_dictation_lowercases_continuations(const HkLanguage *language, uint8_t *out);
+/// TranscriptFormatter.droppingFinalFullStop.
+int32_t hk_dictation_dropping_final_full_stop(HkStr text, HkText *out);
+
+/// Releases text the core wrote and empties it. NULL, or an empty one, is fine.
+void hk_text_free(HkText *text);
+void hk_text_list_free(HkTextList *list);
 
 #ifdef __cplusplus
 }

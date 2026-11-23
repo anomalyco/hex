@@ -5,6 +5,7 @@
 //! comes back as NULL or a nonzero status and never unwinds into Swift, C or the JVM. The
 //! hosts are iOS and Android (and the Mac or Linux machine running the tests): Unix only.
 
+mod dictation;
 #[cfg(feature = "jni")]
 mod jni;
 mod model;
@@ -13,6 +14,17 @@ mod swipe;
 use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
+pub use dictation::{
+    HK_DICTATION_FAILED, HK_DICTATION_INVALID, HK_DICTATION_OK, HkFormatOptions, HkIsWord,
+    HkLanguage, HkStr, HkText, HkTextList, hk_dictation_bare, hk_dictation_cleanup_rules,
+    hk_dictation_cleanup_supports, hk_dictation_continuing_sentence,
+    hk_dictation_dropping_final_full_stop, hk_dictation_filler_pattern, hk_dictation_format,
+    hk_dictation_french_convention, hk_dictation_french_spacing, hk_dictation_french_spacing_with,
+    hk_dictation_insertion_text, hk_dictation_lowercases_continuations, hk_dictation_reconstruct,
+    hk_dictation_spoken_counts, hk_dictation_spoken_lists, hk_dictation_spoken_punctuation,
+    hk_dictation_spoken_symbols, hk_dictation_starts_sentence, hk_dictation_words, hk_text_free,
+    hk_text_list_free,
+};
 pub use model::{HkModel, hk_model_free, hk_model_open, hk_model_open_fd, hk_model_word_count};
 pub use swipe::{
     HkCandidate, HkExtraWord, HkKeyCentre, HkKeys, HkSwipeDecoder, HkSwipeParameters,
@@ -22,7 +34,7 @@ pub use swipe::{
 };
 
 /// `HK_ABI_VERSION` in `include/hex_keyboard.h`.
-pub const HK_ABI_VERSION: u32 = 1;
+pub const HK_ABI_VERSION: u32 = 3;
 
 #[unsafe(no_mangle)]
 pub extern "C" fn hk_abi_version() -> u32 {
