@@ -141,7 +141,7 @@ pub(super) fn item_with_press(p: Paint, item: Item, press: impl Fn(El) -> El) ->
 }
 
 /// One row's box, words, and selected fill, before any press handling.
-fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
+pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) -> El {
     let c = &p.k.c;
     // A row of the list: its title names it and its meta and time describe
     // it, so their texts stay out of the tree.

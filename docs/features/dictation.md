@@ -780,13 +780,19 @@ picker (closing one that is open) and the writer. Check:
 
 ```ts
 Tap, Paste Last menu, or hex paste-last → newest ready, noncancelled dictation or marked annotation
-Hold 300 ms on the Mac event tap → up to eight recent items, without taking focus
+Hold 200 ms on the Mac event tap → up to eight recent items, without taking focus
+├── Rows are read from the press, so the picker fades in as the hold passes
+├── Centred on the display under the pointer; stays open once the keys come up
 ├── Initially select what tap would paste; with only Cancelled rows select nothing
 ├── Show all History → open the searchable archive, not a paste
 ├── Click a row → recheck that item and paste it once into the original field
-├── Arrow keys → move selection; Enter or release the chord modifiers → choose
-└── Escape or changed focus → close without touching the clipboard
+├── ↑/↓, Tab, or Paste Last's key again (with or without ⌥⇧) → move; its repeats do nothing
+├── Return or keypad Enter → paste the selected item into the original field
+└── Escape, a click outside the card, another key, or changed focus → close without touching the clipboard
 ```
+
+Check: `a_tap_pastes_and_a_hold_opens_a_picker_that_stays_until_escape` in
+[paste/browse.rs](../../src/paste/browse.rs). Scene: `mac-paste-picker`.
 
 With it on, the Mac History puts dictations, annotations, screenshots and
 screen recordings in one list. All types is the default. Search works inside the

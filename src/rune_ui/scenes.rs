@@ -160,6 +160,15 @@ pub(super) const SCENES: &[Scene] = &[
             "/Users/alex/Library/Application Support/Scrawl/captures/1.scrawl",
         ));
     }),
+    // The Paste Last picker a held Paste Last opens, centred over the
+    // window as it is over the display: a capture, a cancelled dictation,
+    // and the newest dictation selected.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    ("mac-paste-picker", |ui| {
+        *ui = mac_fixture();
+        ui.settings.labs.paste_last_picker = true;
+        ui.paste_preview = true;
+    }),
     #[cfg(all(target_os = "macos", hex_capture))]
     ("mac-history-empty", |ui| {
         unified_history(ui);

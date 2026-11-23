@@ -31,6 +31,18 @@ impl Id {
     pub(crate) fn bundle(&self) -> &Path {
         &self.dir
     }
+
+    /// An identity for the window's fixture scenes. It names no folder, so
+    /// it resolves to nothing.
+    pub(crate) fn fixture(ready_at: u64) -> Self {
+        Self {
+            dir: PathBuf::new(),
+            stamp: Stamp {
+                ready_at,
+                generation: [0; 16],
+            },
+        }
+    }
 }
 
 /// A receipt belongs to the bundle (so deletion needs no index cleanup).

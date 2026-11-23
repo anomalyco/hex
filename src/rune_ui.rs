@@ -687,6 +687,9 @@ pub(crate) struct Ui {
     screenshot_folder: labs::screenshots::FolderChoice,
     /// A scene previewing the badge of a build kind this binary is not.
     build_preview: Option<BuildKind>,
+    /// A scene showing the Paste Last picker over the window.
+    #[cfg(all(target_os = "macos", hex_capture))]
+    paste_preview: bool,
     capture: Capture,
     vocabulary: vocabulary::VocabularyEditor,
     /// The model the service was last seen preparing, and since when.
@@ -827,6 +830,8 @@ impl Ui {
             #[cfg(all(target_os = "macos", hex_capture))]
             screenshot_folder: labs::screenshots::FolderChoice::default(),
             build_preview: None,
+            #[cfg(all(target_os = "macos", hex_capture))]
+            paste_preview: false,
             capture: Capture::Idle,
             vocabulary,
             preparing: None,
@@ -1598,6 +1603,10 @@ fn view(ui: &Ui, cx: &mut Cx<Ui>) -> El {
         Some(Modal::Vocabulary) => layer.extend(vocabulary::modal(ui, p)),
         Some(Modal::Calls) => layer.extend(calls::modal(ui, p)),
         None => {}
+    }
+    #[cfg(all(target_os = "macos", hex_capture))]
+    if ui.paste_preview {
+        layer.push(paste_picker::preview(p));
     }
     if let Some(first_run) = onboarding_kit::live::overlay(ui, p, cx.is_reduced_motion()) {
         layer.push(first_run);
