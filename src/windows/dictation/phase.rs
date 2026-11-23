@@ -119,8 +119,12 @@ impl CapturePhase {
     /// chunk. Returns `Some(feedback_started)` when promoted, or `None` if not
     /// pending.
     pub(super) fn promote_pending(&mut self, toggle_mode: bool) -> Option<bool> {
-        let Self::Pending(pending) = std::mem::replace(self, Self::Idle) else {
-            return None;
+        let pending = match std::mem::replace(self, Self::Idle) {
+            Self::Pending(pending) => pending,
+            other => {
+                *self = other;
+                return None;
+            }
         };
         let feedback_started = toggle_mode;
         *self = Self::Recording(ActiveCapture {
@@ -160,13 +164,18 @@ impl CapturePhase {
     /// threshold, preserving `flavour`, `by_shortcut`, and `return_to` while
     /// resetting tone/feedback state.
     pub(super) fn rearm_recording(&mut self) {
-        if let Self::Recording(active) = std::mem::replace(self, Self::Idle) {
-            *self = Self::Pending(PendingCapture {
-                flavour: active.flavour,
-                by_shortcut: active.by_shortcut,
-                return_to: active.return_to,
-            });
-        }
+        let active = match std::mem::replace(self, Self::Idle) {
+            Self::Recording(active) => active,
+            other => {
+                *self = other;
+                return;
+            }
+        };
+        *self = Self::Pending(PendingCapture {
+            flavour: active.flavour,
+            by_shortcut: active.by_shortcut,
+            return_to: active.return_to,
+        });
     }
 
     pub(super) fn recording_mut(&mut self) -> Option<&mut ActiveCapture> {
@@ -273,5 +282,55 @@ mod tests {
         assert!(phase.take_pending());
         assert!(phase.is_idle());
         assert!(!phase.take_pending());
+    }
+
+    fn finishing(window: Option<CaptureWindow>) -> Finishing {
+        Finishing {
+            context: PendingContext::default(),
+            release: ReleaseWait::new(&DictationCapture::new(16_000), CaptureInstant::ZERO),
+            print: None,
+            flavour: DictationFlavour::Normal,
+            by_shortcut: true,
+            stop_phrase: None,
+            return_to: window,
+        }
+    }
+
+    #[test]
+    fn a_chunk_promotes_only_a_pending_capture() {
+        let mut phase = CapturePhase::default();
+        let window = Some(CaptureWindow::for_test(7, 3));
+        phase.begin_recording(DictationFlavour::Normal, true, window, false, true);
+        // The listener promotes on every chunk, a recording's included: the
+        // capture must survive it.
+        assert_eq!(phase.promote_pending(false), None);
+        assert!(phase.is_recording());
+        let active = phase.take_recording().expect("recording");
+        assert_eq!(active.return_to, window);
+        assert!(active.start_tone_played);
+    }
+
+    #[test]
+    fn rearming_leaves_every_other_phase_alone() {
+        let mut phase = CapturePhase::default();
+        let window = Some(CaptureWindow::for_test(11, 5));
+        phase.begin_pending(DictationFlavour::Raw, true, window);
+        phase.rearm_recording();
+        assert!(phase.is_pending());
+
+        phase.enter_finishing(finishing(window));
+        phase.rearm_recording();
+        assert!(phase.is_finishing());
+        assert_eq!(phase.take_finishing().expect("finishing").return_to, window);
+    }
+
+    #[test]
+    fn promoting_leaves_finishing_alone() {
+        let mut phase = CapturePhase::default();
+        let window = Some(CaptureWindow::for_test(13, 8));
+        phase.enter_finishing(finishing(window));
+        assert_eq!(phase.promote_pending(false), None);
+        assert!(phase.is_finishing());
+        assert_eq!(phase.take_finishing().expect("finishing").return_to, window);
     }
 }
