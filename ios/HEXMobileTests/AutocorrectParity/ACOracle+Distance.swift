@@ -1,5 +1,5 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// `+Distance`, a copy of `AutocorrectEngine+Distance.swift` as of dev commit 8b879d8a, renamed (`ACOracle`,
+// `+Distance`, a copy of `AutocorrectEngine+Distance.swift` as of dev commit 06ac30af, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
@@ -34,6 +34,44 @@ extension ACOracle {
             return first.uppercased() + target.dropFirst()
         }
         return target
+    }
+
+    /// Whether `word`, one of your own words with capitals after its first letter ("DONT",
+    /// "McQuorv"), is read for `typed`, which has none: the strip offers it, but neither space
+    /// nor a swipe puts it in. Record typing logs showed a word from someone's own list in
+    /// capitals put in for "don't" and for swiped common words. Words typed in capitals, your
+    /// own lowercase words and names, and your vocabulary's spellings ("GitHub") are as before.
+    func isOwnCapitals(_ word: String, typed: String) -> Bool {
+        word.dropFirst().contains(where: \.isUppercase) && !typed.dropFirst().contains(where: \.isUppercase)
+            && !isVocabularySpelling(word)
+    }
+
+    /// Spatial autocorrect's decision for `token`, putting in no `isOwnCapitals` reading:
+    /// space takes the next reading that clears the margin, if any, and the strip keeps them all.
+    func decisionOfferingOwnCapitals(
+        _ decoder: TapOracle, taps: [CGPoint], typed token: String, previous: String?, valid: Bool, keys: TapOracle.Keys
+    ) -> TapOracle.Decision? {
+        let lower = token.lowercased()
+        var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
+        guard let replacement = decision?.replacement, isOwnCapitals(replacement, typed: token),
+              let readings = decision?.readings else { return decision }
+        decision?.replacement = readings.lazy.map(\.text).first {
+            !self.isOwnCapitals($0, typed: token)
+                && decoder.replaces(with: $0, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys) == true
+        }
+        return decision
+    }
+
+    /// A swipe's readings, best first, putting in no `isOwnCapitals` one unless caps lock is
+    /// on: the model's word of the same letters in lowercase ("in" for "IN", which takes its
+    /// place in the decoder), else the first ordinary reading, goes first; the strip offers yours.
+    func readingsOfferingOwnCapitals(_ readings: [String], capsLock: Bool, model: TapOracleModel) -> [String] {
+        guard !capsLock, let first = readings.first, isOwnCapitals(first, typed: "") else { return readings }
+        if model.index(of: first.lowercased()) != nil { return [first.lowercased()] + readings }
+        guard let index = readings.firstIndex(where: { !isOwnCapitals($0, typed: "") }) else { return readings }
+        var ordered = readings
+        ordered.insert(ordered.remove(at: index), at: 0)
+        return ordered
     }
 
     /// `word` without a capital first letter it only has from where it was learned: a fix

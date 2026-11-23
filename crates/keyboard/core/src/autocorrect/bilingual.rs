@@ -7,6 +7,7 @@ use super::engine::Engine;
 use super::language::LanguageId;
 use super::replace::is_all_caps_or_mixed;
 use super::{Autocorrect, FieldKind, Suggestion, SuggestionKind, lists, text, tokens};
+use crate::decoder::without_accents;
 use crate::model::Model;
 
 /// `languageLean(_:before:commonFrom:)`: above zero the partner's language, below this one's.
@@ -110,7 +111,7 @@ impl Autocorrect {
                 None => Vec::new(),
             }
         };
-        if !self.me.has_dictionary {
+        if !self.me.has_words() {
             return replacement_only();
         }
         let language = self.me.config;
@@ -258,7 +259,11 @@ impl Autocorrect {
         if field != FieldKind::Text || autocorrection_off {
             return None;
         }
-        if let Some(replaced) = self.me.text_replacement(before_input) {
+        if let Some(replaced) = self
+            .me
+            .text_replacement(before_input)
+            .or_else(|| self.me.pronoun_capital(before_input))
+        {
             return Some(replaced);
         }
         let token = tokens::current_token(before_input)?;
@@ -270,7 +275,7 @@ impl Autocorrect {
         if self.me.is_kept(&lower) {
             return None;
         }
-        if !self.me.is_enabled || !self.me.has_dictionary || lists::is_shorthand(&lower) {
+        if !self.me.is_enabled || !self.me.has_words() || lists::is_shorthand(&lower) {
             return None;
         }
         let fix = self.cautious_replacement(&token)?;
@@ -311,9 +316,16 @@ impl Autocorrect {
                 && !(me.config.english_rules
                     && lists::unambiguous_fix(&text::lowercased(token)).is_some())
             {
+                // Never just its accents: the other's word is spelled right ("these" stays,
+                // not French "thèse").
                 me.decoder_decision(token, true)
                     .and_then(|d| d.replacement)
-                    .filter(|r| me.may_offer_replacing(r, token))
+                    .filter(|r| {
+                        !text::eq(
+                            &without_accents(&text::lowercased(r)),
+                            &without_accents(&text::lowercased(token)),
+                        ) && me.may_offer_replacing(r, token)
+                    })
             } else {
                 None
             };
@@ -367,7 +379,7 @@ impl Autocorrect {
     ) -> Option<String> {
         if field != FieldKind::Text
             || autocorrection_off
-            || !self.me.has_dictionary
+            || !self.me.has_words()
             || text::count(word) < 2
         {
             return None;
@@ -498,7 +510,7 @@ impl Autocorrect {
         before: &str,
     ) -> Option<String> {
         let me = &self.me;
-        if !me.is_enabled || !me.has_dictionary {
+        if !me.is_enabled || !me.has_words() {
             return None;
         }
         let decoder = me.decoder.as_ref()?;

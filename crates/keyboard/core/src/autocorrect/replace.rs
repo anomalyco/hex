@@ -5,7 +5,8 @@
 
 use super::engine::{DecoderCache, Engine, model_id};
 use super::{distance, lists, text, tokens};
-use crate::decoder::{Decision, UserWords};
+use crate::decoder::{Decision, Keys, TypingDecoder, UserWords};
+use crate::model::Model;
 use crate::never_suggest::NeverSuggest;
 
 fn is_all_caps(token: &str) -> bool {
@@ -282,7 +283,8 @@ impl Engine {
         let decoder = self.decoder.as_ref()?;
         let keys = self.decoder_keys.as_ref()?;
         let taps = self.decoder_taps.as_ref()?;
-        let mut decision = decoder.decide(taps, &lower, previous, valid, keys);
+        let mut decision =
+            self.decision_offering_own_capitals(decoder, taps, token, previous, valid, keys);
         if let Some(baseline) = &self.decoder_baseline_keys
             && let Some(replacement) = decision.as_ref().and_then(|d| d.replacement.clone())
         {
@@ -292,16 +294,18 @@ impl Engine {
                 Some(true) => {}
                 Some(false) => {
                     if let Some(d) = decision.as_mut() {
-                        d.replacement = d
-                            .readings
-                            .iter()
-                            .map(|r| r.text.clone())
-                            .find(|t| !text::eq(t, &replacement) && clears(t) == Some(true));
+                        d.replacement = d.readings.iter().map(|r| r.text.clone()).find(|t| {
+                            !text::eq(t, &replacement)
+                                && !self.is_own_capitals(t, token)
+                                && clears(t) == Some(true)
+                        });
                     }
                 }
                 None => {
-                    let again = decoder
-                        .decide(taps, &lower, previous, valid, baseline)
+                    let again = self
+                        .decision_offering_own_capitals(
+                            decoder, taps, token, previous, valid, baseline,
+                        )
                         .and_then(|d| d.replacement);
                     if let Some(d) = decision.as_mut() {
                         d.replacement = again;
@@ -316,6 +320,92 @@ impl Engine {
             decision: decision.clone(),
         });
         decision
+    }
+
+    /// `decisionOfferingOwnCapitals`: Spatial autocorrect's decision for `token`, putting in no
+    /// `is_own_capitals` reading: space takes the next reading that clears the margin, if any,
+    /// and the strip keeps them all.
+    fn decision_offering_own_capitals(
+        &self,
+        decoder: &TypingDecoder,
+        taps: &[(f64, f64)],
+        token: &str,
+        previous: Option<&str>,
+        valid: bool,
+        keys: &Keys,
+    ) -> Option<Decision> {
+        let lower = text::lowercased(token);
+        let mut decision = decoder.decide(taps, &lower, previous, valid, keys);
+        if let Some(d) = decision.as_mut()
+            && let Some(replacement) = &d.replacement
+            && self.is_own_capitals(replacement, token)
+        {
+            d.replacement = d.readings.iter().map(|r| r.text.clone()).find(|t| {
+                !self.is_own_capitals(t, token)
+                    && decoder.replaces(t, taps, &lower, previous, valid, keys) == Some(true)
+            });
+        }
+        decision
+    }
+
+    /// `readingsOfferingOwnCapitals`: a swipe's readings, best first, putting in no
+    /// `is_own_capitals` one unless caps lock is on: the model's word of the same letters in
+    /// lowercase goes first, else the first ordinary reading; the strip offers yours.
+    pub fn readings_offering_own_capitals(
+        &self,
+        readings: Vec<String>,
+        caps_lock: bool,
+        model: &Model,
+    ) -> Vec<String> {
+        let Some(first) = readings.first() else {
+            return readings;
+        };
+        if caps_lock || !self.is_own_capitals(first, "") {
+            return readings;
+        }
+        let lower = text::lowercased(first);
+        if model.index(&lower).is_some() {
+            return std::iter::once(lower).chain(readings).collect();
+        }
+        let Some(index) = readings.iter().position(|r| !self.is_own_capitals(r, "")) else {
+            return readings;
+        };
+        let mut ordered = readings;
+        let item = ordered.remove(index);
+        ordered.insert(0, item);
+        ordered
+    }
+
+    /// `pronounCapital(before:)`: "i'm", "i'll", "i've" and "i'd" typed with their apostrophe at
+    /// the end of `before` take the capital "i", "im" and "ive" take: (what was typed, its fix).
+    pub fn pronoun_capital(&self, before: Option<&str>) -> Option<(String, String)> {
+        let before = before?;
+        if !self.is_enabled
+            || !self.has_dictionary
+            || !self.adds_capitals
+            || !self.config.english_rules
+        {
+            return None;
+        }
+        for end in ["m", "ll", "ve", "d"] {
+            for mark in ["'", "\u{2019}"] {
+                let typed = format!("i{mark}{end}");
+                if !text::has_suffix(before, &typed) {
+                    continue;
+                }
+                let previous = text::last(text::drop_last(before, text::count(&typed)));
+                let joins = !previous.is_empty()
+                    && (text::is_letter(previous)
+                        || text::is_number(previous)
+                        || previous == "'"
+                        || previous == "\u{2019}");
+                if joins || self.is_suppressed(&typed) || self.learning.is_rejected(&typed) {
+                    return None;
+                }
+                return Some((typed, format!("I{mark}{end}")));
+            }
+        }
+        None
     }
 
     /// `properNoun(for:)`: `token` capitalised when the dictionary knows it only that way.

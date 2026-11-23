@@ -8,7 +8,8 @@ import XCTest
 /// `AutocorrectEngine` renamed) with a deterministic dictionary (`ACStubDictionary`), each with
 /// its inputs and outputs and a hash of every dictionary call in order. Opt-in: it runs only
 /// when `HEX_AUTOCORRECT_PARITY_OUT` names the file to write (`TEST_RUNNER_…` for xcodebuild),
-/// with `HEX_AUTOCORRECT_PARITY_COUNT` cases for English, Spanish and German and a quarter as
+/// with `HEX_AUTOCORRECT_PARITY_COUNT` cases for English, Spanish, German and French (the
+/// languages with a typing model) and a quarter as
 /// many for each other language (200 by default), and every `HEX_AUTOCORRECT_PARITY_LITERALS`th
 /// case from the iOS tests' inputs (all by default).
 ///
@@ -42,7 +43,7 @@ final class AutocorrectParityExport: XCTestCase {
         var writer = TapParityWriter(handle: handle)
 
         var models: [String: TapOracleModel] = [:]
-        for code in ["en", "es", "de"] {
+        for code in ["en", "es", "de", "fr"] {
             let url = URL(fileURLWithPath: repo + "/ios/HEXKeyboard/TypingModel/\(code).hextm")
             models[code] = try XCTUnwrap(TapOracleModel(url: url), "no \(code) model")
         }
@@ -112,7 +113,7 @@ final class AutocorrectParityExport: XCTestCase {
                 language: language, dictionaries: dictionaries, models: models, rng: TapParityRandom(state: 0xAC_0C0E_0000 &+ UInt64(n)),
                 keysets: keysets, keysetsByID: keysetsByID, nextKeysetID: nextID
             )
-            let main = [KeyboardLanguage.english, .spanish, .german].contains(language)
+            let main = [KeyboardLanguage.english, .spanish, .german, .french].contains(language)
             for _ in 0..<(main ? count : max(1, count / 4)) {
                 let c = generator.makeCase()
                 try emit(c, language, &generator)
@@ -155,12 +156,13 @@ final class AutocorrectParityExport: XCTestCase {
             words += ACParityWords.extras[code] ?? []
             out[code] = ACStubDictionary(ranked: words, names: ACParityWords.names[code] ?? [])
         }
-        for (code, list) in ACParityWords.lists {
+        for (code, list) in ACParityWords.lists where models[code] == nil {
             out[code] = ACStubDictionary(ranked: list, names: ACParityWords.names[code] ?? [])
         }
         let setup: [String: Any] = [
             "kind": "setup", "modelWords": modelWords, "dropEvery": dropEvery, "lists": ACParityWords.lists,
             "names": ACParityWords.names, "extras": ACParityWords.extras, "available": ACParityGenerator.available,
+            "models": models.keys.sorted(),
         ]
         return (out, setup)
     }

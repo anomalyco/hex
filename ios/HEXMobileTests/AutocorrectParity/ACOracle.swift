@@ -1,5 +1,5 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// the engine's state, settings and strip, a copy of `AutocorrectEngine.swift` (up to `replacementOnSpace`) as of dev commit 8b879d8a, renamed (`ACOracle`,
+// the engine's state, settings and strip, a copy of `AutocorrectEngine.swift` (up to `replacementOnSpace`) as of dev commit 06ac30af, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
@@ -77,7 +77,7 @@ final class ACOracle {
     /// of `UITextChecker`'s one-edit guesses, for the language its model was built for. Nil
     /// while off or without a model.
     var decoder: TapOracle? {
-        didSet { if oldValue?.model !== decoder?.model { userWordsBuilt = nil } }
+        didSet { if oldValue?.model !== decoder?.model { userWordsBuilt = nil; useOwnWords(decoder?.model) } }
     }
     /// The layout language's word list and word pairs (the typing model, whether or not
     /// Spatial autocorrect is on): English chooses between words the same letters spell with
@@ -511,7 +511,7 @@ final class ACOracle {
                 KeyboardSuggestion(displayText: replacement, replacement: replacement, kind: .primary(autoReplace: true)),
             ]
         }
-        guard hasDictionary else { return replacementOnly ?? [] }
+        guard hasWords else { return replacementOnly ?? [] }
         // An empty field, or a new sentence (". ", "! ", "? ", a new line): three common
         // first words, as Apple's keyboard offers.
         if Self.isSentenceStart(beforeInput, language: language) {

@@ -1,5 +1,5 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// what space puts in, context and the decoder, a copy of `AutocorrectEngine.swift` (from `replacementOnSpace`) as of dev commit 8b879d8a, renamed (`ACOracle`,
+// what space puts in, context and the decoder, a copy of `AutocorrectEngine.swift` (from `replacementOnSpace`) as of dev commit 06ac30af, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read
@@ -26,7 +26,7 @@ extension ACOracle {
         // Your own text replacement comes first, as on Apple's keyboard: before the chat
         // shorthand Hex leaves alone ("brb"), with Autocorrect off or no dictionary, and
         // however often you kept the shortcut.
-        if let replaced = textReplacement(before: beforeInput) { return (replaced.typed, replaced.replacement) }
+        if let replaced = textReplacement(before: beforeInput) ?? pronounCapital(before: beforeInput) { return (replaced.typed, replaced.replacement) }
         guard let token = Self.currentToken(in: beforeInput) else { return nil }
         self.beforeInput = beforeInput
         partner?.beforeInput = beforeInput
@@ -34,7 +34,7 @@ extension ACOracle {
         guard !suppressedInSession.contains(lower),
               !learning.rejected.contains(lower),
               !learnedWords.contains(lower) else { return nil }
-        guard isEnabled, hasDictionary, !Self.shorthandAllowlist.contains(lower) else { return nil }
+        guard isEnabled, hasWords, !Self.shorthandAllowlist.contains(lower) else { return nil }
         guard let fix = cautiousReplacement(for: token) else { return nil }
         return (token, fix)
     }
@@ -76,14 +76,14 @@ extension ACOracle {
                 lastFixLanguage = language
                 return own
             }
-            // Spatial autocorrect may still read the taps as another word, counting the other
-            // language's word as one it changes only on a clear margin, as it does its own
-            // words: "tkm" (German) becomes "Tom", "merci" stays. Not a sure fix's word, which
-            // the next word decides ("Im" stays for "I'm going", not "In").
+            // Spatial autocorrect may still read the taps as another word, on a clear margin, as
+            // it does its own: "tkm" (German) becomes "Tom", "merci" stays. Not a sure fix's word,
+            // which the next word decides ("Im" stays for "I'm going", not "In"), and never just
+            // its accents: the other's word is spelled right ("these" stays, not French "thèse").
             guard lean <= 0, !isAllCapsOrMixed(token),
                   !(language.acoUsesEnglishFixes && Self.unambiguousFixes[token.lowercased()] != nil),
                   let replacement = decoderDecision(for: token, partnerWord: true)?.replacement,
-                  mayOffer(replacement, replacing: token) else {
+                  TapOracle.withoutAccents(replacement.lowercased()) != TapOracle.withoutAccents(token.lowercased()), mayOffer(replacement, replacing: token) else {
                 lastFixLanguage = nil
                 return nil
             }
@@ -394,7 +394,7 @@ extension ACOracle {
             || lexiconTerms.contains { $0.lowercased() == lower } || checker.isWordValid(token)
             || properNoun(for: token) != nil || partnerWord
         let previous = Self.previousWord(before, token: token)
-        var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
+        var decision = decisionOfferingOwnCapitals(decoder, taps: taps, typed: token, previous: previous, valid: valid, keys: keys)
         if let baseline = decoderBaselineKeys, let replacement = decision?.replacement {
             func clears(_ reading: String) -> Bool? {
                 decoder.replaces(with: reading, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)
@@ -406,9 +406,9 @@ extension ACOracle {
                 // The next reading the baseline would also put in, if any: never a new rewrite,
                 // and no second search on the letter.
                 let readings = decision?.readings ?? []
-                decision?.replacement = readings.lazy.map(\.text).first { $0 != replacement && clears($0) == true }
+                decision?.replacement = readings.lazy.map(\.text).first { $0 != replacement && !isOwnCapitals($0, typed: token) && clears($0) == true }
             case nil:
-                decision?.replacement = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: baseline)?.replacement
+                decision?.replacement = decisionOfferingOwnCapitals(decoder, taps: taps, typed: token, previous: previous, valid: valid, keys: baseline)?.replacement
             }
         }
         decoderCache = (before, taps, partnerWord, decision)
@@ -546,7 +546,7 @@ extension ACOracle {
     /// see" becomes "we'll see", as Apple's keyboard decides at the next word. `before` is
     /// the text up to the end of `word`. Nil to leave it.
     func revision(of word: String, before: String, next: String, field: KeyboardFieldKind, autocorrectionType: UITextAutocorrectionType?) -> String? {
-        guard field == .text, autocorrectionType != .no, hasDictionary, word.count >= 2 else { return nil }
+        guard field == .text, autocorrectionType != .no, hasWords, word.count >= 2 else { return nil }
         let isAllCaps = word == word.uppercased() && word != word.lowercased() && !word.hasPrefix("I'")
         guard !isAllCaps, let nextWord = next.split(separator: " ").first.map(String.init) else { return nil }
         let previous = Self.previousWord(before, token: word)
@@ -566,7 +566,7 @@ extension ACOracle {
     /// end of `first`. `first` and `firstTaps` are as you typed them.
     func merge(first: String, firstTaps: [CGPoint], space: CGPoint, second: String, before: String) -> String? {
         // Adaptive touch's personal centres never join words: the centres read without it decide.
-        guard isEnabled, hasDictionary, let decoder, let keys = decoderBaselineKeys ?? decoderKeys, let taps = decoderTaps,
+        guard isEnabled, hasWords, let decoder, let keys = decoderBaselineKeys ?? decoderKeys, let taps = decoderTaps,
               decoder.model.language == language.rawValue, !first.contains("'"), !second.contains("'") else { return nil }
         for word in [first, second] {
             let lower = word.lowercased()

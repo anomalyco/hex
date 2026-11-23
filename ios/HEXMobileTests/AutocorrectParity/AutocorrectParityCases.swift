@@ -90,7 +90,8 @@ struct ACParityGenerator {
         case 38..<62: return typo(word(l), l)
         case 62..<67:
             let fixes = ["dont", "im", "cant", "wont", "youre", "thats", "ive", "teh", "taht", "iphnoe", "i", "id", "ill", "well",
-                         "its", "lets", "were", "hell", "shell", "wed", "your", "there", "their", "then", "than"]
+                         "its", "lets", "were", "hell", "shell", "wed", "your", "there", "their", "then", "than",
+                         "i'm", "i'll", "i've", "i'd", "i\u{2019}m", "i\u{2019}ll", "l'hpmme", "k'homme", "qi'il", "jusqu'ici"]
             return rng.pick(fixes)
         case 67..<71:
             let accented = words(l).filter { strippedAccents($0) != $0 }

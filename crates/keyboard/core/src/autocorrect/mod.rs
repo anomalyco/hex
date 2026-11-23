@@ -493,6 +493,27 @@ impl Autocorrect {
         self.me.offensive.blocked(self.me.allows_swearing)
     }
 
+    /// `hasWords`: the phone's dictionary, or Hex's own model, for the language.
+    pub fn has_words(&self) -> bool {
+        self.me.has_words()
+    }
+
+    pub fn is_own_capitals(&self, word: &str, typed: &str) -> bool {
+        self.me.is_own_capitals(word, typed)
+    }
+
+    /// A swipe's readings with your own words in capitals never first unless caps lock is on
+    /// (`readingsOfferingOwnCapitals`).
+    pub fn readings_offering_own_capitals(
+        &self,
+        readings: Vec<String>,
+        caps_lock: bool,
+        model: &Model,
+    ) -> Vec<String> {
+        self.me
+            .readings_offering_own_capitals(readings, caps_lock, model)
+    }
+
     /// Whether the dictionary knows the word as typed (`checker.isWordValid`).
     pub fn is_word_valid(&self, word: &str) -> bool {
         self.me.checker.is_word_valid(word)

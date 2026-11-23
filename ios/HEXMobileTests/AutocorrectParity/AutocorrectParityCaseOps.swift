@@ -212,13 +212,20 @@ extension ACParityGenerator {
     mutating func casingOp(_ token: String) -> [String: Any] {
         let names = ACParityWords.names.keys.sorted().flatMap { ACParityWords.names[$0]! }
         let w = rng.chance(0.5) ? rng.pick(names) : rng.chance(0.5) ? cased(word(language)) : rng.pick(ACParityWords.vocabulary)
-        switch rng.int(7) {
+        switch rng.int(10) {
         case 0: return ["op": "stray", "w": w, "typed": rng.chance(0.5) ? "" : token]
         case 1: return ["op": "added", "w": w, "typed": token.lowercased()]
         case 2: return ["op": "addedpool", "pool": [w, cased(word(language)), token, w.lowercased()], "typed": token.lowercased()]
         case 3: return ["op": "ownspelling", "w": w]
         case 4: return ["op": "ownwords"]
         case 5: return ["op": "vterm", "w": rng.chance(0.5) ? token : w.lowercased()]
+        case 7:
+            let own = ["McQuorv", "DONT", "IN", "GitHub", "iPad", "OpenCode", "McDonald", "THE"]
+            var readings = (0..<(1 + rng.int(3))).map { _ in rng.chance(0.5) ? rng.pick(own) : word(language) }
+            if rng.chance(0.3) { readings.insert(word(language).uppercased(), at: 0) }
+            let model: Any = models[language.rawValue] != nil ? language.rawValue : NSNull()
+            return ["op": "swipereadings", "readings": readings, "caps": rng.chance(0.2), "model": model]
+        case 8: return ["op": "haswords"]
         default: return ["op": "blocked"]
         }
     }

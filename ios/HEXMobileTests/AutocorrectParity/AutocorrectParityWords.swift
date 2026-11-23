@@ -69,7 +69,7 @@ enum ACParityWords {
         ("ty", "thank you"), ("tchao", "Tchao"), (" idk ", " I don't know "), ("Kate", "Kate"), ("Bell", "Bell"),
         ("Will", "Will"), ("Thompson", "Thompson"), ("Zuzanna", "Zuzanna"), ("hexkey", "Hexkey"), ("gh", "GitHub"),
         ("fuck", "fuck"), ("Saoirse", "Saoirse"), ("wrk", "work"), ("ilu", "I love you"), ("ttyl", "talk to you later"),
-        ("teh", "teh"), ("", "x"), ("x", ""), ("smh", "shaking my head"), ("Mip", "my iPhone"), ("cafe\u{301}", "Café"),
+        ("teh", "teh"), ("", "x"), ("x", ""), ("smh", "shaking my head"), ("Mip", "my iPhone"), ("cafe\u{301}", "Café"), ("McQuorv", "McQuorv"), ("DONT", "DONT"), ("IN", "IN"), ("iPad", "iPad"),
     ]
 
     static let vocabulary: [String] = [

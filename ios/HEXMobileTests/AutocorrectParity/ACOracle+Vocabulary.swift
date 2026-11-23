@@ -1,5 +1,5 @@
 // The autocorrect oracle for the Rust port's parity fixture (`AutocorrectParityExport`):
-// `+Vocabulary`, a copy of `AutocorrectEngine+Vocabulary.swift` as of dev commit 8b879d8a, renamed (`ACOracle`,
+// `+Vocabulary`, a copy of `AutocorrectEngine+Vocabulary.swift` as of dev commit 06ac30af, renamed (`ACOracle`,
 // `TapOracle`, `ACO…`) so it runs on its own copies, independent of the app's. Changed from
 // the copy: the dictionary is `ACOChecking` (no `SystemTextChecker`), learned words live in
 // `ACOLearnedWords` (an in-memory copy of `LearnedWordsStore`), the bundled lists are read

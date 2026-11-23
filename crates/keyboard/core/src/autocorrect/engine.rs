@@ -359,6 +359,25 @@ impl Engine {
                 == Some(true))
     }
 
+    /// `hasWords`: the phone's dictionary, or Hex's own model for the language. A missing system
+    /// dictionary never switches a Hex model off.
+    pub fn has_words(&self) -> bool {
+        self.has_dictionary
+            || self
+                .decoder
+                .as_ref()
+                .is_some_and(|d| self.config.reads_model(d.model().language()))
+    }
+
+    /// `isOwnCapitals`: `word`, one of your own words with capitals after its first letter
+    /// ("DONT", "McQuorv"), read for `typed`, which has none: the strip offers it, but neither
+    /// space nor a swipe puts it in. Your vocabulary's spellings ("GitHub") are as before.
+    pub fn is_own_capitals(&self, word: &str, typed: &str) -> bool {
+        text::any_char(text::drop_first(word), text::is_uppercase)
+            && !text::any_char(text::drop_first(typed), text::is_uppercase)
+            && !self.is_vocabulary_spelling(word)
+    }
+
     /// Whether this language's typing model has `word` among its commonest (`isCommon`).
     pub fn is_common(&self, word: &str) -> bool {
         let Some(model) = self

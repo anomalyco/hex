@@ -1,5 +1,5 @@
 // The autocorrect oracle's own copies of what `AutocorrectEngine` reads beside itself, as of dev
-// commit 8b879d8a: `TextChecking`, `LearnedWordsStore` (in memory, with the same JSON size cap
+// commit 06ac30af: `TextChecking`, `LearnedWordsStore` (in memory, with the same JSON size cap
 // and seeding), `OffensiveWords`, `GermanCapitals`, `TypingLearning`,
 // `AutoCapitalization.shouldCapitalize`, `AppliedCorrection` and the `KeyboardLanguage` data
 // autocorrect reads (as `aco…`; the keys' grid is the app's `keyCoordinates`). Plus the two orders the owner fixed in the port: own words by
@@ -35,6 +35,19 @@ extension ACOracle {
     }
 
     nonisolated(unsafe) static var ownWordsOrder = OwnWordsOrder.dictionary
+
+    /// `useOwnWords` (`HexWordList.swift`): gives a `SystemTextChecker` the decoder model's own
+    /// words. The stub dictionary has none; the real-checker run sets this.
+    nonisolated(unsafe) static var ownWordsHook: (@MainActor (ACOracle, TapOracleModel?) -> Void)?
+
+    func useOwnWords(_ model: TapOracleModel?) {
+        Self.ownWordsHook?(self, model)
+    }
+
+    /// `hasWords` (`HexWordList.swift`): the phone's dictionary, or Hex's own model for it.
+    var hasWords: Bool {
+        hasDictionary || decoder?.model.language == language.rawValue
+    }
 
     /// How `caseInsensitiveCompare(_:) == .orderedSame` compares: Foundation's (today's, which
     /// isn't symmetric for ß and Greek's iota subscript) or both strings case-folded (the port's).
@@ -268,41 +281,105 @@ nonisolated struct ACOOffensiveWords: Equatable, Sendable {
     @MainActor static var loaded: [String: ACOOffensiveWords] = [:]
 }
 
-/// `GermanCapitals`, copied; `bundled` reads the repository's `de.capitals`.
+/// `HexWordList` (dev 06ac30af's `ios/HEXShared/HexWordList.swift`), copied: a sorted word list
+/// memory-mapped and searched in place.
+nonisolated final class ACOWordList: @unchecked Sendable {
+    let byteCount: Int
+    private let base: UnsafePointer<UInt8>
+
+    init?(url: URL) {
+        let fd = open(url.path, O_RDONLY)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_size > 0 else { return nil }
+        let size = Int(info.st_size)
+        guard let mapped = mmap(nil, size, PROT_READ, MAP_PRIVATE, fd, 0), mapped != MAP_FAILED else { return nil }
+        let bytes = UnsafePointer(mapped.assumingMemoryBound(to: UInt8.self))
+        guard bytes[size - 1] == 10 else { munmap(mapped, size); return nil }
+        base = bytes
+        byteCount = size
+    }
+
+    deinit {
+        munmap(UnsafeMutableRawPointer(mutating: base), byteCount)
+    }
+
+    /// Whether the list has `word` (lowercase NFC, as the builder writes them): one bisection over
+    /// the mapped bytes, nothing allocated for a native string.
+    func contains(_ word: String) -> Bool {
+        line(of: word) != nil
+    }
+
+    /// The number after `word`'s tab (a `.capitals` percent, a `.valid` cost), or nil when the
+    /// list lacks the word or its line has none.
+    func value(of word: String) -> Int? {
+        guard let (end, next) = line(of: word), end < next else { return nil }
+        var value = 0
+        for i in (end + 1)..<next {
+            let digit = Int(base[i]) - 48
+            guard (0...9).contains(digit) else { return nil }
+            value = value * 10 + digit
+        }
+        return value
+    }
+
+    /// Where `word`'s line ends (its tab or newline) and where its newline is.
+    private func line(of word: String) -> (end: Int, next: Int)? {
+        var word = word
+        return word.withUTF8 { key -> (Int, Int)? in
+            guard !key.isEmpty else { return nil }
+            var lo = 0, hi = byteCount
+            while lo < hi {
+                // The line holding the middle byte: back to its start, on to its tab or newline.
+                var start = (lo + hi) / 2
+                while start > lo, base[start - 1] != 10 { start -= 1 }
+                var end = start
+                while base[end] != 10, base[end] != 9 { end += 1 }
+                var next = end
+                while base[next] != 10 { next += 1 }
+                var order = 0
+                var k = 0
+                while order == 0, k < key.count, start + k < end {
+                    order = Int(base[start + k]) - Int(key[k])
+                    k += 1
+                }
+                if order == 0 { order = (end - start) - key.count }
+                if order == 0 { return (end, next) }
+                if order < 0 { lo = next + 1 } else { hi = start }
+            }
+            return nil
+        }
+    }
+}
+
+/// `GermanCapitals`, copied; `bundled` maps the repository's `de.capitals`.
 nonisolated struct ACOGermanCapitals: Sendable {
     static let alwaysShare = 95
     static let sometimesShare = 50
 
-    let percentages: [String: UInt8]
-
-    init(percentages: [String: UInt8]) {
-        self.percentages = percentages
-    }
+    private let share: @Sendable (String) -> UInt8?
 
     @MainActor static func bundled() -> ACOGermanCapitals? {
         if didRead { return loaded }
         didRead = true
-        loaded = ACOracleFiles.read("ios/HEXKeyboard/TypingModel/de.capitals").flatMap { ACOGermanCapitals(text: $0) }
+        loaded = ACOGermanCapitals(url: URL(fileURLWithPath: ACOracleFiles.repo + "/ios/HEXKeyboard/TypingModel/de.capitals"))
         return loaded
     }
 
     @MainActor static var loaded: ACOGermanCapitals?
     @MainActor static var didRead = false
 
-    init?(text: String) {
-        var percentages: [String: UInt8] = [:]
-        for line in text.split(separator: "\n") {
-            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
-            guard fields.count == 2, let percent = UInt8(fields[1]),
-                  (Self.sometimesShare...100).contains(Int(percent)) else { continue }
-            percentages[String(fields[0])] = percent
+    init?(url: URL) {
+        guard let list = ACOWordList(url: url) else { return nil }
+        share = { word in
+            guard let percent = list.value(of: word), (Self.sometimesShare...100).contains(percent) else { return nil }
+            return UInt8(percent)
         }
-        guard !percentages.isEmpty else { return nil }
-        self.percentages = percentages
     }
 
     func percent(of word: String) -> UInt8? {
-        percentages[word.lowercased()]
+        share(word.lowercased())
     }
 
     func capitalises(_ word: String, after previous: String?) -> Bool? {

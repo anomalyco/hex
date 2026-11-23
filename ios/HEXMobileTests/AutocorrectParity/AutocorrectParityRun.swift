@@ -206,6 +206,10 @@ struct ACParityRunner {
             return [c.original, c.corrected, c.anchor, c.changes.map { [$0.from, $0.to, $0.language?.rawValue as Any? ?? NSNull()] as [Any] }] as [Any]
         case "forget": e.forgetCorrection()
         case "blocked": return e.offensiveWords.blocked(allowSwearing: e.allowsSwearing).sorted()
+        case "swipereadings":
+            guard let model = s(op["model"]).flatMap({ models[$0] }) else { return NSNull() }
+            return e.readingsOfferingOwnCapitals(op["readings"] as! [String], capsLock: op["caps"] as? Bool ?? false, model: model)
+        case "haswords": return e.hasWords
         case "token": return ACOracle.currentToken(in: s(op["before"])) ?? NSNull()
         case "sentence": return ACOracle.isSentenceStart(s(op["before"]), language: Self.language(op["l"])!)
         case "prevword": return ACOracle.previousWord(s(op["before"])!, token: s(op["token"])!) ?? NSNull()

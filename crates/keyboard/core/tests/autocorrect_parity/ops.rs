@@ -363,6 +363,17 @@ impl World {
                 words.sort();
                 return json!(words);
             }
+            "swipereadings" => {
+                let Some(model) = self.model(&op["model"]) else {
+                    return Value::Null;
+                };
+                return json!(e.readings_offering_own_capitals(
+                    strings(&op["readings"]),
+                    b("caps"),
+                    &model
+                ));
+            }
+            "haswords" => return json!(e.has_words()),
             "token" => return opt(ac::current_token(s("before").as_deref())),
             "sentence" => {
                 return json!(ac::is_sentence_start(

@@ -113,6 +113,9 @@ fn dictionaries(
         out.insert(code.clone(), StubDictionary::new(&words, &names(code)));
     }
     for (code, list) in setup["lists"].as_object().unwrap() {
+        if models.contains_key(code) {
+            continue;
+        }
         out.insert(
             code.clone(),
             StubDictionary::new(&strings(list), &names(code)),
@@ -268,12 +271,10 @@ fn check(path: &str) {
     let file = std::fs::File::open(path).unwrap_or_else(|e| panic!("{path}: {e}"));
     let ios = read("ios/HEXShared/FullKeyboard/never-suggest.tsv");
     let shared = read("android/app/src/main/assets/typing/never-suggest.tsv");
-    let models: HashMap<String, Arc<Model>> = ["en", "es", "de"]
-        .into_iter()
-        .map(|c| (c.to_owned(), model(c)))
-        .collect();
-    let german =
-        GermanCapitals::parse(&read("ios/HEXKeyboard/TypingModel/de.capitals")).map(Arc::new);
+    let german = GermanCapitals::new(Box::new(
+        read("ios/HEXKeyboard/TypingModel/de.capitals").into_bytes(),
+    ))
+    .map(Arc::new);
     let mut world: Option<World> = None;
     let mut keysets = HashMap::new();
     let mut tally = Tally::default();
@@ -294,6 +295,11 @@ fn check(path: &str) {
         }
         match v["kind"].as_str().unwrap() {
             "setup" => {
+                // The typing models the oracle read, from the repository.
+                let models: HashMap<String, Arc<Model>> = strings(&v["models"])
+                    .iter()
+                    .map(|c| (c.clone(), model(c)))
+                    .collect();
                 world = Some(World {
                     dictionaries: Rc::new(dictionaries(&v, &models)),
                     models: models.clone(),
