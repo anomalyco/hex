@@ -60,6 +60,22 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(first.move(by: CGVector(dx: 10, dy: 0), at: 0.7), 1, "and coming back moves it at once")
     }
 
+    /// TestFlight build 147 (iPhone Duo): "Moving up seems to routinely skip a line". At a long
+    /// note's first line the host ignores the step past the text's start, and its context stays
+    /// as it was. Taken as the text above, it was added again before the known text, over and
+    /// over (3 rows grew to 245 in one gesture, iOS 27.2 Duo simulator, and the lift moved the
+    /// cursor 26,642 characters).
+    func testTheTrackpadTakesAnUnchangedContextAsTheTextsStart() {
+        let width: (Character) -> CGFloat = { _ in 10 }
+        var state = TrackpadCursor.State(before: "Abc.", after: " ", wrapWidth: 300, lineHeight: 20, width: width)
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -25), at: 0), -5, "just past the known text's start")
+        XCTAssertFalse(state.catchUp(before: "Abc.", after: " ", width: width), "the same context: the host ignored the step")
+        XCTAssertEqual(String(state.layout.text), "Abc. ", "and nothing was added")
+        XCTAssertEqual(state.settle(at: 0.5), 0, "unanswered: the text's start")
+        XCTAssertEqual(state.move(by: CGVector(dx: 0, dy: -40), at: 0.6), 0, "the first line keeps it")
+        XCTAssertEqual(state.move(by: CGVector(dx: -10, dy: 0), at: 0.7), -1, "and moving along moves it at once")
+    }
+
     /// Apple's took 80 pt of finger 1.05 times as far slowly, 1.4 times at 400 pt/s, twice at
     /// 1,000 and 2.6 times at 2,000 (iOS 27.2), from the finger's speed in whatever direction.
     func testTheTrackpadGoesFurtherTheFasterTheFinger() {

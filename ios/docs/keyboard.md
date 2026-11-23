@@ -1034,7 +1034,21 @@ the field shares (the body font's own widths, rows wrapped at the keyboard's wid
 40 pt) and moves by the offset to the nearest position, a 👍🏽 in one step. The field shares
 only the cursor's sentence or line and a little before it, so at that text's edge the cursor
 waits for the host to show more, and past its first or last line it steps just past it in
-one move, which the host makes only if there's text there. The keys blank to keycaps 60%
+one move, which the host makes only if there's text there. A context unchanged since that
+step is the host ignoring it at the text's start or end, not the text past it: read as text,
+it was added again above the known text on every move (iPhone Duo simulator, a long note's
+first line: 3 rows grew to 245 in one gesture, and the lift moved the cursor 26,642
+characters). Safari's fields (WKWebView) answer a keyboard's moves with a context that never
+matches where the cursor went, so there the trackpad keeps to the text the field shared when
+the hold began, and past it the point waits (iOS 27.2 simulator: 20, 40 and 60 pt up all
+moved 2 lines, and coming back took up to two lines of travel). The rows are a guess: no
+context or callback shows where a field wraps (the context is the cursor's sentence in a
+UITextView and in WKWebView). Where the field is as wide as the keyboard less 40 pt, as a
+full-width text view on an iPhone, a row is a line and Hex moves as many lines as Apple's;
+where it's narrower, a row is more than a line and up and down skip lines (iOS 27.2
+simulator, 20 / 40 / 60 pt up: Apple's 1 / 2 / 3 lines, Hex's 2 / 5 / 7 in a field half the
+width; on the Duo's cover screen an app gets 382 pt of the 466 while the keyboard spans 452,
+so even a full-width field skips one going down). The keys blank to keycaps 60%
 of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
 tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
 selection but not make one. Off (the default), a second finger does nothing. Settings ›
