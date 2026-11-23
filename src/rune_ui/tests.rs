@@ -2799,7 +2799,7 @@ fn the_transcription_picker_asks_the_service_for_a_model() {
         "Whisper keeps the saved English"
     );
     tap(&mut rt, "close-picker");
-    assert!(!rt.state.picker.open);
+    assert!(!rt.state.is_modal(Modal::Picker));
 }
 
 #[test]
@@ -3022,12 +3022,12 @@ fn the_vocabulary_row_opens_its_sheet() {
     let mut rt = runtime("portal", true, GOLDEN_SIZE);
     tap(&mut rt, "vocabulary-control");
     settle(&mut rt);
-    assert!(rt.state.vocabulary.open);
+    assert!(rt.state.is_modal(Modal::Vocabulary));
     assert!(rt.find("add-term").is_some());
     assert!(rt.find("vocabulary-boost").is_none());
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
-    assert!(!rt.state.vocabulary.open);
+    assert!(!rt.state.is_modal(Modal::Vocabulary));
 }
 
 /// A settle frame plus an outside press closes the sheet with its exit: the runtime lands the
@@ -3070,7 +3070,7 @@ fn add_term_scrolls_the_new_row_into_view() {
         })
         .collect();
     rt.state.vocabulary = super::vocabulary::VocabularyEditor::new(&rt.state.settings.vocabulary);
-    rt.state.vocabulary.open = true;
+    rt.state.modal = Some(Modal::Vocabulary);
     rt.invalidate();
     settle(&mut rt);
     tap(&mut rt, "add-term");
@@ -3181,7 +3181,7 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
     settle(&mut rt);
     assert!(shows_note(&rt), "{:?}", texts(&rt));
     tap(&mut rt, "vocabulary-control");
-    assert!(rt.state.vocabulary.open);
+    assert!(rt.state.is_modal(Modal::Vocabulary));
     assert!(sheet_note(&rt));
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
@@ -3201,7 +3201,7 @@ fn the_vocabulary_row_says_when_the_model_ignores_the_list() {
     }
 
     let rt = runtime("vocabulary-unused", true, PANE_SIZE);
-    assert!(rt.state.vocabulary.open);
+    assert!(rt.state.is_modal(Modal::Vocabulary));
     assert!(sheet_note(&rt));
 }
 
@@ -3218,7 +3218,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
     open_advanced(&mut rt, Pane::General);
     assert!(texts(&rt).iter().any(|text| text == "Off"));
     tap(&mut rt, "sound-set-control");
-    assert!(rt.state.sound_sets.open);
+    assert!(rt.state.is_modal(Modal::SoundSets));
     let playing = |rt: &Runtime<Ui>| rt.state.sound_sets.playing();
 
     tap(&mut rt, "set-click/lines/top/play");
@@ -3235,7 +3235,7 @@ fn the_sound_sets_sheet_plays_and_chooses_sets() {
 
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
-    assert!(!rt.state.sound_sets.open);
+    assert!(!rt.state.is_modal(Modal::SoundSets));
     assert_eq!(playing(&rt), None);
     assert!(!rt.state.settings.sound_effects);
     assert_eq!(rt.state.settings.sound_effect_volume, 0.23);
@@ -3338,7 +3338,7 @@ fn the_picker_keeps_focus_inside_and_escape_returns_it() {
     tab_to(&mut rt, "transcription-control");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
-    assert!(rt.state.picker.open);
+    assert!(rt.state.is_modal(Modal::Picker));
     for _ in 0..12 {
         key(&mut rt, Key::Tab, Mods::default());
         assert!(
@@ -3349,7 +3349,7 @@ fn the_picker_keeps_focus_inside_and_escape_returns_it() {
     }
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
-    assert!(!rt.state.picker.open);
+    assert!(!rt.state.is_modal(Modal::Picker));
     assert!(focused(&rt).ends_with("transcription-control"));
 }
 
@@ -3376,7 +3376,7 @@ fn settings_opens_the_picker_and_names_the_model_and_language_apart() {
         "{shown:?}"
     );
     tap(&mut rt, "transcription-control");
-    assert!(rt.state.picker.open);
+    assert!(rt.state.is_modal(Modal::Picker));
 }
 
 #[test]
@@ -4048,7 +4048,7 @@ fn output_fixes_show_only_with_their_lab_and_fix_this_copies_for_the_sentence() 
         Some("Um, open code shipped the hex app today.")
     );
     tap(&mut on, "output-vocabulary");
-    assert!(on.state.vocabulary.open);
+    assert!(on.state.is_modal(Modal::Vocabulary));
 }
 
 #[test]

@@ -17,7 +17,7 @@ use super::controls::{
     modal_transition, nested, note, toggle_row,
 };
 use super::platform::Os;
-use super::{Menu, Pane, Ui, icons};
+use super::{Menu, Modal, Pane, Ui, icons};
 use crate::app_settings::{MeetingPolicy, MeetingProviderChoice};
 use crate::calendar::CallProvider;
 use crate::calendar::date::{LocalDate, local_date};
@@ -41,7 +41,6 @@ const RELOAD_EVERY: f64 = 5.0;
 
 #[derive(Default)]
 pub(super) struct Calls {
-    pub(super) open: bool,
     /// The apps and websites Hex has seen a call in, newest first.
     seen: Vec<SeenCall>,
     loader: Option<Receiver<Vec<SeenCall>>>,
@@ -135,20 +134,18 @@ fn row_icon(ui: &Ui, p: Paint, call: &CallRow, size: f32) -> El {
 /// other sheets and any menu, and reads the seen list at once.
 pub(super) fn open(ui: &mut Ui) {
     super::settings::cancel_capture(ui);
-    super::picker::close(ui);
-    super::explainer::close(ui);
-    super::vocabulary::close(ui);
-    super::sound_sets::close(ui);
-    ui.open = None;
-    ui.calls.open = true;
+    ui.open_modal(Modal::Calls);
     ui.calls.read_at = None;
 }
 
 pub(super) fn close(ui: &mut Ui) {
+    ui.close_modal_if(Modal::Calls);
+}
+
+pub(super) fn on_close(ui: &mut Ui) {
     if matches!(ui.open, Some(Menu::Call(_))) {
         ui.open = None;
     }
-    ui.calls.open = false;
 }
 
 /// Shows `seen` at a fixed `now_ms`, the sheet open when `open`.
@@ -174,7 +171,7 @@ pub(super) fn poll(ui: &mut Ui, clock: f64, visible: bool) -> bool {
             changed = true;
         }
     }
-    let showing = ui.calls.open
+    let showing = ui.is_modal(Modal::Calls)
         || (ui.pane == Pane::Meetings
             && ui.meetings.view == super::meetings::View::Settings
             && ui.settings.meetings.enabled);
@@ -473,12 +470,8 @@ fn call_row(
         )
 }
 
-/// The sheet's scrim and panel, then the menus its rows opened. None while
-/// it's closed.
-pub(super) fn modal(ui: &Ui, p: Paint) -> Option<Vec<El>> {
-    if !ui.calls.open {
-        return None;
-    }
+/// The sheet's scrim and panel, then the menus its rows opened.
+pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
     let c = &p.k.c;
     let mut menus = Vec::new();
     let now_ms = ui
@@ -568,7 +561,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<Vec<El>> {
     ];
     // A row's menu opens above the sheet.
     layers.extend(menus);
-    Some(layers)
+    layers
 }
 
 #[cfg(test)]

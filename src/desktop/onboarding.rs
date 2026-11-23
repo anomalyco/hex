@@ -202,6 +202,9 @@ pub enum Input {
     Reopen,
     /// "Restart Hex" once every permission is on and one waits for it.
     Restart,
+    /// A relaunch requested by the tour could not start, so Restart or Reopen
+    /// stays available.
+    RelaunchFailed,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -253,6 +256,19 @@ pub struct View {
     pub restart: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum RelaunchState {
+    #[default]
+    Idle,
+    /// The listener needs a restart Hex will not do by itself again, or a
+    /// listener-failure relaunch could not start.
+    ReopenNeeded,
+    /// A relaunch is in flight; `restore_reopen` records whether failure
+    /// restores `ReopenNeeded` (listener failure / Reopen) or `Idle` (Setup
+    /// Restart).
+    InFlight { restore_reopen: bool },
+}
+
 #[derive(Clone, Debug)]
 pub struct Flow {
     step: Step,
@@ -274,8 +290,7 @@ pub struct Flow {
     /// on this computer is running, or found one and they choose.
     download_held: bool,
     advance_due: bool,
-    reopen: bool,
-    relaunching: bool,
+    relaunch: RelaunchState,
 }
 
 impl Flow {
@@ -299,8 +314,7 @@ impl Flow {
             download_requested: false,
             download_held: false,
             advance_due: false,
-            reopen: false,
-            relaunching: false,
+            relaunch: RelaunchState::Idle,
         };
         // `status` is read fresh at launch, so a tour resumed after macOS's
         // Quit & Reopen passes a setup whose grants are now real, and one
@@ -343,20 +357,34 @@ impl Flow {
                 Effect::None
             }
             Input::ListenerFailed { relaunch_allowed } => {
-                if relaunch_allowed {
-                    self.relaunch()
+                if relaunch_allowed && self.relaunch == RelaunchState::Idle {
+                    self.start_relaunch()
+                } else if !matches!(self.relaunch, RelaunchState::InFlight { .. }) {
+                    self.relaunch = RelaunchState::ReopenNeeded;
+                    Effect::None
                 } else {
-                    self.reopen = true;
                     Effect::None
                 }
             }
-            Input::Reopen if self.reopen => self.relaunch(),
+            Input::Reopen if self.relaunch == RelaunchState::ReopenNeeded => self.start_relaunch(),
             Input::Reopen => Effect::None,
             Input::Restart if self.step == Step::Setup && self.restart_needed() => {
-                self.relaunching = true;
+                self.relaunch = RelaunchState::InFlight {
+                    restore_reopen: false,
+                };
                 Effect::Relaunch
             }
             Input::Restart => Effect::None,
+            Input::RelaunchFailed => {
+                if let RelaunchState::InFlight { restore_reopen } = self.relaunch {
+                    self.relaunch = if restore_reopen {
+                        RelaunchState::ReopenNeeded
+                    } else {
+                        RelaunchState::Idle
+                    };
+                }
+                Effect::None
+            }
         }
     }
 
@@ -369,14 +397,14 @@ impl Flow {
             model: self.model_status(),
             show_download: self.download_requested && !self.model_in_setup(),
             practice: self.practice,
-            reopen: self.reopen,
+            reopen: self.relaunch == RelaunchState::ReopenNeeded,
             restart: self.restart_needed(),
         }
     }
 
     fn restart_needed(&self) -> bool {
         let states = [self.status.microphone, self.status.accessibility];
-        !self.relaunching
+        !matches!(self.relaunch, RelaunchState::InFlight { .. })
             && states.contains(&PermissionState::NeedsRestart)
             && states.iter().all(|state| {
                 matches!(
@@ -522,6 +550,8 @@ impl Flow {
         if self.step == Step::Done {
             return Effect::Finish;
         }
+        self.advance_due = false;
+        self.microphone_guide = false;
         self.step = self.forward_from(Step::TOUR[self.step.position() + 1]);
         Effect::None
     }
@@ -569,14 +599,15 @@ impl Flow {
         }
     }
 
-    /// Once per tour, and only after dictation is ready: before that, the
-    /// listener has not been asked to start.
-    fn relaunch(&mut self) -> Effect {
-        if self.relaunching || !self.status.ready() {
+    /// Starts a listener-failure or Reopen relaunch once dictation is ready:
+    /// before that, the listener has not been asked to start.
+    fn start_relaunch(&mut self) -> Effect {
+        if matches!(self.relaunch, RelaunchState::InFlight { .. }) || !self.status.ready() {
             return Effect::None;
         }
-        self.relaunching = true;
-        self.reopen = false;
+        self.relaunch = RelaunchState::InFlight {
+            restore_reopen: true,
+        };
         Effect::Relaunch
     }
 }
@@ -669,31 +700,40 @@ pub struct SettingsFocus {
     pub hex_active: bool,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum PermissionAsk {
+    #[default]
+    Idle,
+    /// Asked at `at`; System Settings has not taken focus yet.
+    Asked { at: std::time::Instant },
+    /// System Settings was seen active (or open while Hex was inactive);
+    /// `returned_at` tracks the return grace window once focus leaves Settings.
+    SeenSettings {
+        returned_at: Option<std::time::Instant>,
+    },
+    /// Remained untrusted past the grace window.
+    Stale,
+}
+
 /// Tracks one asked permission across System Settings focus changes so Hex
 /// offers `"Still grey? Fix it"` only after the person went to System Settings,
 /// came back (or closed it), and Hex is still untrusted.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct StalePermissionTracker {
-    asked_at: Option<std::time::Instant>,
-    saw_settings: bool,
-    returned_at: Option<std::time::Instant>,
-    stale: bool,
+    state: PermissionAsk,
 }
 
 impl StalePermissionTracker {
     pub fn note_asked(&mut self, now: std::time::Instant) {
-        self.asked_at = Some(now);
-        self.saw_settings = false;
-        self.returned_at = None;
-        self.stale = false;
+        self.state = PermissionAsk::Asked { at: now };
     }
 
     pub fn clear(&mut self) {
-        *self = Self::default();
+        self.state = PermissionAsk::Idle;
     }
 
     pub const fn is_waiting(&self) -> bool {
-        self.asked_at.is_some()
+        !matches!(self.state, PermissionAsk::Idle)
     }
 
     pub fn poll(&mut self, now: std::time::Instant, untrusted: bool, focus: SettingsFocus) -> bool {
@@ -701,33 +741,45 @@ impl StalePermissionTracker {
             self.clear();
             return false;
         }
-        let Some(asked_at) = self.asked_at else {
-            return false;
-        };
-        if self.stale {
-            return true;
-        }
         // While System Settings' window is open and Hex is inactive (including
         // during Touch ID / password sheets or dragging from Finder), the
         // person has not returned to Hex yet.
         let away_in_settings =
             focus.settings_open && (focus.settings_frontmost || !focus.hex_active);
-        if away_in_settings {
-            self.saw_settings = true;
-            self.returned_at = None;
-            return false;
-        }
-        if self.saw_settings {
-            let returned_at = *self.returned_at.get_or_insert(now);
-            if now.saturating_duration_since(returned_at) >= STALE_RETURN_DELAY {
-                self.stale = true;
+        match self.state {
+            PermissionAsk::Idle => false,
+            PermissionAsk::Stale => true,
+            PermissionAsk::Asked { at } => {
+                if away_in_settings {
+                    self.state = PermissionAsk::SeenSettings { returned_at: None };
+                    false
+                } else if focus.hex_active
+                    && now.saturating_duration_since(at) >= STALE_SIDE_BY_SIDE_DELAY
+                {
+                    self.state = PermissionAsk::Stale;
+                    true
+                } else {
+                    false
+                }
             }
-        } else if focus.hex_active
-            && now.saturating_duration_since(asked_at) >= STALE_SIDE_BY_SIDE_DELAY
-        {
-            self.stale = true;
+            PermissionAsk::SeenSettings { returned_at } => {
+                if away_in_settings {
+                    self.state = PermissionAsk::SeenSettings { returned_at: None };
+                    false
+                } else {
+                    let returned_at = returned_at.unwrap_or(now);
+                    if now.saturating_duration_since(returned_at) >= STALE_RETURN_DELAY {
+                        self.state = PermissionAsk::Stale;
+                        true
+                    } else {
+                        self.state = PermissionAsk::SeenSettings {
+                            returned_at: Some(returned_at),
+                        };
+                        false
+                    }
+                }
+            }
         }
-        self.stale
     }
 }
 
@@ -2441,5 +2493,102 @@ mod tests {
             statuses(&flow)[1],
             (SetupItem::Accessibility, ItemStatus::Waiting, false)
         );
+    }
+
+    #[test]
+    fn failed_relaunch_restores_restart_and_reopen_affordances() {
+        // Setup Restart: a failed relaunch clears the in-flight state so
+        // Restart Hex stays available and can be retried.
+        let mut setup = Flow::new(Step::Setup, fresh_status(), true, true);
+        setup.on(Input::Status(
+            SetupStatus {
+                accessibility: PermissionState::NeedsRestart,
+                transcription_model: false,
+                ..ready_status()
+            },
+            downloading(0.5),
+        ));
+        assert!(setup.view().restart);
+        assert_eq!(setup.on(Input::Restart), Effect::Relaunch);
+        assert!(
+            !setup.view().restart,
+            "in-flight relaunch suppresses double-click"
+        );
+        assert_eq!(setup.on(Input::RelaunchFailed), Effect::None);
+        assert!(setup.view().restart, "failed relaunch restores Restart Hex");
+        assert!(!setup.view().reopen);
+        assert_eq!(setup.on(Input::Restart), Effect::Relaunch);
+
+        // Automatic listener-failure relaunch: failing falls back to Reopen
+        // rather than silently hiding recovery or looping on automatic retries.
+        let mut listener = Flow::new(Step::TryIt, ready_status(), true, true);
+        assert_eq!(
+            listener.on(Input::ListenerFailed {
+                relaunch_allowed: true
+            }),
+            Effect::Relaunch
+        );
+        assert!(!listener.view().reopen);
+        assert_eq!(listener.on(Input::RelaunchFailed), Effect::None);
+        assert!(listener.view().reopen);
+        assert_eq!(
+            listener.on(Input::ListenerFailed {
+                relaunch_allowed: true
+            }),
+            Effect::None,
+            "failed automatic relaunch does not loop"
+        );
+        assert_eq!(listener.on(Input::Reopen), Effect::Relaunch);
+        assert!(!listener.view().reopen);
+        assert_eq!(listener.on(Input::RelaunchFailed), Effect::None);
+        assert!(listener.view().reopen, "failed Reopen keeps the button");
+    }
+
+    #[test]
+    fn stale_tracker_resets_return_grace_when_returning_to_settings_and_stays_stale() {
+        use std::time::{Duration, Instant};
+        let t0 = Instant::now();
+        let mut tracker = StalePermissionTracker::default();
+        let in_settings = SettingsFocus {
+            settings_open: true,
+            settings_frontmost: true,
+            hex_active: false,
+        };
+        let back_in_hex = SettingsFocus {
+            settings_open: true,
+            settings_frontmost: false,
+            hex_active: true,
+        };
+        let another_app = SettingsFocus {
+            settings_open: false,
+            settings_frontmost: false,
+            hex_active: false,
+        };
+
+        // Another app in front before Settings was ever seen never triggers the
+        // side-by-side fallback.
+        tracker.note_asked(t0);
+        assert!(!tracker.poll(t0 + Duration::from_secs(20), true, another_app));
+
+        // Returning to Hex briefly, then going back to System Settings before
+        // STALE_RETURN_DELAY resets the return grace clock.
+        assert!(!tracker.poll(t0 + Duration::from_secs(21), true, in_settings));
+        assert!(!tracker.poll(t0 + Duration::from_secs(22), true, back_in_hex));
+        assert!(!tracker.poll(t0 + Duration::from_millis(23_500), true, in_settings));
+        assert!(!tracker.poll(t0 + Duration::from_secs(24), true, back_in_hex));
+        assert!(
+            !tracker.poll(t0 + Duration::from_millis(25_900), true, back_in_hex),
+            "grace clock restarted on the second return"
+        );
+        assert!(tracker.poll(t0 + Duration::from_secs(26), true, back_in_hex));
+
+        // Once stale, switching back to Settings keeps stale until trusted or re-asked.
+        assert!(tracker.poll(t0 + Duration::from_secs(27), true, in_settings));
+        assert!(tracker.is_waiting());
+        tracker.note_asked(t0 + Duration::from_secs(28));
+        assert!(!tracker.poll(t0 + Duration::from_secs(29), true, back_in_hex));
+        tracker.clear();
+        assert!(!tracker.is_waiting());
+        assert!(!tracker.poll(t0 + Duration::from_secs(40), true, back_in_hex));
     }
 }

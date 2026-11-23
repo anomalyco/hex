@@ -295,7 +295,7 @@ fn the_model_picker_is_a_named_modal_dialog() {
     let mut rt = runtime("portal");
     assert!(rt.accessibility_action("transcription-control", Action::Click, None));
     settle(&mut rt);
-    assert!(rt.state.picker.open);
+    assert!(rt.state.is_modal(Modal::Picker));
     let picker = node(&rt, "transcription-picker");
     assert_eq!(picker["role"], "dialog");
     assert!(!name(&picker).is_empty());

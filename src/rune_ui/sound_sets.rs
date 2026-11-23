@@ -10,10 +10,10 @@ use std::time::Duration;
 use rune::{El, Tx, col, el, row, text};
 use rune_kit::{ControlSize, IconButton, IconButtonVariant};
 
-use super::Ui;
 use super::controls::{ButtonKind, Paint, button, modal_scrim_transition, modal_transition};
 use super::lists::{inline_slider, list_row, source_list};
 use super::settings::sound_volume;
+use super::{Modal, Ui};
 use crate::desktop::i18n::tr;
 use crate::feedback::{self, Audition, SoundSet};
 
@@ -28,7 +28,6 @@ const CHECK_WIDTH: f32 = 16.0;
 
 #[derive(Default)]
 pub(super) struct SoundSets {
-    pub(super) open: bool,
     /// The set whose dictation plays.
     playing: Option<SoundSet>,
     /// The poll clock when it started.
@@ -51,23 +50,21 @@ impl SoundSets {
 /// closes the model picker, the shortcut explainer and any menu.
 pub(super) fn open(ui: &mut Ui) {
     super::settings::cancel_capture(ui);
-    super::picker::close(ui);
-    super::explainer::close(ui);
-    super::vocabulary::close(ui);
-    super::calls::close(ui);
-    ui.open = None;
-    ui.sound_sets.open = true;
+    ui.open_modal(Modal::SoundSets);
     ui.sound_sets.playing = None;
     ui.sound_sets.volume_drag = None;
 }
 
 /// Closes the sheet, stopping whatever it plays.
 pub(super) fn close(ui: &mut Ui) {
+    ui.close_modal_if(Modal::SoundSets);
+}
+
+pub(super) fn on_close(ui: &mut Ui) {
     if ui.sound_sets.playing.take().is_some() && ui.live() {
         feedback::stop_audition();
     }
     ui.sound_sets.volume_drag = None;
-    ui.sound_sets.open = false;
 }
 
 /// Opens the sheet, held while `playing` plays when given.
@@ -131,8 +128,11 @@ fn set_volume(ui: &mut Ui, value: f32, done: bool) {
 /// Ends the play button's Stop once the dictation has played. True when it
 /// ended.
 pub(super) fn poll(ui: &mut Ui, clock: f64, tx: &mut Tx) -> bool {
+    if !ui.is_modal(Modal::SoundSets) {
+        return false;
+    }
     let sheet = &mut ui.sound_sets;
-    if !sheet.open || sheet.held || sheet.playing.is_none() {
+    if sheet.held || sheet.playing.is_none() {
         return false;
     }
     let start = *sheet.start.get_or_insert(clock);
@@ -150,10 +150,7 @@ fn set_key(set: SoundSet) -> String {
     format!("set-{set:?}").to_lowercase()
 }
 
-pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
-    if !ui.sound_sets.open {
-        return None;
-    }
+pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     let c = &p.k.c;
     let volume = ui
         .sound_sets
@@ -245,7 +242,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .w_full()
             .h_full()
     };
-    Some([
+    [
         layer("sound-sets-scrim")
             .fill(c.scrim)
             .on_press(close)
@@ -256,7 +253,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             // Keys stay inside, Escape or a press outside closes, and focus
             // returns to the row's button that opened it.
             .child(panel.modal(true, close)),
-    ])
+    ]
 }
 
 /// The chosen set's check, or the empty column that keeps every name on
