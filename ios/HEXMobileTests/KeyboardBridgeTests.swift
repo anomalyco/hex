@@ -218,6 +218,55 @@ final class KeyboardBridgeTests: XCTestCase {
         XCTAssertTrue(KeyboardJobWatchdog.isStalled(.transcribing, lastProgress: 100, now: 230))
     }
 
+    /// A notification takes the audio session for a second or two: the page says its capture is
+    /// interrupted, that wait isn't counted as quiet, and once the page says it's back the same
+    /// dictation carries on, its quiet counted from then. Interrupted longer than
+    /// `captureInterruption` (a call, an alarm), it finishes with what was said.
+    func testAnInterruptedCaptureWaitsForItsPageAndTheSameDictationCarriesOn() {
+        func page(_ context: String, muted: Bool = false, ended: Bool = false) -> KeyboardCapturePageState {
+            KeyboardCapturePageState(cause: "test", context: context, muted: muted, ended: ended, at: 0)
+        }
+        XCTAssertFalse(page("running").isInterrupted)
+        XCTAssertTrue(page("interrupted").isInterrupted)
+        XCTAssertTrue(page("suspended").isInterrupted)
+        XCTAssertTrue(page("running", muted: true).isInterrupted, "a muted track sends only silence")
+        XCTAssertTrue(page("running", ended: true).isInterrupted)
+
+        // Audio until 103, a notification from 103.2 to 108 with no audio at all, then audio
+        // again: polled 30 times a second, the watchdog never ends it.
+        var watch = KeyboardCaptureWatch(startedAt: 100)
+        var stalledAt: [TimeInterval] = []
+        for tick in 0...(30 * 20) {
+            let now = 100 + Double(tick) / 30
+            if now < 103 || now >= 108.5 { watch.heardAudio(at: now) }
+            if abs(now - 103.2) < 0.5 / 30 { XCTAssertEqual(watch.page(page("interrupted", muted: true), at: now), .interrupted) }
+            if abs(now - 108) < 0.5 / 30 {
+                guard case .resumed(let after) = watch.page(page("running"), at: now) else { return XCTFail("not resumed") }
+                XCTAssertEqual(after, 4.8, accuracy: 0.01)
+            }
+            if watch.isStalled(now: now) { stalledAt.append(now) }
+        }
+        XCTAssertEqual(stalledAt, [], "5 s without audio, but interrupted for all of it")
+        XCTAssertEqual(watch.interruptedSince, nil)
+
+        // Back at 108, the page sends nothing more: quiet counts from 108, not from 103.
+        var quiet = KeyboardCaptureWatch(startedAt: 100)
+        quiet.heardAudio(at: 103)
+        _ = quiet.page(page("suspended"), at: 103.5)
+        _ = quiet.page(page("running"), at: 108)
+        XCTAssertFalse(quiet.isStalled(now: 113.9))
+        XCTAssertTrue(quiet.isStalled(now: 114.1), "6 s after it came back")
+
+        // Muted, the page still sends silence: the interruption's limit ends it all the same.
+        var call = KeyboardCaptureWatch(startedAt: 100)
+        XCTAssertEqual(call.page(page("running", muted: true), at: 101), .interrupted)
+        XCTAssertNil(call.page(page("interrupted", muted: true), at: 102), "still the same interruption")
+        call.heardAudio(at: 115)
+        XCTAssertFalse(call.isStalled(now: 101 + KeyboardJobWatchdog.captureInterruption - 0.1))
+        XCTAssertTrue(call.isStalled(now: 101 + KeyboardJobWatchdog.captureInterruption + 0.1), "finishes with what was said")
+        XCTAssertTrue(KeyboardJobWatchdog.captureInterruption > KeyboardJobWatchdog.captureSilence)
+    }
+
     /// Hex's text that came after its time to go in by itself (Done in Hex, then back late)
     /// is offered as Paste dictation for ten minutes rather than lost.
     func testAResultPastItsTimeToGoInIsOfferedForTenMinutes() {

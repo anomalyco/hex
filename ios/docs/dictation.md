@@ -764,6 +764,27 @@ public way to keep the screen on.
   comes back there within 30 s, and is offered as Paste dictation
   anywhere else or later. A capture that goes quiet for 6 s finishes with
   what it heard, and a transcription stuck for 2 minutes is given up.
+- An in-keyboard capture that another sound interrupts waits for it instead
+  of ending: a notification, an alarm or a call takes the audio session, and
+  WebKit interrupts or suspends the capture page's `AudioContext` and mutes
+  (or, if its capture fails, ends) the microphone track. The page reports each
+  `mute`, `unmute` and `ended` of its track and each `statechange` of its
+  context, with its time, and the keyboard writes every one to the probe log
+  (`page statechange at +4.2 s: context interrupted, track muted`). Every
+  250 ms the page resumes a context that isn't running, then opens the
+  microphone again for a track that ended or stayed muted for 3 s (again
+  after 1, 2, 4 and then every 8 s), into the same context and capture: the
+  same dictation goes on, with its file, live words and Type as I speak, and
+  the time away is missing audio. While the page says it's interrupted, the
+  6 s quiet rule doesn't count, and quiet counts again from when it's back
+  (`KeyboardCaptureWatch`). Interrupted for more than 15 s
+  (`KeyboardJobWatchdog.captureInterruption`: a call, an alarm), it
+  finishes with what was said, as before. In the simulator, which has no
+  microphone and no interruptions, `capture-debug.js` left in the App Group
+  runs once in the capture page (to stand a recording in for the microphone,
+  or suspend the context, mute or stop the track by hand), and each recording
+  is kept there as `capture-debug.wav`. What iOS sends a capture for a
+  notification on a phone, with the ringer on and on silent, is unverified.
 - Phone/FaceTime/Siri audio interruptions finalize captures `>= 300 ms` so
   spoken words are not lost, cancel shorter taps cleanly out of `Listening`,
   and resume warm keepalive when iOS signals `.shouldResume`. Hex's own
