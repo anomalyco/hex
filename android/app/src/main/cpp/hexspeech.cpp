@@ -6,15 +6,15 @@
 #include <whisper.h>
 
 #include <algorithm>
+#include <cmath>
 #include <memory>
 #include <string>
 #include <vector>
 
-extern "C" JNIEXPORT jbyteArray JNICALL
-Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jobject assets, jstring file,
-                                         jshortArray samples, jint count, jint threads, jstring language,
-                                         jboolean translate, jstring prompt) {
-    if (count < 1 || count > env->GetArrayLength(samples)) return nullptr;
+// The model stays loaded between dictations (SpeechModel.kt owns it and frees it when idle), so a
+// dictation pays only for its own audio. Load, decode and free are called under one lock.
+extern "C" JNIEXPORT jlong JNICALL
+Java_ly_anoma_hex_speech_Whisper_load(JNIEnv *env, jobject, jobject assets, jstring file) {
 #ifdef NDEBUG
     // whisper.cpp also installs this callback for ggml. Set it before either engine starts.
     static const bool quiet = [] {
@@ -25,24 +25,42 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jobject assets, js
 #endif
     auto options = whisper_context_default_params();
     options.use_gpu = false;
-    std::unique_ptr<whisper_context, decltype(&whisper_free)> ctx(nullptr, whisper_free);
+    whisper_context *ctx = nullptr;
     if (file) {
         const char *path = env->GetStringUTFChars(file, nullptr);
-        if (!path) return nullptr;
-        ctx.reset(whisper_init_from_file_with_params(path, options));
+        if (!path) return 0;
+        ctx = whisper_init_from_file_with_params(path, options);
         env->ReleaseStringUTFChars(file, path);
     } else {
         auto manager = AAssetManager_fromJava(env, assets);
-        if (!manager) return nullptr;
+        if (!manager) return 0;
         std::unique_ptr<AAsset, decltype(&AAsset_close)> model(
             AAssetManager_open(manager, "whisper-tiny.bin", AASSET_MODE_BUFFER), AAsset_close);
-        if (!model) return nullptr;
+        if (!model) return 0;
         auto data = const_cast<void *>(AAsset_getBuffer(model.get()));
-        if (!data) return nullptr;
-        ctx.reset(whisper_init_from_buffer_with_params(data, AAsset_getLength(model.get()), options));
+        if (!data) return 0;
+        // The weights are copied into the context, so the asset can close afterwards.
+        ctx = whisper_init_from_buffer_with_params(data, AAsset_getLength(model.get()), options);
     }
-    if (!ctx) return nullptr;
+#ifndef NDEBUG
+    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "%s model %s", file ? "small" : "tiny", ctx ? "loaded" : "failed");
+#endif
+    return reinterpret_cast<jlong>(ctx);
+}
 
+extern "C" JNIEXPORT void JNICALL
+Java_ly_anoma_hex_speech_Whisper_free(JNIEnv *, jobject, jlong ctx) {
+    whisper_free(reinterpret_cast<whisper_context *>(ctx));
+#ifndef NDEBUG
+    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "model freed");
+#endif
+}
+
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboolean small, jshortArray samples,
+                                         jint count, jint threads, jstring language, jboolean translate, jstring prompt) {
+    auto ctx = reinterpret_cast<whisper_context *>(handle);
+    if (!ctx || count < 1 || count > env->GetArrayLength(samples)) return nullptr;
     std::vector<float> pcm(count);
     jshort page[2048];
     for (int i = 0; i < count; i += 2048) {
@@ -68,21 +86,27 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jobject assets, js
         env->ReleaseStringUTFChars(prompt, chars);
     }
     if (!hint.empty()) params.initial_prompt = hint.c_str();
-    // The measured short-dictation window; longer clips retain the full encoder context.
-    if (file && count <= 8 * 16000) params.audio_ctx = 512;
+    // The encoder's window, in 20 ms frames: up to 8 s of speech, the speech plus 3.84 s (192 frames),
+    // at most the measured 512; the 40-clip benchmark kept the same word errors at 27% less time.
+    // Longer clips keep the full window: every shorter one tried cost them accuracy. The bundled
+    // tiny model keeps the full window too; shortened, it repeats itself.
+    if (small && count <= 8 * 16000) {
+        const int frames = static_cast<int>(std::ceil(count * 50.0 / 16000)) + 192;
+        params.audio_ctx = std::min(512, (frames + 63) / 64 * 64);
+    }
     params.no_context = true;
     params.no_timestamps = true;
     params.print_progress = params.print_realtime = params.print_timestamps = params.print_special = false;
     params.suppress_nst = true;
-    if (whisper_full(ctx.get(), params, pcm.data(), count) != 0) return nullptr;
+    if (whisper_full(ctx, params, pcm.data(), count) != 0) return nullptr;
 #ifndef NDEBUG
     // Diagnostics identify the engine and task only; no audio or recognized text is logged.
-    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "%s %s complete",
-                        file ? "small" : "tiny", translate ? "translate" : "transcribe");
+    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "%s %s complete, %d threads, window %d",
+                        small ? "small" : "tiny", translate ? "translate" : "transcribe", params.n_threads, params.audio_ctx);
 #endif
     std::string text;
-    for (int i = 0; i < whisper_full_n_segments(ctx.get()); ++i)
-        text += whisper_full_get_segment_text(ctx.get(), i);
+    for (int i = 0; i < whisper_full_n_segments(ctx); ++i)
+        text += whisper_full_get_segment_text(ctx, i);
     // JNI's modified UTF-8 is not standard UTF-8 (notably for supplementary code points).
     auto result = env->NewByteArray(static_cast<jsize>(text.size()));
     if (result) env->SetByteArrayRegion(result, 0, static_cast<jsize>(text.size()),
