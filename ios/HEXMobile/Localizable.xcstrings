@@ -2857,6 +2857,26 @@
         }
       }
     },
+    "Starting microphone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动麦克风"
+          }
+        }
+      }
+    },
+    "Starting…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在启动…"
+          }
+        }
+      }
+    },
     "Starts or finishes on-device dictation and copies the text." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3066,6 +3086,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "太长"
+          }
+        }
+      }
+    },
+    "Transcribing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在转录"
           }
         }
       }
