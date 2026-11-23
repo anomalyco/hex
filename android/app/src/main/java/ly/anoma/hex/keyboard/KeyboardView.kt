@@ -106,12 +106,13 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
             find(keys)?.performAccessibilityAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS, null)
         }
     }
-    fun status(phase: SpeechPhase, hint: String) {
+    /** [note]: [hint] is a dictation's note, not the idle hint. */
+    fun status(phase: SpeechPhase, hint: String, note: Boolean = false) {
         cue(this.phase, phase); this.phase = phase
         val idle = phase == SpeechPhase.Idle
         strip.prepare(phase, hint)
         if (!idle) { heldAt = null; closeMenu() }
-        strip.status(phase, hint, menu.visibility == VISIBLE)
+        strip.status(phase, hint, menu.visibility == VISIBLE, note)
         // Keep the snapshotted paste language visible until this dictation has finished.
         if (idle) keys.refreshSpace()
         strip.update()

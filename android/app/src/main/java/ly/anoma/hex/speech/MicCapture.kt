@@ -9,11 +9,53 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.math.sqrt
 
 internal enum class SpeechPhase { Idle, Opening, Listening, Transcribing }
 
 private const val LOG_TAG = "HexSpeech"
+
+/** Audio Whisper hears before the first voiced 40 ms block and after the last. A word's soft edges (an
+ * initial "h" or "f", a final "s" or "t", a quiet speaker's last syllable) can sit under the voiced test's
+ * −48 dBFS for a few hundred milliseconds. The 40 benchmark clips and 15 long ones kept the same text with
+ * 0.3, 0.4 and 0.5 s after the speech; the longer end costs nothing measurable, so it gets 0.5 s. */
+internal const val SPEECH_LEAD_MS = 300
+internal const val SPEECH_TAIL_MS = 500
+
+/** The part of a recording Whisper transcribes: from [SPEECH_LEAD_MS] before the speech ([first], -1 for none:
+ * all of it) to [SPEECH_TAIL_MS] after it ([last], where it ends), within the [count] samples recorded ([SpeechEdges]).
+ * Quiet around the speech only slows Whisper (3 s of speech in a 60 s recording took 8.5× as long) and
+ * invites stray words ("you", a repeated sentence); pauses between words stay. */
+internal fun speechSpan(first: Int, last: Int, count: Int, rate: Int = 16_000): IntRange =
+    if (first < 0) 0 until count
+    else maxOf(0, first - rate * SPEECH_LEAD_MS / 1000) until minOf(count, last + rate * SPEECH_TAIL_MS / 1000)
+
+/** Voiced 40 ms blocks less than SPEECH_GAP_MS apart form a stretch, which is speech once it holds SPEECH_MIN_MS of
+ * voice. A click, a knock or the tap on ✓ (one or two loud blocks) away from the speech never is, so it doesn't stretch
+ * what Whisper hears; any word is longer. */
+internal const val SPEECH_GAP_MS = 300
+internal const val SPEECH_MIN_MS = 120
+
+/** Where speech starts ([first], -1 for none yet) and ends ([last]) in a recording, fed its blocks in order. */
+internal class SpeechEdges(private val rate: Int = 16_000) {
+    var first = -1
+        private set
+    var last = 0
+        private set
+    private var start = -1
+    private var end = 0
+    private var voice = 0
+    fun block(at: Int, n: Int, voiced: Boolean) {
+        if (!voiced) return
+        if (start < 0 || at - end > rate * SPEECH_GAP_MS / 1000) { start = at; voice = 0 }
+        voice += n; end = at + n
+        if (voice >= rate * SPEECH_MIN_MS / 1000) { if (first < 0) first = start; last = end }
+    }
+}
+
+/** Names a dictation's decode to whisper.cpp, in this process (Home and the keyboard share the model). */
+private val jobs = AtomicLong()
 
 // The IME calls start/finish/cancel on the main thread. One worker records, another transcribes,
 // so a dictation can start while the one before is still transcribing (as desktop Hex queues
@@ -26,6 +68,7 @@ internal class MicCapture(
     private val insert: (String, SpeechOptions) -> Unit,
 ) {
     private class Ticket(val options: SpeechOptions) {
+        val job = jobs.incrementAndGet()
         @Volatile var finish = false
         @Volatile var cancelled = false
         var done = false
@@ -39,6 +82,8 @@ internal class MicCapture(
     private var active: Ticket? = null
     /** Dictations that stopped recording, oldest first, until their text is inserted. */
     private val queue = ArrayDeque<Ticket>()
+    /** The dictation Whisper is decoding, so discarding it stops the decode. */
+    @Volatile private var decoding: Ticket? = null
     var phase = SpeechPhase.Idle
         private set
     /** Whether a new dictation can start: nothing holds the microphone. */
@@ -81,12 +126,14 @@ internal class MicCapture(
         } else cancel()
     }
 
-    /** Leaving the field: nothing recording or transcribing may reach another editor. */
+    /** Leaving the field: nothing recording or transcribing may reach another editor. A decode in progress
+     * stops too, or the next dictation's load and decode would wait for it. */
     fun cancel() {
         active?.cancelled = true
         active = null
         queue.forEach { it.cancelled = true }
         queue.clear()
+        decoding?.takeIf { it.cancelled }?.let { recognizer.abort(it.job) }
         publish(SpeechPhase.Idle)
     }
 
@@ -118,28 +165,32 @@ internal class MicCapture(
         publish(current(), shown)
     }
 
-    /** Recording stopped with audio to transcribe: queue it behind earlier dictations. */
-    private fun transcribe(ticket: Ticket, pcm: ShortArray, count: Int) = main.post {
+    /** Recording stopped with audio to transcribe: queue it behind earlier dictations. [note] goes with its text. */
+    private fun transcribe(ticket: Ticket, pcm: ShortArray, count: Int, note: String?) = main.post {
         if (active === ticket) active = null
         if (ticket.cancelled) { publish(current()); return@post }
         queue.addLast(ticket)
         publish(current())
         transcriber.execute {
+            // Set before the check: cancel() either sees it and stops the decode, or this sees the ticket cancelled.
+            decoding = ticket
             try {
                 if (ticket.cancelled) return@execute
                 val options = ticket.options
                 val raw = recognizer.decode(pcm, count, options.spoken.code, options.translate,
-                    options.vocabulary.takeIf { it.isNotEmpty() }?.joinToString(", "))
+                    options.vocabulary.takeIf { it.isNotEmpty() }?.joinToString(", "), ticket.job)
                 if (ticket.cancelled) return@execute
                 when (val text = raw?.let { SpokenText.format(it, options) }) {
                     null -> complete(ticket, "Couldn’t transcribe. Try again.")
                     "" -> complete(ticket, "No speech heard")
-                    else -> complete(ticket, text = text)
+                    else -> complete(ticket, note, text)
                 }
             } catch (_: UnsatisfiedLinkError) {
                 complete(ticket, "Speech model unavailable")
             } catch (_: Exception) {
                 complete(ticket, "Couldn’t transcribe. Try again.")
+            } finally {
+                decoding = null
             }
         }
     }
@@ -162,6 +213,7 @@ internal class MicCapture(
             .setBufferSizeInBytes(maxOf(minBuffer, rate * 2 * 2)).build()
         var count = 0
         var voiced = 0
+        val edges = SpeechEdges(rate)
         var lastUpdate = 0L
         try {
             check(record.state == AudioRecord.STATE_INITIALIZED)
@@ -177,6 +229,7 @@ internal class MicCapture(
                 for (i in count until count + n) energy += pcm[i].toDouble() * pcm[i]
                 val rms = sqrt(energy / n) / 32768.0
                 if (rms > .004) voiced += n
+                edges.block(count, n, rms > .004)
                 count += n
                 val now = SystemClock.elapsedRealtime()
                 if (now - lastUpdate >= 75) {
@@ -189,13 +242,19 @@ internal class MicCapture(
                 if (record.recordingState == AudioRecord.RECORDSTATE_RECORDING) record.stop()
             } finally { record.release() }
         }
+        val span = speechSpan(edges.first, edges.last, count, rate)
         // Only with "setprop log.tag.HexSpeech DEBUG": how much audio arrived, never the audio or its words.
-        if (Log.isLoggable(LOG_TAG, Log.DEBUG)) Log.d(LOG_TAG, "captured $count samples, $voiced voiced")
+        if (Log.isLoggable(LOG_TAG, Log.DEBUG)) Log.d(LOG_TAG, "captured $count samples, $voiced voiced, kept ${span.first}..${span.last + 1}")
         if (ticket.cancelled) return
         if (voiced < rate / 10 || count < rate / 4) {
             complete(ticket, "No speech heard")
             return
         }
-        transcribe(ticket, pcm, maxOf(count, rate + rate / 10))
+        // Whisper hears the speech and its margins, at least 1.1 s (zeros after it, as before).
+        val kept = span.last + 1 - span.first
+        if (span.first > 0) pcm.copyInto(pcm, 0, span.first, span.last + 1)
+        val padded = maxOf(kept, rate + rate / 10)
+        pcm.fill(0, kept, padded)
+        transcribe(ticket, pcm, padded, if (count == pcm.size) "Stopped at 1 minute" else null)
     }
 }

@@ -41,6 +41,7 @@ internal fun Context.speechNote(note: String?) = when (note) {
     "Couldn’t transcribe. Try again." -> getString(R.string.keyboard_note_transcribe)
     "No speech heard" -> getString(R.string.keyboard_note_no_speech)
     "Speech model unavailable" -> getString(R.string.keyboard_note_model)
+    "Stopped at 1 minute" -> getString(R.string.keyboard_note_minute)
     else -> note
 }
 
@@ -93,7 +94,7 @@ class HexKeyboard : InputMethodService() {
         getSharedPreferences("typing", MODE_PRIVATE).registerOnSharedPreferenceChangeListener(typingChanged)
         contentResolver.registerContentObserver(UserDictionary.Words.CONTENT_URI, true, dictionaryChanged)
         capture = MicCapture(LocalSpeech(applicationContext),
-            update = { phase, note -> view?.status(phase, speechNote(note) ?: idleHint()) },
+            update = { phase, note -> view?.status(phase, speechNote(note) ?: idleHint(), note != null) },
             meter = { view?.setLevel(it) }, insert = ::commitSpeech)
     }
     override fun onEvaluateFullscreenMode() = false

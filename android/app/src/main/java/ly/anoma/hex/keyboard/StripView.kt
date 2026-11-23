@@ -67,7 +67,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val clipboard = context.getSystemService(ClipboardManager::class.java)
     // Undo dictation, in the slots' place after a dictation (iPhone Hex's chip).
     private val undoChip = TextView(context)
+    private val undoBox = FrameLayout(context)
     private var undoing = false
+    /** The hint line holds a dictation's note ("No speech heard", "Stopped at 1 minute"), not the idle hint. */
+    private var noting = false
     // A dismissible line in the hint's place (Hex Preview's update): it goes for this field once typing starts.
     private val noticeRow = LinearLayout(context)
     private val noticeText = TextView(context)
@@ -150,7 +153,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         }
         toolsRow.visibility = GONE
         idleRow.addView(toolsRow, LinearLayout.LayoutParams(0, -1, 1f))
-        val undoBox = FrameLayout(context).apply {
+        undoBox.apply {
             undoChip.apply {
                 text = context.getString(R.string.keyboard_undo_dictation); useInter(500); textSize = 14f; setTextColor(ink)
                 gravity = Gravity.CENTER; includeFontPadding = false; isFocusable = true
@@ -240,8 +243,9 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
      * otherwise the likeliest word in the middle and the next on the left, as Gboard and iPhone place
      * them. The emoji always keeps the last slot (Labs › Keyboard › Emoji suggestions). */
     fun suggestions(slots: List<Suggestion>) {
-        // Typing started: the suggestions matter more than the notice, which comes back in the next field.
-        if (slots.any { it.kind == Suggestion.Kind.Typed }) notice = null
+        // Typing or swiping started: the suggestions (a swipe's word so far) matter more than the notice, which comes
+        // back in the next field.
+        if (slots.any { it.kind == Suggestion.Kind.Typed } || ime.engine.swiping) notice = null
         val shown = Suggestion.place(slots)
         offered = Array(Suggestion.SLOTS) { shown[it]?.text }
         var chip = -1
@@ -299,7 +303,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         update()
     }
     fun update() {
-        val noted = idle && !choosing && notice != null
+        // A dictation's note wins over the notice (Hex Preview's update line), which returns with the idle hint:
+        // after typing, a tap or the next dictation.
+        val spoken = idle && !choosing && noting
+        val noted = idle && !choosing && notice != null && !spoken
         val undo = idle && !choosing && undoing && !noted
         val show = idle && !choosing && !undo && !noted && offered.any { it != null }
         val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
@@ -307,14 +314,20 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             emoji = { ime.engine.emojiAvailable }, canUndo = { ime.engine.canUndoAutocorrection },
             clipboard = { clipboard.hasPrimaryClip() })
         noticeRow.visibility = if (noted) VISIBLE else GONE
-        (undoChip.parent as View).visibility = if (undo) VISIBLE else GONE
+        undoBox.visibility = if (undo) VISIBLE else GONE
+        // A note that came with text ("Stopped at 1 minute") shares the line with Undo, which then takes only its width,
+        // and the menu key shrinks to ⋯ as it does beside suggestions, so the note isn't cut short.
+        val shared = undo && spoken
+        (undoBox.layoutParams as LinearLayout.LayoutParams).apply {
+            if ((weight == 0f) != shared) { width = if (shared) LinearLayout.LayoutParams.WRAP_CONTENT else 0; weight = if (shared) 0f else 1f; undoBox.layoutParams = this }
+        }
         slotRow.visibility = if (show) VISIBLE else GONE
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
         toolEmoji.visibility = if (StripTool.Emoji in tools) VISIBLE else GONE
         toolPaste.visibility = if (StripTool.Paste in tools) VISIBLE else GONE
         toolUndo.visibility = if (StripTool.Undo in tools) VISIBLE else GONE
-        statusText.visibility = if (idle && !show && !undo && !noted && tools.isEmpty()) VISIBLE else GONE
-        menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
+        statusText.visibility = if (idle && !show && (!undo || spoken) && !noted && tools.isEmpty()) VISIBLE else GONE
+        menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show || shared -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
     }
     /** The menu opened: the hint line shows its page's title and goes back a page when tapped. */
@@ -322,9 +335,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     fun menuClosed() { statusText.isClickable = false; menuKey.text = context.getString(R.string.keyboard_menu_open); statusText.text = hint }
     fun title(text: String) { statusText.text = text }
 
-    /** Shows [phase]'s strip. The caller has already closed the menu if dictation is running. */
-    fun status(phase: SpeechPhase, hint: String, menuVisible: Boolean) {
+    /** Shows [phase]'s strip; [note] says [hint] is a dictation's note. The caller has already closed the menu if
+     * dictation is running. */
+    fun status(phase: SpeechPhase, hint: String, menuVisible: Boolean, note: Boolean = false) {
         this.hint = hint
+        noting = note && phase == SpeechPhase.Idle
         val wasIdle = idleRow.visibility == VISIBLE
         idle = phase == SpeechPhase.Idle
         val processing = phase == SpeechPhase.Transcribing

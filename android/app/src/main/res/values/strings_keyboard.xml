@@ -9,6 +9,8 @@
     <string name="keyboard_note_transcribe">Couldn’t transcribe. Try again.</string>
     <string name="keyboard_note_no_speech">No speech heard</string>
     <string name="keyboard_note_model">Speech model unavailable</string>
+    <!-- A recording reached its 1-minute limit: its text is inserted with this note. -->
+    <string name="keyboard_note_minute">Stopped at 1 minute</string>
     <string name="keyboard_cancel_dictation">Cancel dictation</string>
     <string name="keyboard_finish_dictation">Finish dictation</string>
     <string name="keyboard_undo_dictation">Undo dictation</string>

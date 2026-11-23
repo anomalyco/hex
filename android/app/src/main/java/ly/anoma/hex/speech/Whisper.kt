@@ -10,13 +10,17 @@ import java.util.concurrent.TimeUnit
 internal interface Recognizer {
     /** Loads the model ahead of a dictation, while it records (on the transcription thread). */
     fun prepare() {}
-    fun decode(pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String? = null): String?
+    /** [job] names this decode, so [abort] can stop it. */
+    fun decode(pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String? = null, job: Long = 0): String?
+    /** Stops [job]'s decode, from any thread, if it is running: the person discarded it. */
+    fun abort(job: Long) {}
 }
 
 internal class LocalSpeech(private val app: Context) : Recognizer {
     override fun prepare() = SpeechModel.prepare(app)
-    override fun decode(pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?): String? =
-        SpeechModel.decode(app, pcm, count, language, translate, prompt)
+    override fun decode(pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? =
+        SpeechModel.decode(app, pcm, count, language, translate, prompt, job)
+    override fun abort(job: Long) = SpeechModel.abort(job)
 }
 
 /** The one speech model in Hex's process, shared by the keyboard and Home. It loads when a dictation
@@ -44,17 +48,24 @@ internal object SpeechModel {
 
     @Synchronized fun prepare(app: Context) { load(app); keep() }
 
-    @Synchronized fun decode(app: Context, pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?): String? {
+    /** The last decode stopped by [abort]: its empty result says nothing about the model. */
+    @Volatile private var abandoned = 0L
+
+    @Synchronized fun decode(app: Context, pcm: ShortArray, count: Int, language: String, translate: Boolean, prompt: String?, job: Long): String? {
         val small = load(app)
-        var bytes = if (handle != 0L) Whisper.decode(handle, small, pcm, count, threads, language, translate, prompt) else null
+        var bytes = if (handle != 0L) Whisper.decode(handle, small, pcm, count, threads, language, translate, prompt, job) else null
         // Unusable downloaded weights fall back to the bundled model.
-        if (bytes == null && small) {
+        if (bytes == null && small && abandoned != job) {
             unload()
-            if (open(app, null)) bytes = Whisper.decode(handle, false, pcm, count, threads, language, translate, prompt)
+            if (open(app, null)) bytes = Whisper.decode(handle, false, pcm, count, threads, language, translate, prompt, job)
         }
         keep()
         return bytes?.decodeToString()?.trim()
     }
+
+    /** Ends [job]'s decode at whisper.cpp's next check (after an encoder pass or a token). Not under the lock,
+     * which that decode holds. */
+    fun abort(job: Long) { abandoned = job; Whisper.abort(job) }
 
     /** Frees the model off the caller's thread (it may wait for a dictation in progress). */
     fun releaseSoon() { timer.execute(::release) }
@@ -90,5 +101,6 @@ internal object Whisper {
     external fun load(assets: AssetManager, file: String?): Long
     external fun free(handle: Long)
     external fun decode(handle: Long, small: Boolean, pcm: ShortArray, count: Int, threads: Int,
-                        language: String, translate: Boolean, prompt: String?): ByteArray?
+                        language: String, translate: Boolean, prompt: String?, job: Long): ByteArray?
+    external fun abort(job: Long)
 }
