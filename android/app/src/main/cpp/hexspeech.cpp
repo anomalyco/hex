@@ -6,6 +6,8 @@
 #include <whisper.h>
 
 #include <algorithm>
+#include <atomic>
+#include <chrono>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -56,9 +58,18 @@ Java_ly_anoma_hex_speech_Whisper_free(JNIEnv *, jobject, jlong ctx) {
 #endif
 }
 
+// The dictation the person discarded (✕, or Home's Cancel), by MicCapture's job number. whisper.cpp asks after each
+// encoder pass and each decoded token, so its decode ends within one of those and the next dictation's load and
+// decode no longer wait for the whole abandoned one. Set from any thread, outside the model's lock.
+static std::atomic<jlong> abandoned{0};
+
+extern "C" JNIEXPORT void JNICALL
+Java_ly_anoma_hex_speech_Whisper_abort(JNIEnv *, jobject, jlong job) { abandoned.store(job); }
+
 extern "C" JNIEXPORT jbyteArray JNICALL
 Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboolean small, jshortArray samples,
-                                         jint count, jint threads, jstring language, jboolean translate, jstring prompt) {
+                                         jint count, jint threads, jstring language, jboolean translate, jstring prompt,
+                                         jlong job) {
     auto ctx = reinterpret_cast<whisper_context *>(handle);
     if (!ctx || count < 1 || count > env->GetArrayLength(samples)) return nullptr;
     std::vector<float> pcm(count);
@@ -94,6 +105,20 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
         const int frames = static_cast<int>(std::ceil(count * 50.0 / 16000)) + 192;
         params.audio_ctx = std::min(512, (frames + 63) / 64 * 64);
     }
+    // A language the model handles badly (Kazakh told English) repeats itself to Whisper's 220-token limit, then
+    // retries with five sampled decoders at each of up to five more temperatures: 2–5× the time, for nonsense.
+    // Speech measured at most 10 tokens a second (Kazakh in Kazakh; Swedish 6, English 3.6), so each 30 s window
+    // may have 15 a second plus 16, and a decode that fails Whisper's checks is retried once, with one decoder,
+    // at 0.2. whisper.cpp tries params.temperature, then each step up to 1.0, and decodes greedily at any
+    // temperature <= 0: from -0.8 in steps of 1.0 that is greedy, then 0.2. A single retry any hotter (0.6, 1.0)
+    // invented fluent English or mixed scripts instead. The 40 benchmark clips and 15 long ones never fall back,
+    // and keep the same text.
+    params.max_tokens = std::min(220, static_cast<int>(std::ceil(std::min(count, 30 * 16000) * 15.0 / 16000)) + 16);
+    params.greedy.best_of = 1;
+    params.temperature = -0.8f;
+    params.temperature_inc = 1.0f;
+    params.abort_callback = [](void *mine) { return abandoned.load() == *static_cast<const jlong *>(mine); };
+    params.abort_callback_user_data = &job;
     params.no_context = true;
     params.no_timestamps = true;
     params.print_progress = params.print_realtime = params.print_timestamps = params.print_special = false;
@@ -103,12 +128,19 @@ Java_ly_anoma_hex_speech_Whisper_decode(JNIEnv *env, jobject, jlong handle, jboo
     // still reads, so a short dictation after a long one could come out differently (even in another language).
     std::unique_ptr<whisper_state, decltype(&whisper_free_state)> state(whisper_init_state(ctx), whisper_free_state);
     if (!state) return nullptr;
-    if (whisper_full_with_state(ctx, state.get(), params, pcm.data(), count) != 0) return nullptr;
+#ifndef NDEBUG
+    const auto started = std::chrono::steady_clock::now();
+#endif
+    const int status = whisper_full_with_state(ctx, state.get(), params, pcm.data(), count);
 #ifndef NDEBUG
     // Diagnostics identify the engine and task only; no audio or recognized text is logged.
-    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "%s %s complete, %d threads, window %d",
-                        small ? "small" : "tiny", translate ? "translate" : "transcribe", params.n_threads, params.audio_ctx);
+    const auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now() - started).count();
+    __android_log_print(ANDROID_LOG_DEBUG, "HexSpeech", "%s %s %s in %lld ms, %d samples, %d threads, window %d, max %d tokens",
+                        small ? "small" : "tiny", translate ? "translate" : "transcribe",
+                        status == 0 ? "complete" : abandoned.load() == job ? "abandoned" : "failed", static_cast<long long>(ms),
+                        count, params.n_threads, params.audio_ctx, params.max_tokens);
 #endif
+    if (status != 0) return nullptr;
     std::string text;
     for (int i = 0; i < whisper_full_n_segments_from_state(state.get()); ++i)
         text += whisper_full_get_segment_text_from_state(state.get(), i);

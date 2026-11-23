@@ -24,6 +24,7 @@ import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
 import ly.anoma.hex.speech.typingLayout
+import ly.anoma.hex.speech.speechSpan
 
 class InsertionTest {
     @Test fun replacesASelectedWordWithoutJoiningItsNeighbours() {
@@ -481,6 +482,17 @@ class InsertionTest {
         assertEquals(DictationLanguage.German, DictationLanguage.automatic(null, listOf("ja", "de", "en")))
         assertEquals(DictationLanguage.Norwegian, DictationLanguage.automatic(null, listOf("nb")))
         assertEquals(DictationLanguage.English, DictationLanguage.automatic(null, listOf("ja")))
+    }
+    @Test fun whisperHearsTheSpeechAndAMarginNotTheQuietAround() {
+        val second = 16_000
+        // A tap, 3 s of speech from 1 s, then quiet to the 60 s limit: 0.3 s before it to 0.5 s after it.
+        assertEquals(second * 7 / 10 until second * 9 / 2, speechSpan(second, 4 * second, 60 * second))
+        // Speech from the first block to the last keeps the whole recording.
+        assertEquals(0 until 3 * second, speechSpan(0, 3 * second, 3 * second))
+        // The margins stop at the recording's ends.
+        assertEquals(0 until 2 * second, speechSpan(second / 10, 2 * second - 640, 2 * second))
+        // Nothing voiced: the recording as it was (MicCapture says "No speech heard" before it gets here).
+        assertEquals(0 until 5 * second, speechSpan(-1, 0, 5 * second))
     }
     @Test fun frenchItalianAndDutchAreDictationLanguages() {
         assertEquals(DictationLanguage.French, DictationLanguage.automatic(Spoken.French, listOf("en")))
