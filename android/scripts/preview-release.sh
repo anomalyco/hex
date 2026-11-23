@@ -17,6 +17,9 @@
 # Every build is signed with the Hex Preview key: Android refuses an update signed with any other. The key and its
 # keystore.properties stay outside the repository, in ~/.config/hex-android-preview on this Mac and the builder.
 set -euo pipefail
+# ferry's connection to a busy builder can drop; every step it retries is safe to repeat.
+retry() { for _ in 1 2 3 4; do "$@" && return 0; sleep 5; done; "$@"; }
+
 
 repo=anomalyco/hex channel=android-preview commit="" notes="" builder=anomastudio
 while [ $# -gt 0 ]; do
@@ -59,29 +62,29 @@ current=$(curl -fsSL "https://api.github.com/repos/$repo/contents/latest.json?re
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 git -C "$root" archive "$commit" android | tar -x -C "$work"
 remote=dev/hex-preview-build/$build
-ferry sh "$builder" "rm -rf ~/$remote && mkdir -p ~/$remote ~/.config/hex-android-preview && chmod 700 ~/.config/hex-android-preview"
+retry ferry sh "$builder" "rm -rf ~/$remote && mkdir -p ~/$remote ~/.config/hex-android-preview && chmod 700 ~/.config/hex-android-preview"
 ferry sh "$builder" '[ -f ~/.config/hex-android-preview/preview.jks ] && [ -f ~/.config/hex-android-preview/keystore.properties ]' || {
-  ferry cp "$key/preview.jks" "$builder:.config/hex-android-preview/preview.jks" >/dev/null
-  ferry cp "$key/keystore.properties" "$builder:.config/hex-android-preview/keystore.properties" >/dev/null
-  ferry sh "$builder" 'chmod 600 ~/.config/hex-android-preview/*'
+  retry ferry cp "$key/preview.jks" "$builder:.config/hex-android-preview/preview.jks" >/dev/null
+  retry ferry cp "$key/keystore.properties" "$builder:.config/hex-android-preview/keystore.properties" >/dev/null
+  retry ferry sh "$builder" 'chmod 600 ~/.config/hex-android-preview/*'
 }
-ferry cp "$work/android" "$builder:$remote/" >/dev/null
+retry ferry cp "$work/android" "$builder:$remote/" >/dev/null
 jdk='export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=$HOME/Library/Android/sdk; export PATH=$JAVA_HOME/bin:$PATH;'
 # Detached, so a dropped connection to the builder doesn't stop the build; the exit code lands in a file.
-ferry sh "$builder" --detach "$jdk cd ~/$remote/android && ./gradlew --no-daemon -q :app:assemblePreview -PhexPreviewBuild=$build \
+retry ferry sh "$builder" --detach "[ -f ~/$remote/build.log ] && exit 0; $jdk cd ~/$remote/android && ./gradlew --no-daemon -q :app:assemblePreview -PhexPreviewBuild=$build \
   -PhexPreviewChannel=$raw > ~/$remote/build.log 2>&1; echo \$? > ~/$remote/build.exit" >/dev/null
 for _ in $(seq 1 240); do ferry sh "$builder" "test -f ~/$remote/build.exit" 2>/dev/null && break; sleep 15; done
-if [ "$(ferry sh "$builder" "cat ~/$remote/build.exit")" != 0 ]; then
+if [ "$(retry ferry sh "$builder" "cat ~/$remote/build.exit")" != 0 ]; then
   ferry sh "$builder" "tail -40 ~/$remote/build.log" >&2; echo "the build failed on $builder" >&2; exit 1
 fi
 apk=HexPreview-$name.apk
 out=$root/android/build/preview/$build; mkdir -p "$out"
-ferry cp "$builder:$remote/android/app/build/outputs/apk/preview/app-preview.apk" "$out/$apk" >/dev/null
+retry ferry cp "$builder:$remote/android/app/build/outputs/apk/preview/app-preview.apk" "$out/$apk" >/dev/null
 
 # Check what was built before anything is published.
-tools=$(ferry sh "$builder" 'ls -d ~/Library/Android/sdk/build-tools/36.0.0')
-signer=$(ferry sh "$builder" "$jdk $tools/apksigner verify --print-certs ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | sed -n 's/.*SHA-256 digest: //p' | tr a-f A-F)
-badging=$(ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | head -1)
+tools=$(retry ferry sh "$builder" 'ls -d ~/Library/Android/sdk/build-tools/36.0.0')
+signer=$(retry ferry sh "$builder" "$jdk $tools/apksigner verify --print-certs ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | sed -n 's/.*SHA-256 digest: //p' | tr a-f A-F)
+badging=$(retry ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | head -1)
 [ "$signer" = "$fingerprint" ] || { echo "APK is signed with $signer, not the Hex Preview key" >&2; exit 1; }
 case "$badging" in *"name='ly.anoma.hex.preview' versionCode='$build' versionName='$name'"*) ;; *) echo "unexpected APK: $badging" >&2; exit 1 ;; esac
 sha=$(shasum -a 256 "$out/$apk" | cut -d' ' -f1); size=$(stat -f %z "$out/$apk")
