@@ -219,6 +219,7 @@ define_features! {
     DropTranscribe => labs(drop_transcribe), "drop-transcribe", Models, Everyone, EVERY, 20261113;
     PasteLastPicker => labs(paste_last_picker), "paste-last-picker", History, Dev, MACOS, 20261119;
     VocabularyFiles => labs(vocabulary_files), "vocabulary-files", Dictation, Everyone, EVERY, 20261120;
+    VocabularyMenu => labs(vocabulary_menu), "vocabulary-menu", Dictation, Everyone, MACOS, 20261123;
     AnnotateAgentTools => labs(annotate_agent_tools), "annotate-agent-tools", Annotate, Everyone, EVERY, 20261121;
     AnnotateAgentInstall => labs(annotate_agent_install), "annotate-agent-install", Annotate, Everyone, EVERY, 20261121;
     Signature => labs(signature), "signature", Output, Everyone, EVERY, 20261121, extra: ["labs.signature_text"];

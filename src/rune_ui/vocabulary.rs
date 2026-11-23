@@ -186,7 +186,7 @@ fn budget_note(ui: &Ui) -> Option<String> {
 
 /// Opens the sheet alone, with an empty row to type into when the list is
 /// empty.
-pub(super) fn open(ui: &mut Ui) {
+pub(crate) fn open(ui: &mut Ui) {
     super::settings::cancel_capture(ui);
     ui.open_modal(Modal::Vocabulary);
     ui.vocabulary.status = None;
@@ -224,6 +224,18 @@ fn add_row(ui: &mut Ui) -> u64 {
 fn add_term(ui: &mut Ui, tx: &mut Tx) {
     ui.vocabulary.added = Some(add_row(ui));
     tx.scroll_to_bottom("term-scroll");
+}
+
+/// The menu bar's Add term: the sheet, with a new focused row at its end.
+/// An empty list already opens with a focused blank row, so this adds none
+/// then.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub(crate) fn open_new_term(ui: &mut Ui, tx: &mut Tx) {
+    let empty = ui.vocabulary.rows.is_empty();
+    open(ui);
+    if !empty {
+        add_term(ui, tx);
+    }
 }
 
 fn row_key(id: u64) -> String {
@@ -799,6 +811,40 @@ mod tests {
 
         open(&mut ui);
         assert_eq!(ui.vocabulary.rows.len(), 1);
+    }
+
+    #[test]
+    fn adding_a_term_from_the_menu_opens_the_sheet_with_one_blank_row_last() {
+        let mut ui = ui();
+        ui.settings.vocabulary = vec![VocabularyEntry {
+            term: "Rune".into(),
+            sounds_like: vec!["roon".into()],
+        }];
+        ui.vocabulary = VocabularyEditor::new(&ui.settings.vocabulary);
+        open_new_term(&mut ui, &mut Tx::default());
+        assert!(ui.is_modal(Modal::Vocabulary));
+        assert_eq!(terms(&ui), ["Rune", ""]);
+        let last = ui.vocabulary.rows.last().unwrap();
+        assert_eq!(ui.vocabulary.added, Some(last.id));
+        assert!(last.term.focused);
+        assert!(!last.sounds_like.focused);
+
+        // Nothing was typed, so Done saves only the term already listed.
+        close(&mut ui);
+        assert_eq!(ui.settings.vocabulary, ui.vocabulary.project());
+        assert_eq!(ui.settings.vocabulary.len(), 1);
+        assert_eq!(ui.settings.vocabulary[0].term, "Rune");
+    }
+
+    #[test]
+    fn adding_a_term_to_an_empty_list_opens_the_one_blank_row_it_made() {
+        let mut ui = ui();
+        open_new_term(&mut ui, &mut Tx::default());
+        assert!(ui.is_modal(Modal::Vocabulary));
+        assert_eq!(ui.vocabulary.rows.len(), 1);
+        assert!(ui.vocabulary.rows[0].term.focused);
+        // The row the sheet opens with never animates in.
+        assert_eq!(ui.vocabulary.added, None);
     }
 
     #[test]

@@ -272,6 +272,9 @@ pub struct LabsSettings {
     /// The Vocabulary sheet imports terms from a CSV file and exports the
     /// list as one (Labs › Vocabulary files).
     pub vocabulary_files: bool,
+    /// The menu bar's Vocabulary submenu adds a term or opens the sheet, and
+    /// lists the last five saved terms (macOS; Labs › Vocabulary menu).
+    pub vocabulary_menu: bool,
     /// `hex annotate inspect`, `zoom`, `frames`, and `skill` read a capture
     /// bundle for a coding agent (Labs › Agent tools for captures).
     pub annotate_agent_tools: bool,
@@ -528,6 +531,7 @@ impl Default for LabsSettings {
             drop_transcribe: false,
             paste_last_picker: false,
             vocabulary_files: false,
+            vocabulary_menu: false,
             annotate_agent_tools: false,
             annotate_agent_install: false,
             dictate_while_annotating: false,

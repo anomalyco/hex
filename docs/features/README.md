@@ -1727,7 +1727,12 @@ Menu bar and Settings                    // maintenance
 │   │   neutral keyboard, and a restart starts unpaused
 │   ├── Paste Last Dictation ⌥⇧V (saved binding), Copy Recent Dictation ▸ (Labs),
 │   │   Copy Last Meeting Transcript (Meetings on), Restore Last Capture (Labs ›
-│   │   Screenshots on; dimmed until a capture card was closed), Speech Model ▸
+│   │   Screenshots on; dimmed until a capture card was closed), Speech Model ▸,
+│   │   Vocabulary ▸ (Labs › Vocabulary menu, off: Add term… opens Settings on
+│   │   the Vocabulary sheet with a new focused row, then the last five saved
+│   │   terms newest first as informational rows, then Open vocabulary…, which
+│   │   opens the sheet alone; off, the row is hidden and the menu is unchanged,
+│   │   labs.md)
 │   ├── Settings… ⌘, · Check for Updates… · Quit Hex ⌘Q
 │   │   └── Labs > ⌘Q closes Settings (off, #1473) -> ⌘Q closes the Settings
 │   │       window instead; dictation keeps running, the menu bar icon quits (labs.md)
@@ -1739,8 +1744,9 @@ Menu bar and Settings                    // maintenance
 │   │   translate. Check: the_menu_follows_the_interface_language
 │   └── check: the_menu_reads_upcoming_then_meetings_then_actions_then_the_app,
 │       paste_last_shows_the_saved_binding_or_nothing,
-│       the_pause_row_reads_pause_or_resume (status_item.rs; the
-│       row order and key equivalents only, no native menu is drawn)
+│       the_pause_row_reads_pause_or_resume,
+│       vocabulary_lists_the_last_five_terms_newest_first (status_item.rs;
+│       the row order and key equivalents only, no native menu is drawn)
 ├── Icon -> 18 pt monochrome Hex mark template (recording variant + elapsed time)
 │   └── Labs > Hide menu bar icon (off, #1064) -> hidden unless a meeting is under
 │       way; shortcuts keep working; Finder or Spotlight reopen -> Settings (labs.md)

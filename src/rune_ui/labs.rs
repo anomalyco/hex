@@ -631,6 +631,10 @@ fn rows(ui: &Ui) -> Vec<Row> {
         }
     }
     rows.push(row(Feature::VocabularyFiles, Some(&BOOK)));
+    // macOS's menu-bar menu offers it, right under Speech Model.
+    if caps.os == super::platform::Os::Macos {
+        rows.push(row(Feature::VocabularyMenu, None));
+    }
     // macOS reads the focused window through Accessibility as a capture
     // becomes real.
     if caps.os == super::platform::Os::Macos {
@@ -1013,6 +1017,7 @@ fn row_key(lab: Lab) -> &'static str {
         Feature::ModesEditor => "lab-modes-editor",
         Feature::DropTranscribe => "lab-drop-transcribe",
         Feature::VocabularyFiles => "lab-vocabulary-files",
+        Feature::VocabularyMenu => "lab-vocabulary-menu",
         Feature::DictationStyle => "lab-dictation-style",
     }
 }

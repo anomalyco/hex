@@ -379,6 +379,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Light", ["Lekkie", "轻", "弱", "Leicht", "Ligero", "Слабке"]),
     ("Strong", ["Mocne", "强", "強", "Stark", "Fuerte", "Сильне"]),
     ("Add term", ["Dodaj termin", "添加术语", "用語を追加", "Begriff hinzufügen", "Añadir término", "Додати термін"]),
+    ("Open vocabulary", ["Otwórz słownictwo", "打开词汇表", "語彙を開く", "Vokabular öffnen", "Abrir vocabulario", "Відкрити словник"]),
     ("1 term", ["1 termin", "1 个术语", "1 件の用語", "1 Begriff", "1 término", "1 термін"]),
     ("{} terms", ["Terminy: {}", "{} 个术语", "{} 件の用語", "{} Begriffe", "{} términos", "Термінів: {}"]),
     ("Term (e.g. cappuccino)", ["Termin (np. cappuccino)", "术语（如 cappuccino）", "用語（例: cappuccino）", "Begriff (z. B. cappuccino)", "Término (p. ej., cappuccino)", "Термін (напр., cappuccino)"]),
