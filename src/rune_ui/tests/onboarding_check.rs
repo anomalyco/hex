@@ -310,7 +310,7 @@ fn onboarding_walkthrough() {
     let installed = |ui: &Ui| {
         let selection = &ui.settings.transcription;
         crate::transcription::models::is_installed(
-            crate::transcription::models::definition(selection.model),
+            &crate::transcription::models::definition(selection.model),
             &selection.language,
         )
     };
@@ -344,7 +344,7 @@ fn onboarding_walkthrough() {
     let definition = crate::transcription::models::definition(model);
     let downloaded = std::sync::atomic::AtomicU64::new(0);
     let path = crate::transcription::models::download_with_progress(
-        definition,
+        &definition,
         &std::sync::atomic::AtomicBool::new(false),
         &downloaded,
     )
@@ -357,7 +357,7 @@ fn onboarding_walkthrough() {
     rt.state.settings.transcription = TranscriptionSelection { model, language };
     assert!(installed(&rt.state), "{} is installed", definition.name);
     assert!(
-        crate::transcription::models::is_verified(definition),
+        crate::transcription::models::is_verified(&definition),
         "{} is verified against its pin",
         definition.name
     );

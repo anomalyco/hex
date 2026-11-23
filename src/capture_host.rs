@@ -85,10 +85,12 @@ mod timeline;
 mod wav_file;
 mod words;
 
+#[cfg(all(test, target_os = "macos"))]
+use drawing::DRAW_HOLD;
+#[cfg(test)]
+use drawing::end_stroke;
 #[cfg(all(test, target_os = "linux"))]
 use drawing::ink_points;
-#[cfg(test)]
-use drawing::{DRAW_HOLD, end_stroke};
 #[cfg(target_os = "linux")]
 pub use drawing::{InkSpace, draw, pen_button};
 pub use drawing::{KeyUp, annotate_key_down, annotate_key_up, drawing, exit_drawing, toggle_pen};
@@ -752,7 +754,7 @@ const WORD_LAGS: &[(TranscriptionModelId, &str, WordLag)] = &[(
 )];
 
 fn word_lag(model: TranscriptionModelId) -> Option<&'static WordLag> {
-    let ModelRuntime::Gguf(artifact) = crate::transcription::models::definition(model).runtime
+    let ModelRuntime::Gguf(artifact) = &crate::transcription::models::definition(model).runtime
     else {
         return None;
     };

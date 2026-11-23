@@ -9,7 +9,7 @@ use super::settings::toggle_menu;
 use super::{Menu, Ui};
 use crate::app_settings::KeyboardModelChoice;
 use crate::desktop::i18n::tr;
-use crate::transcription::models::{self as transcription_models, ModelDefinition, ModelRuntime};
+use crate::transcription::models::{self as transcription_models, ModelDefinition};
 
 /// One row's keys and copy.
 pub(super) struct SpeechRow<'a> {
@@ -63,20 +63,18 @@ pub(super) fn setting(
     }];
     for model in transcription_models::all_models() {
         let fallback = ui.settings.transcription_for_model(model.id).language;
-        if !model.available()
-            || !matches!(model.runtime, ModelRuntime::Gguf(_))
-            || !ui.picker.installed(model, &fallback)
+        if !model.available() || !model.runtime.is_gguf() || !ui.picker.installed(&model, &fallback)
         {
             continue;
         }
         let language = match &choice {
             Some(choice) if model.supports_language(&choice.language) => choice.language.clone(),
-            _ => language_for(model, &fallback),
+            _ => language_for(&model, &fallback),
         };
         let id = model.id;
         let save = save.clone();
         choices.push(Choice {
-            label: model.name.into(),
+            label: model.name.to_string(),
             detail: None,
             selected: choice.as_ref().is_some_and(|choice| choice.model == id),
             choose: Box::new(move |ui| {
@@ -95,8 +93,8 @@ pub(super) fn setting(
         || tr("Don't switch").to_string(),
         |choice| {
             let model = transcription_models::definition(choice.model);
-            if ui.picker.installed(model, &choice.language) {
-                model.name.into()
+            if ui.picker.installed(&model, &choice.language) {
+                model.name.to_string()
             } else {
                 format!("{} · {}", model.name, tr("Not installed"))
             }

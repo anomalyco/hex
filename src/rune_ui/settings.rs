@@ -917,7 +917,7 @@ pub(super) fn transcription_status(ui: &Ui, p: Paint) -> Option<(String, rune::C
     let Some(model) = transcription.preparing else {
         return super::model_import::selection_notice(ui).map(|notice| (notice, p.warning()));
     };
-    let name = transcription_models::definition(model).name;
+    let name = transcription_models::definition(model).name.to_string();
     let stage = match transcription.preparation_stage {
         Some(ModelPreparationStage::Verifying) => tr("Verifying model").to_string(),
         Some(ModelPreparationStage::Loading) => tr("Loading model").to_string(),

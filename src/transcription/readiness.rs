@@ -3,10 +3,12 @@
 //! API, the control CLI, and every listener decide with it, so none of them
 //! calls a model ready while another refuses it.
 
+use std::borrow::Cow;
+
 use super::found_models;
 use super::models::{
-    ModelDefinition, ModelRuntime, TranscriptionModelId, VocabularyUse, all_models, is_installed,
-    is_verified, model_path,
+    ModelDefinition, TranscriptionModelId, VocabularyUse, all_models, is_installed, is_verified,
+    model_path,
 };
 
 /// One readiness snapshot for a speech model: whether its files are here,
@@ -23,9 +25,10 @@ pub struct ModelReadiness {
 /// Evaluates `model`'s readiness for `language`.
 pub fn readiness(model: &ModelDefinition, language: &str) -> ModelReadiness {
     let installed = is_installed(model, language);
-    let verified = match model.runtime {
-        ModelRuntime::Gguf(_) => is_verified(model),
-        ModelRuntime::AppleSpeech => installed,
+    let verified = if model.runtime.is_gguf() {
+        is_verified(model)
+    } else {
+        installed
     };
     let ready = installed && verified;
     ModelReadiness {
@@ -90,8 +93,8 @@ fn model_source_with(model: &ModelDefinition, installed: bool) -> String {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CatalogModelInfo {
     pub id: TranscriptionModelId,
-    pub id_str: &'static str,
-    pub name: &'static str,
+    pub id_str: String,
+    pub name: Cow<'static, str>,
     pub readiness: ModelReadiness,
     pub managed: bool,
     pub download_bytes: Option<u64>,
@@ -109,12 +112,12 @@ pub fn catalog_models(language: &str) -> Vec<CatalogModelInfo> {
         .into_iter()
         .filter(|model| model.available())
         .map(|model| {
-            let status = readiness(model, language);
-            let managed = matches!(model.runtime, ModelRuntime::AppleSpeech);
+            let status = readiness(&model, language);
+            let managed = !model.runtime.is_gguf();
             CatalogModelInfo {
                 id: model.id,
-                id_str: model.id.as_str(),
-                name: model.name,
+                id_str: model.id.as_str().to_string(),
+                name: model.name.clone(),
                 readiness: status,
                 managed,
                 download_bytes: model.download_bytes(),
@@ -123,7 +126,7 @@ pub fn catalog_models(language: &str) -> Vec<CatalogModelInfo> {
                 supports_language_detection: model.supports_language_detection,
                 streams: model.streams,
                 vocabulary: model.vocabulary_use(),
-                source: model_source_with(model, status.installed),
+                source: model_source_with(&model, status.installed),
             }
         })
         .collect()
@@ -133,20 +136,22 @@ pub fn catalog_models(language: &str) -> Vec<CatalogModelInfo> {
 mod tests {
     use super::*;
     use crate::transcription::models::{
-        GgufArtifact, MODELS, TranscriptionModelId, set_test_models_dir,
+        GgufArtifact, MODELS, ModelRuntime, TranscriptionModelId, set_test_models_dir,
     };
 
     #[test]
     fn readiness_distinguishes_missing_unverified_and_verified_gguf() {
         const ARTIFACT: GgufArtifact = GgufArtifact {
-            filename: "fixture.gguf",
+            filename: Cow::Borrowed("fixture.gguf"),
             stored_as: None,
             revision: "rev",
             repository: "example/fixture",
             bytes: 4,
-            sha256: "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+            sha256: Cow::Borrowed(
+                "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
+            ),
             architecture: "parakeet",
-            variant: "fixture",
+            variant: Cow::Borrowed("fixture"),
         };
         let dir = std::env::temp_dir().join(format!(
             "hex-readiness-{}-{:?}",
@@ -159,12 +164,12 @@ mod tests {
 
         let model = ModelDefinition {
             id: TranscriptionModelId::ParakeetV3,
-            name: "Fixture",
+            name: Cow::Borrowed("Fixture"),
             realtime: "100x",
             word_error_rate: None,
             streams: false,
-            runtime: ModelRuntime::Gguf(&ARTIFACT),
-            languages: &["en"],
+            runtime: ModelRuntime::Gguf(Cow::Borrowed(&ARTIFACT)),
+            languages: Cow::Borrowed(&["en"]),
             accepts_language_hint: false,
             supports_language_detection: false,
         };

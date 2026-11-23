@@ -40,7 +40,7 @@ use protocol::{Decision, Install};
 use platform::Staged;
 #[cfg(target_os = "macos")]
 pub use platform::finish_on_launch;
-#[cfg(any(target_os = "macos", test))]
+#[cfg(target_os = "macos")]
 pub(crate) use presentation::menu_title;
 #[cfg_attr(target_os = "macos", allow(unused_imports))]
 pub(crate) use presentation::{UpdateOffer, offer, offer_hold};

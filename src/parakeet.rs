@@ -298,10 +298,7 @@ impl DictationWorker {
         // the first dictation reloads it, so memory stays free until then.
         // Apple Speech holds no model of Hex's and stays loaded.
         let parked = crate::labs::unload_idle().is_some()
-            && matches!(
-                validate(&selection).map(|definition| definition.runtime),
-                Ok(crate::transcription::models::ModelRuntime::Gguf(_))
-            );
+            && validate(&selection).is_ok_and(|definition| definition.runtime.is_gguf());
         let engine = if parked {
             TranscriptionEngine::start_parked(selection)
         } else {
@@ -1178,7 +1175,7 @@ mod output_history;
 use output_history::{record_history, recover_output, send_unless_escaped};
 
 pub(crate) fn default_model_path() -> Result<std::path::PathBuf> {
-    model_path(crate::transcription::models::definition(
+    model_path(&crate::transcription::models::definition(
         crate::transcription::models::TranscriptionModelId::default(),
     ))
 }
@@ -1192,10 +1189,10 @@ impl Parakeet {
 
     pub fn load_selection(selection: &TranscriptionSelection) -> Result<Self> {
         let definition = validate(selection)?;
-        if !crate::transcription::models::is_installed(definition, &selection.language) {
+        if !crate::transcription::models::is_installed(&definition, &selection.language) {
             return Err(eyre!("{} is not installed", definition.name));
         }
-        let path = model_path(definition)?;
+        let path = model_path(&definition)?;
         let mut parakeet = Self::load_from(&path, true, Some(selection))?;
         parakeet.prewarm()?;
         let stream_run = parakeet.stream_run_options();
@@ -1301,7 +1298,7 @@ impl Parakeet {
         if let (Some(selection), Some(definition)) = (selection, definition) {
             let runtime_language = crate::transcription::gguf_session::validate_gguf_artifact(
                 model_path,
-                definition,
+                &definition,
                 &architecture,
                 &variant,
                 selection,

@@ -433,14 +433,14 @@ fn validate_auto(
     supports_language_detect: bool,
 ) -> Result<Option<String>> {
     let definition = crate::transcription::models::definition(model);
-    let ModelRuntime::Gguf(artifact) = definition.runtime else {
+    let ModelRuntime::Gguf(artifact) = &definition.runtime else {
         panic!("{} is not a GGUF model", definition.name);
     };
     validate_gguf_artifact(
         Path::new("catalog.gguf"),
-        definition,
+        &definition,
         artifact.architecture,
-        artifact.variant,
+        artifact.variant.as_ref(),
         &TranscriptionSelection {
             model,
             language: AUTO_LANGUAGE.into(),

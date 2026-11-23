@@ -161,7 +161,7 @@ pub(super) fn unused_note(ui: &Ui) -> Option<String> {
     (!model.uses_vocabulary()).then(|| {
         tr_fill(
             "{} doesn't use these terms; rewriting and search still do",
-            model.name,
+            &model.name,
         )
     })
 }

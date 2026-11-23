@@ -322,13 +322,13 @@ mod tests {
         };
         let v3 = definition(TranscriptionModelId::ParakeetV3);
         let english = definition(TranscriptionModelId::ParakeetUnifiedEnglish);
-        assert_eq!(source.language_for(v3, "en"), "ru");
-        assert_eq!(source.language_for(english, "en"), "en");
+        assert_eq!(source.language_for(&v3, "en"), "ru");
+        assert_eq!(source.language_for(&english, "en"), "en");
         let unknown = InputSource {
             languages: vec!["xx".into()],
             ..source
         };
-        assert_eq!(unknown.language_for(v3, "de"), "de");
+        assert_eq!(unknown.language_for(&v3, "de"), "de");
     }
 
     #[test]

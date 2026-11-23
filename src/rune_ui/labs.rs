@@ -904,12 +904,12 @@ fn live_text_note_for(
         return cpu_engine
             .then(|| tr("Live words need the GPU, and Speech engine is set to CPU").to_owned());
     }
-    let streaming: Vec<&'static str> = MODELS
+    let streaming: Vec<&str> = MODELS
         .iter()
         .filter(|model| model.streams && model.available() && model.supports_language(language))
-        .map(|model| model.name)
+        .map(|model| model.name.as_ref())
         .collect();
-    match *streaming.as_slice() {
+    match streaming.as_slice() {
         [first, second, ..] => Some(tr_named(
             "This speech model doesn't show live words; pick {first} or {second}",
             &[("first", first), ("second", second)],
@@ -1318,7 +1318,7 @@ mod tests {
         let streaming: Vec<&str> = crate::transcription::models::MODELS
             .iter()
             .filter(|model| model.streams && model.available() && model.supports_language("en"))
-            .map(|model| model.name)
+            .map(|model| model.name.as_ref())
             .collect();
         for name in streaming.iter().take(2) {
             assert!(note.contains(*name), "{note:?} names {name}");

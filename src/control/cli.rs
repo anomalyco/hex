@@ -653,7 +653,9 @@ fn select_installed(
     if crate::app_settings::AppSettings::read()
         .is_ok_and(|settings| settings.transcription == *selection)
     {
-        let name = crate::transcription::models::definition(selection.model).name;
+        let name = crate::transcription::models::definition(selection.model)
+            .name
+            .to_string();
         println!("{name} ({}) is already selected", selection.language);
         return 0;
     }
@@ -704,7 +706,9 @@ fn select_in_running_hex(
 fn save_selection(
     selection: &crate::transcription::models::TranscriptionSelection,
 ) -> color_eyre::Result<String> {
-    let name = crate::transcription::models::definition(selection.model).name;
+    let name = crate::transcription::models::definition(selection.model)
+        .name
+        .to_string();
     let mut settings = crate::app_settings::AppSettings::load()?;
     if settings.transcription == *selection {
         return Ok(format!(
@@ -759,7 +763,7 @@ fn offline_model(command: ModelCommand) -> u8 {
             let _ = crate::transcription::found_models::scan();
             let selection = selection(model, language)?;
             let model = definition(selection.model);
-            let status = readiness(model, &selection.language);
+            let status = readiness(&model, &selection.language);
             println!(
                 "{}\t{}\t{}\t{}",
                 if status.installed {
@@ -773,7 +777,7 @@ fn offline_model(command: ModelCommand) -> u8 {
                     "unverified"
                 },
                 model.name,
-                model_path(model)?.display()
+                model_path(&model)?.display()
             );
             Ok(())
         }

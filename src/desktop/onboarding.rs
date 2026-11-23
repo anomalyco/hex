@@ -1094,7 +1094,7 @@ pub fn status(selection: &TranscriptionSelection) -> SetupStatus {
 pub fn model_ready(selection: &TranscriptionSelection) -> bool {
     let selection = crate::transcription::custom_models::runnable(selection);
     crate::transcription::models::validate(&selection)
-        .is_ok_and(|model| crate::transcription::models::is_ready(model, &selection.language))
+        .is_ok_and(|model| crate::transcription::models::is_ready(&model, &selection.language))
 }
 
 /// Whether the listener's model file is here, even while it still awaits the
@@ -1103,7 +1103,7 @@ pub fn model_ready(selection: &TranscriptionSelection) -> bool {
 pub fn model_installed(selection: &TranscriptionSelection) -> bool {
     let selection = crate::transcription::custom_models::runnable(selection);
     crate::transcription::models::validate(&selection)
-        .is_ok_and(|model| crate::transcription::models::is_installed(model, &selection.language))
+        .is_ok_and(|model| crate::transcription::models::is_installed(&model, &selection.language))
 }
 
 /// Whether setup is settled: its own status, with a model whose file is here
@@ -1389,7 +1389,7 @@ mod tests {
         assert!(!model_ready(&saved));
         assert!(!model_installed(&saved));
         let fallback = custom_models::fallback();
-        let ModelRuntime::Gguf(artifact) = models::definition(fallback.model).runtime else {
+        let ModelRuntime::Gguf(artifact) = &models::definition(fallback.model).runtime else {
             panic!("the fallback is a download");
         };
         let path = directory.join(artifact.local_name());
@@ -1401,7 +1401,7 @@ mod tests {
         // download writes; a file merely present is installed, not ready.
         assert!(model_installed(&saved));
         assert!(!model_ready(&saved));
-        models::write_verification_receipt(&path, models::definition(fallback.model)).unwrap();
+        models::write_verification_receipt(&path, &models::definition(fallback.model)).unwrap();
         assert!(model_ready(&saved));
         assert!(status(&saved).transcription_model);
         assert_eq!(custom_models::runnable(&saved), fallback);

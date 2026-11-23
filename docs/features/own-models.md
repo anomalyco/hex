@@ -225,7 +225,12 @@ in-place use and forgetting, a forgotten catalog file no longer counting as
 downloaded, the full check refusing a mismatched file),
 `transcription::gguf_header::tests`, `transcription::custom_models::tests`
 (including `a_relinked_copy_reads_as_changed_and_check_again_accepts_only_the_same_contents`,
-`a_receipt_survives_a_renumbered_volume_but_not_another_file`, and `a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`),
+`a_receipt_survives_a_renumbered_volume_but_not_another_file`,
+`a_file_added_in_place_is_recorded_by_path_copied_nowhere_and_forgetting_leaves_it`,
+`renaming_many_times_keeps_one_entry_and_frees_earlier_definitions`,
+`a_held_snapshot_keeps_its_name_across_a_rename`,
+`removing_an_import_frees_its_definition_after_the_last_reader`, and
+`an_in_place_path_change_rebuilds_the_definition`),
 `desktop::onboarding::tests::a_held_download_waits_for_the_person`,
 `a_found_model_moves_on_without_a_download_and_back_returns_to_it`,
 `the_onboarding_model_list_starts_the_row_picked_or_the_recommended_one`,
