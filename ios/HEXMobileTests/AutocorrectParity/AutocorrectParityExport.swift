@@ -116,7 +116,7 @@ final class AutocorrectParityExport: XCTestCase {
             let main = [KeyboardLanguage.english, .spanish, .german, .french].contains(language)
             for _ in 0..<(main ? count : max(1, count / 4)) {
                 let c = generator.makeCase()
-                try emit(c, language, &generator)
+                try autoreleasepool { try emit(c, language, &generator) }
             }
         }
         var literalGenerator = ACParityGenerator(

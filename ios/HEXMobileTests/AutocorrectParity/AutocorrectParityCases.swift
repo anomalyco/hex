@@ -103,7 +103,7 @@ struct ACParityGenerator {
             let swears = ["fuck", "shit", "damn", "bitch", "cunt", "merde", "putain", "cazzo", "mierda", "scheiße", "faggot", "blow", "job"]
             return rng.pick(swears)
         case 80..<84:
-            let names = ACParityWords.names[ACStub.dictionaryCode(l.acoSpellCheckCandidates[0])] ?? ["Mary"]
+            let names = l.acoSpellCheckCandidates.first.flatMap { ACParityWords.names[ACStub.dictionaryCode($0)] } ?? ["Mary"]
             let name = rng.pick(names)
             return rng.chance(0.6) ? name.lowercased() : name
         case 84..<87:

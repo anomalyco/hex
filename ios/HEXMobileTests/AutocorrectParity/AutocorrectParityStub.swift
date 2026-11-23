@@ -89,6 +89,8 @@ final class ACStubDictionary {
         }
         if n == 2 { out.append("\(chars[0]).\(chars[1]).") }
         let result = Array(out.prefix(10))
+        // Only a cache: a large export's typos would otherwise grow it without end.
+        if guessMemo.count >= 100_000 { guessMemo.removeAll(keepingCapacity: true) }
         guessMemo[Array(lower.utf8)] = result
         return result
     }
