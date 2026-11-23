@@ -30,12 +30,12 @@
     <string name="setup_done">完成</string>
 
     <string name="model_title">语音模型</string>
-    <string name="model_ready">Whisper small，已在这台手机上</string>
+    <string name="model_ready">在这台手机上运行，离线也能用</string>
     <string name="model_available">正在使用较小的内置模型</string>
     <string name="model_stopped">下载已停止。正在使用较小的内置模型。</string>
     <string name="model_no_connection">没有网络连接。正在使用较小的内置模型。</string>
     <string name="model_no_space">存储空间不足。正在使用较小的内置模型。</string>
-    <string name="model_loading">正在下载 · %1$d%%</string>
+    <string name="model_loading">正在下载 190 MB · %1$d%%</string>
     <string name="model_download">下载</string>
     <string name="model_try_again">再试一次</string>
 
