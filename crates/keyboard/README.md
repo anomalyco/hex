@@ -17,7 +17,9 @@ This is its own Cargo workspace with its own `Cargo.lock` and pinned toolchain
 
 Pieces move here one at a time from the Swift keyboard (`ios/HEXShared/FullKeyboard`), each
 proven identical to the Swift it replaces before iOS switches to it. Today: the typing
-model reader and Swipe typing's decoder. Tune those here, not in Swift.
+model reader, Swipe typing's decoder and the tap decoder (Spatial autocorrect,
+`core/src/decoder`, which iOS runs through `TypingDecoder` and `TypingDecoderModel`). Tune
+those here, not in Swift.
 
 ## Setup
 
@@ -61,3 +63,73 @@ cd ../crates/keyboard && cargo test --release --test swipe_parity -- --nocapture
 
 `TEST_RUNNER_HEX_SWIPE_PARITY_TIMING=1` adds each read's time; a larger count makes a larger
 file for `HEX_SWIPE_PARITY`.
+
+## The tap decoder
+
+`core/src/decoder` is `TypingDecoder` (`ios/HEXShared/FullKeyboard/TypingDecoder.swift`)
+step for step, with one difference: where Swift walks a dictionary, readings that cost
+exactly the same came out in an order that changed from run to run; here a tie in the search
+goes to the commoner word, then the one earlier in the word list, and a tie between
+run-together readings to the one with fewer words. About 1% of the parity cases have such a
+tie (`tests/tap_parity.rs`).
+
+`tests/tap_parity.rs` replays `tests/fixtures/tap-parity.jsonl` and must match it bit for bit,
+and iOS's `TapParityGolden` (`ios/HEXMobileTests/TapParity`) generates the same cases again and
+runs them through the shipped Swift wrappers and the C interface. The fixture holds the
+answers of the Swift decoder this replaced (dev fc867484, in the fixed tie order), so a test
+that fails against it is a change in behaviour.
+
+When a change to the decoder is meant to change its answers, write the fixture again from the
+shipped decoder and review the difference (`git diff --stat`, then a few lines) before
+committing it with the change. From `ios/`, after `xcodegen generate`:
+
+```sh
+TEST_RUNNER_HEX_TAP_PARITY_OUT=$PWD/../crates/keyboard/core/tests/fixtures/tap-parity.jsonl \
+xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>" \
+  -only-testing:HEXMobileTests/TapParityExport
+```
+
+`TEST_RUNNER_HEX_TAP_PARITY_COUNT` sets the cases per language (400 by default, which
+`TapParityGolden` expects); a larger set written to `/tmp` runs in Rust with
+`HEX_TAP_PARITY=/tmp/set.jsonl cargo test --release -p hex-keyboard-core --test tap_parity`.
+A fixture written this way has no `tie` or `swift` notes: there is no Swift order any more.
+
+### The tap benchmark
+
+`examples/tap_replay` replays typing sets through the tap decoder alone, with the parameters
+tuned for each model's language, and prints its word error rate and per-word latency as TSV
+lines (in the Android benchmark's style, `android/benchmark/typing/Replay.java`) and as a
+markdown table for a PR. It leaves out everything around the decoder (the engine's
+contraction and typo rules, the dictionary, capitals, the strip), so compare its numbers only
+with its own. It reads:
+
+- `android/benchmark/typing/held-out/<lang>.tsv.gz`, the benchmark's 2,000 test sentences per
+  language;
+- the public tap datasets, converted by `ios/benchmark/typing-replay/convert.py` to iOS's tap
+  JSON (`ios/README.md`, "Replaying real typing"), from wherever you keep them: they aren't in
+  the repository;
+- the Android benchmark's JSON Lines (`export_synthetic.py`).
+
+All are typed on the 402 pt geometry `Replay.originalGeometry` gives. Each row has a name in
+its set (a held-out row's Tatoeba ID, an iOS sentence's source, session and place in it, a
+JSON Lines row's `id`), and the name alone picks its split: the test split when the first byte
+of SHA-256(`hex-tap-split-v1:` + name) is odd, else the dev split (about half each).
+
+Tune on the dev split, the default. The test split is sealed: it is read only with `--split
+test --sealed`, once per setting. The setting is a hash of every language's parameters and
+its model's SHA-256; the tool refuses the read when `bench/sealed.tsv` already holds that hash,
+and otherwise appends the hash, the date and each set's results to it (with the set's
+SHA-256). Commit the ledger with the change it measured.
+
+```sh
+cd crates/keyboard
+M=../../ios/HEXKeyboard/TypingModel H=../../android/benchmark/typing/held-out
+cargo run --release -p hex-keyboard-core --example tap_replay -- \
+  $H/en.tsv.gz $M/en.hextm $H/es.tsv.gz $M/es.hextm $H/de.tsv.gz $M/de.hextm \
+  /path/noisy-phone-test.json $M/en.hextm
+# once the setting is locked: the same sets, sealed
+cargo run --release -p hex-keyboard-core --example tap_replay -- --split test --sealed <the same sets>
+# a small set of its own, for a smoke test
+cargo run --release -p hex-keyboard-core --example tap_replay -- \
+  --make-sample 200 /tmp/sample.jsonl $M/en.hextm
+```
