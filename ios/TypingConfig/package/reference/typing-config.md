@@ -223,7 +223,32 @@ reason from a fixed list.
 - **A `keys` block for another context:** kept and listed, not applied.
 - **Zones that break the keycap rule or overlap:** those zones are skipped and listed.
 - **`evidence` is never trusted:** Hex shows it as the file's claim and checks the config by
-  replaying the person's own logs.
+  replaying the person's own logs. But it is required: a part whose evidence is missing or
+  falls short of the table below is skipped as `notEnoughEvidence` and listed under Skipped,
+  never applied.
+
+### The evidence each part must carry to be applied
+
+Hex reads these numbers from the part's `evidence` (missing counts as 0) and applies the part
+only when every condition holds. `check_config.py` makes the same test and reports any part
+that fails it as "Hex would skip it", with the reason.
+
+| Part | Evidence fields | Applied only when |
+|---|---|---|
+| `words.keep[]` | `times`, `sessions` | times ≥ 2 and sessions ≥ 2 |
+| `words.neverCorrectTo[]` | `takenBack` | takenBack ≥ 2 |
+| `words.fixes[]` | `times`, `sessions` | times ≥ 2 and sessions ≥ 2 |
+| `words.dictation[]` | `times` | times ≥ 2 |
+| `keys[].aim.<letter>` | `tuned.taps`, `checked.taps`, `checked.gained`, `checked.lost` | tuned.taps ≥ 40, checked.taps ≥ 20, and checked.gained ≥ checked.lost |
+| `keys[].zones[]` | `tuned.taps`, `checked.taps`, `checked.wordsRight`, `checked.wordsWrong` | tuned.taps ≥ 15, checked.taps ≥ 10, checked.wordsRight − checked.wordsWrong ≥ 2, and checked.wordsWrong ≤ 0.34 × checked.wordsRight |
+
+- A zone with tap counts only (`gained`, `lost` and no `wordsRight` / `wordsWrong`, as an
+  older package wrote it) is skipped: write the `evidence json` line `simulate_zones.py`
+  prints, all five fields for `tuned` and `checked`.
+- The numbers are compared as written, with no rounding: 2.3 right and 0.3 wrong is 1.9999…,
+  under 2.
+- `active.json`, which Hex writes after the person applies a config, has no evidence and is not
+  checked again.
 - **Text is cleaned:** the note and every word, fix and dictation fix lose control characters,
   bidirectional overrides, isolates and marks, and invisible format characters (zero-width
   space, word joiner, soft hyphen, …).

@@ -158,6 +158,67 @@ for b, block in enumerate(cfg.get("keys") or []):
                     problems.append("%s: on the check half %d taps in its strip, words right %.1f and wrong %.1f; needs %d taps, %g net words, and wrong at most %d%% of right" % (
                         label, p["taps"], p["wordsRight"], p["wordsWrong"], Z["minCheckedTaps"], Z["minNetCheckedWords"], 100 * Z["maxWrongShare"]))
 
+# ---- what Hex will do with each part, from the evidence the file carries (TypingConfigReview's gates)
+def num(e, *path):
+    for k in path:
+        e = e.get(k) if isinstance(e, dict) else None
+    return e if isinstance(e, (int, float)) and not isinstance(e, bool) else None
+
+
+def gate(kind, e):
+    """None when Hex applies the part on its evidence, else why it skips it (notEnoughEvidence: ...)."""
+    e = e if isinstance(e, dict) else {}
+    WL, A, Z = L["words"], L["keys"]["aim"], L["keys"]["zones"]
+    need = []
+    if kind == "keep":
+        need = [("times", num(e, "times"), WL["keep"]["minTimes"]), ("sessions", num(e, "sessions"), WL["keep"]["minSessions"])]
+    elif kind == "neverCorrectTo":
+        need = [("takenBack", num(e, "takenBack"), WL["neverCorrectTo"]["minTakenBack"])]
+    elif kind == "fixes":
+        need = [("times", num(e, "times"), WL["fixes"]["minTimes"]), ("sessions", num(e, "sessions"), WL["fixes"]["minSessions"])]
+    elif kind == "dictation":
+        need = [("times", num(e, "times"), WL["dictation"]["minTimes"])]
+    elif kind == "aim":
+        need = [("tuned.taps", num(e, "tuned", "taps"), A["minTunedTaps"]), ("checked.taps", num(e, "checked", "taps"), A["minCheckedTaps"])]
+        g, l = num(e, "checked", "gained"), num(e, "checked", "lost")
+        if g is None or l is None or g < l:
+            return "notEnoughEvidence: checked.gained must be at least checked.lost (has %s and %s)" % (g, l)
+    elif kind == "zone":
+        need = [("tuned.taps", num(e, "tuned", "taps"), Z["minTunedTaps"]), ("checked.taps", num(e, "checked", "taps"), Z["minCheckedTaps"])]
+        r, w = num(e, "checked", "wordsRight"), num(e, "checked", "wordsWrong")
+        if r is None or w is None:
+            return "notEnoughEvidence: no checked.wordsRight / checked.wordsWrong (tap counts alone aren't enough; write simulate_zones.py's evidence json)"
+        if r - w < Z["minNetCheckedWords"] or w > Z["maxWrongShare"] * r:
+            return "notEnoughEvidence: checked words right %g, wrong %g; needs right - wrong >= %g and wrong <= %g x right" % (r, w, Z["minNetCheckedWords"], Z["maxWrongShare"])
+    for name, have, least in need:
+        if have is None or have < least:
+            return "notEnoughEvidence: %s is %s, needs %d" % (name, have, least)
+    return None
+
+
+hex_applies = collections.Counter()
+for kind in ("keep", "neverCorrectTo", "fixes", "dictation"):
+    for i, e in enumerate(ws.get(kind) or []):
+        why = gate(kind, e.get("evidence"))
+        if why:
+            problems.append("words.%s[%d]: Hex would skip it, %s" % (kind, i, why))
+        else:
+            hex_applies[kind] += 1
+for b, block in enumerate(cfg.get("keys") or []):
+    for k, v in sorted((block.get("aim") or {}).items()):
+        why = gate("aim", v.get("evidence"))
+        if why:
+            problems.append("keys[%d].aim.%s: Hex would skip it, %s" % (b, k, why))
+        else:
+            hex_applies["aim"] += 1
+    for i, zz in enumerate(block.get("zones") or []):
+        why = gate("zone", zz.get("evidence"))
+        if why:
+            problems.append("keys[%d].zones[%d] (%s %s %+g): Hex would skip it, %s" % (b, i, zz.get("key"), zz.get("edge"), zz.get("move") or 0, why))
+        else:
+            hex_applies["zones"] += 1
+notes.append("on its evidence, Hex applies: %s" % (", ".join("%d %s" % (n, k) for k, n in hex_applies.items()) or "nothing"))
+
 canon = json.dumps({k: v for k, v in cfg.items() if k != "id"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
 cid = "cfg-" + hashlib.sha256(canon.encode()).hexdigest()[:16]
 if "--write" in sys.argv:

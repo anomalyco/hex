@@ -205,9 +205,10 @@ def show(per, total, keys, zones):
 
 
 def holds(p):
-    """Whether a zone's numbers on the check half pass the rule (reference/typing-config.md, Zones)."""
+    """Whether a zone's numbers on the check half pass the rule (reference/typing-config.md, Zones),
+    computed exactly as Hex computes it from the file's numbers (no rounding of the difference)."""
     Z = LIMITS["keys"]["zones"]
-    return p["taps"] >= Z["minCheckedTaps"] and net_words(p) >= Z["minNetCheckedWords"] and p["wordsWrong"] <= Z["maxWrongShare"] * p["wordsRight"]
+    return p["taps"] >= Z["minCheckedTaps"] and p["wordsRight"] - p["wordsWrong"] >= Z["minNetCheckedWords"] and p["wordsWrong"] <= Z["maxWrongShare"] * p["wordsRight"]
 
 
 def evidence(p):
