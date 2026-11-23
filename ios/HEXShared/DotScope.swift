@@ -118,6 +118,7 @@ nonisolated struct DotScopeAutoLevel: Equatable, Sendable {
 
 nonisolated enum DotScopeStage: Equatable, Sendable {
     case idle
+    case starting
     case recording
     case processing
     case done
@@ -516,6 +517,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
     private var softnessSpring = DotSpring(at: hiddenSoftness)
     private var coolSpring = DotSpring(at: 0.0)
     private var failSpring = DotSpring(at: 0.0)
+    private var startingDim: Float = 0.0
     private var enterFromHidden = true
 
     init(tuning: DotScopeTuning = .hud) {
@@ -595,6 +597,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         opacitySpring = DotSpring(at: shown ? 1.0 : 0.0)
         coolSpring = DotSpring(at: 0.0)
         failSpring = DotSpring(at: 0.0)
+        startingDim = 0.0
         columns = 0
         rows = 0
         tuning = currentTuning
@@ -635,7 +638,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
             return max(tuning.height, tuning.width - leadingInsetSpring.target - trailingInsetSpring.target)
         }
         return switch targetStage {
-        case .idle: tuning.idleWidth
+        case .idle, .starting: tuning.idleWidth
         case .recording: tuning.width
         case .processing, .done: tuning.processingWidth
         case .failed: widthSpring.target
@@ -695,8 +698,11 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         reduceMotion: Bool
     ) {
         if targetStage != stage {
-            if stage == .idle {
+            if stage == .idle || stage == .starting {
                 enterFromHidden = false
+            }
+            if steps == 0 && targetStage == .starting {
+                startingDim = 1.0
             }
             if targetStage == .done {
                 armDone()
@@ -792,13 +798,20 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
 
         let liveTarget: Float = if isRecording {
             1.0
-        } else if stage == .idle && visible {
+        } else if (stage == .idle || stage == .starting) && visible {
             Self.idleLiveTarget
         } else {
             0.0
         }
         let liveTau: Float = liveTarget > live ? 0.22 : 0.36
         live += (liveTarget - live) * (1.0 - exp(-h / liveTau))
+
+        let startingTarget: Float = stage == .starting ? 1.0 : 0.0
+        if reduceMotion {
+            startingDim = startingTarget
+        } else {
+            startingDim += (startingTarget - startingDim) * (1.0 - exp(-h / 0.16))
+        }
 
         let speed: Float = reduceMotion ? 0.0 : tuning.braidSpeed
         traces.0.tick(voice: voices.0, live: live, speed: speed, tuning: tuning, h: h)
@@ -914,14 +927,14 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         }
         let mode: Mode
 
-        if stage == .failed || stage == .idle || reduceMotion {
+        if stage == .failed || stage == .idle || stage == .starting || reduceMotion {
             scanHelix = stage == .idle ? 0.55 : 1.0
             scanDecay = 1.0; scanTail = 1.0; scanGrid = 1.0
             mode = .still
         } else {
             switch stage {
-            case .idle:
-                scanHelix = 0.55; scanDecay = 1.0; scanTail = 1.0; scanGrid = 1.0
+            case .idle, .starting:
+                scanHelix = stage == .idle ? 0.55 : 1.0; scanDecay = 1.0; scanTail = 1.0; scanGrid = 1.0
                 mode = .still
 
             case .recording:
@@ -967,7 +980,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         let mid = Float(rws - 1) * 0.5
         let half = mid - 0.55
         let breath: Float = reduceMotion ? 0.5 : (0.5 + 0.5 * sin(time * Self.tau / Self.breathPeriod))
-        let idleScale: Float = stage == .idle ? 0.48 : 1.0
+        let idleScale: Float = stage == .idle ? 0.48 : (1.0 - 0.72 * startingDim)
         let rest = (0.55 + 0.35 * breath) * (0.35 + 0.65 * live) * scanHelix * idleScale
         let sf = Self.spatialFreqs
         let reachAttenuation: Float = tuning.fitsBounds ? 0.48 : 0.80
@@ -1029,7 +1042,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
                     * sin(Self.tau * tuning.helixCycles * xn - carrier)
                 let y = half * tanh((helix + half * 0.72 * spread * reach) / max(half, 0.01)) * ends * amp
                 ys[s] = mid - sign * y
-                let idleDim: Float = stage == .idle ? 0.58 : 1.0
+                let idleDim: Float = stage == .idle ? 0.58 : (1.0 - 0.55 * startingDim)
                 let spatial = (0.3 + 0.7 * min(1.0, a * 1.8)) * (0.45 + 0.55 * ends) * idleDim
                 brightness[s] = spatial * amp + 0.36 * max(0.0, bright - amp)
             }
@@ -1113,6 +1126,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
 enum DotScopePhase: Equatable, Sendable {
     case hidden
     case idle
+    case starting
     case recording
     case processing
     case failed
@@ -1513,7 +1527,7 @@ final class DotScopeHostView: UIView {
               !ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix("-sequence") || $0.hasSuffix("-sequence-dark") })
         else { return }
         switch phase {
-        case .hidden, .idle:
+        case .hidden, .idle, .starting:
             return
         case .recording, .processing, .failed:
             break
@@ -1553,7 +1567,7 @@ final class DotScopeHostView: UIView {
                 !simulation.settled
             case .idle:
                 !simulation.isIdleSettled
-            case .recording, .processing, .failed:
+            case .starting, .recording, .processing, .failed:
                 true
             }
         }
@@ -1593,6 +1607,8 @@ final class DotScopeHostView: UIView {
             return (.done, false, -120.0)
         case .idle:
             return (.idle, true, -120.0)
+        case .starting:
+            return (.starting, true, -120.0)
         case .recording:
             let liveDB = loudnessProvider?() ?? -62.0
             let effectiveDB: Float

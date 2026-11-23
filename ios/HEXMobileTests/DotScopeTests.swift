@@ -261,4 +261,33 @@ final class DotScopeTests: XCTestCase {
         controller.updateRecordingDurationForTesting(1.02)
         XCTAssertEqual(counter.count, 1, "Crossing a whole second should notify SwiftUI once")
     }
+
+    func testStartingStageStaysCalmAndBloomsContinuouslyIntoRecording() {
+        let sim = DotScopeSimulation(tuning: .bar(leadingInset: 45, trailingInset: 77))
+        sim.restart(reduceMotion: false, shown: true)
+
+        // Even if loud audio were passed during .starting, the scope stays calm and uncooled.
+        for _ in 0..<24 {
+            sim.advance(dt: 1.0 / 60.0, stage: .starting, visible: true, loudness: -18.0, reduceMotion: false)
+        }
+        let startingPose = sim.pose
+        let startingPeak = sim.dots.map(\.x).max() ?? 0
+        XCTAssertEqual(startingPose.cool, 0.0, accuracy: 0.01)
+        XCTAssertLessThan(startingPose.live, 0.25, "starting stays at quiet resting level")
+        XCTAssertLessThan(startingPeak, 0.45, "starting dots stay dimmer than live recording")
+
+        // First frame of .recording after .starting must not flash black or drop the grid.
+        sim.advance(dt: 1.0 / 60.0, stage: .recording, visible: true, loudness: -26.0, reduceMotion: false)
+        let firstRecordingPeak = sim.dots.map(\.x).max() ?? 0
+        XCTAssertEqual(sim.pose.grid, 1.0, accuracy: 0.01)
+        XCTAssertGreaterThanOrEqual(firstRecordingPeak, startingPeak * 0.85, "no dark pop on starting -> recording")
+
+        // Over the next 0.5 s, the scope blooms into full live recording brightness.
+        for _ in 0..<30 {
+            sim.advance(dt: 1.0 / 60.0, stage: .recording, visible: true, loudness: -26.0, reduceMotion: false)
+        }
+        let livePeak = sim.dots.map(\.x).max() ?? 0
+        XCTAssertGreaterThan(sim.pose.live, 0.70)
+        XCTAssertGreaterThan(livePeak, startingPeak + 0.15)
+    }
 }

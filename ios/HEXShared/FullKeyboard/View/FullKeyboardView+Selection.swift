@@ -52,7 +52,7 @@ extension FullKeyboardView {
         lastStagePhase = phase
         guard engine.hasPendingSelectionDictation else { return }
         switch phase {
-        case .recording, .transcribing:
+        case .starting, .recording, .transcribing:
             selectionDictationStarted = true
             selectionDictationClear?.cancel()
             selectionDictationClear = nil
@@ -77,7 +77,7 @@ extension FullKeyboardView {
         let work = DispatchWorkItem { [weak self] in
             guard let self, !self.selectionDictationStarted else { return }
             let phase = self.model.stagePhase
-            guard phase != .recording, phase != .transcribing else { return }
+            guard phase != .starting, phase != .recording, phase != .transcribing else { return }
             self.engine.clearPendingSelectionDictation()
             self.refreshStrip()
         }

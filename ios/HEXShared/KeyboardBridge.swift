@@ -3,6 +3,7 @@ import Foundation
 nonisolated enum KeyboardDictationState: String, Codable, Sendable {
     case offline
     case ready
+    case starting
     case recording
     case transcribing
     case failed
@@ -265,7 +266,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     func isAvailable(at now: TimeInterval) -> Bool {
         let heartbeatFresh = now - heartbeat < 3.0 && heartbeat > 0
         guard heartbeatFresh else { return false }
-        if state == .recording || state == .transcribing {
+        if state == .starting || state == .recording || state == .transcribing {
             return true
         }
         return expiresAt > now
@@ -299,7 +300,7 @@ nonisolated struct KeyboardSnapshot: Codable, Equatable, Sendable {
     /// A recording or transcription Hex stopped heartbeating for. Nothing will finish it, and
     /// a new keyboard process reads it the same way: the heartbeat is wall-clock time.
     func isOrphanedJob(at now: TimeInterval) -> Bool {
-        guard state == .recording || state == .transcribing else { return false }
+        guard state == .starting || state == .recording || state == .transcribing else { return false }
         return heartbeat <= 0 || now - heartbeat > Self.orphanedJobTimeout
     }
 

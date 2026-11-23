@@ -536,7 +536,7 @@ struct KeyboardSurfaceView: View {
     }
 
     private var isStageActive: Bool {
-        model.stagePhase == .recording || model.stagePhase == .transcribing
+        model.stagePhase == .starting || model.stagePhase == .recording || model.stagePhase == .transcribing
     }
 
     var body: some View {
@@ -694,15 +694,14 @@ struct KeyboardSurfaceView: View {
 
     private func leadingAccessory(palette p: KeyboardChromePalette) -> some View {
         let showNoAccess = !model.hasFullAccess
+        let showStartingStatus = model.hasFullAccess && model.stagePhase == .starting
         let showRecordingClock = model.hasFullAccess && model.stagePhase == .recording
         let showTranslationNote = model.hasFullAccess
             && model.translationNote != nil
-            && model.stagePhase != .recording
-            && model.stagePhase != .transcribing
+            && !isStageActive
         let showWarmStatus = model.hasFullAccess
             && model.isWarmAvailable
-            && model.stagePhase != .recording
-            && model.stagePhase != .transcribing
+            && !isStageActive
             && !showTranslationNote
 
         return ZStack(alignment: .leading) {
@@ -717,6 +716,12 @@ struct KeyboardSurfaceView: View {
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
             .hexTrayReveal(showNoAccess, reduceMotion: reduceMotion, offsetY: 2)
+
+            Text("Starting…")
+                .font(.system(size: 13, weight: .regular))
+                .foregroundStyle(p.textMuted)
+                .lineLimit(1)
+                .hexTrayReveal(showStartingStatus, reduceMotion: reduceMotion, offsetY: 2)
 
             HStack(spacing: 6) {
                 HexStatusDot(color: HexTheme.danger, size: 6.5)
@@ -1072,14 +1077,16 @@ struct KeyboardSurfaceView: View {
 
     private var primaryStage: some View {
         let p = palette
+        let showStarting = model.stagePhase == .starting
         let showRecordingControls = model.stagePhase == .recording
+        let showCancelControl = showStarting || showRecordingControls
         let showIdleTrigger = model.stagePhase == .idle || model.stagePhase == .failed
         let spec = idleTriggerSpec
 
-        let leadInset: Float = showRecordingControls
+        let leadInset: Float = showCancelControl
             ? Float(Self.wellInset + Self.cancelWidth + 6)
             : 0.0
-        let trailInset: Float = if showRecordingControls {
+        let trailInset: Float = if showCancelControl {
             Float(Self.wellInset + Self.doneWidth + 6)
         } else if showIdleTrigger {
             Float(Self.wellInset + spec.width + 6)
@@ -1109,7 +1116,7 @@ struct KeyboardSurfaceView: View {
                 .allowsHitTesting(false)
             }
 
-            // Recording peer controls (`✕` and `Done`), always mounted so enter/exit springs stay continuous.
+            // Recording peer controls (`✕`, starting spinner, and `Done`), always mounted so enter/exit springs stay continuous.
             HStack(spacing: 8) {
                 Button {
                     model.onKeyFeedback?()
@@ -1126,7 +1133,7 @@ struct KeyboardSurfaceView: View {
                 .buttonStyle(.plain)
                 .accessibilityLabel("Cancel dictation")
                 .hexControlReveal(
-                    showRecordingControls,
+                    showCancelControl,
                     reduceMotion: reduceMotion,
                     scale: 0.90,
                     blur: 2.5,
@@ -1135,26 +1142,42 @@ struct KeyboardSurfaceView: View {
 
                 Spacer(minLength: 0)
 
-                Button {
-                    model.onKeyFeedback?()
-                    model.onStopTap?()
-                } label: {
-                    Text("Done")
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundStyle(p.textBase)
+                ZStack(alignment: .trailing) {
+                    ProgressView()
+                        .controlSize(.small)
+                        .tint(p.textMuted)
                         .frame(width: Self.doneWidth, height: Self.controlHeight)
-                        .background(p.controlProminentFill, in: Capsule())
-                        .frame(minHeight: Self.wellHeight, alignment: .trailing)
-                        .contentShape(Rectangle())
+                        .background(p.controlSubtleFill, in: Capsule())
+                        .accessibilityLabel("Starting microphone")
+                        .hexControlReveal(
+                            showStarting,
+                            reduceMotion: reduceMotion,
+                            scale: 0.90,
+                            blur: 2.5,
+                            anchor: .trailing
+                        )
+
+                    Button {
+                        model.onKeyFeedback?()
+                        model.onStopTap?()
+                    } label: {
+                        Text("Done")
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(p.textBase)
+                            .frame(width: Self.doneWidth, height: Self.controlHeight)
+                            .background(p.controlProminentFill, in: Capsule())
+                            .frame(minHeight: Self.wellHeight, alignment: .trailing)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .hexControlReveal(
+                        showRecordingControls,
+                        reduceMotion: reduceMotion,
+                        scale: 0.90,
+                        blur: 2.5,
+                        anchor: .trailing
+                    )
                 }
-                .buttonStyle(.plain)
-                .hexControlReveal(
-                    showRecordingControls,
-                    reduceMotion: reduceMotion,
-                    scale: 0.90,
-                    blur: 2.5,
-                    anchor: .trailing
-                )
             }
             .padding(.horizontal, Self.wellInset)
 

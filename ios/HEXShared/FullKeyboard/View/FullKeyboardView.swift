@@ -865,11 +865,11 @@ final class FullKeyboardView: UIView {
         hexKey.isWarm = model.dictatesThroughHex
         hexKey.translatingTo = model.translatingTo
         syncGlobe()
-        let recording = model.stagePhase == .recording || model.stagePhase == .transcribing
+        let recording = model.stagePhase == .starting || model.stagePhase == .recording || model.stagePhase == .transcribing
         if recording != showsRecording {
             setRecording(recording)
-            livePreview.sync()
         }
+        livePreview.sync()
         refreshRecordingPanel()
         // A language picked in the switch changes the layout at once when it follows dictation.
         syncLanguage()
@@ -957,7 +957,7 @@ final class FullKeyboardView: UIView {
     func refreshRecordingPanel() {
         guard let panel = recordingPanel, showsRecording else { return }
         panel.update(
-            phase: model.stagePhase == .transcribing ? .processing : .recording,
+            phase: model.dotScopePhase,
             style: model.style
         )
     }

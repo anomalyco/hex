@@ -32,7 +32,10 @@ and its page load as the keyboard shows (unless memory is already short), withou
 the microphone, so no orange dot shows until you dictate; the full keyboard's
 Hex key then starts capture as the finger lands, before the touch is a tap or
 a hold, and a slide to the style menu or a cancelled touch drops it with
-nothing transcribed (its orange dot shows for that moment). iOS ends a keyboard that passes
+nothing transcribed (its orange dot shows for that moment). Until the first
+real PCM audio buffer arrives, the keyboard shows a calm starting state
+(dim resting dots and a spinner in Done's spot, with ✕ active to cancel) and
+switches to active recording only once audio is flowing. iOS ends a keyboard that passes
 its memory limit (about 60–90 MB depending on the model), so while less is left
 than starting needs (`os_proc_available_memory`: 32 MB for the first
 dictation, 24 MB once the capture web view is loaded) Dictate and the Hex key

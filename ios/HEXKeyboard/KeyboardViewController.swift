@@ -68,6 +68,7 @@ final class KeyboardViewController: UIInputViewController {
     /// How long the note that a dictation went in as spoken stays up.
     static let translationNoteDuration: TimeInterval = 8
     private var isShown = false
+    private var isSyncingFromBridge = false
     /// Retired while a newer Hex keyboard sits over this one in the same field (`KeyboardsOnScreen`):
     /// keeps listening and restores its surface if the newer one goes away.
     private var isRetired = false
@@ -685,6 +686,10 @@ final class KeyboardViewController: UIInputViewController {
         }
         localDictation.currentDocument = { [weak self] in self?.currentDocument }
         localDictation.liveText = viewModel.liveText
+        localDictation.onPhaseChange = { [weak self] in
+            guard let self, self.isShown, !self.isSyncingFromBridge else { return }
+            self.syncFromBridge(animated: true)
+        }
         liveTyping.attach(viewModel.liveText)
         liveTyping.mayType = { [weak self] in self?.fullKeyboard?.engine.hasPendingSelectionDictation != true }
         viewModel.liveText.fieldTakesTyping = { [weak self] in self?.liveTyping.takesTyping ?? true }
@@ -898,7 +903,7 @@ final class KeyboardViewController: UIInputViewController {
 
     /// The dictation bar polls at 25 Hz; the full keyboard at 4 Hz, and 30 Hz while recording.
     private func schedulePoll(force: Bool) {
-        let busy = viewModel.stagePhase == .recording || viewModel.stagePhase == .transcribing
+        let busy = viewModel.stagePhase == .starting || viewModel.stagePhase == .recording || viewModel.stagePhase == .transcribing
             || viewModel.pendingCommand != nil
         let interval: TimeInterval = fullKeyboard == nil ? 0.04 : (busy ? 1.0 / 30 : 0.25)
         guard force || (pollTimer != nil && interval != pollInterval) else { return }
@@ -934,6 +939,8 @@ final class KeyboardViewController: UIInputViewController {
     }
 
     private func syncFromBridge(animated: Bool) {
+        isSyncingFromBridge = true
+        defer { isSyncingFromBridge = false }
         let now = Date().timeIntervalSince1970
         reportFullAccess(force: false)
         updateKeyboardTraits()
@@ -1003,7 +1010,7 @@ final class KeyboardViewController: UIInputViewController {
             animated: animated
         )
 
-        if viewModel.stagePhase == .recording || viewModel.stagePhase == .transcribing {
+        if viewModel.stagePhase == .starting || viewModel.stagePhase == .recording || viewModel.stagePhase == .transcribing {
             closeBarEmojiPanel()
         }
         refreshColdStartURL(now: now, force: false)
