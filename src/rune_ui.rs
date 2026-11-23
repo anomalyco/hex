@@ -1318,7 +1318,7 @@ fn on_key(ui: &mut Ui, event: &rune::KeyEvent, tx: &mut Tx) -> bool {
         ui.meetings.delete_armed = None;
         true
     } else {
-        ui.pane == Pane::History && ui.history.cancel_delete()
+        ui.pane == Pane::History && ui.history.cancel_delete(tx)
     }
 }
 

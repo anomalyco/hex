@@ -171,9 +171,14 @@ impl HistoryPane {
         }
     }
 
-    /// Escape: Delete… stops asking. Returns whether it was asking.
-    pub(super) fn cancel_delete(&mut self) -> bool {
-        self.delete_armed.take().is_some()
+    /// Escape or Cancel: Delete… stops asking and returns focus to it.
+    pub(super) fn cancel_delete(&mut self, tx: &mut Tx) -> bool {
+        if self.delete_armed.take().is_some() {
+            tx.focus("history-delete", tx.focus_visible());
+            true
+        } else {
+            false
+        }
     }
 
     /// Delete… asks for `id`, and stops any other confirmation.
@@ -1112,7 +1117,9 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
                 "history-cancel-delete",
                 tr("Cancel"),
                 ButtonKind::Secondary,
-                |ui: &mut Ui, _| ui.history.delete_armed = None,
+                |ui: &mut Ui, tx| {
+                    ui.history.cancel_delete(tx);
+                },
             ))
     });
     if !armed {
@@ -1122,7 +1129,10 @@ fn detail(ui: &Ui, p: Paint, layer: &mut Vec<El>) -> El {
             "history-delete",
             ld::TRASH_ICON,
             tr("Delete…"),
-            move |ui: &mut Ui, _| ui.history.arm_delete(id),
+            move |ui: &mut Ui, tx| {
+                ui.history.arm_delete(id);
+                tx.focus("history-cancel-delete", tx.focus_visible());
+            },
         ));
     }
     col()
