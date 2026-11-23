@@ -700,6 +700,34 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertNil(fix(hungarian, "koszonom"), "three accents are three edits on another layout")
     }
 
+    /// Swedish uses the iPhone's sv dictionary, a real one on the iOS 26.5 and 27.2 simulators
+    /// (it rejects "qzxjvkq" and guesses "köttbullar" for "kottbullar", "tack" for "tacck"), as
+    /// Hungarian does; English's fixes stay off ("i" is "in"). Where iOS lists no sv, nothing is
+    /// changed or suggested, never Norwegian's or Danish's words in its place.
+    func testSwedishUsesTheIPhonesDictionaryAndNeverAnotherLanguages() {
+        let swedish = stubbed {
+            $0.valid = ["köttbullar", "läsa", "små", "tack", "hej", "i", "och", "jag"]
+            $0.guessTable = ["kottbullar": ["köttbullar", "köttbullars"], "lasa": ["läsa", "låsa"], "sma": ["små", "sam"], "tacck": ["tack"]]
+        }
+        swedish.setLanguage(.swedish, available: ["nb_NO", "da_DK", "sv_SE", "en_US"])
+        XCTAssertTrue(swedish.hasDictionary)
+        XCTAssertEqual(fix(swedish, "kottbullar"), "köttbullar")
+        XCTAssertEqual(fix(swedish, "Lasa"), "Läsa")
+        XCTAssertEqual(fix(swedish, "sma"), "små")
+        XCTAssertEqual(fix(swedish, "tacck"), "tack")
+        XCTAssertNil(fix(swedish, "hej"), "a word stays")
+        XCTAssertNil(fix(swedish, "i"), "Swedish \"i\" means \"in\"")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.swedish), ["jag", "det", "vi"])
+        XCTAssertEqual(AutocorrectEngine.clauseStarters(.swedish), ["och", "men", "jag"])
+        XCTAssertEqual(AutocorrectEngine.commonWords(.swedish), ["och", "i", "att", "det", "som", "en"])
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.norwegian), ["jeg", "det", "vi"], "Norwegian's unchanged")
+
+        swedish.setLanguage(.swedish, available: ["nb_NO", "da_DK", "fi_FI", "en_US"])
+        XCTAssertFalse(swedish.hasDictionary)
+        XCTAssertNil(fix(swedish, "kottbullar"), "as typed")
+        XCTAssertTrue(swedish.suggestions(beforeInput: "kottb", field: .text, autocorrectionType: .default).isEmpty)
+    }
+
     /// TestFlight (build 56): "Autocomplete suggests English words in Czech too." With Czech
     /// and English chosen, a sentence the words before show is Czech (`languageLean`) gets
     /// Czech completions only, none of English's even where Czech has none, and an English
