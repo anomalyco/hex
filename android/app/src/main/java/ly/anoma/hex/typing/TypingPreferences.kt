@@ -32,6 +32,10 @@ internal class TypingPreferences(context: Context) {
     var letterSymbols: Boolean
         get() = prefs.getBoolean("letterSymbols", false)
         set(value) { prefs.edit().putBoolean("letterSymbols", value).apply() }
+    /** Labs › Keyboard › Number row: the digits above the letters. Off by default. */
+    var numberRow: Boolean
+        get() = prefs.getBoolean("numberRow", false)
+        set(value) { prefs.edit().putBoolean("numberRow", value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {

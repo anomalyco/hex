@@ -108,4 +108,6 @@
     <string name="signature_too_long">请使用不超过 200 个字符</string>
     <string name="letter_symbols">字母键上的符号</string>
     <string name="letter_symbols_detail">长按字母输入符号，例如长按 m 输入 /</string>
+    <string name="number_row">数字行</string>
+    <string name="number_row_detail">在字母上方显示 1–0</string>
 </resources>

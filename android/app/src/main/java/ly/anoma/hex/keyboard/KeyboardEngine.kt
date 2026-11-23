@@ -178,7 +178,7 @@ internal class KeyboardEngine(
     }
     private fun showPlane() {
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
-            FieldKind.of(editor?.inputType ?: 0), pad))
+            FieldKind.of(editor?.inputType ?: 0), pad, feedback.numberRow))
     }
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */
     fun shiftDown() {

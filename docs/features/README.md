@@ -3162,14 +3162,22 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   `heldLettersOfferSymbolsWhenTheLabIsOn` in InsertionTest.kt passed in
 │   https://github.com/anomalyco/hex/actions/runs/45273240353 (testDebugUnitTest + compileDebugKotlin,
 │   GitHub-hosted); not tried on a device or emulator.
-└── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
-    nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
-    added once; the next dictation starts on a new line below it, and a signed dictation
-    never continues the signature line. Home's preview and Copy stay unsigned, and Hex's
-    own fields are never signed.
-    Unit tests plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-    on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45268305325, the
-    latest observed verification); the repo has no Android CI.
+├── Labs > Output > Signature (off) -> one editable line (up to 200 characters; empty adds
+│   nothing, default "Sent from Hex") on its own line at the end of each keyboard dictation,
+│   added once; the next dictation starts on a new line below it, and a signed dictation
+│   never continues the signature line. Home's preview and Copy stay unsigned, and Hex's
+│   own fields are never signed.
+│   Unit tests plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45268305325, the
+│   latest observed verification); the repo has no Android CI.
+└── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
+    every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
+    corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
+    the Symbols on letter keys hints and holds still work. The keyboard is one row taller and
+    the Hex menu matches that height; ?123, the symbols pages and the pads keep their keys and
+    are a row shorter than the letters while it is on. Off, the page is unchanged.
+    KeyboardPageTest plus `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` on a
+    GitHub-hosted runner: pending rerun. Not tried on a device. The repo has no Android CI.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

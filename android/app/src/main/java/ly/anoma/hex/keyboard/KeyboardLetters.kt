@@ -14,10 +14,13 @@ internal object KeyboardLetters {
         "it" to listOf("qwertyuiop", "asdfghjkl", "zxcvbnm"),
     )
 
+    /** The number row's digits, in the order Gboard's row 1 holds them. */
+    const val DIGITS = "1234567890"
+
     fun rows(layoutCode: String) = rows[layoutCode] ?: rows.getValue("en")
 
     /** Row 1's digits, 1 to 0 on its first ten keys, as Gboard draws and holds them. */
-    fun digit(row: Int, index: Int): Char? = if (row == 0 && index < 10) "1234567890"[index] else null
+    fun digit(row: Int, index: Int): Char? = if (row == 0 && index < 10) DIGITS[index] else null
 
     /** The 123 page and the second symbols page; Spanish puts ¿ and ¡ on the second page's last row. */
     fun numbers(layoutCode: String) = listOf("1234567890", "-/:;()$&@\"", punctuation(layoutCode, more = false))
