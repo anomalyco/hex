@@ -323,6 +323,17 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(target.text, "@.")
     }
 
+    /// Safari's address bar: Apple's `.` beside the space bar types a period on the letters page.
+    func testWebSearchFieldShowsApplesDot() {
+        target.keyboardType = .webSearch
+        engine.configureForField()
+        XCTAssertEqual(engine.field, .webSearch)
+        XCTAssertEqual(engine.layout.key(.character("."))?.row, 3)
+        tap(.character("."))
+        XCTAssertEqual(target.text, ".")
+        XCTAssertEqual(engine.layout.layer, .letters)
+    }
+
     func testNumberPadOpensOnNumbers() {
         target.keyboardType = .numberPad
         engine.configureForField()

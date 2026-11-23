@@ -643,7 +643,7 @@ final class AutocorrectEngine {
         capitalizesNext: Bool = false
     ) -> [KeyboardSuggestion] {
         lastFixLanguage = nil
-        guard field == .text, autocorrectionType != .no else { return [] }
+        guard field.takesWords, autocorrectionType != .no else { return [] }
         // Your text replacement shows as Apple's keyboard shows it ("myem": "myem", then the
         // address Space puts in), in any language and whatever the word's history.
         let replaced = textReplacement(before: beforeInput)
@@ -842,7 +842,7 @@ final class AutocorrectEngine {
         autocorrectionType: UITextAutocorrectionType?
     ) -> (original: String, replacement: String)? {
         lastFixLanguage = nil
-        guard field == .text, autocorrectionType != .no else { return nil }
+        guard field.takesWords, autocorrectionType != .no else { return nil }
         // Your own text replacement comes first, as on Apple's keyboard: before the chat
         // shorthand Hex leaves alone ("brb"), with Autocorrect off or no dictionary, and
         // however often you kept the shortcut.
@@ -1366,7 +1366,7 @@ final class AutocorrectEngine {
     /// see" becomes "we'll see", as Apple's keyboard decides at the next word. `before` is
     /// the text up to the end of `word`. Nil to leave it.
     func revision(of word: String, before: String, next: String, field: KeyboardFieldKind, autocorrectionType: UITextAutocorrectionType?) -> String? {
-        guard field == .text, autocorrectionType != .no, hasWords, word.count >= 2 else { return nil }
+        guard field.takesWords, autocorrectionType != .no, hasWords, word.count >= 2 else { return nil }
         let isAllCaps = word == word.uppercased() && word != word.lowercased() && !word.hasPrefix("I'")
         guard !isAllCaps, let nextWord = next.split(separator: " ").first.map(String.init) else { return nil }
         let previous = Self.previousWord(before, token: word)

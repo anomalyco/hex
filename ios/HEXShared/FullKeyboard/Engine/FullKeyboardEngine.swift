@@ -113,7 +113,7 @@ final class FullKeyboardEngine {
         }
     }
 
-    /// Adaptive touch where this field lets it learn (plain text that allows autocorrect).
+    /// Adaptive touch where this field lets it learn (text or web search allowing autocorrect).
     private var adaptiveLearning: AdaptiveTouch?
 
     private func syncAdaptiveField() {
@@ -992,7 +992,7 @@ final class FullKeyboardEngine {
     /// shortcut ends the text.
     private func applyTextReplacement(ending: String) -> Bool {
         let before = textBefore
-        guard field == .text, target.autocorrectionType != .no,
+        guard field.takesWords, target.autocorrectionType != .no,
               let replaced = autocorrect.textReplacement(before: before) else { return false }
         adaptiveLearning?.finish(token: replaced.typed, corrected: replaced.replacement, before: before)
         rememberTypingContext(
@@ -1046,7 +1046,7 @@ final class FullKeyboardEngine {
         let before = textBefore ?? ""
         guard let token = AutocorrectEngine.currentToken(in: before) else { return false }
         if let finished = finishedWord, before == finished.before + token,
-           let taps = finished.taps, let space = finished.space, field == .text, target.autocorrectionType != .no,
+           let taps = finished.taps, let space = finished.space, field.takesWords, target.autocorrectionType != .no,
            let merged = autocorrect.merge(
                first: finished.typed, firstTaps: taps, space: space, second: token,
                before: String(finished.before.dropLast())
