@@ -225,19 +225,16 @@ pub fn listen(
     let capture_environment = recording_environment.clone();
     let (mut microphone_revision, microphone) = crate::app_settings::microphone_selection();
     #[cfg(hex_capture)]
-    let mut paste_picker =
-        crate::paste::recent::enabled().then(|| paste_picker::Picker::new(history.clone()));
-    #[cfg(hex_capture)]
-    let cancel_history = history.clone().filter(|_| crate::paste::recent::enabled());
+    let paste_history = history.clone();
     let dictation_worker = DictationWorker::start(
         input_monitor.activity.clone(),
         transformations.clone(),
         history,
     );
+    // Labs › Paste Last picker follows its switch on every pass, so turning
+    // it on or off applies without a restart.
     #[cfg(hex_capture)]
-    let cancel_writer = cancel_history
-        .zip(dictation_worker.engine())
-        .and_then(|(history, engine)| cancelled_words::Writer::start(history, engine));
+    let mut paste_lab = paste_picker::Lab::new(paste_history, dictation_worker.engine());
     let input = DictationAudio::open(
         device_override,
         microphone_revision,
@@ -312,6 +309,8 @@ pub fn listen(
                 });
             }
         }
+        #[cfg(hex_capture)]
+        paste_lab.sync(crate::paste::recent::enabled());
         let caps_lock_on = crate::labs::caps_lock_dictation();
         caps_lock.set_enabled(caps_lock_on);
         // Turning the lab off mid-capture cancels it, as unbinding the
@@ -339,10 +338,7 @@ pub fn listen(
                             || hotkeys.suppresses_recognition()
                             || input.is_recording();
                         #[cfg(hex_capture)]
-                        let capture_active = capture_active
-                            || paste_picker
-                                .as_ref()
-                                .is_some_and(paste_picker::Picker::busy);
+                        let capture_active = capture_active || paste_lab.busy();
                         let answer = match paste_last_refusal(capture_active) {
                             Some(refusal) => refusal,
                             None => {
@@ -827,7 +823,7 @@ pub fn listen(
                 continue;
             }
             #[cfg(hex_capture)]
-            if let Some(picker) = paste_picker.as_mut()
+            if let Some(picker) = paste_lab.picker()
                 && let Err(error) = picker.edge(input_event, capture_at, &dictation_worker)
             {
                 events.dictation(DictationPhase::Failed(error.into()), "")?;
@@ -891,7 +887,7 @@ pub fn listen(
                 #[cfg(hex_capture)]
                 if action == HotkeyAction::CancelShortcut
                     && dictation_worker.started_by_shortcut()
-                    && let Some(writer) = &cancel_writer
+                    && let Some(writer) = paste_lab.writer()
                 {
                     writer.cancel(&input, capture_at)?;
                     context.cancel();
@@ -908,7 +904,7 @@ pub fn listen(
                 }
                 #[cfg(hex_capture)]
                 if action == HotkeyAction::PasteLast
-                    && let Some(picker) = paste_picker.as_mut()
+                    && let Some(picker) = paste_lab.picker()
                     && let Some(binding) = crate::app_settings::runtime_hotkeys().paste_last
                 {
                     context.cancel();
@@ -967,7 +963,7 @@ pub fn listen(
             hotkeys.break_chords(CaptureInstant::now());
         }
         #[cfg(hex_capture)]
-        if let Some(picker) = paste_picker.as_mut()
+        if let Some(picker) = paste_lab.picker()
             && let Err(error) = picker.tick(
                 hotkey_capture_suspended
                     || programmatic.is_some()
