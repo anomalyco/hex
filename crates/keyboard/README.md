@@ -94,17 +94,42 @@ xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=
 `HEX_TAP_PARITY=/tmp/set.jsonl cargo test --release -p hex-keyboard-core --test tap_parity`.
 A fixture written this way has no `tie` or `swift` notes: there is no Swift order any more.
 
-`examples/tap_replay.rs` replays a typing set through the decoder alone and prints its word
-error rate and per-word latency as the Android benchmark (`android/benchmark/typing`) does.
-It reads that benchmark's synthetic JSON Lines (`export_synthetic.py`; the sets aren't in the
-repository) or iOS's tap JSON (`ios/README.md`, "Replaying real typing"). It leaves out
-everything around the decoder (the engine's contraction and typo rules, the dictionary,
-capitals, the strip), so compare its numbers only with its own.
+### The tap benchmark
+
+`examples/tap_replay` replays typing sets through the tap decoder alone, with the parameters
+tuned for each model's language, and prints its word error rate and per-word latency as TSV
+lines (in the Android benchmark's style, `android/benchmark/typing/Replay.java`) and as a
+markdown table for a PR. It leaves out everything around the decoder (the engine's
+contraction and typo rules, the dictionary, capitals, the strip), so compare its numbers only
+with its own. It reads:
+
+- `android/benchmark/typing/held-out/<lang>.tsv.gz`, the benchmark's 2,000 test sentences per
+  language;
+- the public tap datasets, converted by `ios/benchmark/typing-replay/convert.py` to iOS's tap
+  JSON (`ios/README.md`, "Replaying real typing"), from wherever you keep them: they aren't in
+  the repository;
+- the Android benchmark's JSON Lines (`export_synthetic.py`).
+
+All are typed on the 402 pt geometry `Replay.originalGeometry` gives. Each row has a name in
+its set (a held-out row's Tatoeba ID, an iOS sentence's source, session and place in it, a
+JSON Lines row's `id`), and the name alone picks its split: the test split when the first byte
+of SHA-256(`hex-tap-split-v1:` + name) is odd, else the dev split (about half each).
+
+Tune on the dev split, the default. The test split is sealed: it is read only with `--split
+test --sealed`, once per setting. The setting is a hash of every language's parameters and
+its model's SHA-256; the tool refuses the read when `bench/sealed.tsv` already holds that hash,
+and otherwise appends the hash, the date and each set's results to it (with the set's
+SHA-256). Commit the ledger with the change it measured.
 
 ```sh
+cd crates/keyboard
+M=../../ios/HEXKeyboard/TypingModel H=../../android/benchmark/typing/held-out
 cargo run --release -p hex-keyboard-core --example tap_replay -- \
-  /path/en-test.jsonl ../../ios/HEXKeyboard/TypingModel/en.hextm
+  $H/en.tsv.gz $M/en.hextm $H/es.tsv.gz $M/es.hextm $H/de.tsv.gz $M/de.hextm \
+  /path/noisy-phone-test.json $M/en.hextm
+# once the setting is locked: the same sets, sealed
+cargo run --release -p hex-keyboard-core --example tap_replay -- --split test --sealed <the same sets>
 # a small set of its own, for a smoke test
 cargo run --release -p hex-keyboard-core --example tap_replay -- \
-  --make-sample 200 /tmp/sample.jsonl ../../ios/HEXKeyboard/TypingModel/en.hextm
+  --make-sample 200 /tmp/sample.jsonl $M/en.hextm
 ```

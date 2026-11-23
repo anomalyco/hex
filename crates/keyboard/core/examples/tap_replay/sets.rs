@@ -1,41 +1,6 @@
-//! Replays recorded or synthetic taps through the Rust tap decoder alone and prints its word
-//! error rate and per-word latency, in the TSV lines `android/benchmark/typing/Replay.java`
-//! prints.
-//!
-//! It measures the decoder (`TypingDecoder::decide` on each space) and nothing around it: no
-//! engine contraction or typo rules, no dictionary (`literal_is_valid` is always false), no
-//! capitals, no likelier-next-letter touch areas, no strip. Its error rate is not the
-//! keyboard's; compare it only with itself (a change to the decoder, or the Swift decoder on
-//! the same taps).
-//!
-//! ```sh
-//! cd crates/keyboard
-//! # One of the Android benchmark's synthetic sets (export_synthetic.py), or iOS's tap JSON
-//! # (ios/README.md, "Replaying real typing"):
-//! cargo run --release -p hex-keyboard-core --example tap_replay -- \
-//!   en-test.jsonl ../../ios/HEXKeyboard/TypingModel/en.hextm
-//! # A small set of its own, for a smoke test:
-//! cargo run --release -p hex-keyboard-core --example tap_replay -- \
-//!   --make-sample 200 /tmp/sample.jsonl ../../ios/HEXKeyboard/TypingModel/en.hextm
-//! ```
-//!
-//! Two input shapes: one JSON object with `sentences`, or else JSON Lines.
-//!
-//! - JSON Lines, the Android benchmark's engine-neutral rows: `id`,
-//!   `intended`, `typed` (one character per tap, spaces included) and `taps` (`[x, y]` per
-//!   character) in the 402 pt iOS geometry `Replay.originalGeometry` gives, optionally
-//!   `ios_shared` (iOS's output, for an `agreement` line). As `Replay.java`, a word is read
-//!   when a space follows it; the last one stays as typed unless the row ends with a space.
-//! - iOS `TypingReplayTests` tap JSON (`{"sentences": [...]}`): each touch's last sample, on
-//!   the same 402 pt geometry, is typed as the nearest letter key's (a space when y > 1, at
-//!   its fraction along the space bar), and a space ends the sentence, as that test taps one.
-//!
-//! The decoder's taps are the rows' coordinates as given, the previous word is the word the
-//! replay last wrote, and the key geometry is the 402 pt layout's (English and Spanish rows
-//! of ten, nine (ten with ñ) and seven keys at a 39.5 pt pitch; German and Bokmål Android's
-//! eleven-key rows at 36 pt; French AZERTY), with no Learn how I type offsets.
+//! The sets the replay reads, the 402 pt geometry it types them on, and typing a row.
 
-use std::sync::Arc;
+use std::io::Read;
 use std::time::Instant;
 
 use hex_keyboard_core::decoder::{Keys, Rect, TypingDecoder};
@@ -44,7 +9,7 @@ use serde_json::Value;
 
 /// `Replay.originalGeometry`: the portrait 402 pt KeyboardLayout's letter centres, row pitch
 /// 56 and space bar.
-fn geometry(language: &str) -> Keys {
+pub fn geometry(language: &str) -> Keys {
     let wide = language == "de" || language == "nb";
     let pitch = if wide { 36.0 } else { 39.5 };
     let rows: [&str; 3] = match language {
@@ -78,7 +43,7 @@ fn geometry(language: &str) -> Keys {
 }
 
 /// `Replay.words`: lowercase, split on whitespace, terminal punctuation dropped.
-fn words(s: &str) -> Vec<String> {
+pub fn words(s: &str) -> Vec<String> {
     s.to_lowercase()
         .split_whitespace()
         .map(|w| {
@@ -90,7 +55,7 @@ fn words(s: &str) -> Vec<String> {
 }
 
 /// `Replay.edits`: word-level Levenshtein distance.
-fn edits(reference: &[String], hypothesis: &[String]) -> usize {
+pub fn edits(reference: &[String], hypothesis: &[String]) -> usize {
     let mut d: Vec<usize> = (0..=hypothesis.len()).collect();
     for i in 1..=reference.len() {
         let mut prev = d[0];
@@ -106,12 +71,65 @@ fn edits(reference: &[String], hypothesis: &[String]) -> usize {
 }
 
 /// A row to replay: what was meant, and each typed character with its tap.
-struct Row {
-    intended: String,
-    typed: Vec<(char, (f64, f64))>,
+pub struct Row {
+    /// The row's own name in its set, which decides its split.
+    pub key: String,
+    pub intended: String,
+    pub typed: Vec<(char, (f64, f64))>,
     /// Whether a space ends the row after its last character (iOS's replay taps one).
-    finish: bool,
-    ios: Option<String>,
+    pub finish: bool,
+    pub ios: Option<String>,
+}
+
+/// Reads a set: one JSON object with `sentences` is iOS's tap file, a gzip file
+/// `android/benchmark/typing/held-out`'s TSV, anything else JSON Lines.
+pub fn rows(path: &str, keys: &Keys) -> Vec<Row> {
+    let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{path}: {e}"));
+    if bytes.starts_with(&[0x1f, 0x8b]) {
+        let mut text = String::new();
+        flate2::read::GzDecoder::new(&bytes[..])
+            .read_to_string(&mut text)
+            .unwrap_or_else(|e| panic!("{path}: {e}"));
+        return held_out_rows(&text);
+    }
+    let content = String::from_utf8(bytes).unwrap_or_else(|e| panic!("{path}: {e}"));
+    let ios = serde_json::from_str::<Value>(&content).is_ok_and(|v| v.get("sentences").is_some());
+    if ios {
+        ios_rows(&content, keys)
+    } else {
+        jsonl_rows(&content)
+    }
+}
+
+/// The held-out TSV: Tatoeba ID, contributor, reference, the hit keys (one per tap, the
+/// final space included, Shift's capitals kept) and the `x,y` taps. The keys are read
+/// lowercase, as the benchmark's JSON Lines hold them.
+fn held_out_rows(text: &str) -> Vec<Row> {
+    text.lines()
+        .filter(|l| !l.is_empty())
+        .map(|line| {
+            let columns: Vec<&str> = line.split('\t').collect();
+            let [id, _, reference, typed, taps] = columns[..] else {
+                panic!("a held-out row has five columns: {line}");
+            };
+            let taps: Vec<(f64, f64)> = taps
+                .split(' ')
+                .map(|t| {
+                    let (x, y) = t.split_once(',').expect("x,y");
+                    (x.parse().expect("x"), y.parse().expect("y"))
+                })
+                .collect();
+            let typed: Vec<char> = typed.to_lowercase().chars().collect();
+            assert_eq!(typed.len(), taps.len(), "unaligned taps in {id}");
+            Row {
+                key: format!("tatoeba:{id}"),
+                intended: reference.to_owned(),
+                typed: typed.into_iter().zip(taps).collect(),
+                finish: false,
+                ios: None,
+            }
+        })
+        .collect()
 }
 
 fn jsonl_rows(content: &str) -> Vec<Row> {
@@ -124,6 +142,7 @@ fn jsonl_rows(content: &str) -> Vec<Row> {
             let taps = r["taps"].as_array().expect("taps");
             assert_eq!(typed.len(), taps.len(), "unaligned taps in {}", r["id"]);
             Row {
+                key: format!("jsonl:{}", r["id"].as_str().expect("id")),
                 intended: r["intended"].as_str().expect("intended").to_owned(),
                 typed: typed
                     .into_iter()
@@ -148,11 +167,21 @@ fn ios_rows(content: &str, keys: &Keys) -> Vec<Row> {
     let column = (p.0 - q.0) / 9.0;
     let row = (z.1 - q.1) / 2.0;
     let space = keys.space.expect("a space bar");
+    // A sentence's name: its source, session and place among that session's sentences.
+    let mut seen: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
     file["sentences"]
         .as_array()
         .expect("sentences")
         .iter()
         .map(|s| {
+            let session = format!(
+                "{}/{}",
+                s["source"].as_str().unwrap_or(""),
+                s["session"].as_str().unwrap_or("")
+            );
+            let place = seen.entry(session.clone()).or_default();
+            let key = format!("ios:{session}/{place}");
+            *place += 1;
             let typed = s["taps"]
                 .as_array()
                 .expect("taps")
@@ -177,6 +206,7 @@ fn ios_rows(content: &str, keys: &Keys) -> Vec<Row> {
                 .filter_map(Value::as_str)
                 .collect();
             Row {
+                key,
                 intended: words.join(" "),
                 typed,
                 finish: true,
@@ -200,7 +230,7 @@ fn nearest(keys: &Keys, (x, y): (f64, f64)) -> char {
 }
 
 /// Types a row: letters gather into a word, a space reads it with the decoder.
-fn replay_row(
+pub fn replay_row(
     decoder: &TypingDecoder,
     keys: &Keys,
     row: &Row,
@@ -241,21 +271,6 @@ fn replay_row(
     out
 }
 
-fn latency(name: &str, nanos: &mut [u128]) {
-    if nanos.is_empty() {
-        return;
-    }
-    nanos.sort_unstable();
-    let ms = |n: u128| n as f64 / 1e6;
-    println!(
-        "latency\t{name}\t{}\t{:.4}\t{:.4}\t{:.4}",
-        nanos.len(),
-        ms(nanos[nanos.len() / 2]),
-        ms(nanos[nanos.len() * 95 / 100]),
-        ms(nanos[nanos.len() - 1]),
-    );
-}
-
 /// SplitMix64, for the sample.
 struct Rng(u64);
 
@@ -280,7 +295,7 @@ impl Rng {
 
 /// Writes `count` rows of common words typed as key centres plus noise (a quarter of the
 /// pitch), in the JSON Lines shape: a smoke test, not a benchmark.
-fn make_sample(count: usize, path: &str, model: &Model, keys: &Keys) {
+pub fn make_sample(count: usize, path: &str, model: &Model, keys: &Keys) {
     let mut by_frequency: Vec<usize> =
         (0..hex_keyboard_core::model::SortedWords::word_count(model)).collect();
     by_frequency.sort_by(|&a, &b| model.unigram_cost(a).total_cmp(&model.unigram_cost(b)));
@@ -333,78 +348,4 @@ fn make_sample(count: usize, path: &str, model: &Model, keys: &Keys) {
     }
     std::fs::write(path, lines.join("\n") + "\n").unwrap_or_else(|e| panic!("{path}: {e}"));
     println!("wrote {count} rows to {path}");
-}
-
-fn main() {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "tap_replay <set.jsonl | taps.json> <model.hextm>\n       tap_replay --make-sample <rows> <out.jsonl> <model.hextm>";
-    let (sample, set, model_path) = match args.as_slice() {
-        [flag, rows, out, model] if flag == "--make-sample" => (
-            Some(rows.parse::<usize>().expect("a row count")),
-            out,
-            model,
-        ),
-        [set, model] => (None, set, model),
-        _ => {
-            eprintln!("usage: {usage}");
-            std::process::exit(2);
-        }
-    };
-    let bytes = std::fs::read(model_path).unwrap_or_else(|e| panic!("{model_path}: {e}"));
-    let model = Arc::new(Model::new(Box::new(bytes)).expect("an HXTM v3 model"));
-    let language = model.language().to_owned();
-    let keys = geometry(&language);
-    if let Some(rows) = sample {
-        make_sample(rows, set, &model, &keys);
-        return;
-    }
-    let content = std::fs::read_to_string(set).unwrap_or_else(|e| panic!("{set}: {e}"));
-    // One JSON object with sentences is iOS's tap file; anything else, JSON Lines.
-    let ios = serde_json::from_str::<Value>(&content).is_ok_and(|v| v.get("sentences").is_some());
-    let rows = if ios {
-        ios_rows(&content, &keys)
-    } else {
-        jsonl_rows(&content)
-    };
-    let decoder = TypingDecoder::new(model, None);
-    let (mut raw_errors, mut errors, mut ios_errors, mut total) = (0, 0, 0, 0);
-    let (mut raw_exact, mut exact, mut ios_exact, mut agreement, mut with_ios) = (0, 0, 0, 0, 0);
-    let mut latencies = Vec::new();
-    for row in &rows {
-        let reference = words(&row.intended);
-        total += reference.len();
-        let raw: String = row.typed.iter().map(|&(c, _)| c).collect();
-        let out = replay_row(&decoder, &keys, row, &mut latencies);
-        let (raw_err, err) = (
-            edits(&reference, &words(&raw)),
-            edits(&reference, &words(&out)),
-        );
-        raw_errors += raw_err;
-        errors += err;
-        raw_exact += usize::from(raw_err == 0);
-        exact += usize::from(err == 0);
-        if let Some(ios) = &row.ios {
-            with_ios += 1;
-            let ios_err = edits(&reference, &words(ios));
-            ios_errors += ios_err;
-            ios_exact += usize::from(ios_err == 0);
-            agreement += usize::from(words(ios) == words(&out));
-        }
-    }
-    let count = rows.len();
-    let wer = |name: &str, e: usize, x: usize| {
-        println!(
-            "wer\t{language}_{name}\t{e}\t{total}\t{:.4}\t{x}/{count}",
-            100.0 * e as f64 / total.max(1) as f64
-        );
-    };
-    wer("raw", raw_errors, raw_exact);
-    if with_ios > 0 {
-        wer("ios_shared", ios_errors, ios_exact);
-    }
-    wer("rust_decoder", errors, exact);
-    if with_ios > 0 {
-        println!("agreement\t{language}\t{agreement}/{with_ios}");
-    }
-    latency(&format!("{language}_decide"), &mut latencies);
 }

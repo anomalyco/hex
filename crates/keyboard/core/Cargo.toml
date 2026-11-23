@@ -16,6 +16,8 @@ unicode-normalization = "0.1"
 # sets are JSON Lines; the swipe fixture also checks the models' SHA-256.
 serde_json = "1"
 sha2 = "0.10"
+# The tap benchmark (examples/tap_replay) reads the Android benchmark's gzipped held-out sets.
+flate2 = "1"
 
 [lints]
 workspace = true
