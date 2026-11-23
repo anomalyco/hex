@@ -1325,7 +1325,25 @@ pub(super) fn quiet_select(
 
 /// A shortcut's keys, pressed to record a new one; while recording, the
 /// recorder's prompt in their place.
+#[cfg(test)]
+thread_local! {
+    /// Probe only: which recorder motion `keys_button` draws.
+    pub(super) static RECORDER_MOTION: std::cell::Cell<u8> = const { std::cell::Cell::new(0) };
+}
+
+fn recorder_motion() -> u8 {
+    #[cfg(test)]
+    {
+        RECORDER_MOTION.get()
+    }
+    #[cfg(not(test))]
+    {
+        0
+    }
+}
+
 pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
+    let motion = recorder_motion();
     let c = &p.k.c;
     let face = s::face(ui, target);
     let listening = matches!(
@@ -1333,7 +1351,9 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         Capture::Listening { target: active, .. } if active == target
     );
     let content = match face {
-        Face::Listening(_) => s::recorder_face(p, face, true).key("face"),
+        Face::Listening(_) => {
+            s::recorder_face(p, face, true).key(if motion < 2 { "face" } else { "listening-face" })
+        }
         Face::Shortcut { saved } => {
             let keys = match s::binding(&ui.settings, target) {
                 Some(binding) => {
@@ -1355,7 +1375,7 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
                 ),
             };
             row()
-                .key("face")
+                .key(if motion < 2 { "face" } else { "shortcut-face" })
                 .gap(4.0)
                 .center_y()
                 .children(saved.then(|| {
@@ -1365,6 +1385,22 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
                 }))
                 .child(keys)
         }
+    };
+    let content = match motion {
+        0 => content,
+        1 | 2 => content.ride_trailing(),
+        3 => content
+            .ride_trailing()
+            .transition(rune::Transition::push(rune::Edge::Bottom)),
+        _ => content
+            .ride_trailing()
+            .transition(rune::Transition::blur_replace()),
+    };
+    let content_col = col().key("content").child(content);
+    let content_col = if motion == 0 {
+        content_col
+    } else {
+        content_col.ride_trailing()
     };
     let mut button = row()
         .key(s::hotkey_key(target))
@@ -1378,7 +1414,10 @@ pub(super) fn keys_button(ui: &Ui, p: Paint, target: ShortcutTarget) -> El {
         .focusable(!listening)
         .focus_ring(2.0, 0.0, c.border_focus)
         .on_press(move |ui: &mut Ui| s::begin_capture(ui, target))
-        .child(col().key("content").child(content));
+        .child(content_col);
+    if motion == 3 {
+        button = button.clip_rounded(p.k.radius.md);
+    }
     if listening {
         button = button.fill(c.bg_button_neutral);
     } else {

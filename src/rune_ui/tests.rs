@@ -3949,6 +3949,7 @@ mod application_picker;
 mod drop_transcribe;
 mod onboarding_check;
 mod panes;
+mod recorder_motion;
 
 /// Rune hands focus back to a menu's trigger when it closes. A key the
 /// window means for something else must not reach that trigger.
