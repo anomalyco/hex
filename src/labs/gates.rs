@@ -261,6 +261,14 @@ pub fn recent_dictations() -> bool {
     feature_on(Feature::RecentDictations)
 }
 
+/// The menu bar's Vocabulary submenu: Add term…, the last saved terms, and
+/// Open vocabulary… (macOS; read each time the status item refreshes, as the
+/// menu opens, and by the menu's actions).
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+pub fn vocabulary_menu() -> bool {
+    feature_on(Feature::VocabularyMenu)
+}
+
 /// A whole-clip dictation transcription hears only the head and tail of
 /// each long pause (Linux and Windows; read as each whole-clip run starts).
 #[cfg_attr(target_os = "macos", allow(dead_code))]

@@ -77,7 +77,7 @@ mod spark;
 mod speech_model;
 #[cfg(target_os = "macos")]
 pub(crate) mod story_link;
-mod vocabulary;
+pub(crate) mod vocabulary;
 mod whats_new;
 
 use std::sync::Arc;

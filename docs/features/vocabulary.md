@@ -53,6 +53,16 @@ General › Vocabulary   // vocabulary.settings; after Language
     `hex settings set vocabulary_boost off|light|normal|strong`
     (settings.json `vocabulary_boost`)  // vocabulary.boost
 
+Menu bar › Vocabulary ▸ (Labs › Vocabulary menu, off by default, macOS)  // vocabulary.menu
+├── Add term… -> Settings' Vocabulary sheet with a new focused row at its end
+│   (the list glides to it as Add term's does), autosaved through the sheet's
+│   draft path; an empty list already opens with one focused blank row
+├── up to the last five saved terms, newest first, as disabled informational
+│   rows on one line each (whitespace collapsed); no separator or rows while
+│   the list is empty
+└── Open vocabulary… -> Settings' Vocabulary sheet
+    (macos_rune/status_item.rs `refresh_vocabulary`, read as the menu opens)
+
 Transcription (Parakeet: RNN-T and TDT, Underdog Bark and Nemotron 3.5 ASR too)  // vocabulary.transcription; transcription::gguf_session::with_vocabulary
 ├── Parakeet takes the list unless the boost is Off (labs.md)
 ├── Every run and live stream reads the list and the boost at its start:

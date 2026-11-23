@@ -844,6 +844,17 @@
       "title": "Vocabulary files"
     },
     {
+      "added": "2026-11-23",
+      "group": "dictation",
+      "groupTitle": "Dictation",
+      "id": "vocabulary-menu",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Add terms to Vocabulary from the menu bar, or open the Vocabulary sheet",
+      "title": "Vocabulary menu"
+    },
+    {
       "added": "2026-11-21",
       "group": "output",
       "groupTitle": "Output",

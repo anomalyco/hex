@@ -408,6 +408,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        // the_vocabulary_sheet_offers_files_only_with_its_lab_on (rune_ui/tests.rs),
 │                                        // vocabulary_files_is_its_own_switch_and_everywhere (labs.rs); the native
 │                                        // dialogs were not opened in a desktop session
+├── Vocabulary menu no  labs.vocabulary_menu             (macOS) the menu bar's Vocabulary ▸ submenu, right under
+│                                        Speech Model ▸, offers Add term… and Open vocabulary… and lists the last five
+│                                        saved terms newest first; off, the row is hidden and the menu is exactly as
+│                                        before (#2540)
+│                                        // checks: vocabulary_lists_the_last_five_terms_newest_first (status_item.rs,
+│                                        // macOS only), the_vocabulary_menu_is_a_macos_dictation_lab_off_by_default
+│                                        // (labs.rs), adding_a_term_from_the_menu_opens_the_sheet_with_one_blank_row_last
+│                                        // (rune_ui/vocabulary.rs); the native menu was not opened on a Mac
 └── Only on speakers no   labs.speakers_only            (every OS) While dictating (Mute, Lower audio, Pause
                                          media) applies only while the default output is speakers; wired or Bluetooth
                                          headphones leave the output and media alone for that recording or capture, and
@@ -3834,6 +3842,31 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   no new dependency; the save dialog is the same native
   `desktop::file_dialog` wrapper as open, over Rune's
   `FileDialogs::save`.
+- Vocabulary menu: the menu-bar menu gains **Vocabulary ▸** right under
+  **Speech Model ▸** (macOS; off by default, `labs.vocabulary_menu`, in the
+  Dictation group). Off, the row is hidden and the menu is exactly as before.
+  **Add term…** opens Settings on the Vocabulary sheet with a new focused term
+  row at its end, which the list glides to, autosaved through the sheet's own
+  draft path like Add term; a list that is empty already opens with one focused
+  blank row, so no second row is made. **Open vocabulary…** opens the sheet
+  alone. Between them, up to the last five saved terms, newest first, as
+  disabled informational rows on one line each (whitespace collapsed and cut
+  like a meeting title); the separator and the rows are left out while the list
+  is empty. The saved list is read only as the menu opens, and only with
+  `labs::vocabulary_menu()` on, from
+  `dictation::vocabulary::entries()`; the row, submenu, and actions
+  (`StatusItemAction::AddVocabularyTerm`, `OpenVocabulary`,
+  `refresh_vocabulary`) are in
+  [macos_rune/status_item.rs](../../src/macos_rune/status_item.rs), and the
+  sheet opens through `rune_ui::vocabulary::open` / `open_new_term` from
+  `Pump::status_action`. Checks:
+  `vocabulary_lists_the_last_five_terms_newest_first`
+  ([macos_rune/status_item.rs](../../src/macos_rune/status_item.rs), macOS
+  only), `the_vocabulary_menu_is_a_macos_dictation_lab_off_by_default`
+  ([labs.rs](../../src/labs.rs)), and
+  `adding_a_term_from_the_menu_opens_the_sheet_with_one_blank_row_last`
+  ([rune_ui/vocabulary.rs](../../src/rune_ui/vocabulary.rs)). Not yet observed:
+  the submenu on a real Mac; the menu-bar row exists only in macOS builds.
 - Paste Last picker: tapping Paste Last pastes the newest ready dictation or
   finished annotation, and holding it (⌥⇧V) opens a picker of recent rows, or
   all of History; History then lists dictations, annotations, screenshots and

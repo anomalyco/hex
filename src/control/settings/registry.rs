@@ -370,6 +370,12 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: import vocabulary terms from a CSV file in the Vocabulary sheet, and export the list as one",
     ),
     key(
+        "labs.vocabulary_menu",
+        Kind::Bool,
+        "Labs: the menu bar's Vocabulary submenu lists the last five saved terms and offers \
+         Add term… and Open vocabulary… (macOS)",
+    ),
+    key(
         "labs.screen_vocabulary",
         Kind::Bool,
         "Labs: use names and terms visible in the focused window as temporary vocabulary for each dictation (macOS)",

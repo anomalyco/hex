@@ -540,6 +540,19 @@ mod tests {
     }
 
     #[test]
+    fn the_vocabulary_menu_is_a_macos_dictation_lab_off_by_default() {
+        let feature = Feature::VocabularyMenu;
+        assert_eq!(feature.name(), "vocabulary-menu");
+        assert_eq!(feature.group(), Group::Dictation);
+        assert_eq!(feature.audience(), Audience::Everyone);
+        assert_eq!(feature.oses(), &[Os::Macos]);
+        assert_eq!(feature.added(), 20261123);
+        assert!(!feature.on(&AppSettings::default()));
+        assert_eq!(feature.on_this_os(), cfg!(target_os = "macos"));
+        assert_eq!(Feature::from_name("vocabulary-menu"), Some(feature));
+    }
+
+    #[test]
     fn every_labs_feature_encodes_independently_in_the_switch_bank() {
         let default_bank = encode_where(&LabsSettings::default(), |_| true);
         for feature in Feature::ALL {
