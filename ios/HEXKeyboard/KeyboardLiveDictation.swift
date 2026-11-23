@@ -141,12 +141,14 @@ final class KeyboardLiveDictation {
 
     /// The preview shows from here (empty until the first words), never while the language is
     /// still looked up, so a dictation without live words never flashes it. Type as I speak
-    /// never types a dictation Translate what I say turns into another language.
+    /// never types a dictation Translate what I say turns into another language, nor in a field
+    /// it never types in; the words then show over the keys instead (`liveWords`).
     private func attach(_ source: LiveTranscriptSource) {
-        text.begin(
-            showsPreview: settings.showsPreview,
-            typesIntoField: settings.typesIntoField && !DictationTranslationSettings().isEnabled
+        let words = settings.liveWords(
+            translating: DictationTranslationSettings().isEnabled,
+            fieldTakesTyping: text.fieldTakesTyping()
         )
+        text.begin(showsPreview: words.showsPreview, typesIntoField: words.typesIntoField)
         source.onUpdate = { [weak self] transcript in self?.received(transcript) }
         source.onFailure = { [weak self] reason in self?.giveUp(reason) }
         self.source = source

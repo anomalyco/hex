@@ -24,14 +24,16 @@ What the simulator proves and what only a physical iPhone can.
   record with the microphone on with Hex closed, Hex open and idle, a warm
   session on, and during in-keyboard dictation (WebKit's `videoChat` session,
   which Hex can't change), and compare.
-- **Show what I say and Type as I speak:** `LiveDictationTests` cover how results become the
-  words shown, the switches' defaults, the end of a long dictation, and Type as I speak's
+- **Live words (In bar and Into field):** `LiveDictationTests` cover how results become the
+  words shown, the defaults, the end of a long dictation, and Into field's
   typing, revising, taking back, stopping when the field changes or an app reports no text,
-  private fields, and an app's Send (three in a row, Undo after one, an edit that isn't one). The simulator has no speech models, so there the preview and typing ran on a
+  private fields, an app's Send (three in a row, Undo after one, an edit that isn't one), and
+  the words shown over the keys where Into field can't type
+  (`testIntoFieldShowsTheWordsOverTheKeysWhereItCantType`). The simulator has no speech models, so there the preview and typing ran on a
   replay of Apple's results recorded on a Mac (`LiveTranscriptReplay`), in a host app, light and
   dark, upright and turned, on an iPhone SE's globe key and with no model at all (no preview).
-  On an iPhone 17 Pro (iOS 27.2): the preview, Type as I speak, a 60 s dictation, memory with
-  and without, and the keyboard hidden mid-dictation with Type as I speak (Home, then back: the
+  On an iPhone 17 Pro (iOS 27.2): the preview, Into field, a 60 s dictation, memory with
+  and without, and the keyboard hidden mid-dictation with Into field (Home, then back: the
   held text pasted over its words). Unchecked: VoiceOver on a device (the test runner there has
   no VoiceOver control), hosts that lag or show part of the text (web views, Notes) and real
   speech in a room rather than a clip from a speaker.

@@ -19,7 +19,7 @@ the area you touch is the spec for it.
 | --- | --- |
 | [`docs/onboarding-and-setup.md`](docs/onboarding-and-setup.md) | First run, the setup sheet, Full Access, opening Hex from the keyboard, cold start and the handoff |
 | [`docs/keyboard.md`](docs/keyboard.md) | The full keyboard and dictation bar: the Hex key, auto-start, push to talk, autocorrect and the typing models, Learn how I type, Adaptive touch, swipe typing, languages and layouts, size and touch targets, iPhone Duo and iPad, emoji, the Dot Scope |
-| [`docs/dictation.md`](docs/dictation.md) | Engines and speech models, warm sessions, styles and cleanup, dictation language, translation, live dictation and Type as I speak, capture and audio, Action Button and Live Activity |
+| [`docs/dictation.md`](docs/dictation.md) | Engines and speech models, warm sessions, styles and cleanup, dictation language, translation, live dictation (Live words), capture and audio, Action Button and Live Activity |
 | [`docs/settings-and-home.md`](docs/settings-and-home.md) | Home's screen, the four Settings pages, the experiments list, and every `--snap-state` scene |
 | [`docs/build-and-test.md`](docs/build-and-test.md) | Prerequisites, generating the project, the cleanup tagger's model, the emoji index, replaying real typing |
 | [`docs/verification.md`](docs/verification.md) | What the simulator proves, what needs a physical iPhone, and the measured numbers behind each check |
