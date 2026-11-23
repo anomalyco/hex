@@ -1908,8 +1908,8 @@ Hex checks the release service            // maintain.updates
 │       │   └── A release published after the relaunch -> the next launch's check
 │       ├── macOS -> renamex_np swap (also at quit) -> relaunch -> old bundle removed at launch
 │       │   // one .Hex-update-<version> folder at a time: staging a newer build removes the one it replaces
-│       └── Labs › Release notes link -> a release build's footer carries this build's notes:
-│           anoma.ly/hex/dev#<version> for a dev build, github.com/anomalyco/hex/releases/tag/v<version> for a stable one;
+│       └── Labs › Release notes link -> a release build's footer links to what changed since this build:
+│           anoma.ly/hex/dev?since=<version> for a dev build, github.com/anomalyco/hex/releases/tag/v<version> for a stable one;
 │           local and test builds show no link (by build kind, not version string)
 ├── macOS location not replaceable (read-only, translocated, root-owned) -> Download update (DMG)
 ├── Package manager (pacman, Nix) -> its command, once it serves another version
