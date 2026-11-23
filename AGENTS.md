@@ -1681,7 +1681,10 @@ New, unproven, user-requested, and externally contributed features
 its settings key, description, and group (`Feature::group`), a card on the Labs page, and a
 `hex settings` key; gate where the feature's work starts (worker, thread,
 capture), not just its UI. Never add a master switch or ship such a feature
-on by default. Remove it from Labs when it graduates or is dropped.
+on by default. Remove it from Labs when it graduates or is dropped. Before
+merging a new lab or any new persisted setting, run
+`scripts/check labs control::settings` locally: Compile alone doesn't run the
+check that every persisted setting has a `hex settings` key.
 
 Use `scripts/check [filter]` for the local loop, not raw `cargo test`. It runs
 tests through cargo-nextest (`brew install cargo-nextest`) with
