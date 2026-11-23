@@ -86,7 +86,7 @@ final class KeyboardViewController: UIInputViewController {
     /// The dictation bar's key haptic; the full keyboard has its own generator.
     private lazy var barHaptics = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(hapticStrength))
     /// Settings › Keyboard › Strength as of the last bridge sync.
-    private var hapticStrength = KeyHapticStrength.medium {
+    private var hapticStrength = KeyHapticStrength.light {
         didSet {
             if hapticStrength != oldValue { barHaptics = UIImpactFeedbackGenerator(style: FullKeyboardView.keyTickStyle(hapticStrength)) }
         }
