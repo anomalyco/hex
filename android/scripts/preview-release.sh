@@ -67,7 +67,13 @@ ferry sh "$builder" '[ -f ~/.config/hex-android-preview/preview.jks ] && [ -f ~/
 }
 ferry cp "$work/android" "$builder:$remote/" >/dev/null
 jdk='export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home ANDROID_HOME=$HOME/Library/Android/sdk; export PATH=$JAVA_HOME/bin:$PATH;'
-ferry sh "$builder" --timeout 3600 "$jdk cd ~/$remote/android && ./gradlew --no-daemon -q :app:assemblePreview -PhexPreviewBuild=$build -PhexPreviewChannel=$raw"
+# Detached, so a dropped connection to the builder doesn't stop the build; the exit code lands in a file.
+ferry sh "$builder" --detach "$jdk cd ~/$remote/android && ./gradlew --no-daemon -q :app:assemblePreview -PhexPreviewBuild=$build \
+  -PhexPreviewChannel=$raw > ~/$remote/build.log 2>&1; echo \$? > ~/$remote/build.exit" >/dev/null
+for _ in $(seq 1 240); do ferry sh "$builder" "test -f ~/$remote/build.exit" 2>/dev/null && break; sleep 15; done
+if [ "$(ferry sh "$builder" "cat ~/$remote/build.exit")" != 0 ]; then
+  ferry sh "$builder" "tail -40 ~/$remote/build.log" >&2; echo "the build failed on $builder" >&2; exit 1
+fi
 apk=HexPreview-$name.apk
 out=$root/android/build/preview/$build; mkdir -p "$out"
 ferry cp "$builder:$remote/android/app/build/outputs/apk/preview/app-preview.apk" "$out/$apk" >/dev/null
