@@ -43,6 +43,7 @@ import kotlinx.coroutines.delay
 import ly.anoma.hex.keyboard.speechNote
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
+import ly.anoma.hex.updates.Updates
 
 internal data class Setup(val mic: Boolean = false, val enabled: Boolean = false, val chosen: Boolean = false,
                          val micNeedsSettings: Boolean = false) {
@@ -122,7 +123,7 @@ class MainActivity : ComponentActivity() {
             permission.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
-    override fun onResume() { super.onResume(); refresh() }
+    override fun onResume() { super.onResume(); refresh(); Updates.appOpened(this) }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (!hasFocus) return

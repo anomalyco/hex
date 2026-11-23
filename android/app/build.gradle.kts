@@ -60,6 +60,26 @@ val requireUploadKey by tasks.registering {
     }
 }
 
+// Hex Preview (the `preview` build type) is signed with its own key, never the Play upload key, read the same way.
+val previewProperties = providers.environmentVariable("HEX_ANDROID_PREVIEW_KEYSTORE_PROPERTIES").orNull
+    ?.let(::file) ?: File(System.getProperty("user.home"), ".config/hex-android-preview/keystore.properties")
+val previewKey = Properties().apply {
+    if (previewProperties.isFile) previewProperties.inputStream().use(::load)
+}
+val requirePreviewKey by tasks.registering {
+    doLast {
+        check(listOf("storeFile", "storePassword", "keyAlias", "keyPassword").all { !previewKey.getProperty(it).isNullOrBlank() } &&
+            previewProperties.parentFile.resolve(previewKey.getProperty("storeFile")).isFile) {
+            "Hex Preview packaging requires the preview keystore and its keystore.properties."
+        }
+    }
+}
+// A Hex Preview build's number: android/scripts/preview-release.sh passes the count of dev's commits up to the
+// commit it builds, which only grows. A local build without it is build 1 and updates to any published one.
+val previewBuild = providers.gradleProperty("hexPreviewBuild").orNull?.toInt() ?: 1
+val previewChannel = providers.gradleProperty("hexPreviewChannel").orNull
+    ?: "https://raw.githubusercontent.com/anomalyco/hex/android-preview/latest.json"
+
 android {
     namespace = "ly.anoma.hex"
     compileSdk = 36
@@ -88,6 +108,12 @@ android {
             keyAlias = upload.getProperty("keyAlias")
             keyPassword = upload.getProperty("keyPassword")
         }
+        create("preview") {
+            storeFile = previewKey.getProperty("storeFile")?.let { previewProperties.parentFile.resolve(it) }
+            storePassword = previewKey.getProperty("storePassword")
+            keyAlias = previewKey.getProperty("keyAlias")
+            keyPassword = previewKey.getProperty("keyPassword")
+        }
     }
     buildTypes {
         release {
@@ -98,7 +124,18 @@ android {
             signingConfig = signingConfigs.getByName("upload")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        // Hex Preview: the release build as an APK outside Google Play, beside the Play app, with its own updater
+        // (src/preview). Play builds get src/play's empty one: Google Play forbids an app updating itself.
+        create("preview") {
+            initWith(getByName("release"))
+            applicationIdSuffix = ".preview"
+            signingConfig = signingConfigs.getByName("preview")
+            matchingFallbacks += "release"
+            resValue("string", "update_channel", previewChannel)
+        }
     }
+    sourceSets["debug"].java.srcDir("src/play/java")
+    sourceSets["release"].java.srcDir("src/play/java")
     packaging.resources.excludes += "DebugProbesKt.bin"
     buildFeatures { compose = true }
     androidResources { noCompress += listOf("bin", "hextm", "valid", "capitals") }
@@ -111,9 +148,17 @@ android {
     }
 }
 
+androidComponents {
+    onVariants(selector().withBuildType("preview")) { variant ->
+        val name = "${android.defaultConfig.versionName}-preview.$previewBuild"
+        variant.outputs.forEach { it.versionCode.set(previewBuild); it.versionName.set(name) }
+    }
+}
+
 kotlin.compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
 tasks.matching { it.name in setOf("packageRelease", "packageReleaseBundle", "signReleaseBundle", "bundleRelease", "assembleRelease") }
     .configureEach { dependsOn(requireUploadKey) }
+tasks.matching { it.name in setOf("packagePreview", "assemblePreview") }.configureEach { dependsOn(requirePreviewKey) }
 // Unmodified InterVariable.ttf from rsms/inter v4.1, stored locally for offline builds.
 val verifyInter by tasks.registering {
     val font = file("src/main/res/font/inter_variable.ttf")

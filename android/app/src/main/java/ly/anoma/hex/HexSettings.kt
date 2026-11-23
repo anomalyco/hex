@@ -38,6 +38,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ly.anoma.hex.speech.*
 import ly.anoma.hex.typing.TypingPreferences
+import ly.anoma.hex.updates.Updates
 
 private enum class Page(val title: Int) {
     Home(R.string.app_name), Dictation(R.string.settings_dictation), Keyboard(R.string.settings_keyboard), Privacy(R.string.settings_privacy),
@@ -163,6 +164,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             }
                         }
                         if (notice != null) Label(notice, muted = true, size = 14, lines = 3)
+                        Updates.HomeCard()
                         Card {
                             listOf(Page.Dictation, Page.Keyboard, Page.Privacy).forEachIndexed { i, dest ->
                                 if (i != 0) Rule()
@@ -173,6 +175,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                             Entry(stringResource(R.string.home_keyboard_settings), value = "↗", action = systemSettings)
                             Rule(); Entry(stringResource(R.string.home_run_setup), action = { setupPage(0) })
                         }
+                        Updates.SettingsCard()
                     }
                     Page.Dictation -> {
                         Card {
@@ -286,7 +289,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     }
 }
 
-@Composable private fun Label(text: String, size: Int = 16, weight: FontWeight = FontWeight.Normal,
+@Composable internal fun Label(text: String, size: Int = 16, weight: FontWeight = FontWeight.Normal,
                               muted: Boolean = false, inverted: Boolean = false, lines: Int = 1, mod: Modifier = Modifier) {
     BasicText(text, mod, style = TextStyle(fontFamily = inter, fontWeight = weight, fontSize = size.sp,
         lineHeight = (size + 5).sp, color = colorResource(if (inverted) R.color.page else if (muted) R.color.quiet else R.color.ink)),
@@ -312,14 +315,14 @@ private fun reflow(lines: List<String>) = buildString {
         append(if (ends) "\n" else " ")
     }
 }
-@Composable private fun Action(text: String, onClick: () -> Unit) {
+@Composable internal fun Action(text: String, onClick: () -> Unit) {
     Box(Modifier.heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 12.dp),
         contentAlignment = Alignment.Center) { Label(text, weight = FontWeight.Medium, size = 15) }
 }
-@Composable private fun Card(content: @Composable ColumnScope.() -> Unit) {
+@Composable internal fun Card(content: @Composable ColumnScope.() -> Unit) {
     Column(Modifier.fillMaxWidth().clip(RoundedCornerShape(14.dp)).background(colorResource(R.color.sheet)), content = content)
 }
-@Composable private fun Rule() {
+@Composable internal fun Rule() {
     Spacer(Modifier.fillMaxWidth().padding(start = 16.dp).height(1.dp).background(colorResource(R.color.rule)))
 }
 @Composable private fun RowScope.RowTitle(title: String, note: String?) {
@@ -328,7 +331,7 @@ private fun reflow(lines: List<String>) = buildString {
         if (note != null) Label(note, size = 13, muted = true, lines = 2)
     }
 }
-@Composable private fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
+@Composable internal fun Entry(title: String, note: String? = null, value: String = "›", action: (() -> Unit)? = null) {
     val click = if (action != null) Modifier.clickable(role = Role.Button, onClick = action) else Modifier
     Row(Modifier.fillMaxWidth().then(click).heightIn(min = 52.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -336,7 +339,7 @@ private fun reflow(lines: List<String>) = buildString {
         if (action != null && value.isNotEmpty()) Label(value, muted = true, size = if (value == "›") 22 else 15)
     }
 }
-@Composable private fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, change: (Boolean) -> Unit) {
+@Composable internal fun Toggle(title: String, note: String, on: Boolean, enabled: Boolean = true, change: (Boolean) -> Unit) {
     Row(Modifier.fillMaxWidth().toggleable(on, enabled = enabled, role = Role.Switch, onValueChange = change)
         .heightIn(min = 56.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
