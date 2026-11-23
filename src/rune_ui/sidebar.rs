@@ -391,7 +391,7 @@ fn footer(ui: &Ui, p: Paint) -> El {
         .children(sidebar_update::blocked(ui, p))
 }
 
-/// The version itself links to this build's notes.
+/// The version itself links to what changed since this build.
 fn release_notes_url(ui: &Ui) -> Option<String> {
     // A source or test build has no published notes for its code.
     if ui.build_preview.unwrap_or_else(build_kind) != BuildKind::Release {
