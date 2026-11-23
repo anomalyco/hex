@@ -3,27 +3,37 @@ use super::*;
 
 impl Capsule {
     pub(super) fn request_stop(&mut self) {
-        if !self.stopping
-            && matches!(self.kind, Some(Kind::Recording(_)))
-            && self.send(ControllerCommand::Stop)
+        if matches!(
+            self.state,
+            State::Recording {
+                stopping: false,
+                ..
+            }
+        ) && self.send(ControllerCommand::Stop)
         {
             self.mark_stopping();
         }
     }
 
     pub(super) fn mark_stopping(&mut self) {
-        if matches!(self.kind, Some(Kind::Recording(_))) {
-            self.stopping = true;
+        if let State::Recording { stopping, .. } = &mut self.state {
+            *stopping = true;
             #[cfg(target_os = "windows")]
             self.fit_recording_window();
         }
     }
 
     pub(super) fn capture_stopped(&mut self) {
-        if let Some(Kind::Recording(r)) = &self.kind {
-            self.kind = Some(Kind::Finalizing {
-                duration_ms: r.started.elapsed().as_millis() as u64,
-            });
+        if let State::Recording {
+            recording, hovered, ..
+        } = &self.state
+        {
+            let duration_ms = recording.started.elapsed().as_millis() as u64;
+            let hovered = *hovered;
+            self.state = State::Finalizing {
+                duration_ms,
+                hovered,
+            };
             #[cfg(target_os = "windows")]
             if let Some(resize) = &self.resize {
                 resize(panel::finalizing_window_size());
@@ -34,12 +44,13 @@ impl Capsule {
     /// The controller accepted the recording: the offer's handoff ends and
     /// the recording takes the surface it left.
     pub(super) fn start_recording(&mut self, recording: Recording, tx: &mut Tx) {
-        self.kind = Some(Kind::Recording(recording));
+        self.state = State::Recording {
+            recording,
+            hovered: false,
+            stopping: false,
+        };
         self.waveform = Some(Box::new(waveform::Listening::new(Instant::now())));
         self.live = Live::default();
-        self.hovered = false;
-        self.stopping = false;
-        self.expired = false;
         self.throw.stop();
         // Nothing here mounts with an entrance of its own: the surface
         // carries the change.
@@ -49,11 +60,24 @@ impl Capsule {
 
     pub(super) fn published(&mut self, manifest: Box<MeetingManifest>) {
         self.live = Live::default();
-        self.kind = Some(Kind::Ready(manifest));
+        let hover = if self.hovered() {
+            ReadyHover::Hovered
+        } else {
+            ReadyHover::Idle
+        };
+        self.state = State::Ready { manifest, hover };
     }
 }
 
 impl MeetingCapsules {
+    pub(super) fn clear_finishing(&mut self) {
+        if matches!(self.host, offer::Host::Finishing(_)) {
+            self.host = offer::Host::Panel;
+            self.generation.fetch_add(1, Ordering::SeqCst);
+            self.pill.handle.update(|c, tx| c.dismiss(tx));
+        }
+    }
+
     pub(super) fn advance_handoff(&mut self, event: &ControllerEvent, inherit: bool) {
         // A new panel supersedes an old summary, and failure yields to the
         // host's failure UI. Notes never take ownership or show a window.
@@ -64,13 +88,11 @@ impl MeetingCapsules {
                 | ControllerEvent::Reminder { .. }
                 | ControllerEvent::Offer(..)
                 | ControllerEvent::Failed { .. }
-        ) && self.finishing.take().is_some()
-        {
-            self.generation.fetch_add(1, Ordering::SeqCst);
-            self.pill.handle.update(|c, tx| c.dismiss(tx));
+        ) {
+            self.clear_finishing();
         }
         if let Some(id) = self.pill.apply(event, inherit) {
-            self.finishing = Some(id);
+            self.host = offer::Host::Finishing(id);
             if matches!(event, ControllerEvent::Transcribing) {
                 self.pill.handle.update(|c, tx| {
                     c.capture_stopped();
@@ -83,7 +105,7 @@ impl MeetingCapsules {
     /// The capsule a finished meeting still owns: the recording's own
     /// window while it is finishing there, else the panel.
     pub(super) fn handle_for(&self, id: &str) -> &OverlayHandle<Capsule> {
-        if self.finishing.as_deref() == Some(id) {
+        if self.host.finishing_id() == Some(id) {
             &self.pill.handle
         } else {
             &self.panel
@@ -94,7 +116,7 @@ impl MeetingCapsules {
         let handle = self.handle_for(id);
         let id = id.to_owned();
         handle.update_if(move |c, _| {
-            let Some(Kind::Ready(m)) = &c.kind else {
+            let State::Ready { manifest: m, .. } = &c.state else {
                 return false;
             };
             #[cfg(target_os = "windows")]
@@ -108,7 +130,8 @@ impl MeetingCapsules {
     }
 
     pub(super) fn finish_meeting(&mut self, manifest: &MeetingManifest) {
-        if self.finishing.as_ref() != Some(&manifest.id) {
+        if self.host.finishing_id() != Some(manifest.id.as_str()) {
+            self.clear_finishing();
             self.show_panel(Kind::Ready(Box::new(manifest.clone())), Some(READY_TIMEOUT));
             return;
         }

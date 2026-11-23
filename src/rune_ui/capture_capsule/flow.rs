@@ -57,6 +57,9 @@ pub(crate) const MENU_HINT_S: f64 = 4.0;
 /// The permission helper waits this long for a grant, then folds; the
 /// capture shortcut brings it back.
 pub(crate) const PERMISSION_HOLD_S: f64 = 120.0;
+/// How long an unanswered `Action::Undo` suppresses late delivery news before
+/// expiring so a silent router cannot wedge the capsule.
+pub(crate) const UNDO_REPLY_TIMEOUT_S: f64 = 10.0;
 /// Session names in the capsule are cut to this many characters.
 const ROUTE_NAME_MAX: usize = 18;
 
@@ -540,6 +543,9 @@ pub(crate) enum Pen {
 #[derive(Clone, Debug, PartialEq)]
 enum Phase {
     Hidden,
+    /// A written capture was dismissed or its hold expired; late routing or
+    /// delivery news for it leaves the capsule closed until the next stage.
+    Dismissed,
     Selecting(Mode),
     /// `discard_until`: the ✕ asks "Discard?" until then (Escape never
     /// ends a recording, so discarding takes two clicks).
@@ -680,6 +686,39 @@ struct Pause {
     router: bool,
 }
 
+/// Tracks an `Action::Undo` sent to the router until `Input::Undone` arrives
+/// or [`UNDO_REPLY_TIMEOUT_S`] elapses.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Undo {
+    #[default]
+    Idle,
+    /// An Undo was asked for at `at` and the router has not answered yet:
+    /// late news of the send it takes back changes nothing.
+    InFlight { at: f64 },
+    /// A pick came at `at` while that Undo was unanswered: the router answers
+    /// the earlier Undo first, so the next `Undone` and news for another
+    /// session belong to the earlier send and leave the pick standing.
+    Superseded { at: f64 },
+}
+
+impl Undo {
+    fn deadline(self) -> Option<f64> {
+        match self {
+            Self::Idle => None,
+            Self::InFlight { at } | Self::Superseded { at } => Some(at + UNDO_REPLY_TIMEOUT_S),
+        }
+    }
+
+    fn expire(&mut self, now: f64) -> bool {
+        if self.deadline().is_some_and(|due| now >= due) {
+            *self = Self::Idle;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 /// The capsule's state machine.
 #[derive(Clone, Debug)]
 pub(crate) struct Flow {
@@ -706,18 +745,8 @@ pub(crate) struct Flow {
     silent: bool,
     /// The capture shown isn't on the clipboard: its copy failed.
     uncopied: bool,
-    /// The written capture shown was closed (dismissed, or its hold ran
-    /// out); news of it leaves the capsule closed.
-    closed: bool,
-    /// An Undo was asked for and the router hasn't said how it ended: news
-    /// of the send it takes back (it went, queued, or failed) changes
-    /// nothing.
-    undoing: bool,
-    /// A pick came while that Undo was unanswered. The router takes the
-    /// earlier send back before it sends the pick, so the next answer to an
-    /// Undo is the earlier send's, and so is news of a send elsewhere: the
-    /// pick shown stands.
-    superseded: bool,
+    /// In-flight router Undo tracking.
+    undo: Undo,
     /// A guess opens its suggestions under the finished capsule (the Mac).
     /// On Linux the capsule shows Paste first and Send to… waits for a
     /// click, so Dax can paste again without a list in the way.
@@ -749,9 +778,7 @@ impl Flow {
             cues: Vec::new(),
             silent: false,
             uncopied: false,
-            closed: false,
-            undoing: false,
-            superseded: false,
+            undo: Undo::Idle,
             suggest_on_route: true,
             drawing: false,
             helper_next: None,
@@ -961,8 +988,7 @@ impl Flow {
             open.pointed = None;
         }
         self.cue(&before, &actions);
-        self.closing(&before);
-        self.track_undo(&actions);
+        self.track_undo(&actions, now);
         let mut actions = actions;
         actions.extend(self.hold_countdown(now));
         actions
@@ -985,33 +1011,28 @@ impl Flow {
             .map(|dest| dest.session.clone())
     }
 
-    /// Follows an Undo until the router answers it.
-    fn track_undo(&mut self, actions: &[Action]) {
+    /// Follows an Undo until the router answers it or times out.
+    fn track_undo(&mut self, actions: &[Action], now: f64) {
         if actions
             .iter()
             .any(|action| matches!(action, Action::Undo { .. }))
         {
-            self.undoing = true;
+            self.undo = Undo::InFlight { at: now };
         }
         // A pick while an Undo is unanswered: the router answers the Undo
         // first, then sends the pick, so news of the pick counts.
-        if self.undoing
+        if matches!(self.undo, Undo::InFlight { .. })
             && actions
                 .iter()
                 .any(|action| matches!(action, Action::Send { .. }))
         {
-            self.undoing = false;
-            self.superseded = true;
+            self.undo = Undo::Superseded { at: now };
         }
-    }
-
-    fn closing(&mut self, before: &Phase) {
-        let written = !matches!(
-            before,
-            Phase::Hidden | Phase::Selecting(_) | Phase::Recording { .. } | Phase::Processing
-        );
-        if written && self.phase == Phase::Hidden {
-            self.closed = true;
+        if !matches!(
+            self.phase,
+            Phase::Routed(_) | Phase::Sent(_) | Phase::TakenBack { .. }
+        ) {
+            self.undo = Undo::Idle;
         }
     }
 
@@ -1021,7 +1042,7 @@ impl Flow {
     pub(crate) fn keys(&self) -> Option<crate::capture_host::CapsuleKeys> {
         use crate::capture_host::CapsuleKeys;
         match &self.phase {
-            Phase::Hidden | Phase::Kept { .. } => None,
+            Phase::Hidden | Phase::Dismissed | Phase::Kept { .. } => None,
             Phase::Selecting(_) => Some(CapsuleKeys::Picker),
             // Nothing to list; ✕ dismisses, or it
             // leaves by itself.
@@ -1047,14 +1068,16 @@ impl Flow {
     }
 
     /// Runs what time decides: the chips closing, the Undo window ending,
-    /// the finished capsule leaving. True when one was due.
+    /// the finished capsule leaving, and an unanswered Undo expiring.
+    /// True when one was due.
     pub(crate) fn tick(&mut self, now: f64) -> bool {
+        let undo_expired = self.undo.expire(now);
         match &mut self.phase {
             Phase::Recording {
                 chips_until,
                 discard_until,
             } => {
-                let mut due = false;
+                let mut due = undo_expired;
                 for until in [chips_until, discard_until] {
                     if !self.hovered && until.is_some_and(|t| now >= t) {
                         *until = None;
@@ -1064,21 +1087,25 @@ impl Flow {
                 due
             }
             phase => {
+                let was_permission = matches!(phase, Phase::Permission { .. });
                 let due = !self.hovered
                     && hold_until(phase).is_some_and(|at| now >= at.max(self.hold_floor));
                 if due {
-                    self.phase = Phase::Hidden;
-                    self.closed = true;
-                    if let Some((need, asked_by)) = self.helper_next.take() {
-                        self.phase = Phase::Permission {
+                    self.undo = Undo::Idle;
+                    self.phase = if let Some((need, asked_by)) = self.helper_next.take() {
+                        Phase::Permission {
                             need,
                             grant: Grant::Off,
                             at: now,
                             asked_by,
-                        };
-                    }
+                        }
+                    } else if was_permission {
+                        Phase::Hidden
+                    } else {
+                        Phase::Dismissed
+                    };
                 }
-                due
+                due || undo_expired
             }
         }
     }
@@ -1124,7 +1151,11 @@ impl Flow {
         let hold = hold_until(&self.phase)
             .map(|at| at.max(self.hold_floor))
             .filter(|_| !self.hovered);
-        [due, hold].into_iter().flatten().min_by(f64::total_cmp)
+        let undo_reply = self.undo.deadline().filter(|&at| at > now);
+        [due, hold, undo_reply]
+            .into_iter()
+            .flatten()
+            .min_by(f64::total_cmp)
     }
 
     /// What the capsule draws at `now`.
@@ -1162,7 +1193,7 @@ impl Flow {
         let now = self.clock(now);
         let undo_left = |at: f64| now - at < undo_s();
         match &self.phase {
-            Phase::Hidden => Pres::Hidden,
+            Phase::Hidden | Phase::Dismissed => Pres::Hidden,
             Phase::Selecting(mode) => Pres::Selecting {
                 mode: *mode,
                 phone: self.phone,
@@ -2247,8 +2278,66 @@ mod tests {
         let mut flow = Flow::new();
         picked(&mut flow);
         flow.input(Input::Settled, 1.4);
-        assert!(!flow.undoing);
+        assert!(!matches!(flow.undo, Undo::InFlight { .. }));
         assert_eq!(done(&flow, 1.4).text, "Sent to HEX");
+    }
+
+    /// A router that never answers an `Action::Undo` must not wedge delivery
+    /// news forever: `next_due` schedules the reply timeout, and once it
+    /// elapses delivery news is accepted again.
+    #[test]
+    fn a_silent_router_undo_expires_and_never_wedges_delivery_news() {
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        assert_eq!(
+            flow.input(Input::Undo, 1.0),
+            [Action::Undo { to: "SEER".into() }]
+        );
+        let deadline = 1.0 + UNDO_REPLY_TIMEOUT_S;
+        assert_eq!(flow.next_due(1.5), Some(deadline));
+        // Before the deadline, late news of the undone send is still ignored.
+        flow.input(
+            Input::Delivered(Delivered::Queued {
+                to: "SEER".into(),
+                why: "OpenCode isn't running".into(),
+            }),
+            2.0,
+        );
+        assert_eq!(rows(&flow, 2.0), ["HEX", "HOME", "SEER"]);
+        // Once the silent router misses the deadline, the guard clears and
+        // delivery news is accepted again.
+        assert!(flow.tick(deadline));
+        assert_eq!(flow.next_due(deadline), None);
+        flow.input(
+            Input::Delivered(Delivered::Sent { to: "HEX".into() }),
+            deadline + 0.1,
+        );
+        assert_eq!(done(&flow, deadline + 0.1).text, "Sent to HEX");
+
+        // Same when a pick superseded the unanswered Undo: once the deadline
+        // elapses without `Input::Undone`, the superseded guard expires too.
+        let mut flow = Flow::new();
+        flow.input(Input::Routed(rule_of_three()), 0.0);
+        flow.input(Input::Undo, 1.0);
+        flow.input(Input::SendRow(0), 1.1);
+        assert!(matches!(flow.undo, Undo::Superseded { .. }));
+        assert!(flow.tick(1.1 + UNDO_REPLY_TIMEOUT_S));
+        assert_eq!(flow.undo, Undo::Idle);
+    }
+
+    /// Dismissing the permission helper returns to clean `Hidden`, never
+    /// suppressing routing news for a subsequent capture.
+    #[test]
+    fn dismissing_permission_helper_does_not_suppress_later_routing() {
+        let mut flow = Flow::new();
+        flow.input(
+            Input::NeedsPermission(CaptureNeed::ScreenRecording, AskedBy::Capture),
+            0.0,
+        );
+        flow.input(Input::Dismiss, 1.0);
+        assert_eq!(flow.pres(1.0), Pres::Hidden);
+        flow.input(Input::Routed(guess()), 2.0);
+        assert!(matches!(flow.pres(2.0), Pres::Done(_)));
     }
 
     /// An Undo asked for while the rule's send is still under way keeps

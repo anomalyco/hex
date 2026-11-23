@@ -421,7 +421,7 @@ fn play(
     // The recording is dark in either appearance; the offer follows the host.
     let dark = std::env::var("HEX_HUD_THEME").as_deref() != Ok("light");
     let (mut rt, commands, _) = runtime(kind, false, dark, size);
-    let width = if matches!(rt.state.kind, Some(Kind::Offer(..))) {
+    let width = if matches!(rt.state.state, State::Offer { .. }) {
         rt.state.presentation.window().0
     } else {
         size.0
@@ -435,7 +435,7 @@ fn play(
         }
         moved
     });
-    if let Some(Kind::Recording(shown)) = &mut rt.state.kind {
+    if let State::Recording { recording: shown, .. } = &mut rt.state.state {
         match replay.name {
             "notice" | "left-notice" => {
                 shown.warning = Some(meeting::TrackWarning::DigitalSilence)
@@ -469,8 +469,8 @@ fn play(
         rt.state.waveform = Some(Box::new(waveform::Listening::new(clock)));
         rt.state.live.entries = call();
     }
-    let mut host = match rt.state.kind.as_ref() {
-        Some(Kind::Offer(id, _)) => offer::Host::Offered(*id),
+    let mut host = match &rt.state.state {
+        State::Offer { id, .. } => offer::Host::Offered(*id),
         _ => offer::Host::default(),
     };
     let mut live_since = replay.live.then_some(0usize);
@@ -581,8 +581,8 @@ fn play(
                         unreachable!()
                     };
                     // The finished meeting is as long as its recording was.
-                    m.duration_ms = Some(match c.kind {
-                        Some(Kind::Finalizing { duration_ms }) => duration_ms,
+                    m.duration_ms = Some(match c.state {
+                        State::Finalizing { duration_ms, .. } => duration_ms,
                         _ => 5_000,
                     });
                     c.published(m);
@@ -605,7 +605,7 @@ fn play(
                 _ => 0,
             } + (frame - since) as u64 * 1000 / 60;
             rt.update(move |c, _| {
-                if let Some(Kind::Recording(shown)) = &mut c.kind {
+                if let State::Recording { recording: shown, .. } = &mut c.state {
                     shown.started = Instant::now() - Duration::from_millis(run);
                 }
             });
@@ -636,18 +636,18 @@ fn play(
                     (_, "not-now") => assert!(matches!(sent, Ok(ControllerCommand::Dismiss))),
                     _ => assert!(sent.is_err(), "{key} sent a command"),
                 }
-                assert!(rt.state.kind.is_none(), "{key} is true the frame it is pressed");
+                assert!(!rt.state.is_shown(), "{key} is true the frame it is pressed");
             }
             Some(Cue::Timeout) => {
                 assert!(matches!(
                     commands.try_recv(),
                     Ok(ControllerCommand::OfferTimedOut(_))
                 ));
-                assert!(rt.state.kind.is_none());
+                assert!(!rt.state.is_shown());
             }
             Some(_) => {
                 assert!(matches!(commands.try_recv(), Ok(ControllerCommand::Stop)));
-                assert!(rt.state.stopping, "Stop is true the frame it is pressed");
+                assert!(rt.state.stopping(), "Stop is true the frame it is pressed");
             }
             None => (),
         }
@@ -656,16 +656,16 @@ fn play(
         let rect = |key: &str| rt.presented(key).map(|(rect, _)| rect);
         let shot = Shot {
             width,
-            phase: match &c.kind {
-                None if c.surface.leaving() => "leaving",
-                None => "closed",
-                Some(Kind::Offer(..)) if c.presentation.departing() => "starting",
-                Some(Kind::Offer(..)) => "offer",
-                Some(Kind::Recording(_)) if c.stopping => "stopping",
-                Some(Kind::Recording(_)) => "recording",
-                Some(Kind::Finalizing { .. }) => "transcribing",
-                Some(Kind::Ready(m)) if m.notes.is_some() => "summary",
-                Some(Kind::Ready(_)) => "published",
+            phase: match &c.state {
+                State::Empty if c.surface.leaving() => "leaving",
+                State::Empty => "closed",
+                State::Offer { .. } if c.presentation.departing() => "starting",
+                State::Offer { .. } => "offer",
+                State::Recording { stopping: true, .. } => "stopping",
+                State::Recording { .. } => "recording",
+                State::Finalizing { .. } => "transcribing",
+                State::Ready { manifest: m, .. } if m.notes.is_some() => "summary",
+                State::Ready { .. } => "published",
                 _ => "other",
             },
             pill: rect("pill"),
@@ -741,8 +741,8 @@ fn play(
 impl Capsule {
     /// The shown finished meeting's length, for notes that arrive for it.
     fn length(&self) -> Option<u64> {
-        match &self.kind {
-            Some(Kind::Ready(m)) => m.duration_ms,
+        match &self.state {
+            State::Ready { manifest: m, .. } => m.duration_ms,
             _ => Some(5_000),
         }
     }

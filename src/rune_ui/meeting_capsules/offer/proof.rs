@@ -212,7 +212,7 @@ fn the_offer_has_no_default_key_and_names_each_focus_target() {
         assert!(commands.try_recv().is_err());
         key(&mut rt, rune::Key::Text(" ".into()));
         match tabs {
-            1 => assert!(rt.state.more_open),
+            1 => assert!(rt.state.more_open()),
             2 => assert!(matches!(
                 commands.try_recv(),
                 Ok(ControllerCommand::Dismiss)
@@ -375,7 +375,7 @@ fn a_record_click_keeps_its_corner_until_the_worker_is_live() {
                             assert!(texts(&rt).contains(&tr("Starting…").to_owned()));
                         }
                     }
-                    assert!(rt.find("stop").is_none() && !rt.state.hovered);
+                    assert!(rt.find("stop").is_none() && !rt.state.hovered());
                     assert!(commands.try_recv().is_err());
                     last = (w, h);
                 }

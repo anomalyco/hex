@@ -1,13 +1,16 @@
 use super::*;
 
-/// Starting acknowledges a particular offer. The controller's later withdrawal
-/// retires the detection, not the worker it already started for that offer.
-#[derive(Default, Clone, Copy, Debug, PartialEq)]
+/// Who currently owns the recording window (`pill.handle`) outside an active
+/// recording driven by `PillModel`. Only one occupant can own it at a time:
+/// an offer, an accepted offer waiting to hand off, or a meeting finalizing /
+/// showing its ready summary there.
+#[derive(Default, Clone, Debug, PartialEq, Eq)]
 pub(super) enum Host {
     #[default]
     Panel,
     Offered(OfferId),
     Accepted(OfferId),
+    Finishing(String),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -19,17 +22,26 @@ pub(super) enum Route {
 }
 
 impl Host {
-    pub(super) fn on_pill(self) -> bool {
-        self != Self::Panel
+    pub(super) fn offer_on_pill(&self) -> bool {
+        matches!(self, Self::Offered(_) | Self::Accepted(_))
     }
+
+    pub(super) fn finishing_id(&self) -> Option<&str> {
+        match self {
+            Self::Finishing(id) => Some(id.as_str()),
+            _ => None,
+        }
+    }
+
     pub(super) fn route(&mut self, event: &ControllerEvent) -> Route {
         use ControllerEvent::*;
-        match (*self, event) {
-            (Self::Offered(shown) | Self::Accepted(shown), Starting(Some(id))) if shown == *id => {
+        match (&*self, event) {
+            (Self::Offered(shown) | Self::Accepted(shown), Starting(Some(id))) if *shown == *id => {
+                let shown = *shown;
                 *self = Self::Accepted(shown);
                 Route::Keep
             }
-            (Self::Offered(shown), OfferWithdrawn(id)) if shown == *id => Route::Close,
+            (Self::Offered(shown), OfferWithdrawn(id)) if *shown == *id => Route::Close,
             (
                 Self::Accepted(_),
                 RecordingStarted {
@@ -107,8 +119,11 @@ pub(super) fn actions(
             .cursor(Cursor::Pointer)
             .on_press_tx(move |c: &mut Capsule, tx| {
                 if !c.presentation.inherits_offer_window()
-                    && c.more_open == choosing
-                    && matches!(c.kind, Some(Kind::Offer(shown, _)) if shown == id)
+                    && matches!(
+                        c.state,
+                        State::Offer { id: shown, choices, .. }
+                            if shown == id && choices.is_open() == choosing
+                    )
                 {
                     press(c);
                     // The surface answers in the frame of the press.
@@ -148,7 +163,7 @@ pub(super) fn actions(
         actions.push(action("offer-more", "…", false, |c| c.set_more_open(true)).label(tr("More")));
     }
     actions.push(action("not-now", tr("Not now"), false, |c| {
-        if let Some(Kind::Offer(_, candidate)) = &c.kind {
+        if let State::Offer { candidate, .. } = &c.state {
             tracing::info!(source = candidate.source.label(), title = %candidate.title, "meeting recording offer dismissed");
         }
         c.send(ControllerCommand::Dismiss);
@@ -163,32 +178,59 @@ impl Capsule {
         if self.presentation.inherits_offer_window() {
             return;
         }
-        let Some(Kind::Offer(id, candidate)) = &self.kind else {
+        let State::Offer {
+            id,
+            candidate,
+            rearm,
+            ..
+        } = &mut self.state
+        else {
             return;
         };
-        if self.send(ControllerCommand::Record(candidate.clone(), Some(*id))) {
-            self.presentation.begin(*id, candidate.clone());
-            self.rearm_offer = None;
+        let (id, candidate) = (*id, candidate.clone());
+        if self
+            .commands
+            .try_send(ControllerCommand::Record(candidate.clone(), Some(id)))
+            .is_ok()
+        {
+            self.presentation.begin(id, candidate);
+            *rearm = None;
         } else {
             tracing::warn!("could not queue the meeting recording request");
         }
     }
 
+    #[cfg(test)]
     pub(super) fn set_offer_timer(&mut self, timer: Option<After>) {
-        self.rearm_offer = timer;
-        self.arm_offer_timeout();
+        if let State::Offer { rearm, .. } = &mut self.state {
+            *rearm = timer;
+            self.arm_offer_timeout();
+        }
     }
 
-    fn arm_offer_timeout(&self) {
-        if let Some(after) = &self.rearm_offer {
+    pub(super) fn arm_offer_timeout(&self) {
+        if let State::Offer {
+            rearm: Some(after), ..
+        } = &self.state
+        {
             after(OFFER_TIMEOUT, Self::expire_offer);
         }
     }
 
     pub(super) fn set_more_open(&mut self, open: bool) {
-        self.more_open = open;
-        if !open && std::mem::take(&mut self.expired) {
-            self.arm_offer_timeout();
+        let State::Offer { choices, .. } = &mut self.state else {
+            return;
+        };
+        if open {
+            if *choices == OfferChoices::Closed {
+                *choices = OfferChoices::Open;
+            }
+        } else {
+            let expired = *choices == OfferChoices::OpenExpired;
+            *choices = OfferChoices::Closed;
+            if expired {
+                self.arm_offer_timeout();
+            }
         }
     }
 
@@ -196,19 +238,26 @@ impl Capsule {
         if self.presentation.inherits_offer_window() {
             return;
         }
-        let Some(Kind::Offer(id, candidate)) = &self.kind else {
+        let State::Offer {
+            id,
+            candidate,
+            choices,
+            ..
+        } = &mut self.state
+        else {
             return;
         };
-        if self.more_open {
-            self.expired = true;
+        if choices.is_open() {
+            *choices = OfferChoices::OpenExpired;
             return;
         }
+        let id = *id;
         tracing::info!(
             source = candidate.source.label(),
             title = %candidate.title,
             "meeting recording offer timed out"
         );
-        self.send(ControllerCommand::OfferTimedOut(*id));
+        self.send(ControllerCommand::OfferTimedOut(id));
         self.close();
     }
 }

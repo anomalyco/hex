@@ -391,6 +391,49 @@ impl Scene {
 
 // ─── The overlay ─────────────────────────────────────────────────────────────
 
+/// The picker's visibility, enter/leave, and pick-handoff lifecycle.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Lifecycle {
+    /// Hidden: overlay is down, scene is off.
+    Closed,
+    /// Committed the hidden pose on a (new) display; fades in next poll
+    /// (overlay is up, scene is off).
+    Opening,
+    /// Visible and taking pointer/drag input (overlay is up, scene is on).
+    Open,
+    /// A target was picked at `at`; waiting `hold` polls before starting the
+    /// fade-out so the drag's instant commit does not land the fade at once
+    /// (overlay is up, scene is still on, pointer input disabled).
+    PickedHold { at: f64, hold: u8 },
+    /// A target was picked at `at`; scene is off and fading out since
+    /// `off_since` before hiding the overlay.
+    PickedFade { at: f64, off_since: f64 },
+    /// A target was picked at `at`; overlay is hidden, waiting up to
+    /// [`RETRY_AFTER_S`] to reopen if no capture starts.
+    PickedHidden { at: f64 },
+    /// Dismissed; fading out since `since` before hiding the overlay.
+    Closing { since: f64 },
+}
+
+impl Lifecycle {
+    fn overlay_up(self) -> bool {
+        !matches!(self, Self::Closed | Self::PickedHidden { .. })
+    }
+
+    fn is_picked(self) -> bool {
+        matches!(
+            self,
+            Self::PickedHold { .. } | Self::PickedFade { .. } | Self::PickedHidden { .. }
+        )
+    }
+
+    /// Whether the picker still holds its current mode (so the same `want`
+    /// does not re-open it).
+    fn keeps_mode(self) -> bool {
+        !matches!(self, Self::Closed | Self::Closing { .. })
+    }
+}
+
 /// The picker overlay's state.
 pub(crate) struct PickerState {
     /// What the capsule picks; `None` closes the picker.
@@ -406,15 +449,8 @@ pub(crate) struct PickerState {
     /// instant commits move it.
     badge: Badge,
     badge_alpha: Live<f32>,
-    /// Committed the hidden pose on the new display; fades in next poll.
-    opening: bool,
-    /// Animation seconds a pick hid the picker at.
-    picked: Option<f64>,
-    /// Polls until a pick's fade starts: never in the commit of the drag
-    /// that made it, whose instant moves would land the fade at once.
-    fading_in: u8,
-    /// Animation seconds the scene went off at, until the overlay hides.
-    off_since: Option<f64>,
+    /// Enter, active, pick-handoff, and exit lifecycle.
+    lifecycle: Lifecycle,
     /// When it last looked for the pointer on another display.
     looked: f64,
     now: f64,
@@ -424,7 +460,6 @@ pub(crate) struct PickerState {
     shortcut: Arc<Mutex<Option<CaptureTarget>>>,
     act: Option<super::Act>,
     overlay: Option<OverlayHandle<PickerState>>,
-    shown: bool,
     /// Draws a plain desktop with its windows under the picker (stills and
     /// clips).
     backdrop: bool,
@@ -442,17 +477,13 @@ impl PickerState {
             camera: Live::new([0.0, 0.0]),
             badge: Badge::empty([720.0, 450.0]),
             badge_alpha: Live::new(0.0),
-            opening: false,
-            picked: None,
-            fading_in: 0,
-            off_since: Some(f64::NEG_INFINITY),
+            lifecycle: Lifecycle::Closed,
             looked: f64::NEG_INFINITY,
             now: 0.0,
             loads: 0,
             shortcut: Arc::default(),
             act: None,
             overlay: None,
-            shown: false,
             backdrop: false,
             screen_label: FULL_SCREEN,
         }
@@ -470,7 +501,11 @@ impl PickerState {
         state.backdrop = true;
         state.restage();
         state.scene.on = on;
-        state.off_since = (!on).then_some(f64::NEG_INFINITY);
+        state.lifecycle = if on {
+            Lifecycle::Open
+        } else {
+            Lifecycle::Closed
+        };
         if let Some([x, y]) = state.aim.as_ref().and_then(|aim| aim.pointer) {
             state.camera.set([x - CAMERA * 0.5, y - CAMERA * 0.5]);
         }
@@ -531,7 +566,7 @@ impl PickerState {
     pub(crate) fn moved(&mut self, at: [f32; 2], tx: &mut Tx) {
         self.camera
             .set([at[0] - CAMERA * 0.5, at[1] - CAMERA * 0.5]);
-        let Some(aim) = self.aim.as_mut().filter(|_| self.picked.is_none()) else {
+        let Some(aim) = self.aim.as_mut().filter(|_| !self.lifecycle.is_picked()) else {
             tx.live_only();
             return;
         };
@@ -550,7 +585,7 @@ impl PickerState {
 
     /// A press, drag, or release on the picker.
     pub(crate) fn dragged(&mut self, phase: Phase, at: [f32; 2], cancelled: bool, tx: &mut Tx) {
-        if self.picked.is_some() || !self.scene.on {
+        if self.lifecycle != Lifecycle::Open {
             return;
         }
         let Some(aim) = &mut self.aim else {
@@ -604,8 +639,10 @@ impl PickerState {
 
     fn picked(&mut self) {
         *self.shortcut.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        self.picked = Some(self.now);
-        self.fading_in = 2;
+        self.lifecycle = Lifecycle::PickedHold {
+            at: self.now,
+            hold: 2,
+        };
         if let Some(overlay) = &self.overlay {
             overlay.set_input(OverlayInput::None);
         }
@@ -653,8 +690,7 @@ impl PickerState {
         // next poll.
         self.scene.on = false;
         self.restage();
-        self.opening = true;
-        self.off_since = None;
+        self.lifecycle = Lifecycle::Opening;
         tx.instant();
         tx.wake_after(Duration::ZERO);
         true
@@ -700,7 +736,7 @@ impl PickerState {
             .aim
             .as_ref()
             .map(|aim| aim.mode)
-            .filter(|_| self.off_since.is_none() || self.opening || self.picked.is_some());
+            .filter(|_| self.lifecycle.keeps_mode());
         if want == have {
             return false;
         }
@@ -708,9 +744,16 @@ impl PickerState {
             Some(Mode::Iphone) | None => {
                 *self.shortcut.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 self.scene.on = false;
-                self.fading_in = 0;
-                self.opening = false;
-                self.picked = None;
+                self.lifecycle = match self.lifecycle {
+                    Lifecycle::Closed | Lifecycle::PickedHidden { .. } => Lifecycle::Closed,
+                    Lifecycle::PickedFade { off_since, .. } => {
+                        Lifecycle::Closing { since: off_since }
+                    }
+                    Lifecycle::Closing { since } => Lifecycle::Closing { since },
+                    Lifecycle::Opening | Lifecycle::Open | Lifecycle::PickedHold { .. } => {
+                        Lifecycle::Closing { since: self.now }
+                    }
+                };
                 if let Some(aim) = &mut self.aim {
                     aim.drag = None;
                 }
@@ -718,8 +761,6 @@ impl PickerState {
                 true
             }
             Some(mode) => {
-                self.picked = None;
-                self.fading_in = 0;
                 if let Some(overlay) = &self.overlay {
                     overlay.set_input(OverlayInput::All);
                 }
@@ -730,7 +771,12 @@ impl PickerState {
                     }
                     self.load_windows();
                 }
-                if have.is_none() {
+                let needs_open = have.is_none()
+                    || matches!(
+                        self.lifecycle,
+                        Lifecycle::PickedFade { .. } | Lifecycle::PickedHidden { .. }
+                    );
+                if needs_open {
                     if self.overlay.is_some() {
                         self.aim = None;
                         self.place(mode, tx);
@@ -740,12 +786,14 @@ impl PickerState {
                         aim.drag = None;
                         self.scene.on = false;
                         self.restage();
-                        self.opening = true;
-                        self.off_since = None;
+                        self.lifecycle = Lifecycle::Opening;
                         tx.instant();
                         tx.wake_after(Duration::ZERO);
                     }
                     return true;
+                }
+                if matches!(self.lifecycle, Lifecycle::PickedHold { .. }) {
+                    self.lifecycle = Lifecycle::Open;
                 }
                 if let Some(aim) = &mut self.aim {
                     aim.mode = mode;
@@ -789,38 +837,48 @@ fn in_engine_units(target: CaptureTarget) -> CaptureTarget {
 
 pub(crate) fn poll(s: &mut PickerState, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
+    let was_shown = s.lifecycle.overlay_up();
     let mut changed = s.follow(tx);
-    if s.opening && !changed {
-        // The hidden pose is on screen: fade in from it.
-        s.opening = false;
-        s.scene.on = true;
-        changed = true;
-    }
-    if s.fading_in > 0 {
-        s.fading_in -= 1;
-        if s.fading_in == 0 {
-            s.scene.on = false;
+    match s.lifecycle {
+        Lifecycle::Opening if !changed => {
+            // The hidden pose is on screen: fade in from it.
+            s.lifecycle = Lifecycle::Open;
+            s.scene.on = true;
             changed = true;
-        } else {
-            tx.wake_after(Duration::ZERO);
         }
+        Lifecycle::PickedHold { at, hold } => {
+            let next = hold.saturating_sub(1);
+            if next == 0 {
+                s.lifecycle = Lifecycle::PickedFade { at, off_since: now };
+                s.scene.on = false;
+                changed = true;
+            } else {
+                s.lifecycle = Lifecycle::PickedHold { at, hold: next };
+                tx.wake_after(Duration::ZERO);
+            }
+        }
+        _ => {}
     }
-    if let Some(at) = s.picked
-        && s.aim.is_some()
-        && now - at >= RETRY_AFTER_S
-    {
-        s.picked = None;
-        s.scene.on = true;
-        if let Some(overlay) = &s.overlay {
-            overlay.set_input(OverlayInput::All);
+    match s.lifecycle {
+        Lifecycle::PickedHold { at, .. }
+        | Lifecycle::PickedFade { at, .. }
+        | Lifecycle::PickedHidden { at } => {
+            if s.aim.is_some() && now - at >= RETRY_AFTER_S {
+                s.lifecycle = Lifecycle::Open;
+                s.scene.on = true;
+                if let Some(overlay) = &s.overlay {
+                    overlay.set_input(OverlayInput::All);
+                }
+                changed = true;
+            } else {
+                tx.wake_after(Duration::from_secs_f64((at + RETRY_AFTER_S - now).max(0.0)));
+            }
         }
-        changed = true;
-    } else if let Some(at) = s.picked {
-        tx.wake_after(Duration::from_secs_f64((at + RETRY_AFTER_S - now).max(0.0)));
+        _ => {}
     }
     // It follows the pointer to another display, between drags.
     if s.overlay.is_some()
-        && s.scene.on
+        && s.lifecycle == Lifecycle::Open
         && let Some(aim) = &s.aim
         && aim.drag.is_none()
     {
@@ -832,30 +890,35 @@ pub(crate) fn poll(s: &mut PickerState, now: f64, tx: &mut Tx) -> bool {
         tx.wake_after(DISPLAY_EVERY);
     }
 
-    let off = !s.scene.on && !s.opening;
-    let since = match (off, s.off_since) {
-        (true, None) => *s.off_since.insert(now),
-        (true, Some(since)) => since,
-        (false, _) => {
-            s.off_since = None;
-            now
-        }
-    };
-    let leaving = since + HIDE_AFTER_S - now;
-    if off && leaving > 0.0 {
-        tx.wake_after(Duration::from_secs_f64(leaving));
-    }
-    let shown = !off || leaving > 0.0;
-    if s.shown != shown {
-        s.shown = shown;
-        if let Some(overlay) = &s.overlay {
-            if shown {
-                overlay.show();
+    match s.lifecycle {
+        Lifecycle::PickedFade { at, off_since } => {
+            let leaving = off_since + HIDE_AFTER_S - now;
+            if leaving > 0.0 {
+                tx.wake_after(Duration::from_secs_f64(leaving));
             } else {
-                overlay.hide();
-                if s.want.is_none() || s.want == Some(Mode::Iphone) {
-                    s.aim = None;
-                }
+                s.lifecycle = Lifecycle::PickedHidden { at };
+            }
+        }
+        Lifecycle::Closing { since } => {
+            let leaving = since + HIDE_AFTER_S - now;
+            if leaving > 0.0 {
+                tx.wake_after(Duration::from_secs_f64(leaving));
+            } else {
+                s.lifecycle = Lifecycle::Closed;
+            }
+        }
+        _ => {}
+    }
+    let shown = s.lifecycle.overlay_up();
+    if was_shown != shown
+        && let Some(overlay) = &s.overlay
+    {
+        if shown {
+            overlay.show();
+        } else {
+            overlay.hide();
+            if s.want.is_none() || s.want == Some(Mode::Iphone) {
+                s.aim = None;
             }
         }
     }
