@@ -1462,8 +1462,9 @@ not). Checks: `styles_differ_on_ordinary_short_dictation`,
 in [dictation/processor.rs](../../src/dictation/processor.rs);
 `dictation_style_is_its_own_atomic_and_carries_its_choice` in
 [labs.rs](../../src/labs.rs);
-`dictation_style_shows_its_choices_on_its_card_while_on` and
-`output_shows_the_style_row_while_its_lab_is_on` in
+`dictation_style_shows_its_choices_on_its_card_while_on`,
+`output_shows_the_style_row_while_its_lab_is_on`, and
+`the_style_menu_shows_every_name_whole_beside_its_hint` in
 [panes.rs](../../src/rune_ui/tests/panes.rs);
 `every_dictation_style_string_has_every_language` in
 [i18n.rs](../../src/desktop/i18n.rs). Not yet observed with a real
