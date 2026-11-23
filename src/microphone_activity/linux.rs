@@ -1,8 +1,9 @@
 //! Microphone users on Linux: PipeWire's running capture streams, watched
 //! through one long-running `pw-dump --monitor`. Streams that capture an
 //! output's monitor (`stream.capture.sink`), such as Hex's own meeting
-//! system audio, are not microphone users. Only stream metadata is read;
-//! no audio is captured.
+//! system audio, are not microphone users. The same graph tracks running
+//! playback streams, so a call app still playing counts as present even off
+//! the microphone. Only stream metadata is read; no audio is captured.
 
 use std::collections::HashMap;
 use std::io::BufReader;
@@ -18,10 +19,12 @@ use serde_json::Value;
 use super::{ActiveMicrophoneApplication, deduplicated};
 
 const INPUT_STREAM: &str = "Stream/Input/Audio";
+const OUTPUT_STREAM: &str = "Stream/Output/Audio";
 
 #[derive(Clone, Debug, Default, PartialEq)]
 struct Node {
     input: bool,
+    output: bool,
     running: bool,
     client: Option<u64>,
     process: Process,
@@ -89,6 +92,7 @@ impl Graph {
                     id,
                     Node {
                         input: class == Some(INPUT_STREAM) && !monitor,
+                        output: class == Some(OUTPUT_STREAM),
                         running: info.get("state").and_then(Value::as_str) == Some("running"),
                         client: props.get("client.id").and_then(|client| {
                             client
@@ -128,6 +132,26 @@ impl Graph {
             })
             .collect();
         deduplicated(applications)
+    }
+
+    /// Whether any running output stream belongs to `canonical_bundle_id`.
+    fn playing_output(&self, canonical_bundle_id: &str) -> bool {
+        self.nodes
+            .values()
+            .filter(|node| node.output && node.running)
+            .any(|node| {
+                let client = node
+                    .client
+                    .and_then(|client| self.clients.get(&client))
+                    .cloned()
+                    .unwrap_or_default();
+                let process = node.process.or(&client);
+                let Some(binary) = process.binary else {
+                    return false;
+                };
+                super::canonical_bundle_id_for(&binary, process.name.as_deref())
+                    == Some(canonical_bundle_id)
+            })
     }
 }
 
@@ -189,10 +213,14 @@ impl Monitor {
 /// How long a monitor that would not start waits before the next try.
 const RETRY: Duration = Duration::from_secs(60);
 
-/// The applications whose PipeWire capture streams are running now. Without
-/// PipeWire this fails once, then reports none until the next try.
-pub fn active_microphone_applications() -> Result<Vec<ActiveMicrophoneApplication>> {
-    static MONITOR: Mutex<Option<std::result::Result<Monitor, Instant>>> = Mutex::new(None);
+/// The one monitor, or the time a start failed before the next try.
+static MONITOR: Mutex<Option<std::result::Result<Monitor, Instant>>> = Mutex::new(None);
+
+/// The graph of the one monitor, starting it when none runs. `None` while a
+/// monitor that just failed waits for its retry: an answer from a graph that
+/// is not being updated could falsely say an app went quiet, so each caller
+/// says what not knowing means.
+fn graph() -> Result<Option<Arc<Mutex<Graph>>>> {
     let mut monitor = MONITOR.lock().unwrap_or_else(|error| error.into_inner());
     let current = match monitor.as_mut() {
         Some(Ok(running)) => running.alive(),
@@ -208,14 +236,34 @@ pub fn active_microphone_applications() -> Result<Vec<ActiveMicrophoneApplicatio
             }
         }
     }
-    match monitor.as_ref() {
-        Some(Ok(running)) => Ok(running
-            .graph
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .microphone_users(std::process::id() as i32)),
-        _ => Ok(Vec::new()),
-    }
+    Ok(match monitor.as_ref() {
+        Some(Ok(running)) => Some(running.graph.clone()),
+        _ => None,
+    })
+}
+
+/// The applications whose PipeWire capture streams are running now. Without
+/// PipeWire this fails once, then reports none until the next try.
+pub fn active_microphone_applications() -> Result<Vec<ActiveMicrophoneApplication>> {
+    let Some(shared) = graph()? else {
+        return Ok(Vec::new());
+    };
+    Ok(shared
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .microphone_users(std::process::id() as i32))
+}
+
+/// Whether any running PipeWire output stream belongs to the app
+/// `canonical_bundle_id`: a call keeps its output open, muted or not, and a
+/// hung-up call closes it with the microphone (#835). A graph that is not
+/// being watched is an error, which the caller treats as playing.
+pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bool> {
+    let shared = graph()?.ok_or_else(|| eyre!("PipeWire is not being watched"))?;
+    Ok(shared
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .playing_output(canonical_bundle_id))
 }
 
 #[cfg(test)]
@@ -287,5 +335,55 @@ mod tests {
         graph.apply(&json!({"id": 1, "info": null}));
         let users = graph.microphone_users(7);
         assert_eq!(users.len(), 1);
+    }
+
+    /// A muted call can leave the microphone and still play: a running
+    /// output stream of its app is the safeguard that keeps it recording
+    /// (#835). A suspended stream, or one of another app, is not.
+    #[test]
+    fn running_output_streams_say_whether_an_app_still_plays() {
+        let mut graph = Graph::default();
+        for object in [
+            node(
+                1,
+                "running",
+                json!({"media.class": "Stream/Output/Audio", "application.process.binary": "zoom",
+                       "application.process.id": 41}),
+            ),
+            node(
+                2,
+                "suspended",
+                json!({"media.class": "Stream/Output/Audio", "application.process.binary": "discord",
+                       "application.process.id": 42}),
+            ),
+            // Its process properties are on the client.
+            json!({"id": 9, "type": "PipeWire:Interface:Client",
+                   "info": {"props": {"application.process.binary": "teams-for-linux",
+                                      "application.process.id": "43"}}}),
+            node(
+                3,
+                "running",
+                json!({"media.class": "Stream/Output/Audio", "client.id": 9}),
+            ),
+            // A capture stream, whose output it is not.
+            node(
+                4,
+                "running",
+                json!({"media.class": "Stream/Input/Audio", "application.process.binary": "chrome",
+                       "application.process.id": 44}),
+            ),
+        ] {
+            graph.apply(&object);
+        }
+        assert!(graph.playing_output("us.zoom.xos"));
+        assert!(graph.playing_output("com.microsoft.teams2"));
+        assert!(!graph.playing_output("com.hnc.Discord"), "suspended");
+        assert!(!graph.playing_output("com.google.Chrome"), "capturing");
+        let users = graph
+            .microphone_users(7)
+            .into_iter()
+            .map(|user| user.bundle_id)
+            .collect::<Vec<_>>();
+        assert_eq!(users, ["chrome"], "playback is never a microphone user");
     }
 }

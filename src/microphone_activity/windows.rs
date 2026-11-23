@@ -1,11 +1,12 @@
 //! Microphone users on Windows: the processes with an active audio session
-//! on any capture device, from `IAudioSessionManager2`. Only session
-//! metadata is read; no audio is captured.
+//! on any capture device, from `IAudioSessionManager2`, and the apps still
+//! playing through an active render session. Only session metadata is read;
+//! no audio is captured.
 
 use color_eyre::eyre::{Result, eyre};
 use windows::Win32::Media::Audio::{
     AudioSessionStateActive, DEVICE_STATE_ACTIVE, EDataFlow, IAudioSessionControl2,
-    IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture,
+    IAudioSessionManager2, IMMDeviceEnumerator, MMDeviceEnumerator, eCapture, eRender,
 };
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree,
@@ -107,6 +108,19 @@ pub fn active_microphone_applications() -> Result<Vec<ActiveMicrophoneApplicatio
         }
     }
     Ok(deduplicated(applications))
+}
+
+/// Whether any process of the app `canonical_bundle_id` (its helpers
+/// included) has an active render session: a call keeps its output open,
+/// muted or not, and a hung-up call closes it with the microphone (#835).
+pub(crate) fn application_running_output(canonical_bundle_id: &str) -> Result<bool> {
+    Ok(active_endpoint_sessions(eRender)?
+        .iter()
+        .flat_map(|endpoint| endpoint.pids.iter().copied())
+        .any(|pid| {
+            process_canonical_bundle_id(pid)
+                .is_some_and(|canonical| canonical == canonical_bundle_id)
+        }))
 }
 
 /// The canonical bundle identifier of `pid`'s executable, when Hex knows it.

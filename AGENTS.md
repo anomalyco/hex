@@ -595,9 +595,9 @@ substitute for source inspection or a second roadmap.
 - `apple_intelligence`: the weak-linked FoundationModels Swift bridge:
   availability, context size, and guided-generation notes at utility priority.
 - `microphone_activity`: permission-light observation of which apps use the
-  microphone: CoreAudio processes (macOS), a `pw-dump --monitor` of PipeWire
-  capture streams (Linux), audio sessions on capture devices (Windows). No
-  samples are read.
+  microphone and which call apps still play: CoreAudio processes (macOS), one
+  `pw-dump --monitor` of PipeWire capture and playback streams (Linux), and
+  audio sessions on capture and render devices (Windows). No samples are read.
 - `meeting/detection`: pure provider classification, debounce, per-call snooze,
   and call-ended presence.
 - `calendar`: calendar meetings on every OS as a pure model (which events

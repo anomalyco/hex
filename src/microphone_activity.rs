@@ -40,6 +40,11 @@ mod os;
 mod os;
 #[cfg(not(target_os = "macos"))]
 pub use os::active_microphone_applications;
+/// Whether any process of `canonical_bundle_id` has audio output running:
+/// a call keeps it open, muted or not, until it hangs up (#835). macOS reads
+/// Core Audio below; Linux and Windows answer from their own adapters.
+#[cfg(not(target_os = "macos"))]
+pub(crate) use os::application_running_output;
 #[cfg(target_os = "windows")]
 pub(crate) use os::{EndpointSessions, active_endpoint_sessions, process_canonical_bundle_id};
 
