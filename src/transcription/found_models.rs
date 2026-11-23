@@ -12,7 +12,7 @@
 //! under "Found on this computer" and, once chosen, is hashed in full once
 //! and registered as an in-place import (`custom_models`).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -137,7 +137,9 @@ fn scan_in(hub: &Path) -> Vec<Found> {
 /// test can scan either side of Labs › Smaller model files.
 fn scan_in_where(hub: &Path, types: TensorTypes) -> Vec<Found> {
     let mut found = Vec::new();
+    let mut seen = HashSet::new();
     let Ok(repositories) = std::fs::read_dir(hub) else {
+        prune(hub, &seen);
         return found;
     };
     for repository in repositories.flatten() {
@@ -159,12 +161,16 @@ fn scan_in_where(hub: &Path, types: TensorTypes) -> Vec<Found> {
                 if path.extension().is_none_or(|extension| extension != "gguf") {
                     continue;
                 }
+                if path.is_file() {
+                    seen.insert(path.clone());
+                }
                 if let Some(model) = read(&path, &repository_name, &revision, types) {
                     found.push(model);
                 }
             }
         }
     }
+    prune(hub, &seen);
     found.sort_by(|left, right| {
         left.catalog
             .is_none()
@@ -173,6 +179,16 @@ fn scan_in_where(hub: &Path, types: TensorTypes) -> Vec<Found> {
             .then_with(|| left.path.cmp(&right.path))
     });
     found
+}
+
+/// Keep only this scan's files for this hub, including unreadable headers.
+/// A removed snapshot (or a dangling blob link) must release its metadata.
+fn prune(hub: &Path, seen: &HashSet<PathBuf>) {
+    CACHE
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .files
+        .retain(|path, _| !path.starts_with(hub) || seen.contains(path));
 }
 
 fn stamp(path: &Path) -> Option<Stamp> {
@@ -628,6 +644,44 @@ mod tests {
         }
         files.sort();
         files
+    }
+
+    #[test]
+    fn scans_release_removed_snapshots_and_missing_hubs() {
+        let hub = temporary("prune");
+        for revision in 0..100 {
+            let path = cache(
+                &hub,
+                "someone/model",
+                &revision.to_string(),
+                "model.gguf",
+                &"ab".repeat(32),
+                Some(b"not a gguf"),
+                0,
+            );
+            assert!(scan_in(&hub).is_empty());
+            let count = || {
+                CACHE
+                    .lock()
+                    .unwrap()
+                    .files
+                    .keys()
+                    .filter(|p| p.starts_with(&hub))
+                    .count()
+            };
+            assert_eq!(count(), 1, "old snapshot metadata must not accumulate");
+            fs::remove_file(path).unwrap();
+        }
+        fs::remove_dir_all(&hub).unwrap();
+        assert!(scan_in(&hub).is_empty());
+        assert!(
+            !CACHE
+                .lock()
+                .unwrap()
+                .files
+                .keys()
+                .any(|p| p.starts_with(&hub))
+        );
     }
 
     #[test]
