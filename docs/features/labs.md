@@ -2,18 +2,17 @@
 
 Labs holds features we're unsure about, **especially features people asked
 for that we built**: they land in Labs, off by default, instead of shipping
-on. Each feature also has an **audience** (`labs::Feature::audience`, one
-`match` beside `on_this_os`, so a new feature must choose): `Everyone` ships
-in every build; `Dev` exists only in dev builds (`dev_build::is_dev_build`:
-debug, local `HEX_LOCAL_BUILD`, test `HEX_TEST_BUILD`, and dev-channel
-`HEX_BUILD_CHANNEL=dev` builds). A stable build never lists, accepts
-(`hex labs on`, `hex settings set`), or runs a Dev feature: `available()`
-drops it, its gate reads false even when `settings.json` says on, and the
-saved setting is kept untouched. In dev builds a Dev row carries a quiet
-"Dev" tag, and `hex labs` prints each feature's audience. Every feature
-below is `Everyone` today unless marked `(Dev)`. Each feature also has a
-**group** (`labs::Feature::group` in `src/labs/group.rs`, one exhaustive
-`match`, so a new feature must choose): Dictation, Output (paste, formatting,
+on. Each feature's settings field, CLI name, **group**, **audience**, OSes, and
+join date live in one descriptor table in `src/labs/feature.rs`. Its
+**audience** (`labs::Feature::audience`) is either `Everyone` (ships in every
+build) or `Dev` (`dev_build::is_dev_build`: debug, local `HEX_LOCAL_BUILD`,
+test `HEX_TEST_BUILD`, and dev-channel `HEX_BUILD_CHANNEL=dev` builds). A
+stable build never lists, accepts (`hex labs on`, `hex settings set`), or
+runs a Dev feature: `available()` drops it, its gate reads false even when
+`settings.json` says on, and the saved setting is kept untouched. In dev
+builds a Dev row carries a quiet "Dev" tag, and `hex labs` prints each
+feature's audience. Every feature below is `Everyone` today unless marked
+`(Dev)`. Its **group** (`labs::Feature::group`) is one of Dictation, Output (paste, formatting,
 spoken punctuation), History, Meetings, Annotate, Shortcuts, or Models. There
 is no master switch. **Labs** is always the last item in the sidebar (Up and
 Down reach it from the last pane; pressing it while it shows keeps it open) and
@@ -51,7 +50,7 @@ not on pull requests; the live page is unverified until a deploy.
 
 ```ts
 Feature             Pane  Toggle (settings.json, hex settings)   On: what it does
-├── Meetings (beta) yes   meetings.enabled             (macOS)   Meetings joins the sidebar: call detection, recording, transcripts
+├── Meetings (beta) yes   meetings.enabled                       Meetings joins the sidebar: call detection, recording, transcripts
 ├── Voice Filter (Dev) yes experimental.hex_microphone (macOS, Linux) Voice Filter joins the sidebar; feeds the Hex Microphone (macOS driver, Linux PipeWire source)
 │                                        a stable build never feeds it; with the macOS driver installed it keeps the pane with Uninstall alone
 ├── Playground (Dev) yes  labs.playground                        a Playground sidebar item and ⇧⌘D open the story browser
@@ -71,7 +70,7 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Failure notices no    labs.failure_notices                   when a dictation fails, its explanation sits beside the HUD for about 6 s, or until the next capture starts
 ├── Live typing     no    labs.live_typing                       (Linux Wayland) provisional words as an underlined input-method preedit in the focused field; the final text is committed there instead of pasted; on a compositor that offers no input method (GNOME) its card is disabled with a note and `hex labs` says so
 ├── Appearance      no    labs.appearance + labs.appearance_theme (system/light/dark, default system)  the main window is forced light or dark instead of following the system; the dictation HUD (including its onboarding and Sounds previews) and meeting recording pill remain dark. Other overlays follow the OS. On Windows the title bar follows too, through its background and light/dark mode; Windows 10 has no caption colour, so DWM keeps its own light or dark caption background (builds before 19041 keep the OS caption) while its text and buttons follow
-├── Live chapters   no    labs.live_chapters           (macOS)   chapters a meeting while it records, boundary pass after Stop
+├── Live chapters   no    labs.live_chapters                     chapters a meeting while it records, boundary pass after Stop
 ├── Words on screen no labs.screen_vocabulary         (macOS)   names and terms in the focused window become temporary vocabulary for each dictation; read locally through Accessibility, never saved, password fields skipped
 ├── Learn from corrections no labs.learn_from_corrections (macOS) after a dictation is pasted, watch only that field for up to 5 minutes and add up to 5 names you corrected to Vocabulary; password fields, long text, and rewrites are skipped, and nothing leaves the Mac
 ├── Rewrite reads nearby text no labs.cursor_context (macOS) the mode's OpenCode rewrite reads the focused text element's text around the caret as context for names, terms, and where the result lands; password fields skipped

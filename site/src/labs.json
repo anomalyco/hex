@@ -6,7 +6,9 @@
       "groupTitle": "Meetings",
       "id": "meetings",
       "oses": [
-        "macos"
+        "macos",
+        "windows",
+        "linux"
       ],
       "summary": "Record calls and keep a written copy",
       "title": "Meetings (beta)"
@@ -67,7 +69,9 @@
       "groupTitle": "Meetings",
       "id": "live-chapters",
       "oses": [
-        "macos"
+        "macos",
+        "windows",
+        "linux"
       ],
       "summary": "Split a meeting's text into chapters while it records",
       "title": "Live chapters"
