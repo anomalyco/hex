@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @main
 struct HEXMobileApp: App {
@@ -21,6 +22,7 @@ struct HEXMobileApp: App {
         MultilingualParakeetSettings().applyLaunchArguments()
         KeyboardParakeetSettings().applyLaunchArguments()
         SettingsSnapshotFixture.applyDefaults()
+        UNUserNotificationCenter.current().delegate = TypingConfigNotificationDelegate.shared
     }
 
     private static var initialOpenedFromKeyboard: Bool {
@@ -57,6 +59,12 @@ struct HEXMobileApp: App {
                         typingConfigs.receive(url)
                         return
                     }
+                    // The keyboard's notice that typing may be worse: the comparison.
+                    if TypingConfigWatch.handles(url) {
+                        openedFromKeyboard = false
+                        TypingConfigWatch.shared.openCompare()
+                        return
+                    }
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
                     if case .setup = request {
                         openedFromKeyboard = false
@@ -85,7 +93,10 @@ struct HEXMobileApp: App {
                         // Settings › Dictation › Speech model in keyboard: picks its download up.
                         dictation.startKeyboardParakeetDownloadIfWanted()
                         // Typing configs: a keyboard first used since the config was applied.
-                        if TypingConfigSettings().isEnabled { TypingConfigActivation.refreshActive() }
+                        if TypingConfigSettings().isEnabled {
+                            TypingConfigActivation.refreshActive()
+                            TypingConfigWatch.shared.refresh()
+                        }
                     }
                 }
                 .onChange(of: typingConfigs.opensExperiments) { _, opens in

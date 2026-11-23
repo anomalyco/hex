@@ -288,6 +288,8 @@ final class TypingJournal {
     /// (`TypingLearning.isSlip`), never a change of mind.
     func didFinish(word: String?, language: String? = nil) {
         defer { erasedWord = nil }
+        // Typing configs' regression watch counts words, never keeps them.
+        if let word, !word.isEmpty { TypingConfigHealth().finishedWord() }
         guard let erased = erasedWord, let word, !word.isEmpty,
               erased.lowercased() != word.lowercased(),
               TypingLearning.isSlip(typed: erased, final: word, language: language)
@@ -298,6 +300,7 @@ final class TypingJournal {
     func record(_ kind: TypingJournalCorrection.Kind, typed: String, final: String, language: String? = nil) {
         guard !typed.isEmpty, !final.isEmpty, typed != final else { return }
         if kind != .retyped { erasedWord = nil }
+        TypingConfigHealth().recorded(kind)
         refreshFromDisk()
         snapshot.corrections.append(
             TypingJournalCorrection(

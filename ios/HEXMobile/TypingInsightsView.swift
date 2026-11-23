@@ -70,6 +70,8 @@ struct TypingInsightsView: View {
                         let history = TypingConfigHistory()
                         TypingConfigActivation.useDefaults(history: history)
                         history.deleteAll()
+                        TypingConfigHealth().deleteAll()
+                        TypingConfigStartupGuard().clearFallback()
                     }
                     reload()
                 }

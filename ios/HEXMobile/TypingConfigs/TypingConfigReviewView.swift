@@ -12,6 +12,7 @@ struct TypingConfigReviewView: View {
     @State private var partsOff: Set<String>
     @State private var appliedNow = false
     @State private var failure: String?
+    @State private var asksNotifications = false
     private let existing: TypingConfigEntry?
     private let isActive: Bool
     /// The kept config keeping this one would remove (`TypingConfigHistory.limit`).
@@ -144,9 +145,14 @@ struct TypingConfigReviewView: View {
                 .font(.system(size: 15))
                 .foregroundStyle(HexTheme.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
+            // Asked here, the first time a config is applied, never at first launch.
+            if asksNotifications {
+                TypingConfigNotificationAsk { asksNotifications = false }
+            }
             OnboardingPrimaryButton(title: "Done", action: done)
                 .padding(.top, 4)
         }
+        .task { asksNotifications = await TypingConfigWatch.shouldAsk() }
     }
 
     private func refusedView(_ reason: TypingConfigReview.Reason) -> some View {

@@ -599,4 +599,56 @@ final class TypingLogTests: XCTestCase {
         XCTAssertEqual(TypingConfigDictation.corrections(translating: true, settings: off), [], "translated")
     }
 
+
+    /// The regression watch counts words per config, compares only once both sides have 400
+    /// words, and calls a config worse only at twice the trouble rate and 8 troubles or more.
+    func testTypingConfigHealthComparesOnlyWithEnoughWordsAndTwiceTheTrouble() throws {
+        let suite = "TypingLogTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let health = TypingConfigHealth(defaults: defaults)
+        health.finishedWord()
+        XCTAssertEqual(health.counts(TypingConfigHealth.defaultsKey).words, 0, "nothing counted while the experiment is off")
+        TypingConfigSettings(defaults: defaults).isEnabled = true
+        health.setActive("new", previous: TypingConfigHealth.defaultsKey)
+        for _ in 0..<3 { health.finishedWord() }
+        health.recorded(.undone)
+        health.recorded(.retyped)
+        XCTAssertEqual(health.counts("new"), TypingConfigHealth.Counts(words: 3, undone: 1, retyped: 1))
+
+        func compare(_ now: (Int, Int), _ before: (Int, Int)) -> TypingConfigHealth.Comparison {
+            TypingConfigHealth.Comparison(current: "new", previous: "old",
+                                          now: .init(words: now.0, retyped: now.1), before: .init(words: before.0, retyped: before.1))
+        }
+        XCTAssertFalse(compare((399, 40), (400, 1)).seemsWorse, "not before 400 words on each side")
+        XCTAssertTrue(compare((400, 10), (400, 4)).seemsWorse)
+        XCTAssertFalse(compare((400, 8), (400, 5)).seemsWorse, "under twice")
+        XCTAssertFalse(compare((400, 7), (400, 0)).seemsWorse, "fewer than 8 troubles")
+        XCTAssertTrue(compare((400, 8), (400, 0)).seemsWorse)
+    }
+
+    /// The one automatic step: a keyboard that didn't come up twice running with a config starts
+    /// without it and leaves word for the app; one that comes up clears its mark.
+    func testTheKeyboardFallsBackOnlyAfterFailingToStartTwiceWithAConfig() throws {
+        let suite = "TypingLogTests-\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let store = TypingConfigStore(settings: TypingConfigSettings(defaults: defaults), directory: directory)
+        store.settings.isEnabled = true
+        try store.writeActive(TypingConfigFile(format: TypingConfigLimits.format, version: 0))
+        TypingConfigHealth(defaults: defaults).setActive("new", previous: TypingConfigHealth.defaultsKey)
+        let guardian = TypingConfigStartupGuard(defaults: defaults, store: store)
+
+        for _ in 0..<5 {
+            XCTAssertFalse(guardian.willStart())
+            guardian.didStart()
+        }
+        XCTAssertFalse(guardian.willStart(), "this start dies")
+        XCTAssertFalse(guardian.willStart(), "and this one")
+        XCTAssertTrue(guardian.willStart(), "the third starts without it")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: try XCTUnwrap(store.activeURL).path))
+        XCTAssertEqual(guardian.fallback?.key, "new")
+        XCTAssertEqual(TypingConfigHealth(defaults: defaults).activeKey, TypingConfigHealth.defaultsKey)
+    }
+
 }

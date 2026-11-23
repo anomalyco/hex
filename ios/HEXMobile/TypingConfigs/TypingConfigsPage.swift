@@ -50,6 +50,7 @@ struct TypingConfigsPage: View {
     @State private var bestID: String?
     @State private var confirmingDeleteAll = false
     @State private var failure: String?
+    @State private var alertsOff = TypingConfigHealth().alertsOff
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -84,6 +85,26 @@ struct TypingConfigsPage: View {
                     .padding(.horizontal, 16)
             }
 
+            SettingsCard {
+                if TypingConfigHealth().comparison != nil {
+                    Button {
+                        TypingConfigWatch.shared.openCompare()
+                    } label: {
+                        SettingsLinkLabel(title: String(localized: "Compare with the one before"))
+                    }
+                    .buttonStyle(.plain)
+                    SettingsDivider()
+                }
+                SettingsToggleRow(
+                    title: String(localized: "Alerts"),
+                    detail: String(localized: "A notice in the keyboard, or a notification, if typing seems worse with a new config"),
+                    isOn: Binding(get: { !alertsOff }, set: { on in
+                        TypingConfigHealth().alertsOff = !on
+                        alertsOff = !on
+                    })
+                )
+            }
+
             if !entries.isEmpty {
                 SettingsCard {
                     Button {
@@ -102,6 +123,7 @@ struct TypingConfigsPage: View {
                             let history = TypingConfigHistory()
                             TypingConfigActivation.useDefaults(history: history)
                             history.deleteAll()
+                            TypingConfigHealth().deleteAll()
                             reload()
                         }
                     } message: {
@@ -306,6 +328,7 @@ struct TypingConfigDetailPage: View {
                             let history = TypingConfigHistory()
                             if history.activeID == entry.id { TypingConfigActivation.useDefaults(history: history) }
                             history.delete(entry.id)
+                            TypingConfigHealth().forget(entry.id)
                             dismiss()
                         }
                     } message: {

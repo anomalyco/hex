@@ -2933,7 +2933,9 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Typing configs
 │   (a `.mhexconfig` from the person's own agent opens Hex in a review sheet that applies
 │   nothing by itself; history of every config, `ios/docs/typing-configs.md`; simulator
-│   only, no iPhone run), Learn each language separately
+│   only, no iPhone run; it suggests going back when typing seems worse with a new config:
+│   keyboard bar notice, notification, Home card; falls back only when the keyboard failed to
+│   start twice), Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing

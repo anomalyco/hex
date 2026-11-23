@@ -138,6 +138,8 @@ final class KeyboardViewController: UIInputViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         reportFullAccess(force: true)
+        // Typing configs: a config the keyboard twice failed to start with isn't loaded again.
+        if hasFullAccess { TypingConfigStartupGuard().willStart() }
         // Before any typing log starts: the keyboard may update before Hex is opened.
         TypingLogSettings().turnOffOnce()
         KeyboardLocalDictation.allowHapticsWhileRecording()
@@ -176,6 +178,8 @@ final class KeyboardViewController: UIInputViewController {
         view.window?.gestureRecognizers?.forEach { $0.delaysTouchesBegan = false }
         fullKeyboard?.keyboardDidAppear()
         fullKeyboard?.offerModelNotice()
+        if hasFullAccess { TypingConfigStartupGuard().didStart() }
+        fullKeyboard?.offerTypingConfigNotice()
         // Onboarding's practice tells Hex's keyboard on screen from another one, or iOS's
         // dictation, by these.
         bridge.recordKeyboardShown(at: Date().timeIntervalSince1970)

@@ -133,6 +133,13 @@ final class TypingConfigHistory {
         save()
     }
 
+    /// The regression watch's best so far (`TypingConfigWatch.refresh`).
+    func setBest(_ id: String?) {
+        guard index.best != id else { return }
+        index.best = id
+        save()
+    }
+
     func setPartsOff(_ id: String, _ partsOff: [String]) {
         guard let i = index.entries.firstIndex(where: { $0.id == id }) else { return }
         index.entries[i].partsOff = partsOff
@@ -213,8 +220,11 @@ enum TypingConfigActivation {
                       history: TypingConfigHistory, store: TypingConfigStore = TypingConfigStore()) throws {
         let on = Set(review.items.filter { $0.outcome.applies && !partsOff.contains($0.path) }.map(\.part))
         guard let compiled = review.compiled(switchedOn: on) else { throw Failure.nothingToApply }
+        let previous = history.activeID ?? TypingConfigHealth.defaultsKey
         try store.writeActive(compiled)
         history.setActive(entry.id, partsOff: partsOff.sorted())
+        // The regression watch compares it with the one in use before.
+        TypingConfigHealth(defaults: store.settings.defaults).setActive(entry.id, previous: previous)
     }
 
     /// One tap back to a config in the history (deletes nothing).
@@ -239,7 +249,9 @@ enum TypingConfigActivation {
     }
 
     static func useDefaults(history: TypingConfigHistory, store: TypingConfigStore = TypingConfigStore()) {
+        let previous = history.activeID ?? TypingConfigHealth.defaultsKey
         store.removeActive()
         history.setActive(nil)
+        TypingConfigHealth(defaults: store.settings.defaults).setActive(nil, previous: previous)
     }
 }

@@ -63,8 +63,9 @@ enum TypingConfigGroup: Int, CaseIterable, Comparable {
         case .neverCorrectTo: String(localized: "Autocorrect never puts these in place of what you typed.")
         case .fixes: String(localized: "A typo you make, and the word you meant.")
         case .dictation: String(localized: "Words dictation mishears, fixed after you dictate.")
-        case .aim: String(localized: "Taps on these letters are read from where you really aim. The keys stay where they are.")
-        case .zones: String(localized: "Which key a tap near these edges presses. The keys stay where they are.")
+        case .aim: String(localized: "Autocorrect and the next-letter guess read taps on these letters from where you really aim. The keys stay where they are.")
+        // The next-letter odds still decide a tap near an edge, so this says "more often".
+        case .zones: String(localized: "A tap near these edges counts for the key more often. Hex's guess at the next letter can still pick its neighbour. The keys stay where they are.")
         }
     }
 
@@ -212,14 +213,14 @@ struct TypingConfigItemWords {
     static func zoneWords(edge: String, move: Double) -> String {
         let amount = number(move)
         switch (edge, move >= 0) {
-        case ("top", true): return String(localized: "Takes taps up to \(amount) key above it")
-        case ("top", false): return String(localized: "Gives \(amount) key along its top to the keys above")
-        case ("bottom", true): return String(localized: "Takes taps up to \(amount) key below it")
-        case ("bottom", false): return String(localized: "Gives \(amount) key along its bottom to the keys below")
-        case ("left", true): return String(localized: "Takes taps up to \(amount) key to its left")
-        case ("left", false): return String(localized: "Gives \(amount) key on its left to the key beside it")
-        case (_, true): return String(localized: "Takes taps up to \(amount) key to its right")
-        default: return String(localized: "Gives \(amount) key on its right to the key beside it")
+        case ("top", true): return String(localized: "Its touch area reaches \(amount) key higher")
+        case ("top", false): return String(localized: "Its touch area stops \(amount) key short at the top")
+        case ("bottom", true): return String(localized: "Its touch area reaches \(amount) key lower")
+        case ("bottom", false): return String(localized: "Its touch area stops \(amount) key short at the bottom")
+        case ("left", true): return String(localized: "Its touch area reaches \(amount) key further left")
+        case ("left", false): return String(localized: "Its touch area stops \(amount) key short on the left")
+        case (_, true): return String(localized: "Its touch area reaches \(amount) key further right")
+        default: return String(localized: "Its touch area stops \(amount) key short on the right")
         }
     }
 

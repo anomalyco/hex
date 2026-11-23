@@ -180,3 +180,31 @@ back to a config compiles its kept file again on today's keyboard with the same 
   Files › On My iPhone, cold and with Hex running, through every state above. AirDrop,
   Messages, Mail, another app's Open in Hex, and Full Access off on a real iPhone are
   unverified.
+
+### The regression watch (`HEXShared/TypingLog/TypingConfigHealth.swift`, `TypingConfigWatch.swift`)
+
+Hex only ever suggests going back. The one exception is a keyboard that failed to start.
+
+- **Counts.** The keyboard keeps a set of counts for each config, and one for Hex defaults, in the App Group (`typingConfig.health`). It stores no words.
+  - What it counts: words finished, autocorrections, autocorrections undone, kept as typed, fixed by hand, and suggestions picked.
+  - Where they come from: the hooks in Learn how I type's journal (`TypingJournal.didFinish` and `record`). So the watch needs Learn how I type and Full Access, and it counts nothing while the experiment is off.
+  - Trouble is undone + kept as typed + fixed by hand. The rate is trouble per 100 finished words.
+- **Comparison.** Apply records the config and the one in use before it (`typingConfig.comparePair`).
+  - The new config "seems worse" only when both have at least 400 words, its rate is at least 2× the old one's, and it has at least 8 troubles.
+  - Best so far marks the lowest rate over 400 words, once two configs have that many.
+- **Telling the person.** This happens at most once per config, and never again after Go back, Keep this one or Turn typing configs off.
+  1. **The keyboard's bar notice**, the next time it appears: "Typing may be worse · with this config · Compare with your last one", with Open Hex and an ✕ for good. It needs no permission.
+  2. **A notification** a day later, if the bar notice wasn't acted on. The keyboard posts it quietly. "Typing may be worse with this config" / "Tap to compare it with your last one and go back if you want."
+  3. **A card on Home**, with Compare and ✕.
+  - Settings › Keyboard › Typing configs › Alerts turns off the first two, not the card.
+- **The comparison sheet** (`hex-dictation://typing-configs/compare`, from any of the three) shows each side's rate, words and counts, then Go back, Keep this one and Turn typing configs off.
+- **Notification permission** is asked on the applied sheet, the first time a config is applied and never before. Hex's own buttons ("Allow notifications" / "Not now") come before the system's prompt.
+- **Start-up fallback** (`TypingConfigStartupGuard`).
+  - The keyboard marks "starting with config X" in `viewDidLoad` and clears the mark in `viewDidAppear`.
+  - A start that finds its mark still there counts a failed start.
+  - After two failed starts it starts without the config and leaves word for the app. The app goes back to the config before it and says so on Home: "The keyboard couldn't start with your new config, so Hex went back to the one before."
+- **Deleting.** Delete what Hex learned and Delete all typing configs clear the counts and alerts too.
+
+Checks:
+- `TypingLogTests`: `testTypingConfigHealthComparesOnlyWithEnoughWordsAndTwiceTheTrouble` and `testTheKeyboardFallsBackOnlyAfterFailingToStartTwiceWithAConfig`.
+- Simulator: every state was shown with seeded counts, not real typing. 420 words with 30 troubles against 460 with 12 under Hex defaults, a bar notice backdated 25 hours, and a start mark with one failed start, all written into the App Group's defaults.

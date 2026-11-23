@@ -128,6 +128,7 @@ final class FullKeyboardView: UIView {
     /// A paste iOS asked about or refused: the strip points to the setting that stops it.
     var showsAllowPasteHint = false
     var showsModelNotice = false
+    var showsTypingConfigNotice = false
     var allowPasteHintHideWork: DispatchWorkItem?
     static let allowPasteHintDuration: TimeInterval = 8
 
@@ -188,7 +189,9 @@ final class FullKeyboardView: UIView {
         stripView.onUndoDictation = { [weak self] in self?.undoDictation() }
         stripView.onPaste = { [weak self] in self?.pasteFromClipboard() }
         stripView.onOpenHexFromHint = { [weak self] in self?.openSetupFromHint() }
-        stripView.onDismissNotice = { [weak self] in self?.dismissModelNotice() }
+        stripView.onDismissNotice = { [weak self] in
+            if self?.typingConfigNotice != nil { self?.dismissTypingConfigNotice() } else { self?.dismissModelNotice() }
+        }
         stripView.onOpenNotice = { [weak self] in
             guard let self else { return }
             self.keyFeedback()
@@ -201,6 +204,7 @@ final class FullKeyboardView: UIView {
                 return
             }
             if self.modelNotice != nil { return self.openHexForModel() }
+            if self.typingConfigNotice != nil { return self.openHexForTypingConfig() }
             self.model.onOpenURL?(KeyboardLaunchRequest.translationSettings.url)
         }
         stripView.onNextKeyboard = { [weak self] in
@@ -254,6 +258,7 @@ final class FullKeyboardView: UIView {
             self.hideFullAccessHint()
             self.hideAllowPasteHint()
             self.hideModelNotice()
+            self.hideTypingConfigNotice()
             self.refreshReturnKey()
             self.refreshStrip()
             self.onTextEdit?()
@@ -947,7 +952,7 @@ final class FullKeyboardView: UIView {
             statusText: status,
             clipboard: clipboardOffer,
             fullAccessHint: showsFullAccessHint && !model.hasFullAccess,
-            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice ?? modelNotice
+            notice: allowPasteNotice ?? vocabularyNotice ?? translationNotice ?? modelNotice ?? typingConfigNotice
         )
     }
 
@@ -1144,7 +1149,8 @@ final class FullKeyboardView: UIView {
         let m = engine.layout.metrics
         let bar = CGRect(x: 0, y: appliedLift, width: bounds.width, height: m.stripTop + m.stripHeight)
         guard bar.contains(point), !showsRecording, emojiPanel == nil, styleMenu == nil,
-              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil, modelNotice == nil
+              !(showsFullAccessHint && !model.hasFullAccess), vocabularyNotice == nil, translationNotice == nil, modelNotice == nil,
+              typingConfigNotice == nil
         else { return false }
         return model.stagePhase == .idle || model.stagePhase == .failed
     }
