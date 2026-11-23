@@ -1177,7 +1177,9 @@ names an emoji is typed ("smile" → 😊, "fuego" → 🔥 on the Spanish layou
 offers that one emoji: in the next empty slot, else in place of the right slot's runner-up
 word, else the centre's. A word names an emoji when it is the emoji's whole name or one of
 Hex's chat words, in the layout's language or English, plurals and endings too, never a
-prefix ("smil") or a word only part of several names ("face", "heart"). The emoji never
+prefix ("smil") or a word only part of several names ("face", "hand"). "heart" is one of
+Hex's chat words, so it offers ❤️ though 45 emoji share it. A phrase is offered at the word
+that names it ("thumbs" → 👍), not at its last word ("thumbs up"): the strip reads one word. The emoji never
 takes the place of what you typed, a revert, the word space will put in, or your own
 words, and isn't offered while space would put in another word, for a swiped word, or in a
 password, one-time code, username, email address or web address field, a secure one or
@@ -1193,7 +1195,9 @@ days and each emoji's skin tone, no words (`EmojiUsageStore`); Clear emoji histo
 empties it. The index is `HEXShared/FullKeyboard/Emoji/emoji-index-<lang>.txt`,
 built by `scripts/build-emoji-data.py` from Unicode's emoji-test.txt 18.0 and CLDR
 49 (Unicode License v3, `LICENSE-Unicode.txt` beside it, which permits commercial
-use with the notice) and `scripts/emoji-aliases-en.txt`; the keyboard maps it and
+use with the notice) and `scripts/emoji-aliases-en.txt` (its chat words apply on every
+layout); a word several emoji share counts for less, except for the emoji it is the
+whole name of; the keyboard maps it and
 binary-searches it in place (about 0.7 MB on the heap), loading it on the first
 emoji key press or word typed in a field that takes emoji. Emoji newer than 15.1 are listed only where the
 emoji font draws them. Nothing leaves the iPhone.
