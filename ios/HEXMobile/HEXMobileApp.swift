@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit
+import UserNotifications
 
 @main
 struct HEXMobileApp: App {
@@ -8,6 +9,7 @@ struct HEXMobileApp: App {
     @State private var openedFromKeyboard = Self.initialOpenedFromKeyboard
     @State private var showSetup = SettingsSnapshotFixture.showsSetupSheet
     @State private var openPage: SettingsPage?
+    @State private var typingConfigs = TypingConfigInbox.shared
 
     init() {
         FullKeyboardSettings().applyLaunchArguments()
@@ -20,6 +22,7 @@ struct HEXMobileApp: App {
         MultilingualParakeetSettings().applyLaunchArguments()
         KeyboardParakeetSettings().applyLaunchArguments()
         SettingsSnapshotFixture.applyDefaults()
+        UNUserNotificationCenter.current().delegate = TypingConfigNotificationDelegate.shared
     }
 
     private static var initialOpenedFromKeyboard: Bool {
@@ -50,6 +53,18 @@ struct HEXMobileApp: App {
                     openPage: $openPage
                 )
                 .onOpenURL { url in
+                    // A typing config (`.mhexconfig`) from Files or a share sheet: its own sheet.
+                    if TypingConfigInbox.handles(url) {
+                        openedFromKeyboard = false
+                        typingConfigs.receive(url)
+                        return
+                    }
+                    // The keyboard's notice that typing may be worse: the comparison.
+                    if TypingConfigWatch.handles(url) {
+                        openedFromKeyboard = false
+                        TypingConfigWatch.shared.openCompare()
+                        return
+                    }
                     guard let request = KeyboardLaunchRequest(url: url) else { return }
                     if case .setup = request {
                         openedFromKeyboard = false
@@ -77,7 +92,17 @@ struct HEXMobileApp: App {
                         dictation.appBecameActive()
                         // Settings › Dictation › Speech model in keyboard: picks its download up.
                         dictation.startKeyboardParakeetDownloadIfWanted()
+                        // Typing configs: a keyboard first used since the config was applied.
+                        if TypingConfigSettings().isEnabled {
+                            TypingConfigActivation.refreshActive()
+                            TypingConfigWatch.shared.refresh()
+                        }
                     }
+                }
+                .onChange(of: typingConfigs.opensExperiments) { _, opens in
+                    guard opens else { return }
+                    typingConfigs.opensExperiments = false
+                    openPage = .experiments
                 }
             }
         }

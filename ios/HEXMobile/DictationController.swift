@@ -791,7 +791,8 @@ final class DictationController {
         let preferences = DictationPipeline.Preferences.current(
             style: effectiveStyle,
             vocabulary: customVocabularySettings,
-            corrections: learnedDictationCorrections(language),
+            corrections: learnedDictationCorrections(language)
+                + TypingConfigDictation.corrections(translating: DictationTranslationSettings().isEnabled),
             lowercase: lowercaseSettings,
             lists: listSettings,
             punctuation: punctuationSettings,

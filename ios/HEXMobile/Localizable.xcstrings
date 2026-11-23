@@ -4740,6 +4740,1886 @@
           }
         }
       }
+    },
+    "Nothing in this file applies to your keyboard. What Hex skipped is listed below." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件里没有适用于你键盘的内容。Hex 跳过的部分列在下面。"
+          }
+        }
+      }
+    },
+    "Hex can't check this config on your typing yet. Once it's on, Hex watches how your typing goes and tells you if it seems worse. You can go back in Settings › Keyboard › Typing configs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 还无法用你的打字记录检查这个配置。启用后，Hex 会留意你的打字情况，如果似乎变差会告诉你。你可以在“设置 › 键盘 › 输入配置”中退回。"
+          }
+        }
+      }
+    },
+    "For another keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于另一个键盘"
+          }
+        }
+      }
+    },
+    "Skipped" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过"
+          }
+        }
+      }
+    },
+    "From the file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自文件"
+          }
+        }
+      }
+    },
+    "Typing config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入配置"
+          }
+        }
+      }
+    },
+    "made from 1 day of typing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据 1 天的打字记录制作"
+          }
+        }
+      }
+    },
+    "made from %lld days of typing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据 %lld 天的打字记录制作"
+          }
+        }
+      }
+    },
+    "the one you use now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用"
+          }
+        }
+      }
+    },
+    "opened before" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "之前打开过"
+          }
+        }
+      }
+    },
+    "Key positions for another keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "另一个键盘的按键位置"
+          }
+        }
+      }
+    },
+    "Kept in the file, not applied." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留在文件中，未启用。"
+          }
+        }
+      }
+    },
+    " and %lld more" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "，另有 %lld 项"
+          }
+        }
+      }
+    },
+    "Apply again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新启用"
+          }
+        }
+      }
+    },
+    "Apply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用"
+          }
+        }
+      }
+    },
+    "Not now" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "以后再说"
+          }
+        }
+      }
+    },
+    "Hex couldn't save this config. Nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法保存这个配置。没有任何更改。"
+          }
+        }
+      }
+    },
+    "All %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部 %lld 项"
+          }
+        }
+      }
+    },
+    "Hex limited this. The file asked for %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 限制了这个值。文件要求的是 %@。"
+          }
+        }
+      }
+    },
+    "Show all %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示全部 %lld 项"
+          }
+        }
+      }
+    },
+    "The keyboard can only use a typing config with Full Access. Turn on Allow Full Access in Settings › Apps › Hex › Keyboards, then apply." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘只有在开启完全访问后才能使用输入配置。请在“设置 › App › Hex › 键盘”中打开“允许完全访问”，然后再启用。"
+          }
+        }
+      }
+    },
+    "Typing config applied" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已启用输入配置"
+          }
+        }
+      }
+    },
+    "“%@” takes effect the next time the keyboard opens. To go back, open Settings › Keyboard › Typing configs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”会在下次打开键盘时生效。要退回，请打开“设置 › 键盘 › 输入配置”。"
+          }
+        }
+      }
+    },
+    "This isn't a typing config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是输入配置"
+          }
+        }
+      }
+    },
+    "%@ “%@” wasn't opened, and nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@“%2$@”没有打开，也没有任何更改。"
+          }
+        }
+      }
+    },
+    "1 more file waiting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 1 个文件在等待"
+          }
+        }
+      }
+    },
+    "%lld more files waiting" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还有 %lld 个文件在等待"
+          }
+        }
+      }
+    },
+    "This file is too large" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件太大了"
+          }
+        }
+      }
+    },
+    "A typing config is at most %@, and “%@” is %@. Hex didn't open it, and nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入配置最大为 %1$@，而“%2$@”有 %3$@。Hex 没有打开它，也没有任何更改。"
+          }
+        }
+      }
+    },
+    "Hex couldn't read this file" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法读取这个文件"
+          }
+        }
+      }
+    },
+    "“%@” is empty or couldn't be opened. Nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”是空的或无法打开。没有任何更改。"
+          }
+        }
+      }
+    },
+    "Typing configs are off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入配置已关闭"
+          }
+        }
+      }
+    },
+    "“%@” is a typing config: words and key positions made for how you type. Hex opens typing configs only while Settings › Experiments › Typing configs is on. Nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“%@”是一个输入配置：根据你的打字习惯制作的词语和按键位置。只有打开“设置 › 实验 › 输入配置”后，Hex 才会打开输入配置。没有任何更改。"
+          }
+        }
+      }
+    },
+    "Open Experiments" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开“实验”"
+          }
+        }
+      }
+    },
+    "This file isn't a typing config Hex can read." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件不是 Hex 能读取的输入配置。"
+          }
+        }
+      }
+    },
+    "This file is larger than a typing config can be." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个文件超过了输入配置的大小上限。"
+          }
+        }
+      }
+    },
+    "Made for a newer Hex. Update Hex to use it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要更新版本的 Hex。更新 Hex 后才能使用。"
+          }
+        }
+      }
+    },
+    "Hex doesn't know this part of the file." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 不认识文件里的这一部分。"
+          }
+        }
+      }
+    },
+    "Incomplete, or holds a value Hex can't use." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不完整，或包含 Hex 无法使用的值。"
+          }
+        }
+      }
+    },
+    "More than a typing config can hold." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "超出了输入配置能容纳的数量。"
+          }
+        }
+      }
+    },
+    "Already in the file once." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件里已经有这一项。"
+          }
+        }
+      }
+    },
+    "The file doesn't show this often enough to be sure." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件显示的次数太少，无法确定。"
+          }
+        }
+      }
+    },
+    "Made for another keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "是为另一个键盘制作的。"
+          }
+        }
+      }
+    },
+    "Measured on an older version of Hex's touch areas, so it needs checking again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "是在旧版 Hex 的触控区域上测量的，需要重新检查。"
+          }
+        }
+      }
+    },
+    "That key isn't on this keyboard." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个键盘上没有这个键。"
+          }
+        }
+      }
+    },
+    "That edge of the key can't move." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个键的这条边不能移动。"
+          }
+        }
+      }
+    },
+    "Two changes claim the same spot, so neither applies." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "两项更改占用了同一个位置，所以都不生效。"
+          }
+        }
+      }
+    },
+    "It would leave a key too small to tap reliably." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "会让某个键小到难以准确点按。"
+          }
+        }
+      }
+    },
+    "Words to keep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "要保留的词"
+          }
+        }
+      }
+    },
+    "Never correct to" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永不改成"
+          }
+        }
+      }
+    },
+    "Typo fixes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "错字修正"
+          }
+        }
+      }
+    },
+    "Dictation fixes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写修正"
+          }
+        }
+      }
+    },
+    "Where you aim" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按位置"
+          }
+        }
+      }
+    },
+    "Touch areas" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域"
+          }
+        }
+      }
+    },
+    "Autocorrect leaves these alone and offers them." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动改正不会改动这些词，还会建议它们。"
+          }
+        }
+      }
+    },
+    "Autocorrect never puts these in place of what you typed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动改正永远不会用这些词替换你输入的内容。"
+          }
+        }
+      }
+    },
+    "A typo you make, and the word you meant." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你常打的错字，以及你想打的词。"
+          }
+        }
+      }
+    },
+    "Words dictation mishears, fixed after you dictate." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写常听错的词，会在听写后修正。"
+          }
+        }
+      }
+    },
+    "Note" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "备注"
+          }
+        }
+      }
+    },
+    "Put in when you press space" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按空格时替换"
+          }
+        }
+      }
+    },
+    "Offered in the suggestions, never put in by space" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在建议中提供，按空格时不会替换"
+          }
+        }
+      }
+    },
+    "Space bar" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "空格键"
+          }
+        }
+      }
+    },
+    "Shift" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Shift"
+          }
+        }
+      }
+    },
+    "%@ key to the right" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏右 %@ 个键"
+          }
+        }
+      }
+    },
+    "%@ key to the left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏左 %@ 个键"
+          }
+        }
+      }
+    },
+    "%@ key lower" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏下 %@ 个键"
+          }
+        }
+      }
+    },
+    "%@ key higher" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "偏上 %@ 个键"
+          }
+        }
+      }
+    },
+    "You aim %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你点按的位置%@"
+          }
+        }
+      }
+    },
+    "At the key's centre" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在按键中心"
+          }
+        }
+      }
+    },
+    "top edge" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "上边缘"
+          }
+        }
+      }
+    },
+    "bottom edge" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下边缘"
+          }
+        }
+      }
+    },
+    "left edge" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "左边缘"
+          }
+        }
+      }
+    },
+    "right edge" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "右边缘"
+          }
+        }
+      }
+    },
+    "aim for %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的点按位置"
+          }
+        }
+      }
+    },
+    "left alone %lld times in %lld sessions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %2$lld 次使用中保留了 %1$lld 次"
+          }
+        }
+      }
+    },
+    "left alone %lld times" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留了 %lld 次"
+          }
+        }
+      }
+    },
+    "taken back %lld times" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销了 %lld 次"
+          }
+        }
+      }
+    },
+    "fixed by hand %lld times in %lld sessions" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %2$lld 次使用中手动改正了 %1$lld 次"
+          }
+        }
+      }
+    },
+    "fixed by hand %lld times" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动改正了 %lld 次"
+          }
+        }
+      }
+    },
+    "fixed %lld times after dictating" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "听写后改正了 %lld 次"
+          }
+        }
+      }
+    },
+    "%lld taps gained and %lld lost on the typing it was checked on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在用于检查的打字记录中，多对了 %1$lld 次点按，多错了 %2$lld 次"
+          }
+        }
+      }
+    },
+    "The file says: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件声称：%@"
+          }
+        }
+      }
+    },
+    "%@: %@ in the file, %@ here" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@：文件中为 %2$@，这里为 %3$@"
+          }
+        }
+      }
+    },
+    "Width" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "宽度"
+          }
+        }
+      }
+    },
+    "Orientation" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "方向"
+          }
+        }
+      }
+    },
+    "Posture" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "姿态"
+          }
+        }
+      }
+    },
+    "Split keyboard" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分离键盘"
+          }
+        }
+      }
+    },
+    "Key height" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键高"
+          }
+        }
+      }
+    },
+    "Row spacing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行距"
+          }
+        }
+      }
+    },
+    "Key width" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键宽"
+          }
+        }
+      }
+    },
+    "Upright" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "竖屏"
+          }
+        }
+      }
+    },
+    "Sideways" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "横屏"
+          }
+        }
+      }
+    },
+    "%@ pt" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ pt"
+          }
+        }
+      }
+    },
+    "Typing configs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入配置"
+          }
+        }
+      }
+    },
+    "Open typing configs your own agent made from your typing logs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开你自己的 AI 助手根据打字日志制作的输入配置"
+          }
+        }
+      }
+    },
+    "%@, number %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@第 %2$lld 项"
+          }
+        }
+      }
+    },
+    "%@: kept in the file, not applied." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@：保留在文件中，未启用。"
+          }
+        }
+      }
+    },
+    "Aim for %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 的点按位置"
+          }
+        }
+      }
+    },
+    "%@ key" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 个键"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@，%2$@"
+          }
+        }
+      }
+    },
+    "Hex keeps %lld typing configs. Keeping this one removes “%@”, the oldest one you're not using." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 最多保留 %1$lld 个输入配置。保留这个会移除“%2$@”，即你没在使用的最早的一个。"
+          }
+        }
+      }
+    },
+    "Turn on typing configs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开输入配置"
+          }
+        }
+      }
+    },
+    "Using “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用“%@”"
+          }
+        }
+      }
+    },
+    "Hex defaults" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 默认设置"
+          }
+        }
+      }
+    },
+    "No typing configs yet. Export your typing logs for your agent from Settings › Privacy › Typing logs, then open the file it makes." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有输入配置。请在“设置 › 隐私 › 打字日志”中把打字日志导出给你的 AI 助手，然后打开它制作的文件。"
+          }
+        }
+      }
+    },
+    "Going back deletes nothing. Hex keeps your last %lld typing configs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退回不会删除任何内容。Hex 会保留你最近的 %lld 个输入配置。"
+          }
+        }
+      }
+    },
+    "No typing config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不使用输入配置"
+          }
+        }
+      }
+    },
+    "Delete all typing configs?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除所有输入配置？"
+          }
+        }
+      }
+    },
+    "Delete all typing configs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除所有输入配置"
+          }
+        }
+      }
+    },
+    "The keyboard goes back to Hex defaults, and every typing config is deleted from this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘会恢复为 Hex 默认设置，所有输入配置都会从这台 iPhone 上删除。"
+          }
+        }
+      }
+    },
+    "In use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在使用"
+          }
+        }
+      }
+    },
+    "Best so far" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目前最佳"
+          }
+        }
+      }
+    },
+    "applied %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@启用"
+          }
+        }
+      }
+    },
+    "Applied %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@启用过"
+          }
+        }
+      }
+    },
+    "Not applied" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未启用"
+          }
+        }
+      }
+    },
+    "opened %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@打开"
+          }
+        }
+      }
+    },
+    "Hex couldn't use “%@”. Nothing has changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法使用“%@”。没有任何更改。"
+          }
+        }
+      }
+    },
+    "Use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用"
+          }
+        }
+      }
+    },
+    "Rename typing config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名输入配置"
+          }
+        }
+      }
+    },
+    "Switches here take effect the next time the keyboard opens." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里的开关会在下次打开键盘时生效。"
+          }
+        }
+      }
+    },
+    "1 change switched on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打开 1 项更改"
+          }
+        }
+      }
+    },
+    "%lld changes switched on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打开 %lld 项更改"
+          }
+        }
+      }
+    },
+    "Based on “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "基于“%@”"
+          }
+        }
+      }
+    },
+    "Made from another iPhone's typing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据另一台 iPhone 的打字记录制作"
+          }
+        }
+      }
+    },
+    "Use Hex defaults instead" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "改用 Hex 默认设置"
+          }
+        }
+      }
+    },
+    "Use this config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用这个配置"
+          }
+        }
+      }
+    },
+    "Rename" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重命名"
+          }
+        }
+      }
+    },
+    "Share" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享"
+          }
+        }
+      }
+    },
+    "Delete “%@”?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除“%@”？"
+          }
+        }
+      }
+    },
+    "Delete this config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这个配置"
+          }
+        }
+      }
+    },
+    "The keyboard goes back to Hex defaults, and this config is deleted from this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘会恢复为 Hex 默认设置，这个配置会从这台 iPhone 上删除。"
+          }
+        }
+      }
+    },
+    "This config is deleted from this iPhone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个配置会从这台 iPhone 上删除。"
+          }
+        }
+      }
+    },
+    "Name" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "名称"
+          }
+        }
+      }
+    },
+    "Export for your agent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "导出给你的 AI 助手"
+          }
+        }
+      }
+    },
+    "One file with your typing logs and a skill your own AI agent follows to make a typing config for you. Open the file it makes on this iPhone to review it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一个文件，包含你的打字日志，以及让你自己的 AI 助手为你制作输入配置的技能说明。在这台 iPhone 上打开它制作的文件即可查看。"
+          }
+        }
+      }
+    },
+    "Days" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "日期"
+          }
+        }
+      }
+    },
+    "This holds everything you typed and dictated with Hex in the last 14 days, including any password you typed outside a password field. Give it only to an agent you trust, and don't upload it anywhere you wouldn't share your messages." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里包含你过去 14 天用 Hex 输入和听写的所有内容，包括你在密码栏以外输入的密码。只把它交给你信任的 AI 助手，也不要上传到你不愿分享自己消息的地方。"
+          }
+        }
+      }
+    },
+    "This holds everything you typed and dictated with Hex on the days you chose, including any password you typed outside a password field. Give it only to an agent you trust, and don't upload it anywhere you wouldn't share your messages." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这里包含你在所选日期用 Hex 输入和听写的所有内容，包括你在密码栏以外输入的密码。只把它交给你信任的 AI 助手，也不要上传到你不愿分享自己消息的地方。"
+          }
+        }
+      }
+    },
+    "Preparing…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备…"
+          }
+        }
+      }
+    },
+    "Hex couldn't prepare the export. Nothing was shared." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 无法准备导出内容。没有共享任何内容。"
+          }
+        }
+      }
+    },
+    "For your own AI agent to make a typing config from. It holds everything you typed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "供你自己的 AI 助手制作输入配置。其中包含你输入的所有内容。"
+          }
+        }
+      }
+    },
+    "This also deletes your typing configs, which hold your words, and the keyboard goes back to Hex defaults." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这也会删除你的输入配置（其中包含你的词语），键盘会恢复为 Hex 默认设置。"
+          }
+        }
+      }
+    },
+    "It has hidden characters, so what it types wouldn't be what you see." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "包含隐藏字符，输入的内容会与看到的不一样。"
+          }
+        }
+      }
+    },
+    "Autocorrect and the next-letter guess read taps on these letters from where you really aim. The keys stay where they are." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动改正和下一个字母的预测会按你实际点按的位置来识别这些字母。按键位置不变。"
+          }
+        }
+      }
+    },
+    "A tap near these edges counts for the key more often. Hex's guess at the next letter can still pick its neighbour. The keys stay where they are." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点按这些边缘附近时，会更常算作这个键。Hex 对下一个字母的预测仍可能选择旁边的键。按键位置不变。"
+          }
+        }
+      }
+    },
+    "Its touch area reaches %@ key higher" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域向上多延伸 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area reaches %@ key lower" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域向下多延伸 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area reaches %@ key further left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域向左多延伸 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area reaches %@ key further right" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域向右多延伸 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area stops %@ key short at the top" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域上边缩短 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area stops %@ key short at the bottom" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域下边缩短 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area stops %@ key short on the left" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域左边缩短 %@ 个键"
+          }
+        }
+      }
+    },
+    "Its touch area stops %@ key short on the right" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "触控区域右边缩短 %@ 个键"
+          }
+        }
+      }
+    },
+    "Key positions, number %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键位置第 %lld 项"
+          }
+        }
+      }
+    },
+    "Made for %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "适用于 %@"
+          }
+        }
+      }
+    },
+    "Hex hasn't seen your keyboard yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 还没见过你的键盘"
+          }
+        }
+      }
+    },
+    "Key positions are for one keyboard. Type with the Hex keyboard for a moment, then open Hex again: those made for it apply then." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按键位置只适用于某一个键盘。先用 Hex 键盘打一会儿字，再打开 Hex：为它制作的按键位置就会生效。"
+          }
+        }
+      }
+    },
+    "Alerts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提醒"
+          }
+        }
+      }
+    },
+    "A notice in the keyboard, or a notification, if typing seems worse with a new config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果用新配置打字似乎变差，在键盘中提示或发送通知"
+          }
+        }
+      }
+    },
+    "Compare with the one before" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与上一个配置比较"
+          }
+        }
+      }
+    },
+    "Hex went back to your last config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hex 换回了上一个配置"
+          }
+        }
+      }
+    },
+    "The keyboard couldn't start with your new config, so Hex went back to the one before." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "键盘无法用新配置启动，所以 Hex 换回了上一个配置。"
+          }
+        }
+      }
+    },
+    "Typing may be worse with your new config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用了新配置后，打字可能更差"
+          }
+        }
+      }
+    },
+    "Since you applied it you've undone or fixed %lld words in %@, against %lld in %@ before." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用后的 %2$@ 个词里，你撤销或改正了 %1$lld 次；之前 %4$@ 个词里是 %3$lld 次。"
+          }
+        }
+      }
+    },
+    "Compare" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "比较"
+          }
+        }
+      }
+    },
+    "Nothing to compare yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有可比较的内容"
+          }
+        }
+      }
+    },
+    "Hex compares a typing config with the one before it once you've typed with it for a while." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你用一个输入配置打一段时间字后，Hex 会把它和上一个配置比较。"
+          }
+        }
+      }
+    },
+    "Typing may be worse with this config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用这个配置打字可能更差"
+          }
+        }
+      }
+    },
+    "How typing is going" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打字情况"
+          }
+        }
+      }
+    },
+    "Words you undid, kept as typed or fixed by hand, per 100 words you typed. Counts only: no words are kept." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每输入 100 个词中，你撤销、保留原样或手动改正的次数。只记录次数，不保存任何词语。"
+          }
+        }
+      }
+    },
+    "Hex compares once you've typed %lld words with each. Counts only: no words are kept." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "两边各输入 %lld 个词后，Hex 才会比较。只记录次数，不保存任何词语。"
+          }
+        }
+      }
+    },
+    "Going back deletes nothing. You can switch again in Settings › Keyboard › Typing configs." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退回不会删除任何内容。你可以在“设置 › 键盘 › 输入配置”中再次切换。"
+          }
+        }
+      }
+    },
+    "This config" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这个配置"
+          }
+        }
+      }
+    },
+    "Before" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "之前"
+          }
+        }
+      }
+    },
+    "Go back to “%@”" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "退回“%@”"
+          }
+        }
+      }
+    },
+    "Keep this one" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留这个"
+          }
+        }
+      }
+    },
+    "Turn typing configs off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "关闭输入配置"
+          }
+        }
+      }
+    },
+    "per 100 words" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每 100 个词"
+          }
+        }
+      }
+    },
+    "Words typed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入的词"
+          }
+        }
+      }
+    },
+    "Corrections undone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "撤销的改正"
+          }
+        }
+      }
+    },
+    "Fixed by hand" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动改正"
+          }
+        }
+      }
+    },
+    "Autocorrections" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动改正"
+          }
+        }
+      }
+    },
+    "Hex can tell you if a typing config seems to make your typing worse. Allow notifications for that?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "如果某个输入配置似乎让你打字变差，Hex 可以提醒你。要为此允许通知吗？"
+          }
+        }
+      }
+    },
+    "Without them, the keyboard and Home still tell you." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "即使不允许，键盘和主页仍会告诉你。"
+          }
+        }
+      }
+    },
+    "Allow notifications" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许通知"
+          }
+        }
+      }
+    },
+    "Tap to compare it with your last one and go back if you want." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点与上一个配置比较，需要时可以退回。"
+          }
+        }
+      }
+    },
+    "Typing may be worse" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打字可能更差"
+          }
+        }
+      }
+    },
+    "with this config · Compare with your last one" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用了这个配置后 · 与上一个配置比较"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

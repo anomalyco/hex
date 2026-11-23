@@ -61,7 +61,9 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   keyboard when unfolded (only on a foldable iPhone, `FullKeyboardView.isFoldable`);
   **Typing**: Adaptive touch (its status and Reset touch learning below the switch),
   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Emoji
-  shortcodes and Learn each language separately. 21 switches, 20 on an iPhone that doesn't fold.
+  shortcodes, Typing configs ([typing-configs.md](typing-configs.md); a config opened while
+  it's off opens this page at it) and Learn each language separately. 22 switches, 21 on an
+  iPhone that doesn't fold.
 
 Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
 added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`

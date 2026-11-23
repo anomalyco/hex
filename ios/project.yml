@@ -26,6 +26,10 @@ targets:
       - HEXActivity
       - path: ../app/AppIcon.icon
         buildPhase: resources
+      # Typing configs' Export for your agent: the agent package, copied in as one folder.
+      - path: TypingConfig/package
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: FluidAudio
       - target: HEXKeyboard
@@ -39,6 +43,26 @@ targets:
         CFBundleShortVersionString: $(MARKETING_VERSION)
         CFBundleVersion: $(CURRENT_PROJECT_VERSION)
         CADisableMinimumFrameDurationOnPhone: true
+        # Typing configs (`.mhexconfig`, ios/TypingConfig): a file tapped in Files or opened
+        # from a share sheet opens Hex. Conforms to public.data, not public.json: a JSON-typed
+        # file AirDropped to an iPhone previews as text and never reaches the app.
+        CFBundleDocumentTypes:
+          - CFBundleTypeName: Hex typing config
+            CFBundleTypeRole: Viewer
+            LSHandlerRank: Owner
+            LSItemContentTypes:
+              - anomaly.hex.typing-config
+        LSSupportsOpeningDocumentsInPlace: true
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: anomaly.hex.typing-config
+            UTTypeDescription: Hex typing config
+            UTTypeConformsTo:
+              - public.data
+            UTTypeTagSpecification:
+              public.filename-extension:
+                - mhexconfig
+              public.mime-type:
+                - application/vnd.anomaly.hex-typing-config
         CFBundleURLTypes:
           - CFBundleTypeRole: Editor
             CFBundleURLName: anomaly.hex.mobile.keyboard-session

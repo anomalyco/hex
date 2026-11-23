@@ -26,6 +26,7 @@ the area you touch is the spec for it.
 | [`docs/releasing.md`](docs/releasing.md) | TestFlight releases: marketing version, App Store versions, tags and the Xcode Cloud workflow |
 | [`docs/acknowledgements.md`](docs/acknowledgements.md) | Third-party data, models and their licences, shown in Settings › Acknowledgements |
 | [`docs/typing-logs.md`](docs/typing-logs.md) | Record typing logs: files, NDJSON schema and events |
+| [`docs/typing-configs.md`](docs/typing-configs.md) | Typing configs (Experiments): the `.mhexconfig` format, how the keyboard reads one, the agent package, and the app's arrival, review and history |
 
 ## Layout
 

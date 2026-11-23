@@ -4,6 +4,9 @@ import SwiftUI
 /// Keyboard layout, Typing), off until turned on. They live in the App Group so the keyboard
 /// reads them too.
 struct ExperimentsSettingsPage: View {
+    static let typingConfigsRow = "typing-configs"
+    /// The `id` of a row to start at instead of the top.
+    var startsAt: String?
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var revision = 0
     @State private var cleanupAvailability = AppleIntelligenceCleanupAvailability.current
@@ -52,7 +55,7 @@ struct ExperimentsSettingsPage: View {
     }
 
     var body: some View {
-        SettingsPageScaffold(title: "Experiments") {
+        SettingsPageScaffold(title: "Experiments", startsAt: startsAt) {
             dictationSection
             languagesSection
             layoutSection
@@ -334,6 +337,23 @@ struct ExperimentsSettingsPage: View {
                 detail: String(localized: "Type a colon and a name, like :pizza, to pick an emoji."),
                 isOn: keyboardBinding(\.emojiShortcodes)
             )
+
+            SettingsDivider()
+
+            // Settings › Keyboard › Typing configs while it's on; a file opened while it's off
+            // waits for it (`TypingConfigInbox`).
+            SettingsToggleRow(
+                title: String(localized: "Typing configs"),
+                detail: String(localized: "Open typing configs your own agent made from your typing logs"),
+                isOn: toggleBinding(
+                    { TypingConfigSettings().isEnabled },
+                    { enabled in
+                        TypingConfigSettings().isEnabled = enabled
+                        if enabled { TypingConfigInbox.shared.experimentTurnedOn() }
+                    }
+                )
+            )
+            .id(Self.typingConfigsRow)
 
             SettingsDivider()
 

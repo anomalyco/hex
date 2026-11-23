@@ -8,6 +8,7 @@ struct TypingLogsView: View {
     /// Event counts by day and size, counted off the main thread when a row shows.
     @State private var counts: [String: Int] = [:]
     @State private var confirmingDelete = false
+    @State private var exporting = false
 
     var body: some View {
         NavigationStack {
@@ -23,6 +24,17 @@ struct TypingLogsView: View {
                     }
                 } footer: {
                     Text("One file per day, kept for 14 days. Password, code and card fields are never logged.")
+                }
+
+                // Settings › Experiments › Typing configs: the logs, a skill and state/ in one zip.
+                if !days.isEmpty, TypingConfigSettings().isEnabled {
+                    Section {
+                        Button("Export for your agent") {
+                            exporting = true
+                        }
+                    } footer: {
+                        Text("For your own AI agent to make a typing config from. It holds everything you typed.")
+                    }
                 }
 
                 if !days.isEmpty {
@@ -55,6 +67,9 @@ struct TypingLogsView: View {
                 Text("All logs are deleted from this iPhone.")
             }
             .refreshable { reload() }
+            .sheet(isPresented: $exporting) {
+                TypingConfigExportSheet(days: days)
+            }
         }
         .preferredColorScheme(.dark)
         .onAppear(perform: reload)
@@ -63,7 +78,7 @@ struct TypingLogsView: View {
     private func row(_ day: TypingLogDay) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title(day))
+                Text(Self.title(day))
                 Text(detail(day))
                     .font(.caption)
                     .monospacedDigit()
@@ -76,11 +91,11 @@ struct TypingLogsView: View {
                 Image(systemName: "square.and.arrow.up")
             }
             .buttonStyle(.borderless)
-            .accessibilityLabel("Share \(title(day))")
+            .accessibilityLabel("Share \(Self.title(day))")
         }
     }
 
-    private func title(_ day: TypingLogDay) -> String {
+    static func title(_ day: TypingLogDay) -> String {
         guard let date = day.date else { return day.day }
         if Calendar.current.isDateInToday(date) { return String(localized: "Today") }
         if Calendar.current.isDateInYesterday(date) { return String(localized: "Yesterday") }
@@ -116,7 +131,7 @@ struct TypingLogsView: View {
 /// The system share sheet for files, over whatever is showing.
 @MainActor
 enum ShareSheet {
-    static func present(_ urls: [URL]) {
+    static func present(_ urls: [URL], completion: (() -> Void)? = nil) {
         guard !urls.isEmpty else { return }
         let scene = UIApplication.shared.connectedScenes
             .compactMap { $0 as? UIWindowScene }
@@ -126,6 +141,9 @@ enum ShareSheet {
             top = presented
         }
         let controller = UIActivityViewController(activityItems: urls, applicationActivities: nil)
+        if let completion {
+            controller.completionWithItemsHandler = { _, _, _, _ in completion() }
+        }
         controller.popoverPresentationController?.sourceView = top.view
         controller.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: 60, width: 1, height: 1)
         top.present(controller, animated: true)

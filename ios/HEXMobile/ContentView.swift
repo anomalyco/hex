@@ -50,6 +50,7 @@ struct ContentView: View {
     @State private var showAcknowledgements = false
     /// Whether Hex went to the background, so only a real return starts the keyboard's check over.
     @State private var keyboardCheckWasInBackground = false
+    @State private var typingConfigWatch = TypingConfigWatch.shared
 
     private static let stageWellHeight: CGFloat = 48
     private static let stageControlHeight: CGFloat = 36
@@ -183,6 +184,9 @@ struct ContentView: View {
         .sheet(isPresented: $showSetup) {
             SetupSheet(dictation: dictation, monitor: setupMonitor, keyboardSpeech: keyboardSpeech)
         }
+        .sheet(isPresented: Bindable(typingConfigWatch).showsCompare) {
+            TypingConfigCompareSheet(watch: typingConfigWatch)
+        }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active {
                 setupMonitor.refresh()
@@ -243,6 +247,9 @@ struct ContentView: View {
                     dictationOpensAtSpeechModel = true
                     settingsPath = [.dictation]
                 })
+
+                // Experiments › Typing configs: typing may be worse with a new config.
+                TypingConfigHomeCards(watch: typingConfigWatch)
 
                 if setupMonitor.needsAllowPasteSetting {
                     AllowPasteBanner(
@@ -352,7 +359,8 @@ struct ContentView: View {
         case .privacy:
             PrivacySettingsPage()
         case .experiments:
-            ExperimentsSettingsPage()
+            // A typing config's Open Experiments: starts at its switch.
+            ExperimentsSettingsPage(startsAt: TypingConfigInbox.shared.isParked ? ExperimentsSettingsPage.typingConfigsRow : nil)
         }
     }
 

@@ -2936,8 +2936,12 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Swipe typing in more languages, Korean keyboard (두벌식), Dvorak punctuation keys, Comma
 │   and period keys, Quick accents, Emoji shortcodes, ABC under the emoji key, Keyboard
 │   themes (Black, White, Navy, Forest, Ember), Two-thumb selection, Delete swiped words
-│   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Learn each
-│   language separately
+│   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Typing configs
+│   (a `.mhexconfig` from the person's own agent opens Hex in a review sheet that applies
+│   nothing by itself; history of every config, `ios/docs/typing-configs.md`; simulator
+│   only, no iPhone run; it suggests going back when typing seems worse with a new config:
+│   keyboard bar notice, notification, Home card; falls back only when the keyboard failed to
+│   start twice), Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
