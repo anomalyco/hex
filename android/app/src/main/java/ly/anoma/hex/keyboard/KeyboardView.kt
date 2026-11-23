@@ -54,6 +54,7 @@ internal class KeyboardView(context: Context, private val ime: HexKeyboard) : Li
     }
     override fun suggestions(slots: List<Suggestion>) = strip.suggestions(slots)
     override fun undoDictation(shown: Boolean) = strip.undo(shown)
+    override fun toolsChanged() = strip.update()
     fun notice(notice: StripNotice?) = strip.notice(notice)
 
     /** Emoji in place of the strip and the keys, the window's height unchanged (Gboard's panel

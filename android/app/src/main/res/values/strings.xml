@@ -122,4 +122,6 @@
     <string name="letter_symbols_detail">Hold a letter to type a symbol, like m for /</string>
     <string name="number_row">Number row</string>
     <string name="number_row_detail">Shows 1–0 above the letters</string>
+    <string name="keyboard_tools">Keyboard tools</string>
+    <string name="keyboard_tools_detail">Emoji, paste, settings and undo in the suggestion strip</string>
 </resources>

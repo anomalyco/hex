@@ -2,6 +2,7 @@ package ly.anoma.hex.keyboard
 
 import android.Manifest
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.database.ContentObserver
@@ -13,6 +14,7 @@ import android.inputmethodservice.InputMethodService
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
+import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.MicCapture
@@ -67,6 +69,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
+        if (key == TypingPreferences.KEYBOARD_TOOLS) engine.keyboardToolsChanged()
     }
     internal val previewAllowed get() = !engine.secure
 
@@ -109,6 +112,14 @@ class HexKeyboard : InputMethodService() {
         engine.updateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd)
     }
 
+    /** The strip's Paste tool: the editor's own paste, so Hex never reads the clipboard itself. */
+    internal fun pasteClipboard() {
+        if (!engine.secure && currentInputConnection?.performContextMenuAction(android.R.id.paste) == true) engine.pasted()
+    }
+    /** The strip's Settings tool: Hex opens on its Keyboard page, not Home. */
+    internal fun openKeyboardSettings() = startActivity(Intent(this, MainActivity::class.java)
+        .putExtra(MainActivity.EXTRA_PAGE, MainActivity.PAGE_KEYBOARD)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP))
     internal fun nextIme() {
         capture.cancel()
         if (!switchToNextInputMethod(false)) getSystemService(InputMethodManager::class.java).showInputMethodPicker()

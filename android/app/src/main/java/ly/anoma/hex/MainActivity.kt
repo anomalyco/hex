@@ -51,6 +51,11 @@ internal data class Setup(val mic: Boolean = false, val enabled: Boolean = false
 }
 
 class MainActivity : ComponentActivity() {
+    companion object {
+        /** The keyboard's Settings tool opens Hex on this page, not Home: [PAGE_KEYBOARD] names it. */
+        const val EXTRA_PAGE = "ly.anoma.hex.extra.page"
+        const val PAGE_KEYBOARD = "keyboard"
+    }
     private val prefs by lazy { getSharedPreferences("setup", MODE_PRIVATE) }
     private val imm by lazy { getSystemService(InputMethodManager::class.java) }
     private var setup by mutableStateOf(Setup())
@@ -88,7 +93,8 @@ class MainActivity : ComponentActivity() {
                 val model = ModelStore.state.collectAsState().value
                 if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.download(this) },
                     phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
-                    { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) })
+                    { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
+                    startPage = intent.getStringExtra(EXTRA_PAGE))
                 else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     choose = { imm.showInputMethodPicker() }, model = model,
