@@ -1905,8 +1905,8 @@ workflow on every push to `dev` with `test-build`, plus an ad-hoc signed
 it must never read the real `hex` data), as unsigned 14-day artifacts for
 teammates (`docs/test-builds.md`). `HEX_TEST_BUILD=1` builds never update
 themselves, and neither do local builds (`HEX_LOCAL_BUILD=1`, the owner's own
-build from a checkout: footer "Local build · updates off", version label with its
-commit, no channel row). Every push to `dev` (except docs/site-only changes) publishes a dev-channel
+build from a checkout: footer "<version> · Local build", full commit and updates
+off in its tooltip and `hex --version`, no channel row). Every push to `dev` (except docs/site-only changes) publishes a dev-channel
 build for signed platforms. Stable requires a manual dispatch on `dev`.
 Like OpenCode, every run uses the one `release` environment, with no
 required reviewer; its deployment policy admits only the `dev` branch. Rerunning

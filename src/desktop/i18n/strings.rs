@@ -811,7 +811,7 @@ pub(super) const TRANSLATIONS: &[(&str, [&str; 6])] = &[
     ("Show Hex", ["Pokaż Hex", "显示 Hex", "Hex を表示", "Hex anzeigen", "Mostrar Hex", "Показати Hex"]),
     ("Enable / Disable Hex", ["Włącz / wyłącz Hex", "启用 / 停用 Hex", "Hex を有効 / 無効にする", "Hex aktivieren / deaktivieren", "Activar / desactivar Hex", "Увімкнути / вимкнути Hex"]),
     ("Updated by your package manager", ["Aktualizowany przez menedżer pakietów", "由你的软件包管理器更新", "パッケージマネージャーで更新します", "Wird von deinem Paketmanager aktualisiert", "Se actualiza con tu gestor de paquetes", "Оновлюється через менеджер пакетів"]),
-    ("Local", ["Lokalna", "本地", "ローカル", "Lokal", "Local", "Локальна"]),
+    ("{} · Local build", ["{} · Lokalna kompilacja", "{} · 本地构建", "{} · ローカルビルド", "{} · Lokaler Build", "{} · Compilación local", "{} · Локальна збірка"]),
     ("Test", ["Test", "测试", "テスト", "Test", "Prueba", "Тест"]),
     ("Local build · updates off", ["Lokalna kompilacja · aktualizacje wyłączone", "本地构建 · 更新已关闭", "ローカルビルド · 更新はオフ", "Lokaler Build · Updates aus", "Compilación local · actualizaciones desactivadas", "Локальна збірка · оновлення вимкнено"]),
     ("Updated from your source checkout", ["Aktualizowany z Twojej kopii źródeł", "通过你的源代码检出更新", "ソースのチェックアウトから更新します", "Wird aus deinem Quellcode-Checkout aktualisiert", "Se actualiza desde tu copia del código fuente", "Оновлюється з локальної копії вихідного коду"]),
