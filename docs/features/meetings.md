@@ -83,7 +83,7 @@ Labs > Meetings switch (macOS)                       // meetings.opt-in; off by 
 │       │       │   automatically / Don't offer, each with what it does
 │       │       │   (meetings.default_policy). Choosing one moves every app
 │       │       │   and website that followed the old answer with it.
-│       │       │   └── Stop when the call ends (macOS, off;
+│       │       │   └── Stop when the call ends (off;
 │       │       │       meetings.stop_when_call_ends) nests under Record
 │       │       │       automatically while it is the answer or any app or
 │       │       │       website records automatically; its line names the
@@ -291,6 +291,16 @@ Browser calls -> a browser holding the microphone is a browser call after 20 s
             searched, and the whole-window title is reduced to the page's
             (Edge's profile name, its other-tab count, and the zero-width
             space in its name removed)
+Stop when the call ends -> the same row and 30 s grace as macOS
+    (meetings.stop_when_call_ends). The call app counts as present while it
+    holds the microphone OR still plays output: Windows any active render
+    session on any output of its processes (IAudioSessionManager2), Linux a
+    running Stream/Output/Audio node of its executable in the same pw-dump
+    graph. A failed or unknown read counts as playing, so a muted call is
+    never stopped
+    // checks: running_output_streams_say_whether_an_app_still_plays
+    // (microphone_activity/linux.rs); Windows has no automated check
+    └── not observed on a real muted call on either OS
 Permissions -> none asked; the System Audio Recording row is macOS-only
 Calendar -> none (no Connect calendar row)
 Notes and live chapters -> After a meeting › Summaries is a switch (off by
@@ -355,7 +365,9 @@ monitor capture and the pw-dump parsing were checked by hand on Arch/niri
 before #1801. Not verified: the multi-sink capture #1801 added has not been
 run against a real PipeWire session (neither has `target.object` been shown to
 link each `pw-record` to that sink's monitor), a recorded call end to end on
-either OS, Windows loopback and session detection on hardware.
+either OS, Windows loopback and session detection on hardware, and the
+audio-output read behind Stop when the call ends (a Windows render session
+and a Linux PipeWire output node on a real muted call).
 
 ## Sub-features
 
@@ -1169,7 +1181,7 @@ Panel capsules move like the recording capsule (#1093, graduated from Labs; only
   around it (#1305); a click on the body outside its buttons still stops
   there
 
-Meetings › Settings › Calls › Stop when the call ends (macOS, off by default; #835;
+Meetings › Settings › Calls › Stop when the call ends (off by default; #835;
 meetings.stop_when_call_ends) // meetings.auto-stop
   Only a recording Hex started on its own (Always record); manual, offered,
   and calendar recordings are never stopped by this switch. Labs › Stop every
@@ -1180,8 +1192,13 @@ meetings.stop_when_call_ends) // meetings.auto-stop
   record keeps answering to its own
   ([Stop Other Call Recordings](#stop-other-call-recordings-labs))
   -> The call app counts as present while it holds the microphone OR any of
-     its Core Audio processes plays output (WhatsApp keeps the microphone
-     while muted; its output stays open until hang-up)
+     its processes plays output (WhatsApp keeps the microphone while muted;
+     its output stays open until hang-up): Core Audio's running-output
+     processes on macOS, an active render session on any output in
+     IAudioSessionManager2 on Windows, and a running Stream/Output/Audio
+     node in PipeWire's graph on Linux
+     └── A failed or unknown output read counts as playing, so it never
+         stops a recording
   -> Both off for about 3 s -> capsule says "Hex stops recording in 30 s
      unless you keep recording."
      ├── App back on the microphone or output within 30 s -> its stop is
@@ -1516,7 +1533,10 @@ Checks: `call_end_is_reported_once_per_sustained_absence`,
 [meeting_capsules.rs](../../src/rune_ui/meeting_capsules.rs) (auto-stop; not
 yet observed on a real Mac: the output read
 `microphone_activity::application_running_output` against a live WhatsApp
-call, a muted call, and Zoom or Teams helpers),
+call, a muted call, and Zoom or Teams helpers, and not on a real muted call
+on Windows or Linux either), and
+`running_output_streams_say_whether_an_app_still_plays` in
+[microphone_activity/linux.rs](../../src/microphone_activity/linux.rs),
 `paste_cursor_counts_coalesced_turns_and_advances_only_on_success` in
 [meeting/tests.rs](../../src/meeting/tests.rs),
 `meeting_delta_coalesces_turns_in_time_order` in

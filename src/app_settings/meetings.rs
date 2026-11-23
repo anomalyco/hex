@@ -531,9 +531,8 @@ fn audio_retention_in(settings: &serde_json::Value) -> Option<MeetingRetention> 
         .flatten()
 }
 
-/// Meetings › Settings' Stop when the call ends, as last applied (macOS;
-/// read on each pass of the meeting controller).
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+/// Meetings › Settings' Stop when the call ends, as last applied (read on
+/// each pass of the meeting controller).
 pub fn meeting_stop_when_call_ends() -> bool {
     MEETING_STOP_WHEN_CALL_ENDS.load(Ordering::Acquire)
 }

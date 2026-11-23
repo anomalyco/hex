@@ -330,7 +330,7 @@ fn set_default(ui: &mut Ui, policy: MeetingPolicy) {
 }
 
 /// The default's radios, with Stop when the call ends under Record
-/// automatically while anything records on its own (macOS).
+/// automatically while anything records on its own.
 fn answers(ui: &Ui, p: Paint) -> Vec<CardRow> {
     let meetings = &ui.settings.meetings;
     let default = meetings.default_policy;
@@ -363,7 +363,7 @@ fn answers(ui: &Ui, p: Paint) -> Vec<CardRow> {
                 )
                 .into(),
         );
-        if policy == MeetingPolicy::AlwaysRecord && records && mac {
+        if policy == MeetingPolicy::AlwaysRecord && records {
             let grace = crate::meeting::detection::AUTO_STOP_GRACE.as_secs();
             answers.push(
                 nested(toggle_row(

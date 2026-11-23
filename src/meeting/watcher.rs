@@ -1074,20 +1074,10 @@ fn withdraw_stop(
 /// Whether the call app still plays audio; a failed read counts as playing,
 /// so it never stops a recording.
 fn call_app_playing(application: &str) -> bool {
-    #[cfg(target_os = "macos")]
-    {
-        crate::microphone_activity::application_running_output(application).unwrap_or_else(
-            |error| {
-                tracing::warn!(%error, "could not inspect the call app's audio output");
-                true
-            },
-        )
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let _ = application;
-        false
-    }
+    crate::microphone_activity::application_running_output(application).unwrap_or_else(|error| {
+        tracing::warn!(%error, "could not inspect the call app's audio output");
+        true
+    })
 }
 
 /// How often a browser's tabs are queried while it has just started holding

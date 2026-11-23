@@ -609,6 +609,29 @@ fn meeting_export_and_stop_when_call_ends_save_their_settings() {
     );
 }
 
+/// Stop when the call ends shows next to Record automatically on Windows
+/// and Linux too: the call app's audio output keeps a muted call's recording
+/// alive there as Core Audio does on a Mac (#835).
+#[test]
+fn stop_when_the_call_ends_shows_on_every_os() {
+    use crate::app_settings::MeetingPolicy;
+    for scene in ["portal", "windows-settings"] {
+        let mut rt = runtime(scene, true, (980.0, 2400.0));
+        rt.state.settings.meetings.enabled = true;
+        rt.state.settings.meetings.default_policy = MeetingPolicy::AlwaysRecord;
+        rt.state.pane = Pane::Meetings;
+        rt.state.meetings.view = super::super::meetings::View::Settings;
+        refresh(&mut rt);
+        tap(&mut rt, "calls");
+        assert!(
+            rt.find("meeting-stop-when-call-ends").is_some(),
+            "no Stop row on {scene}"
+        );
+        tap(&mut rt, "meeting-stop-when-call-ends");
+        assert!(rt.state.settings.meetings.stop_when_call_ends, "{scene}");
+    }
+}
+
 /// Off a Mac, Summaries is a switch that turns OpenCode on.
 #[test]
 fn summaries_are_a_switch_off_a_mac() {
