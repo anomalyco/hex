@@ -86,6 +86,7 @@ pub use chapters::{Chapter, chapter_entries, section_markdown};
 pub use delete::DeleteRefusal;
 pub use delete::{DeleteError, TrashedMeeting, delete, trash};
 pub use delta::*;
+pub(crate) use finish::discard_if_empty;
 pub use markdown::{
     live_transcript_markdown, render_turns_markdown, speaker_label, transcript_markdown,
     transcript_markdown_with,

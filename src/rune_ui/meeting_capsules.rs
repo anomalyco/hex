@@ -244,6 +244,7 @@ impl PillModel {
             ControllerEvent::Starting(_)
             | ControllerEvent::Transcribing
             | ControllerEvent::Finished(_)
+            | ControllerEvent::Discarded(_)
             | ControllerEvent::Failed { .. } => {
                 self.recording = None;
                 self.call_ended = false;
@@ -971,6 +972,9 @@ impl MeetingCapsules {
             ControllerEvent::Finished(manifest) => {
                 self.finish_meeting(manifest);
             }
+            // Nothing to show: the meeting it would have offered was trashed
+            // as it finished. `advance_handoff` already dismissed the pill.
+            ControllerEvent::Discarded(_) => {}
             ControllerEvent::NotesFinished(manifest) => {
                 let manifest = manifest.clone();
                 let panel = self.handle_for(&manifest.id);

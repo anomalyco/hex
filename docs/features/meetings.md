@@ -1757,6 +1757,13 @@ transcript.
 ```ts
 Final publication                                   // meetings.output
 ├── Internal: transcript.ndjson + transcript.md (atomic, owner-only)
+├── No speech at all (Complete, zero transcript entries) -> the recording
+│   folder and its exported Markdown go to the Trash through the pane's
+│   delete path; no finished panel and no notes for a meeting that is gone.
+│   Failed, Interrupted, and final.pending meetings are never discarded, and
+│   existing meetings are not swept when the list loads
+│   // checks: an_empty_finished_meeting_is_moved_to_the_trash,
+│   // a_meeting_with_speech_or_a_failure_is_never_discarded
 └── Markdown copy -> <folder>/<YYYY-MM-DD HHMM> <title>.md
     ├── Title, date, duration, app, You / Them turns
     ├── Never overwrites; adds " (2)"
@@ -1774,7 +1781,8 @@ Final publication                                   // meetings.output
     └── Failure -> Meeting still Complete; "Markdown not saved: …"
 
 Finished meeting panel (15 s, kept open while the pointer is over it; it
-    closes when the pointer leaves after that) -> title · length, the
+    closes when the pointer leaves after that; never shown for a recording
+    with no speech, which is trashed instead) -> title · length, the
     summary while notes are on (or "Writing a title and summary with Apple
     Intelligence…" when it writes, "…with OpenCode…" otherwise, or
     "Markdown not saved: …"), then the recording's copies
@@ -1819,7 +1827,8 @@ Detail (a raised card beside the list)
 ├── Chapters (when present): start, name, line, and a Copy section icon
 └── Transcript: stacked turns, no bubbles; "You" in text colour, "Them"
     faint, each with its clock; merged turns; 30 s+ pause lines;
-    "Listening…" while recording
+    "Listening…" while recording; "No speech was transcribed." only for a
+    Complete meeting from before empty results were trashed
 Empty: "No meetings yet." with a one-line hint; "No meetings match." while
 searching
 
@@ -1854,7 +1863,9 @@ Agents -> hex meetings delete <id>                 // exact `meetings list --jso
 
 Choice: Delete trashes the Markdown copy too, since it holds the transcript;
 a separate notes file Hex tracks goes with it, and all stay recoverable from
-the Trash. Sources:
+the Trash. A recording that finished Complete with no speech takes this same
+path automatically and never appears in the pane (check:
+`an_empty_finished_meeting_is_moved_to_the_trash`). Sources:
 [rune_ui/meetings.rs](../../src/rune_ui/meetings.rs), the requests in
 [rune_ui/macos_host.rs](../../src/rune_ui/macos_host.rs), and `RevealTarget` /
 `rename` in [meeting.rs](../../src/meeting.rs) with `delete` / `trash` in
@@ -1993,6 +2004,10 @@ While recording, setting on, model available           // meetings.title.provisi
 
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
+  -> No speech in the transcript (no entries, or only blank text) -> no call,
+     nothing written, notes_error cleared: nothing to summarize is not a
+     notes failure, including a manual Summarize on an older empty meeting
+     (check: context_overflow_halves_the_excerpt_once_and_failures_stop)
   -> ONE call over a bounded excerpt, no map-reduce
      ├── Language -> the transcript's own; the instructions say "You MUST
      │   write the title and summary in the language spoken in the transcript

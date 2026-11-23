@@ -252,8 +252,14 @@ pub(super) fn summarize_entries(
     max_chars: usize,
     deadline: Instant,
     generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
-) -> Result<Summary> {
+) -> Result<Option<Summary>> {
     summarize_with_calendar(entries, None, &[], max_chars, deadline, generate)
+}
+
+/// Whether these entries hold any speech worth summarizing. An empty
+/// transcript is not a notes failure: there is simply nothing to write.
+fn has_speech(entries: &[TranscriptEntry]) -> bool {
+    entries.iter().any(|entry| !entry.text.trim().is_empty())
 }
 
 /// The most attendee names a notes prompt lists.
@@ -297,7 +303,7 @@ pub(super) fn summarize_with_calendar(
     max_chars: usize,
     deadline: Instant,
     mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
-) -> Result<Summary> {
+) -> Result<Option<Summary>> {
     let preamble = format!(
         "{}{}",
         super::chapters::vocabulary_line(terms),
@@ -308,7 +314,7 @@ pub(super) fn summarize_with_calendar(
     loop {
         let excerpt = excerpt(entries, max_chars);
         if excerpt.text.is_empty() {
-            return Err(eyre!("the transcript has no speech to summarize"));
+            return Ok(None);
         }
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
@@ -318,7 +324,7 @@ pub(super) fn summarize_with_calendar(
         let prompt = format!("{preamble}Meeting transcript:\n\n{}", excerpt.text);
         match generate(NOTES_INSTRUCTIONS, &prompt, remaining.min(CALL_TIMEOUT)) {
             Ok(notes) => {
-                return Ok(Summary {
+                return Ok(Some(Summary {
                     notes: GeneratedNotes {
                         title: clean_title(&notes.title),
                         summary: clean_summary(&notes.summary),
@@ -327,7 +333,7 @@ pub(super) fn summarize_with_calendar(
                     excerpt_chars: excerpt.text.len(),
                     transcript_chars: excerpt.transcript_chars,
                     calls,
-                });
+                }));
             }
             Err(GenerationError::ContextWindow) if calls == 1 => max_chars /= 2,
             Err(error) => return Err(eyre!("{error}")),
@@ -875,12 +881,26 @@ pub fn summarize(id: &str) -> Result<MeetingManifest> {
     summarize_claimed(id, claim)
 }
 
-/// Generates and records notes while holding this meeting's claim.
+/// Generates and records notes while holding this meeting's claim. A
+/// transcript with no speech writes nothing and clears any earlier notes
+/// error: there is nothing to summarize, so nothing failed.
 fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     let directory = root()?.join(id);
     let mut manifest = read_manifest(&directory)?;
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("only completed meetings can be summarized"));
+    }
+    let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
+    if !has_speech(&entries) {
+        tracing::info!(
+            meeting = id,
+            "nothing to summarize: the transcript has no speech"
+        );
+        if manifest.notes_error.is_some() {
+            manifest.notes_error = None;
+            write_manifest(&directory, &manifest)?;
+        }
+        return Ok(manifest);
     }
     // A writer that isn't there (OpenCode not running, Apple Intelligence
     // off) is the meeting's notes error, so the pane says why.
@@ -890,7 +910,6 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
         write_manifest(&directory, &manifest)?;
         return Err(eyre!("{reason}"));
     }
-    let entries = super::read_ndjson(&directory.join("transcript.ndjson"))?;
     let never = AtomicBool::new(false);
     if crate::labs::live_chapters() {
         super::chapters::refine_meeting(&directory, &entries, &never);
@@ -912,7 +931,7 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     // Re-read so concurrent manifest updates are not lost.
     let mut manifest = read_manifest(&directory)?;
     match result {
-        Ok(summary) => {
+        Ok(Some(summary)) => {
             tracing::info!(
                 meeting = id,
                 excerpt_chars = summary.excerpt_chars,
@@ -935,6 +954,13 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
                 tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
                 manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
             }
+            write_manifest(&directory, &manifest)?;
+            Ok(manifest)
+        }
+        // The transcript emptied between the read and the excerpt: nothing to
+        // summarize is not a notes failure.
+        Ok(None) => {
+            manifest.notes_error = None;
             write_manifest(&directory, &manifest)?;
             Ok(manifest)
         }
@@ -1043,12 +1069,18 @@ pub fn summarize_file(path: &Path, excerpt_chars: Option<usize>) -> Result<Strin
 
     let max_chars = excerpt_chars.unwrap_or_else(|| excerpt_budget(context, FINAL_EXCERPT_CHARS));
     let started = Instant::now();
-    let summary = summarize_entries(
+    let summary = match summarize_entries(
         &entries,
         max_chars,
         started + TOTAL_DEADLINE,
         generator::generate_notes,
-    )?;
+    )? {
+        Some(summary) => summary,
+        None => {
+            report.push_str("\nthe transcript has no speech to summarize\n");
+            return Ok(report);
+        }
+    };
     let elapsed = started.elapsed();
     let calls = summary.calls;
     let notes = MeetingNotes::from_summary(summary, elapsed);
@@ -1150,6 +1182,7 @@ mod tests {
                 ))
             },
         )
+        .unwrap()
         .unwrap();
         assert_eq!(summary.calls, 1);
         assert_eq!(prompts[0].0, NOTES_INSTRUCTIONS);
@@ -1207,6 +1240,7 @@ mod tests {
                 Ok(generated("Launch", "They met."))
             },
         )
+        .unwrap()
         .unwrap();
         assert!(prompts[0].starts_with(
             "Calendar event: Q4 launch sync\nAttendees: Ana Ruiz, Ben Ito\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
@@ -1232,6 +1266,7 @@ mod tests {
                 Ok(generated("Launch", "They met."))
             },
         )
+        .unwrap()
         .unwrap();
         assert!(prompts[0].starts_with(
             "Names and terms that may appear: Kubernetes, Ana Ruiz\n\nCalendar event: Q4 launch sync\nAttendees: Ana Ruiz\n\nMeeting transcript:\n\n[00:00] You: Turn 0"
@@ -1250,6 +1285,7 @@ mod tests {
                 Ok(generated("Launch", "They met."))
             },
         )
+        .unwrap()
         .unwrap();
         assert!(without[0].starts_with("Meeting transcript:\n\n[00:00] You: Turn 0"));
 
@@ -1267,6 +1303,7 @@ mod tests {
                 Instant::now() + Duration::from_secs(60),
                 |_, _, _| Ok(generated("Launch", "They met.")),
             )
+            .unwrap()
             .unwrap();
             excerpts.push(summary.excerpt_chars);
         }
@@ -1342,6 +1379,7 @@ mod tests {
                 }
             },
         )
+        .unwrap()
         .unwrap();
         assert_eq!(summary.calls, 2);
         assert!(sizes[1] < sizes[0] * 2 / 3, "{sizes:?}");
@@ -1380,7 +1418,19 @@ mod tests {
         .unwrap();
         assert!(!called);
         assert!(error.to_string().contains("in time"));
-        assert!(summarize_entries(&[], 8_000, Instant::now(), |_, _, _| unreachable!()).is_err());
+
+        // No speech is nothing to summarize, not a notes failure: the writer
+        // is never called and no summary comes back.
+        let mut summarized = false;
+        assert!(
+            summarize_entries(&[], 8_000, Instant::now(), |_, _, _| {
+                summarized = true;
+                Ok(GeneratedNotes::default())
+            })
+            .unwrap()
+            .is_none()
+        );
+        assert!(!summarized);
     }
 
     #[test]

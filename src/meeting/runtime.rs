@@ -193,6 +193,10 @@ fn follow(event: &ControllerEvent, window: &rune::AppHandle<Ui>) {
             tracing::info!(id = %manifest.id, "meeting transcript ready");
             *state = MeetingMenuState::Idle;
         }
+        ControllerEvent::Discarded(id) => {
+            tracing::info!(%id, "meeting had no speech; moved to the Trash");
+            *state = MeetingMenuState::Idle;
+        }
         ControllerEvent::Failed { title, error } => {
             tracing::error!(%title, %error, "meeting failed");
             *state = MeetingMenuState::Idle;

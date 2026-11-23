@@ -107,6 +107,9 @@ pub(crate) enum ControllerEvent {
     /// capsule returns.
     CallEndedWithdrawn,
     Finished(Box<meeting::MeetingManifest>),
+    /// The final pass succeeded with no speech: its recording and Markdown
+    /// went to the Trash, so nothing opens a finished meeting.
+    Discarded(String),
     Failed {
         title: String,
         error: String,
@@ -816,6 +819,15 @@ fn poll_import(importing: &mut Option<ImportWorker>, events: &SyncSender<Control
     };
     match worker.worker.join() {
         Ok(Ok(manifest)) if manifest.status == meeting::MeetingStatus::Complete => {
+            // An imported file with no speech leaves nothing to keep, exactly
+            // as an empty recording does; notes never run for it.
+            match meeting::discard_if_empty(&manifest) {
+                Ok(true) => return,
+                Ok(false) => {}
+                Err(error) => {
+                    tracing::warn!(%error, meeting = manifest.id, "could not discard an imported meeting with no speech");
+                }
+            }
             tracing::info!(meeting = manifest.id, "imported audio was transcribed");
             if meeting::notes_wanted() {
                 start_notes(manifest.id, events);
