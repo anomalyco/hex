@@ -594,11 +594,13 @@ struct KeyboardSurfaceView: View {
         HStack(spacing: 8) {
             Button {
                 model.onKeyFeedback?()
-                if model.hasFullAccess, !model.isWarmAvailable, let local = model.onLocalDictateTap {
-                    local()
-                } else {
-                    let target = model.hasFullAccess ? model.coldStartURL : KeyboardLaunchRequest.setup.url
-                    model.onOpenURL?(target)
+                switch model.route {
+                case .setUp:
+                    model.onOpenURL?(KeyboardLaunchRequest.setup.url)
+                case .inKeyboard:
+                    model.onLocalDictateTap?()
+                case .warm, .needsModel, .opensHex:
+                    model.onOpenURL?(model.coldStartURL)
                 }
             } label: {
                 HexMarkView(
@@ -693,16 +695,17 @@ struct KeyboardSurfaceView: View {
     }
 
     private func leadingAccessory(palette p: KeyboardChromePalette) -> some View {
-        let showNoAccess = !model.hasFullAccess
-        let showStartingStatus = model.hasFullAccess && model.stagePhase == .starting
-        let showRecordingClock = model.hasFullAccess && model.stagePhase == .recording
-        let showTranslationNote = model.hasFullAccess
-            && model.translationNote != nil
-            && !isStageActive
-        let showWarmStatus = model.hasFullAccess
-            && model.isWarmAvailable
-            && !isStageActive
-            && !showTranslationNote
+        let slot = model.statusSlot
+        let messageSlot: (text: String, isFailure: Bool)? = if case .message(let text, let isFailure) = slot {
+            (text, isFailure)
+        } else {
+            nil
+        }
+        let noteSlot: TranslationFailure? = if case .translationNote(let note) = slot {
+            note
+        } else {
+            nil
+        }
 
         return ZStack(alignment: .leading) {
             HStack(spacing: 6) {
@@ -715,49 +718,49 @@ struct KeyboardSurfaceView: View {
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel("Full Access is off. \(KeyboardSetupCopy.fullAccessPath)")
-            .hexTrayReveal(showNoAccess, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(slot == .noAccess, reduceMotion: reduceMotion, offsetY: 2)
 
             Text("Starting…")
                 .font(.system(size: 13, weight: .regular))
                 .foregroundStyle(p.textMuted)
                 .lineLimit(1)
-                .hexTrayReveal(showStartingStatus, reduceMotion: reduceMotion, offsetY: 2)
+                .hexTrayReveal(slot == .starting, reduceMotion: reduceMotion, offsetY: 2)
 
             HStack(spacing: 6) {
                 HexStatusDot(color: HexTheme.danger, size: 6.5)
                 KeyboardRecordingClockText(clock: model.clock, color: p.textBase)
             }
-            .hexTrayReveal(showRecordingClock, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(slot == .recording, reduceMotion: reduceMotion, offsetY: 2)
 
             Group {
-                if let message = model.statusMessage {
+                if let messageSlot {
                     HStack(spacing: 6) {
-                        if model.stagePhase == .failed {
+                        if messageSlot.isFailure {
                             HexStatusDot(color: HexTheme.danger, size: 6)
                         }
                         // A failure gets two smaller lines: it has to be read in full.
-                        let failed = model.stagePhase == .failed
-                        Text(message)
-                            .font(.system(size: failed ? 11 : 13, weight: .regular))
+                        Text(messageSlot.text)
+                            .font(.system(size: messageSlot.isFailure ? 11 : 13, weight: .regular))
                             .foregroundStyle(p.textMuted)
-                            .lineLimit(failed ? 2 : 1)
+                            .lineLimit(messageSlot.isFailure ? 2 : 1)
                             .minimumScaleFactor(0.85)
                     }
-                } else {
-                    HStack(spacing: 5) {
-                        HexStatusDot(color: HexTheme.warmMic, size: 6)
-                        KeyboardWarmRemainingText(clock: model.clock, color: p.textMuted)
-                    }
                 }
             }
-            .hexTrayReveal(showWarmStatus, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(messageSlot != nil, reduceMotion: reduceMotion, offsetY: 2)
+
+            HStack(spacing: 5) {
+                HexStatusDot(color: HexTheme.warmMic, size: 6)
+                KeyboardWarmRemainingText(clock: model.clock, color: p.textMuted)
+            }
+            .hexTrayReveal(slot == .warm, reduceMotion: reduceMotion, offsetY: 2)
 
             Group {
-                if let note = model.translationNote {
-                    translationNote(note, palette: p)
+                if let noteSlot {
+                    translationNote(noteSlot, palette: p)
                 }
             }
-            .hexTrayReveal(showTranslationNote, reduceMotion: reduceMotion, offsetY: 2)
+            .hexTrayReveal(noteSlot != nil, reduceMotion: reduceMotion, offsetY: 2)
         }
     }
 
@@ -1066,13 +1069,14 @@ struct KeyboardSurfaceView: View {
     // MARK: - Unified 44 pt Recessed Stage Well (all controls permanently mounted)
 
     private var idleTriggerSpec: (icon: String, title: String, width: CGFloat) {
-        if !model.hasFullAccess {
+        switch model.route {
+        case .setUp:
             return ("arrow.up.forward.app.fill", "Set up Hex", 112)
-        }
-        if !model.isModelInstalled {
+        case .needsModel:
             return ("mic.fill", "Set up", 88)
+        case .warm, .inKeyboard, .opensHex:
+            return ("mic.fill", "Dictate", 94)
         }
-        return ("mic.fill", "Dictate", 94)
     }
 
     private var primaryStage: some View {
@@ -1234,8 +1238,7 @@ struct KeyboardSurfaceView: View {
     /// The well dictates in the keyboard (a warm session or in-keyboard dictation), so a
     /// hold there can be push to talk; opening Hex or setup stays a tap.
     private var canHoldToTalk: Bool {
-        guard model.hasFullAccess, model.stagePhase == .idle || model.stagePhase == .failed else { return false }
-        return (model.isWarmAvailable && model.stagePhase != .failed) || model.onLocalDictateTap != nil
+        model.canPushToTalk
     }
 
     /// Hold still on Dictate for `HexKeyGesture.holdDuration`: dictation starts with a light
@@ -1277,16 +1280,15 @@ struct KeyboardSurfaceView: View {
     }
 
     private func handleIdleStageTap() {
-        if !model.hasFullAccess {
+        switch model.route {
+        case .setUp:
             model.onOpenURL?(KeyboardLaunchRequest.setup.url)
-        } else if !model.isWarmAvailable || model.stagePhase == .failed {
-            if let local = model.onLocalDictateTap {
-                local()
-            } else {
-                model.onOpenURL?(model.coldStartURL)
-            }
-        } else {
+        case .warm:
             model.onDictateTap?()
+        case .inKeyboard:
+            model.onLocalDictateTap?()
+        case .needsModel, .opensHex:
+            model.onOpenURL?(model.coldStartURL)
         }
     }
 

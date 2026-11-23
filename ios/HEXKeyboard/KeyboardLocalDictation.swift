@@ -16,11 +16,13 @@ final class KeyboardLocalDictation {
     private final class Job {
         let id: String
         let document: UUID?
+        var preferences: DictationPipeline.Preferences
         var interrupted = false
 
-        init(id: String, document: UUID?) {
+        init(id: String, document: UUID?, preferences: DictationPipeline.Preferences) {
             self.id = id
             self.document = document
+            self.preferences = preferences
         }
     }
 
@@ -90,7 +92,11 @@ final class KeyboardLocalDictation {
     var corrections: () -> [DictationCorrection] = { [] }
     /// The field the keyboard is in, read when a dictation starts.
     var currentDocument: () -> UUID? = { nil }
-    private var activeCorrections: [DictationCorrection] = []
+
+    /// Updates the active job's style when the user cycles style on the recording panel.
+    func updateActiveStyle(_ style: DictationStyle) {
+        job?.preferences.style = style
+    }
 
     static var isSupported: Bool {
         if #available(iOS 26.0, *) { return true }
@@ -384,10 +390,13 @@ final class KeyboardLocalDictation {
         }
         let jobID = UUID().uuidString
         let requestedAt = Date()
-        job = Job(id: jobID, document: currentDocument())
+        let preferences = DictationPipeline.Preferences.current(
+            style: KeyboardBridge().style,
+            corrections: corrections()
+        )
+        job = Job(id: jobID, document: currentDocument(), preferences: preferences)
         lastProgressAt = requestedAt.timeIntervalSince1970
         watch = KeyboardCaptureWatch(startedAt: lastProgressAt)
-        activeCorrections = corrections()
         loudness = -62
         armedFailure = nil
         phase = armed
@@ -798,31 +807,19 @@ final class KeyboardLocalDictation {
         phase = .transcribing(jobID: jobID)
         lastProgressAt = Date().timeIntervalSince1970
         let url = file.url
-        let fixes = activeCorrections
-        let vocabulary = CustomVocabularySettings().activeTerms
-        let hints = DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: fixes)
+        let preferences = job?.preferences ?? DictationPipeline.Preferences.current(
+            style: KeyboardBridge().style,
+            corrections: corrections()
+        )
+        let hints = preferences.recognitionHints
         transcription = Task { [weak self] in
             let started = Date()
             do {
                 let (heard, language, engine) = try await KeyboardTranscription.transcribe(url, hints: hints, audioSeconds: seconds)
                 try? FileManager.default.removeItem(at: url)
                 let locale = language.identifier
-                let style = KeyboardBridge().style
-                // The app's steps (but Apple Intelligence's cleanup), its style, Format lists,
-                // Spoken punctuation, Numbers as digits, End with a period and Lowercase included.
-                let pipeline = DictationPipeline(
-                    style: style,
-                    language: locale,
-                    vocabulary: vocabulary,
-                    corrections: fixes,
-                    lowercase: DictationLowercaseSettings().isEnabled,
-                    formatLists: DictationListSettings().isEnabled,
-                    spokenPunctuation: DictationPunctuationSettings().isEnabled,
-                    numbersAsDigits: DictationNumberSettings().isEnabled,
-                    hinglish: HinglishSettings().isEnabled,
-                    greeklish: GreeklishSettings().isEnabled,
-                    endsWithPeriod: DictationPeriodSettings().isEnabled
-                )
+                // The app's steps (but Apple Intelligence's cleanup), snapshotted at capture start.
+                let pipeline = DictationPipeline(preferences: preferences, language: locale)
                 let steps = await pipeline.run(heard, translationSource: language.locale.language)
                 let translated = steps.translated
                 let text = steps.formatted
@@ -850,13 +847,13 @@ final class KeyboardLocalDictation {
                     ? DictationStages(
                         engine: engine,
                         locale: locale,
-                        style: style.rawValue,
+                        style: preferences.style.rawValue,
                         recordedMS: Int((seconds * 1000).rounded()),
                         transcribeMS: Int((Date().timeIntervalSince(started) * 1000).rounded()),
                         raw: heard,
                         fixed: steps.fixed,
-                        spelled: vocabulary.isEmpty ? nil : steps.spelled,
-                        tagged: CleanupTaggerSettings().isEnabled && style != .verbatim ? steps.tagged : nil,
+                        spelled: preferences.vocabulary.isEmpty ? nil : steps.spelled,
+                        tagged: CleanupTaggerSettings().isEnabled && preferences.style != .verbatim ? steps.tagged : nil,
                         translated: translated,
                         formatted: steps.formatted
                     )

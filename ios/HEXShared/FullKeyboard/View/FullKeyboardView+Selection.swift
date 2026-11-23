@@ -27,7 +27,7 @@ extension FullKeyboardView {
     /// session or in-keyboard dictation), opening Hex would leave the keyboard, so it opens
     /// Hex as the Hex key does (or says Full Access is missing) and the text stays.
     func startSelectionDictation() {
-        guard model.hasFullAccess, model.dictatesThroughHex || model.onLocalDictateTap != nil else {
+        guard model.route.dictatesInPlace else {
             engine.performTrackpadSelectionAction(.cancel) { _ in }
             refreshStrip()
             hexKeyHeld(from: "selection_dictate")

@@ -159,6 +159,101 @@ nonisolated struct DictationPipeline: Sendable {
     /// Translate what I say's translator; nil is Apple's. Tests stand in for it.
     var translationEngine: TranslationEngine?
 
+    /// Snapshot of processing preferences captured once when a dictation starts, shared by
+    /// `DictationController` and `KeyboardLocalDictation` so neither path re-reads defaults mid-flight.
+    struct Preferences: Equatable, Sendable {
+        var style: DictationStyle
+        var vocabulary: [String] = []
+        var corrections: [DictationCorrection] = []
+        var lowercase = false
+        var formatLists = false
+        var spokenPunctuation = false
+        var numbersAsDigits = false
+        var hinglish = false
+        var greeklish = false
+        var endsWithPeriod = true
+
+        /// Custom vocabulary plus the learned fixes' meant words, for speech recognition hints.
+        var recognitionHints: [String] {
+            DictationCorrections.recognitionHints(vocabulary: vocabulary, corrections: corrections)
+        }
+
+        static func current(
+            style: DictationStyle,
+            vocabulary: CustomVocabularySettings = CustomVocabularySettings(),
+            corrections: [DictationCorrection] = [],
+            lowercase: DictationLowercaseSettings = DictationLowercaseSettings(),
+            lists: DictationListSettings = DictationListSettings(),
+            punctuation: DictationPunctuationSettings = DictationPunctuationSettings(),
+            numbers: DictationNumberSettings = DictationNumberSettings(),
+            hinglish: HinglishSettings = HinglishSettings(),
+            greeklish: GreeklishSettings = GreeklishSettings(),
+            period: DictationPeriodSettings = DictationPeriodSettings()
+        ) -> Preferences {
+            Preferences(
+                style: style,
+                vocabulary: vocabulary.activeTerms,
+                corrections: corrections,
+                lowercase: lowercase.isEnabled,
+                formatLists: lists.isEnabled,
+                spokenPunctuation: punctuation.isEnabled,
+                numbersAsDigits: numbers.isEnabled,
+                hinglish: hinglish.isEnabled,
+                greeklish: greeklish.isEnabled,
+                endsWithPeriod: period.isEnabled
+            )
+        }
+    }
+
+    init(
+        style: DictationStyle,
+        language: String,
+        vocabulary: [String] = [],
+        corrections: [DictationCorrection] = [],
+        lowercase: Bool = false,
+        formatLists: Bool = false,
+        spokenPunctuation: Bool = false,
+        numbersAsDigits: Bool = false,
+        hinglish: Bool = false,
+        greeklish: Bool = false,
+        endsWithPeriod: Bool = true,
+        translationEngine: TranslationEngine? = nil
+    ) {
+        self.style = style
+        self.language = language
+        self.vocabulary = vocabulary
+        self.corrections = corrections
+        self.lowercase = lowercase
+        self.formatLists = formatLists
+        self.spokenPunctuation = spokenPunctuation
+        self.numbersAsDigits = numbersAsDigits
+        self.hinglish = hinglish
+        self.greeklish = greeklish
+        self.endsWithPeriod = endsWithPeriod
+        self.translationEngine = translationEngine
+    }
+
+    init(
+        preferences: Preferences,
+        language: String,
+        translationEngine: TranslationEngine? = nil
+    ) {
+        self.init(
+            style: preferences.style,
+            language: language,
+            vocabulary: preferences.vocabulary,
+            corrections: preferences.corrections,
+            lowercase: preferences.lowercase,
+            formatLists: preferences.formatLists,
+            spokenPunctuation: preferences.spokenPunctuation,
+            numbersAsDigits: preferences.numbersAsDigits,
+            hinglish: preferences.hinglish,
+            greeklish: preferences.greeklish,
+            endsWithPeriod: preferences.endsWithPeriod,
+            translationEngine: translationEngine
+        )
+    }
+
     /// Each step's text, for Record typing logs.
     struct Stages: Equatable, Sendable {
         /// What the speech model heard, in Latin letters for Hinglish or Greeklish: what

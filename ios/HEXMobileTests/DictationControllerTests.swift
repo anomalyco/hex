@@ -88,7 +88,7 @@ private final class FakeAudioManager: AudioManaging {
 
 /// A preparation that never answers, as Speech or its asset store not answering.
 private actor SilentTranscriber: LocalTranscribing {
-    nonisolated let displayName = "Apple Speech"
+    nonisolated let engine: DictationEngine = .appleSpeech
     let languageName = "English"
     private(set) var preparationCancelled = false
 
@@ -105,6 +105,7 @@ private actor SilentTranscriber: LocalTranscribing {
 }
 
 private actor ControlledTranscriber: LocalTranscribing {
+    nonisolated let engine: DictationEngine = .appleSpeech
     nonisolated let displayName = "Controlled Speech"
     let languageName = "English"
 
@@ -169,7 +170,7 @@ private actor ControlledTranscriber: LocalTranscribing {
 
 /// A transcriber whose model can't be got ready, such as a language Apple Speech can't install.
 private actor UnpreparableTranscriber: LocalTranscribing {
-    nonisolated let displayName = "Apple Speech"
+    nonisolated let engine: DictationEngine = .appleSpeech
     let languageName = "Russian"
     let error: Error
 
@@ -2120,7 +2121,7 @@ final class DictationControllerTests: XCTestCase {
         XCTAssertEqual(controller.phase, .ready)
 
         // Turned off while Parakeet Ultra dictated: Hex prepares the engine it picks without it.
-        controller.engineName = ParakeetUltraTranscriber.name
+        controller.engine = .parakeetUltra
         controller.multilingualParakeetChanged()
         try await settle()
         XCTAssertEqual(made, 2)

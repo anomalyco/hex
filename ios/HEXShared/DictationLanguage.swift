@@ -220,6 +220,15 @@ nonisolated struct LanguageSettings {
         )
     }
 
+    /// The one definition of the language dictation is meant to be in: the language picked by
+    /// hand, else the keyboard's language Automatic follows, else the iPhone's first preferred
+    /// language.
+    func wantedDictationLanguage(
+        preferred: [String] = Locale.preferredLanguages
+    ) -> String? {
+        dictationLanguage ?? keyboardDictationLanguage(preferred: preferred) ?? preferred.first
+    }
+
     /// The language dictation uses, when known: the one set, else the keyboard's it follows
     /// (`keyboardDictationLanguage`), else what Automatic picks, else the last one it ran in.
     var effectiveDictationLanguage: String? {

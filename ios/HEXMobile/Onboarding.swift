@@ -62,7 +62,7 @@ struct OnboardingModel: Equatable {
         let id: String
         if dictation.isModelReady {
             id = dictation.transcriptionLanguageID
-        } else if dictation.engineName == "Parakeet V2" {
+        } else if dictation.engine == .parakeetV2 {
             id = "en-US"
         } else {
             id = LanguageSettings().effectiveDictationLanguage ?? Locale.preferredLanguages.first ?? "en-US"
@@ -207,7 +207,7 @@ struct OnboardingView: View {
         if !dictation.isModelReady {
             dictation.prepareModel()
         }
-        keyboardSpeech.start(retry: true) { dictation.engineName }
+        keyboardSpeech.start(retry: true) { dictation.engine }
     }
 
     /// "onboarding-tour": steps through every page on the fixture timeline.

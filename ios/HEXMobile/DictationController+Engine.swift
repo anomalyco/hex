@@ -17,7 +17,7 @@ extension DictationController {
             return
         }
         if hasCachedModel && !parakeetInterrupted {
-            engineName = "Parakeet V2"
+            engine = .parakeetV2
             prepareModel()
             return
         }
@@ -25,10 +25,10 @@ extension DictationController {
         Task { [weak self] in
             guard let self else { return }
             if await Self.appleSpeechLanguage(picked: AppleSpeechTranscriber.preferredLanguage(), parakeetFits: fits) != nil {
-                self.engineName = "Apple Speech"
+                self.engine = .appleSpeech
                 self.prepareModel()
             } else {
-                self.engineName = "Parakeet V2"
+                self.engine = .parakeetV2
                 if hasCachedModel {
                     self.phase = .failed(ParakeetLoadGuard.message)
                 }
@@ -67,7 +67,7 @@ extension DictationController {
             startMultilingualDownloadIfWanted()
             return false
         }
-        engineName = ParakeetUltraTranscriber.name
+        engine = .parakeetUltra
         prepareModel()
         return true
     }
@@ -118,7 +118,7 @@ extension DictationController {
         case .download:
             startMultilingualDownloadIfWanted()
         case .loadBeside, .dictate:
-            if engineName == ParakeetUltraTranscriber.name, isModelReady {
+            if engine == .parakeetUltra, isModelReady {
                 multilingualDownload.settle()
             } else if let language {
                 loadMultilingualParakeetBeside(language: language)
@@ -186,10 +186,10 @@ extension DictationController {
         let wanted = Self.wantedLanguage()
         switch choice.engine(for: wanted, appleSpeechPicks: false) {
         case .parakeet:
-            engineName = "Parakeet V2"
+            engine = .parakeetV2
             if hasCachedModel { prepareModel() }
         case .onDeviceRecognizer, .appleSpeech:
-            engineName = "Apple Speech"
+            engine = .onDeviceRecognizer
             languageNotice = choice.notice(for: wanted)
             if SFSpeechRecognizer.authorizationStatus() == .authorized {
                 // The keyboard's Hex key starts recording in Hex rather than only opening it.
@@ -200,16 +200,14 @@ extension DictationController {
     }
 
     /// Whether getting the engine ready downloads a model in Hex: not Apple's on-device
-    /// recognizer, the only "Apple Speech" before iOS 26, whose model iOS keeps.
+    /// recognizer, whose model iOS keeps.
     var engineDownloads: Bool {
-        if #available(iOS 26.0, *) { return true }
-        return engineName != "Apple Speech"
+        engine.downloads
     }
 
-    /// The language dictation is meant to be in: the one set, else the keyboard's Automatic
-    /// follows, else the iPhone's.
+    /// The language dictation is meant to be in: delegates to `LanguageSettings.wantedDictationLanguage`.
     nonisolated static func wantedLanguage(settings: LanguageSettings = LanguageSettings()) -> String? {
-        settings.dictationLanguage ?? settings.keyboardDictationLanguage() ?? Locale.preferredLanguages.first
+        settings.wantedDictationLanguage()
     }
 
     static func defaultTranscriber() async -> any LocalTranscribing {
