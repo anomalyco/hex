@@ -2,7 +2,9 @@
 
 For each word whose final spelling is known (words.py), its taps are lined up with the letters
 (and spaces) it ended as, so each tap has the key it was **meant** for, not just the one it
-pressed. The space that finished a word was meant as a space. Each tap's landing point is
+pressed. The space that finished a word was meant as a space, unless the person then finished
+the word longer from where that space went in ("o" then fixed to "on"): that tap was meant for
+the next letter, and pressed the space bar instead. Each tap's landing point is
 mapped onto state/phone.json's keys: it keeps its place on the keycap it landed on, scaled to
 that keycap now (fingers aim at keycaps), so taps from older layouts count too.
 Writes <export>/out/taps.json; letters and "space" only, no words.
@@ -64,7 +66,11 @@ def build(export):
                     add(taps[i], "space" if final[j] == " " else final[j], w)
         ct = w.get("commit_touch")
         if ct and ct.get("key0") == "space" and w.get("commit_src") is not None and not w.get("merged_into"):
-            add(ct, "space", w)
+            committed = W.norm(w.get("committed") or "")
+            if committed and len(final) > len(committed) and final.startswith(committed) and final[len(committed)].isalpha():
+                add(ct, final[len(committed)], w)
+            else:
+                add(ct, "space", w)
     os.makedirs(os.path.join(export, "out"), exist_ok=True)
     json.dump({"layout": target["context"], "taps": out, "dropped": dropped}, open(os.path.join(export, "out", "taps.json"), "w"))
     return out, dropped
