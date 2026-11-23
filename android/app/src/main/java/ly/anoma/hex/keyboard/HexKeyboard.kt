@@ -16,6 +16,7 @@ import android.view.inputmethod.InputMethodManager
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
 import ly.anoma.hex.speech.MicCapture
+import ly.anoma.hex.speech.Signature
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.SpeechModel
@@ -131,7 +132,9 @@ class HexKeyboard : InputMethodService() {
     internal fun cancelSpeech() = capture.cancelLatest()
     private fun commitSpeech(text: String, options: SpeechOptions) {
         if (currentInputConnection == null || engine.secure || !isInputViewShown) return
-        engine.insertDictation(text, if (options.translate) "en" else options.spoken.code)
+        // Read now, so a toggle or text changed while it transcribed applies to this dictation.
+        val signed = Signature.append(text, preferences.signatureText, preferences.signature)
+        engine.insertDictation(signed ?: text, if (options.translate) "en" else options.spoken.code, signed != null)
     }
     private fun leaveEditor() { view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel() }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
