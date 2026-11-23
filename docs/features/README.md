@@ -3158,6 +3158,16 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   path receives none
 └── Proof limits: unit tests only; no CI compiles the iOS targets
 Android keyboard -> English, Spanish, German and Bokmål typing assistance
+├── Português, Nederlands, Polski or Русский with no pinned layout -> English's keys and
+│   accents (DictationLanguage.layout is null), with English's word list only standing in for
+│   the keys' geometry: the strip keeps what was typed and your own dictionary words as
+│   completions, and text shortcuts, double-space period, capitals and the literal chip stay.
+│   No English completions, next words, autocorrection, tap correction, swipe typing or emoji
+│   keywords. A layout pinned in Keyboard > Keyboard layout brings that layout's model.
+│   Checks: `aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel` in InsertionTest.kt and
+│   `standInOffersYourWordsAndShortcutsButNoEnglishCompletionsOrNextWords` /
+│   `standInTurnsOffAutocorrectButKeepsYourTextReplacements` in StandInTypingTest.kt; not
+│   tried on a device.
 ├── Keyboard > Suggest swear words (off) -> opt in to profanity; listed slurs never offered
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
 ├── Labs > Keyboard > Symbols on letter keys (off) -> hold a letter from QWERTY's home and

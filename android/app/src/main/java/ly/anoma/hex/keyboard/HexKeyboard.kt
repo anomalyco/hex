@@ -22,6 +22,7 @@ import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.SpeechModel
 import ly.anoma.hex.speech.SpeechPreferences
 import ly.anoma.hex.speech.Spoken
+import ly.anoma.hex.speech.typingLayout
 import ly.anoma.hex.typing.PersonalWords
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.TypingModel
@@ -48,13 +49,17 @@ class HexKeyboard : InputMethodService() {
     /** The options the dictation in flight started with: its language decides mid-sentence case. */
     internal val feedback by lazy { TypingPreferences(this) }
     internal val layoutLanguage get() = feedback.layout ?: preferences.spoken.layout ?: Spoken.English
+    /** The keys' typing model, or none when the layout is only English's stand-in for a dictation language
+     * without one: English keys and accents, but no English next words or autocorrections for its text. */
+    internal val typingLanguage get() = typingLayout(feedback.layout, preferences.spoken)?.layoutCode
     // Android's personal dictionary is read off the main thread, and again whenever it changes.
     private val words = Executors.newSingleThreadExecutor { Thread(it, "Hex personal words") }
     private val dictionaryChanged = object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) = engine.personalWordsChanged()
     }
     internal val engine by lazy {
-        KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { SpatialDecoder(TypingModel.asset(assets, it)) },
+        KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { typingLanguage },
+            { SpatialDecoder(TypingModel.asset(assets, it)) },
             readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
             emoji = EmojiWords(assets, words))
     }

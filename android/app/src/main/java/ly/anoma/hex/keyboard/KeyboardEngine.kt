@@ -63,6 +63,9 @@ internal class KeyboardEngine(
     private val target: KeyboardTextTarget,
     private val feedback: TypingPreferences,
     private val layoutLanguage: () -> Spoken,
+    /** The typing model's language, or null when the keys are only English's stand-in for a dictation language
+     * with no layout: they keep English's keys and accents, but must not suggest or correct English words. */
+    private val typingLanguage: () -> String?,
     private val loadDecoder: (String) -> SpatialDecoder,
     /** Reads Android's personal dictionary for a model; runs on [background]. */
     private val readPersonal: ((TypingModel) -> PersonalWords)? = null,
@@ -239,10 +242,14 @@ internal class KeyboardEngine(
     private fun forgetSwipe() { swiped = null; takenBack = null }
     private fun cancelChip() { pendingChip?.let(main::removeCallbacks); pendingChip = null }
     fun configureTyping(keepWord: Boolean = false) {
-        val language = layoutLanguage().layoutCode
+        val typing = typingLanguage()
+        // No model of its own: English's word list still gives the keys their geometry and your personal
+        // dictionary, marked as a stand-in so none of English's words reach the strip or autocorrect.
+        val language = typing ?: layoutLanguage().layoutCode
+        val standIn = typing == null
         val active = word
-        if (ordinaryField && keepWord && active != null && active.decoder.model.language == language && active.spatial == feedback.spatial &&
-            active.token.isNotEmpty() && endsWith(prefix + active.token)) {
+        if (ordinaryField && keepWord && active != null && active.standIn == standIn && active.decoder.model.language == language &&
+            active.spatial == feedback.spatial && active.token.isNotEmpty() && endsWith(prefix + active.token)) {
             active.addsCapitals = feedback.autoCapitalize
             showPlane(); showSuggestions(active); return
         }
@@ -250,7 +257,11 @@ internal class KeyboardEngine(
         word = if (ordinaryField) {
             try {
                 TypingWord(models.getOrPut(language) { loadDecoder(language).also(::loadPersonal) }, feedback.spatial)
-                    .also { it.suggestSwearWords = feedback.suggestSwearWords; it.addsCapitals = feedback.autoCapitalize }
+                    .also {
+                        it.standIn = standIn
+                        it.suggestSwearWords = feedback.suggestSwearWords
+                        it.addsCapitals = feedback.autoCapitalize
+                    }
             } catch (_: java.io.IOException) { null } // The editor can still type if its assets cannot be read.
         } else null
         showPlane()
@@ -263,7 +274,8 @@ internal class KeyboardEngine(
         cancelChip()
         if (w != null && w.token.isNotEmpty()) {
             surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false), emojiFor(w)))
-            if (!feedback.autocorrect || !canEndWord()) return
+            // A stand-in's strip already is the finished one: nothing there changes after the pause.
+            if (!feedback.autocorrect || w.standIn || !canEndWord()) return
             val token = w.token
             pendingChip = Runnable {
                 pendingChip = null
@@ -281,7 +293,7 @@ internal class KeyboardEngine(
      * one. The bundled list is read off the main thread the first time; once it is in memory this
      * word's strip is shown again. */
     private fun emojiFor(w: TypingWord): String? {
-        if (!feedback.emojiSuggestions) return null
+        if (w.standIn || !feedback.emojiSuggestions) return null
         val list = emoji ?: return null
         val hit = list.match(w.token, w.decoder.model.language)
         if (hit == null && !list.requested) list.load {
@@ -316,7 +328,7 @@ internal class KeyboardEngine(
      * while autocorrect is on in an ordinary text field on the letters page, and never with caps lock. */
     fun likelierLetter(hit: Char, near: Map<Char, Double>, keys: Collection<Char>): Char {
         val w = word ?: return hit
-        if (near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
+        if (w.standIn || near.isEmpty() || symbols || shift.locked || !feedback.autocorrect || !target.connected) return hit
         return w.likelierKey(before(), hit, near, keys)
     }
     /** Shift as the keys show it: letters type capitals while it is on or held. */
@@ -579,8 +591,9 @@ internal class KeyboardEngine(
     class SwipeContext(val reader: SwipeReader, val previous: String?)
 
     /** Whether a letter touch may become a swipe now: the setting on, on the letters page of an ordinary text field
-     * (not a password, address, URL or number, where Hex reads no words), with its typing model loaded. */
-    val swipes get() = feedback.swipe && !secure && word != null && !symbols && pad == null && target.connected
+     * (not a password, address, URL or number, where Hex reads no words), with its typing model loaded and not
+     * English's list standing in for a language without one. */
+    val swipes get() = feedback.swipe && !secure && word?.standIn == false && !symbols && pad == null && target.connected
 
     /** A letter touch became a swipe: its key no longer types. Null when it can't be one here. */
     fun beginSwipe(): SwipeContext? {
