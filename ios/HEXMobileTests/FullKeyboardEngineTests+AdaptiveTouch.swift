@@ -404,6 +404,7 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(outcome(review, "keys[0].zones[2]"), .skipped(.twoZonesClaimPoint))
         XCTAssertEqual(outcome(review, "keys[0].zones[3]"), .clamped(from: [0.4], to: [0.25]))
         XCTAssertEqual(outcome(review, "keys[0].zones[4]"), .skipped(.notEnoughEvidence), "taps alone don't say what the words gain")
+        XCTAssertFalse(review.items.contains { $0.path.contains(".evidence.") }, "a zone's word counts are evidence Hex knows")
         XCTAssertEqual(outcome(review, "keys[1].aim.e"), .skipped(.forAnotherKeyboard))
         XCTAssertEqual(review.contexts.map(\.differences), [[], ["width"]])
         XCTAssertEqual(review.applied.aim, ["o": CGVector(dx: 0, dy: 0.3)])

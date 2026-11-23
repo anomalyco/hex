@@ -155,6 +155,6 @@ nonisolated struct TypingConfigFile: Codable, Equatable, Sendable {
         "keys[].aim.*": ["offset", "evidence"],
         "keys[].zones[]": ["key", "edge", "move", "evidence"],
         "evidence": ["times", "sessions", "takenBack", "tuned", "checked"],
-        "tally": ["taps", "gained", "lost"],
+        "tally": ["taps", "gained", "lost", "wordsRight", "wordsWrong"],
     ]
 }
