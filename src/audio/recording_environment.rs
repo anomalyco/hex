@@ -17,6 +17,8 @@ use objc2_core_audio::{
 
 use crate::app_settings::{self, RecordingAudioBehavior};
 use crate::audio::browser_media::{self, NativeBrowserAudio, PausedBrowser};
+pub(crate) use crate::audio::effect_holds::Effect;
+use crate::audio::effect_holds::{EffectHolds, Hold};
 use crate::audio::output_route;
 
 mod ducking;
@@ -77,47 +79,6 @@ impl MediaPlayer {
         format!(
             "try\n  if application \"{name}\" is running then tell application \"{name}\" to play\nend try"
         )
-    }
-}
-
-/// One thing the environment changes while a session wants it. Each is
-/// held from the first session that wants it until the last one ends, so
-/// overlapping sessions with different policies compose and none restores
-/// what another still needs.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum Effect {
-    Sleep,
-    Mute,
-    Duck,
-    Pause,
-}
-
-impl Effect {
-    /// Restoration order: output is audible again before a session's
-    /// callback, and resuming media (AppleScript) never delays it.
-    const ALL: [Self; 4] = [Self::Sleep, Self::Mute, Self::Duck, Self::Pause];
-
-    const fn index(self) -> usize {
-        self as usize
-    }
-}
-
-/// What one session asks for: dictation prevents idle sleep and applies
-/// "While dictating"; a capture applies "While dictating" only.
-#[derive(Clone, Copy, Debug)]
-struct Hold {
-    dictation: bool,
-    audio: RecordingAudioBehavior,
-}
-
-impl Hold {
-    fn wants(self, effect: Effect) -> bool {
-        match effect {
-            Effect::Sleep => self.dictation,
-            Effect::Mute => self.audio == RecordingAudioBehavior::Mute,
-            Effect::Duck => self.audio == RecordingAudioBehavior::Duck,
-            Effect::Pause => self.audio == RecordingAudioBehavior::PauseMedia,
-        }
     }
 }
 
@@ -209,39 +170,11 @@ impl RecordingEnvironmentController {
     ) -> (Self, JoinHandle<()>) {
         let (commands, receiver) = mpsc::channel();
         let restorer = thread::spawn(move || {
-            let mut sessions = [0_u32; Effect::ALL.len()];
-            let mut held: [Option<H>; Effect::ALL.len()] = std::array::from_fn(|_| None);
+            let mut holds = EffectHolds::new();
             while let Ok(command) = receiver.recv() {
                 match command {
-                    EnvironmentCommand::Start(wanted) => {
-                        for effect in Effect::ALL.into_iter().filter(|e| wanted.wants(*e)) {
-                            let count = &mut sessions[effect.index()];
-                            *count = count.saturating_add(1);
-                            if *count == 1 {
-                                held[effect.index()] = Some(hold(effect));
-                            }
-                        }
-                    }
-                    EnvironmentCommand::Stop(wanted, mut then) => {
-                        for effect in Effect::ALL {
-                            if effect == Effect::Pause
-                                && let Some(then) = then.take()
-                            {
-                                then();
-                            }
-                            if !wanted.wants(effect) {
-                                continue;
-                            }
-                            let count = &mut sessions[effect.index()];
-                            *count = count.saturating_sub(1);
-                            if *count == 0 {
-                                held[effect.index()] = None;
-                            }
-                        }
-                        if let Some(then) = then {
-                            then();
-                        }
-                    }
+                    EnvironmentCommand::Start(wanted) => holds.acquire(wanted, &hold),
+                    EnvironmentCommand::Stop(wanted, then) => holds.release(wanted, then),
                     #[cfg(test)]
                     EnvironmentCommand::Barrier(reply) => {
                         let _ = reply.send(());
@@ -255,10 +188,7 @@ impl RecordingEnvironmentController {
     /// A dictation session: prevents idle sleep and applies "While
     /// dictating" until the session ends.
     pub fn begin(&self) -> RecordingEnvironmentSession {
-        self.begin_as(Hold {
-            dictation: true,
-            audio: app_settings::recording_audio_behavior(),
-        })
+        self.begin_as(Hold::dictation(app_settings::recording_audio_behavior()))
     }
 
     /// A capture session: applies `audio` ("While dictating") until the
@@ -266,10 +196,7 @@ impl RecordingEnvironmentController {
     /// nor holds back meeting transcription.
     #[cfg(any(hex_capture, test))]
     pub fn begin_capture(&self, audio: RecordingAudioBehavior) -> RecordingEnvironmentSession {
-        self.begin_as(Hold {
-            dictation: false,
-            audio,
-        })
+        self.begin_as(Hold::capture(audio))
     }
 
     fn begin_as(&self, hold: Hold) -> RecordingEnvironmentSession {

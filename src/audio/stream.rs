@@ -54,13 +54,8 @@ pub struct AudioInput {
     /// Whether this input stands in for the saved microphone until it can
     /// be opened again.
     pub selection: Selection,
-    /// Whether this input was asked to open through Apple's voice processing
-    /// (Labs › Voice isolation), whether or not it could; the reconcile
-    /// comparison reads this requested path, not the one that opened.
-    pub voice_isolation: bool,
-    /// Whether Apple's voice processing actually opened this input; false
-    /// when the raw cpal stream stood in.
-    pub voice_processing_active: bool,
+    /// Which capture path was requested and opened (Labs › Voice isolation).
+    pub voice_path: VoicePath,
     pub(super) stream_errors: Receiver<StreamError>,
     pub(super) watch_service_restarts: bool,
     pub(super) restart_generation: u64,
@@ -96,6 +91,42 @@ pub enum AudioInputEvent {
     /// AVAudioEngine reconfigured; reopen the stream, still through voice
     /// processing when it is on, rather than treating it as a failure.
     StreamReconfigured,
+}
+
+/// Which capture path an [`AudioInput`] was asked for and opened on.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum VoicePath {
+    /// Voice processing was not requested; the raw stream opened.
+    #[default]
+    Raw,
+    /// Voice processing was requested and opened.
+    VoiceProcessing,
+    /// Voice processing was requested, but the raw stream stood in (either
+    /// because voice processing refused to start or because a remembered
+    /// fallback or rate renegotiation skipped it).
+    VoiceProcessingFallback,
+}
+
+impl VoicePath {
+    /// Whether Apple's voice processing is running on this input.
+    pub fn active(self) -> bool {
+        matches!(self, Self::VoiceProcessing)
+    }
+
+    /// Whether voice processing was requested but the raw stream stood in.
+    pub fn fell_back(self) -> bool {
+        matches!(self, Self::VoiceProcessingFallback)
+    }
+
+    /// The path an open request produces when voice processing succeeds unless
+    /// `fallback` skipped it.
+    pub fn from_request(voice_processing: bool, fallback: bool) -> Self {
+        match (voice_processing, fallback) {
+            (false, _) => Self::Raw,
+            (true, false) => Self::VoiceProcessing,
+            (true, true) => Self::VoiceProcessingFallback,
+        }
+    }
 }
 
 /// Whether an input stands in for the saved microphone, and why.
@@ -137,8 +168,7 @@ impl AudioInput {
                 device_name: "Test microphone".into(),
                 uid: None,
                 selection: Selection::InUse,
-                voice_isolation: false,
-                voice_processing_active: false,
+                voice_path: VoicePath::Raw,
                 watch_service_restarts: false,
                 restart_generation: audio_service_restart_generation(),
                 hex_microphone: crate::audio::hex_microphone::capture_feed(48_000).1,
@@ -263,21 +293,24 @@ impl AudioInput {
                 renegotiate_rate,
             )
         };
-        let mut voice_processing_active = false;
-        let started = match voice_processed {
-            Some(Ok(started)) => {
-                voice_processing_active = true;
-                started
-            }
+        let (started, voice_path) = match voice_processed {
+            Some(Ok(started)) => (started, VoicePath::VoiceProcessing),
             Some(Err(error)) => {
                 tracing::warn!(
                     error = format!("{error:#}"),
                     device = %device_name,
                     "voice processing would not start; opening the microphone normally"
                 );
-                open_raw()?
+                (open_raw()?, VoicePath::VoiceProcessingFallback)
             }
-            None => open_raw()?,
+            None => (
+                open_raw()?,
+                if voice_processing {
+                    VoicePath::VoiceProcessingFallback
+                } else {
+                    VoicePath::Raw
+                },
+            ),
         };
 
         Ok(Self {
@@ -287,8 +320,7 @@ impl AudioInput {
             device_name,
             uid,
             selection: Selection::InUse,
-            voice_isolation: voice_processing,
-            voice_processing_active,
+            voice_path,
             stream_errors: started.stream_errors,
             watch_service_restarts: true,
             restart_generation,
@@ -382,7 +414,7 @@ impl AudioInput {
             tracing::info!(
                 device = %self.device_name,
                 sample_rate = self.sample_rate,
-                voice_processing = self.voice_processing_active,
+                voice_processing = self.voice_path.active(),
                 frames,
                 period_us = duration_for_frames(frames, self.sample_rate).as_micros() as u64,
                 "microphone stream opened"

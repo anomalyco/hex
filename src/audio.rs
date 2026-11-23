@@ -6,6 +6,7 @@
 pub(crate) mod browser_media;
 mod call_input;
 mod devices;
+pub(crate) mod effect_holds;
 mod fixture;
 #[cfg_attr(any(target_os = "linux", target_os = "windows"), allow(dead_code))]
 pub(crate) mod hex_microphone;

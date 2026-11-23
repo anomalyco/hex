@@ -10,9 +10,9 @@ use scrawl_capture::audio::{GapSpan, RecordedAudio};
 use scrawl_capture::recover::PARTIAL_AUDIO;
 
 use super::wav_file::WavFile;
-use super::{CaptureSinkClosed, GAP_TOLERANCE, MAX_CAPTURE, SAMPLE_RATE};
+use super::{CaptureSinkClosed, MAX_CAPTURE, SAMPLE_RATE};
 use crate::audio::CaptureInstant;
-use crate::dictation::StreamingResampler;
+use crate::dictation::{CHUNK_GAP_TOLERANCE, StreamingResampler};
 
 /// A capture's audio at 16 kHz on its own clock: resampled as it arrives and
 /// written to the capture's `audio.wav.partial` as it goes, with missing spans
@@ -85,7 +85,7 @@ impl Timeline {
     }
 
     pub(super) fn gap(&mut self, from: CaptureInstant, through: CaptureInstant) {
-        if through.duration_since(from) <= GAP_TOLERANCE {
+        if through.duration_since(from) <= CHUNK_GAP_TOLERANCE {
             return;
         }
         let Some(first) = self.first else {

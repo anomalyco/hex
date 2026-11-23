@@ -7,12 +7,14 @@
 //! slow player or logind.
 
 use std::process::Command;
-use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::OnceLock;
+use std::sync::mpsc::{self, Sender};
 use std::time::Duration;
 
 use zbus::{Connection, OwnedVariant};
 
 use crate::app_settings::RecordingAudioBehavior;
+use crate::audio::effect_holds::{Effect, Hold, SessionRequest, next_session_id, serve_sessions};
 use crate::audio::idle_sleep::PreventSleep;
 use crate::audio::output_ducking;
 use crate::audio::output_route;
@@ -23,123 +25,132 @@ const MPRIS_PLAYER: &str = "org.mpris.MediaPlayer2.Player";
 const DBUS_TIMEOUT: Duration = Duration::from_millis(500);
 const RESTORE_GRACE: Duration = Duration::from_millis(300);
 
-enum Request {
-    Suppress,
-    Restore,
-    /// Restores, running the callback once the output is audible again.
-    RestoreThen(Box<dyn FnOnce() + Send>),
+/// One shared worker thread owns every held Linux audio/sleep effect so
+/// overlapping sessions (dictation + Annotate capture) compose cleanly and
+/// never double-duck or restore prematurely.
+fn shared_worker() -> Option<Sender<SessionRequest>> {
+    static WORKER: OnceLock<Option<Sender<SessionRequest>>> = OnceLock::new();
+    WORKER
+        .get_or_init(|| {
+            let (requests, receiver) = mpsc::channel();
+            let spawned = std::thread::Builder::new()
+                .name("linux-audio-control".into())
+                .spawn(move || serve_sessions(receiver, RESTORE_GRACE, hold_effect));
+            if let Err(error) = &spawned {
+                tracing::warn!(%error, "could not start Linux audio control");
+            }
+            spawned.ok().map(|_| requests)
+        })
+        .clone()
 }
 
 pub(crate) struct AudioSuppressor {
-    requests: Option<Sender<Request>>,
+    id: u64,
+    hold: Hold,
+    requests: Option<Sender<SessionRequest>>,
 }
 
 impl AudioSuppressor {
     /// "While dictating" for a capture, which does not prevent sleep.
     pub(crate) fn new(behavior: RecordingAudioBehavior) -> Self {
-        Self::start(behavior, false)
+        Self::start(Hold::capture(behavior))
     }
 
     /// "While dictating" for a dictation, which also prevents idle sleep.
     pub(crate) fn dictation(behavior: RecordingAudioBehavior) -> Self {
-        Self::start(behavior, true)
+        Self::start(Hold::dictation(behavior))
     }
 
-    fn start(behavior: RecordingAudioBehavior, prevent_sleep: bool) -> Self {
-        if behavior == RecordingAudioBehavior::DoNothing && !prevent_sleep {
-            return Self { requests: None };
-        }
-        let (requests, receiver) = mpsc::channel();
-        let hold = move || Held {
-            audio: suppress(behavior),
-            _sleep: prevent_sleep
-                .then(crate::audio::idle_sleep::prevent_sleep)
-                .flatten(),
-        };
-        let spawned = std::thread::Builder::new()
-            .name("linux-audio-control".into())
-            .spawn(move || serve(receiver, hold, restore, restore_then));
-        if let Err(error) = &spawned {
-            tracing::warn!(%error, "could not start Linux audio control");
+    fn start(hold: Hold) -> Self {
+        if hold.is_empty() {
+            return Self {
+                id: next_session_id(),
+                hold,
+                requests: None,
+            };
         }
         Self {
-            requests: spawned.ok().map(|_| requests),
+            id: next_session_id(),
+            hold,
+            requests: shared_worker(),
+        }
+    }
+
+    #[cfg(test)]
+    fn with_requests_for_test(hold: Hold, requests: Sender<SessionRequest>) -> Self {
+        Self {
+            id: next_session_id(),
+            hold,
+            requests: (!hold.is_empty()).then_some(requests),
         }
     }
 
     pub(crate) fn suppress(&self) {
         if let Some(requests) = &self.requests {
-            let _ = requests.send(Request::Suppress);
+            let _ = requests.send(SessionRequest::Suppress {
+                id: self.id,
+                hold: self.hold,
+            });
         }
     }
 
     pub(crate) fn restore(&self) {
         if let Some(requests) = &self.requests {
-            let _ = requests.send(Request::Restore);
+            let _ = requests.send(SessionRequest::Restore { id: self.id });
         }
     }
 
-    /// Restores what recording changed and runs `then` once a muted output
-    /// is unmuted, so a tone it plays is heard. Anything else runs `then` at
+    /// Restores what recording changed and runs `then` once a muted or
+    /// lowered output is audible again (or at once if another session still
+    /// holds it), so a tone it plays is heard. Anything else runs `then` at
     /// once, never behind a slow media player.
     pub(crate) fn restore_then(&self, then: impl FnOnce() + Send + 'static) {
         let Some(requests) = &self.requests else {
             return then();
         };
-        if let Err(mpsc::SendError(Request::RestoreThen(then))) =
-            requests.send(Request::RestoreThen(Box::new(then)))
+        if let Err(mpsc::SendError(SessionRequest::RestoreThen { then, .. })) =
+            requests.send(SessionRequest::RestoreThen {
+                id: self.id,
+                then: Box::new(then),
+            })
         {
             then();
         }
     }
 }
 
-/// Applies requests in order. A double-tap restores and suppresses back to
-/// back, before wpctl or the player reports the restored state, so a plain
-/// restore waits briefly and is dropped when another recording starts.
-fn serve<S>(
-    receiver: Receiver<Request>,
-    mut suppress: impl FnMut() -> S,
-    mut restore: impl FnMut(S),
-    mut restore_then: impl FnMut(Option<S>, Box<dyn FnOnce() + Send>),
-) {
-    let mut suppressed: Option<S> = None;
-    let mut next = None;
-    loop {
-        let request = match next.take() {
-            Some(request) => request,
-            None => match receiver.recv() {
-                Ok(request) => request,
-                Err(_) => break,
-            },
-        };
-        match request {
-            Request::Suppress if suppressed.is_none() => suppressed = Some(suppress()),
-            Request::Suppress => {}
-            Request::Restore if suppressed.is_some() => {
-                match receiver.recv_timeout(RESTORE_GRACE) {
-                    Ok(Request::Suppress) => {}
-                    Ok(request @ Request::RestoreThen(_)) => next = Some(request),
-                    Ok(Request::Restore) | Err(RecvTimeoutError::Timeout) => {
-                        restore(suppressed.take().unwrap());
-                    }
-                    Err(RecvTimeoutError::Disconnected) => break,
-                }
-            }
-            Request::Restore => {}
-            Request::RestoreThen(then) => restore_then(suppressed.take(), then),
+impl Drop for AudioSuppressor {
+    fn drop(&mut self) {
+        if let Some(requests) = &self.requests {
+            let _ = requests.send(SessionRequest::Drop {
+                id: self.id,
+                ack: None,
+            });
         }
-    }
-    if let Some(suppressed) = suppressed {
-        restore(suppressed);
     }
 }
 
-/// What one recording changed. Dropping it releases idle sleep after
-/// `restore` puts the audio back.
-struct Held {
-    audio: Suppressed,
-    _sleep: Option<PreventSleep>,
+/// One held environment effect; dropping it restores what it changed.
+enum HeldEffect {
+    Sleep(#[allow(dead_code)] Option<PreventSleep>),
+    Audio(Suppressed),
+}
+
+impl Drop for HeldEffect {
+    fn drop(&mut self) {
+        if let Self::Audio(audio) = self {
+            restore_audio(std::mem::replace(audio, Suppressed::Nothing));
+        }
+    }
+}
+
+fn hold_effect(effect: Effect) -> HeldEffect {
+    match effect {
+        Effect::Sleep => HeldEffect::Sleep(crate::audio::idle_sleep::prevent_sleep()),
+        Effect::Mute => HeldEffect::Audio(suppress(RecordingAudioBehavior::Mute)),
+        Effect::Duck => HeldEffect::Audio(suppress(RecordingAudioBehavior::Duck)),
+        Effect::Pause => HeldEffect::Audio(suppress(RecordingAudioBehavior::PauseMedia)),
+    }
 }
 
 enum Suppressed {
@@ -181,36 +192,14 @@ fn suppress(behavior: RecordingAudioBehavior) -> Suppressed {
     }
 }
 
-fn restore(held: Held) {
-    match held.audio {
+fn restore_audio(audio: Suppressed) {
+    match audio {
         Suppressed::Muted(mixer) => {
             mixer.mute(false);
         }
         Suppressed::Ducked(mut guard) => guard.restore(),
         Suppressed::Paused(players) => resume_players(&players),
         Suppressed::Nothing => {}
-    }
-}
-
-/// A muted or lowered output is audible again before `then`, as on macOS;
-/// resuming players never delays it.
-fn restore_then(held: Option<Held>, then: Box<dyn FnOnce() + Send>) {
-    match held {
-        Some(
-            held @ Held {
-                audio: Suppressed::Muted(_) | Suppressed::Ducked(_),
-                ..
-            },
-        ) => {
-            restore(held);
-            then();
-        }
-        other => {
-            then();
-            if let Some(other) = other {
-                restore(other);
-            }
-        }
     }
 }
 
@@ -472,19 +461,46 @@ mod tests {
         assert!(done.try_recv().is_ok());
     }
 
+    fn barrier(requests: &Sender<SessionRequest>) {
+        let (ack, done) = mpsc::sync_channel(1);
+        requests.send(SessionRequest::Barrier(ack)).unwrap();
+        done.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
     #[test]
     fn restoring_without_a_mute_runs_its_callback_first() {
-        let (order, events) = mpsc::channel();
-        let ran = order.clone();
-        restore_then(
-            Some(Held {
-                audio: Suppressed::Paused(Vec::new()),
-                _sleep: None,
-            }),
-            Box::new(move || ran.send("then").unwrap()),
+        use std::sync::{Arc, Mutex};
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (requests, receiver) = mpsc::channel();
+        let worker_events = events.clone();
+        struct Logged(Effect, Arc<Mutex<Vec<&'static str>>>);
+        impl Drop for Logged {
+            fn drop(&mut self) {
+                if self.0 == Effect::Pause {
+                    self.1.lock().unwrap().push("resume");
+                }
+            }
+        }
+        let worker = std::thread::spawn(move || {
+            serve_sessions(receiver, RESTORE_GRACE, move |effect| {
+                Logged(effect, worker_events.clone())
+            });
+        });
+
+        let suppressor = AudioSuppressor::with_requests_for_test(
+            Hold::capture(RecordingAudioBehavior::PauseMedia),
+            requests.clone(),
         );
-        restore_then(None, Box::new(move || order.send("idle").unwrap()));
-        assert_eq!(events.try_iter().collect::<Vec<_>>(), ["then", "idle"]);
+        suppressor.suppress();
+        let cb_events = events.clone();
+        suppressor.restore_then(move || cb_events.lock().unwrap().push("then"));
+        let idle_events = events.clone();
+        suppressor.restore_then(move || idle_events.lock().unwrap().push("idle"));
+        barrier(&requests);
+        drop(suppressor);
+        drop(requests);
+        worker.join().unwrap();
+        assert_eq!(*events.lock().unwrap(), ["then", "resume", "idle"]);
     }
 
     #[test]
@@ -492,32 +508,106 @@ mod tests {
         use std::sync::{Arc, Mutex};
         let log = Arc::new(Mutex::new(Vec::new()));
         let (requests, receiver) = mpsc::channel();
-        let (suppress_log, restore_log) = (log.clone(), log.clone());
-        let worker = std::thread::spawn(move || {
-            serve(
-                receiver,
-                move || suppress_log.lock().unwrap().push("suppress"),
-                move |()| restore_log.lock().unwrap().push("restore"),
-                |_, then: Box<dyn FnOnce() + Send>| then(),
-            )
-        });
-        // Double-tap: the first tap's restore is followed at once by a start.
-        for request in [Request::Suppress, Request::Restore, Request::Suppress] {
-            requests.send(request).unwrap();
+        let worker_log = log.clone();
+        struct Logged(Arc<Mutex<Vec<&'static str>>>);
+        impl Drop for Logged {
+            fn drop(&mut self) {
+                self.0.lock().unwrap().push("restore");
+            }
         }
+        let worker = std::thread::spawn(move || {
+            serve_sessions(receiver, RESTORE_GRACE, move |_| {
+                worker_log.lock().unwrap().push("suppress");
+                Logged(worker_log.clone())
+            });
+        });
+        let suppressor = AudioSuppressor::with_requests_for_test(
+            Hold::capture(RecordingAudioBehavior::Mute),
+            requests.clone(),
+        );
+        // Double-tap: the first tap's restore is followed at once by a start.
+        suppressor.suppress();
+        suppressor.restore();
+        suppressor.suppress();
         std::thread::sleep(RESTORE_GRACE * 2);
+        barrier(&requests);
         assert_eq!(*log.lock().unwrap(), ["suppress"]);
         // A lone restore applies once the grace period passes.
-        requests.send(Request::Restore).unwrap();
+        suppressor.restore();
         std::thread::sleep(RESTORE_GRACE * 2);
+        barrier(&requests);
         assert_eq!(*log.lock().unwrap(), ["suppress", "restore"]);
         // A later recording suppresses again.
-        requests.send(Request::Suppress).unwrap();
+        suppressor.suppress();
+        drop(suppressor);
         drop(requests);
         worker.join().unwrap();
         assert_eq!(
             *log.lock().unwrap(),
             ["suppress", "restore", "suppress", "restore"]
         );
+    }
+
+    #[test]
+    fn overlapping_dictation_and_capture_restore_original_volume() {
+        use std::sync::{Arc, Mutex};
+        let values = Arc::new(Mutex::new(vec![1.0_f32, 0.75]));
+        struct SharedVolume(Arc<Mutex<Vec<f32>>>);
+        impl output_ducking::Volume for SharedVolume {
+            fn read(&self) -> Option<Vec<f32>> {
+                Some(self.0.lock().unwrap().clone())
+            }
+            fn write(&mut self, next: &[f32]) -> bool {
+                *self.0.lock().unwrap() = next.to_vec();
+                true
+            }
+        }
+        let (requests, receiver) = mpsc::channel();
+        let worker_values = values.clone();
+        let worker = std::thread::spawn(move || {
+            serve_sessions(receiver, Duration::ZERO, move |effect| {
+                if effect == Effect::Duck {
+                    let volume = SharedVolume(worker_values.clone());
+                    output_ducking::Guard::start(0.2, move || Some(volume))
+                } else {
+                    None
+                }
+            });
+        });
+
+        let dictation = AudioSuppressor::with_requests_for_test(
+            Hold::dictation(RecordingAudioBehavior::Duck),
+            requests.clone(),
+        );
+        let capture = AudioSuppressor::with_requests_for_test(
+            Hold::capture(RecordingAudioBehavior::Duck),
+            requests.clone(),
+        );
+
+        dictation.suppress();
+        barrier(&requests);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!((values.lock().unwrap()[0] - 0.2).abs() < 0.02);
+
+        capture.suppress();
+        barrier(&requests);
+        // Overlapping capture must not duck 20% down to 4%.
+        assert!((values.lock().unwrap()[0] - 0.2).abs() < 0.02);
+
+        // Dictation ends first; volume stays lowered for the capture.
+        dictation.restore();
+        barrier(&requests);
+        assert!((values.lock().unwrap()[0] - 0.2).abs() < 0.02);
+
+        // Capture drops; original volume (1.0, 0.75) is restored cleanly.
+        drop(capture);
+        barrier(&requests);
+        let restored = values.lock().unwrap().clone();
+        assert!((restored[0] - 1.0).abs() < 0.01, "got {restored:?}");
+        assert!((restored[1] - 0.75).abs() < 0.01, "got {restored:?}");
+
+        drop(dictation);
+        drop(requests);
+        worker.join().unwrap();
     }
 }

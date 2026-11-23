@@ -264,9 +264,10 @@ pub(super) fn open_configured_input(request: &OpenRequest) -> Result<Opened> {
         let mut input = Box::new(fixture::open(path)?);
         // The fixture stands in for whichever capture path was asked for, so
         // the listener does not keep reopening it looking for the other one.
-        input.voice_isolation = request.voice_processing;
-        input.voice_processing_active =
-            request.voice_processing && !request.voice_processing_fallback;
+        input.voice_path = super::stream::VoicePath::from_request(
+            request.voice_processing,
+            request.voice_processing_fallback,
+        );
         return Ok(Opened::Input(input));
     }
     let host = cpal::default_host();
