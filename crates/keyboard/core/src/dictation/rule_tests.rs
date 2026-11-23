@@ -177,11 +177,11 @@ fn cleanup_rules_symbols_and_counts() {
     );
     let english = language("en-IN", "en", Some("IN"));
     assert_eq!(
-        spoken_symbols("My email is John at the rategmail.com.", Some(&english)).unwrap(),
+        spoken_symbols("My email is John at the rategmail.com.", Some(&english)),
         "My email is john@gmail.com."
     );
     assert_eq!(
-        spoken_symbols("Type the at sign, then your name", Some(&english)).unwrap(),
+        spoken_symbols("Type the at sign, then your name", Some(&english)),
         "Type the @, then your name"
     );
     assert_eq!(
@@ -260,24 +260,25 @@ fn swift_string_semantics() {
 }
 
 #[test]
-fn back_to_back_addresses_are_the_case_swift_traps_on() {
+fn back_to_back_addresses_keep_the_first() {
+    // The owner's decided change: the Swift rules before the core trapped on these.
     let english = language("en-US", "en", Some("US"));
-    for spoken in [
-        "a at sign b.com at sign c.com",
-        "mail john at the rate gmail dot com at the rate yahoo dot com",
-    ] {
-        assert_eq!(
-            spoken_symbols(spoken, Some(&english)),
-            Err(OverlappingAddresses),
-            "{spoken}"
-        );
-    }
+    assert_eq!(
+        spoken_symbols("a at sign b.com at sign c.com", Some(&english)),
+        "a@b.com at sign c.com"
+    );
+    assert_eq!(
+        spoken_symbols(
+            "mail john at the rate gmail dot com at the rate yahoo dot com",
+            Some(&english)
+        ),
+        "mail john@gmail.com at the rate yahoo dot com"
+    );
     assert_eq!(
         spoken_symbols(
             "john at sign gmail.com and mary at sign yahoo.com",
             Some(&english)
-        )
-        .as_deref(),
-        Ok("john@gmail.com and mary@yahoo.com")
+        ),
+        "john@gmail.com and mary@yahoo.com"
     );
 }

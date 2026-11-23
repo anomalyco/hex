@@ -156,9 +156,6 @@ void hk_swipe_reading_free(HkSwipeReading *reading);
 #define HK_DICTATION_INVALID 1
 /// The core failed (a panic, caught).
 #define HK_DICTATION_FAILED 2
-/// hk_dictation_spoken_symbols only: two addresses said back to back ("a at sign b.com at sign
-/// c.com"), where the Swift original trapped. What to write there is still to be decided.
-#define HK_DICTATION_OVERLAPPING_ADDRESSES 3
 
 /// UTF-8 text the caller owns: `length` bytes at `bytes` (NULL when `length` is 0).
 typedef struct {

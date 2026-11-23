@@ -15,9 +15,9 @@ use std::ffi::{CStr, c_char};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 
 pub use dictation::{
-    HK_DICTATION_FAILED, HK_DICTATION_INVALID, HK_DICTATION_OK, HK_DICTATION_OVERLAPPING_ADDRESSES,
-    HkFormatOptions, HkIsWord, HkLanguage, HkStr, HkText, HkTextList, hk_dictation_bare,
-    hk_dictation_cleanup_rules, hk_dictation_cleanup_supports, hk_dictation_continuing_sentence,
+    HK_DICTATION_FAILED, HK_DICTATION_INVALID, HK_DICTATION_OK, HkFormatOptions, HkIsWord,
+    HkLanguage, HkStr, HkText, HkTextList, hk_dictation_bare, hk_dictation_cleanup_rules,
+    hk_dictation_cleanup_supports, hk_dictation_continuing_sentence,
     hk_dictation_dropping_final_full_stop, hk_dictation_filler_pattern, hk_dictation_format,
     hk_dictation_french_convention, hk_dictation_french_spacing, hk_dictation_french_spacing_with,
     hk_dictation_insertion_text, hk_dictation_lowercases_continuations, hk_dictation_reconstruct,

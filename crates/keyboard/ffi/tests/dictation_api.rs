@@ -1,5 +1,5 @@
 //! The dictation rules' C interface as Swift calls it: the committed parity fixture through
-//! `hk_dictation_*`, the trap case, and the pointers and bytes it refuses.
+//! `hk_dictation_*`, back-to-back addresses, and the pointers and bytes it refuses.
 
 use std::ffi::{CStr, c_void};
 use std::ptr;
@@ -285,18 +285,21 @@ fn the_committed_fixture_through_the_c_interface() {
 }
 
 #[test]
-fn back_to_back_addresses_report_the_trap() {
+fn back_to_back_addresses_keep_the_first() {
     let english = Lang {
         identifier: "en-US".into(),
         code: Some("en".into()),
         region: Some("US".into()),
     };
-    let mut out = empty();
-    let status = unsafe {
-        hk_dictation_spoken_symbols(s("a at sign b.com at sign c.com"), &english.c(), &mut out)
-    };
-    assert_eq!(status, HK_DICTATION_OVERLAPPING_ADDRESSES);
-    assert!(out.bytes.is_null() && out.length == 0, "out left empty");
+    let language: *const HkLanguage = &english.c();
+    assert_eq!(
+        stage(
+            hk_dictation_spoken_symbols,
+            "a at sign b.com at sign c.com",
+            language
+        ),
+        "a@b.com at sign c.com"
+    );
 }
 
 #[test]

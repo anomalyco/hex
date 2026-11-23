@@ -21,7 +21,7 @@ TESTS = [
     "CleanupTaggerTests.swift",
     "DictationControllerTests.swift",
     "FullKeyboardEngineTests.swift",
-    "SpokenSymbolsTrapTests.swift",
+    "SpokenSymbolsBackToBackTests.swift",
 ]
 # The rules' words, in the keyboard core (Rust string literals read as Swift's do).
 RULES = [

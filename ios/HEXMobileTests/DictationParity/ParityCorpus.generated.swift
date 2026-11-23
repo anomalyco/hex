@@ -3203,12 +3203,11 @@ enum ParityCorpus {
         "the next keyboard process reads it",
         "a damaged file is dropped",
         "a at sign b.com at sign c.com",
+        "a@b.com at sign c.com",
         "mail john at the rate gmail dot com at the rate yahoo dot com",
+        "mail john@gmail.com at the rate yahoo dot com",
         "john at sign gmail.com and mary at sign yahoo.com",
         "john@gmail.com and mary@yahoo.com",
-        "SpokenCleanupRules.spokenSymbols(in: \"a at sign b.com at sign c.com\", language: \"en-US\") traps ",
-        "(preconditionFailure in SpokenCleanupRules.overlappingAddresses(in:)), as the Swift original did; ",
-        "the owner hasn't decided what it writes instead.",
     ]
 
     /// The words and phrases the rules know.

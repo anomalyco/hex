@@ -105,6 +105,14 @@ struct ParityCases {
                 } else {
                     one(random.below(13), text, language: language, random: &random)
                 }
+                // Two addresses said in one test string: through spoken symbols and the cleanup
+                // chain in English, so the owner's decided change is in the fixture.
+                if Self.namesTwoAddresses(text) {
+                    for language in [ParityLanguage(identifier: nil), ParityLanguage(identifier: "en-US")] {
+                        one(3, text, language: language, random: &random)
+                        one(12, text, language: language, random: &random)
+                    }
+                }
             }
         }
         for language in ParityLanguage.all {
@@ -142,7 +150,6 @@ struct ParityCases {
         case 2: write("cleanup_rules", text, language: language,
                       SpokenCleanupRules.clean(text, language: identifier))
         case 3:
-            guard !Self.crashesSpokenSymbols(text) else { return }
             write("spoken_symbols", text, language: language,
                   SpokenCleanupRules.spokenSymbols(in: text, language: identifier))
         case 4: write("spoken_counts", text, language: language,
@@ -192,7 +199,6 @@ struct ParityCases {
                 ])
             }
         default:
-            guard !Self.crashesSpokenSymbols(text) else { return }
             // The cleanup steps as Clean up what I say runs them without the tagger.
             let symbols = SpokenCleanupRules.spokenSymbols(in: text, language: identifier)
             let counted = SpokenCleanupRules.spokenCounts(in: symbols, language: identifier)
@@ -200,10 +206,25 @@ struct ParityCases {
         }
     }
 
-    /// Whether `spokenSymbols` could trap on `text` (`SpokenCleanupRules.overlappingAddresses`):
-    /// two addresses back to back ("a at sign b.com at sign c.com"). Two symbol names in a text
-    /// skip it, which covers every such case.
-    static func crashesSpokenSymbols(_ text: String) -> Bool {
+    /// The committed fixture's cases marked as the owner's decided change (back-to-back
+    /// addresses, recorded from the Swift rules with that fix): a refresh keeps the marks, which
+    /// are decisions, not something the shipped rules can tell.
+    static let decided: Set<String> = {
+        guard let lines = try? String(contentsOf: ShippedDictation.fixture, encoding: .utf8) else { return [] }
+        return Set(lines.split(separator: "\n").compactMap { line in
+            guard let record = try? JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any],
+                  record["decided"] != nil else { return nil }
+            return key(record)
+        })
+    }()
+
+    static func key(_ record: [String: Any]) -> String {
+        "\(record["op"] ?? "")\u{1F}\(record["lang"] ?? "")\u{1F}\(record["text"] ?? "")"
+    }
+
+    /// Whether `text` names two addresses, as back-to-back addresses do ("a at sign b.com at sign
+    /// c.com", where the Swift rules before the core trapped).
+    static func namesTwoAddresses(_ text: String) -> Bool {
         let words = CleanupTagger.words(in: text).map { $0.lowercased() }
         var names = 0
         for (index, word) in words.enumerated() {
@@ -236,6 +257,7 @@ struct ParityCases {
     private mutating func write(_ op: String, language: ParityLanguage, _ fields: [String: Any]) {
         var record = fields.merging(language.json) { first, _ in first }
         record["op"] = op
+        if Self.decided.contains(Self.key(record)) { record["decided"] = "overlapping-addresses" }
         emit(record)
     }
 }

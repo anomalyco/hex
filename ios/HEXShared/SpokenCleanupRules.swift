@@ -51,28 +51,12 @@ nonisolated enum SpokenCleanupRules {
     /// domain join it as one lowercase address: "John at the rate Gmail dot com." becomes
     /// "john@gmail.com.", "dot" becoming "." only there. Elsewhere "at sign" is a lone "@"
     /// ("the @ key"). Words around it keep their spacing.
+    ///
+    /// Two addresses said back to back, the second's local part the first's domain ("a at sign
+    /// b.com at sign c.com"), keep the first and leave the second as said ("a@b.com at sign
+    /// c.com"); the Swift rules before the keyboard core trapped there.
     static func spokenSymbols(in text: String, language: String?) -> String {
-        let result = DictationCore.withText(text) { string in
-            DictationCore.withLanguage(language) { language in
-                DictationCore.call { hk_dictation_spoken_symbols(string, language, $0) }
-            }
-        }
-        if let written = result.text { return written }
-        if result.status == HK_DICTATION_OVERLAPPING_ADDRESSES { return overlappingAddresses(in: text) }
-        assertionFailure("spokenSymbols: the keyboard core's dictation rules failed (status \(result.status))")
-        return text
-    }
-
-    /// OWNER'S DECISION PENDING: what "a at sign b.com at sign c.com" (two addresses said
-    /// back to back, the second's local part the first's domain) becomes. The Swift rules
-    /// before the keyboard core trapped here (their edits overlapped and `text[cursor..<start]`
-    /// had a lower bound past its upper bound), and so does this, on purpose, until the owner
-    /// decides: this function is the one place that changes then. The core reports the case
-    /// as `HK_DICTATION_OVERLAPPING_ADDRESSES`.
-    static func overlappingAddresses(in text: String) -> String {
-        preconditionFailure(
-            "Range requires lowerBound <= upperBound: spokenSymbols' edits overlap (two addresses said back to back)"
-        )
+        DictationCore.stage(text, language: language, hk_dictation_spoken_symbols)
     }
 
     // MARK: Spoken counts

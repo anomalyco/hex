@@ -1,7 +1,9 @@
 //! The dictation rules give exactly what today's Swift gives: every case the iOS exporter
 //! wrote (ios/HEXMobileTests/DictationParity, from oracle copies of the Swift files) is run
 //! through the port and compared. The committed fixture always runs; a larger export runs
-//! with `HEX_DICTATION_PARITY=/path/dictation-parity.jsonl`.
+//! with `HEX_DICTATION_PARITY=/path/dictation-parity.jsonl`. A case marked `"decided"` is the
+//! owner's decided change (back-to-back addresses, where the Swift rules trapped): its `out` is
+//! the Swift rules with that fix, so it's compared too and counted on its own.
 
 use std::collections::HashSet;
 
@@ -63,12 +65,10 @@ fn run(case: &Value) -> Option<Value> {
         }
         "spoken_lists" => Value::from(dictation::spoken_lists(text(case, "text"), language)),
         "cleanup_rules" => Value::from(dictation::cleanup_rules(text(case, "text"), language)),
-        "spoken_symbols" => {
-            Value::from(dictation::spoken_symbols(text(case, "text"), language).expect("no trap"))
-        }
+        "spoken_symbols" => Value::from(dictation::spoken_symbols(text(case, "text"), language)),
         "spoken_counts" => Value::from(dictation::spoken_counts(text(case, "text"), language)),
         "cleanup_chain" => {
-            let symbols = dictation::spoken_symbols(text(case, "text"), language).expect("no trap");
+            let symbols = dictation::spoken_symbols(text(case, "text"), language);
             let counted = dictation::spoken_counts(&symbols, language);
             Value::from(dictation::cleanup_rules(&counted, language))
         }
@@ -123,6 +123,7 @@ fn run(case: &Value) -> Option<Value> {
 
 fn check(name: &str, lines: &str) {
     let mut cases = 0;
+    let mut decided = 0;
     let mut failures = Vec::new();
     for (number, line) in lines.lines().enumerate() {
         if line.is_empty() {
@@ -132,6 +133,7 @@ fn check(name: &str, lines: &str) {
             .unwrap_or_else(|error| panic!("{name}:{}: {error}", number + 1));
         let Some(got) = run(&case) else { continue };
         cases += 1;
+        decided += usize::from(case.get("decided").is_some());
         if got != case["out"] {
             failures.push(format!("{name}:{}: {case}\n  port gives {got}", number + 1));
         }
@@ -145,7 +147,7 @@ fn check(name: &str, lines: &str) {
             shown.join("\n")
         );
     }
-    println!("{name}: {cases} cases, all as Swift");
+    println!("{name}: {cases} cases ({decided} of them the decided change), all as Swift");
 }
 
 #[test]

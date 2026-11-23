@@ -19,9 +19,6 @@ pub const HK_DICTATION_OK: i32 = 0;
 pub const HK_DICTATION_INVALID: i32 = 1;
 /// `HK_DICTATION_FAILED`: the core failed (a panic, caught here). `out` is left empty.
 pub const HK_DICTATION_FAILED: i32 = 2;
-/// `HK_DICTATION_OVERLAPPING_ADDRESSES`: `hk_dictation_spoken_symbols` only, where the
-/// Swift original traps. `out` is left empty.
-pub const HK_DICTATION_OVERLAPPING_ADDRESSES: i32 = 3;
 
 /// UTF-8 text the caller owns: `length` bytes at `bytes` (NULL when `length` is 0).
 #[repr(C)]
@@ -256,7 +253,7 @@ pub unsafe extern "C" fn hk_dictation_spoken_symbols(
     // SAFETY: the caller's promises, passed on.
     unsafe {
         text_stage(text, language, out, |t, l| {
-            dictation::spoken_symbols(t, l).map_err(|_| HK_DICTATION_OVERLAPPING_ADDRESSES)
+            Ok(dictation::spoken_symbols(t, l))
         })
     }
 }

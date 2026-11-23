@@ -74,7 +74,11 @@ file for `HEX_SWIPE_PARITY`.
 - `core/tests/fixtures/dictation-parity.jsonl` (about 4,700 cases, 1 MB), written from copies
   of the Swift rules (dev 93db6ad7, recorded again from dev 06ac30af's), replayed by
   `core/tests/dictation_parity.rs`, by `ffi/tests/dictation_api.rs` through the C interface,
-  and by iOS's `DictationGoldenTests` through the shipped Swift API.
+  and by iOS's `DictationGoldenTests` through the shipped Swift API. Its cases marked
+  `"decided": "overlapping-addresses"` are the owner's decided change: two addresses said back
+  to back ("a at sign b.com at sign c.com") keep the first and leave the second as said
+  ("a@b.com at sign c.com"), where the Swift rules trapped; they were recorded from the Swift
+  rules with that fix, and a refresh carries the marks forward.
 - Larger exports: `HEX_DICTATION_PARITY=/tmp/dictation-parity.jsonl cargo test --release`.
 - iOS's Unicode data, per scalar: `HEX_DICTATION_UNICODE=/tmp/dictation-unicode.tsv cargo
   test --release`. The tables in `core/src/dictation/unicode_generated.rs` come from the same
