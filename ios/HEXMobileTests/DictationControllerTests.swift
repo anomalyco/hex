@@ -2289,7 +2289,7 @@ final class DictationControllerTests: XCTestCase {
 
         // A failed model with none ready still sets up.
         controller.isModelReady = false
-        controller.phase = .failed("The speech model isn't ready. Try again.")
+        controller.failModel("The speech model isn't ready. Try again.")
         XCTAssertTrue(controller.primaryActionPreparesModel)
     }
 

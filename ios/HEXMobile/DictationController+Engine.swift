@@ -30,7 +30,7 @@ extension DictationController {
             } else {
                 self.engine = .parakeetV2
                 if hasCachedModel {
-                    self.phase = .failed(ParakeetLoadGuard.message)
+                    self.failModel(ParakeetLoadGuard.message)
                 }
             }
         }
