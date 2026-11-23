@@ -761,6 +761,8 @@ fn records_automatically(
 /// (macOS; Labs › Import audio).
 struct ImportWorker {
     worker: JoinHandle<Result<meeting::MeetingManifest>>,
+    /// The chosen file's name, for the message when it held no speech.
+    file: String,
 }
 
 /// Starts importing `path`, refusing while a recording or another import
@@ -792,11 +794,15 @@ fn start_import(
     }
     #[cfg(target_os = "macos")]
     {
+        let file = path.file_name().map_or_else(
+            || path.display().to_string(),
+            |name| name.to_string_lossy().into_owned(),
+        );
         let started = thread::Builder::new()
             .name("meeting-import".into())
             .spawn(move || meeting::import::import(&path));
         match started {
-            Ok(worker) => *importing = Some(ImportWorker { worker }),
+            Ok(worker) => *importing = Some(ImportWorker { worker, file }),
             Err(error) => {
                 let _ = events.send(ControllerEvent::ImportFailed {
                     error: error.to_string(),
@@ -817,18 +823,25 @@ fn poll_import(importing: &mut Option<ImportWorker>, events: &SyncSender<Control
     let Some(worker) = importing.take() else {
         return;
     };
+    let file = worker.file;
     match worker.worker.join() {
         Ok(Ok(manifest)) if manifest.status == meeting::MeetingStatus::Complete => {
             // An imported file with no speech leaves nothing to keep, exactly
             // as an empty recording does; notes never run for it.
             match meeting::discard_if_empty(&manifest) {
-                Ok(true) => return,
+                Ok(true) => {
+                    let _ = events.send(ControllerEvent::ImportFailed {
+                        error: format!("No speech was found in {file}."),
+                    });
+                    return;
+                }
                 Ok(false) => {}
                 Err(error) => {
                     tracing::warn!(%error, meeting = manifest.id, "could not discard an imported meeting with no speech");
                 }
             }
             tracing::info!(meeting = manifest.id, "imported audio was transcribed");
+            meeting::finished_events::publish(&manifest.id);
             if meeting::notes_wanted() {
                 start_notes(manifest.id, events);
             }
@@ -2035,6 +2048,7 @@ mod tests {
         let mut recording = None;
         let mut importing = Some(ImportWorker {
             worker: thread::spawn(|| Err(eyre!("not imported"))),
+            file: "call.m4a".into(),
         });
         start_import(
             &mut recording,

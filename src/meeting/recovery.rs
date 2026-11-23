@@ -118,6 +118,7 @@ impl PendingFinals {
                                 }
                             }
                             tracing::info!(meeting = id, "finished a meeting left unfinished");
+                            super::finished_events::publish(&manifest.id);
                             if super::notes_wanted() {
                                 start_notes(manifest.id, &events);
                             }

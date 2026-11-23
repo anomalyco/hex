@@ -407,14 +407,12 @@ impl Pump {
                 (Some(ControllerEvent::Stopping), true) => {
                     ControlReply::done("Stopping the meeting recording")
                 }
-                (
-                    Some(
-                        ControllerEvent::Transcribing
-                        | ControllerEvent::Finished(_)
-                        | ControllerEvent::Discarded(_),
-                    ),
-                    true,
-                ) => ControlReply::done("Stopped recording; transcribing the meeting"),
+                (Some(ControllerEvent::Discarded(_)), true) => {
+                    ControlReply::done("Stopped recording; it had no speech and went to the Trash")
+                }
+                (Some(ControllerEvent::Transcribing | ControllerEvent::Finished(_)), true) => {
+                    ControlReply::done("Stopped recording; transcribing the meeting")
+                }
                 (Some(ControllerEvent::Failed { title, error }), _) => {
                     ControlReply::error("failed", format!("{title}: {error}"))
                 }

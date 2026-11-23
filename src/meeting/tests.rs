@@ -601,6 +601,17 @@ fn an_empty_finished_meeting_is_moved_to_the_trash() {
     fs::remove_dir_all(base).unwrap();
 }
 
+/// Asserts a meeting is kept: false, and nothing handed to the Trash.
+fn assert_kept(base: &Path, manifest: &MeetingManifest) {
+    let mut trashed = Vec::new();
+    let discarded = discard_if_empty_in(base, manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    });
+    assert!(!discarded.unwrap());
+    assert!(trashed.is_empty());
+}
+
 #[test]
 fn a_meeting_with_speech_or_a_failure_is_never_discarded() {
     // One finished entry is enough to keep the meeting.
@@ -615,15 +626,7 @@ fn a_meeting_with_speech_or_a_failure_is_never_discarded() {
         }],
     );
     let manifest = read_manifest(&directory).unwrap();
-    let mut trashed = Vec::new();
-    assert!(
-        !discard_if_empty_in(&base, &manifest, |path| {
-            trashed.push(path.to_path_buf());
-            Ok(())
-        })
-        .unwrap()
-    );
-    assert!(trashed.is_empty());
+    assert_kept(&base, &manifest);
     fs::remove_dir_all(base).unwrap();
 
     // A transcription failure is not an empty success.
@@ -633,15 +636,56 @@ fn a_meeting_with_speech_or_a_failure_is_never_discarded() {
     manifest.status = MeetingStatus::Failed;
     manifest.error = Some("the model failed".into());
     write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // An Interrupted meeting, and a Complete one that carries an error, wait
+    // for a person instead of being swept.
+    let (base, directory) = finished_meeting("discard-interrupted", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.status = MeetingStatus::Interrupted;
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    let (base, directory) = finished_meeting("discard-error", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.error = Some("a stale failure".into());
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // Complete without the published transcript pair is not a finished pass.
+    let (base, directory) = finished_meeting("discard-unpublished", "Design sync");
+    let manifest = read_manifest(&directory).unwrap();
+    assert_kept(&base, &manifest);
+    fs::remove_dir_all(base).unwrap();
+
+    // A final pass still pending keeps the meeting: deletion would race it.
+    let (base, directory) = finished_meeting("discard-pending", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let manifest = read_manifest(&directory).unwrap();
+    fs::write(directory.join(FINAL_PENDING_FILE), b"").unwrap();
     let mut trashed = Vec::new();
-    assert!(
-        !discard_if_empty_in(&base, &manifest, |path| {
-            trashed.push(path.to_path_buf());
-            Ok(())
-        })
-        .unwrap()
-    );
+    let refused = discard_if_empty_in(&base, &manifest, |path| {
+        trashed.push(path.to_path_buf());
+        Ok(())
+    });
+    assert!(refused.is_err());
     assert!(trashed.is_empty());
+    fs::remove_dir_all(base).unwrap();
+}
+
+#[test]
+fn a_meeting_that_dropped_echo_is_kept_even_with_no_entries() {
+    let (base, directory) = finished_meeting("discard-echo", "Design sync");
+    write_final_transcript(&directory, &[]);
+    let mut manifest = read_manifest(&directory).unwrap();
+    manifest.echo_suppressed_utterances = 2;
+    write_manifest(&directory, &manifest).unwrap();
+    assert_kept(&base, &manifest);
     fs::remove_dir_all(base).unwrap();
 }
 

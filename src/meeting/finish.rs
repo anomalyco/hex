@@ -1,6 +1,6 @@
-//! The final pass of a meeting whose audio is complete: its transcript, the
-//! user's Markdown copy, and its finished event, or `final.pending` recovery
-//! when Hex is quitting.
+//! The final pass of a meeting whose audio is complete: its transcript and
+//! the user's Markdown copy, or `final.pending` recovery when Hex is
+//! quitting. The caller publishes its finished event once it is kept.
 
 use std::fs;
 use std::path::Path;
@@ -30,6 +30,11 @@ pub(super) fn discard_if_empty_in(
     if manifest.status != MeetingStatus::Complete || manifest.error.is_some() {
         return Ok(false);
     }
+    // Echo suppression removed utterances from this meeting: its silence is
+    // not proof that nobody spoke, so keep it even with no transcript entries.
+    if manifest.echo_suppressed_utterances > 0 {
+        return Ok(false);
+    }
     let directory = root.join(&manifest.id);
     if !super::final_transcript_exists(&directory) {
         return Ok(false);
@@ -48,8 +53,8 @@ pub(super) fn discard_if_empty_in(
     Ok(true)
 }
 
-/// Transcribes and publishes a meeting whose audio is complete, with the
-/// folder's lock held. A failure while quitting keeps `final.pending` and
+/// Transcribes a meeting whose audio is complete, with the folder's lock
+/// held. A failure while quitting keeps `final.pending` and
 /// leaves it Interrupted for the next launch; any other failure keeps the
 /// meeting Interrupted with its error.
 pub(crate) fn finish_transcription(
@@ -62,7 +67,6 @@ pub(crate) fn finish_transcription(
             manifest.status = MeetingStatus::Complete;
             manifest.error = None;
             write_manifest(directory, &manifest)?;
-            super::finished_events::publish(&manifest.id);
             Ok(manifest)
         }
         Err(error) if crate::desktop::process_exit::quitting() => {

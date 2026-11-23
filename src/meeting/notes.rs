@@ -881,12 +881,26 @@ pub fn summarize(id: &str) -> Result<MeetingManifest> {
     summarize_claimed(id, claim)
 }
 
-/// Generates and records notes while holding this meeting's claim. A
-/// transcript with no speech writes nothing and clears any earlier notes
-/// error: there is nothing to summarize, so nothing failed.
-fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
-    let directory = root()?.join(id);
-    let mut manifest = read_manifest(&directory)?;
+/// Generates and records notes while holding this meeting's claim.
+fn summarize_claimed(id: &str, claim: InProgress) -> Result<MeetingManifest> {
+    summarize_in(&root()?.join(id), id, claim)
+}
+
+/// Generates notes for the meeting in `directory`.
+fn summarize_in(directory: &Path, id: &str, claim: InProgress) -> Result<MeetingManifest> {
+    summarize_with(directory, id, claim, generator::generate_notes)
+}
+
+/// [`summarize_in`] with the notes call injected. A transcript with no speech
+/// writes no notes and clears any earlier notes error: there is nothing to
+/// summarize, so nothing failed, and the writer is never asked.
+fn summarize_with(
+    directory: &Path,
+    id: &str,
+    _claim: InProgress,
+    mut generate: impl FnMut(&str, &str, Duration) -> Result<GeneratedNotes, GenerationError>,
+) -> Result<MeetingManifest> {
+    let mut manifest = read_manifest(directory)?;
     if manifest.status != MeetingStatus::Complete {
         return Err(eyre!("only completed meetings can be summarized"));
     }
@@ -898,7 +912,7 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
         );
         if manifest.notes_error.is_some() {
             manifest.notes_error = None;
-            write_manifest(&directory, &manifest)?;
+            write_manifest(directory, &manifest)?;
         }
         return Ok(manifest);
     }
@@ -907,12 +921,12 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
     if let Err(reason) = generator::available() {
         tracing::warn!(%reason, meeting = id, "could not generate meeting notes");
         manifest.notes_error = Some(reason.clone());
-        write_manifest(&directory, &manifest)?;
+        write_manifest(directory, &manifest)?;
         return Err(eyre!("{reason}"));
     }
     let never = AtomicBool::new(false);
     if crate::labs::live_chapters() {
-        super::chapters::refine_meeting(&directory, &entries, &never);
+        super::chapters::refine_meeting(directory, &entries, &never);
     }
     // Read at each generation, so Regenerate summary uses the current list.
     let terms = crate::dictation::vocabulary::terms();
@@ -925,11 +939,11 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
         started + TOTAL_DEADLINE,
         |instructions, prompt, timeout| {
             wait_for_dictation(&never);
-            generator::generate_notes(instructions, prompt, timeout)
+            generate(instructions, prompt, timeout)
         },
     );
     // Re-read so concurrent manifest updates are not lost.
-    let mut manifest = read_manifest(&directory)?;
+    let mut manifest = read_manifest(directory)?;
     match result {
         Ok(Some(summary)) => {
             tracing::info!(
@@ -954,20 +968,20 @@ fn summarize_claimed(id: &str, _claim: InProgress) -> Result<MeetingManifest> {
                 tracing::warn!(%error, meeting = id, "could not add notes to meeting Markdown");
                 manifest.notes_error = Some(format!("Notes not added to Markdown: {error}"));
             }
-            write_manifest(&directory, &manifest)?;
+            write_manifest(directory, &manifest)?;
             Ok(manifest)
         }
-        // The transcript emptied between the read and the excerpt: nothing to
-        // summarize is not a notes failure.
+        // The excerpt can come out empty even with entries (a tiny budget):
+        // nothing to summarize is not a notes failure.
         Ok(None) => {
             manifest.notes_error = None;
-            write_manifest(&directory, &manifest)?;
+            write_manifest(directory, &manifest)?;
             Ok(manifest)
         }
         Err(error) => {
             tracing::warn!(%error, meeting = id, "could not generate meeting notes");
             manifest.notes_error = Some(error.to_string());
-            write_manifest(&directory, &manifest)?;
+            write_manifest(directory, &manifest)?;
             Err(error)
         }
     }
@@ -1431,6 +1445,42 @@ mod tests {
             .is_none()
         );
         assert!(!summarized);
+    }
+
+    #[test]
+    fn a_transcript_with_no_speech_clears_notes_error_without_asking_the_writer() {
+        let id = format!("notes-empty-{}-{}", std::process::id(), now_ms());
+        let directory = std::env::temp_dir().join(&id);
+        let _ = fs::remove_dir_all(&directory);
+        fs::create_dir_all(&directory).unwrap();
+        let mut manifest: MeetingManifest = serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "id": id,
+            "title": "Design sync",
+            "status": "complete",
+            "created_at_ms": 1_760_000_000_000_u64,
+            "ended_at_ms": 1_760_000_060_000_u64,
+            "duration_ms": 60_000,
+            "system": {"file": "system.wav", "samples": 0, "dropped_packets": 0},
+            "microphone": {"file": "microphone.wav", "samples": 0, "dropped_packets": 0},
+            "error": null
+        }))
+        .unwrap();
+        manifest.notes_error = Some("the transcript has no speech to summarize".into());
+        write_manifest(&directory, &manifest).unwrap();
+        fs::write(directory.join("transcript.ndjson"), "").unwrap();
+
+        let claim = InProgress::claim(&manifest.id).unwrap();
+        let saved = summarize_with(&directory, &manifest.id, claim, |_, _, _| {
+            unreachable!("a transcript with no speech never asks the writer")
+        })
+        .unwrap();
+        assert!(saved.notes.is_none());
+        assert_eq!(saved.notes_error, None);
+        let stored = read_manifest(&directory).unwrap();
+        assert!(stored.notes.is_none());
+        assert_eq!(stored.notes_error, None);
+        fs::remove_dir_all(directory).unwrap();
     }
 
     #[test]

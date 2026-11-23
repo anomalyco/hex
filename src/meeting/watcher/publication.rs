@@ -17,6 +17,11 @@ pub(super) fn finished(manifest: meeting::MeetingManifest, events: &SyncSender<C
     }
     let notes = (manifest.status == meeting::MeetingStatus::Complete && meeting::notes_wanted())
         .then(|| manifest.id.clone());
+    // Only a kept, completed meeting is announced: an empty one went to the
+    // Trash above, and a quit left an Interrupted draft with no final pass.
+    if manifest.status == meeting::MeetingStatus::Complete {
+        meeting::finished_events::publish(&manifest.id);
+    }
     let _ = events.send(ControllerEvent::Finished(Box::new(manifest)));
     if let Some(id) = notes {
         super::start_notes(id, events);

@@ -1240,6 +1240,10 @@ Meetings > Import audio… (macOS; Labs › Import audio, off by default) // mee
 │       transcript.md, and Copy Last Transcript still say You/Them
 ├── Notes/summary follow exactly as after a recording (the meetings Summaries
 │   setting; Apple Intelligence or OpenCode)
+├── No speech at all -> the import is moved to the Trash with its Markdown,
+│   no notes run, no finished event is sent, and Meetings says
+│   "No speech was found in <file name>."
+│   (check: an_empty_finished_meeting_is_moved_to_the_trash)
 ├── A request while recording or importing is refused; the failure shows in
 │   Meetings as Audio could not be imported
 └── Quitting mid-import
@@ -1532,6 +1536,9 @@ Any of the above, next launch, Meetings on, no recording, engine up (or 30 s)
   -> A pass stops between meetings if a recording starts, and is offered
      again when Hex is next idle
   -> Full-WAV final pass -> Complete + Markdown export + notes
+  ├── No speech -> the recording and its Markdown go to the Trash, no notes
+  │   (checks: an_empty_finished_meeting_is_moved_to_the_trash,
+  │   a_meeting_with_speech_or_a_failure_is_never_discarded)
   ├── Quit again or model not installed -> stays pending
   └── Other failure -> stays Interrupted with the error and its draft
 ```
@@ -1759,11 +1766,13 @@ Final publication                                   // meetings.output
 ├── Internal: transcript.ndjson + transcript.md (atomic, owner-only)
 ├── No speech at all (Complete, zero transcript entries) -> the recording
 │   folder and its exported Markdown go to the Trash through the pane's
-│   delete path; no finished panel and no notes for a meeting that is gone.
-│   Failed, Interrupted, and final.pending meetings are never discarded, and
-│   existing meetings are not swept when the list loads
+│   delete path; no finished panel, no notes, and no meeting.finished stream
+│   event for a meeting that is gone. Failed, Interrupted, final.pending, and
+│   echo-suppressed meetings are never discarded, and existing meetings are
+│   not swept when the list loads
 │   // checks: an_empty_finished_meeting_is_moved_to_the_trash,
-│   // a_meeting_with_speech_or_a_failure_is_never_discarded
+│   // a_meeting_with_speech_or_a_failure_is_never_discarded,
+│   // a_meeting_that_dropped_echo_is_kept_even_with_no_entries
 └── Markdown copy -> <folder>/<YYYY-MM-DD HHMM> <title>.md
     ├── Title, date, duration, app, You / Them turns
     ├── Never overwrites; adds " (2)"
@@ -1827,8 +1836,9 @@ Detail (a raised card beside the list)
 ├── Chapters (when present): start, name, line, and a Copy section icon
 └── Transcript: stacked turns, no bubbles; "You" in text colour, "Them"
     faint, each with its clock; merged turns; 30 s+ pause lines;
-    "Listening…" while recording; "No speech was transcribed." only for a
-    Complete meeting from before empty results were trashed
+    "Listening…" while recording; "No speech was transcribed." for an older
+    empty Complete meeting, or one whose automatic Trash move failed (a lock
+    race or a Trash error leaves it listed)
 Empty: "No meetings yet." with a one-line hint; "No meetings match." while
 searching
 
@@ -2005,9 +2015,10 @@ While recording, setting on, model available           // meetings.title.provisi
 Final publication complete                               // meetings.notes
   -> meeting-notes thread, utility QoS; waits (≤30 s) while dictation is busy
   -> No speech in the transcript (no entries, or only blank text) -> no call,
-     nothing written, notes_error cleared: nothing to summarize is not a
-     notes failure, including a manual Summarize on an older empty meeting
-     (check: context_overflow_halves_the_excerpt_once_and_failures_stop)
+     no notes written; the manifest is rewritten only to clear a stale
+     notes_error. Nothing to summarize is not a notes failure, including a
+     manual Summarize on an older empty meeting (check:
+     a_transcript_with_no_speech_clears_notes_error_without_asking_the_writer)
   -> ONE call over a bounded excerpt, no map-reduce
      ├── Language -> the transcript's own; the instructions say "You MUST
      │   write the title and summary in the language spoken in the transcript

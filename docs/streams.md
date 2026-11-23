@@ -263,8 +263,9 @@ Only the id is sent: no title, path, transcript, or audio. Read the rest with
 `hex meetings show <id>` (or `hex mcp`). One subscriber at a time; a
 second answers `409 subscriber-busy`. Nothing is queued while nobody listens,
 so a client that reconnects should list meetings to catch up. A meeting whose
-final transcript fails sends nothing. The stream ends when Hex quits or the
-toggle turns off. `hex service` serves the route but records no meetings, so
+final transcript fails sends nothing, and neither does a meeting that finishes
+with no speech: it is moved to the Trash instead of being published. The
+stream ends when Hex quits or the toggle turns off. `hex service` serves the route but records no meetings, so
 it never sends one.
 
 ### Catching up after being offline
