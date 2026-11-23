@@ -2,7 +2,7 @@
 //! no retained entry needs a RAM slot. Row previews never authorize a paste.
 #![allow(dead_code, reason = "staged until the mixed shortcut is enabled")]
 
-use super::{HistoryEntry, HistoryKind, HistoryStore};
+use super::{HistoryKind, HistoryStore, PasteReuse};
 use crate::dictation::paste_last::LastDictation;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -37,23 +37,10 @@ impl HistoryStore {
         }
     }
 
-    pub(super) fn pasteable(&self, e: &HistoryEntry, now: u64) -> bool {
-        !self.retention.is_off()
-            && self
-                .retention
-                .cutoff(now)
-                .is_none_or(|cut| e.timestamp_ms >= cut)
-            && matches!(
-                e.kind,
-                HistoryKind::Dictation | HistoryKind::Raw | HistoryKind::Send
-            )
-            && !e.final_text.trim().is_empty()
-    }
-
     pub(crate) fn paste_rows(&self, count: usize, now: u64) -> Vec<Row> {
         let mut rows: Vec<_> = self
             .entries()
-            .filter(|e| self.pasteable(e, now))
+            .filter(|e| self.paste_reuse(e, now) != PasteReuse::None)
             .map(|e| {
                 (
                     e.timestamp_ms,
@@ -108,7 +95,7 @@ impl HistoryStore {
                 .map(|r| r.last.text()),
             Id::Retained(id) => self
                 .entries()
-                .find(|e| e.id == id && self.pasteable(e, now))
+                .find(|e| e.id == id && self.paste_reuse(e, now) != PasteReuse::None)
                 .map(|e| e.final_text.as_str()),
         }
     }

@@ -63,6 +63,10 @@ use crate::audio::recording_environment::{
 };
 
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
+/// Upper bound on warm-ring retention when an old pending input timestamp
+/// (such as a `CaptureInstant::ZERO` sentinel or a stalled consumer) sits in
+/// `pending_input`, preventing unbounded audio ring growth.
+const MAX_TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(60);
 const PRE_ROLL_DURATION: Duration = Duration::from_millis(450);
 
 /// How much audio a shortcut capture keeps from before its press. Muting,
@@ -1206,7 +1210,7 @@ impl DictationCapture {
                 captured_through
                     .duration_since(pending)
                     .saturating_add(PRE_ROLL_DURATION)
-                    .max(TIMELINE_BUFFER_DURATION)
+                    .clamp(TIMELINE_BUFFER_DURATION, MAX_TIMELINE_BUFFER_DURATION)
             })
             .unwrap_or(TIMELINE_BUFFER_DURATION);
         self.keep_warm_for(samples, retention);
@@ -2314,6 +2318,27 @@ mod tests {
         };
         assert_eq!(clip.duration_ms(), 30_450);
         assert_eq!(clip.samples.first(), Some(&0.25));
+    }
+
+    #[test]
+    fn pending_zero_sentinel_caps_warm_ring_retention() {
+        let mut capture = DictationCapture::new(16_000);
+        // Simulate hours of machine uptime with a CaptureInstant::ZERO sentinel
+        // (e.g. from TapDisabled) sitting in oldest_pending.
+        let uptime = CaptureInstant::from_nanos(10 * 3_600 * 1_000_000_000);
+        for second in 0..75 {
+            capture.ingest_with_pending(
+                &vec![second as f32; 16_000],
+                uptime + Duration::from_secs(second),
+                Some(CaptureInstant::ZERO),
+            );
+        }
+        assert_eq!(
+            capture.ring.len(),
+            samples_for(MAX_TIMELINE_BUFFER_DURATION, 16_000)
+        );
+        assert_eq!(capture.ring.front(), Some(&15.0));
+        assert_eq!(capture.ring.back(), Some(&74.0));
     }
 
     #[test]

@@ -44,7 +44,7 @@ pub(super) fn run_runtime(
                 .then(|| crate::transcription::app_model_switching::startup_choice(&settings))
                 .flatten(),
         ),
-        automatic_preparation: false,
+        automatic_preparation: None,
         settings,
         preparation: TranscriptionPreparation::default(),
         recognition_start,
@@ -110,13 +110,19 @@ pub(super) fn same_model_and_language(
     left.model == right.model && left.language == right.language
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum AutomaticSwitch {
+    Keyboard,
+    App,
+}
+
 pub(super) struct Runtime {
     pub(super) settings: AppSettings,
     pub(super) preparation: TranscriptionPreparation,
     pub(super) keyboard_switcher: crate::transcription::keyboard_model_switching::Switcher,
     /// Labs › Switch model with app: the foreground application's mode choice.
     pub(super) app_switcher: crate::transcription::app_model_switching::Switcher,
-    pub(super) automatic_preparation: bool,
+    pub(super) automatic_preparation: Option<AutomaticSwitch>,
     /// Starts the listener once setup is ready; `None` once started.
     pub(super) recognition_start: Option<SyncSender<()>>,
     /// Why the listener stopped, once it has.
@@ -203,18 +209,18 @@ impl Runtime {
     fn manual_choice(&mut self) {
         self.keyboard_switcher.manual_choice();
         self.app_switcher.manual_choice();
-        if self.automatic_preparation {
-            self.preparation.cancel();
-            self.automatic_preparation = false;
-        }
+        self.supersede_automatic();
     }
 
     fn supersede_automatic(&mut self) {
         // A source being cycled through must not cancel a manual operation.
         // Manual work is superseded only when the debounced choice is due.
-        if self.automatic_preparation {
+        if let Some(source) = self.automatic_preparation.take() {
             self.preparation.cancel();
-            self.automatic_preparation = false;
+            match source {
+                AutomaticSwitch::Keyboard => self.keyboard_switcher.cancel_applying(),
+                AutomaticSwitch::App => self.app_switcher.cancel_applying(),
+            }
         }
     }
 
@@ -231,13 +237,19 @@ impl Runtime {
                 ..self.settings.transcription_for_model(choice.model)
             };
             if !same_model_and_language(&selection, &self.settings.transcription) {
+                if self.automatic_preparation == Some(AutomaticSwitch::App) {
+                    self.app_switcher.cancel_applying();
+                }
                 self.preparation.start(selection, true);
-                self.automatic_preparation = true;
+                self.automatic_preparation = Some(AutomaticSwitch::Keyboard);
             } else {
                 // The debounced choice keeps the current model, but must
                 // still prevent an older manual preparation replacing it.
+                self.keyboard_switcher.commit();
+                if self.automatic_preparation.take() == Some(AutomaticSwitch::App) {
+                    self.app_switcher.cancel_applying();
+                }
                 self.preparation.cancel();
-                self.automatic_preparation = false;
             }
         }
     }
@@ -280,8 +292,11 @@ impl Runtime {
             language: choice.language,
             ..self.settings.transcription_for_model(choice.model)
         };
+        if self.automatic_preparation == Some(AutomaticSwitch::Keyboard) {
+            self.keyboard_switcher.cancel_applying();
+        }
         self.preparation.start(selection, true);
-        self.automatic_preparation = true;
+        self.automatic_preparation = Some(AutomaticSwitch::App);
     }
 
     /// Reads the listener's newest events, bounded by `EventReader`'s
@@ -310,7 +325,7 @@ impl Runtime {
             now,
         );
         if let Some(result) = self.preparation.poll() {
-            self.automatic_preparation = false;
+            let automatic = self.automatic_preparation.take();
             let result = result.and_then(|selection| {
                 crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
                 // Only a preparation that changes what Hex runs replaces the
@@ -329,8 +344,20 @@ impl Runtime {
                 Ok(())
             });
             match result {
-                Ok(()) => self.preparation.set_error(None),
+                Ok(()) => {
+                    match automatic {
+                        Some(AutomaticSwitch::Keyboard) => self.keyboard_switcher.commit(),
+                        Some(AutomaticSwitch::App) => self.app_switcher.commit(),
+                        None => {}
+                    }
+                    self.preparation.set_error(None);
+                }
                 Err(error) => {
+                    match automatic {
+                        Some(AutomaticSwitch::Keyboard) => self.keyboard_switcher.fail(now),
+                        Some(AutomaticSwitch::App) => self.app_switcher.fail(now),
+                        None => {}
+                    }
                     tracing::warn!(%error, "could not select transcription model");
                     self.preparation.set_error(Some(error));
                 }

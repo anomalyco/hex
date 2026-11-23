@@ -52,6 +52,12 @@ impl RunningListener {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AutomaticSwitch {
+    Keyboard,
+    App,
+}
+
 /// The Windows runtime: owns the listener, model preparation, OpenCode
 /// catalog, personal transformations, and self-updater.
 pub(crate) struct WindowsDesktopHost {
@@ -87,9 +93,8 @@ pub(crate) struct WindowsDesktopHost {
     app_switcher: crate::transcription::app_model_switching::Switcher,
     /// Present only while keyboard model switching is on.
     input_sources: Option<crate::keyboard_input_sources::Watcher>,
-    /// The preparation running is a keyboard switch, which a manual choice
-    /// or a later source change supersedes.
-    automatic_preparation: bool,
+    /// Which automatic switcher owns the in-flight preparation, if any.
+    automatic_preparation: Option<AutomaticSwitch>,
     updater: crate::updater::Updater,
     /// The newest foreground window of another app, where the tray's Paste
     /// last dictation goes once its menu has taken the foreground.
@@ -270,7 +275,7 @@ impl WindowsDesktopHost {
             keyboard_switcher,
             app_switcher,
             input_sources: None,
-            automatic_preparation: false,
+            automatic_preparation: None,
             updater: crate::updater::Updater::start(),
             foreground: ForeignWindow::default(),
             dictations,
@@ -396,18 +401,18 @@ impl WindowsDesktopHost {
         }
         self.keyboard_switcher.manual_choice();
         self.app_switcher.manual_choice();
-        if self.automatic_preparation {
-            self.preparation.cancel();
-            self.automatic_preparation = false;
-        }
+        self.supersede_automatic();
     }
 
     /// A layout being cycled through cancels only automatic work; a manual
     /// operation is superseded once the debounced choice is due.
     fn supersede_automatic(&mut self) {
-        if self.automatic_preparation {
+        if let Some(source) = self.automatic_preparation.take() {
             self.preparation.cancel();
-            self.automatic_preparation = false;
+            match source {
+                AutomaticSwitch::Keyboard => self.keyboard_switcher.cancel_applying(),
+                AutomaticSwitch::App => self.app_switcher.cancel_applying(),
+            }
         }
     }
 
@@ -444,15 +449,21 @@ impl WindowsDesktopHost {
         if selection.model != self.settings.transcription.model
             || selection.language != self.settings.transcription.language
         {
+            if self.automatic_preparation == Some(AutomaticSwitch::App) {
+                self.app_switcher.cancel_applying();
+            }
             self.checking = false;
             self.preparation.start(selection, true);
-            self.automatic_preparation = true;
+            self.automatic_preparation = Some(AutomaticSwitch::Keyboard);
         } else {
             // The current model stays, but an older manual preparation must
             // not replace it.
+            self.keyboard_switcher.commit();
             self.checking = false;
+            if self.automatic_preparation.take() == Some(AutomaticSwitch::App) {
+                self.app_switcher.cancel_applying();
+            }
             self.preparation.cancel();
-            self.automatic_preparation = false;
         }
     }
 
@@ -497,9 +508,12 @@ impl WindowsDesktopHost {
             language: choice.language,
             ..self.settings.transcription_for_model(choice.model)
         };
+        if self.automatic_preparation == Some(AutomaticSwitch::Keyboard) {
+            self.keyboard_switcher.cancel_applying();
+        }
         self.checking = false;
         self.preparation.start(selection, true);
-        self.automatic_preparation = true;
+        self.automatic_preparation = Some(AutomaticSwitch::App);
     }
 
     fn model_ready(&self) -> bool {
@@ -764,7 +778,7 @@ impl WindowsDesktopHost {
         self.switch_with_app();
         let mut checked = false;
         if let Some(result) = self.preparation.poll() {
-            self.automatic_preparation = false;
+            let automatic = self.automatic_preparation.take();
             self.checking = false;
             let result = result.and_then(|selection| {
                 crate::transcription::models::validate(&selection).map_err(|e| e.to_string())?;
@@ -785,6 +799,11 @@ impl WindowsDesktopHost {
             });
             match result {
                 Ok(()) => {
+                    match automatic {
+                        Some(AutomaticSwitch::Keyboard) => self.keyboard_switcher.commit(),
+                        Some(AutomaticSwitch::App) => self.app_switcher.commit(),
+                        None => {}
+                    }
                     checked = true;
                     if self.status == ListenerStatus::Enabling && !self.model_ready() {
                         // One check per Enable: a check that finished without
@@ -793,6 +812,13 @@ impl WindowsDesktopHost {
                     }
                 }
                 Err(error) => {
+                    match automatic {
+                        Some(AutomaticSwitch::Keyboard) => {
+                            self.keyboard_switcher.fail(Instant::now())
+                        }
+                        Some(AutomaticSwitch::App) => self.app_switcher.fail(Instant::now()),
+                        None => {}
+                    }
                     // An Enable that stopped to check a model failed to reach
                     // listening; say so instead of Enabling… forever.
                     if self.listen_when_ready
