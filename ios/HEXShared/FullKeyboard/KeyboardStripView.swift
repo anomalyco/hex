@@ -18,7 +18,6 @@ final class KeyboardStripView: UIView {
             guard inSystemPlatter != oldValue else { return }
             for button in slotButtons { button.inSystemPlatter = inSystemPlatter }
             setNeedsLayout()
-            setNeedsDisplay()
         }
     }
     /// Each slot's frame in this view, from `KeyboardLayout.stripSlotFrames`; thirds of the
@@ -30,7 +29,6 @@ final class KeyboardStripView: UIView {
             guard textCenterY != oldValue else { return }
             for button in slotButtons { button.textCenterY = textCenterY }
             setNeedsLayout()
-            setNeedsDisplay()
         }
     }
     /// A suggestion's chip and the dividers' height (`KeyboardMetrics.stripChipHeight`).
@@ -39,7 +37,6 @@ final class KeyboardStripView: UIView {
             guard chipHeight != oldValue else { return }
             for button in slotButtons { button.chipHeight = chipHeight }
             setNeedsLayout()
-            setNeedsDisplay()
         }
     }
     /// The strip is Apple's bar (`KeyboardMetrics.appleBar`): a pending word gets Apple's bubble,
@@ -48,12 +45,12 @@ final class KeyboardStripView: UIView {
         didSet {
             guard appleBar != oldValue else { return }
             for button in slotButtons { button.fillsCell = appleBar }
-            setNeedsDisplay()
+            setNeedsLayout()
         }
     }
     /// The Hex key has a cell of its own at the strip's end (Apple's bar): a divider stands
     /// between it and the slot beside it, as between Apple's icon and its first cell.
-    var dividerBesideHex = false { didSet { if dividerBesideHex != oldValue { setNeedsDisplay() } } }
+    var dividerBesideHex = false { didSet { if dividerBesideHex != oldValue { setNeedsLayout() } } }
     /// How far the pills sit in from the strip's top and bottom (`KeyboardMetrics.stripInset`).
     var pillInset: CGFloat = 0.5 {
         didSet {
@@ -114,6 +111,8 @@ final class KeyboardStripView: UIView {
     /// (`KeyboardClipboardTracker`).
     private let pasteControl = StripChip()
     private let nextKeyboardChip = UIButton(type: .custom)
+    /// Between slots 0 and 1, slots 1 and 2, and beside the Hex key.
+    private let dividers: [CALayer] = [CALayer(), CALayer(), CALayer()]
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -127,6 +126,10 @@ final class KeyboardStripView: UIView {
         statusLabel.minimumScaleFactor = 0.8
         statusLabel.isHidden = true
         addSubview(statusLabel)
+        for divider in dividers {
+            divider.opacity = 0
+            layer.addSublayer(divider)
+        }
 
         var chip = UIButton.Configuration.plain()
         chip.image = UIImage(
@@ -190,6 +193,13 @@ final class KeyboardStripView: UIView {
 
     private static let pasteFont = UIFont.systemFont(ofSize: 17, weight: .regular)
 
+    /// While the recording bar covers the strip (and as it hands the strip back), changes just
+    /// show: the edge running across the bar is the motion, and words rolling behind it would
+    /// read as the old state coming back first.
+    var holdsStill = false
+
+    private var animates: Bool { window != nil && !holdsStill }
+
     /// `fullAccessHint`, while true, replaces everything else in the strip with what
     /// dictation needs (`FullAccessHintView`); `notice` does the same after it.
     func update(
@@ -232,16 +242,16 @@ final class KeyboardStripView: UIView {
             : String(localized: "Switches to the next keyboard, where iOS offers codes from Messages and Mail")
         // Words swap letter by letter (and leave the same way when a chip or status takes the
         // strip); the strip being shown for the first time just draws them.
-        let animated = window != nil
+        let animated = animates
         if showsHint || showsUndo || showsClipboard {
-            statusLabel.isHidden = true
+            show(statusLabel, false)
             slotButtons.forEach { $0.configure(with: nil, palette: palette, animated: animated) }
         } else if let statusText, suggestions.isEmpty {
             statusLabel.text = statusText
-            statusLabel.isHidden = false
-            slotButtons.forEach { $0.configure(with: nil, palette: palette, animated: false) }
+            show(statusLabel, true)
+            slotButtons.forEach { $0.configure(with: nil, palette: palette, animated: animated) }
         } else {
-            statusLabel.isHidden = true
+            show(statusLabel, false)
             let slots = Self.slots(for: suggestions)
             for (idx, button) in slotButtons.enumerated() {
                 let item = slots.firstIndex(of: idx).map { suggestions[$0] }
@@ -249,31 +259,43 @@ final class KeyboardStripView: UIView {
             }
         }
         setNeedsLayout()
-        setNeedsDisplay()
+        updateDividers(animated: animated)
     }
 
-    /// Shows or hides a chip, fading it over Apple's 0.2 s word swap (at once with Reduce Motion).
+    /// Shows or hides a chip in place, on the same frame the words roll out or in: it grows
+    /// from 0.96 as it fades in on the settle spring and goes back to 0.96 a fifth quicker. At
+    /// first paint it just shows; with Reduce Motion it only fades.
     private func show(_ view: UIView, _ shown: Bool) {
-        let visible = !view.isHidden && view.alpha > 0
-        guard shown != visible || (shown && view.alpha < 1) else { return }
-        guard window != nil, !UIAccessibility.isReduceMotionEnabled else {
+        let target: CGFloat = shown ? 1 : 0
+        guard view.isHidden == shown || view.alpha != target else { return }
+        guard animates else {
             view.layer.removeAllAnimations()
-            view.alpha = 1
+            view.alpha = target
+            view.transform = .identity
             view.isHidden = !shown
             return
         }
-        if shown {
-            if view.isHidden { view.alpha = 0 }
+        let moves = !StripMotion.reduced
+        let small = CGAffineTransform(scaleX: Self.chipScale, y: Self.chipScale)
+        let fresh = shown && view.isHidden
+        if fresh {
+            view.alpha = 0
+            view.transform = moves ? small : .identity
             view.isHidden = false
         }
-        UIView.animate(withDuration: 0.2, delay: 0, options: [.beginFromCurrentState, .allowUserInteraction, .curveEaseOut]) {
-            view.alpha = shown ? 1 : 0
-        } completion: { _ in
+        let duration = moves ? (shown ? StripMotion.settle : StripMotion.settleExit) : StripMotion.reducedFade
+        StripMotion.animate(duration, fresh: fresh, {
+            view.alpha = target
+            view.transform = shown || !moves ? .identity : small
+        }, completion: { _ in
             guard view.alpha == 0 else { return }
             view.isHidden = true
-            view.alpha = 1
-        }
+            view.transform = .identity
+        })
     }
+
+    /// How small a chip is as it arrives and leaves (Kit's motion: in-place enters from 0.96).
+    private static let chipScale: CGFloat = 0.96
 
     /// Which slot shows each suggestion: in order, except a lone emoji, swiped word or reading
     /// of one, which takes the centre. A revert keeps the left slot.
@@ -361,7 +383,7 @@ final class KeyboardStripView: UIView {
         for (item, slot) in Self.slots(for: currentSuggestions).enumerated() {
             slotButtons[slot].configure(with: currentSuggestions[item], palette: palette, animated: false)
         }
-        setNeedsDisplay()
+        updateDividers(animated: false)
     }
 
     private var contentCenterY: CGFloat {
@@ -371,15 +393,15 @@ final class KeyboardStripView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
         let midY = contentCenterY
-        statusLabel.frame = CGRect(x: 16, y: max(0, midY - 12), width: max(0, bounds.width - 32), height: 24)
+        place(statusLabel, CGRect(x: 16, y: max(0, midY - 12), width: max(0, bounds.width - 32), height: 24))
         let chipH = min(34, max(18, min(bounds.height - 2 * pillInset, chipHeight ?? .infinity)))
         let chipSize = undoChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
-        undoChip.frame = CGRect(
+        place(undoChip, CGRect(
             x: (bounds.width - chipSize.width) / 2,
             y: max(0, midY - chipH / 2),
             width: chipSize.width,
             height: chipH
-        )
+        ))
         let pasteW = pasteControl.sizeThatFits(CGSize(width: bounds.width, height: chipH)).width
         let nextSize = nextKeyboardChip.sizeThatFits(CGSize(width: bounds.width, height: chipH))
         // Laid out for what is shown, not what is still fading out.
@@ -392,27 +414,34 @@ final class KeyboardStripView: UIView {
         let midX = barMidX ?? bounds.width / 2
         let startX = max(0, min(bounds.width - total, midX - total / 2))
         let chipY = max(0, midY - chipH / 2)
-        pasteControl.frame = CGRect(x: startX, y: chipY, width: pasteW, height: chipH)
-        nextKeyboardChip.frame = CGRect(
+        place(pasteControl, CGRect(x: startX, y: chipY, width: pasteW, height: chipH))
+        place(nextKeyboardChip, CGRect(
             x: pair ? startX + pasteW + gap : startX,
             y: chipY,
             width: nextSize.width,
             height: chipH
-        )
+        ))
         pasteControl.touchArea = pasteShown && !nextShown ? barTouchFrame ?? bounds : nil
         // The hint's two lines and chip centre on the words' line, as everything in the strip.
         let hintHalf = min(midY, bounds.height - midY)
         let hintY = midY - hintHalf
         let hintFrame = CGRect(x: 12, y: hintY, width: max(0, bounds.width - 24), height: 2 * hintHalf)
-        fullAccessHintView?.frame = hintFrame
+        if let fullAccessHintView { place(fullAccessHintView, hintFrame) }
         fullAccessHintView?.chipHeight = chipH
-        noticeView?.frame = hintFrame
+        if let noticeView { place(noticeView, hintFrame) }
         noticeView?.chipHeight = chipH
         let slots = currentSlotFrames
         for (idx, button) in slotButtons.enumerated() {
             button.inSystemPlatter = inSystemPlatter
             button.frame = slots[idx]
         }
+        updateDividers(animated: false)
+    }
+
+    /// Bounds and centre, not a frame: the chips may be mid-scale as they come and go.
+    private func place(_ view: UIView, _ rect: CGRect) {
+        view.bounds = CGRect(origin: .zero, size: rect.size)
+        view.center = CGPoint(x: rect.midX, y: rect.midY)
     }
 
     override func point(inside point: CGPoint, with event: UIEvent?) -> Bool {
@@ -426,32 +455,73 @@ final class KeyboardStripView: UIView {
         return (0..<3).map { CGRect(x: CGFloat($0) * slotW, y: 0, width: slotW, height: bounds.height) }
     }
 
-    override func draw(_ rect: CGRect) {
-        guard !showsUndo, !showsClipboard, !showsFullAccessHint, notice == nil, statusLabel.isHidden, bounds.width > 60 else { return }
-        // A chip sits inside its slot, so the dividers stay beside it, but for the one beside a
-        // revert, which Apple's bar hides.
+    /// Apple's dividers: 1 pt wide, ending on the slot boundary, centred on the words' line, no
+    /// taller than a chip (24 pt where there's room), and only between two filled slots (nothing
+    /// to show, no dividers, as Apple's bar in a field it offers nothing for). Apple's bar hides
+    /// both beside its bubble, and the one beside a revert. The last stands beside the Hex key.
+    private var dividerFrames: [CGRect?] {
+        let none: [CGRect?] = [nil, nil, nil]
+        guard !showsUndo, !showsClipboard, !showsFullAccessHint, notice == nil, statusText == nil || !currentSuggestions.isEmpty,
+              bounds.width > 60 else { return none }
         let reverting = currentSuggestions.first?.kind == .revert
-
-        // Apple's dividers: 1 pt wide, ending on the slot boundary, centred on the words' line, and
-        // no taller than a chip (24 pt where there's room).
         let lineH: CGFloat = min(24, bounds.height - 2, chipHeight ?? .infinity, 2 * contentCenterY)
         let y = contentCenterY - lineH / 2
-        palette.stripDivider.setFill()
-        // Only between two filled slots: nothing to show, no dividers (as Apple's bar in a
-        // field it offers nothing for).
         let slots = Self.slots(for: currentSuggestions)
         let filled = Set(slots)
-        // Apple's bar hides both dividers beside its bubble (a pending autocorrection or a revert).
         let bubbled: Set<Int> = appleBar ? Set(zip(currentSuggestions, slots).filter { $0.0.willAutoReplace || $0.0.kind == .revert }.map(\.1)) : []
+        var frames = none
         for (index, slot) in currentSlotFrames.prefix(2).enumerated()
         where slot.maxX < bounds.width - 1 && filled.contains(index) && filled.contains(index + 1) && !(reverting && index == 0)
             && !bubbled.contains(index) && !bubbled.contains(index + 1) {
-            UIRectFill(CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH))
+            frames[index] = CGRect(x: slot.maxX - 1, y: y, width: 1, height: lineH)
         }
         let besideHex = hexOnLeading ? 0 : 2
         if dividerBesideHex, filled.contains(besideHex), !bubbled.contains(besideHex) {
-            UIRectFill(CGRect(x: hexOnLeading ? 0 : bounds.width - 1, y: y, width: 1, height: lineH))
+            frames[2] = CGRect(x: hexOnLeading ? 0 : bounds.width - 1, y: y, width: 1, height: lineH)
         }
+        return frames
+    }
+
+    /// Each divider fades in and out with the words beside it (at once at first paint).
+    private func updateDividers(animated: Bool) {
+        let frames = dividerFrames
+        let fades = animated && animates
+        for (layer, frame) in zip(dividers, frames) {
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            if let frame { layer.frame = frame }
+            layer.backgroundColor = palette.stripDivider.cgColor
+            CATransaction.commit()
+            let target: Float = frame == nil ? 0 : 1
+            guard layer.opacity != target else { continue }
+            if fades {
+                let fade = CABasicAnimation(keyPath: "opacity")
+                fade.fromValue = (layer.presentation() ?? layer).opacity
+                fade.toValue = target
+                fade.duration = StripMotion.reduced ? StripMotion.reducedFade : (target == 1 ? SlotButton.letterIn : SlotButton.letterOut)
+                fade.timingFunction = CAMediaTimingFunction(name: .easeOut)
+                layer.add(fade, forKey: "opacity")
+            }
+            CATransaction.begin()
+            CATransaction.setDisableActions(true)
+            layer.opacity = target
+            CATransaction.commit()
+        }
+    }
+
+    /// What the bar shows this frame, for `--motion-trace`.
+    func debugMotionSample() -> [String: Double] {
+        func alpha(_ view: UIView) -> Double { view.isHidden ? 0 : Double((view.layer.presentation() ?? view.layer).opacity) }
+        var s: [String: Double] = [
+            "undo": alpha(undoChip),
+            "undoScale": Double((undoChip.layer.presentation() ?? undoChip.layer).transform.m11),
+        ]
+        for (i, button) in slotButtons.enumerated() {
+            let (progress, x) = button.debugSample()
+            s["slot\(i)"] = progress
+            s["slot\(i)X"] = x
+        }
+        return s
     }
 
     @objc private func handleUndo() {
@@ -529,27 +599,38 @@ final class KeyboardStripView: UIView {
         }
     }
 
-    /// One suggestion slot. A word that changes swaps letter by letter, as Apple's bar does
-    /// (iOS 27.2, recorded at 60 fps): the letters both words share stay, the old word's other
-    /// letters fade from its end and the new word's from its start, each in 0.1 s, staggered
-    /// over 0.2 s. The capsule and dividers change at once. Reduce Motion swaps at once.
+    /// One suggestion slot. A word that changes rolls: the letters both words start with stay
+    /// and slide with the word as it recentres (width leads), the old word's other letters rise
+    /// and fade from its end, and the new word's rise in from below from its start, staggered.
+    /// A word replaced outright leaves where it stood as the new one rolls in, on the same frame.
+    /// A new word mid-roll takes over from wherever every letter is. The bubble fades in and out
+    /// (a press lights it at once). Reduce Motion crossfades whole words in place.
     private final class SlotButton: UIControl {
         var inSystemPlatter = true { didSet { if inSystemPlatter != oldValue { setNeedsDisplay() } } }
         var pillInset: CGFloat = 0.5 { didSet { if pillInset != oldValue { setNeedsDisplay() } } }
-        var textCenterY: CGFloat? { didSet { if textCenterY != oldValue { setNeedsDisplay() } } }
+        var textCenterY: CGFloat? { didSet { if textCenterY != oldValue { settle() } } }
         var chipHeight: CGFloat? { didSet { if chipHeight != oldValue { setNeedsDisplay() } } }
         /// Apple's bar: the bubble fills the slot across, from `pillInset` down `chipHeight`.
         var fillsCell = false { didSet { if fillsCell != oldValue { setNeedsDisplay() } } }
         private var suggestion: KeyboardSuggestion?
         private var palette = FullKeyboardPalette(isDark: false)
-        /// The word leaving while its letters fade, and when the swap began.
-        private var outgoing: KeyboardSuggestion?
-        private var swapStart: CFTimeInterval = 0
+        private var glyphs: [Glyph] = []
+        private var wordX = Glide.at(0)
+        private var pill = Tween.at(0)
+        /// Where the bubble was last drawn, so it can fade out after its word has gone.
+        private var lastPill: (rect: CGRect, arrowAt: CGPoint?)?
+        private var settledSize: CGSize = .zero
         private var displayLink: CADisplayLink?
 
-        static let letterFade: CFTimeInterval = 0.1
-        static let swapLength: CFTimeInterval = 0.2
+        /// Letters arriving and leaving (a fifth quicker), the most one letter waits on the one
+        /// before, how far they roll, and the bubble's fades.
+        static let letterIn: CFTimeInterval = 0.25
+        static let letterOut: CFTimeInterval = 0.2
         static let maxStagger: CFTimeInterval = 0.025
+        static let staggerSpan: CFTimeInterval = 0.08
+        static let rise: CGFloat = 6
+        static let pillIn: CFTimeInterval = 0.15
+        static let pillOut: CFTimeInterval = 0.12
 
         override init(frame: CGRect) {
             super.init(frame: frame)
@@ -567,7 +648,10 @@ final class KeyboardStripView: UIView {
 
         override var isHighlighted: Bool { didSet { if isHighlighted != oldValue { setNeedsDisplay() } } }
 
-        /// nil empties the slot (its word fades out when animated).
+        /// Scene time, stretched by `--motion-slow`.
+        private var clock: CFTimeInterval { CACurrentMediaTime() / MotionDebug.slow }
+
+        /// nil empties the slot (its word rolls out when animated).
         func configure(with suggestion: KeyboardSuggestion?, palette: FullKeyboardPalette, animated: Bool) {
             let old = self.suggestion
             self.suggestion = suggestion
@@ -576,21 +660,86 @@ final class KeyboardStripView: UIView {
             isUserInteractionEnabled = suggestion != nil
             accessibilityLabel = suggestion?.displayText
             accessibilityHint = suggestion?.kind == .revert ? String(localized: "Undoes the autocorrection") : nil
-            if old?.displayText != suggestion?.displayText {
-                if animated, window != nil, !UIAccessibility.isReduceMotionEnabled {
-                    outgoing = old
-                    swapStart = CACurrentMediaTime()
-                    startTicking()
-                } else {
-                    endSwap()
+            defer { setNeedsDisplay() }
+            guard animated, window != nil else { return settle() }
+            let t = clock
+            let reduced = StripMotion.reduced
+            let bubbled = suggestion.map(Self.bubbled) ?? false
+            if bubbled != (old.map(Self.bubbled) ?? false) || (suggestion == nil && old != nil) {
+                pill.retarget(to: bubbled ? 1 : 0, at: t, length: bubbled ? Self.pillIn : Self.pillOut)
+            }
+            guard old?.displayText != suggestion?.displayText || old?.kind == .emoji && suggestion?.kind != .emoji else { return startTicking() }
+            let target = suggestion.map(layout)
+            let current = glyphs.filter { !$0.leaving }
+            // Letters both words start with stay, unless a bubble came or went (its ink changes).
+            var shared = 0
+            if !reduced, let target, target.box == nil, current.allSatisfy({ $0.box == nil }), current.first?.font == target.font {
+                let new = Array(target.text).map(String.init)
+                while shared < min(current.count, new.count), current[shared].text == new[shared] { shared += 1 }
+            }
+            let x = wordX.value(t)
+            if shared == 0 {
+                // Replaced outright: everything shown leaves where it stands.
+                for i in glyphs.indices {
+                    if glyphs[i].fixedX == nil { glyphs[i].fixedX = x + glyphs[i].offset }
+                }
+                wordX = .at(target?.origin.x ?? x)
+            } else if let target {
+                wordX.retarget(to: target.origin.x, at: t)
+            }
+            let leavingIDs = Set(current.dropFirst(shared).map(\.id))
+            let leaveCount = leavingIDs.count
+            let leaveStagger = reduced ? 0 : Self.stagger(leaveCount)
+            var order = 0
+            for i in glyphs.indices.reversed() where leavingIDs.contains(glyphs[i].id) {
+                glyphs[i].leaving = true
+                glyphs[i].tween.retarget(
+                    to: 0, y: reduced ? 0 : -Self.rise, at: t,
+                    delay: Double(order) * leaveStagger, length: reduced ? StripMotion.reducedFade : Self.letterOut
+                )
+                order += 1
+            }
+            if let target {
+                let entering = target.glyphs.dropFirst(shared)
+                let stagger = reduced ? 0 : Self.stagger(entering.count)
+                for (n, var glyph) in entering.enumerated() {
+                    glyph.tween = Tween(
+                        a0: 0, a1: 1, y0: reduced ? 0 : Self.rise, y1: 0,
+                        start: t + Double(n) * stagger, length: reduced ? StripMotion.reducedFade : Self.letterIn
+                    )
+                    glyphs.append(glyph)
                 }
             }
+            startTicking()
+        }
+
+        private static func bubbled(_ suggestion: KeyboardSuggestion) -> Bool {
+            suggestion.willAutoReplace || suggestion.kind == .revert
+        }
+
+        private static func stagger(_ count: Int) -> CFTimeInterval {
+            count > 1 ? min(maxStagger, staggerSpan / Double(count - 1)) : 0
+        }
+
+        /// Shows the word as it is, with nothing in flight (first paint, layout, Reduce Motion off-window).
+        private func settle() {
+            let target = suggestion.map(layout)
+            glyphs = target?.glyphs ?? []
+            wordX = .at(target?.origin.x ?? 0)
+            pill = .at(suggestion.map(Self.bubbled) == true ? 1 : 0)
+            settledSize = bounds.size
+            stopTicking()
             setNeedsDisplay()
+        }
+
+        override func layoutSubviews() {
+            super.layoutSubviews()
+            if bounds.size != settledSize { settle() }
         }
 
         override func didMoveToWindow() {
             super.didMoveToWindow()
-            if window == nil { endSwap() }
+            if window == nil { settle() }
         }
 
         private func startTicking() {
@@ -600,154 +749,226 @@ final class KeyboardStripView: UIView {
             displayLink = link
         }
 
-        private func endSwap() {
-            outgoing = nil
+        private func stopTicking() {
             displayLink?.invalidate()
             displayLink = nil
         }
 
         @objc private func tick() {
-            if CACurrentMediaTime() - swapStart >= Self.swapLength { endSwap() }
+            let t = clock
+            glyphs.removeAll { $0.leaving && $0.tween.done(t) }
+            if glyphs.allSatisfy({ $0.tween.done(t) }), wordX.settled(t), pill.done(t) {
+                wordX = .at(wordX.target)
+                stopTicking()
+            }
             setNeedsDisplay()
         }
 
         @objc private func redraw() { setNeedsDisplay() }
 
-        private struct Word {
-            let text: String
-            let attributes: [NSAttributedString.Key: Any]
-            let origin: CGPoint
-            /// Drawn in a box with a truncating tail (too long for the slot): never swapped by letter.
-            let truncatedRect: CGRect?
+        /// For `--motion-trace`: how settled the slot is (1 at rest) and where its word starts.
+        func debugSample() -> (Double, Double) {
+            let t = clock
+            let busy = glyphs.contains { !$0.tween.done(t) } || !wordX.settled(t) || !pill.done(t)
+            let x = suggestion == nil ? -1 : Double(wordX.value(t) + frame.minX)
+            return (busy ? 0 : 1, x)
         }
 
-        private func layout(_ suggestion: KeyboardSuggestion, ink: UIColor) -> Word {
+        private struct Glyph {
+            let id = UUID()
+            let text: String
+            let font: UIFont
+            /// From the word's start (riding with it as it slides).
+            let offset: CGFloat
+            let y: CGFloat
+            /// Too long for the slot: the whole word in a box with a truncating tail.
+            let box: CGSize?
+            /// A replaced word's letters stay where they were as they leave.
+            var fixedX: CGFloat?
+            var leaving = false
+            var tween = Tween.at(1)
+        }
+
+        private struct Word {
+            let text: String
+            let font: UIFont
+            let origin: CGPoint
+            let width: CGFloat
+            let box: CGSize?
+            let glyphs: [Glyph]
+        }
+
+        private func layout(_ suggestion: KeyboardSuggestion) -> Word {
             let midY = textCenterY ?? bounds.height * 0.5
             // Apple's words are all SF 17 pt regular, the one in the capsule included.
             let font = UIFont.systemFont(ofSize: suggestion.kind == .emoji ? 22 : 17, weight: .regular)
-            let attributes: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: ink]
             // The word centres in the slot; a revert's with its arrow after it.
             let arrowRoom = suggestion.kind == .revert ? Self.revertArrowSize + Self.revertArrowGap : 0
             let textMidX = (bounds.width - arrowRoom) / 2
             let maxTextW = max(20, bounds.width - 12 - arrowRoom)
             let text = suggestion.displayText
-            let size = (text as NSString).size(withAttributes: attributes)
+            let size = (text as NSString).size(withAttributes: [.font: font])
             guard size.width > maxTextW else {
                 let origin = CGPoint(x: textMidX - size.width / 2, y: midY - size.height / 2)
-                return Word(text: text, attributes: attributes, origin: origin, truncatedRect: nil)
-            }
-            let style = NSMutableParagraphStyle()
-            style.lineBreakMode = .byTruncatingTail
-            style.alignment = .center
-            let small: [NSAttributedString.Key: Any] = [
-                .font: UIFont.systemFont(ofSize: 15, weight: .regular), .foregroundColor: ink, .paragraphStyle: style,
-            ]
-            let smallSize = (text as NSString).size(withAttributes: small)
-            let width = min(maxTextW, smallSize.width)
-            let box = CGRect(x: textMidX - width / 2, y: midY - smallSize.height / 2, width: width, height: smallSize.height)
-            return Word(text: text, attributes: small, origin: box.origin, truncatedRect: box)
-        }
-
-        /// Draws the word with each letter's opacity from alpha (1 is the ink's own).
-        private func draw(_ word: Word, alpha: (Int) -> CGFloat) {
-            let ink = word.attributes[.foregroundColor] as? UIColor ?? .label
-            if let box = word.truncatedRect {
-                var attributes = word.attributes
-                attributes[.foregroundColor] = ink.withAlphaComponent(ink.cgColor.alpha * max(0, alpha(0)))
-                (word.text as NSString).draw(in: box, withAttributes: attributes)
-                return
-            }
-            let string = NSMutableAttributedString(string: word.text, attributes: word.attributes)
-            var offset = 0
-            for (index, character) in word.text.enumerated() {
-                let length = String(character).utf16.count
-                let a = alpha(index)
-                if a < 1 {
-                    let faded = ink.withAlphaComponent(ink.cgColor.alpha * max(0, a))
-                    string.addAttribute(.foregroundColor, value: faded, range: NSRange(location: offset, length: length))
+                var glyphs: [Glyph] = []
+                var prefix = ""
+                for character in text {
+                    let offset = (prefix as NSString).size(withAttributes: [.font: font]).width
+                    glyphs.append(Glyph(text: String(character), font: font, offset: offset, y: origin.y, box: nil))
+                    prefix.append(character)
                 }
-                offset += length
+                return Word(text: text, font: font, origin: origin, width: size.width, box: nil, glyphs: glyphs)
             }
-            string.draw(at: word.origin)
-        }
-
-        private static func progress(_ t: CFTimeInterval, start: CFTimeInterval) -> CGFloat {
-            let x = min(1, max(0, (t - start) / letterFade))
-            return CGFloat(x * x * (3 - 2 * x))
+            let small = UIFont.systemFont(ofSize: 15, weight: .regular)
+            let smallSize = (text as NSString).size(withAttributes: [.font: small])
+            let width = min(maxTextW, smallSize.width)
+            let origin = CGPoint(x: textMidX - width / 2, y: midY - smallSize.height / 2)
+            let box = CGSize(width: width, height: smallSize.height)
+            let glyph = Glyph(text: text, font: small, offset: 0, y: origin.y, box: box)
+            return Word(text: text, font: small, origin: origin, width: width, box: box, glyphs: [glyph])
         }
 
         static let chipPadding: CGFloat = 12
         static let revertArrowSize: CGFloat = 13
         static let revertArrowGap: CGFloat = 5
 
-        /// Apple's revert bubble's undo arrow, after the word.
-        private func drawRevertArrow(after word: Word, ink: UIColor) {
-            let config = UIImage.SymbolConfiguration(pointSize: Self.revertArrowSize, weight: .medium)
-            guard let arrow = UIImage(systemName: "arrow.uturn.backward", withConfiguration: config)?
-                .withTintColor(ink, renderingMode: .alwaysOriginal) else { return }
-            let textWidth = word.truncatedRect?.width ?? (word.text as NSString).size(withAttributes: word.attributes).width
-            let x = word.origin.x + textWidth + Self.revertArrowGap
-            arrow.draw(at: CGPoint(x: x, y: (textCenterY ?? bounds.height * 0.5) - arrow.size.height / 2))
-        }
-
         override func draw(_ rect: CGRect) {
-            let pilled = suggestion != nil && (isHighlighted || suggestion?.willAutoReplace == true || suggestion?.kind == .revert)
-            let ink = pilled ? palette.stripPillText : palette.stripText
-            let incoming = suggestion.map { layout($0, ink: ink) }
-            if pilled, let incoming {
+            let t = clock
+            let bubble = isHighlighted && suggestion != nil ? 1 : pill.value(t).alpha
+            let ink = Self.mix(palette.stripText, palette.stripPillText, bubble)
+            let x = wordX.value(t)
+            if let suggestion, Self.bubbled(suggestion) || isHighlighted {
                 // A chip around the word (and a revert's arrow), even above and below the words'
                 // line: Apple's slot-wide 38 pt pill reaches into the band iOS draws over a
                 // third-party keyboard, and cut short there it read as squashed.
-                let textW = incoming.truncatedRect?.width ?? (incoming.text as NSString).size(withAttributes: incoming.attributes).width
-                let arrowRoom = suggestion?.kind == .revert ? Self.revertArrowSize + Self.revertArrowGap : 0
+                let word = layout(suggestion)
+                let arrowRoom = suggestion.kind == .revert ? Self.revertArrowSize + Self.revertArrowGap : 0
                 let chipH = chipHeight ?? max(22, bounds.height - 2 * pillInset)
-                let chipW = min(bounds.width, textW + arrowRoom + 2 * Self.chipPadding)
+                let chipW = min(bounds.width, word.width + arrowRoom + 2 * Self.chipPadding)
                 let midY = textCenterY ?? bounds.height * 0.5
                 // Apple's bubble (iOS 26.5 and 27.2): the whole cell across, a capsule on the line.
                 let chip = fillsCell ? CGRect(x: 0, y: midY - chipH / 2, width: bounds.width, height: chipH) : CGRect(
-                    x: max(0, min(bounds.width - chipW, incoming.origin.x - (chipW - textW - arrowRoom) / 2)),
+                    x: max(0, min(bounds.width - chipW, x - (chipW - word.width - arrowRoom) / 2)),
                     y: midY - chipH / 2,
                     width: chipW,
                     height: chipH
                 )
-                (isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill).setFill()
-                UIBezierPath(roundedRect: chip, cornerRadius: chipH / 2).fill()
+                let arrowAt = suggestion.kind == .revert ? CGPoint(x: x + word.width + Self.revertArrowGap, y: midY) : nil
+                lastPill = (chip, arrowAt)
             }
-            if let incoming, suggestion?.kind == .revert { drawRevertArrow(after: incoming, ink: ink) }
-            guard var leaving = outgoing.map({ layout($0, ink: ink) }) else {
-                if let incoming { draw(incoming) { _ in 1 } }
-                return
+            if bubble > 0.001, let (chip, arrowAt) = lastPill {
+                let fill = isHighlighted ? palette.stripPillPressedFill : palette.stripPillFill
+                fill.withAlphaComponent(fill.cgColor.alpha * bubble).setFill()
+                UIBezierPath(roundedRect: chip, cornerRadius: chip.height / 2).fill()
+                if let arrowAt { drawRevertArrow(at: arrowAt, ink: ink.withAlphaComponent(ink.cgColor.alpha * bubble)) }
             }
-            let t = CACurrentMediaTime() - swapStart
-            let oldLetters = Array(leaving.text)
-            let newLetters = Array(incoming?.text ?? "")
-            let byLetter = leaving.truncatedRect == nil && incoming?.truncatedRect == nil
-            // Letters both words start with stay put (drawn once, in the new word).
-            var shared = 0
-            if byLetter, incoming != nil {
-                while shared < min(oldLetters.count, newLetters.count), oldLetters[shared] == newLetters[shared] {
-                    shared += 1
-                }
-            }
-            if shared > 0, let incoming {
-                // The old ending continues from the shared letters, so it never jumps aside.
-                leaving = Word(text: leaving.text, attributes: leaving.attributes, origin: incoming.origin, truncatedRect: nil)
-            }
-            let changing = max(oldLetters.count, newLetters.count) - shared
-            let stagger = changing > 1 ? min(Self.maxStagger, (Self.swapLength - Self.letterFade) / Double(changing - 1)) : 0
-            draw(leaving) { index in
-                guard index >= shared else { return 0 }
-                guard byLetter else { return 1 - Self.progress(t, start: 0) }
-                return 1 - Self.progress(t, start: Double(oldLetters.count - 1 - index) * stagger)
-            }
-            if let incoming {
-                draw(incoming) { index in
-                    guard index >= shared else { return 1 }
-                    guard byLetter else { return Self.progress(t, start: 0) }
-                    return Self.progress(t, start: Double(index - shared) * stagger)
+            for glyph in glyphs {
+                let (a, dy) = glyph.tween.value(t)
+                guard a > 0.001 else { continue }
+                let attributes: [NSAttributedString.Key: Any] = [
+                    .font: glyph.font, .foregroundColor: ink.withAlphaComponent(ink.cgColor.alpha * a),
+                ]
+                let gx = glyph.fixedX ?? (x + glyph.offset)
+                if let box = glyph.box {
+                    let style = NSMutableParagraphStyle()
+                    style.lineBreakMode = .byTruncatingTail
+                    style.alignment = .center
+                    var boxed = attributes
+                    boxed[.paragraphStyle] = style
+                    (glyph.text as NSString).draw(in: CGRect(x: gx, y: glyph.y + dy, width: box.width, height: box.height), withAttributes: boxed)
+                } else {
+                    (glyph.text as NSString).draw(at: CGPoint(x: gx, y: glyph.y + dy), withAttributes: attributes)
                 }
             }
         }
+
+        /// Apple's revert bubble's undo arrow, after the word.
+        private func drawRevertArrow(at point: CGPoint, ink: UIColor) {
+            let config = UIImage.SymbolConfiguration(pointSize: Self.revertArrowSize, weight: .medium)
+            guard let arrow = UIImage(systemName: "arrow.uturn.backward", withConfiguration: config)?
+                .withTintColor(ink, renderingMode: .alwaysOriginal) else { return }
+            arrow.draw(at: CGPoint(x: point.x, y: point.y - arrow.size.height / 2))
+        }
+
+        private static func mix(_ a: UIColor, _ b: UIColor, _ f: CGFloat) -> UIColor {
+            if f <= 0 { return a }
+            if f >= 1 { return b }
+            var (r1, g1, b1, a1): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+            var (r2, g2, b2, a2): (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0)
+            a.getRed(&r1, green: &g1, blue: &b1, alpha: &a1)
+            b.getRed(&r2, green: &g2, blue: &b2, alpha: &a2)
+            return UIColor(red: r1 + (r2 - r1) * f, green: g1 + (g2 - g1) * f, blue: b1 + (b2 - b1) * f, alpha: a1 + (a2 - a1) * f)
+        }
+    }
+}
+
+/// A zero-bounce spring's curve (Kit's motion tokens), from one value to another, that can start
+/// late and be retargeted from wherever it is.
+private struct Tween {
+    var a0: CGFloat
+    var a1: CGFloat
+    var y0: CGFloat = 0
+    var y1: CGFloat = 0
+    var start: CFTimeInterval = 0
+    var length: CFTimeInterval = 0
+
+    static func at(_ alpha: CGFloat) -> Tween { Tween(a0: alpha, a1: alpha) }
+
+    private static let tail = 1 - (1 + 2 * CGFloat.pi) * exp(-2 * CGFloat.pi)
+
+    private func progress(_ t: CFTimeInterval) -> CGFloat {
+        guard length > 0 else { return 1 }
+        let x = CGFloat((t - start) / length)
+        if x <= 0 { return 0 }
+        if x >= 1 { return 1 }
+        let w = 2 * CGFloat.pi * x
+        return (1 - (1 + w) * exp(-w)) / Self.tail
+    }
+
+    func value(_ t: CFTimeInterval) -> (alpha: CGFloat, y: CGFloat) {
+        let p = progress(t)
+        return (a0 + (a1 - a0) * p, y0 + (y1 - y0) * p)
+    }
+
+    func done(_ t: CFTimeInterval) -> Bool { t >= start + length }
+
+    mutating func retarget(to alpha: CGFloat, y: CGFloat = 0, at t: CFTimeInterval, delay: CFTimeInterval = 0, length: CFTimeInterval) {
+        let now = value(t)
+        self = Tween(a0: now.alpha, a1: alpha, y0: now.y, y1: y, start: t + delay, length: length)
+    }
+}
+
+/// A critically damped spring on one coordinate (settle, 0.3 s) that keeps its velocity when
+/// it is sent somewhere new.
+private struct Glide {
+    var target: CGFloat
+    var offset: CGFloat = 0
+    var velocity0: CGFloat = 0
+    var start: CFTimeInterval = 0
+
+    private static let omega = 2 * CGFloat.pi / CGFloat(StripMotion.settle)
+
+    static func at(_ x: CGFloat) -> Glide { Glide(target: x) }
+
+    func value(_ t: CFTimeInterval) -> CGFloat {
+        let s = CGFloat(max(0, t - start))
+        let w = Self.omega
+        return target + (offset + (velocity0 + w * offset) * s) * exp(-w * s)
+    }
+
+    func velocity(_ t: CFTimeInterval) -> CGFloat {
+        let s = CGFloat(max(0, t - start))
+        let w = Self.omega
+        let b = velocity0 + w * offset
+        return (b - w * (offset + b * s)) * exp(-w * s)
+    }
+
+    func settled(_ t: CFTimeInterval) -> Bool { abs(value(t) - target) < 0.05 && abs(velocity(t)) < 1 }
+
+    mutating func retarget(to x: CGFloat, at t: CFTimeInterval) {
+        let p = value(t)
+        let v = velocity(t)
+        self = Glide(target: x, offset: p - x, velocity0: v, start: t)
     }
 }
 

@@ -74,7 +74,6 @@ struct FullKeyboardPalette: Equatable {
     var popupShadow: UIColor { UIColor(white: 0, alpha: isDark ? 0.42 : 0.18) }
 
     var chipFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.11) : UIColor(white: 0, alpha: 0.065) }
-    var wellFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.055) : UIColor(white: 0, alpha: 0.045) }
     var separator: UIColor { isDark ? UIColor(white: 1, alpha: 0.12) : UIColor(white: 0, alpha: 0.10) }
     var selectFill: UIColor { isDark ? UIColor(white: 1, alpha: 0.18) : UIColor(white: 0, alpha: 0.075) }
     var selectText: UIColor { textBase }

@@ -13,6 +13,8 @@ import UIKit
 /// footprint and latency (`EMOJI_PROBE` lines) for `simctl launch --console`.
 struct FullKeyboardSnapshotStage: View {
     let scene: String
+    /// The `sequence` scene's dictation, once it lands in the field.
+    @State private var landed: String?
 
     static var layout: KeyboardLanguage {
         argument(after: "--keyboard-layout").flatMap(KeyboardLanguage.init(rawValue:))
@@ -224,7 +226,7 @@ struct FullKeyboardSnapshotStage: View {
         let backdrop = FullKeyboardPalette(isDark: darkApp || darkField).backdrop
         VStack(spacing: 0) {
             Spacer()
-            Text(draft)
+            Text(landed ?? draft)
                 .font(.system(size: 15))
                 .foregroundStyle(ink)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -245,6 +247,9 @@ struct FullKeyboardSnapshotStage: View {
         }
         .background(canvas.ignoresSafeArea())
         .preferredColorScheme(darkApp ? .dark : .light)
+        .onReceive(NotificationCenter.default.publisher(for: MotionTrace.landed)) { note in
+            landed = (landed ?? draft) + ((note.object as? String) ?? "")
+        }
     }
 }
 
@@ -439,6 +444,87 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                     }
                 }
                 cycle(now)
+            case "strip-sequence":
+                // The bar's own transitions, set on the strip directly: words
+                // appearing, changing and leaving, an autocorrection's bubble, an emoji, a revert,
+                // Undo dictation in and out, and fast typing retargeting a word mid-swap.
+                let slow = MotionDebug.slow
+                if slow > 1 { view.window?.layer.speed = Float(1 / slow) }
+                if MotionDebug.tracing { MotionTrace.shared.start(view) }
+                func word(_ text: String, _ kind: KeyboardSuggestion.Kind) -> KeyboardSuggestion {
+                    KeyboardSuggestion(displayText: text, replacement: text, kind: kind)
+                }
+                func at(_ seconds: Double, _ mark: String, _ suggestions: [KeyboardSuggestion], undo: Bool = false) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.5 + seconds * slow) {
+                        MotionTrace.shared.mark(mark)
+                        view.stripView.update(suggestions: suggestions, showsUndo: undo, statusText: nil)
+                    }
+                }
+                view.stripView.update(suggestions: [], showsUndo: false, statusText: nil)
+                at(0.3, "appear", [word("\u{201C}Th\u{201D}", .keepLiteral), word("The", .primary(autoReplace: false)), word("This", .secondary)])
+                at(1.1, "change", [word("\u{201C}The\u{201D}", .keepLiteral), word("They", .primary(autoReplace: false)), word("There", .secondary)])
+                at(1.9, "bubble", [word("\u{201C}Thw\u{201D}", .keepLiteral), word("The", .primary(autoReplace: true)), word("Thaw", .secondary)])
+                at(2.7, "emoji", [word("🙏", .emoji)])
+                at(3.5, "revert", [word("teh", .revert), word("then", .secondary), word("tech", .secondary)])
+                at(4.3, "undo", [], undo: true)
+                at(5.5, "undo-leaves", [word("I", .nextWord), word("The", .nextWord), word("I'm", .nextWord)])
+                at(6.3, "clear", [])
+                at(7.0, "type-r", [word("Ru", .primary(autoReplace: false))])
+                at(7.08, "type-u", [word("Run", .primary(autoReplace: false))])
+                at(7.16, "type-n", [word("Running", .primary(autoReplace: false))])
+                DispatchQueue.main.asyncAfter(deadline: .now() + 3.5 + 8.0 * slow) { MotionTrace.shared.finish() }
+            case "sequence", "cancel-sequence":
+                // Rest, then a recording on the demo voice (speech, pause, speech). `sequence`
+                // ends with ✓: transcribing, the text lands, the suggestions come back;
+                // `cancel-sequence` ends with ✕. `--motion-slow 4` plays all of it at a quarter.
+                let slow = MotionDebug.slow
+                if slow > 1 { view.window?.layer.speed = Float(1 / slow) }
+                if MotionDebug.tracing { MotionTrace.shared.start(view) }
+                let cancels = state == "cancel-sequence"
+                func at(_ seconds: Double, _ step: @escaping () -> Void) {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 3.5 + seconds * slow, execute: step)
+                }
+                // A finger on the Hex key for a moment, then the tap lifts and recording starts.
+                at(-0.15) { view.debugPressHexKey(true) }
+                at(0) {
+                    view.debugPressHexKey(false)
+                    MotionTrace.shared.mark("record")
+                    model.configureFixture(
+                        snapshot: KeyboardSnapshot(
+                            state: .recording,
+                            heartbeat: now,
+                            expiresAt: now + 15 * 60,
+                            recordingStartedAt: now,
+                            audioLevel: 0,
+                            loudnessDB: -120,
+                            jobID: "snap-job"
+                        ),
+                        now: now
+                    )
+                }
+                if cancels {
+                    at(2.6) {
+                        MotionTrace.shared.mark("cancel")
+                        model.configureFixture(snapshot: warm, now: now)
+                    }
+                    at(4.0) { MotionTrace.shared.finish() }
+                } else {
+                    at(3.6) {
+                        MotionTrace.shared.mark("done")
+                        model.configureFixture(
+                            snapshot: KeyboardSnapshot(state: .transcribing, heartbeat: now, expiresAt: now + 15 * 60, jobID: "snap-job"),
+                            now: now
+                        )
+                    }
+                    at(5.0) {
+                        MotionTrace.shared.mark("landed")
+                        let text = "should be home by 7:30."
+                        NotificationCenter.default.post(name: MotionTrace.landed, object: text)
+                        view.didInsertDictation(text)
+                        model.configureFixture(snapshot: warm, now: now)
+                    }
+                    at(6.6) { MotionTrace.shared.finish() }
+                }
             default:
                 break
             }
@@ -671,5 +757,56 @@ class FixtureTextTarget: KeyboardTextTarget {
 
     func adjustTextPosition(byCharacterOffset offset: Int) {
         cursorIndex = max(0, min(text.count, cursorIndex + offset))
+    }
+}
+/// Per-frame samples of the recording strip (`--motion-trace`), written as
+/// NDJSON to Documents/motion-trace.ndjson; `t` is scene time (real time over `--motion-slow`).
+@MainActor
+final class MotionTrace: NSObject {
+    static let shared = MotionTrace()
+    static let landed = Notification.Name("MotionTrace.landed")
+    private weak var view: FullKeyboardView?
+    private var link: CADisplayLink?
+    private var start: CFTimeInterval = 0
+    private var lines: [String] = []
+
+    func start(_ view: FullKeyboardView) {
+        self.view = view
+        start = CACurrentMediaTime()
+        let link = CADisplayLink(target: self, selector: #selector(tick))
+        link.preferredFrameRateRange = CAFrameRateRange(minimum: 60, maximum: 120, preferred: 120)
+        link.add(to: .main, forMode: .common)
+        self.link = link
+    }
+
+    private var now: Double { (CACurrentMediaTime() - start) / MotionDebug.slow }
+
+    func mark(_ event: String) {
+        guard link != nil else { return }
+        lines.append("{\"t\":\(now),\"event\":\"\(event)\"}")
+    }
+
+    @objc private func tick() {
+        guard let view else { return }
+        var sample = view.debugMotionSample()
+        sample["t"] = now
+        if let data = try? JSONSerialization.data(withJSONObject: sample, options: [.sortedKeys]),
+           let line = String(data: data, encoding: .utf8) {
+            lines.append(line)
+        }
+        if lines.count % 30 == 0 { flush() }
+    }
+
+    private func flush() {
+        let url = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("motion-trace.ndjson")
+        try? (lines.joined(separator: "\n") + "\n").write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    func finish() {
+        guard let link else { return }
+        link.invalidate()
+        self.link = nil
+        flush()
     }
 }

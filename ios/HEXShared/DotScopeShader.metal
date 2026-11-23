@@ -21,9 +21,10 @@ struct DotScopeUniforms {
     float4 plate;    // rgba
     float4 rim;      // rgba
     float4 shadow;   // rgba
+    float4 look;     // x: the keyboard strip's dots (1) or OpenCode iOS (0), y: the strip's trace glow
 };
 
-static_assert(sizeof(DotScopeUniforms) == 160, "DotScopeUniforms must match Swift layout");
+static_assert(sizeof(DotScopeUniforms) == 176, "DotScopeUniforms must match Swift layout");
 
 struct DotScopePackedDot {
     ushort power;
@@ -156,6 +157,8 @@ fragment float4 dot_scope_fragment(
     bool is_dark = u.state.w > 0.5f;
     bool draw_plate = u.base.w > 0.5f;
     float cool = u.core.w;
+    bool desktop = u.look.x > 0.5f;
+    float trace_glow_scale = clamp(u.look.y, 0.0f, 1.0f);
 
     float2 position = in.uv * resolution;
     float2 window_point = (position - resolution * 0.5f) / backing_scale;
@@ -186,7 +189,36 @@ fragment float4 dot_scope_fragment(
     // Soft button-anchored glow lobes matching OpenCode iOS `glowAt`.
     float rest_glow = 0.045f * max(live, cool * 0.6f);
     float lobe_g = min(1.0f, glow * 0.85f + rest_glow);
-    if (lobe_g > 0.005f) {
+    if (desktop) {
+        // Under the lit dots, column by column, falling to zero well inside the drawable.
+        float2 view_half = resolution / (2.0f * backing_scale);
+        float edge = ds_sstep(1.0f, 8.0f, view_half.y - abs(window_point.y))
+            * ds_sstep(1.0f, 8.0f, view_half.x - abs(window_point.x));
+        if (edge > 0.001f) {
+            float2 c_off = float2(float(columns) - 1.0f, float(rows) - 1.0f) * 0.5f;
+            int gi = int(rint(point.x / pitch + c_off.x));
+            int gj = int(rint(point.y / pitch + c_off.y));
+            float sigma = 1.35f * pitch;
+            float sum = 0.0f;
+            for (int dj = -3; dj <= 3; dj++) {
+                for (int di = -3; di <= 3; di++) {
+                    int i = gi + di;
+                    int j = gj + dj;
+                    if (i < 0 || j < 0 || i >= columns || j >= rows) {
+                        continue;
+                    }
+                    float2 c = (float2(float(i), float(j)) - c_off) * pitch;
+                    float p = float(dots[j * columns + i].power) / 65535.0f;
+                    float2 d = point - c;
+                    sum += p * p * ds_scope_window(c, half_size, radius, u.window)
+                        * exp(-dot(d, d) / (2.0f * sigma * sigma));
+                }
+            }
+            float strength = (is_dark ? 0.26f : 0.10f) * trace_glow_scale;
+            float3 g_col = mix(u.base.rgb, u.core.rgb, 0.5f);
+            ds_composite(result, g_col, strength * (1.0f - exp(-0.9f * sum)) * edge * point_win);
+        }
+    } else if (lobe_g > 0.005f) {
         float2 p_bar = point + half_size;
         float peak = (is_dark ? 0.30f : 0.18f) * 0.55f;
         float a_l = min(1.0f, ds_glow_lobe(p_bar, width, half_size.y, lobe_g, true)) * peak;
@@ -204,9 +236,9 @@ fragment float4 dot_scope_fragment(
     float2 center_offset = float2(float(columns) - 1.0f, float(rows) - 1.0f) * 0.5f;
     int i0 = int(rint(point.x / pitch + center_offset.x));
     int j0 = int(rint(point.y / pitch + center_offset.y));
-    float unlit = is_dark ? 0.055f : 0.10f;
-    float full = is_dark ? 0.85f : 0.88f;
-    float curve_exp = is_dark ? 0.90f : 0.76f;
+    float unlit = desktop ? (is_dark ? 0.07f : 0.085f) : (is_dark ? 0.055f : 0.10f);
+    float full = desktop ? (is_dark ? 0.96f : 1.0f) : (is_dark ? 0.85f : 0.88f);
+    float curve_exp = desktop ? (is_dark ? 0.9f : 0.75f) : (is_dark ? 0.90f : 0.76f);
     float presence = 0.5f + 0.5f * max(live, cool);
     float px_scale = backing_scale * scale;
 
@@ -219,7 +251,7 @@ fragment float4 dot_scope_fragment(
             }
             float2 center = (float2(float(i), float(j)) - center_offset) * pitch;
             float cap = -ds_rounded_box(center, half_size, radius);
-            float mask = ds_sstep(2.0f, 6.2f, cap);
+            float mask = desktop ? ds_sstep(1.4f, 4.6f, cap) : ds_sstep(2.0f, 6.2f, cap);
             if (mask <= 0.0f) {
                 continue;
             }
@@ -234,6 +266,15 @@ fragment float4 dot_scope_fragment(
             float row = abs(center.y) / max(half_size.y, 1.0f);
             float floor_alpha = unlit * (1.0f - 0.7f * ds_sstep(0.35f, 0.95f, row)) * presence * grid;
             float alpha = floor_alpha + (full - floor_alpha) * pow(power, curve_exp * mix(1.4f, 1.0f, fresh));
+            if (desktop) {
+                float d_radius = (0.25f + 0.17f * pow(power, 0.6f))
+                    * mix(1.0f, mix(0.82f, 1.0f, fresh), ds_sstep(0.03f, 0.2f, power)) * pitch;
+                float d_core = clamp(power * power * 1.1f, 0.0f, 0.9f) * mix(0.3f, 1.0f, fresh);
+                float3 d_color = mix(u.base.rgb, u.core.rgb, d_core);
+                float from_center = length(point - center);
+                ds_composite(result, d_color, alpha * mask * win * shape * ds_coverage(from_center - d_radius, aa));
+                continue;
+            }
             float dot_radius = (0.25f + 0.17f * pow(power, 0.6f))
                 * mix(1.0f, mix(0.82f, 1.0f, fresh), ds_sstep(0.03f, 0.2f, power))
                 * pitch

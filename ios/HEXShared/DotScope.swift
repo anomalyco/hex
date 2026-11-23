@@ -327,6 +327,34 @@ nonisolated struct DotScopePalette: Equatable, Sendable {
             shadow: SIMD4<Float>(0.0, 0.0, 0.0, isDark ? 0.22 : 0.10)
         )
     }
+
+    /// The keyboard strip's dots: graphite on light, and on dark the desktop HUD's warm pearl
+    /// (`dot_scope::palette` in `scope.rs`). The strip draws no plate.
+    static func strip(isDark: Bool, pose: DotScopePose, saturation: Float = 1.0) -> DotScopePalette {
+        func mix3(_ a: SIMD3<Float>, _ b: SIMD3<Float>, _ t: Float) -> SIMD3<Float> { a + (b - a) * t }
+        let clear = SIMD4<Float>(0, 0, 0, 0)
+        guard isDark else {
+            let coral = SIMD3<Float>(0.82, 0.22, 0.18)
+            return DotScopePalette(
+                base: mix3(SIMD3<Float>(0.20, 0.20, 0.23), coral, pose.fail),
+                core: mix3(SIMD3<Float>(0.07, 0.07, 0.09), coral, pose.fail),
+                plate: clear, rim: clear, shadow: clear
+            )
+        }
+        func sat(_ c: SIMD3<Float>) -> SIMD3<Float> {
+            let l = SIMD3<Float>(repeating: 0.2126 * c.x + 0.7152 * c.y + 0.0722 * c.z)
+            return pointwiseMin(pointwiseMax(l + (c - l) * saturation, SIMD3<Float>(repeating: 0)), SIMD3<Float>(repeating: 1))
+        }
+        let you = SIMD3<Float>(0.86, 0.83, 0.77)
+        let youCore = SIMD3<Float>(0.98, 0.96, 0.92)
+        let agent = SIMD3<Float>(0.70, 0.78, 0.90)
+        let agentCore = SIMD3<Float>(0.92, 0.95, 1.0)
+        return DotScopePalette(
+            base: sat(mix3(mix3(you, agent, pose.cool), SIMD3<Float>(1.0, 0.38, 0.31), pose.fail)),
+            core: sat(mix3(mix3(youCore, agentCore, pose.cool), SIMD3<Float>(1.0, 0.66, 0.6), pose.fail)),
+            plate: clear, rim: clear, shadow: clear
+        )
+    }
 }
 
 // MARK: - 240 Hz Braided Oscilloscope Simulation (`src/dot_scope/scope.rs`)
@@ -527,7 +555,8 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
         return clamped <= 0.001 ? -90.0 : (-54.0 + 34.0 * clamped)
     }
 
-    func restart(reduceMotion: Bool) {
+    /// `shown`: the dots start fully present (their host fades them in), so only the trace wakes.
+    func restart(reduceMotion: Bool, shown: Bool = false) {
         let savedAuto = auto
         let currentTuning = tuning
         stage = .recording
@@ -563,7 +592,7 @@ nonisolated final class DotScopeSimulation: @unchecked Sendable {
             scaleSpring = DotSpring(at: Self.hiddenScale)
             softnessSpring = DotSpring(at: Self.hiddenSoftness)
         }
-        opacitySpring = DotSpring(at: 0.0)
+        opacitySpring = DotSpring(at: shown ? 1.0 : 0.0)
         coolSpring = DotSpring(at: 0.0)
         failSpring = DotSpring(at: 0.0)
         columns = 0
@@ -1100,6 +1129,24 @@ private struct DotScopeMetalUniforms {
     var plate: SIMD4<Float>
     var rim: SIMD4<Float>
     var shadow: SIMD4<Float>
+    var look: SIMD4<Float>
+}
+
+/// How the dots are drawn: OpenCode iOS's bar look, or the keyboard strip's: the desktop HUD's
+/// dots (`src/rune_hud.wgsl`) without their bloom, with a soft glow under the lit trace.
+enum DotScopeLook: Equatable {
+    case ios
+    case strip
+
+    /// The glow under the strip's trace, half as strong as it was first drawn.
+    static let stripGlow: Float = 0.5
+
+    var uniform: SIMD4<Float> {
+        switch self {
+        case .ios: SIMD4<Float>(0, 0, 0, 0)
+        case .strip: SIMD4<Float>(1, Self.stripGlow, 0, 0)
+        }
+    }
 }
 
 struct DotSwipeCueMetalUniforms {
@@ -1233,13 +1280,25 @@ final class DotScopeHostView: UIView {
         }
     }
 
+    var look: DotScopeLook = .ios {
+        didSet {
+            if look != oldValue {
+                renderCurrentFrame()
+            }
+        }
+    }
+
     var reduceMotion = false
+    /// The view around the scope fades it in and out, so its own opacity spring stays at 1
+    /// while shown and one fade, not two stacked, sets how it comes and goes.
+    var hostFades = false
     var useDemoVoice = false
     var loudnessProvider: (() -> Float)?
 
     /// Exposed for unit tests to verify simulation continuity across live meter updates.
     var debugElapsedTime: Float { simulation.elapsedTime }
     var debugIsPaused: Bool { displayLink?.isPaused ?? true }
+    var debugPose: DotScopePose { simulation.pose }
 
     private var metalLayer: CAMetalLayer {
         // swiftlint:disable:next force_cast
@@ -1437,7 +1496,7 @@ final class DotScopeHostView: UIView {
 
     private func handlePhaseChange(from old: DotScopePhase, to next: DotScopePhase) {
         if old == .hidden, next != .hidden, simulation.settled {
-            simulation.restart(reduceMotion: reduceMotion)
+            simulation.restart(reduceMotion: reduceMotion, shown: hostFades)
             if next == .idle {
                 settleIdleImmediately()
             }
@@ -1450,7 +1509,9 @@ final class DotScopeHostView: UIView {
     }
 
     private func seedForSnapshotIfNeeded() {
-        guard useDemoVoice, !hasSeededSnapshot, bounds.width > 8 else { return }
+        guard useDemoVoice, !hasSeededSnapshot, bounds.width > 8,
+              !ProcessInfo.processInfo.arguments.contains(where: { $0.hasSuffix("-sequence") || $0.hasSuffix("-sequence-dark") })
+        else { return }
         switch phase {
         case .hidden, .idle:
             return
@@ -1516,7 +1577,7 @@ final class DotScopeHostView: UIView {
 
         let (stage, visible, loudness) = simulationInputs()
         simulation.advance(
-            dt: dt,
+            dt: dt / Float(MotionDebug.slow),
             stage: stage,
             visible: visible,
             loudness: loudness,
@@ -1563,11 +1624,10 @@ final class DotScopeHostView: UIView {
         }
 
         let pose = simulation.pose
-        let palette = DotScopePalette.palette(
-            isDark: isDark,
-            pose: pose,
-            saturation: simulation.tuning.saturation
-        )
+        let palette = switch look {
+        case .ios: DotScopePalette.palette(isDark: isDark, pose: pose, saturation: simulation.tuning.saturation)
+        case .strip: DotScopePalette.strip(isDark: isDark, pose: pose, saturation: simulation.tuning.saturation)
+        }
         let scale = Float(max(1.0, metalLayer.contentsScale))
         let resX = Float(metalLayer.drawableSize.width)
         let resY = Float(metalLayer.drawableSize.height)
@@ -1593,7 +1653,8 @@ final class DotScopeHostView: UIView {
             core: SIMD4<Float>(palette.core.x, palette.core.y, palette.core.z, pose.cool),
             plate: palette.plate,
             rim: palette.rim,
-            shadow: palette.shadow
+            shadow: palette.shadow,
+            look: look.uniform
         )
 
         let slotStride = DotScopeTuning.maxDots * MemoryLayout<SIMD2<UInt16>>.stride
