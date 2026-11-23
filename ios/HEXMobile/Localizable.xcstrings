@@ -5060,6 +5060,26 @@
           }
         }
       }
+    },
+    "Stopped at %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 %@ 处停止"
+          }
+        }
+      }
+    },
+    "The screen locked or you left the app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "屏幕已锁定，或你离开了该应用"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"
