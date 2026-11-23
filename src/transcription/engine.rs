@@ -103,6 +103,14 @@ pub(crate) enum Command {
         stream: u64,
         samples: Vec<f32>,
     },
+    /// Raises the clip samples ignored at the stream's head, as Hex's output
+    /// suppression only reports that it took effect after the stream began.
+    /// The value only ever increases and is applied before the finalize.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    IgnoreHead {
+        stream: u64,
+        head: usize,
+    },
     Cancel {
         stream: u64,
     },
@@ -466,6 +474,19 @@ impl LiveStream {
         let _ = self.commands.send(Command::Feed {
             stream: self.id,
             samples: samples.to_vec(),
+        });
+    }
+
+    /// Raises the clip samples the opening check ignores for this stream. It
+    /// only ever increases, and the engine applies the latest value before it
+    /// finalizes; a value sent after the stream ended is ignored. An
+    /// `IgnoreHead` sent before `finish` is handled before the `Finish` on the
+    /// same channel, so it is seen; one sent after cannot be.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    pub fn raise_ignored_head(&self, head: usize) {
+        let _ = self.commands.send(Command::IgnoreHead {
+            stream: self.id,
+            head,
         });
     }
 }
@@ -1121,6 +1142,9 @@ impl Worker {
                 Command::FinishYielding { reply, .. } => {
                     let _ = reply.send(Err(PREEMPTED.into()));
                 }
+                // The stream already ended, so its finalize cannot see a
+                // later head. It is dropped.
+                Command::IgnoreHead { .. } => {}
                 Command::Finish {
                     stream,
                     clip,
@@ -2120,6 +2144,188 @@ mod tests {
             finish_with_text_bounds(&clip, Some(1_600), 2_600)
                 .is_err_and(|reason| reason.contains("precedes")),
             "the head exclusion is what keeps this stream"
+        );
+    }
+
+    /// As [`finish_with_text_bounds_ignoring_head`], but the stream begins
+    /// with no head and the capture raises it after `raise_at` samples, as
+    /// the effect report does once suppression actually took effect.
+    fn finish_raising_head(
+        clip: &[f32],
+        raise_at: usize,
+        head: usize,
+        text_start_ms: Option<u64>,
+        text_end_ms: u64,
+    ) -> Result<String, String> {
+        let mut fake = FakeStream {
+            text_start_ms,
+            text_end_ms: Some(text_end_ms),
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0);
+        let (before, after) = clip.split_at(raise_at.min(clip.len()));
+        capped.feed(before).unwrap();
+        capped.raise_ignored_head(head);
+        capped.feed(after).unwrap();
+        let result = finish_stream(&mut capped, clip, clip.len());
+        assert_eq!(fake.fed, clip);
+        result
+    }
+
+    #[test]
+    fn media_speech_before_output_suppression_took_effect_is_not_a_lost_opening() {
+        // 200 ms of room, then 900 ms of what the speakers were playing, then
+        // the dictation at 1.8 s. The stream began with no head; the raise
+        // after it began covers the media, so nothing before the text counts.
+        let mut clip = vec![0.0; 3_200];
+        clip.extend(tone(14_400));
+        clip.extend(vec![0.0; 11_200]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 3_200]);
+        assert!(
+            finish_with_text_bounds(&clip, Some(1_800), 2_800)
+                .is_err_and(|reason| reason.contains("precedes")),
+            "without the head the media is a lost opening"
+        );
+        assert_eq!(
+            finish_raising_head(&clip, 4_800, 17_600, Some(1_800), 2_800),
+            Ok(format!("streamed {}", clip.len()))
+        );
+    }
+
+    /// 200 ms of room, 900 ms of what the speakers played, then the
+    /// dictation from 1.8 s: a stream whose text starts at 1.8 s.
+    fn media_then_dictation() -> Vec<f32> {
+        let mut clip = vec![0.0; 3_200];
+        clip.extend(tone(14_400));
+        clip.extend(vec![0.0; 11_200]);
+        clip.extend(tone(16_000));
+        clip.extend(vec![0.0; 3_200]);
+        clip
+    }
+
+    /// Runs the commands the real engine queued through `drive_stream`, the
+    /// way the worker does after taking the `Begin` head.
+    fn drive_queued_stream(
+        mut queued: Vec<Command>,
+        head: usize,
+        text_start_ms: u64,
+        text_end_ms: u64,
+    ) -> (StreamEnd, Receiver<Command>) {
+        let mut fake = FakeStream {
+            text_start_ms: Some(text_start_ms),
+            text_end_ms: Some(text_end_ms),
+            ..FakeStream::default()
+        };
+        let mut capped = PauseCap::new(&mut fake, 0).ignoring_head(head);
+        let (relay, relayed) = mpsc::channel();
+        for command in queued.drain(..) {
+            relay.send(command).unwrap();
+        }
+        let mut stats = FeedStats::default();
+        let ended = drive_stream(
+            1,
+            &mut capped,
+            &relayed,
+            &AtomicBool::new(false),
+            None,
+            &mut VecDeque::new(),
+            &mut stats,
+        );
+        (ended, relayed)
+    }
+
+    fn begin_head(command: Command) -> usize {
+        match command {
+            Command::Begin { head_ignored, .. } => head_ignored,
+            _ => panic!("a stream began"),
+        }
+    }
+
+    #[test]
+    fn a_head_raised_before_the_finish_keeps_the_stream() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let mut stream = engine.begin().expect("the test engine streams");
+        let clip = media_then_dictation();
+        stream.feed(&clip);
+        stream.raise_ignored_head(17_600);
+        let _finish = engine
+            .finish_with(
+                Some(stream),
+                clip.clone(),
+                Box::new(|_, _| Ok(String::new())),
+            )
+            .unwrap();
+        let mut queued = commands.try_iter().collect::<Vec<_>>();
+        let head = begin_head(queued.remove(0));
+        let (ended, _) = drive_queued_stream(queued, head, 1_800, 2_800);
+        match ended {
+            StreamEnd::Finished { result, .. } => {
+                assert_eq!(result, Ok(format!("streamed {}", clip.len())));
+            }
+            _ => panic!("the stream should have finished"),
+        }
+    }
+
+    #[test]
+    fn a_head_raised_after_the_finish_cannot_save_the_stream() {
+        let (engine, commands) = TranscriptionEngine::for_test();
+        let mut stream = engine.begin().expect("the test engine streams");
+        let clip = media_then_dictation();
+        stream.feed(&clip);
+        let _finish = engine
+            .finish_with(
+                Some(stream),
+                clip.clone(),
+                Box::new(|_, _| Ok(String::new())),
+            )
+            .unwrap();
+        let mut queued = commands.try_iter().collect::<Vec<_>>();
+        let head = begin_head(queued.remove(0));
+        // The head arrives after the Finish command: the stream finalizes
+        // without it, so the media it heard is a lost opening.
+        queued.push(Command::IgnoreHead {
+            stream: 1,
+            head: 17_600,
+        });
+        let (ended, relayed) = drive_queued_stream(queued, head, 1_800, 2_800);
+        match ended {
+            StreamEnd::Finished { result, .. } => assert!(
+                result
+                    .as_ref()
+                    .is_err_and(|reason| reason.contains("precedes")),
+                "{result:?}"
+            ),
+            _ => panic!("the stream should have finished"),
+        }
+        // The late head was never handled: the finish already ended the stream.
+        assert!(matches!(
+            relayed.try_recv(),
+            Ok(Command::IgnoreHead {
+                stream: 1,
+                head: 17_600
+            })
+        ));
+    }
+
+    #[test]
+    fn speech_after_the_raised_head_is_still_a_lost_opening() {
+        // 200 ms of room and 700 ms of media the raise covers, then 400 ms
+        // the stream missed at 0.95-1.35 s, text at 1.8 s: still a lost
+        // opening.
+        let mut clip = vec![0.0; 3_200];
+        clip.extend(tone(11_200));
+        clip.extend(vec![0.0; 800]);
+        clip.extend(tone(6_400));
+        clip.extend(vec![0.0; 7_200]);
+        clip.extend(tone(9_600));
+        clip.extend(vec![0.0; 3_200]);
+        let result = finish_raising_head(&clip, 4_800, 14_400, Some(1_800), 2_400);
+        assert!(
+            result
+                .as_ref()
+                .is_err_and(|reason| reason.contains("precedes")),
+            "{result:?}"
         );
     }
 

@@ -7,6 +7,8 @@ use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use crate::audio::CaptureInstant;
+
 const TICK: Duration = Duration::from_millis(16);
 const EPSILON: f32 = 0.002;
 /// Lowering starts after the 300 ms hold threshold, so it must finish before
@@ -33,19 +35,32 @@ pub(crate) struct Guard {
 }
 
 impl Guard {
-    /// Lowers what `open` returns, opened on the ramp's own thread.
+    /// Lowers what `open` returns, opened on the ramp's own thread. macOS
+    /// reports the lowering through [`Self::start_reporting`]; the Linux and
+    /// Windows suppressors start without a report.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) fn start<V: Volume>(
         factor: f32,
         open: impl FnOnce() -> Option<V> + Send + 'static,
+    ) -> Option<Self> {
+        Self::start_reporting(factor, open, None)
+    }
+
+    /// As [`Self::start`], sending the moment the lowering first writes its
+    /// full target through `report`, from the ramp's own thread. Nothing is
+    /// sent when there is no output to lower, the output is already silent,
+    /// the ramp fails, or the guard is restored before the target is written.
+    pub(crate) fn start_reporting<V: Volume>(
+        factor: f32,
+        open: impl FnOnce() -> Option<V> + Send + 'static,
+        report: Option<Sender<CaptureInstant>>,
     ) -> Option<Self> {
         let (stop, receiver) = mpsc::channel();
         let worker = thread::Builder::new()
             .name("output-ducking".into())
             .spawn(move || {
-                if let Some(output) = open()
-                    && let Some(mut ramp) = Ramp::new(output)
-                {
-                    run(&mut ramp, factor, receiver);
+                if let Some(mut ramp) = open().and_then(Ramp::new) {
+                    run(&mut ramp, factor, receiver, report);
                 }
             })
             .ok()?;
@@ -70,18 +85,37 @@ impl Drop for Guard {
     }
 }
 
-fn run<V: Volume>(ramp: &mut Ramp<V>, factor: f32, receiver: Receiver<()>) {
+fn run<V: Volume>(
+    ramp: &mut Ramp<V>,
+    factor: f32,
+    receiver: Receiver<()>,
+    mut report: Option<Sender<CaptureInstant>>,
+) {
+    if !ramp.would_change(factor) {
+        report = None;
+    }
     ramp.retarget(Some(factor));
     let started = Instant::now();
     loop {
         match receiver.recv_timeout(TICK) {
             Ok(()) | Err(RecvTimeoutError::Disconnected) => break,
-            Err(RecvTimeoutError::Timeout) => ramp.tick(started.elapsed().as_secs_f32()),
+            Err(RecvTimeoutError::Timeout) => {
+                ramp.tick(started.elapsed().as_secs_f32());
+                if ramp.lowered
+                    && let Some(report) = report.take()
+                {
+                    // The target was written; Bluetooth may take longer to
+                    // report it back, and that is not when the audio dropped.
+                    let _ = report.send(CaptureInstant::now());
+                }
+            }
         }
         if ramp.finished {
             return;
         }
     }
+    // Restored before the target was written: nothing to report.
+    drop(report);
     ramp.retarget(None);
     let started = Instant::now();
     while !ramp.finished {
@@ -101,6 +135,9 @@ struct Ramp<V: Volume> {
     restoring: bool,
     settled: bool,
     finished: bool,
+    /// The full lowering target was written at least once. This is when the
+    /// output actually dropped, whatever the readback says afterwards.
+    lowered: bool,
 }
 
 fn close(a: &[f32], b: &[f32]) -> bool {
@@ -108,6 +145,12 @@ fn close(a: &[f32], b: &[f32]) -> bool {
 }
 
 impl<V: Volume> Ramp<V> {
+    /// Whether lowering to `factor` would change a running output: some
+    /// channel has a volume, and the target is below it.
+    fn would_change(&self, factor: f32) -> bool {
+        factor < 1.0 && self.original.iter().any(|value| *value > EPSILON)
+    }
+
     fn new(output: V) -> Option<Self> {
         let original = output.read().filter(|values| !values.is_empty())?;
         Some(Self {
@@ -119,6 +162,7 @@ impl<V: Volume> Ramp<V> {
             restoring: false,
             settled: false,
             finished: false,
+            lowered: false,
         })
     }
 
@@ -172,6 +216,11 @@ impl<V: Volume> Ramp<V> {
         };
         // Bluetooth may acknowledge channels late; use a bounded settling period.
         self.accepted = actual;
+        // The ramp wrote its full target: the output dropped now, even if a
+        // late Bluetooth readback still disagrees and delays the settle.
+        if t >= 1.0 && !self.restoring {
+            self.lowered = true;
+        }
         if t >= 1.0
             && (close(&self.accepted, &self.target) || seconds >= duration + SETTLE.as_secs_f32())
         {
@@ -281,5 +330,70 @@ mod tests {
         r.tick(LOWER.as_secs_f32() / 2.0);
         assert!(r.finished);
         assert!(close(&r.output.values, &[0.3, 0.8]));
+    }
+
+    /// Reads back a rounded value below 0.5, as Bluetooth may: the settling
+    /// check never sees its target, so only the write itself can time the
+    /// lowering.
+    struct Rounded {
+        values: Vec<f32>,
+    }
+
+    impl Volume for Rounded {
+        fn read(&self) -> Option<Vec<f32>> {
+            Some(
+                self.values
+                    .iter()
+                    .map(|value| if *value < 0.5 { value + 0.003 } else { *value })
+                    .collect(),
+            )
+        }
+
+        fn write(&mut self, values: &[f32]) -> bool {
+            self.values = values.to_vec();
+            true
+        }
+    }
+
+    #[test]
+    fn a_guard_that_changes_nothing_reports_no_moment() {
+        // An already silent output has nothing to lower, so a capture hearing
+        // its microphone has not missed anything Hex suppressed.
+        let (report, outcome) = mpsc::channel();
+        let guard = Guard::start_reporting(
+            0.2,
+            || {
+                Some(Fake {
+                    values: vec![0.0],
+                    fail: false,
+                })
+            },
+            Some(report),
+        )
+        .unwrap();
+        assert!(
+            outcome
+                .recv_timeout(LOWER + Duration::from_millis(80))
+                .is_err()
+        );
+        drop(guard);
+    }
+
+    #[test]
+    fn a_guard_reports_when_the_target_is_written_not_when_the_readback_settles() {
+        let (report, outcome) = mpsc::channel();
+        let started = Instant::now();
+        let guard =
+            Guard::start_reporting(0.2, || Some(Rounded { values: vec![0.8] }), Some(report))
+                .unwrap();
+        outcome
+            .recv_timeout(LOWER + Duration::from_millis(80))
+            .expect("the lowering reports when it writes its target");
+        assert!(
+            started.elapsed() < LOWER + Duration::from_millis(80),
+            "reported at the settle fallback: {:?}",
+            started.elapsed()
+        );
+        drop(guard);
     }
 }

@@ -687,6 +687,10 @@ impl Owner {
                 .input
                 .recv_timeout(Duration::from_millis(10), capture_idle);
             self.handle_input(event);
+            // The environment reports output suppression from its own
+            // thread, so the head rises here, before the next chunk or the
+            // finish finalizes the stream (#2338).
+            self.capture.apply_suppression_report();
             self.reconcile_input();
         }
     }
@@ -770,6 +774,10 @@ impl Owner {
                 } else {
                     (tail, None)
                 };
+                // The last chance the finish has to see a report: once the
+                // clip is submitted, its stream finalizes without a later
+                // head. A report that lands after this is ignored.
+                self.capture.apply_suppression_report();
                 let mut finish = match self.slot {
                     CaptureSlot::Pending(_) => {
                         if !self.capture_sink_open() {
@@ -1309,11 +1317,11 @@ impl Owner {
     }
 
     fn start_capture_at(&mut self, kind: CaptureKind, at: CaptureInstant) {
+        let while_dictating = crate::app_settings::recording_audio_behavior();
         match kind {
-            CaptureKind::Hotkey => self.capture.start_hotkey_at(
-                at,
-                crate::dictation::hotkey_pre_roll(crate::app_settings::recording_audio_behavior()),
-            ),
+            CaptureKind::Hotkey => self
+                .capture
+                .start_hotkey_at(at, crate::dictation::hotkey_pre_roll(while_dictating)),
             CaptureKind::Programmatic => self.capture.start_programmatic_at(at),
         }
         self.enter(CaptureSlot::Recording { kind });

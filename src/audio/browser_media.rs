@@ -23,6 +23,7 @@ use objc2_core_audio::{
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList, AudioTimeStamp};
 use objc2_foundation::{NSArray, NSNumber, NSString};
 
+use crate::audio::CaptureInstant;
 use crate::microphone_activity::BrowserProcesses;
 
 /// Sound: a peak above this in every listen window.
@@ -76,7 +77,10 @@ impl PausedBrowser {
     }
 }
 
-pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<PausedBrowser> {
+/// Pauses a sounding browser and returns the proof, with the instant the
+/// pause command was sent: the confirmation windows after it are not part of
+/// when the browser actually stopped.
+pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<(PausedBrowser, CaptureInstant)> {
     if audio.in_call() {
         tracing::info!("left the browser alone: it is using the microphone");
         return None;
@@ -94,6 +98,7 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<PausedBrowser> {
             }
         }
     }
+    let sent_at = CaptureInstant::now();
     if !audio.send(MediaCommand::Pause) {
         tracing::info!("the system refused the pause command");
         return None;
@@ -107,7 +112,7 @@ pub(crate) fn pause(audio: &mut impl BrowserAudio) -> Option<PausedBrowser> {
             silent += 1;
             if silent == SILENT_WINDOWS {
                 tracing::info!("paused the browser");
-                return Some(PausedBrowser(()));
+                return Some((PausedBrowser(()), sent_at));
             }
         } else {
             silent = 0;
@@ -471,7 +476,7 @@ mod tests {
     #[ignore = "needs a browser playing audio for 15 s and System Audio Recording"]
     fn native_resume_after_a_long_pause_plays_the_browser() {
         let _ = tracing_subscriber::fmt().with_test_writer().try_init();
-        let paused = pause(&mut NativeBrowserAudio::for_pause()).expect("paused the browser");
+        let (paused, _) = pause(&mut NativeBrowserAudio::for_pause()).expect("paused the browser");
         std::thread::sleep(Duration::from_secs(15));
         let mut audio = NativeBrowserAudio::for_resume();
         eprintln!("output closed after 15 s: {}", audio.output_closed());
@@ -523,7 +528,7 @@ mod tests {
             Some(-200.0),
             Some(-25.0),
         ]));
-        let paused = pause(&mut audio).expect("the pause is confirmed");
+        let (paused, _) = pause(&mut audio).expect("the pause is confirmed");
         resume(&mut audio, paused);
         assert_eq!(audio.sent, [MediaCommand::Pause, MediaCommand::Play]);
     }
@@ -597,7 +602,7 @@ mod tests {
     #[test]
     fn a_browser_already_playing_gets_no_play() {
         let mut audio = Fake::new(playing().into_iter().chain([Some(-200.0), Some(-200.0)]));
-        let paused = pause(&mut audio).expect("the pause is confirmed");
+        let (paused, _) = pause(&mut audio).expect("the pause is confirmed");
         audio.peaks = VecDeque::from([Some(-20.0)]);
         resume(&mut audio, paused);
         assert_eq!(audio.sent, [MediaCommand::Pause]);

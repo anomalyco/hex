@@ -11,13 +11,19 @@ use objc2_core_audio::{
 };
 use objc2_core_audio_types::{AudioBuffer, AudioBufferList};
 
+use std::sync::mpsc::Sender;
+
 use super::VIRTUAL_MAIN_VOLUME;
+use crate::audio::CaptureInstant;
 use crate::audio::output_ducking::{Guard, Volume};
 
 const VOLUME: [u8; 4] = *b"volm";
 
-pub(super) fn start(factor: f32) -> Option<Guard> {
-    Guard::start(factor, Output::current)
+/// Starts lowering the output; the ramp's own thread sends the moment the
+/// full target is first written. Returned without waiting, so a stop or
+/// another session is never held up behind the ramp.
+pub(super) fn start(factor: f32, report: Option<Sender<CaptureInstant>>) -> Option<Guard> {
+    Guard::start_reporting(factor, Output::current, report)
 }
 
 /// What one channel of an output reports for its volume scalar.

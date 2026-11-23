@@ -1848,7 +1848,8 @@ Model advertises streaming, GPU device             // dictate.streaming
        ├── ≥ 300 ms of speech it heard > 400 ms before the text (1.2 s for a
        │   buffered Parakeet stream, which also refuses speech starting 1.5 s
        │   or more before the text once 100 ms is detected more than 400 ms
-       │   before it), outside the pre-roll and start tone
+       │   before it), outside the pre-roll, the start tone, and (macOS) audio
+       │   from before Hex's output suppression took effect (#2338)
        │   -> Transcribe the whole clip offline (source=fallback)  // lost opening
        ├── ≥ 300 ms of speech the stream heard lies > 400 ms past its text's end
        │   -> Transcribe the whole clip offline (source=fallback)   // #1101
@@ -2244,6 +2245,44 @@ timestamp lag. Checks:
 `parakeets_opening_slack_still_refuses_a_lost_opening`, and
 `parakeets_opening_slack_edge_is_one_frame` (synthetic tones, a fake stream).
 Not measured on a microphone or a device.
+
+**Fixed November 23, 2026 (opening after output suppression, macOS):** with
+Lower audio, Mute, or Pause media, a hotkey capture keeps no pre-roll and
+asks for output suppression only once it passes the 300 ms hold; Lower audio
+then ramps over `output_ducking::LOWER` (120 ms) on its own thread. Audio
+still coming from the speakers in that window was counted as speech the
+stream missed, so nearly every dictation with something playing fell back to
+the whole clip. The head only widens when the recording environment reports
+that suppression actually took effect, and each source reports its own
+moment: Lower audio sends when the ramp first writes its full target (a late
+Bluetooth readback no longer delays it), Mute when a write lands over a
+non-zero volume, and Pause media the latest of the player pause command being
+issued and the browser pause being sent — the browser's confirmation windows
+after the command are not part of the moment. Nothing is reported for an
+effect that changed nothing, was skipped on headphones under Labs › Only on
+speakers, or was stopped before its target was written; the report is sent
+from the environment or ramp thread, so a stop is never held up behind it.
+The audio owner maps the moment onto the recorded timeline (a report handled
+late maps back into audio already captured) and adds
+`SPEAKER_TO_MIC_MARGIN` (40 ms) for the output-to-microphone path; the head
+is whatever is later, that position or Hex's own sounds. Up to one resampler
+input buffer is still unprocessed when the report lands, so the position can
+sit slightly early; that only ever ignores less speech, and the margin covers
+it. The head is raised on the live stream with `Command::IgnoreHead`, which
+`PauseCap` applies before its finalize if it arrives before the `Finish`
+command; one that arrives after the finish is ignored. A report that lands
+during the release tail still reaches the finish. The Linux and Windows
+listeners have the same pattern but no effective report yet, so their head
+stays as it was. Checks:
+`a_reported_effect_raises_the_head_from_the_recorded_timeline`,
+`media_speech_before_output_suppression_took_effect_is_not_a_lost_opening`,
+`speech_after_the_raised_head_is_still_a_lost_opening`,
+`a_head_raised_before_the_finish_keeps_the_stream`,
+`a_head_raised_after_the_finish_cannot_save_the_stream`,
+`a_guard_reports_when_the_target_is_written_not_when_the_readback_settles`,
+`a_guard_that_changes_nothing_reports_no_moment`, and
+`muting_an_already_silent_output_changes_nothing`. Not measured on a
+microphone or a device.
 
 ### Ongoing Jobs And Output
 
