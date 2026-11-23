@@ -848,52 +848,13 @@ fn rows(ui: &Ui) -> Vec<Row> {
     }
     #[cfg(hex_capture)]
     if ui.platform.scrawl.is_some() {
-        // A written capture's copy runs through the same engine and the same
-        // Annotate lock.
-        let annotate_locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
-        let locked = annotate_locked || Feature::CopyCaptureZip.managed().is_some();
-        let copy_zip = row(Feature::CopyCaptureZip, Some(&FOLDER));
-        rows.push(Row {
-            locked,
-            about: if locked {
-                super::managed_note().into()
-            } else {
-                copy_zip.about.clone()
-            },
-            on: !locked && Feature::CopyCaptureZip.on(settings),
-            ..copy_zip
-        });
-        // `hex annotate inspect|zoom|frames|skill` for coding agents: the
-        // same engine and Annotate lock as the copy above.
-        let agent_locked = annotate_locked || Feature::AnnotateAgentTools.managed().is_some();
-        let agent_tools = row(Feature::AnnotateAgentTools, Some(&TERMINAL));
-        rows.push(Row {
-            locked: agent_locked,
-            about: if agent_locked {
-                super::managed_note().into()
-            } else {
-                agent_tools.about.clone()
-            },
-            on: !agent_locked && Feature::AnnotateAgentTools.on(settings),
-            ..agent_tools
-        });
-        // The Annotate pane's Agents section writes that skill into each
-        // coding agent's folder and links hex onto PATH (macOS).
-        let install_locked = annotate_locked || Feature::AnnotateAgentInstall.managed().is_some();
-        let agent_install = row(Feature::AnnotateAgentInstall, Some(&TERMINAL));
-        rows.push(Row {
-            locked: install_locked,
-            about: if install_locked {
-                super::managed_note().into()
-            } else {
-                agent_install.about.clone()
-            },
-            on: !install_locked && Feature::AnnotateAgentInstall.on(settings),
-            ..agent_install
-        });
-        // The dictation shortcut keeps working while a capture records.
+        // Every Annotate-group feature carries Lock::Annotate in its managed()
+        // check, so `row` locks them under DisableAnnotate automatically.
+        rows.push(row(Feature::CopyCaptureZip, Some(&FOLDER)));
+        rows.push(row(Feature::AnnotateAgentTools, Some(&TERMINAL)));
+        rows.push(row(Feature::AnnotateAgentInstall, Some(&TERMINAL)));
         rows.push(row(Feature::DictateWhileAnnotating, Some(&KEYBOARD)));
-        let locked = annotate_locked;
+        let locked = crate::policy::Policy::current().locks(crate::policy::Lock::Annotate);
         rows.push(Row {
             lab: Lab::Annotate,
             icon: Pane::Annotate.icon(),

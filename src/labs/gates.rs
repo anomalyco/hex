@@ -104,6 +104,27 @@ pub fn copy_dictation_audio() -> bool {
     feature_on(Feature::CopyDictationAudio) && keep_recordings()
 }
 
+/// Whether `settings` enable Labs › Copy dictation audio (both it and Keep
+/// recordings on, shipped, available on this OS, and unlocked by policy).
+/// Used by UI views and actions that inspect an explicit `AppSettings`
+/// snapshot rather than the process switch bank.
+pub fn copy_dictation_audio_enabled(settings: &AppSettings) -> bool {
+    copy_dictation_audio_enabled_under(settings, crate::policy::Policy::current())
+}
+
+pub(crate) fn copy_dictation_audio_enabled_under(
+    settings: &AppSettings,
+    policy: crate::policy::Policy,
+) -> bool {
+    let on = |feature: Feature| {
+        feature.on(settings)
+            && feature.shipped()
+            && feature.on_this_os()
+            && policy.labs_lock(feature).is_none()
+    };
+    on(Feature::CopyDictationAudio) && on(Feature::KeepRecordings)
+}
+
 /// A pasted dictation stays on the clipboard rather than the previous
 /// clipboard being restored (read as each paste commits).
 pub fn keep_on_clipboard() -> bool {

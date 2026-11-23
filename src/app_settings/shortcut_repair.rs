@@ -63,6 +63,14 @@ impl HotkeyKey {
             "insert" | "home" | "end" | "pageup" | "pagedown"
         )
     }
+
+    /// Whether `label` names a function key (`F1`–`F20`, any case).
+    pub fn is_function_name(label: &str) -> bool {
+        label
+            .strip_prefix(['F', 'f'])
+            .and_then(|number| number.parse::<u8>().ok())
+            .is_some_and(|number| (1..=20).contains(&number))
+    }
 }
 
 impl HotkeyBinding {
@@ -161,22 +169,11 @@ impl AppSettings {
     /// With Labs › Microphone key alone off, a macOS shortcut on the
     /// microphone key, with or without a modifier, goes back to its default
     /// (an optional one is unbound), so the listener never registers one.
-    /// The cancel and screenshot shortcuts are not in `reset_shortcuts`, so
-    /// they are reset here too.
     pub(crate) fn repair_microphone_key(&mut self) {
         if self.microphone_key_allowed() || !cfg!(target_os = "macos") {
             return;
         }
-        let mut reset = self.reset_shortcuts(HotkeyBinding::uses_microphone_key);
-        if self.cancel_hotkey.uses_microphone_key() {
-            self.cancel_hotkey = HotkeyBinding::cancel_default();
-            reset = true;
-        }
-        if self.screenshots.hotkey.uses_microphone_key() {
-            self.screenshots.hotkey = HotkeyBinding::screenshot_default();
-            reset = true;
-        }
-        if reset {
+        if self.reset_shortcuts(HotkeyBinding::uses_microphone_key) {
             tracing::info!("reset microphone-key shortcuts: Labs › Microphone key alone is off");
         }
     }
@@ -254,63 +251,6 @@ impl AppSettings {
             &mut self.paste_last_hotkey,
             "Paste last dictation",
         );
-    }
-
-    /// Puts back every shortcut `matches`: dictation, Paste last dictation,
-    /// and Annotate to their defaults, the optional ones unbound. Returns
-    /// whether any changed.
-    fn reset_shortcuts(&mut self, matches: impl Fn(&HotkeyBinding) -> bool) -> bool {
-        let mut reset = false;
-        if matches(&self.dictation_hotkey) {
-            self.dictation_hotkey = HotkeyBinding::default();
-            reset = true;
-        }
-        if self.paste_last_hotkey.as_ref().is_some_and(&matches) {
-            self.paste_last_hotkey = Some(HotkeyBinding::paste_last_default());
-            reset = true;
-        }
-        if self.raw_dictation_hotkey.as_ref().is_some_and(&matches) {
-            self.raw_dictation_hotkey = None;
-            reset = true;
-        }
-        if self.typed_text_hotkey.as_ref().is_some_and(&matches) {
-            self.typed_text_hotkey = None;
-            reset = true;
-        }
-        if self.second_dictation_hotkey.as_ref().is_some_and(&matches) {
-            self.second_dictation_hotkey = None;
-            reset = true;
-        }
-        for row in &mut self.extra_dictation_hotkeys {
-            if row.binding.as_ref().is_some_and(&matches) {
-                row.binding = None;
-                reset = true;
-            }
-        }
-        if self.terminal_paste_hotkey.as_ref().is_some_and(&matches) {
-            self.terminal_paste_hotkey = None;
-            reset = true;
-        }
-        #[cfg(hex_capture)]
-        if matches(&self.capture.hotkey) {
-            self.capture.hotkey = HotkeyBinding::capture_default();
-            reset = true;
-        }
-        #[cfg(hex_capture)]
-        if self.capture.replay_hotkey.as_ref().is_some_and(&matches) {
-            self.capture.replay_hotkey = None;
-            reset = true;
-        }
-        if self
-            .screenshots
-            .record_hotkey
-            .as_ref()
-            .is_some_and(&matches)
-        {
-            self.screenshots.record_hotkey = None;
-            reset = true;
-        }
-        reset
     }
 }
 

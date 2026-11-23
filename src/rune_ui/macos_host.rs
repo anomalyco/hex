@@ -379,7 +379,7 @@ impl ChordCapture {
         // refuses it while Labs › Microphone key alone is off. Plain ⌫ turns an
         // optional shortcut off, and `settings::validate` refuses it as a
         // binding.
-        let stands_alone = is_function_key(&key.label)
+        let stands_alone = HotkeyKey::is_function_name(&key.label)
             || is_navigation_key(code)
             || key.is_section()
             || key.is_microphone()
@@ -420,13 +420,6 @@ impl ChordCapture {
             key: None,
         })))
     }
-}
-
-fn is_function_key(label: &str) -> bool {
-    label
-        .strip_prefix('F')
-        .and_then(|number| number.parse::<u8>().ok())
-        .is_some_and(|number| (1..=20).contains(&number))
 }
 
 /// Home, End, Page Up, Page Down, and Help (Insert on PC keyboards): keys

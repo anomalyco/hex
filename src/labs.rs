@@ -410,19 +410,50 @@ mod tests {
     }
 
     #[test]
-    fn switches_hold_every_feature() {
+    fn labs_lock_holds_every_feature_and_app_model_switching_off() {
         let mut settings = AppSettings::default();
-        for switch in Feature::switches(&mut settings) {
-            *switch = true;
-        }
         for feature in Feature::ALL {
+            feature.set_field(&mut settings, true);
             assert!(feature.on(&settings), "{} has no switch", feature.name());
         }
-        assert_eq!(
-            Feature::switches(&mut settings).len(),
-            Feature::ALL.len() + 1,
-            "one switch per feature plus the saved per-app model opt-in"
-        );
+        settings.labs.app_model_switching = true;
+        crate::policy::Policy::default()
+            .with(crate::policy::Lock::Labs)
+            .enforce(&mut settings);
+        for feature in Feature::ALL {
+            assert!(
+                !feature.on(&settings),
+                "{} escaped Lock::Labs",
+                feature.name()
+            );
+        }
+        assert!(!settings.labs.app_model_switching);
+    }
+
+    #[test]
+    fn copy_dictation_audio_requires_both_switches_and_no_policy_lock() {
+        let none = crate::policy::Policy::default();
+        let locked = none.with(crate::policy::Lock::Labs);
+        for (keep, copy) in [(false, false), (true, false), (false, true), (true, true)] {
+            let mut settings = AppSettings::default();
+            settings.labs.keep_recordings = keep;
+            settings.labs.copy_dictation_audio = copy;
+            let expected = keep && copy;
+            assert_eq!(
+                copy_dictation_audio_enabled_under(&settings, none),
+                expected,
+                "keep={keep}, copy={copy}"
+            );
+            assert!(
+                !copy_dictation_audio_enabled_under(&settings, locked),
+                "Lock::Labs must hold copy_dictation_audio off"
+            );
+            let bank = encode(&settings.labs);
+            assert_eq!(
+                bank.is_on(Feature::CopyDictationAudio) && bank.is_on(Feature::KeepRecordings),
+                expected
+            );
+        }
     }
 
     #[test]

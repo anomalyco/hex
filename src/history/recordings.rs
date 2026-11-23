@@ -50,6 +50,24 @@ pub fn directory(history: &Path) -> PathBuf {
     history.with_file_name(DIRECTORY)
 }
 
+/// The newest kept recording a person may copy from the menu bar or tray,
+/// if Labs › Copy dictation audio (and Keep recordings) is on and the file
+/// is still there.
+pub fn newest_copyable(history: &super::History) -> Option<PathBuf> {
+    crate::labs::copy_dictation_audio()
+        .then(|| history.newest_recording(super::now_ms()))
+        .flatten()
+}
+
+/// Copies the newest kept recording to the clipboard as a file, using the
+/// one wording for "nothing to copy" across macOS, Linux, and Windows.
+pub fn copy_newest(history: Option<&super::History>) -> anyhow::Result<()> {
+    let path = history
+        .and_then(newest_copyable)
+        .ok_or_else(|| anyhow::anyhow!("no dictation with kept audio is in History"))?;
+    copy_to_clipboard(&path)
+}
+
 /// Puts `path` on the clipboard as a file, so a paste into an app that takes
 /// files (a chat, an agent, Finder or Explorer) attaches it (Labs › Copy
 /// dictation audio). This only copies a WAV Keep recordings already wrote; it
@@ -198,6 +216,71 @@ fn restrict_directory(_directory: &Path) -> io::Result<()> {
 mod tests {
     use super::*;
     use crate::transcription::models::{CustomModelId, TranscriptionModelId};
+
+    #[test]
+    fn newest_copyable_requires_keep_recordings_and_copy_dictation_audio() {
+        let directory = std::env::temp_dir().join(format!(
+            "hex-copy-newest-{}-{}",
+            std::process::id(),
+            crate::history::now_ms()
+        ));
+        let path = directory.join("history.json");
+        let store = crate::history::HistoryStore::open(
+            path,
+            crate::history::HistoryRetention::Week,
+            crate::history::now_ms(),
+        );
+        let history = crate::history::History::new(store);
+        let mut labs = crate::app_settings::LabsSettings {
+            keep_recordings: true,
+            copy_dictation_audio: false,
+            ..Default::default()
+        };
+        crate::labs::apply(&labs);
+        history
+            .record(crate::history::HistoryDraft {
+                kind: crate::history::HistoryKind::Dictation,
+                raw_text: "hello".into(),
+                final_text: "hello".into(),
+                application: None,
+                processing: None,
+                audio_ms: 1_000,
+                inference_ms: 50,
+                total_ms: 1_050,
+                recording: Some(Recording::from_samples(vec![0.1; 160])),
+                model: None,
+            })
+            .unwrap();
+        assert!(
+            newest_copyable(&history).is_none(),
+            "Keep recordings alone must not enable copying"
+        );
+
+        labs.keep_recordings = false;
+        labs.copy_dictation_audio = true;
+        crate::labs::apply(&labs);
+        assert!(
+            newest_copyable(&history).is_none(),
+            "Copy dictation audio without Keep recordings must not enable copying"
+        );
+        assert!(
+            copy_newest(Some(&history))
+                .unwrap_err()
+                .to_string()
+                .contains("no dictation with kept audio is in History")
+        );
+
+        labs.keep_recordings = true;
+        labs.copy_dictation_audio = true;
+        crate::labs::apply(&labs);
+        assert!(
+            newest_copyable(&history).is_some(),
+            "both switches on with a kept WAV returns the path"
+        );
+
+        crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        let _ = fs::remove_dir_all(&directory);
+    }
 
     #[test]
     fn transcribe_again_returns_once_the_run_ends() {

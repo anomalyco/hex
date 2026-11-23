@@ -315,7 +315,10 @@ fn recording(ui: &Ui, p: Paint) -> El {
             "frame-rate",
             tr("Frame rate"),
             segmented(p, "frame-rate", &rates, rate, |ui, index| {
-                ui.update(|settings| settings.screenshots.frame_rate = [30, 60][index]);
+                ui.update(|settings| {
+                    settings.screenshots.frame_rate =
+                        crate::app_settings::SCREENSHOT_FRAME_RATES[index];
+                });
             }),
         ))
         .child(fact(

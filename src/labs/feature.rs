@@ -50,15 +50,6 @@ macro_rules! field_write {
     };
 }
 
-macro_rules! field_mut {
-    ($settings:expr, labs($field:ident)) => {
-        &mut $settings.labs.$field
-    };
-    ($settings:expr, app($($seg:ident).+)) => {
-        &mut $settings.$($seg).+
-    };
-}
-
 macro_rules! field_key {
     (labs($field:ident)) => {
         concat!("labs.", stringify!($field))
@@ -126,19 +117,25 @@ macro_rules! define_features {
                 }
             }
 
-            fn set_field(self, settings: &mut AppSettings, on: bool) {
+            /// Sets this feature's raw switch field without running `set`'s
+            /// shortcut-repair side effects (for `crate::policy` enforcement).
+            pub(crate) fn set_field(self, settings: &mut AppSettings, on: bool) {
                 match self {
                     $(Self::$variant => field_write!(settings, on, $storage($($path).+)),)*
                 }
             }
 
-            /// Every feature's switch in `settings`, for the Labs lock
-            /// (`crate::policy`), plus the saved per-app model opt-in.
-            pub fn switches(settings: &mut AppSettings) -> Vec<&mut bool> {
-                vec![
-                    $(field_mut!(settings, $storage($($path).+)),)*
-                    &mut settings.labs.app_model_switching,
-                ]
+            /// The feature-specific managed lock that governs this feature
+            /// (in addition to `Lock::Labs`, which locks every Labs feature).
+            pub const fn lock(self) -> Option<crate::policy::Lock> {
+                match self {
+                    Self::Meetings => Some(crate::policy::Lock::Meetings),
+                    Self::VoicePrompt => Some(crate::policy::Lock::OpenCodeProcessing),
+                    _ if matches!(self.group(), Group::Annotate) => {
+                        Some(crate::policy::Lock::Annotate)
+                    }
+                    _ => None,
+                }
             }
         }
     };
