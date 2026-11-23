@@ -42,4 +42,9 @@
     <string name="updates_ready">Update available</string>
     <string name="updates_strip">Hex Preview update available</string>
     <string name="updates_strip_dismiss">Dismiss</string>
+    <string name="updates_install">Install</string>
+    <string name="updates_channel">Updates</string>
+    <string name="updates_notification_downloading">Downloading Hex Preview %1$s</string>
+    <string name="updates_notification_ready">Hex Preview %1$s is downloaded</string>
+    <string name="updates_notification_open">Open Hex Preview to install it.</string>
 </resources>

@@ -37,4 +37,9 @@
     <string name="updates_ready">有可用更新</string>
     <string name="updates_strip">Hex Preview 有可用更新</string>
     <string name="updates_strip_dismiss">关闭</string>
+    <string name="updates_install">安装</string>
+    <string name="updates_channel">更新</string>
+    <string name="updates_notification_downloading">正在下载 Hex Preview %1$s</string>
+    <string name="updates_notification_ready">Hex Preview %1$s 已下载</string>
+    <string name="updates_notification_open">打开 Hex Preview 即可安装。</string>
 </resources>

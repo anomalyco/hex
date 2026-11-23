@@ -1,5 +1,6 @@
 package ly.anoma.hex.updates
 
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -28,6 +29,8 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import ly.anoma.hex.Action
@@ -40,6 +43,7 @@ import ly.anoma.hex.Rule
 import ly.anoma.hex.Toggle
 import ly.anoma.hex.keyboard.StripNotice
 import java.io.File
+import java.lang.ref.WeakReference
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.FormatStyle
@@ -60,6 +64,8 @@ internal object Updates {
         data class Confirm(val release: Release) : State
         data class Downloading(val release: Release, val percent: Int) : State
         data class Verifying(val release: Release) : State
+        /** Android 14+: downloaded and checked while Hex Preview was out of sight; Install waits for a tap. */
+        data class Downloaded(val release: Release, val file: File) : State
         /** Android's one-time "Install unknown apps" switch for Hex Preview is off. */
         data class NeedsPermission(val release: Release, val file: File) : State
         data class Installing(val release: Release) : State
@@ -76,6 +82,8 @@ internal object Updates {
     private var checkedThisRun = false
     /** The keyboard's field now: where a check's answer goes, unless it is a password field. */
     private var keyboard: ((StripNotice?) -> Unit)? = null
+    /** Hex Preview's window, last resumed: an update downloaded by UpdateJob installs at once only while it shows. */
+    private var window: WeakReference<LifecycleOwner>? = null
 
     private fun prefs(c: Context) = c.getSharedPreferences("updates", Context.MODE_PRIVATE)
     private fun automatic(c: Context) = prefs(c).getBoolean("automatic", true)
@@ -83,22 +91,27 @@ internal object Updates {
     private fun release(s: State) = when (s) {
         is State.Available -> s.release; is State.Confirm -> s.release; is State.Downloading -> s.release
         is State.Verifying -> s.release; is State.NeedsPermission -> s.release; is State.Installing -> s.release
-        is State.Failed -> s.release; else -> null
+        is State.Failed -> s.release; is State.Downloaded -> s.release; else -> null
     }
     private fun busy(s: State) = s is State.Confirm || s is State.Downloading || s is State.Verifying ||
-        s is State.NeedsPermission || s is State.Installing
+        s is State.NeedsPermission || s is State.Installing || s is State.Downloaded
 
     @Synchronized private fun load(c: Context) {
         if (loaded) return
         loaded = true
         val saved = prefs(c).getString("release", null)?.let(Release::parse)
-        if (saved != null && saved.code > installed(c).longVersionCode) flow.value = State.Available(saved)
-        else { prefs(c).edit().remove("release").apply(); worker.execute { File(c.cacheDir, "updates").deleteRecursively() } }
+        if (saved != null && saved.code > installed(c).longVersionCode) {
+            val file = File(File(c.cacheDir, "updates"), "${saved.code}.apk")
+            val downloaded = prefs(c).getLong("downloaded", 0) == saved.code && file.length() == saved.size
+            flow.value = if (downloaded) State.Downloaded(saved, file) else State.Available(saved)
+        } else { prefs(c).edit().remove("release").apply(); worker.execute { File(c.cacheDir, "updates").deleteRecursively() } }
     }
 
     fun appOpened(context: Context) {
         val c = context.applicationContext
+        (context as? LifecycleOwner)?.let { window = WeakReference(it) }
         load(c)
+        c.getSystemService(NotificationManager::class.java).cancel(UpdateJob.READY)
         // Back from Android's "Install unknown apps" page: carry on with the update the person asked for.
         (flow.value as? State.NeedsPermission)?.let { if (c.packageManager.canRequestPackageInstalls()) install(c, it.release, it.file) }
         if (automatic(c) && (!checkedThisRun || System.currentTimeMillis() - prefs(c).getLong("checked", 0) > HOUR)) check(c, false)
@@ -157,19 +170,60 @@ internal object Updates {
         val c = context.applicationContext
         val r = release(flow.value) ?: return
         if (flow.value is State.Downloading || flow.value is State.Verifying || flow.value is State.Installing) return
-        if (!confirmed && c.getSystemService(ConnectivityManager::class.java).isActiveNetworkMetered) { flow.value = State.Confirm(r); return }
+        val network = c.getSystemService(ConnectivityManager::class.java)
+        if (!confirmed && network.isActiveNetworkMetered) { flow.value = State.Confirm(r); return }
         flow.value = State.Downloading(r, 0)
-        worker.execute {
-            try {
-                var shown = -1
-                val file = Channel.download(c, r) { if (it != shown) { shown = it; flow.value = State.Downloading(r, it) } }
-                flow.value = State.Verifying(r)
-                try { Channel.verify(c, file, r) } catch (e: Channel.Failure) { file.delete(); throw e }
-                main.post { install(c, r, file) }
-            } catch (e: Channel.Failure) { flow.value = State.Failed(r, e.problem) }
-        }
+        // Android 14+ cuts off a plain download seconds after the person leaves Hex Preview; a user-initiated job
+        // keeps it going. With no network at all it runs here instead and stops at once, as before.
+        if (Build.VERSION.SDK_INT >= 34 && network.activeNetwork != null && UpdateJob.schedule(c, r)) return
+        fetch(c, r) { file -> file?.let { install(c, r, it) } }
     }
     fun notNow() { (flow.value as? State.Confirm)?.let { flow.value = State.Available(it.release) } }
+
+    /** Downloads [r] and checks it (size, SHA-256, then package, build and signing key) on the worker, then hands
+     * the file to [then] on the main thread, or null after a failure, which the Home card shows. [stop] ends the
+     * download at its next read and deletes the partial file, as a lost connection does. */
+    internal fun fetch(c: Context, r: Release, stop: () -> Boolean = { false }, progress: (Int) -> Unit = {}, then: (File?) -> Unit) {
+        load(c)
+        flow.value = State.Downloading(r, 0)
+        worker.execute {
+            val file = try {
+                var shown = -1
+                val file = Channel.download(c, r) {
+                    if (stop()) throw Channel.Failure(Problem.Connection)
+                    if (it != shown) { shown = it; flow.value = State.Downloading(r, it); progress(it) }
+                }
+                flow.value = State.Verifying(r)
+                try { Channel.verify(c, file, r) } catch (e: Channel.Failure) { file.delete(); throw e }
+                file
+            } catch (e: Channel.Failure) { flow.value = State.Failed(r, e.problem); null }
+            main.post { then(file) }
+        }
+    }
+
+    /** UpdateJob's checked download: installs as an in-process one does while Hex Preview shows, else waits for
+     * the Home card's Install. True when it waits. */
+    internal fun ready(c: Context, r: Release, file: File): Boolean {
+        if (window?.get()?.lifecycle?.currentState?.isAtLeast(Lifecycle.State.STARTED) == true) { install(c, r, file); return false }
+        prefs(c).edit().putLong("downloaded", r.code).apply()
+        flow.value = State.Downloaded(r, file)
+        return true
+    }
+
+    /** The person tapped Install on an update downloaded out of sight: its size, SHA-256 and signing key are
+     * checked again first. If Android cleared it from the cache meanwhile, it downloads again. */
+    private fun installDownloaded(context: Context) {
+        val c = context.applicationContext
+        val s = flow.value as? State.Downloaded ?: return
+        val r = s.release
+        flow.value = State.Verifying(r)
+        worker.execute {
+            val file = Channel.downloaded(c, r)
+            if (file == null) { main.post { flow.value = State.Available(r); update(c) }; return@execute }
+            try { Channel.verify(c, file, r); main.post { install(c, r, file) } }
+            catch (e: Channel.Failure) { file.delete(); flow.value = State.Failed(r, e.problem) }
+        }
+    }
 
     private fun install(c: Context, r: Release, file: File) {
         if (!c.packageManager.canRequestPackageInstalls()) { flow.value = State.NeedsPermission(r, file); return }
@@ -209,7 +263,7 @@ internal object Updates {
                 confirm?.let { c.startActivity(it.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
             }
             PackageInstaller.STATUS_SUCCESS -> {
-                prefs(c).edit().remove("release").apply(); flow.value = State.Current
+                prefs(c).edit().remove("release").remove("downloaded").apply(); flow.value = State.Current
             }
             else -> release(flow.value)?.let { flow.value = State.Failed(it, Problem.Install) }
         }
@@ -248,6 +302,10 @@ internal object Updates {
                         Label(stringResource(R.string.updates_downloading, s.percent), muted = true, size = 14)
                         LinearProgressIndicator(progress = { s.percent / 100f }, modifier = Modifier.fillMaxWidth(),
                             color = colorResource(R.color.ink), trackColor = colorResource(R.color.rule))
+                    }
+                    is State.Downloaded -> {
+                        Primary(stringResource(R.string.updates_install)) { installDownloaded(c) }
+                        Label(stringResource(R.string.updates_keyboard_note), muted = true, size = 13, lines = 3)
                     }
                     is State.Verifying -> Label(stringResource(R.string.updates_verifying), muted = true, size = 14)
                     is State.Installing -> {
