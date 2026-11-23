@@ -64,8 +64,10 @@ it to `TypingConfigs/active.json` in the App Group atomically and bumps
 
 - **Loading:** `FullKeyboardView.syncSettings` sets `engine.typingConfig` from
   `TypingConfigActive.current(fullAccess:)`. It returns nothing when the experiment is off,
-  without Full Access, or when the file is missing or unreadable. The file is read again only
-  when the generation changes.
+  without Full Access, or when the file is missing or unreadable. The file is read and compiled
+  once per generation and kept for the life of the process: the words, and each key block's
+  context, aim and zones as plain values. A layout rebuild only picks the block for its keyboard
+  and reuses the compiled zone map while the keys' geometry is the same.
 - **Words** (`TypingLearning.adding`) go to autocorrect on top of Learn how I type's learning, in
   memory only, so removing the config removes exactly them. What the person taught Hex themselves
   wins: a typo they fixed another way, a word they kept.
@@ -73,7 +75,7 @@ it to `TypingConfigs/active.json` in the App Group atomically and bumps
   - `neverCorrectTo` blocks corrections on space, next-word revisions and merges.
   - Fixes are applied or offered according to their mode.
   - Dictation fixes are added to the keyboard's dictation.
-- **Zones** (`KeyboardLayout.zoneMap`, applied in `rebuildLayout`) give the keys of the letters
+- **Zones** (`TypingConfigActive.zoneMap`, applied in `rebuildLayout`) give the keys of the letters
   page `zoneRects`: disjoint rectangles that `hitTest` and the next-letter odds' distances use.
   - A zone that would leave any keycap less than its centre ±0.3 keycap is skipped, and so are
     two zones claiming one point.

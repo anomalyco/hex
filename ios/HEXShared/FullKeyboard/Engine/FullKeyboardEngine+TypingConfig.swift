@@ -16,16 +16,15 @@ extension FullKeyboardEngine {
     /// `layout` with the active config's zones, when it has a key block for these keys.
     func zoned(_ layout: KeyboardLayout) -> KeyboardLayout {
         TypingConfigActive.record(layout)
-        guard let config = typingConfig else { return layout }
-        let zones = config.keys(on: layout).zones
-        return zones.isEmpty ? layout : layout.applying(layout.zoneMap(zones))
+        guard let config = typingConfig, let zones = config.keys(on: layout)?.zones, !zones.isEmpty else { return layout }
+        return layout.applying(config.zoneMap(zones, on: layout))
     }
 
     /// The active config's aim for these keys, in points from each letter's keycap centre.
     func typingConfigAim() -> [Character: CGVector] {
-        guard let config = typingConfig else { return [:] }
+        guard let aim = typingConfig?.keys(on: layout)?.aim, !aim.isEmpty else { return [:] }
         var out: [Character: CGVector] = [:]
-        for (letter, aim) in config.keys(on: layout).aim {
+        for (letter, aim) in aim {
             guard let key = layout.keys.first(where: { $0.character == String(letter) }) else { continue }
             out[letter] = CGVector(dx: aim.dx * key.frame.width, dy: aim.dy * key.frame.height)
         }

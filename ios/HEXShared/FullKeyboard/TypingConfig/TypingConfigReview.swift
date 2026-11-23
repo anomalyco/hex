@@ -222,6 +222,25 @@ nonisolated struct TypingConfigReview: Equatable, Sendable {
     }
 }
 
+nonisolated extension TypingConfigReview {
+    /// An aim entry as every reader takes it: nil when it doesn't parse (`invalidValue`), else
+    /// its offset clamped to `TypingConfigLimits.aimBound`.
+    static func aim(letter: String, _ aim: TypingConfigFile.Aim) -> [Double]? {
+        guard letter.count == 1, letter.first?.isLetter == true, letter == letter.lowercased(),
+              aim.offset.count == 2, aim.offset.allSatisfy(\.isFinite) else { return nil }
+        let bound = Double(TypingConfigLimits.aimBound)
+        return aim.offset.map { max(-bound, min(bound, $0)) }
+    }
+
+    /// A zone as every reader takes it: nil when it doesn't parse (`invalidValue`), else with
+    /// its move clamped to `TypingConfigLimits.zoneMaxMove`.
+    static func zone(_ zone: TypingConfigFile.Zone) -> KeyboardZone? {
+        guard let edge = KeyboardZone.Edge(rawValue: zone.edge), zone.move.isFinite else { return nil }
+        let bound = Double(TypingConfigLimits.zoneMaxMove)
+        return KeyboardZone(key: zone.key, edge: edge, move: CGFloat(max(-bound, min(bound, zone.move))))
+    }
+}
+
 /// Walks the file in its order, recording an item per part.
 private nonisolated struct Builder {
     typealias R = TypingConfigReview
@@ -407,13 +426,10 @@ private nonisolated struct Builder {
             var appliedBlock = R.AppliedBlock(block: b, keyboard: index ?? -1, context: block.context)
             for letter in (block.aim ?? [:]).keys.sorted() {
                 let aimPath = "\(path).aim.\(letter)"
-                guard let aim = block.aim?[letter]?.value, letter.count == 1, letter.first?.isLetter == true,
-                      letter == letter.lowercased(), aim.offset.count == 2, aim.offset.allSatisfy(\.isFinite) else {
+                guard let aim = block.aim?[letter]?.value, let to = R.aim(letter: letter, aim) else {
                     add(.unreadable(path: aimPath), aimPath, .skipped(.invalidValue), list: .aim, block: b, evidence: block.aim?[letter]?.value?.evidence, text: letter)
                     continue
                 }
-                let bound = Double(TypingConfigLimits.aimBound)
-                let to = aim.offset.map { max(-bound, min(bound, $0)) }
                 let outcome: R.Outcome = if let blockReason { .skipped(blockReason) }
                     else if geometry?.keys.contains(where: { $0.id == letter && $0.row >= 0 }) != true { .skipped(.keyNotOnKeyboard) }
                     else if !enough(aim.evidence, { e in
@@ -428,12 +444,11 @@ private nonisolated struct Builder {
             var candidates: [(index: Int, zone: KeyboardZone, outcome: R.Outcome, evidence: Evidence?)] = []
             for (i, entry) in (block.zones ?? []).enumerated() {
                 let zonePath = "\(path).zones[\(i)]"
-                guard let zone = entry.value, let edge = KeyboardZone.Edge(rawValue: zone.edge), zone.move.isFinite else {
+                guard let zone = entry.value, let clamped = R.zone(zone) else {
                     add(.unreadable(path: zonePath), zonePath, .skipped(.invalidValue), list: .zones, position: i, block: b, evidence: entry.value?.evidence)
                     continue
                 }
-                let bound = Double(TypingConfigLimits.zoneMaxMove)
-                let to = max(-bound, min(bound, zone.move))
+                let to = Double(clamped.move)
                 let outcome: R.Outcome = if let blockReason { .skipped(blockReason) }
                     else if !check.hitModelMatches { .skipped(.needsCheckingAgain) }
                     else if !enough(zone.evidence, { e in
@@ -444,7 +459,7 @@ private nonisolated struct Builder {
                     }) { .skipped(.notEnoughEvidence) }
                     else if to != zone.move { .clamped(from: [zone.move], to: [to]) }
                     else { .applied }
-                candidates.append((i, KeyboardZone(key: zone.key, edge: edge, move: CGFloat(to)), outcome, zone.evidence))
+                candidates.append((i, clamped, outcome, zone.evidence))
             }
             // The geometry: the zones that still apply, together, on the keyboard the block is for.
             let applying = candidates.filter { $0.outcome.applies }

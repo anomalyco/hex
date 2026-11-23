@@ -1,39 +1,67 @@
 import CoreGraphics
 import Foundation
 
-/// The typing config the keyboard is using: `TypingConfigs/active.json` read once through
-/// `TypingConfigReview`, its words, and its key positions for each layout the keys draw.
+/// The typing config the keyboard is using: `TypingConfigs/active.json`, read and compiled once
+/// per `typingConfig.generation` (`current(fullAccess:)`) into what the keys use, and kept for
+/// the life of the process: its words, and each key block's keyboard, aim and zones as plain
+/// values read and clamped as `TypingConfigReview` reads them. A layout only picks its block.
 @MainActor
 final class TypingConfigActive {
-    let data: Data
+    /// One key block as the keys use it.
+    struct Block: Equatable, Sendable {
+        var context: TypingConfigFile.Context
+        /// By letter, in keycaps.
+        var aim: [Character: CGVector]
+        var zones: [KeyboardZone]
+    }
+
     /// The words (they don't depend on the keyboard).
     let words: TypingConfigReview.Applied
+    /// The key blocks a reader looks at (`TypingConfigLimits.maxContexts`), in the file's order.
+    let blocks: [Block]
     /// Whether any key block has zones: Adaptive touch then records no taps.
     let hasZones: Bool
-    private var cache: (layout: KeyboardLayout, applied: TypingConfigReview.Applied)?
+    private var live: (context: TypingConfigFile.Context, block: Block?)?
+    private var zoneMap: (geometry: KeyboardZoneGeometry, zones: [KeyboardZone], map: KeyboardZoneMap)?
 
     init?(data: Data) {
-        let review = TypingConfigReview(data: data, keyboard: KeyboardLayout(width: 402), checksEvidence: false)
+        let review = TypingConfigReview(data: data, keyboards: [], checksEvidence: false)
         guard review.refused == nil, let file = review.file else { return nil }
         var words = review.applied
         words.blocks = []
-        self.data = data
         self.words = words
-        hasZones = (file.keys ?? []).contains { !($0.value?.zones ?? []).isEmpty }
+        blocks = (file.keys ?? []).prefix(TypingConfigLimits.maxContexts).compactMap { entry in
+            entry.value.map { block in
+                var aim: [Character: CGVector] = [:]
+                for (letter, value) in block.aim ?? [:] {
+                    guard let value = value.value, let to = TypingConfigReview.aim(letter: letter, value), let c = letter.first else { continue }
+                    aim[c] = CGVector(dx: to[0], dy: to[1])
+                }
+                return Block(context: block.context, aim: aim, zones: (block.zones ?? []).compactMap { $0.value.flatMap(TypingConfigReview.zone) })
+            }
+        }
+        hasZones = blocks.contains { !$0.zones.isEmpty }
     }
 
-    /// Aim and zones for `layout` (letters only), as the review applies them there.
-    func keys(on layout: KeyboardLayout) -> TypingConfigReview.Applied {
-        guard layout.layer == .letters else { return TypingConfigReview.Applied() }
-        if let cache, cache.layout == layout { return cache.applied }
-        var applied = TypingConfigReview(data: data, keyboard: layout, checksEvidence: false).applied
-        applied.keep = []
-        applied.neverCorrectTo = []
-        applied.fixes = []
-        applied.dictation = []
-        applied.blocks = applied.blocks.filter { $0.keyboard == 0 }
-        cache = (layout, applied)
-        return applied
+    /// The block for `layout` (letters only): the first made for its keyboard, as the review
+    /// applies them, with no zones when Hex's edges changed since (`needsCheckingAgain`).
+    func keys(on layout: KeyboardLayout) -> Block? {
+        guard layout.layer == .letters else { return nil }
+        let context = TypingConfigFile.Context(layout: layout)
+        if let live, live.context == context { return live.block }
+        var block = blocks.first { $0.context.differences(from: context).isEmpty }
+        if block?.context.hitModel != KeyboardZone.hitModel { block?.zones = [] }
+        live = (context, block)
+        return block
+    }
+
+    /// `zones` compiled against `layout`'s keys, kept while the keys' geometry stays the same.
+    func zoneMap(_ zones: [KeyboardZone], on layout: KeyboardLayout) -> KeyboardZoneMap {
+        let geometry = KeyboardZoneGeometry(layout: layout)
+        if let zoneMap, zoneMap.geometry == geometry, zoneMap.zones == zones { return zoneMap.map }
+        let map = geometry.zoneMap(zones)
+        zoneMap = (geometry, zones, map)
+        return map
     }
 
     private static var loaded: (generation: Int, data: Data?, config: TypingConfigActive?)?

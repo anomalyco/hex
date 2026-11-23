@@ -533,9 +533,9 @@ extension FullKeyboardEngineTests {
         let compiled = try XCTUnwrap(review.compiled(switchedOn: Set(review.switchable)))
         XCTAssertEqual(compiled.keys?.count, 2, "every block for one of the person's keyboards")
         let active = try XCTUnwrap(TypingConfigActive(data: JSONEncoder().encode(compiled)))
-        XCTAssertEqual(active.keys(on: upright).aim, ["o": CGVector(dx: 0, dy: 0.2)])
-        XCTAssertEqual(active.keys(on: sideways).zones, [KeyboardZone(key: "space", edge: .top, move: 0.1)])
-        XCTAssertTrue(active.keys(on: french).isEmpty)
+        XCTAssertEqual(active.keys(on: upright)?.aim, ["o": CGVector(dx: 0, dy: 0.2)])
+        XCTAssertEqual(active.keys(on: sideways)?.zones, [KeyboardZone(key: "space", edge: .top, move: 0.1)])
+        XCTAssertNil(active.keys(on: french))
 
         let suite = "typing-config-keyboards-\(UUID().uuidString)"
         let settings = TypingConfigSettings(defaults: UserDefaults(suiteName: suite))
