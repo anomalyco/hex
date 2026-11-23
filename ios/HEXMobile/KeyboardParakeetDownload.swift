@@ -296,7 +296,26 @@ struct KeyboardParakeetStatus: View {
     }
 
     private func line(now: Date) -> String? {
-        switch download.state {
+        Self.line(
+            state: download.state,
+            isDownloaded: download.isDownloaded,
+            hold: download.hold,
+            keyboardState: KeyboardParakeetSettings().keyboardState,
+            now: now
+        )
+    }
+
+    /// What the row says. The keyboard's word is about English: dictating in another language
+    /// (Hinglish, French), Apple's speech recognition takes it, so a downloaded model says
+    /// it's only for English rather than "Ready in the keyboard".
+    static func line(
+        state: KeyboardParakeetDownload.State,
+        isDownloaded: Bool,
+        hold: KeyboardParakeetDownload.Hold?,
+        keyboardState: (state: KeyboardParakeetSettings.KeyboardState, at: Date)?,
+        now: Date
+    ) -> String? {
+        switch state {
         case .downloading:
             return String(localized: "Downloading the speech model")
         case .failed(let message):
@@ -304,8 +323,8 @@ struct KeyboardParakeetStatus: View {
         case .idle:
             break
         }
-        guard download.isDownloaded else { return Self.line(for: download.hold) }
-        switch KeyboardParakeetSettings().keyboardState {
+        guard isDownloaded, hold != .notEnglish else { return line(for: hold) }
+        switch keyboardState {
         case (.preparing, let at)? where now.timeIntervalSince(at) < 180:
             return String(localized: "Getting ready in the keyboard")
         case (.ready, _)?:
