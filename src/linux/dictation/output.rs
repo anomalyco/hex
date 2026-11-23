@@ -41,13 +41,13 @@ pub(super) fn paste_last(
         .paste_dictation(last.text(), false, last.standalone())
 }
 
-struct LinuxOutputAdapter<'a> {
+struct LinuxOutputAdapter<'a, 'b> {
     typing: Option<crate::linux::live_typing::Session>,
     insert: Option<Insert<'a>>,
-    last_dictation: &'a mut Option<LastDictation>,
+    last_dictation: &'b mut Option<LastDictation>,
 }
 
-impl OutputAdapter for LinuxOutputAdapter<'_> {
+impl OutputAdapter for LinuxOutputAdapter<'_, '_> {
     fn cancel_pending(&mut self) {
         if let Some(session) = self.typing.take() {
             session.cancel();
