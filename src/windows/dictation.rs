@@ -488,10 +488,8 @@ pub fn run(
             && finishing.is_none()
             && !service.is_active()
             && pending == 0
-            && let Some(selection) = model.take_reload()
-            && let Err(error) = engine.reload(selection)
         {
-            tracing::warn!(%error, "could not replace the transcription model");
+            model.start_reload(|selection| engine.reload(selection));
         }
         if !recording
             && !start_pending
