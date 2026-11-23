@@ -424,7 +424,10 @@ more), and moving a legacy folder forgets the app's compile record for it
 (`ParakeetCompileRecord.forget`), so V2 says it's optimizing for this iPhone and Ultra
 gets ready beside the engine that dictates. The Settings › Dictation row says what it's doing: downloading,
 downloaded, getting ready in the keyboard, ready, or that the keyboard can't use it now
-(`KeyboardParakeetSettings.keyboardState`, written by the keyboard). Each dictation logs
+(`KeyboardParakeetSettings.keyboardState`, written by the keyboard). Dictating in another
+language than English, Hinglish included, it says "Only for English dictation." even once
+downloaded: Apple's speech recognition takes that dictation whatever the keyboard last wrote
+(build 147 said "Ready in the keyboard", which reads as Parakeet taking Hinglish). Each dictation logs
 its engine, the keyboard's limit, footprint before and at peak, load and transcription
 time to `keyboard-capture-probe.log`. Measured in Hex's keyboard on an iPhone 17 Pro
 (iOS 27.2, keyboard limit 177 MB) with the app force-quit: V2's first load 15.4 s, the

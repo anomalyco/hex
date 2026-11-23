@@ -389,6 +389,19 @@ final class DictationSSOTTests: XCTestCase {
         XCTAssertEqual(ready.modelChoice?.model, .parakeetV2)
         XCTAssertEqual(ready.modelChoice?.language, "en-US")
         XCTAssertFalse(ready.awaitsV2Download)
+
+        // Settings' row: the keyboard's "ready" is about English. Dictating Hinglish after the
+        // download, Apple Speech takes it, and the row says so rather than "Ready".
+        let now = Date()
+        func line(_ hold: KeyboardParakeetDownload.Hold?) -> String? {
+            KeyboardParakeetStatus.line(state: .idle, isDownloaded: true, hold: hold, keyboardState: (.ready, now), now: now)
+        }
+        XCTAssertEqual(line(nil), "Ready in the keyboard")
+        XCTAssertEqual(line(.notEnglish), "Only for English dictation.")
+        XCTAssertEqual(
+            KeyboardParakeetStatus.line(state: .idle, isDownloaded: false, hold: .notEnglish, keyboardState: nil, now: now),
+            "Only for English dictation."
+        )
     }
 
     func testWantedDictationLanguagePrecedenceAndSelfDictationHandoffReason() throws {
