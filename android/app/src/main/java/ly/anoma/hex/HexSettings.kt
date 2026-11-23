@@ -105,6 +105,7 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
     var vocabularyDraft by remember { mutableStateOf(speech.vocabularyTerms.joinToString("\n")) }
     val signature = remember(revision) { speech.signature }
     var signatureDraft by remember { mutableStateOf(speech.signatureText) }
+    val emojiSuggestions = remember(revision) { typing.emojiSuggestions }
     // A hidden field or leaving Labs shows the saved line again, never an unsaved draft.
     LaunchedEffect(page, signature) { if (page != Page.Labs || !signature) signatureDraft = speech.signatureText }
     val autoCapitalize = remember(revision) { typing.autoCapitalize }
@@ -334,6 +335,9 @@ internal fun HexSettings(setup: Setup, speech: SpeechPreferences, typing: Typing
                                 Rule()
                                 Toggle(stringResource(R.string.number_row), stringResource(R.string.number_row_detail),
                                     numberRow) { typing.numberRow = it }
+                                Rule()
+                                Toggle(stringResource(R.string.emoji_suggestions), stringResource(R.string.emoji_suggestions_detail),
+                                    emojiSuggestions) { typing.emojiSuggestions = it }
                             }
                         }
                     }

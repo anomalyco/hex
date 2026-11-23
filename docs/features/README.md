@@ -3172,17 +3172,34 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   Unit tests plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
 │   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45268305325, the
 │   latest observed verification); the repo has no Android CI.
-└── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
-    every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
-    corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
-    the Symbols on letter keys hints and holds still work, with row 1 letters that have a
-    symbol (AZERTY a/z, QWERTZ z) showing it instead of the digit. The keyboard is one row
-    taller and the Hex menu matches that height; ?123, the symbols pages and the pads keep
-    their keys and are a row shorter than the letters while it is on. Off, the page is
-    unchanged.
-    KeyboardPageTest plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
-    on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45275591325, the
-    latest observed verification); not tried on a device. The repo has no Android CI.
+├── Labs > Keyboard > Number row (off) -> 1 2 3 4 5 6 7 8 9 0 above the letter rows on
+│   every layout (en, es, nb, de, fr, it), typed like normal keys. The first letter row's
+│   corner digits and digit-first hold are hidden while it shows; accents on hold stay, and
+│   the Symbols on letter keys hints and holds still work, with row 1 letters that have a
+│   symbol (AZERTY a/z, QWERTZ z) showing it instead of the digit. The keyboard is one row
+│   taller and the Hex menu matches that height; ?123, the symbols pages and the pads keep
+│   their keys and are a row shorter than the letters while it is on. Off, the page is
+│   unchanged.
+│   KeyboardPageTest plus a passing `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin`
+│   on a GitHub-hosted runner (https://github.com/anomalyco/hex/actions/runs/45275591325, the
+│   latest observed verification); not tried on a device. The repo has no Android CI.
+└── Labs > Keyboard > Emoji suggestions (off) -> on the English layout, while a word
+    that names an emoji is being typed (smile -> 😊, joy/haha -> 😂, heart -> ❤️), the
+    strip's last slot offers it beside the word suggestions, padded to that slot even when
+    it is the only one. Another layout's model never offers one. A tap replaces the word
+    and commits it with the same space rules as a word suggestion; continuing to type
+    keeps the word. Nothing matching leaves the strip unchanged. The list keeps the same
+    0.85 strong cut-off as the iPhone strip, plus a reviewed joy -> 😂 and a reviewed
+    exclusion list (number words that name clock faces, and ordinary words that name an
+    emoji's object in another sense), generated from the iOS keyboard's
+    emoji-index-en.txt (Unicode emoji-test.txt 18.0 and CLDR 49 annotations, Unicode
+    License v3, plus Hex's chat words). It is a compact word-to-emoji asset read lazily
+    only while the toggle is on; the loader keeps only emoji the device's `Paint.hasGlyph`
+    can draw (minSdk 31 draws up to Emoji 13.1), so the strip never shows tofu. Matching is
+    case-insensitive and whole-word.
+    Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
+    `EmojiKeywordsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
+    Android CI.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

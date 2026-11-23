@@ -20,6 +20,7 @@
     <string name="keyboard_recording">正在录音</string>
     <string name="keyboard_keep">保留 %1$s</string>
     <string name="keyboard_suggest">建议 %1$s</string>
+    <string name="keyboard_suggest_emoji">建议表情符号 %1$s</string>
     <string name="keyboard_menu">Hex 菜单</string>
     <string name="keyboard_menu_open">"Hex 菜单  ›"</string>
     <string name="keyboard_menu_done">完成</string>

@@ -66,6 +66,8 @@ internal class KeyboardEngine(
     /** Reads Android's personal dictionary for a model; runs on [background]. */
     private val readPersonal: ((TypingModel) -> PersonalWords)? = null,
     private val background: Executor = Executor { it.run() },
+    /** The bundled emoji words (Labs › Keyboard › Emoji suggestions), read lazily. */
+    private val emoji: EmojiWords? = null,
     private val clock: () -> Long = { SystemClock.uptimeMillis() },
     private val main: Handler = Handler(Looper.getMainLooper()),
 ) {
@@ -159,6 +161,10 @@ internal class KeyboardEngine(
         }
     }
 
+    /** Labs › Keyboard › Emoji suggestions changed: the current word's strip follows at once,
+     * reading the bundled list then if it was never read. */
+    fun emojiSuggestionsChanged() { word?.let { showSuggestions(it) } }
+
     /** Android's personal dictionary changed: every loaded language reads it again, off the main thread. */
     fun personalWordsChanged() { for (decoder in models.values) loadPersonal(decoder) }
     private fun loadPersonal(decoder: SpatialDecoder) {
@@ -235,21 +241,39 @@ internal class KeyboardEngine(
     private fun showSuggestions(w: TypingWord?) {
         cancelChip()
         if (w != null && w.token.isNotEmpty()) {
-            surface?.suggestions(w.strip(autocorrect = false))
+            surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = false), emojiFor(w)))
             if (!feedback.autocorrect || !canEndWord()) return
             val token = w.token
             pendingChip = Runnable {
                 pendingChip = null
-                if (word === w && w.token == token) surface?.suggestions(w.strip(autocorrect = true).map {
+                if (word === w && w.token == token) surface?.suggestions(Suggestion.withEmoji(w.strip(autocorrect = true).map {
                     if (it.kind == Suggestion.Kind.Fix && feedback.blocked(w.decoder.model.language, token, it.text))
                         Suggestion(it.text, Suggestion.Kind.Word) else it
-                })
+                }, emojiFor(w)))
             }.also { main.postDelayed(it, CHIP_PAUSE_MS) }
             return
         }
         val b = if (w != null && !symbols && selStart == selEnd) before() else null
         showPredictions(if (b != null && TypingWord.boundary(b.lastOrNull())) b else null)
     }
+    /** The current word's emoji when Labs › Keyboard › Emoji suggestions is on and the word names
+     * one. The bundled list is read off the main thread the first time; once it is in memory this
+     * word's strip is shown again. */
+    private fun emojiFor(w: TypingWord): String? {
+        if (!feedback.emojiSuggestions) return null
+        val list = emoji ?: return null
+        val hit = list.match(w.token, w.decoder.model.language)
+        if (hit == null && !list.requested) list.load {
+            // A pending autocorrect runnable draws this word again with the emoji when it fires.
+            // Re-rendering now would cancel and restart its delay, flickering the Fix chip.
+            main.post {
+                if (pendingChip == null && word === w && w.token.isNotEmpty() && feedback.emojiSuggestions)
+                    showSuggestions(w)
+            }
+        }
+        return hit
+    }
+
     /** Next words for the text before the cursor, capitalised as shift would be. */
     private fun showPredictions(before: String?) {
         val w = word

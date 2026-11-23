@@ -55,11 +55,13 @@ class HexKeyboard : InputMethodService() {
     }
     internal val engine by lazy {
         KeyboardEngine(InputConnectionTarget(this), feedback, { layoutLanguage }, { SpatialDecoder(TypingModel.asset(assets, it)) },
-            readPersonal = { PersonalWords.read(contentResolver, it) }, background = words)
+            readPersonal = { PersonalWords.read(contentResolver, it) }, background = words,
+            emoji = EmojiWords(assets, words))
     }
     private val typingChanged = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key == TypingPreferences.SUGGEST_SWEAR_WORDS) engine.swearWordsChanged()
         if (key == TypingPreferences.NUMBER_ROW) engine.numberRowChanged()
+        if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
     }
     internal val previewAllowed get() = !engine.secure
 

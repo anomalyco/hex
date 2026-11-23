@@ -219,22 +219,22 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         return true
     }
 
-    /** The typing model's slots in its order. With what was typed among them they show as given: typed
-     * in quotes on the left, then the fix (in a chip) or the likeliest word in the middle. Without it,
-     * the likeliest word takes the middle, the next the left, as Gboard and iPhone place them. */
+    /** The typing model's slots in their display order ([Suggestion.place]): with what was typed among
+     * them, typed in quotes on the left then the fix (in a chip) or the likeliest word in the middle;
+     * otherwise the likeliest word in the middle and the next on the left, as Gboard and iPhone place
+     * them. The emoji always keeps the last slot (Labs › Keyboard › Emoji suggestions). */
     fun suggestions(slots: List<Suggestion>) {
         // Typing started: the suggestions matter more than the notice, which comes back in the next field.
         if (slots.any { it.kind == Suggestion.Kind.Typed }) notice = null
-        val shown = arrayOfNulls<Suggestion>(3)
-        if (slots.any { it.kind == Suggestion.Kind.Typed }) slots.take(3).forEachIndexed { i, slot -> shown[i] = slot }
-        else { shown[1] = slots.getOrNull(0); shown[0] = slots.getOrNull(1); shown[2] = slots.getOrNull(2) }
-        offered = Array(3) { shown[it]?.text }
+        val shown = Suggestion.place(slots)
+        offered = Array(Suggestion.SLOTS) { shown[it]?.text }
         var chip = -1
         for (i in 0..2) {
             val slot = shown[i]
             val s = slot?.text.orEmpty()
             val typed = slot?.kind == Suggestion.Kind.Typed
             val fix = slot?.kind == Suggestion.Kind.Fix
+            val emoji = slot?.kind == Suggestion.Kind.Emoji
             if (fix) chip = i
             this.words[i].text = if (typed) context.getString(R.string.keyboard_literal, s) else s
             this.words[i].background = if (fix) shape(key, dp(15).toFloat()) else null
@@ -242,6 +242,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
                 s.isEmpty() -> null
                 typed -> context.getString(R.string.keyboard_keep, s)
                 fix -> context.getString(R.string.keyboard_correction, s)
+                emoji -> context.getString(R.string.keyboard_suggest_emoji, s)
                 else -> context.getString(R.string.keyboard_suggest, s)
             }
             slotViews[i].isEnabled = s.isNotEmpty()
@@ -359,11 +360,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
                 val available = MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
                 measure.set(paint)
-                val size = fitTextSize(available.toFloat(), StripText.SIZE, StripText.MIN) { sp ->
+                val fitted = fitTextSize(available.toFloat(), StripText.SIZE, StripText.MIN) { sp ->
                     measure.textSize = spToPx(sp, resources.displayMetrics)
                     ceil(measure.measureText(text, 0, text.length))
                 }
-                setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, fitted)
             }
             super.onMeasure(widthMeasureSpec, heightMeasureSpec)
         }
