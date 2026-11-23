@@ -621,19 +621,19 @@ pub(super) fn drive_yielding(
     id: u64,
     stream: &mut impl StreamFeed,
     commands: &Receiver<Command>,
-    yielding: &Yielding,
+    yielding: Yielding,
     deferred: &mut VecDeque<Command>,
 ) -> Option<Command> {
+    // `yielding` is owned here so every exit path — feed error, cancel,
+    // finish, preemption, disconnect, or panic — drops it and marks the stream
+    // closed.
     loop {
         let Ok(command) = commands.recv() else {
             return None;
         };
         match command {
             Command::Feed { stream: s, samples } if s == id => match stream.feed(&samples) {
-                Ok(()) => {
-                    yielding.consumed.fetch_add(samples.len(), Ordering::AcqRel);
-                    yielding.partials.publish(stream.partial());
-                }
+                Ok(()) => yielding.record_consumed(samples.len(), stream.partial()),
                 Err(error) => {
                     tracing::warn!(%error, "yielding stream feed failed");
                     return None;

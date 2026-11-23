@@ -560,11 +560,8 @@ pub(crate) fn run(
                 }
             }
             // A GPU without room for two copies: the engine swaps in place.
-            if pending == 0
-                && let Some(selection) = model.take_reload()
-                && let Err(error) = engine.reload(selection)
-            {
-                tracing::warn!(%error, "could not replace the transcription model");
+            if pending == 0 {
+                model.start_reload(|selection| engine.reload(selection));
             }
             if pending == 0
                 && let Some(next) = model.take_ready()

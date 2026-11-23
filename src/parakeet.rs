@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::Once;
@@ -36,8 +36,6 @@ pub struct Parakeet {
 /// Loaded model weights, estimated from the model file size (they live in Metal buffers).
 static MODEL_WEIGHTS: procwatch::Gauge = procwatch::Gauge::new("speech.model_weights");
 static TRANSCRIBE_LOGGING: Once = Once::new();
-#[cfg(hex_capture)]
-const TRANSCRIPTION_SAMPLES_PER_MS: usize = 16;
 const MAX_PENDING_OUTPUTS: usize = 16;
 
 pub enum WorkerEvent {
@@ -105,6 +103,7 @@ pub enum TranscriptionTarget {
 }
 
 struct InferenceJob {
+    ticket: OutputTicket,
     job_id: DictationJobId,
     control: Arc<JobControl>,
     submitted_at: Instant,
@@ -128,6 +127,7 @@ struct InferenceJob {
 }
 
 struct ProcessorJob {
+    ticket: OutputTicket,
     job_id: DictationJobId,
     control: Arc<JobControl>,
     target: TranscriptionTarget,
@@ -172,19 +172,23 @@ struct CompletedTranscript {
 
 enum OutputJob {
     PreparePaste,
+    Skipped {
+        sequence: u64,
+    },
     #[cfg(hex_capture)]
     Recent {
-        sequence: u64,
+        ticket: OutputTicket,
         request: crate::paste::recent::Request,
     },
     Completed {
+        ticket: OutputTicket,
         job_id: DictationJobId,
         control: Arc<JobControl>,
         target: TranscriptionTarget,
         result: Box<Result<CompletedTranscript, String>>,
     },
     Paste {
-        sequence: u64,
+        ticket: OutputTicket,
         kind: PasteKind,
     },
 }
@@ -193,10 +197,21 @@ impl OutputJob {
     fn sequence(&self) -> u64 {
         match self {
             Self::PreparePaste => u64::MAX,
+            Self::Skipped { sequence } => *sequence,
             #[cfg(hex_capture)]
-            Self::Recent { sequence, .. } => *sequence,
-            Self::Completed { job_id, .. } => job_id.0,
-            Self::Paste { sequence, .. } => *sequence,
+            Self::Recent { ticket, .. } => ticket.sequence(),
+            Self::Completed { ticket, .. } => ticket.sequence(),
+            Self::Paste { ticket, .. } => ticket.sequence(),
+        }
+    }
+
+    fn disarm_ticket(self) {
+        match self {
+            Self::PreparePaste | Self::Skipped { .. } => {}
+            #[cfg(hex_capture)]
+            Self::Recent { ticket, .. } => ticket.disarm(),
+            Self::Completed { ticket, .. } => ticket.disarm(),
+            Self::Paste { ticket, .. } => ticket.disarm(),
         }
     }
 }
@@ -221,26 +236,8 @@ impl JobControl {
     }
 }
 
-#[derive(Default)]
-struct OrderedOutputs {
-    waiting: BTreeMap<u64, OutputJob>,
-    next_sequence: u64,
-}
-
-impl OrderedOutputs {
-    fn push(&mut self, job: OutputJob) -> Vec<OutputJob> {
-        if job.sequence() < self.next_sequence {
-            return Vec::new();
-        }
-        self.waiting.insert(job.sequence(), job);
-        let mut ready = Vec::new();
-        while let Some(job) = self.waiting.remove(&self.next_sequence) {
-            ready.push(job);
-            self.next_sequence += 1;
-        }
-        ready
-    }
-}
+mod ordered;
+use ordered::{OrderedOutputs, OutputTicket, TicketKind};
 
 pub struct DictationWorker {
     engine: Option<Arc<TranscriptionEngine>>,
@@ -254,10 +251,15 @@ pub struct DictationWorker {
     output_worker: Option<thread::JoinHandle<()>>,
 }
 
+#[derive(Default)]
 struct WorkerState {
     next_sequence: u64,
     jobs: BTreeSet<DictationJobId>,
     pending_pastes: usize,
+    /// Sequences whose [`OutputTicket`] dropped unsettled; drained by the
+    /// output worker so [`OrderedOutputs`] never wedges even if the output
+    /// channel was full when the drop occurred.
+    skipped: BTreeSet<u64>,
     /// Labs › Return to app: the app in front when the capture started,
     /// which its output returns to (macOS).
     return_to: Option<i32>,
@@ -289,13 +291,7 @@ impl DictationWorker {
         let (processor_jobs, processor_receiver) = mpsc::sync_channel::<ProcessorJob>(4);
         let (output_jobs, output_receiver) = mpsc::sync_channel::<OutputJob>(8);
         let (event_sender, events) = mpsc::channel();
-        let state = Arc::new(Mutex::new(WorkerState {
-            next_sequence: 0,
-            jobs: BTreeSet::new(),
-            pending_pastes: 0,
-            return_to: None,
-            started_by_shortcut: false,
-        }));
+        let state = Arc::new(Mutex::new(WorkerState::default()));
 
         let (_, selection) = crate::app_settings::transcription_selection();
         // Labs › Free memory when idle parks a GGUF model at launch too:
@@ -449,7 +445,9 @@ impl DictationWorker {
         )
         .then(|| state.return_to.take())
         .flatten();
-        let (Some(engine), Some(jobs)) = (&self.engine, &self.inference_jobs) else {
+        let (Some(engine), Some(jobs), Some(output)) =
+            (&self.engine, &self.inference_jobs, &self.output_jobs)
+        else {
             return Err("dictation worker is unavailable");
         };
         let control = Arc::new(JobControl {
@@ -489,7 +487,15 @@ impl DictationWorker {
         let transcript = engine
             .finish_with(stream, samples, offline)
             .map_err(|_| "dictation worker is unavailable")?;
-        jobs.try_send(InferenceJob {
+        let ticket = OutputTicket::new(
+            job_id.0,
+            TicketKind::Dictation { job_id, target },
+            self.state.clone(),
+            output.clone(),
+            self.event_sender.clone(),
+        );
+        match jobs.try_send(InferenceJob {
+            ticket,
             job_id,
             control,
             submitted_at,
@@ -503,13 +509,26 @@ impl DictationWorker {
             recording,
             send_gate,
             stop_phrase,
-        })
-        .map(|()| {
-            state.next_sequence += 1;
-            state.jobs.insert(job_id);
-            job_id
-        })
-        .map_err(queue_error)
+        }) {
+            Ok(()) => {
+                state.next_sequence += 1;
+                state.jobs.insert(job_id);
+                Ok(job_id)
+            }
+            Err(error) => {
+                let message = match error {
+                    TrySendError::Full(job) => {
+                        job.ticket.disarm();
+                        "dictation queue is full"
+                    }
+                    TrySendError::Disconnected(job) => {
+                        job.ticket.disarm();
+                        "dictation worker is unavailable"
+                    }
+                };
+                Err(message)
+            }
+        }
     }
 
     /// The engine that streams hotkey captures while they are recorded.
@@ -557,7 +576,7 @@ impl DictationWorker {
     }
 
     fn submit_paste(&self, kind: PasteKind) -> Result<(), &'static str> {
-        self.enqueue_paste(|sequence| OutputJob::Paste { sequence, kind })
+        self.enqueue_paste(kind, |ticket| OutputJob::Paste { ticket, kind })
     }
 
     #[cfg(hex_capture)]
@@ -565,21 +584,50 @@ impl DictationWorker {
         &self,
         request: crate::paste::recent::Request,
     ) -> Result<(), &'static str> {
-        self.enqueue_paste(|sequence| OutputJob::Recent { sequence, request })
+        self.enqueue_paste(PasteKind::LastTranscript, |ticket| OutputJob::Recent {
+            ticket,
+            request,
+        })
     }
 
-    fn enqueue_paste(&self, job: impl FnOnce(u64) -> OutputJob) -> Result<(), &'static str> {
+    fn enqueue_paste(
+        &self,
+        kind: PasteKind,
+        job: impl FnOnce(OutputTicket) -> OutputJob,
+    ) -> Result<(), &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|error| error.into_inner());
         let sequence = state.next_output_sequence()?;
-        self.output_jobs
+        let output = self
+            .output_jobs
             .as_ref()
-            .ok_or("dictation worker is unavailable")?
-            .try_send(job(sequence))
-            .map(|()| {
+            .ok_or("dictation worker is unavailable")?;
+        let ticket = OutputTicket::new(
+            sequence,
+            TicketKind::Paste(kind),
+            self.state.clone(),
+            output.clone(),
+            self.event_sender.clone(),
+        );
+        match output.try_send(job(ticket)) {
+            Ok(()) => {
                 state.next_sequence += 1;
                 state.pending_pastes += 1;
-            })
-            .map_err(queue_error)
+                Ok(())
+            }
+            Err(error) => {
+                let message = match error {
+                    TrySendError::Full(job) => {
+                        job.disarm_ticket();
+                        "dictation queue is full"
+                    }
+                    TrySendError::Disconnected(job) => {
+                        job.disarm_ticket();
+                        "dictation worker is unavailable"
+                    }
+                };
+                Err(message)
+            }
+        }
     }
 
     pub fn try_recv(&self) -> Option<WorkerEvent> {
@@ -632,15 +680,29 @@ fn run_output_worker(
             paster.prepare();
             continue;
         }
-        for job in ordered.push(job) {
+        let skipped = {
+            let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
+            std::mem::take(&mut state.skipped)
+        };
+        let mut ready = Vec::new();
+        for sequence in skipped {
+            ready.extend(ordered.skip(sequence));
+        }
+        ready.extend(ordered.push(job));
+        for job in ready {
             let event = match job {
+                OutputJob::PreparePaste | OutputJob::Skipped { .. } => continue,
                 #[cfg(hex_capture)]
-                OutputJob::Recent { request, .. } => WorkerEvent::Pasted {
-                    kind: PasteKind::LastTranscript,
-                    result: request
+                OutputJob::Recent { ticket, request } => {
+                    let result = request
                         .insert(&mut paster, history.as_ref())
-                        .map_err(|e| e.to_string()),
-                },
+                        .map_err(|e| e.to_string());
+                    ticket.settle();
+                    WorkerEvent::Pasted {
+                        kind: PasteKind::LastTranscript,
+                        result,
+                    }
+                }
                 job => finish_output(
                     job,
                     &mut |text, mode| paster.paste(text, mode),
@@ -648,17 +710,6 @@ fn run_output_worker(
                     history.as_ref(),
                 ),
             };
-            let mut state = state.lock().unwrap_or_else(|error| error.into_inner());
-            match &event {
-                WorkerEvent::Completed { job_id, .. } => {
-                    state.jobs.remove(job_id);
-                }
-                WorkerEvent::Pasted { .. } => {
-                    state.pending_pastes = state.pending_pastes.saturating_sub(1);
-                }
-                WorkerEvent::ModelFailed(_) | WorkerEvent::Stage { .. } => {}
-            }
-            drop(state);
             if events.send(event).is_err() {
                 return;
             }
@@ -702,6 +753,7 @@ fn run_processor_worker(
         }
         if output
             .send(OutputJob::Completed {
+                ticket: job.ticket,
                 job_id: job.job_id,
                 control: job.control,
                 target: job.target,
@@ -752,109 +804,12 @@ fn process_job_text(
     )
 }
 
-/// The longest audio the capture path hands the model at once; longer
-/// captures are transcribed in consecutive chunks with their times offset.
 #[cfg(hex_capture)]
-const WORD_CHUNK_SAMPLES: usize = 30 * 16_000;
-/// How long a capture chunk waits for dictation to go idle before it is
-/// queued anyway; the engine still never runs it inside a live stream.
+mod words;
 #[cfg(hex_capture)]
-const WORD_DICTATION_WAIT: std::time::Duration = std::time::Duration::from_secs(20);
-
-/// Transcribes a capture's 16 kHz audio with word timestamps on the engine's
-/// warm model (the `capture` experiment). Before each chunk it waits while
-/// dictation is busy (from the shortcut press through inference); each chunk
-/// is then a foreground request: after the dictation already sent, before
-/// meeting chunks, and never inside a dictation live stream, which finishes
-/// first. No second copy of the model is loaded, and only a weak reference
-/// to the engine is kept between chunks. Quitting stops it between chunks.
-/// Every chunk runs on `selection`.
-#[cfg(hex_capture)]
-pub fn transcribe_with_words(
-    engine: &std::sync::Weak<TranscriptionEngine>,
-    selection: &crate::transcription::models::TranscriptionSelection,
-    samples: Vec<f32>,
-) -> Result<crate::transcription::Transcript> {
-    if samples.is_empty() {
-        return Ok(crate::transcription::Transcript::default());
-    }
-    transcribe_in_chunks(samples, WORD_CHUNK_SAMPLES, |chunk| {
-        wait_for_dictation_idle()?;
-        let selection = selection.clone();
-        let (send, transcript) = mpsc::sync_channel(1);
-        let offline: crate::transcription::engine::Offline = Box::new(move |model, samples| {
-            let _busy = DictationInference::begin();
-            let transcriber = model
-                .activate(&selection)
-                .map_err(|error| format!("{error:#}"))?;
-            let result = transcriber
-                .transcribe_segments(samples)
-                .map_err(|error| format!("{error:#}"))?;
-            let text = result.text.clone();
-            let _ = send.send(result);
-            Ok(text)
-        });
-        let pending = engine
-            .upgrade()
-            .ok_or_else(|| eyre!("the transcription engine stopped"))?
-            .foreground(chunk, offline)?;
-        pending.wait().map_err(|error| eyre!(error))?;
-        transcript
-            .try_recv()
-            .map_err(|_| eyre!("the transcription returned no words"))
-    })
-}
-
-#[cfg(hex_capture)]
-fn wait_for_dictation_idle() -> Result<()> {
-    let started = Instant::now();
-    while dictation_busy()
-        && !crate::desktop::process_exit::quitting()
-        && started.elapsed() < WORD_DICTATION_WAIT
-    {
-        thread::sleep(std::time::Duration::from_millis(50));
-    }
-    if crate::desktop::process_exit::quitting() {
-        return Err(eyre!("Hex is quitting"));
-    }
-    Ok(())
-}
-
-/// Transcribes `samples` in chunks of at most `chunk_samples`, offsetting
-/// each chunk's segment and word times by where it starts.
-#[cfg(hex_capture)]
-fn transcribe_in_chunks(
-    samples: Vec<f32>,
-    chunk_samples: usize,
-    mut transcribe: impl FnMut(Vec<f32>) -> Result<crate::transcription::Transcript>,
-) -> Result<crate::transcription::Transcript> {
-    use crate::transcription::{Transcript, TranscriptSegment};
-    let shift = |spans: Vec<TranscriptSegment>, offset_ms: i64| {
-        spans.into_iter().filter_map(move |span| {
-            let text = span.text.trim();
-            let start_ms = span.start_ms.max(0);
-            (!text.is_empty()).then(|| TranscriptSegment {
-                start_ms: start_ms + offset_ms,
-                end_ms: span.end_ms.max(start_ms) + offset_ms,
-                text: text.to_string(),
-            })
-        })
-    };
-    let mut merged = Transcript::default();
-    let mut texts = Vec::new();
-    for (index, chunk) in samples.chunks(chunk_samples.max(1)).enumerate() {
-        let offset_ms = (index * chunk_samples / TRANSCRIPTION_SAMPLES_PER_MS) as i64;
-        let result = transcribe(chunk.to_vec())?;
-        let text = result.text.trim();
-        if !text.is_empty() {
-            texts.push(text.to_string());
-        }
-        merged.segments.extend(shift(result.segments, offset_ms));
-        merged.words.extend(shift(result.words, offset_ms));
-    }
-    merged.text = texts.join(" ");
-    Ok(merged)
-}
+pub use words::transcribe_with_words;
+#[cfg(all(test, hex_capture))]
+use words::{WORD_CHUNK_SAMPLES, transcribe_in_chunks};
 
 /// Waits for each accepted job's transcript in submission order, then hands
 /// it to processing. The engine thread runs the inference itself.
@@ -919,6 +874,7 @@ fn run_inference_worker(
             {
                 if processor_jobs
                     .send(ProcessorJob {
+                        ticket: job.ticket,
                         job_id: job.job_id,
                         control: job.control,
                         target,
@@ -951,6 +907,7 @@ fn run_inference_worker(
                 });
                 if output
                     .send(OutputJob::Completed {
+                        ticket: job.ticket,
                         job_id: job.job_id,
                         control: job.control,
                         target,
@@ -1051,13 +1008,6 @@ pub(crate) fn deprioritize_background_thread() {
     }
 }
 
-fn queue_error(error: TrySendError<impl Sized>) -> &'static str {
-    match error {
-        TrySendError::Full(_) => "dictation queue is full",
-        TrySendError::Disconnected(_) => "dictation worker is unavailable",
-    }
-}
-
 fn finish_output(
     job: OutputJob,
     paste: &mut impl FnMut(&str, PasteMode) -> Result<String>,
@@ -1066,9 +1016,11 @@ fn finish_output(
 ) -> WorkerEvent {
     match job {
         OutputJob::PreparePaste => unreachable!("paste preparation bypasses ordered output"),
+        OutputJob::Skipped { .. } => unreachable!("skipped sequences never reach finish_output"),
         #[cfg(hex_capture)]
         OutputJob::Recent { .. } => unreachable!("a recent paste uses its own insertion adapter"),
         OutputJob::Completed {
+            ticket,
             job_id,
             control,
             target,
@@ -1200,6 +1152,7 @@ fn finish_output(
                     Err(error) => crate::control::PrintedTranscript::Failed(error.clone()),
                 });
             }
+            ticket.settle();
             WorkerEvent::Completed {
                 job_id,
                 target,
@@ -1207,7 +1160,7 @@ fn finish_output(
                 processing,
             }
         }
-        OutputJob::Paste { kind, .. } => {
+        OutputJob::Paste { ticket, kind } => {
             let result = match kind {
                 PasteKind::LastTranscript => output_history::paste_last(
                     last_transcript.as_ref(),
@@ -1215,6 +1168,7 @@ fn finish_output(
                     paste,
                 ),
             };
+            ticket.settle();
             WorkerEvent::Pasted { kind, result }
         }
     }
@@ -1480,6 +1434,7 @@ mod tests {
 
     fn processing_job(target: TranscriptionTarget) -> ProcessorJob {
         ProcessorJob {
+            ticket: OutputTicket::for_test(0),
             job_id: DictationJobId(0),
             control: Arc::new(JobControl::default()),
             target,
@@ -1609,6 +1564,7 @@ mod tests {
                 .map_err(str::to_owned);
             finish_output(
                 OutputJob::Completed {
+                    ticket: OutputTicket::for_test(1),
                     job_id: DictationJobId(1),
                     control: Arc::new(JobControl::default()),
                     target: TranscriptionTarget::Paste,
@@ -1657,6 +1613,7 @@ mod tests {
         let mut last_transcript = Some(LastDictation::new("an older dictation".to_string(), false));
         let event = finish_output(
             OutputJob::Completed {
+                ticket: OutputTicket::for_test(1),
                 job_id: DictationJobId(1),
                 control: Arc::new(JobControl::default()),
                 target: TranscriptionTarget::Paste,
@@ -1704,7 +1661,7 @@ mod tests {
             let mut mode = None;
             let event = finish_output(
                 OutputJob::Paste {
-                    sequence: 1,
+                    ticket: OutputTicket::for_test(1),
                     kind: PasteKind::LastTranscript,
                 },
                 &mut |text, paste_mode| {
@@ -1749,6 +1706,7 @@ mod tests {
             let mut last_transcript = None;
             let event = finish_output(
                 OutputJob::Completed {
+                    ticket: OutputTicket::for_test(1),
                     job_id: DictationJobId(1),
                     control: Arc::new(JobControl::default()),
                     target,
@@ -1878,7 +1836,7 @@ mod tests {
     fn parallel_processing_results_are_released_in_submission_order() {
         let mut outputs = OrderedOutputs::default();
         let job = |sequence| OutputJob::Paste {
-            sequence,
+            ticket: OutputTicket::for_test(sequence),
             kind: PasteKind::LastTranscript,
         };
 
@@ -1915,6 +1873,7 @@ mod tests {
                 next_sequence: 1,
                 jobs: BTreeSet::from([DictationJobId(0)]),
                 pending_pastes: 0,
+                skipped: BTreeSet::new(),
                 return_to: None,
                 started_by_shortcut: false,
             })),
@@ -2129,8 +2088,13 @@ mod tests {
             end_ms,
             text: text.into(),
         };
+        // Loud audio with explicit 200 ms silent pauses centered at 8 s and 16 s
+        // so quiet-span cuts land on those pauses instead of arbitrary sample edges.
+        let mut samples = vec![0.4; 16_000 * 22];
+        samples[16_000 * 8 - 1_600..16_000 * 8 + 1_600].fill(0.0);
+        samples[16_000 * 16 - 1_600..16_000 * 16 + 1_600].fill(0.0);
         let mut calls = Vec::new();
-        let merged = transcribe_in_chunks(vec![0.0; 16_000 * 25], 16_000 * 10, |chunk| {
+        let merged = transcribe_in_chunks(samples, 16_000 * 10, |chunk| {
             calls.push(chunk.len());
             let chunk_index = calls.len();
             Ok(Transcript {
@@ -2144,7 +2108,19 @@ mod tests {
             })
         })
         .unwrap();
-        assert_eq!(calls, [160_000, 160_000, 80_000]);
+        assert_eq!(calls.len(), 3);
+        assert!(calls.iter().all(|&len| len <= 16_000 * 10));
+        let second_ms = (calls[0] / 16) as i64;
+        let third_ms = ((calls[0] + calls[1]) / 16) as i64;
+        // Cuts landed inside the silent pauses around 8 s and 16 s.
+        assert!(
+            (7_900..=8_100).contains(&second_ms),
+            "cut 1 at {second_ms} ms"
+        );
+        assert!(
+            (15_900..=16_100).contains(&third_ms),
+            "cut 2 at {third_ms} ms"
+        );
         assert_eq!(merged.text, "part 1 part 2 part 3");
         let words = merged
             .words
@@ -2156,13 +2132,34 @@ mod tests {
             [
                 (0, 400, "part"),
                 (450, 450, "two"),
-                (10_000, 10_400, "part"),
-                (10_450, 10_450, "two"),
-                (20_000, 20_400, "part"),
-                (20_450, 20_450, "two"),
+                (second_ms, second_ms + 400, "part"),
+                (second_ms + 450, second_ms + 450, "two"),
+                (third_ms, third_ms + 400, "part"),
+                (third_ms + 450, third_ms + 450, "two"),
             ]
         );
-        assert_eq!(merged.segments[2].start_ms, 20_000);
+        assert_eq!(merged.segments[2].start_ms, third_ms);
+    }
+
+    #[cfg(hex_capture)]
+    #[test]
+    fn word_chunk_cap_never_exceeds_whisper_max_audio_chunk_samples() {
+        let whisper_cap =
+            crate::transcription::models::max_audio_chunk_samples("whisper", 0).unwrap();
+        assert!(
+            WORD_CHUNK_SAMPLES <= whisper_cap,
+            "capture foreground chunks must never exceed Whisper's 30 s single-window cap"
+        );
+        // Even a 30.04 s clip fed into `transcribe_in_chunks` is split so no
+        // chunk exceeds Whisper's 30 s limit.
+        let mut sizes = Vec::new();
+        transcribe_in_chunks(vec![0.1; whisper_cap + 640], WORD_CHUNK_SAMPLES, |chunk| {
+            sizes.push(chunk.len());
+            Ok(crate::transcription::Transcript::default())
+        })
+        .unwrap();
+        assert_eq!(sizes.len(), 2);
+        assert!(sizes.iter().all(|&len| len > 0 && len <= whisper_cap));
     }
 
     #[cfg(hex_capture)]
@@ -2208,7 +2205,8 @@ mod tests {
         // request so meeting chunks yield to it, and never inside a stream.
         assert!(matches!(
             command,
-            EngineCommand::Foreground { ref clip, .. } if clip.len() == WORD_CHUNK_SAMPLES
+            EngineCommand::Foreground { ref clip, .. }
+                if !clip.is_empty() && clip.len() <= WORD_CHUNK_SAMPLES
         ));
         // The next chunk waits for this one, so a dictation sent meanwhile
         // runs first.
