@@ -104,13 +104,13 @@ pub fn chapter_entries(
 }
 
 /// One chapter as Markdown for copying: its name, its line, and its turns.
-pub fn section_markdown(chapter: &Chapter, entries: &[TranscriptEntry]) -> String {
+pub fn section_markdown(chapter: &Chapter, entries: &[TranscriptEntry], imported: bool) -> String {
     let mut markdown = format!("## {}\n\n", chapter.title.trim());
     if !chapter.summary.trim().is_empty() {
         markdown.push_str(chapter.summary.trim());
         markdown.push_str("\n\n");
     }
-    markdown.push_str(&super::transcript_markdown(entries));
+    markdown.push_str(&super::transcript_markdown_with(entries, imported));
     markdown.trim_end().to_string()
 }
 
@@ -126,6 +126,7 @@ pub fn section_for_id(id: &str, index: usize) -> Result<String> {
     Ok(section_markdown(
         chapter,
         &chapter_entries(&entries, &manifest.chapters, index),
+        manifest.imported,
     ))
 }
 

@@ -32,8 +32,7 @@ use crate::transcription::transcript::{Transcript, TranscriptSegment};
 use super::chunk_level;
 use super::echo::{EchoEnvelope, Signal};
 use super::{
-    AudioPacket, MeetingManifest, MeetingSource, TranscriptEntry, coalesce_transcript,
-    format_duration, set_owner_only, sync_directory,
+    AudioPacket, MeetingManifest, MeetingSource, TranscriptEntry, set_owner_only, sync_directory,
 };
 
 const RATE: usize = 16_000;
@@ -1892,47 +1891,7 @@ impl LocalTime {
 }
 
 pub(super) fn render_markdown(manifest: &MeetingManifest, entries: &[TranscriptEntry]) -> String {
-    let started = LocalTime::from_ms(manifest.created_at_ms);
-    let mut markdown = format!("# {}\n\n", super::display_title(manifest).trim());
-    markdown.push_str(&format!(
-        "- **Date:** {}, {}\n",
-        started.date(),
-        started.clock()
-    ));
-    if let Some(duration) = manifest.duration_ms {
-        markdown.push_str(&format!("- **Duration:** {}\n", format_duration(duration)));
-    }
-    if let Some(app) = &manifest.app {
-        markdown.push_str(&format!("- **App:** {app}\n"));
-    }
-    if let Some(calendar) = &manifest.calendar {
-        if calendar.title.trim() != manifest.title.trim() && !calendar.title.trim().is_empty() {
-            markdown.push_str(&format!("- **Calendar:** {}\n", calendar.title.trim()));
-        }
-        let attendees = calendar
-            .attendees
-            .iter()
-            .map(|name| name.trim())
-            .filter(|name| !name.is_empty())
-            .collect::<Vec<_>>();
-        if !attendees.is_empty() {
-            markdown.push_str(&format!("- **Attendees:** {}\n", attendees.join(", ")));
-        }
-    }
-    markdown.push_str("\n## Transcript\n\n");
-    let turns = coalesce_transcript(entries.iter().cloned());
-    if turns.is_empty() {
-        markdown.push_str("_No speech was transcribed._\n");
-    }
-    for turn in turns {
-        markdown.push_str(&format!(
-            "**{}** · {}\n{}\n\n",
-            manifest.speaker_label(turn.source),
-            format_duration(turn.start_ms),
-            turn.text.trim()
-        ));
-    }
-    markdown
+    super::markdown::render_document(manifest, entries)
 }
 
 /// Writes the user-facing Markdown copy without replacing an existing file.

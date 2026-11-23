@@ -216,33 +216,19 @@ pub(super) fn length(milliseconds: u64) -> String {
     }
 }
 
-/// `mm:ss`, as `meeting::format_duration`.
-fn clock_offset(milliseconds: u64) -> String {
-    let seconds = milliseconds / 1_000;
-    format!("{:02}:{:02}", seconds / 60, seconds % 60)
-}
-
-/// Speaker turns as Markdown, as `meeting::transcript_markdown`; an imported
-/// meeting's one track is Speaker.
+/// Speaker turns as Markdown, delegating to the canonical meeting renderer.
 fn transcript_markdown(turns: &[Turn], imported: bool) -> String {
-    turns
-        .iter()
-        .map(|turn| {
-            format!(
-                "**{}** · {}\n{}",
-                if imported {
-                    "Speaker"
-                } else if turn.mine {
-                    "You"
-                } else {
-                    "Them"
-                },
-                clock_offset(turn.start_ms),
-                turn.text.trim()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    crate::meeting::render_turns_markdown(
+        turns.iter().map(|turn| {
+            let source = if turn.mine {
+                crate::meeting::MeetingSource::Microphone
+            } else {
+                crate::meeting::MeetingSource::System
+            };
+            (source, turn.start_ms, turn.text.as_str())
+        }),
+        imported,
+    )
 }
 
 impl MeetingsPane {
@@ -481,7 +467,7 @@ fn recording_action(ui: &Ui, p: Paint) -> El {
                     .center_y()
                     .child(pulsing_dot(p.danger()))
                     .children(active.map(|meeting| {
-                        text(clock_offset(meeting.duration_ms))
+                        text(crate::meeting::format_duration(meeting.duration_ms))
                             .key("elapsed")
                             .font(p.k.ty.mono)
                             .color(p.muted())
@@ -845,7 +831,7 @@ fn detail(ui: &Ui, p: Paint, meeting: &Meeting, layer: &mut Vec<El>) -> El {
     let mut meta_line = vec![
         day_label(&meeting.day).to_string(),
         meeting.clock.clone(),
-        clock_offset(meeting.duration_ms),
+        crate::meeting::format_duration(meeting.duration_ms),
     ];
     meta_line.extend(meeting.app.clone());
     let retention = meeting
@@ -993,7 +979,7 @@ fn chapters(p: Paint, meeting: &Meeting, copied: &dyn Fn(&str) -> bool) -> El {
                 .key(format!("chapter{index}"))
                 .gap(12.0)
                 .child(
-                    text(clock_offset(chapter.start_ms))
+                    text(crate::meeting::format_duration(chapter.start_ms))
                         .key("clock")
                         .font(p.k.ty.mono)
                         .color(p.faint())
@@ -1212,7 +1198,7 @@ pub(super) fn turn_line(p: Paint, index: usize, turn: &Turn, imported: bool) -> 
                         }),
                     )
                     .child(
-                        text(clock_offset(turn.start_ms))
+                        text(crate::meeting::format_duration(turn.start_ms))
                             .key("clock")
                             .font(p.k.ty.small)
                             .color(p.faint()),

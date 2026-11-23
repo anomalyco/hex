@@ -329,6 +329,7 @@ mod tests {
             let menu = crate::meeting::section_markdown(
                 &chapters[index],
                 &crate::meeting::chapter_entries(&entries, chapters, index),
+                meeting.manifest.imported,
             );
             assert_eq!(chapter.markdown, menu);
             let cli = library.chapter_markdown(id, index + 1, now_ms).unwrap();
