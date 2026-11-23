@@ -1874,8 +1874,8 @@ Hex checks the release service            // maintain.updates
 │   ├── Windows -> Authenticode valid, signer AUTHENTICODE_SIGNER -> new version directory
 │   │   └── .lnk files in Start Menu, Desktop, and taskbar pins -> retargeted in one PowerShell run
 │   │       // target is versions\<version>\hex.exe; arguments and name stay, an old-version icon is repointed
-│   │       // a zero-filled Start Menu Hex.lnk is recreated as the installer writes it, but never when it is gone
-│   │       // saves write updates\shortcut.tmp.lnk and move it over the link, so a killed save cannot corrupt it
+│   │       // a Start Menu Hex.lnk that reads as empty (zero-filled) is recreated, but never when it is gone
+│   │       // saves flush updates\shortcut.tmp.lnk and replace the link in place, else the old in-place save
 │   ├── Linux -> SHA-256 only -> new version directory, `current` switched
 │   ├── Staged -> checks continue; Restart to update stays offered meanwhile
 │   │   ├── Another release this install takes (update, required) -> download -> replaces the staged one
