@@ -1,5 +1,5 @@
 <resources xmlns:tools="http://schemas.android.com/tools" tools:ignore="MissingTranslation">
-    <string name="setup_welcome_detail">Hex Preview 只在下载语音模型（190 MB）和向 GitHub 检查更新时使用网络。你的声音和文字都保留在这台设备上。</string>
+    <string name="setup_welcome_detail">Hex Preview 只在下载语音模型（190 MB）、向 GitHub 检查更新，以及你点按“发送”提交反馈时使用网络。你的声音和文字都保留在这台设备上。</string>
     <string name="setup_title">设置 Hex Preview</string>
     <string name="setup_detail">允许使用麦克风，然后选择 Hex Preview 作为键盘。</string>
     <string name="setup_microphone_detail">让 Hex Preview 能听见你</string>
@@ -8,7 +8,7 @@
     <string name="setup_keyboard_off">在“设置”中打开 Hex Preview</string>
     <string name="setup_choose_hex">选择 Hex Preview 键盘</string>
     <string name="keyboard_hint_microphone">请在 Hex Preview 中允许使用麦克风</string>
-    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或输入的内容，也不保存任何按键记录或转录内容。为了查找更新，Hex Preview 会在你打开它时，以及每天最多一次在键盘上，向 GitHub 询问最新版本。这个请求不包含任何关于你或你输入内容的信息，不过和访问任何网站一样，GitHub 会看到你的网络地址。可以用“自动检查更新”关闭。</string>
+    <string name="settings_privacy_detail">Hex 在这台手机上将语音转换为文字，绝不上传你的声音或用它的键盘输入的内容，也不保存任何按键记录或转录内容。只有在“发送反馈”中点按“发送”时，反馈才会离开这台手机：你的留言、保留的图片、你填写的邮箱（如有），以及 Hex 和这台手机的相关信息会发送到 Anomaly 的反馈收件箱（Bellhop）。你的听写、录音、词汇和更正都不会包含在内。为了查找更新，Hex Preview 会在你打开它时，以及每天最多一次在键盘上，向 GitHub 询问最新版本。这个请求不包含任何关于你或你输入内容的信息，不过和访问任何网站一样，GitHub 会看到你的网络地址。可以用“自动检查更新”关闭。</string>
     <string name="updates_available">Hex Preview %1$s（版本号 %2$d）已可更新</string>
     <string name="updates_update">更新</string>
     <string name="updates_keyboard_note">更新时键盘会暂时关闭，点按文本框即可重新打开。</string>
