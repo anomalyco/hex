@@ -285,7 +285,7 @@ pub unsafe extern "C" fn hk_tap_free(decoder: *mut HkTapDecoder) {
 ///
 /// # Safety
 /// `keys` is valid with `centre_count` centres.
-unsafe fn keys(keys: &HkTapKeys) -> Option<Keys> {
+pub(crate) unsafe fn keys(keys: &HkTapKeys) -> Option<Keys> {
     // SAFETY: `centres` holds `centre_count` items, as the caller promises.
     let centres = unsafe { slice(keys.keys.centres, keys.keys.centre_count) }?;
     let centres = centres
@@ -304,7 +304,7 @@ unsafe fn keys(keys: &HkTapKeys) -> Option<Keys> {
 ///
 /// # Safety
 /// `taps` is NULL or holds `count` pairs.
-unsafe fn taps(taps: *const f64, count: usize) -> Option<Vec<(f64, f64)>> {
+pub(crate) unsafe fn taps(taps: *const f64, count: usize) -> Option<Vec<(f64, f64)>> {
     // SAFETY: holds `count` pairs, as the caller promises.
     let flat = unsafe { count.checked_mul(2).and_then(|n| slice(taps, n)) }?;
     Some(
@@ -318,7 +318,7 @@ unsafe fn taps(taps: *const f64, count: usize) -> Option<Vec<(f64, f64)>> {
 
 /// # Safety
 /// `pointer` is NULL or NUL-terminated.
-unsafe fn optional_utf8<'a>(pointer: *const c_char) -> Result<Option<&'a str>, i32> {
+pub(crate) unsafe fn optional_utf8<'a>(pointer: *const c_char) -> Result<Option<&'a str>, i32> {
     if pointer.is_null() {
         return Ok(None);
     }
@@ -330,7 +330,7 @@ unsafe fn optional_utf8<'a>(pointer: *const c_char) -> Result<Option<&'a str>, i
 ///
 /// # Safety
 /// `text` is NULL or from `CString::into_raw`, not freed before.
-unsafe fn free_string(text: *mut c_char) {
+pub(crate) unsafe fn free_string(text: *mut c_char) {
     if !text.is_null() {
         // SAFETY: as the caller promises.
         drop(unsafe { CString::from_raw(text) });

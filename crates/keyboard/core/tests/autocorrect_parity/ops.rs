@@ -142,7 +142,7 @@ impl World {
     ) -> Run {
         let log = Rc::new(RefCell::new(CallLog::new(keep)));
         let bundled = Arc::new(Bundled {
-            never_suggest: ac::NeverSuggestList::new(tsv),
+            never_suggest: Arc::new(ac::NeverSuggestList::new(tsv)),
             german_capitals: self.german.clone(),
         });
         let mut e = Autocorrect::new(bundled, self.checker("p", &log, false));

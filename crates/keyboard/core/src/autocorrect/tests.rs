@@ -77,9 +77,9 @@ fn qwerty_cells() -> Vec<KeyCell> {
 
 fn engine(checker: Box<Stub>) -> Autocorrect {
     let bundled = Arc::new(Bundled {
-        never_suggest: NeverSuggestList::new(
+        never_suggest: Arc::new(NeverSuggestList::new(
             "*\tswear\tfuck\n*\tslur\tfaggot\nen\tswear\tblow job\n",
-        ),
+        )),
         german_capitals: None,
     });
     let mut e = Autocorrect::new(bundled, checker);

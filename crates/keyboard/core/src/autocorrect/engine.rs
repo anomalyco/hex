@@ -18,7 +18,7 @@ use crate::model::Model;
 /// for iOS and Android, `never-suggest.tsv`) and German's capitals.
 #[derive(Debug, Default)]
 pub struct Bundled {
-    pub never_suggest: NeverSuggestList,
+    pub never_suggest: Arc<NeverSuggestList>,
     /// `GermanCapitals.bundled()`: what an engine reads when no one set its own.
     pub german_capitals: Option<Arc<GermanCapitals>>,
 }
