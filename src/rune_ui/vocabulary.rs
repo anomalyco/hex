@@ -9,11 +9,11 @@ use rune::tok::motion::{SETTLE, SETTLE_EXIT};
 use rune::{El, SpringPair, TextEdit, Transition, Tx, col, edit_access, el, row, text};
 use rune_kit::{ControlSize, TextInput};
 
-use super::Ui;
 use super::controls::{
     ButtonKind, DESCRIPTION, METRICS, Paint, button, modal_scrim_transition, modal_transition, note,
 };
 use super::lists::remove_button;
+use super::{Modal, Ui};
 use crate::desktop::file_dialog::{Dialog, Filter, Pending, Target};
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::dictation::vocabulary::csv::{self, MergeSummary};
@@ -67,7 +67,6 @@ pub(super) struct VocabularyEditor {
     /// The file dialogs Import… and Export… asked for.
     import_chooser: Option<Pending>,
     export_chooser: Option<Pending>,
-    pub(super) open: bool,
 }
 
 impl VocabularyEditor {
@@ -189,12 +188,7 @@ fn budget_note(ui: &Ui) -> Option<String> {
 /// empty.
 pub(super) fn open(ui: &mut Ui) {
     super::settings::cancel_capture(ui);
-    super::picker::close(ui);
-    super::explainer::close(ui);
-    super::sound_sets::close(ui);
-    super::calls::close(ui);
-    ui.open = None;
-    ui.vocabulary.open = true;
+    ui.open_modal(Modal::Vocabulary);
     ui.vocabulary.status = None;
     if ui.vocabulary.rows.is_empty() {
         add_row(ui);
@@ -203,10 +197,10 @@ pub(super) fn open(ui: &mut Ui) {
 
 /// Saves what was typed, drops rows left blank, and closes the sheet.
 pub(super) fn close(ui: &mut Ui) {
-    if !ui.vocabulary.open {
-        return;
-    }
-    ui.vocabulary.open = false;
+    ui.close_modal_if(Modal::Vocabulary);
+}
+
+pub(super) fn on_close(ui: &mut Ui) {
     ui.vocabulary.added = None;
     ui.vocabulary.status = None;
     ui.flush_drafts();
@@ -322,7 +316,7 @@ fn choose_export(ui: &mut Ui) {
 pub(super) fn poll(ui: &mut Ui) -> bool {
     // A closed sheet or the lab off takes no answer: a dialog that finishes
     // after either changes nothing.
-    if !ui.vocabulary.open || !on(ui) {
+    if !ui.is_modal(Modal::Vocabulary) || !on(ui) {
         ui.vocabulary.import_chooser = None;
         ui.vocabulary.export_chooser = None;
         if !on(ui) {
@@ -571,10 +565,7 @@ fn term_row(p: Paint, entry: &TermRow, added: bool) -> El {
     }
 }
 
-pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
-    if !ui.vocabulary.open {
-        return None;
-    }
+pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     let c = &p.k.c;
     let rows = col().key("terms").px(SIDE_ROOM).children(
         ui.vocabulary
@@ -709,7 +700,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .w_full()
             .h_full()
     };
-    Some([
+    [
         layer("vocabulary-scrim")
             .fill(c.scrim)
             .on_press(close)
@@ -720,7 +711,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             // Keys stay inside, Escape or a press outside closes, and focus
             // returns to the row's button that opened it.
             .child(panel.modal(true, close)),
-    ])
+    ]
 }
 
 /// A few terms, one with spellings, with the sheet open.
@@ -791,10 +782,10 @@ mod tests {
     fn the_sheet_starts_empty_lists_with_a_row_and_saves_on_close() {
         let mut ui = ui();
         open(&mut ui);
-        assert!(ui.vocabulary.open);
+        assert!(ui.is_modal(Modal::Vocabulary));
         assert_eq!(ui.vocabulary.rows.len(), 1);
         close(&mut ui);
-        assert!(!ui.vocabulary.open);
+        assert!(!ui.is_modal(Modal::Vocabulary));
         assert!(ui.vocabulary.rows.is_empty());
         assert_eq!(summary(&ui), "None");
 

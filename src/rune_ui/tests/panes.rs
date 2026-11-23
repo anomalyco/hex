@@ -768,7 +768,7 @@ fn the_shortcut_mode_row_names_the_choice() {
     refresh(&mut rt);
     assert_eq!(name(&rt).as_deref(), Some("Tap"));
     tap(&mut rt, "shortcut-mode-control");
-    assert!(rt.state.explainer.open);
+    assert!(rt.state.is_modal(Modal::Explainer));
 }
 
 #[test]
@@ -779,7 +779,7 @@ fn shortcut_mode_opens_from_its_row_and_keeps_focus_inside() {
     tab_to(&mut rt, "shortcut-mode-control");
     key(&mut rt, Key::Text(" ".into()), Mods::default());
     settle(&mut rt);
-    assert!(rt.state.explainer.open);
+    assert!(rt.state.is_modal(Modal::Explainer));
     tab_to(&mut rt, "trigger-hold-or-double-tap");
     // A lone modifier can't double-tap, so that option takes no focus.
     let stops = [
@@ -798,7 +798,7 @@ fn shortcut_mode_opens_from_its_row_and_keeps_focus_inside() {
     }
     key(&mut rt, Key::Escape, Mods::default());
     settle(&mut rt);
-    assert!(!rt.state.explainer.open);
+    assert!(!rt.state.is_modal(Modal::Explainer));
     assert!(
         focused(&rt).ends_with("shortcut-mode-control"),
         "focus went to {}",
@@ -811,7 +811,7 @@ fn shortcut_mode_opens_from_its_row_and_keeps_focus_inside() {
     tab_to(&mut rt, "trigger-tap");
     key(&mut rt, Key::Enter, Mods::default());
     settle(&mut rt);
-    assert!(!rt.state.explainer.open);
+    assert!(!rt.state.is_modal(Modal::Explainer));
     assert_eq!(
         rt.state.settings.shortcut_mode,
         crate::dictation::ShortcutMode::Hold
@@ -840,7 +840,7 @@ fn each_option_picks_its_trigger() {
     tap(&mut rt, "trigger-double-tap");
     assert_eq!(saved(&rt), 4, "picking the choice again saves nothing");
     tap(&mut rt, "shortcut-mode-done");
-    assert!(!rt.state.explainer.open);
+    assert!(!rt.state.is_modal(Modal::Explainer));
 
     // With a lone modifier, Double-tap says why and does nothing.
     let mut rt = runtime("shortcut-mode", true, PANE_SIZE);
@@ -890,7 +890,7 @@ fn reduce_motion_shows_the_finished_explainer_without_waking() {
         "the first poll already knows"
     );
     settle(&mut rt);
-    assert!(rt.state.explainer.open);
+    assert!(rt.state.is_modal(Modal::Explainer));
     assert_eq!(rt.state.explainer.time(), explainer::DONE);
     assert_eq!(rt.wake_deadline(), None, "the loop never ticks");
 }
@@ -1250,17 +1250,23 @@ fn the_explainer_picker_and_shortcut_recording_never_share_the_window() {
     assert!(sent(&rt).contains(&Request::CancelShortcut));
 
     picker::open(&mut rt.state);
-    assert!(!rt.state.explainer.open, "the picker closes the explainer");
+    assert!(
+        rt.state.is_modal(Modal::Picker),
+        "the picker replaces the explainer"
+    );
     explainer::open(&mut rt.state);
-    assert!(!rt.state.picker.open, "and the explainer the picker");
+    assert!(
+        rt.state.is_modal(Modal::Explainer),
+        "and the explainer replaces the picker"
+    );
 
     rt.state
         .select_pane(Pane::History, &mut rune::Tx::default());
-    assert!(!rt.state.explainer.open);
+    assert_eq!(rt.state.modal, None);
     picker::open(&mut rt.state);
     rt.state
         .select_pane(Pane::General, &mut rune::Tx::default());
-    assert!(!rt.state.picker.open);
+    assert_eq!(rt.state.modal, None);
 }
 
 #[test]
@@ -1408,7 +1414,7 @@ fn the_calls_sheet_saves_the_default_and_each_answer() {
         Some("Ask each time")
     );
     tap(&mut rt, "calls");
-    assert!(rt.state.calls.open);
+    assert!(rt.state.is_modal(Modal::Calls));
     // Seen calls newest first (Slack, Zoom, Google Meet, a website), then
     // the saved answer Hex hasn't seen a call in.
     pick(&mut rt, "call1-policy", 1);
@@ -1424,7 +1430,7 @@ fn the_calls_sheet_saves_the_default_and_each_answer() {
     assert_eq!(policy(&rt, "example.com"), MeetingPolicy::NeverOffer);
     assert_eq!(policy(&rt, "us.zoom.xos"), MeetingPolicy::AlwaysRecord);
     tap(&mut rt, "close-calls");
-    assert!(!rt.state.calls.open);
+    assert!(!rt.state.is_modal(Modal::Calls));
 }
 
 /// Before Hex has seen a call, the sheet says where they'll come from.

@@ -22,7 +22,7 @@ use super::controls::{
     segmented,
 };
 use super::lists::{Tone, error_panel};
-use super::{Request, Ui};
+use super::{Modal, Request, Ui};
 use crate::app_settings::AppSettings;
 use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::transcription::models::{
@@ -86,7 +86,6 @@ pub(super) enum View {
 
 #[derive(Default)]
 pub(super) struct Picker {
-    pub(super) open: bool,
     pub(super) view: View,
     /// The models that don't speak the saved language, in the full list.
     pub(super) others_open: bool,
@@ -148,12 +147,7 @@ impl Picker {
 }
 
 pub(super) fn open(ui: &mut Ui) {
-    super::explainer::close(ui);
-    super::sound_sets::close(ui);
-    super::vocabulary::close(ui);
-    super::calls::close(ui);
-    ui.open = None;
-    ui.picker.open = true;
+    ui.open_modal(Modal::Picker);
     ui.picker.clear_deletion();
     // Models already on this computer: headers only, on a worker.
     super::found::scan(ui);
@@ -374,7 +368,10 @@ fn hidden_model(
 }
 
 pub(super) fn close(ui: &mut Ui) {
-    ui.picker.open = false;
+    ui.close_modal_if(Modal::Picker);
+}
+
+pub(super) fn on_close(ui: &mut Ui) {
     ui.picker.in_use_first = None;
     ui.picker.clear_deletion();
 }
@@ -458,12 +455,9 @@ pub(super) fn delete(ui: &mut Ui, model: &'static ModelDefinition) {
     }
 }
 
-/// The picker's scrim and panel over the window, when open: the scrim fades
+/// The picker's scrim and panel over the window: the scrim fades
 /// and the panel scales in as one surface ([`modal_transition`]).
-pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
-    if !ui.picker.open {
-        return None;
-    }
+pub(super) fn modal(ui: &Ui, p: Paint) -> [El; 2] {
     let c = &p.k.c;
     let language = ui.settings.transcription.language.clone();
     let view = ui.picker.view;
@@ -609,7 +603,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             .w_full()
             .h_full()
     };
-    Some([
+    [
         layer("picker-scrim")
             .fill(c.scrim)
             .on_press(close)
@@ -620,7 +614,7 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Option<[El; 2]> {
             // Keys stay inside, Escape or a press outside closes, and focus
             // returns to the control that opened it.
             .child(panel.modal(true, close)),
-    ])
+    ]
 }
 
 /// `model`'s preparation label and progress while the service prepares it.
@@ -813,7 +807,7 @@ pub(super) fn parakeet_ultra_fixture(ui: &mut Ui) {
         model: TranscriptionModelId::ParakeetV3,
         language: "mt".into(),
     };
-    ui.picker.open = true;
+    ui.open_modal(Modal::Picker);
     ui.picker.view = View::All;
     ui.picker.sort = Sort::Name;
     ui.picker.supported_only = true;
@@ -824,7 +818,7 @@ pub(super) fn parakeet_ultra_fixture(ui: &mut Ui) {
 /// The picker open with English and Parakeet saved; `downloading` shows a
 /// model mid-download.
 pub(super) fn fixture(ui: &mut Ui, downloading: Option<TranscriptionModelId>) {
-    ui.picker.open = true;
+    ui.open_modal(Modal::Picker);
     if let (Some(model), Some(view)) = (downloading, ui.view.as_mut()) {
         let bytes = transcription_models::definition(model)
             .download_bytes()
