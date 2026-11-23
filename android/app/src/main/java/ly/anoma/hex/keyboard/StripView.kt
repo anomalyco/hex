@@ -6,7 +6,10 @@ import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
+import android.text.TextPaint
 import android.text.TextUtils
+import android.util.DisplayMetrics
+import android.util.TypedValue
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -20,6 +23,7 @@ import ly.anoma.hex.R
 import ly.anoma.hex.speech.SpeechPhase
 import ly.anoma.hex.typing.Suggestion
 import ly.anoma.hex.useInter
+import kotlin.math.ceil
 import kotlin.math.hypot
 import kotlin.math.roundToInt
 
@@ -47,7 +51,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val statusText = TextView(context)
     private val slotRow = LinearLayout(context)
     private val slotViews = List(3) { FrameLayout(context) }
-    private val words = List(3) { TextView(context) }
+    private val words = List(3) { Word(context) }
+    private val measurePaint = TextPaint()
     private val dividers = List(2) { View(context) }
     private var offered = arrayOfNulls<String>(3)
     private val menuKey = TextView(context)
@@ -117,7 +122,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             if (i > 0) slotRow.addView(dividers[i - 1].apply { setBackgroundColor(color(R.color.rule)) },
                 LinearLayout.LayoutParams(maxOf(1, dp(1) / 2 + 1), dp(20)).apply { gravity = Gravity.CENTER_VERTICAL })
             words[i].apply {
-                useInter(450); gravity = Gravity.CENTER; setTextColor(ink); textSize = 16f
+                useInter(450); gravity = Gravity.CENTER; setTextColor(ink); textSize = StripText.SIZE
                 maxLines = 1; ellipsize = TextUtils.TruncateAt.END; includeFontPadding = false
                 setPadding(dp(10), 0, dp(10), 0); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
@@ -241,9 +246,31 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             }
             slotViews[i].isEnabled = s.isNotEmpty()
         }
-        dividers[0].visibility = if (chip == 0 || chip == 1) INVISIBLE else VISIBLE
-        dividers[1].visibility = if (chip == 1 || chip == 2) INVISIBLE else VISIBLE
+        // A divider only between two filled slots, and never beside the chip.
+        val filled = (0..2).map { words[it].text.isNotEmpty() }
+        dividers[0].visibility = if (chip == 0 || chip == 1 || !filled[0] || !filled[1]) INVISIBLE else VISIBLE
+        dividers[1].visibility = if (chip == 1 || chip == 2 || !filled[1] || !filled[2]) INVISIBLE else VISIBLE
+        weigh()
         update()
+    }
+    /** Each slot's share of the row follows its word's width, so a short word leaves the room a long
+     * one needs; a word still wider than its share shrinks ([Word]) before it is ellipsized. A slot
+     * never falls below a tappable width. */
+    private fun weigh() {
+        for (i in 0..2) {
+            val word = words[i]
+            val params = slotViews[i].layoutParams as LinearLayout.LayoutParams
+            val weight = if (word.text.isEmpty()) 0f else maxOf(
+                naturalWidth(word) + word.paddingLeft + word.paddingRight, dp(56).toFloat())
+            if (params.weight == weight) continue
+            params.weight = weight; slotViews[i].layoutParams = params
+        }
+    }
+    /** [word]'s width at the strip's own size, whatever size it shrank to for its last slot. */
+    private fun naturalWidth(word: TextView): Float {
+        measurePaint.set(word.paint)
+        measurePaint.textSize = spToPx(StripText.SIZE, resources.displayMetrics)
+        return measurePaint.measureText(word.text, 0, word.text.length)
     }
     /** Undo dictation shows in the slots' place, or goes. */
     fun undo(shown: Boolean) { undoing = shown; update() }
@@ -323,6 +350,25 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         hexKey.isPressed = false
     }
 
+    /** A slot's word: [StripText.SIZE] when it fits, smaller (down to [StripText.MIN]) before the
+     * strip ellipsizes it. The slot's width arrives as the measure spec, so nothing waits for layout. */
+    private class Word(context: Context) : TextView(context) {
+        private val measure = TextPaint()
+
+        override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+            if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                val available = MeasureSpec.getSize(widthMeasureSpec) - compoundPaddingLeft - compoundPaddingRight
+                measure.set(paint)
+                val size = fitTextSize(available.toFloat(), StripText.SIZE, StripText.MIN) { sp ->
+                    measure.textSize = spToPx(sp, resources.displayMetrics)
+                    ceil(measure.measureText(text, 0, text.length))
+                }
+                setTextSize(TypedValue.COMPLEX_UNIT_SP, size)
+            }
+            super.onMeasure(widthMeasureSpec, heightMeasureSpec)
+        }
+    }
+
     private fun icon(res: Int) = ImageView(context).apply { setImageResource(res); imageTintList = ColorStateList.valueOf(ink) }
     private fun shape(fill: Int, radius: Float) = GradientDrawable().apply { setColor(fill); cornerRadius = radius }
     private fun pressable(fill: Int) = android.graphics.drawable.StateListDrawable().apply {
@@ -330,3 +376,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         addState(intArrayOf(), GradientDrawable().apply { shape = GradientDrawable.OVAL; setColor(fill) })
     }
 }
+
+/** [size] in sp as pixels through the conversion [TextView.setTextSize] uses: Android 14+ makes it
+ * non-linear above a 1.0 font scale, so a cached pixel-per-sp never matches a size set in sp. */
+private fun spToPx(size: Float, metrics: DisplayMetrics): Float =
+    TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, size, metrics)
