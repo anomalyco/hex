@@ -25,7 +25,9 @@ internal enum class Spoken(val code: String, val label: String) {
 internal enum class DictationLanguage(val code: String, val label: String, val layout: Spoken?) {
     English("en", "English", Spoken.English), Spanish("es", "Español", Spoken.Spanish),
     German("de", "Deutsch", Spoken.German), Norwegian("no", "Norsk", Spoken.Norwegian),
-    French("fr", "Français", Spoken.French), Italian("it", "Italiano", Spoken.Italian), Dutch("nl", "Nederlands", null);
+    French("fr", "Français", Spoken.French), Italian("it", "Italiano", Spoken.Italian), Dutch("nl", "Nederlands", null),
+    // One entry for Brazil and Portugal: Whisper has a single "pt", and Hex has no regional rules.
+    Portuguese("pt", "Português", null);
 
     companion object {
         fun matching(code: String?): DictationLanguage? = when (code) {

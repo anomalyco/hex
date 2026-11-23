@@ -485,6 +485,23 @@ class InsertionTest {
         assertEquals("il treno", SpokenText.continuing("Il treno", "e", "it"))
         assertEquals("de trein", SpokenText.continuing("De trein", "en", "nl"))
     }
+    @Test fun portugueseIsADictationLanguageWithoutEnglishRules() {
+        // A Brazilian or Portuguese phone (Locale language "pt") used to fall back to English.
+        assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt")))
+        assertEquals(DictationLanguage.Portuguese, DictationLanguage.automatic(null, listOf("pt", "en")))
+        assertEquals(DictationLanguage.Portuguese, DictationLanguage.matching("pt"))
+        assertEquals(null, DictationLanguage.Portuguese.layout)
+        fun format(text: String, style: Style) = SpokenText.format(text, SpeechOptions(style, DictationLanguage.Portuguese,
+            clean = true, translate = false, formatLists = true, spokenPunctuation = true))
+        // English cleanup would drop "um" (a filler there, "a" here) and read "no" as a correction.
+        assertEquals("Fiquei no hotel um dia, não dois.", format("fiquei no hotel um dia, não dois", Style.Polished))
+        assertEquals("Primeiro, um café.", format("primeiro, um café", Style.Polished))
+        assertEquals("Obrigado pela ajuda, até amanhã?", format("obrigado pela ajuda vírgula até amanhã ponto de interrogação", Style.Polished))
+        assertEquals("obrigado pela ajuda", format("Obrigado pela ajuda.", Style.Casual))
+        assertEquals("Fiquei no hotel um dia", format("Fiquei no hotel um dia", Style.Verbatim))
+        assertEquals("o ônibus", SpokenText.continuing("O ônibus", "e", "pt"))
+        assertEquals("Maria chegou", SpokenText.continuing("Maria chegou", "e", "pt"))
+    }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
         val typed = StringBuilder()
