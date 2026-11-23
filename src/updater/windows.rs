@@ -378,11 +378,13 @@ fn wait_for_exit(child: &mut std::process::Child) -> Result<std::process::ExitSt
 /// Every path arrives as an environment variable, so no path is interpolated
 /// into the script and its quoting cannot break out of it. A Start Menu link
 /// that still exists but reads as empty (zero-filled, for example) is
-/// recreated as the installer writes it, and every save writes a flushed
-/// temporary link beside the update that replaces the shortcut in place,
-/// falling back to the old in-place save. Each folder and each file is
-/// independent: a missing folder or a failed save leaves the rest alone, and
-/// the failure still reaches `stage`'s warning.
+/// recreated as the installer writes it. Every save writes a flushed temporary
+/// link beside the update and replaces the shortcut with it on the same
+/// volume; another volume or a failed replace falls back to the old in-place
+/// save, or copies the new link back when the replace lost the shortcut, and
+/// the recreated broken link is copied over instead. Each folder and each file
+/// is independent: a missing folder or a failed save leaves the rest alone,
+/// and the failure still reaches `stage`'s warning.
 const SHORTCUT_REPOINT_SCRIPT: &str = "\
     $ErrorActionPreference = 'Stop'; \
     $shell = New-Object -ComObject WScript.Shell; \
@@ -412,7 +414,10 @@ const SHORTCUT_REPOINT_SCRIPT: &str = "\
           $fs = [IO.File]::Open($temp, 'Open', 'ReadWrite'); \
           $fs.Flush($true); \
           $fs.Close(); \
-          try { [IO.File]::Replace($temp, $managed, [NullString]::Value) } catch { Copy-Item -LiteralPath $temp -Destination $managed -Force } \
+          $replaced = $false; \
+          if ([string]::Equals([IO.Path]::GetPathRoot($temp), [IO.Path]::GetPathRoot($managed), [StringComparison]::OrdinalIgnoreCase)) { \
+            try { [IO.File]::Replace($temp, $managed, [NullString]::Value); $replaced = $true } catch { } } \
+          if (-not $replaced) { Copy-Item -LiteralPath $temp -Destination $managed -Force } \
           Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } \
       } catch { \
         $failed = $true; \
@@ -459,12 +464,18 @@ const SHORTCUT_REPOINT_SCRIPT: &str = "\
               $fs = [IO.File]::Open($temp, 'Open', 'ReadWrite'); \
               $fs.Flush($true); \
               $fs.Close(); \
-              try { [IO.File]::Replace($temp, $file.FullName, [NullString]::Value) } catch { \
-                $orig = $shell.CreateShortcut($file.FullName); \
-                $orig.TargetPath = $executable; \
-                $orig.WorkingDirectory = $working; \
-                if ($newIcon) { $orig.IconLocation = $newIcon } \
-                $orig.Save() } \
+              $replaced = $false; \
+              if ([string]::Equals([IO.Path]::GetPathRoot($temp), [IO.Path]::GetPathRoot($file.FullName), [StringComparison]::OrdinalIgnoreCase)) { \
+                try { [IO.File]::Replace($temp, $file.FullName, [NullString]::Value); $replaced = $true } catch { } } \
+              if (-not $replaced) { \
+                if (-not (Test-Path -LiteralPath $file.FullName -ErrorAction SilentlyContinue)) { \
+                  Copy-Item -LiteralPath $temp -Destination $file.FullName -Force } \
+                else { \
+                  $orig = $shell.CreateShortcut($file.FullName); \
+                  $orig.TargetPath = $executable; \
+                  $orig.WorkingDirectory = $working; \
+                  if ($newIcon) { $orig.IconLocation = $newIcon } \
+                  $orig.Save() } } \
               Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } \
           } catch { \
             if ($matched) { $failed = $true }; \
