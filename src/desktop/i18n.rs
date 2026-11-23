@@ -328,7 +328,7 @@ pub(crate) fn tr(english: &str) -> &str {
 
 /// Whether the interface is in English, for labels whose English form
 /// differs from the translated key (macOS menus' title case).
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 pub(crate) fn english() -> bool {
     current() == ENGLISH
 }
@@ -676,6 +676,7 @@ mod tests {
         include_str!("../rune_ui/vocabulary.rs"),
         include_str!("../rune_ui/windows_host.rs"),
         include_str!("tray_menu.rs"),
+        include_str!("../updater/presentation.rs"),
         include_str!("../calendar_menu.rs"),
         include_str!("../macos_rune/status_item.rs"),
         include_str!("../rune_ui/history/unified.rs"),

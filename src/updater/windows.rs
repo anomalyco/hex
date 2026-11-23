@@ -45,6 +45,13 @@ const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstal
 #[derive(Clone, Debug)]
 pub struct Staged(PathBuf);
 
+#[cfg(test)]
+impl Staged {
+    pub fn dummy() -> Self {
+        Self(PathBuf::new())
+    }
+}
+
 /// Why this copy of Hex can't update itself; the window says so beside
 /// Download update, with what to do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
