@@ -284,7 +284,9 @@ pub fn verify_authenticode(file: &Path, signer: &str) -> Result<()> {
 /// run: the Start Menu, Desktop, and taskbar pins. Only a shortcut whose
 /// target is `hex.exe` in this install's `versions\<version>` folder is
 /// touched; its arguments and name stay, and an icon from an old version
-/// follows. One bad folder or file never stops the rest.
+/// follows. A managed Start Menu link that still exists but reads as empty
+/// (zero-filled, for example) is recreated as the installer writes it. One bad
+/// folder or file never stops the rest.
 fn repoint_shortcuts(support: &Path, executable: &Path) -> Result<()> {
     let Some(appdata) = dirs::config_dir() else {
         return Ok(());
@@ -307,9 +309,13 @@ fn shortcut_folders(appdata: &Path, desktop: Option<PathBuf>) -> [PathBuf; 3] {
 
 /// Runs the one PowerShell process over `folders` and waits for it with a
 /// bound: `stage` holds the update lock meanwhile, and a redirected Desktop on
-/// an unreachable network share can stall a shortcut read.
+/// an unreachable network share can stall a shortcut read. `support\updates`
+/// holds the temporary link each save replaces its shortcut with; it is
+/// created here and cleared after the run.
 fn retarget_shortcuts(folders: &[PathBuf; 3], support: &Path, executable: &Path) -> Result<()> {
     let [programs, taskbar, desktop] = folders;
+    let staging = support.join("updates");
+    fs::create_dir_all(&staging).wrap_err("could not create the shortcut staging folder")?;
     let mut child = background_process::command("powershell.exe")
         .args([
             "-NoProfile",
@@ -323,6 +329,7 @@ fn retarget_shortcuts(folders: &[PathBuf; 3], support: &Path, executable: &Path)
         .env("HEX_DESKTOP", desktop)
         .env("HEX_TASKBAR", taskbar)
         .env("HEX_VERSIONS", support.join("versions"))
+        .env("HEX_STAGING", &staging)
         .env("HEX_EXECUTABLE", executable)
         .env_remove("PSModulePath")
         .stdin(Stdio::null())
@@ -330,7 +337,11 @@ fn retarget_shortcuts(folders: &[PathBuf; 3], support: &Path, executable: &Path)
         .stderr(Stdio::null())
         .spawn()
         .wrap_err("could not update shortcuts")?;
-    let status = wait_for_exit(&mut child)?;
+    let waited = wait_for_exit(&mut child);
+    // A killed PowerShell can leave its temporary link behind; it never became
+    // a shortcut, and the next run removes it before using the path again.
+    let _ = fs::remove_file(staging.join("shortcut.tmp.lnk"));
+    let status = waited?;
     if !status.success() {
         bail!("the shortcut update exited with {status}");
     }
@@ -365,17 +376,52 @@ fn wait_for_exit(child: &mut std::process::Child) -> Result<std::process::ExitSt
 }
 
 /// Every path arrives as an environment variable, so no path is interpolated
-/// into the script and its quoting cannot break out of it. Each folder and
-/// each file is independent: a missing folder or a failed save leaves the rest
-/// alone, and the failure still reaches `stage`'s warning.
+/// into the script and its quoting cannot break out of it. A Start Menu link
+/// that still exists but reads as empty (zero-filled, for example) is
+/// recreated as the installer writes it. Every save writes a flushed temporary
+/// link beside the update and replaces the shortcut with it on the same
+/// volume; another volume or a failed replace falls back to the old in-place
+/// save, or copies the new link back when the replace lost the shortcut, and
+/// the recreated broken link is copied over instead. Each folder and each file
+/// is independent: a missing folder or a failed save leaves the rest alone,
+/// and the failure still reaches `stage`'s warning.
 const SHORTCUT_REPOINT_SCRIPT: &str = "\
     $ErrorActionPreference = 'Stop'; \
     $shell = New-Object -ComObject WScript.Shell; \
     $executable = $env:HEX_EXECUTABLE; \
     $working = [IO.Path]::GetDirectoryName($executable); \
     $versions = $env:HEX_VERSIONS.TrimEnd('\\') + '\\'; \
+    $staging = $env:HEX_STAGING; \
+    $temp = if ($staging) { Join-Path $staging 'shortcut.tmp.lnk' } else { '' }; \
     $folders = @($env:HEX_PROGRAMS, $env:HEX_TASKBAR, $env:HEX_DESKTOP); \
     $failed = $false; \
+    $programs = $env:HEX_PROGRAMS; \
+    if ($programs) { \
+      try { \
+        $managed = Join-Path $programs 'Hex.lnk'; \
+        $broken = $false; \
+        if (Test-Path -LiteralPath $managed -PathType Leaf -ErrorAction SilentlyContinue) { \
+          try { $existing = $shell.CreateShortcut($managed); if (-not [string]$existing.TargetPath) { $broken = $true } } catch { $broken = $true } } \
+        if ($broken) { \
+          if (-not $temp) { throw 'no shortcut staging folder' } \
+          if (Test-Path -LiteralPath $temp -ErrorAction SilentlyContinue) { Remove-Item -LiteralPath $temp -Force } \
+          $fresh = $shell.CreateShortcut($temp); \
+          $fresh.TargetPath = $executable; \
+          $fresh.Arguments = 'app'; \
+          $fresh.Description = 'Hex managed install'; \
+          $fresh.WorkingDirectory = $working; \
+          $fresh.Save(); \
+          $fs = [IO.File]::Open($temp, 'Open', 'ReadWrite'); \
+          $fs.Flush($true); \
+          $fs.Close(); \
+          $replaced = $false; \
+          if ([string]::Equals([IO.Path]::GetPathRoot($temp), [IO.Path]::GetPathRoot($managed), [StringComparison]::OrdinalIgnoreCase)) { \
+            try { [IO.File]::Replace($temp, $managed, [NullString]::Value); $replaced = $true } catch { } } \
+          if (-not $replaced) { Copy-Item -LiteralPath $temp -Destination $managed -Force } \
+          Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } \
+      } catch { \
+        $failed = $true; \
+        if ($temp -and (Test-Path -LiteralPath $temp -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } } } \
     foreach ($folder in $folders) { \
       if (-not $folder) { continue } \
       try { \
@@ -392,8 +438,9 @@ const SHORTCUT_REPOINT_SCRIPT: &str = "\
             if ($relative.Count -ne 2 -or -not $relative[0]) { continue } \
             $matched = $true; \
             $changed = $false; \
-            if (-not [string]::Equals($s.TargetPath, $executable, [StringComparison]::OrdinalIgnoreCase)) { $s.TargetPath = $executable; $changed = $true } \
-            if (-not [string]::Equals($s.WorkingDirectory, $working, [StringComparison]::OrdinalIgnoreCase)) { $s.WorkingDirectory = $working; $changed = $true } \
+            $newIcon = ''; \
+            if (-not [string]::Equals($s.TargetPath, $executable, [StringComparison]::OrdinalIgnoreCase)) { $changed = $true } \
+            if (-not [string]::Equals($s.WorkingDirectory, $working, [StringComparison]::OrdinalIgnoreCase)) { $changed = $true } \
             $icon = [string]$s.IconLocation; \
             $comma = $icon.LastIndexOf(','); \
             $iconPath = if ($comma -ge 0) { $icon.Substring(0, $comma) } else { $icon }; \
@@ -403,9 +450,36 @@ const SHORTCUT_REPOINT_SCRIPT: &str = "\
               if ($iconRelative.Count -eq 2 -and $iconRelative[0] -and $iconRelative[1] -ieq 'hex.exe') { \
                 $index = if ($comma -ge 0) { $icon.Substring($comma) } else { ',0' }; \
                 $newIcon = $executable + $index; \
-                if (-not [string]::Equals($icon, $newIcon, [StringComparison]::OrdinalIgnoreCase)) { $s.IconLocation = $newIcon; $changed = $true } } } \
-            if ($changed) { $s.Save() } \
-          } catch { if ($matched) { $failed = $true } } } \
+                if (-not [string]::Equals($icon, $newIcon, [StringComparison]::OrdinalIgnoreCase)) { $changed = $true } } } \
+            if ($changed) { \
+              if (-not $temp) { throw 'no shortcut staging folder' } \
+              if (Test-Path -LiteralPath $temp -ErrorAction SilentlyContinue) { Remove-Item -LiteralPath $temp -Force } \
+              Copy-Item -LiteralPath $file.FullName -Destination $temp -Force; \
+              [IO.File]::SetAttributes($temp, [IO.FileAttributes]::Normal); \
+              $s = $shell.CreateShortcut($temp); \
+              $s.TargetPath = $executable; \
+              $s.WorkingDirectory = $working; \
+              if ($newIcon) { $s.IconLocation = $newIcon } \
+              $s.Save(); \
+              $fs = [IO.File]::Open($temp, 'Open', 'ReadWrite'); \
+              $fs.Flush($true); \
+              $fs.Close(); \
+              $replaced = $false; \
+              if ([string]::Equals([IO.Path]::GetPathRoot($temp), [IO.Path]::GetPathRoot($file.FullName), [StringComparison]::OrdinalIgnoreCase)) { \
+                try { [IO.File]::Replace($temp, $file.FullName, [NullString]::Value); $replaced = $true } catch { } } \
+              if (-not $replaced) { \
+                if (-not (Test-Path -LiteralPath $file.FullName -ErrorAction SilentlyContinue)) { \
+                  Copy-Item -LiteralPath $temp -Destination $file.FullName -Force } \
+                else { \
+                  $orig = $shell.CreateShortcut($file.FullName); \
+                  $orig.TargetPath = $executable; \
+                  $orig.WorkingDirectory = $working; \
+                  if ($newIcon) { $orig.IconLocation = $newIcon } \
+                  $orig.Save() } } \
+              Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } \
+          } catch { \
+            if ($matched) { $failed = $true }; \
+            if ($temp -and (Test-Path -LiteralPath $temp -ErrorAction SilentlyContinue)) { Remove-Item -LiteralPath $temp -Force -ErrorAction SilentlyContinue } } } \
       } catch { } } \
     if ($failed) { exit 1 }";
 
@@ -956,6 +1030,80 @@ mod tests {
         assert_eq!(
             unrelated,
             (elsewhere, String::new(), String::new(), ",0".to_owned())
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_zero_filled_managed_shortcut_is_recreated() {
+        // A zero-filled Start Menu link reads as no target at all, which the
+        // update would otherwise skip forever.
+        let local = dirs::data_local_dir().expect("a local app data folder");
+        let root = local.join(format!("hex-win-broken-shortcut-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        let support = root.join("hex");
+        let executable = support.join(r"versions\2.0.0\hex.exe");
+        let working = executable.parent().unwrap().to_path_buf();
+        fs::create_dir_all(&working).unwrap();
+        fs::write(&executable, b"new").unwrap();
+        // retarget_shortcuts creates the update staging folder it names here.
+        let staging = support.join("updates");
+        let folder = root.join("shortcuts");
+        fs::create_dir_all(&folder).unwrap();
+        let managed = folder.join("Hex.lnk");
+        let folders = [folder, PathBuf::new(), PathBuf::new()];
+
+        // A link the user removed stays removed: the update never creates one.
+        retarget_shortcuts(&folders, &support, &executable).unwrap();
+        assert!(
+            !managed.exists(),
+            "the update created a Start Menu link that was not there"
+        );
+
+        fs::write(&managed, vec![0u8; 1254]).unwrap();
+        retarget_shortcuts(&folders, &support, &executable).unwrap();
+
+        let output = background_process::command("powershell.exe")
+            .args([
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "$s = (New-Object -ComObject WScript.Shell).CreateShortcut($env:HEX_LINK); \
+                 $nl = [Environment]::NewLine; \
+                 [Console]::Out.Write($s.TargetPath + $nl + $s.Arguments + $nl + $s.Description + $nl + $s.WorkingDirectory)",
+            ])
+            .env("HEX_LINK", &managed)
+            .env_remove("PSModulePath")
+            .output()
+            .expect("could not read the repaired shortcut");
+        assert!(
+            output.status.success(),
+            "reading the repaired shortcut failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let text = String::from_utf8_lossy(&output.stdout);
+        let lines: Vec<&str> = text.lines().collect();
+        assert_eq!(
+            lines,
+            [
+                executable.display().to_string(),
+                "app".to_owned(),
+                "Hex managed install".to_owned(),
+                working.display().to_string(),
+            ],
+            "unexpected repaired shortcut: {text}"
+        );
+
+        let leftovers: Vec<PathBuf> = fs::read_dir(&staging)
+            .unwrap()
+            .filter_map(|entry| entry.ok().map(|entry| entry.path()))
+            .filter(|path| path.extension().and_then(|extension| extension.to_str()) == Some("lnk"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "the shortcut save left temporary links: {leftovers:?}"
         );
 
         let _ = fs::remove_dir_all(root);

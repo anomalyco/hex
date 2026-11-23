@@ -42,7 +42,7 @@ slow-timeout = { period = "90s", terminate-after = 2 }
 # The PowerShell updater tests get four minutes before nextest kills them, and
 # never run beside each other.
 [[profile.ci.overrides]]
-filter = "test(authenticode_requires_a_valid_signature_from_the_expected_signer) | test(shortcuts_pointing_at_an_old_version_are_retargeted)"
+filter = "test(authenticode_requires_a_valid_signature_from_the_expected_signer) | test(shortcuts_pointing_at_an_old_version_are_retargeted) | test(a_zero_filled_managed_shortcut_is_recreated)"
 test-group = "windows-shell"
 slow-timeout = { period = "120s", terminate-after = 2 }
 
