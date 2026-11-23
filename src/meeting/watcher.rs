@@ -22,7 +22,7 @@ use crate::meeting::recovery::PendingFinals;
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
-use call_end::{CallEndStop, stops_when_call_ends};
+use call_end::{CallEndStop, CallWatch, stops_when_call_ends};
 use call_switch::{
     disarm_call_stop_unless_watching, watching_call_switch, withdraw_call_switch_stop,
 };
@@ -130,6 +130,9 @@ struct ActiveRecording {
     app_label: String,
     automatic: bool,
     presence: CallPresence,
+    /// The app this recording has seen on the microphone, so one whose app
+    /// joins late counts no absence before it does.
+    watch: CallWatch,
     /// Stop when the call ends, armed while the call is over.
     auto_stop: AutoStop,
     /// The call's own code, watching the browser's page for another call
@@ -918,6 +921,7 @@ fn start_recording(
         app_label,
         automatic,
         presence: CallPresence::default(),
+        watch: CallWatch::default(),
         auto_stop: AutoStop::default(),
         call_switch,
         call_stop: AutoStop::default(),
@@ -1012,8 +1016,9 @@ fn poll_recording(
         && let Some(application) = active.application.as_deref()
     {
         // A failed query must not end the controller while it owns a recording.
+        let start = CallEndStop::of(active.automatic, active.application.as_deref());
         let auto_stop = stops_when_call_ends(
-            CallEndStop::of(active.automatic, active.application.as_deref()),
+            start,
             crate::app_settings::meeting_stop_when_call_ends(),
             crate::labs::stop_any_call_recording(),
         );
@@ -1040,7 +1045,12 @@ fn poll_recording(
         {
             tracing::info!(application, "the pending automatic stop is withdrawn");
         }
-        if active.presence.observe(present) {
+        // A recording started on request counts no absence before its app has
+        // been on the microphone: a calendar reminder records before the call
+        // is answered, and stopping it there would end a call it never saw.
+        if active.watch.counts_absence(start, auto_stop, present)
+            && active.presence.observe(present)
+        {
             tracing::info!(
                 application,
                 auto_stop,
@@ -1574,8 +1584,37 @@ mod tests {
         );
     }
 
+    /// Turns Labs › Stop every call recording off for one test, and back off
+    /// after, so the by-hand association never reads another test's gate.
+    struct CallEndLabOff;
+
+    /// Serializes the tests that turn this process's global Labs gate on or
+    /// off, as each module's gate tests do.
+    static CALL_END_LABS: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    impl CallEndLabOff {
+        fn off() -> Self {
+            crate::labs::apply(&crate::app_settings::LabsSettings {
+                stop_any_call_recording: false,
+                ..crate::app_settings::LabsSettings::default()
+            });
+            assert!(!crate::labs::stop_any_call_recording());
+            Self
+        }
+    }
+
+    impl Drop for CallEndLabOff {
+        fn drop(&mut self) {
+            crate::labs::apply(&crate::app_settings::LabsSettings::default());
+        }
+    }
+
     #[test]
     fn a_by_hand_recording_watches_no_call_app_while_its_lab_is_off() {
+        let _lock = CALL_END_LABS
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let _lab = CallEndLabOff::off();
         let start = Start::from_candidate(&MeetingCandidate::manual());
         assert_eq!(start.watched, None);
         assert_eq!(start.meeting.application, None);
@@ -1609,6 +1648,7 @@ mod tests {
             app_label: "WhatsApp".into(),
             automatic: true,
             presence: CallPresence::default(),
+            watch: CallWatch::default(),
             auto_stop: AutoStop::default(),
             call_switch: CallSwitch::new(None),
             call_stop: AutoStop::default(),
@@ -1648,6 +1688,7 @@ mod tests {
             app_label: "Google Meet".into(),
             automatic,
             presence: CallPresence::default(),
+            watch: CallWatch::default(),
             auto_stop: AutoStop::default(),
             call_switch: CallSwitch::new(call.map(str::to_string)),
             call_stop: AutoStop::default(),
@@ -2049,6 +2090,7 @@ mod tests {
             app_label: "Zoom".into(),
             automatic: false,
             presence: CallPresence::default(),
+            watch: CallWatch::default(),
             auto_stop: AutoStop::default(),
             call_switch: CallSwitch::new(None),
             call_stop: AutoStop::default(),

@@ -46,6 +46,37 @@ pub(super) const fn stops_when_call_ends(
     }
 }
 
+/// What a recording has seen of the call app it watches, so one whose app
+/// joins late never counts an absence it never sat through.
+#[derive(Default)]
+pub(super) struct CallWatch {
+    seen_present: bool,
+}
+
+impl CallWatch {
+    /// Whether this pass reads the watched app's absence as the call ending,
+    /// recording that a present app has now been seen. A recording Hex
+    /// started on request knows its app before that app joins — a calendar
+    /// reminder records before the call is answered, and its app can be slow
+    /// to launch — so its absence counts only once the app has been on the
+    /// microphone. `auto_stop` says whether that absence could stop it at
+    /// all: with no stop to arm (the lab off, or Always record's setting
+    /// off) the "left the call" notice shows every pass, exactly as before.
+    pub(super) fn counts_absence(
+        &mut self,
+        start: CallEndStop,
+        auto_stop: bool,
+        present: bool,
+    ) -> bool {
+        self.seen_present |= present;
+        match start {
+            CallEndStop::Automatic => true,
+            CallEndStop::OnRequest => !auto_stop || self.seen_present,
+            CallEndStop::Unwatched => false,
+        }
+    }
+}
+
 /// The call app a recording started by hand watches: the one native call app
 /// holding the microphone, or nothing when none is or when more than one is
 /// and they can't be told apart. Browsers are left out, since Hex reads a
@@ -112,6 +143,34 @@ mod tests {
         // call has nothing to watch.
         assert!(!stops_when_call_ends(Automatic, false, true));
         assert!(!stops_when_call_ends(Unwatched, false, true));
+    }
+
+    #[test]
+    fn a_calendar_recording_counts_no_absence_until_its_app_joins() {
+        // 33 s of a recording Hex started on request before its app joined
+        // (a calendar reminder's Zoom call, not answered yet): every pass is
+        // absent, and none may count, so nothing arms a stop.
+        let mut watch = CallWatch::default();
+        for _ in 0..66 {
+            assert!(
+                !watch.counts_absence(CallEndStop::OnRequest, true, false),
+                "an absence counted before the app was ever on the microphone"
+            );
+        }
+        // The app joins, then leaves: its absence counts from then on, and the
+        // call coming back keeps counting after it leaves again.
+        assert!(watch.counts_absence(CallEndStop::OnRequest, true, true));
+        assert!(watch.counts_absence(CallEndStop::OnRequest, true, false));
+        assert!(watch.counts_absence(CallEndStop::OnRequest, true, true));
+        assert!(watch.counts_absence(CallEndStop::OnRequest, true, false));
+
+        // With no stop to arm (the lab off) the notice shows every pass, as
+        // before, and Always record counts from its first pass, as before.
+        let mut lab_off = CallWatch::default();
+        assert!(lab_off.counts_absence(CallEndStop::OnRequest, false, false));
+        let mut automatic = CallWatch::default();
+        assert!(automatic.counts_absence(CallEndStop::Automatic, true, false));
+        assert!(automatic.counts_absence(CallEndStop::Automatic, false, false));
     }
 
     #[test]

@@ -275,10 +275,13 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
 ├── Stop every call recording when the call ends no labs.stop_any_call_recording (macOS, with Meetings on) an offered,
-│                                        calendar, or by-hand call recording stops 30 s after its call app leaves the
-│                                        microphone, even with Stop when the call ends off; a recording started by hand
-│                                        watches the one native call app holding the microphone when it starts
+│                                        calendar (Zoom, Teams, or Slack link), or by-hand call recording stops 3 s after
+│                                        its call app leaves the microphone, then 30 s of grace, even with Stop when the
+│                                        call ends off; a recording started by hand watches the one native call app on the
+│                                        microphone when it starts, and an on-request recording counts no absence until it
+│                                        has seen that app on the microphone
 │                                        // checks: the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record,
+│                                        // a_calendar_recording_counts_no_absence_until_its_app_joins,
 │                                        // a_recording_kind_knows_whether_it_watches_a_call_app,
 │                                        // one_native_call_app_is_watched_and_a_browser_or_two_are_not
 │                                        // (meeting/watcher/call_end.rs); not observed on a real Mac
@@ -4152,20 +4155,27 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
   `labs.stop_any_call_recording` (off by default), and it needs nothing from
   `meetings.stop_when_call_ends`: that switch keeps governing Always record,
   and this one governs everything else. On, a recording accepted from a
-  detection offer and a recording started from a calendar reminder stop 30 s
-  after the call app it watches leaves the microphone and goes quiet, with the
-  same 3 s absence, Keep recording, and call-comes-back logic
+  detection offer and a recording started from a calendar reminder stop 3 s
+  after the call app it watches leaves the microphone and goes quiet, then
+  30 s of grace, with the same Keep recording and call-comes-back logic
   ([Meetings › Stop Other Call Recordings](meetings.md#stop-other-call-recordings-labs)).
-  A recording started by hand (Meetings' Start recording, the menu bar, `hex
-  meetings record`) takes its call app from the microphone at start: the one
-  native call app holding it right then, by the canonical bundles detection
-  uses, with browsers left out so no page is read and none or several leaving
-  the recording unwatched. The recording keeps its own title, app, and
-  capture; only its stop is associated. The absence rule is all it adds: a
-  browser that never releases the microphone between calls (Arc) is still
-  ended only for a recording Hex started itself. Turning the lab off while a
-  stop counts drops it. Checks:
+  A calendar link is watched only when it names a desktop app: Zoom, Teams, or
+  Slack (`CallProvider::application` in
+  [calendar.rs](../../src/calendar.rs)), never Google Meet or Webex.
+  A recording Hex started on request counts no absence until it has seen its
+  app on the microphone at least once, so a calendar recording started before
+  the call is answered, or while a waiting room holds, never arms a stop on
+  its own. A recording started by hand (Meetings' Start recording, the menu bar,
+  `hex meetings record`) takes its call app from the microphone at start: the
+  one native call app holding it right then, by the canonical bundles
+  detection uses, with browsers left out so no page is read and none or
+  several leaving the recording unwatched. The recording keeps its own title,
+  app, and capture; only its stop is associated. The absence rule is all it
+  adds: a browser that never releases the microphone between calls (Arc) is
+  still ended only for a recording Hex started itself. Turning the lab off
+  while a stop counts drops it. Checks:
   `the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record`,
+  `a_calendar_recording_counts_no_absence_until_its_app_joins`,
   `a_recording_kind_knows_whether_it_watches_a_call_app`, and
   `one_native_call_app_is_watched_and_a_browser_or_two_are_not`
   ([meeting/watcher/call_end.rs](../../src/meeting/watcher/call_end.rs));
