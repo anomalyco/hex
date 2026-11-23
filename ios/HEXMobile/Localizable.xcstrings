@@ -4740,6 +4740,326 @@
           }
         }
       }
+    },
+    "Send feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送反馈"
+          }
+        }
+      }
+    },
+    "Problem" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问题"
+          }
+        }
+      }
+    },
+    "Idea" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议"
+          }
+        }
+      }
+    },
+    "Question" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提问"
+          }
+        }
+      }
+    },
+    "Other" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "其他"
+          }
+        }
+      }
+    },
+    "Thanks for your feedback" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "感谢你的反馈"
+          }
+        }
+      }
+    },
+    "It's with the Hex team. If they reply, you'll get an email at %@, and you'll need to confirm your address once from that email. Nothing has been emailed yet." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈已送达 Hex 团队。如果团队回复，你会在 %@ 收到邮件，并需要通过那封邮件确认一次你的地址。目前还没有发送任何邮件。"
+          }
+        }
+      }
+    },
+    "It's with the Hex team. It was sent anonymously, so it can't be answered." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈已送达 Hex 团队。这是匿名发送的，因此无法回复。"
+          }
+        }
+      }
+    },
+    "It's with the Hex team." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "反馈已送达 Hex 团队。"
+          }
+        }
+      }
+    },
+    "Pictures" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片"
+          }
+        }
+      }
+    },
+    "Subject (optional)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "主题（可选）"
+          }
+        }
+      }
+    },
+    "%@ of %@ characters" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ / %2$@ 个字符"
+          }
+        }
+      }
+    },
+    "What happened, or what would you like?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发生了什么，或者你希望怎样？"
+          }
+        }
+      }
+    },
+    "Email for a reply (optional)" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用于回复的邮箱（可选）"
+          }
+        }
+      }
+    },
+    "The message is too long. Keep it under 20,000 characters." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留言太长了，请控制在 20,000 个字符以内。"
+          }
+        }
+      }
+    },
+    "The pictures are too large together. Remove one and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "图片加起来太大了。请移除一张后再试。"
+          }
+        }
+      }
+    },
+    "Sending… trying again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在发送… 正在重试"
+          }
+        }
+      }
+    },
+    "Sending…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在发送…"
+          }
+        }
+      }
+    },
+    "Add a picture" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加图片"
+          }
+        }
+      }
+    },
+    "Add" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加"
+          }
+        }
+      }
+    },
+    "Remove picture %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除图片 %lld"
+          }
+        }
+      }
+    },
+    "Couldn't send: your iPhone seems to be offline. Your message is still here; try again when you're connected." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法发送：你的 iPhone 似乎没有联网。留言仍保留在这里，联网后再试一次。"
+          }
+        }
+      }
+    },
+    "That's too large to send. Remove a picture, or add a smaller one, and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内容太大，无法发送。请移除一张图片或换一张更小的，然后再试。"
+          }
+        }
+      }
+    },
+    "One of the pictures couldn't be read. Remove it and try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有一张图片无法读取。请移除它后再试。"
+          }
+        }
+      }
+    },
+    "Too many reports right now. Try again in a little while." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前反馈过多，请稍后再试。"
+          }
+        }
+      }
+    },
+    "Feedback is unavailable in this version of Hex." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此版本的 Hex 暂时无法发送反馈。"
+          }
+        }
+      }
+    },
+    "Couldn't send your feedback. Try again in a little while." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法发送你的反馈，请稍后再试。"
+          }
+        }
+      }
+    },
+    "When you tap Send, Hex sends your message, the pictures above, your email, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, the screen you opened this from, and a random install id that keeps your reports together, to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、你的邮箱、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言、打开此页面的位置，以及一个把你的反馈归在一起的随机安装 ID 发送到 Anomaly 的反馈收件箱。你在别处听写或输入的内容都不会发送。"
+          }
+        }
+      }
+    },
+    "Hex sends nothing unless you tap Send in Send feedback. Then it sends your message and the pictures you kept, your email if you add one, and details about Hex and this iPhone to Anomaly's feedback inbox. Your dictations, what you type, and what Hex learned are never included." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "除非你在“发送反馈”中轻点“发送”，否则 Hex 不会发送任何内容。轻点后，它会把你的留言和保留的图片、你填写的邮箱（如有），以及 Hex 和这台 iPhone 的相关信息发送到 Anomaly 的反馈收件箱。你的听写、输入的内容以及 Hex 学到的内容都不会包含在内。"
+          }
+        }
+      }
+    },
+    "With an email, the team can reply. Without one, your feedback is anonymous." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "填写邮箱后，团队可以回复你。不填写，反馈就是匿名的。"
+          }
+        }
+      }
+    },
+    "When you tap Send, Hex sends your message, the pictures above, Hex's version and the language and speech model it dictates with, your iPhone's model, iOS version and language, and the screen you opened this from to Anomaly's feedback inbox. Nothing you dictate or type elsewhere is sent." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "轻点“发送”后，Hex 会把你的留言、上面的图片、Hex 的版本及其听写所用的语言和语音模型、你的 iPhone 型号、iOS 版本和语言，以及打开此页面的位置发送到 Anomaly 的反馈收件箱。你在别处听写或输入的内容都不会发送。"
+          }
+        }
+      }
+    },
+    "That isn't an email address. Fix it, or clear it to send without one." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这不是有效的邮箱地址。请修正，或清空后不带邮箱发送。"
+          }
+        }
+      }
     }
   },
   "version" : "1.0"

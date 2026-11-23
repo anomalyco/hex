@@ -309,6 +309,9 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
 
+                    // Absent in a build without a report key (FeedbackRow).
+                    FeedbackRow(screen: "Home", dictation: dictation, divider: true)
+
                     SettingsDivider(leading: 50)
 
                     Button {
