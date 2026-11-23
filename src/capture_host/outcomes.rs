@@ -151,7 +151,7 @@ impl Feed {
 pub(super) static FEED: Feed = Feed::new();
 
 /// The current capture snapshot.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+#[cfg(target_os = "macos")]
 pub fn snapshot() -> CaptureSnapshot {
     FEED.snapshot()
 }

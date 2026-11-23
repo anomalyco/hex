@@ -94,7 +94,9 @@ pub use drawing::{InkSpace, draw, pen_button};
 pub use drawing::{KeyUp, annotate_key_down, annotate_key_up, drawing, exit_drawing, toggle_pen};
 #[cfg(test)]
 use outcomes::Feed;
-pub use outcomes::{CaptureSnapshot, SettledCapture, snapshot, watch};
+#[cfg(target_os = "macos")]
+pub use outcomes::snapshot;
+pub use outcomes::{CaptureSnapshot, SettledCapture, watch};
 #[cfg(test)]
 pub use outcomes::{FinishingCapture, RecordingCapture};
 use outcomes::{LIVE_OUTCOMES, Outcomes, SharedOutcomes, lock};
