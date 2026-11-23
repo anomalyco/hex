@@ -20,7 +20,9 @@ import Foundation
 /// observed long-press options, in the iPhone's rows (no ; or ς keys, the tonos key ending row
 /// 1; its typing rules are `GreekTyping`). Czech matches the standard Czech layout and the
 /// system keyboard's observed long-press options: QWERTZ, with the ´ and ˇ keys that accent the
-/// letter before them (`CzechTyping`) and every other Czech letter on a held key. Hungarian is
+/// letter before them (`CzechTyping`) and every other Czech letter on a held key. Slovak types
+/// on the same keys, as Apple's iPhone Slovak keyboard does (its "QWERTZ – Czech/Slovak" and
+/// "QWERTY – Czech/Slovak" are Czech's), with Slovak's own long-press options. Hungarian is
 /// the standard QWERTZ (its own layout, with QWERTY offered) with its nine accented vowels held
 /// on a e i o u (á é í ó ö ő ú ü ű) and the iPhone's hu dictionary behind its autocorrect.
 /// Korean is the standard two-set (Dubeolsik, 두벌식) layout, whose syllables `HangulComposer`
@@ -38,6 +40,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case portuguese = "pt"
     case polish = "pl"
     case czech = "cs"
+    case slovak = "sk"
     case hungarian = "hu"
     case romanian = "ro"
     case russian = "ru"
@@ -60,6 +63,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .portuguese: "Português"
         case .polish: "Polski"
         case .czech: "Čeština"
+        case .slovak: "Slovenčina"
         case .hungarian: "Magyar"
         case .romanian: "Română"
         case .russian: "Русский"
@@ -101,6 +105,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .portuguese: "pt-BR"
         case .polish: "pl-PL"
         case .czech: "cs-CZ"
+        case .slovak: "sk-SK"
         case .hungarian: "hu-HU"
         case .romanian: "ro-RO"
         case .russian: "ru-RU"
@@ -115,6 +120,11 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// (bilingual autocorrect). Russian's and Ukrainian's are Cyrillic, Greek's Greek, and
     /// Korean's Hangul.
     var isLatin: Bool { self != .russian && self != .ukrainian && self != .greek && self != .korean }
+
+    /// Apple's Czech and Slovak keyboards type on the same keys ("QWERTZ – Czech/Slovak" and
+    /// "QWERTY – Czech/Slovak", the ´ and ˇ keys ending rows 2 and 3; iOS 26.5 and 27.2
+    /// simulators).
+    var typesOnCzechKeys: Bool { self == .czech || self == .slovak }
 
     /// Apple's three French keyboards: France (and Belgium), Canada and Switzerland.
     var isFrench: Bool { self == .french || self == .frenchCanadian || self == .frenchSwiss }
@@ -186,7 +196,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         let rows: [String] = switch offered(letters) {
         case .own: ownLetterRows
         // Apple's Czech layouts are both its own, the ´ and ˇ keys kept: QWERTY only swaps Z and Y.
-        case .qwerty where self == .czech: ["qwertyuiop", "asdfghjkl\u{00B4}", "zxcvbnm\u{02C7}"]
+        case .qwerty where typesOnCzechKeys: ["qwertyuiop", "asdfghjkl\u{00B4}", "zxcvbnm\u{02C7}"]
         // Apple's French keyboards' own layouts add the apostrophe key (`FrenchTyping`).
         case .qwerty where self == .frenchCanadian: ownLetterRows
         case .qwerty: ["qwertyuiop", "asdfghjkl", "zxcvbnm"]
@@ -218,8 +228,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .italian, .portuguese: [.qwerty, .azerty, .qwertz]
         case .polish, .romanian: [.qwerty, .qwertz, .azerty]
         // Apple's "QWERTZ – Czech/Slovak" (its default) and "QWERTY – Czech/Slovak", nothing else
-        // (iOS 27.2 simulator, Add New Keyboard › Czech › Layout).
-        case .czech: [.own, .qwerty]
+        // (iOS 27.2 simulator, Add New Keyboard › Czech › Layout); Slovak's are the same two.
+        case .czech, .slovak: [.own, .qwerty]
         // Hungarian's own QWERTZ (the standard Hungarian layout) and QWERTY, both keeping every
         // accented vowel on a held key.
         case .hungarian: [.own, .qwerty]
@@ -243,14 +253,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// own layout with letters of its own, its arrangement and the language ("QWERTZ – Deutsch").
     func layoutName(_ letters: KeyboardLetterLayout) -> String {
         switch letters {
-        case .qwerty where self == .czech || self == .hungarian: "QWERTY – \(displayName)"
+        case .qwerty where typesOnCzechKeys || self == .hungarian: "QWERTY – \(displayName)"
         case .qwerty: "QWERTY"
         case .qwertz: "QWERTZ"
         case .azerty: "AZERTY"
         case .dvorak: "Dvorak"
         case .own:
             switch self {
-            case .german, .czech, .hungarian: "QWERTZ – \(displayName)"
+            case .german, .czech, .slovak, .hungarian: "QWERTZ – \(displayName)"
             case .spanish, .norwegian: "QWERTY – \(displayName)"
             default: displayName
             }
@@ -289,7 +299,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // The standard Czech layout (QWERTZ) in the rows the iPhone's own Czech keyboard shows
         // (iOS 27.2 simulator): the ´ key (U+00B4) ends row 2, ten keys edge to edge, and the ˇ
         // key (U+02C7) ends row 3, so shift and delete are one letter wide.
-        case .czech: ["qwertzuiop", "asdfghjkl\u{00B4}", "yxcvbnm\u{02C7}"]
+        case .czech, .slovak: ["qwertzuiop", "asdfghjkl\u{00B4}", "yxcvbnm\u{02C7}"]
         // The standard Hungarian QWERTZ, its accented vowels all on held keys (letterHolds), so
         // no key of its own and shift and delete keep their English sizes.
         case .hungarian: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
@@ -441,6 +451,28 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "c": ["c", "č", "ç", "ć"],
                 "n": ["n", "ň", "ñ", "ń"],
                 "\u{02C7}": ["\u{02C7}", "\u{02DA}"],
+            ]
+        case .slovak:
+            // Apple's Slovak options (iOS 26.5 and 27.2 simulators, the same on both), every
+            // Slovak letter first after the base: á ä on A, é on E, í on I, ĺ ľ on L (ľ first),
+            // ň on N, ô ó on O (ô first), ŕ on R, š on S, ť on T, ú on U, ý on Y, ž on Z, č on C
+            // and ď on D. Apple's callout leaves the base out and starts on the first accent;
+            // Hex's keeps it first, as every other language's does. ´ and ˇ hold nothing.
+            [
+                "e": ["e", "é", "ě", "è", "ê", "ë", "ę", "ė", "ē"],
+                "r": ["r", "ŕ", "ř"],
+                "t": ["t", "ť"],
+                "z": ["z", "ž", "ź", "ż"],
+                "u": ["u", "ú", "ů", "û", "ü", "ù", "ū"],
+                "i": ["i", "í", "î", "ï", "ì", "į", "ī"],
+                "o": ["o", "ô", "ó", "ö", "ò", "õ", "œ", "ø", "ō"],
+                "a": ["a", "á", "ä", "à", "â", "æ", "ã", "å", "ā"],
+                "s": ["s", "š", "ś", "ß"],
+                "d": ["d", "ď"],
+                "l": ["l", "ľ", "ĺ", "ł"],
+                "y": ["y", "ý", "ÿ"],
+                "c": ["c", "č", "ç", "ć"],
+                "n": ["n", "ň", "ñ", "ń"],
             ]
         case .hungarian:
             // Hungarian's nine accented vowels, its own letter right after the base: á on A, é on
@@ -616,8 +648,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "8": ["8", "8ª", "8º"],
                 "9": ["9", "9º", "9ª"],
             ]
-        case .czech:
-            // The system Czech keyboard's 123 and #+= pages, and every held symbol, are English's.
+        case .czech, .slovak:
+            // The system Czech and Slovak keyboards' 123 and #+= pages, and every held symbol,
+            // are English's.
             [:]
         case .polish:
             // Its currency key is € (no zł), held for € $ £ ¥ ₩ ₽; Hex's 123 page keeps $.
@@ -663,6 +696,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
         case .polish: ["pl", "pl_PL"]
         case .czech: ["cs", "cs_CZ"]
+        case .slovak: ["sk", "sk_SK"]
         case .hungarian: ["hu", "hu_HU"]
         case .romanian: ["ro", "ro_RO"]
         case .russian: ["ru", "ru_RU"]
@@ -714,7 +748,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .hungarian:
             ["az", "és", "is", "de", "ha", "ez", "el", "ki", "be", "rá", "én", "te", "mi", "ne", "se"]
         case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
+             .czech, .slovak, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
             []
         }
     }
@@ -743,7 +777,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "giovedi": "giovedì", "venerdi": "venerdì",
             ]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .hungarian, .romanian, .russian, .ukrainian, .greek,
+             .portuguese, .polish, .czech, .slovak, .hungarian, .romanian, .russian, .ukrainian, .greek,
              .serbianLatin, .korean:
             [:]
         }
@@ -756,7 +790,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .italian: ["e": "è", "ce": "c'è"]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .hungarian, .romanian, .russian, .ukrainian, .greek,
+             .portuguese, .polish, .czech, .slovak, .hungarian, .romanian, .russian, .ukrainian, .greek,
              .serbianLatin, .korean:
             [:]
         }
@@ -780,8 +814,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .qwerty where self == .frenchCanadian, .qwertz where self == .frenchSwiss: [0.0, 0.0, 1.5]
         case .azerty: [0.0, 0.0, 2.0]
         case .dvorak: [1.85, 0.0, 1.33]
-        case .own where self == .ukrainian || self == .greek || self == .czech: [0.0, 0.0, 1.0]
-        case .qwerty where self == .czech: [0.0, 0.0, 1.0]
+        case .own where self == .ukrainian || self == .greek || typesOnCzechKeys: [0.0, 0.0, 1.0]
+        case .qwerty where typesOnCzechKeys: [0.0, 0.0, 1.0]
         default: [0.0, 0.5, 1.5]
         }
         for (row, letters) in letterRows(letters).enumerated() {
@@ -818,6 +852,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "pt": return .portuguese
         case "pl": return .polish
         case "cs": return .czech
+        case "sk": return .slovak
         case "hu": return .hungarian
         case "ro": return .romanian
         case "ru": return .russian

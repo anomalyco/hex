@@ -650,6 +650,33 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(AutocorrectEngine.sentenceStarters(.czech).count, 3)
     }
 
+    /// Slovak follows Czech: with an iPhone's sk dictionary, háčky, čárky, the vokáň and the
+    /// dĺžeň left out are the cheapest fix ("dakujem" -> "ďakujem", "kon" -> "kôň"); a word it
+    /// knows stays. Without one (the iOS 26.5 and 27.2 simulators list no sk), nothing is
+    /// changed or suggested, never Czech's dictionary in its place.
+    func testSlovakFollowsCzechAndGuessesNothingWithoutADictionary() {
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "dakujem", to: "ďakujem", language: .slovak)!, 0.15, accuracy: 0.001)
+        XCTAssertEqual(AutocorrectEngine.singleEditKeyboardCost(from: "kon", to: "kôň", language: .slovak)!, 0.20, accuracy: 0.001)
+        let slovak = stubbed {
+            $0.valid = ["ďakujem", "kôň", "ľudia", "dobrý", "je"]
+            $0.guessTable = ["dakujem": ["ďakujem"], "ludia": ["ľudia"], "dobry": ["dobrý"]]
+        }
+        slovak.setLanguage(.slovak, available: ["sk", "en_US"])
+        XCTAssertTrue(slovak.hasDictionary)
+        XCTAssertEqual(fix(slovak, "dakujem"), "ďakujem")
+        XCTAssertEqual(fix(slovak, "Ludia"), "Ľudia")
+        XCTAssertEqual(fix(slovak, "dobry"), "dobrý")
+        XCTAssertNil(fix(slovak, "je"), "a word stays")
+        XCTAssertEqual(AutocorrectEngine.sentenceStarters(.slovak), ["to", "ja", "ale"])
+        XCTAssertEqual(AutocorrectEngine.commonWords(.slovak), ["a", "sa", "je", "v", "na", "to"])
+
+        slovak.setLanguage(.slovak, available: ["cs_CZ", "hu_HU", "pl_PL", "en_US"])
+        XCTAssertFalse(slovak.hasDictionary)
+        XCTAssertNil(fix(slovak, "dakujem"), "as typed")
+        XCTAssertTrue(slovak.suggestions(beforeInput: "dakuj", field: .text, autocorrectionType: .default).isEmpty)
+        XCTAssertTrue(slovak.suggestions(beforeInput: "", field: .text, autocorrectionType: .default).isEmpty)
+    }
+
     /// Hungarian types with iOS's hu dictionary, and a missing accent is the cheapest fix there
     /// is, however many a word lacks ("koszonom" -> "köszönöm", "kesobb" -> "később"); ő and ű
     /// are o and u with the combining double acute, so each is one edit like á or é, where

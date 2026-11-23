@@ -5,7 +5,7 @@ import UIKit
 /// `--snap-state full-keyboard-<state>[-dark|-dark-field]` is passed on Simulator.
 /// `-dark` is a dark app; `-dark-field` is a light app whose field asks for a dark keyboard.
 /// The layout follows `--dictation-language` (Automatic, English, without it), or
-/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|hu|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
+/// `--keyboard-layout nb|es|de|it|fr|fr-CA|fr-CH|pt|pl|cs|sk|hu|ro|ru|uk|el|sr-Latn|ko|en` pins it; drafts are in the layout's language.
 /// `--keyboard-letters qwerty|qwertz|azerty|dvorak|own` arranges its letters (its own without it).
 /// `--accent-key ø` (or Cyrillic `е`, `ь`, `ʼ`, Greek `α`, `σ`, `t` on Romanian, or `o` on Hungarian) picks the key the `accents` state holds; `--emoji-query kiss` what `emoji-search` types.
 /// Emoji states (`emoji`, `emoji-search`, `emoji-tones`, `emoji-food`, `emoji-strip`) turn
@@ -138,6 +138,15 @@ struct FullKeyboardSnapshotStage: View {
             case "typing": "Přijdu o deset minut pozd"
             case "accents": Self.accentKey == "r" ? "P" : "Ka"
             default: "Přijdu o deset minut později, "
+            }
+        case .slovak:
+            return switch state {
+            case "inserted": "Prídem o desať minút neskôr, doma budem o 19:30. Začnite bezo mňa."
+            case "numbers": "Prídem o desať minút neskôr, doma budem o 19:3"
+            case "shift": "Prídem o desať minút neskôr. "
+            case "typing": "Prídem o desať minút nesk"
+            case "accents": Self.accentKey == "o" ? "K" : "Ďakuj"
+            default: "Prídem o desať minút neskôr, "
             }
         case .hungarian:
             return switch state {
@@ -349,6 +358,7 @@ private struct FullKeyboardFixture: UIViewRepresentable {
                 case .polish: ["e": "ę", "a": "ą", "c": "ć", "l": "ł", "n": "ń", "o": "ó", "s": "ś", "z": "ż"]
                 case .romanian: ["a": "ă", "i": "î", "s": "ș", "t": "ț"]
                 case .czech: ["e": "ě", "r": "ř", "u": "ů", "a": "á", "c": "č", "s": "š", "z": "ž", "y": "ý", "n": "ň"]
+                case .slovak: ["o": "ô", "a": "ä", "l": "ľ", "e": "é", "c": "č", "s": "š", "z": "ž", "y": "ý", "n": "ň"]
                 case .hungarian: ["a": "á", "e": "é", "i": "í", "o": "ő", "u": "ű"]
                 case .greek: ["ε": "έ", "α": "ά", "ο": "ό", "η": "ή", "ι": "ί", "υ": "ύ", "ω": "ώ", "σ": "ς", "κ": "ϗ"]
                 default: [:]

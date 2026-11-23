@@ -119,10 +119,11 @@ extension AutocorrectEngine {
         // are as cheap as one missing Spanish accent, a little more for each further one. Greek
         // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
         // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
-        // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), and Hungarian: its accented
+        // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), Slovak's on the same keys
+        // ("dakujem" -> "ďakujem", "kon" -> "kôň"), and Hungarian: its accented
         // vowels left out ("koszonom" -> "köszönöm", "kesobb" -> "később", "szivesen" ->
         // "szívesen"), ő and ű included, as o and u with the combining double acute.
-        if language == .polish || language == .greek || language == .czech || language == .hungarian,
+        if language == .polish || language == .greek || language.typesOnCzechKeys || language == .hungarian,
            s.count == t.count {
             func same(_ a: Character, _ b: Character) -> Bool {
                 switch language {

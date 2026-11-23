@@ -580,7 +580,9 @@ the apostrophe key; Canada's QWERTY and Switzerland's QWERTZ are Apple's "QWERTY
 is the plain one); Italiano and Português QWERTY,
 AZERTY, QWERTZ; Polski and Română QWERTY, QWERTZ, AZERTY; Čeština "QWERTZ – Čeština" and
 "QWERTY – Čeština", Apple's "QWERTZ – Czech/Slovak" and "QWERTY – Czech/Slovak" (iOS 27.2
-simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second; Magyar
+simulator), both its own rows with the ´ and ˇ keys, Z and Y swapped on the second;
+Slovenčina "QWERTZ – Slovenčina" and "QWERTY – Slovenčina", the same two (Apple's Slovak
+keyboard lists Czech's "Czech-Slovak" layouts, iOS 26.5 and 27.2 runtimes); Magyar
 "QWERTZ – Magyar" and "QWERTY – Magyar", the standard Hungarian QWERTZ with every accented
 vowel on a held key, Z and Y swapped on the second (Apple's own Hungarian layout list wasn't
 read on a simulator for this change); Srpski
@@ -674,7 +676,16 @@ included, types itself ("aˇ", "á´"); delete then takes the accented letter wh
 ì į ī, O ó ô ö ò õ œ ø ō, A á à ą â ä æ ã å ā, S š ß ś, D ď, L ł ľ ĺ, Y ý ÿ, C č ç ć, N ň ñ ń
 and the ˇ key the ring ˚ (which makes ů and å), each callout laid out as the system's
 (`AccentCatalog.arrangement`), and every other key, ´ included, nothing; its 123 and #+=
-pages and their held keys are English's), Magyar (the standard Hungarian QWERTZ, so
+pages and their held keys are English's), Slovenčina (Czech's keys, as Apple's Slovak
+keyboard has them on iOS 26.5 and 27.2: the same rows on all four pages, portrait and
+landscape, read by the capture tool, and English's 123 and #+= pages and held symbols; its ´
+and ˇ do as Czech's with real touches, ´ giving á é í ó ú ý ĺ ŕ (and ć ń ś ź) and ˇ č ď ě ľ ň
+ř š ť ž, capitals too, except that ˇ after u types itself, as after o and a, and a held ˇ
+offers nothing: Slovak's ů, ô and ä aren't composed (`CzechTyping`); held, each key offers
+Apple's Slovak options in Apple's order, the Slovak letter first: A á ä à â æ ã å ā, E é ě è ê
+ë ę ė ē, I í î ï ì į ī, O ô ó ö ò õ œ ø ō, U ú ů û ü ù ū, Y ý ÿ, L ľ ĺ ł, R ŕ ř, S š ś ß, T ť,
+D ď, Z ž ź ż, C č ç ć, N ň ñ ń; Apple's callout leaves the base letter out and opens on the
+first accent, Hex's keeps the base first, as in every language), Magyar (the standard Hungarian QWERTZ, so
 `qwertzuiop`, `asdfghjkl`, `yxcvbnm`, on the English keys' QWERTZ; its nine accented vowels
 are all held, á on A, é on E, í on I, ó ö ő on O and ú ü ű on U, the base first and then the
 neighbouring Latin accents, ő and ű the double-acute letters U+0151 and U+0171, and every
@@ -726,7 +737,10 @@ checked against a stub dictionary there. Greek likewise: every tonos or diaeresi
 counts as one such fix, and so does σ where the word ends in ς ("καλημερα" → "καλημέρα",
 "λογοσ" → "λόγος"); Greek fixes are checked against a stub dictionary too. Czech likewise:
 every háček or čárka left out counts as one such fix ("cesky" → "český", "prilis" →
-"příliš"), checked against a stub dictionary, and Hungarian too ("koszonom" → "köszönöm",
+"příliš"), checked against a stub dictionary, Slovak the same way ("dakujem" → "ďakujem",
+"kon" → "kôň"; the iOS 26.5 and 27.2 simulators list no `sk` dictionary at all, so there
+Slovak changes and suggests nothing, never Czech's words in its place; their `cs_CZ`,
+`hu_HU` and `pl_PL` take "qzxjvkq" as a word), and Hungarian too ("koszonom" → "köszönöm",
 "kesobb" → "később"), while a word of its own keeps its spelling ("meg" and "kor" stay
 though "még" and "kör" exist). A two-letter non-word one
 neighbouring key (or one swap) from a very common two-letter word is fixed too
