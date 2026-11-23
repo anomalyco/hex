@@ -1064,8 +1064,8 @@ nonisolated struct KeyboardLayout: Equatable, Sendable {
             ? min(modW, (innerWidth - 2 * m.side - CGFloat(middle.count) * lw - CGFloat(middle.count + 1) * m.gap) / 2)
             : modW
         if !dvorak {
-            // Arabic has no letter case and Apple's keyboard has no shift key: its eight row-3
-            // letters fill the row from the edge to delete, wider than a letter above.
+            // Arabic has no letter case and Apple's keyboard has no shift key: its nine row-3
+            // letters keep the letter width and leave a gap before delete.
             let showsShift = layer == .letters && language.showsShift
             if layer == .letters, showsShift { add(.shift, row: 2, x: left, w: row3ModW, label: "shift") }
             if layer == .numbers { add(.layerSwitch(.symbols), row: 2, x: left, w: modW, label: "#+=") }
