@@ -3,11 +3,15 @@
 //! and in a live desktop window pauses on `"Your turn"` with a focused
 //! [`rune::TextEdit`] so you can hold `⌥` and test real voice dictation live.
 
+mod beat;
 #[cfg(test)]
 mod motion_gate;
 mod replay;
 mod side;
 
+pub(crate) use beat::{
+    Beat, DemoBeat, DemoPhase, PermissionKind, PracticeBeat, PracticePhase, TypingRun,
+};
 pub(super) use replay::strip;
 
 use std::cell::Cell;
@@ -111,7 +115,8 @@ pub(crate) struct Onboard {
     pub(crate) wants: Language,
     pub(crate) caps: Vec<String>,
     shortcut_index: usize,
-    pub(crate) step: Step,
+    /// The active beat and its per-beat clocks and flags.
+    pub(crate) beat: Beat,
     pub(crate) language: Option<Language>,
     pub(crate) now: f64,
     pub(crate) reduced: Cell<bool>,
@@ -124,21 +129,6 @@ pub(crate) struct Onboard {
     pub(crate) pill_up: bool,
     pub(crate) pill_flew: f64,
     polled: f64,
-    pub(crate) parked_from: Option<f64>,
-    pub(crate) typing_from: Option<f64>,
-    /// The conversation came on screen open, Jay's messages landing in it,
-    /// rather than growing out of the Launch Room's clicked row.
-    pub(crate) in_place: bool,
-    pub(crate) voice_from: Option<f64>,
-    /// When the resting HUD plate first showed on `"With Hex"` or
-    /// `"Your turn"`: the HUD unfolds from here and keeps running through the
-    /// take, so pressing the shortcut never restarts it.
-    pub(crate) hud_from: Option<f64>,
-    pub(crate) take_from: Option<f64>,
-    /// How many `"Without Hex"` bubbles have flown out of the field so far.
-    sent_seen: usize,
-    /// Whether `"With Hex"`'s reply has flown out of the field.
-    hex_seen: bool,
     /// Every pause and the key pace of `"Without Hex"`, tunable live.
     pub(crate) timing: typing::Timing,
     /// `"Without Hex"` as [`Self::timing`] times it.
@@ -158,17 +148,12 @@ pub(crate) struct Onboard {
     /// The practice game has started this run.
     played: bool,
     pub(crate) scripted_try: bool,
-    pub(crate) permissions_from: Option<f64>,
-    ready_from: Option<f64>,
     manual_override: bool,
     pub(crate) auto_due_at: Option<f64>,
     pub(crate) practice: TextEdit,
-    pub(crate) live_hold_from: Option<f64>,
     /// The `"Your turn"` plate, on the microphone's real level.
     pub(crate) hud: LiveHud,
     pub(crate) flow_hud: FlowHud,
-    /// A dictation's text landed since the plate last stepped.
-    pub(crate) hud_landed: bool,
     pub(crate) sfx: SfxTrack,
     /// Set when this is Hex's real first run (Labs):
     /// what the window's tour reports, in place of the fixtures.
@@ -179,8 +164,6 @@ pub(crate) struct Onboard {
     pub(crate) dictated: Dictated,
     /// A story's stand-in for a real dictation on the interactive try.
     pub(crate) rehearsal: Option<Rehearsal>,
-    /// The interactive try as the practice game (`game`).
-    pub(crate) game: Option<super::game::Session>,
     /// The interactive try as the plain practice field, not the game.
     pub(crate) practice_field: bool,
     /// Presses too short to dictate on the practice, for its coaching.
@@ -268,7 +251,7 @@ impl Onboard {
                 .dictation_hotkey
                 .keycaps(),
             shortcut_index: 0,
-            step: Step::Pick,
+            beat: Beat::Pick,
             language: None,
             now: 0.0,
             reduced: Cell::new(false),
@@ -278,14 +261,6 @@ impl Onboard {
             pill_up: false,
             pill_flew: f64::NEG_INFINITY,
             polled: f64::NEG_INFINITY,
-            parked_from: None,
-            typing_from: None,
-            in_place: false,
-            voice_from: None,
-            hud_from: None,
-            take_from: None,
-            sent_seen: 0,
-            hex_seen: false,
             scene: typing::Scene::build(&timing),
             timing,
             partial: "",
@@ -304,21 +279,16 @@ impl Onboard {
             mic_granted: false,
             played: false,
             scripted_try: false,
-            permissions_from: None,
-            ready_from: None,
             manual_override: false,
             auto_due_at: None,
             practice: TextEdit::default(),
-            live_hold_from: None,
             hud: LiveHud::default(),
             flow_hud: FlowHud::default(),
-            hud_landed: false,
             sfx: SfxTrack::default(),
             live: None,
             login: super::login::LoginAsk::default(),
             dictated: Dictated::default(),
             rehearsal: None,
-            game: None,
             practice_field: false,
             taps: 0,
             toggle: false,
@@ -338,11 +308,11 @@ impl Onboard {
     }
 
     pub(crate) fn pick(&mut self, language: Language) {
-        if self.step != Step::Pick {
+        if self.step() != Step::Pick {
             return;
         }
         self.language = Some(language);
-        self.step = Step::Started;
+        self.beat = Beat::Started;
         self.download_from = Some(self.now);
         self.download = Some(Download {
             language,
@@ -410,12 +380,18 @@ impl Onboard {
         }
         self.dictated.changed(&self.practice.text, self.now);
         let has_words = !self.practice.text.trim().is_empty();
-        self.hud_landed |= has_words;
-        if has_words && self.step == Step::Try {
-            self.step = Step::TryHeard;
+        let mut landed = false;
+        if let Some(practice) = self.beat.practice_mut() {
+            practice.hud_landed |= has_words;
+            if has_words && matches!(practice.phase, PracticePhase::Try) {
+                practice.phase = PracticePhase::Heard { take_from: None };
+                landed = true;
+            } else if !has_words && matches!(practice.phase, PracticePhase::Heard { .. }) {
+                practice.phase = PracticePhase::Try;
+            }
+        }
+        if landed {
             self.sfx.on_live_dictation_landed(self.now);
-        } else if !has_words && self.step == Step::TryHeard {
-            self.step = Step::Try;
         }
     }
 
@@ -424,7 +400,7 @@ impl Onboard {
         self.manual_override = true;
         self.auto_due_at = None;
         self.sfx.on_capsule_tap();
-        match self.step {
+        match self.step() {
             // The permission steps move on as the story does, so the model
             // and the permissions still to come decide the next page.
             Step::Microphone | Step::Accessibility => {
@@ -439,7 +415,7 @@ impl Onboard {
     /// Skip on the demo or the practice: on to the next step setup still
     /// needs (the permissions, then the model), else Hex is ready.
     pub(crate) fn skip_optional(&mut self) {
-        if !self.step.optional() {
+        if !self.step().optional() {
             return;
         }
         if !self.granted {
@@ -485,9 +461,7 @@ impl Onboard {
         self.manual_override = true;
         self.sfx.clear();
         self.practice.focused = false;
-        self.live_hold_from = None;
-        self.game = None;
-        self.step = Step::Started;
+        self.beat = Beat::Started;
         self.auto_due_at = Some(self.now);
     }
 
@@ -495,8 +469,7 @@ impl Onboard {
         self.manual_override = true;
         self.sfx.clear();
         self.practice.focused = false;
-        self.live_hold_from = None;
-        self.step = Step::Started;
+        self.beat = Beat::Started;
         let lang = self.wants;
         self.language = Some(lang);
         self.download_from = Some(self.now);
@@ -515,18 +488,12 @@ impl Onboard {
         self.manual_override = true;
         self.sfx.clear();
         self.practice.focused = false;
-        self.live_hold_from = None;
         self.ensure_download(false);
-        self.voice_from = None;
-        self.hud_from = None;
-        self.take_from = None;
         self.partial = "";
         self.auto_due_at = None;
         park(self, self.now);
     }
 
-    /// the Launch Room's row: plays `"Without Hex"` from the top, then the
-    /// story moves on by itself.
     /// `Skip →` or Escape: leaves the comedy for whatever follows it. True
     /// when there was one to skip.
     pub(crate) fn skip_scene(&mut self) -> bool {
@@ -540,7 +507,9 @@ impl Onboard {
         self.auto_due_at = if self.flow == Flow::FirstRun {
             leave_comedy(self, now)
         } else {
-            self.step = Step::Done;
+            if let Some(demo) = self.beat.demo_mut() {
+                demo.enter_done();
+            }
             next_beat(self, now)
         }
         .map(|secs| now + secs);
@@ -548,15 +517,20 @@ impl Onboard {
     }
 
     pub(crate) fn start_scene(&mut self) {
-        if self.step != Step::Parked || self.typing_from.is_some() {
+        let Some(demo) = self.beat.demo_mut() else {
+            return;
+        };
+        if !matches!(demo.phase, DemoPhase::Parked) || demo.typing.is_some() {
             return;
         }
-        self.manual_override = true;
         // The conversation opens on Jay finishing his question; the scene's
         // clock starts once it lands.
         let from = self.now + self.timing.opening;
-        self.typing_from = Some(from);
-        self.in_place = false;
+        demo.typing = Some(TypingRun {
+            from,
+            in_place: false,
+        });
+        self.manual_override = true;
         self.sfx.on_opened(self.now);
         self.sfx.on_without_hex(from, &self.scene);
         self.auto_due_at = Some(from + self.scene.duration());
@@ -566,12 +540,17 @@ impl Onboard {
     /// land in it one by one, each with its sound, and the scene's clock
     /// starts after them. The first run opens this way.
     pub(crate) fn open_scene(&mut self) {
-        if self.step != Step::Parked || self.typing_from.is_some() {
+        let from = self.now + self.scene.lead_in();
+        let Some(demo) = self.beat.demo_mut() else {
+            return;
+        };
+        if !matches!(demo.phase, DemoPhase::Parked) || demo.typing.is_some() {
             return;
         }
-        let from = self.now + self.scene.lead_in();
-        self.typing_from = Some(from);
-        self.in_place = true;
+        demo.typing = Some(TypingRun {
+            from,
+            in_place: true,
+        });
         self.sfx.on_arrivals(from, &self.scene);
         self.sfx.on_without_hex(from, &self.scene);
         self.auto_due_at = Some(from + self.scene.duration());
@@ -580,9 +559,13 @@ impl Onboard {
     /// Rebuilds [`Self::scene`] after a change to [`Self::timing`].
     fn retime(&mut self) {
         self.scene = typing::Scene::build(&self.timing);
-        if self.step == Step::Parked && self.typing_from.is_some() {
+        if let Some(demo) = self.beat.demo_mut()
+            && matches!(demo.phase, DemoPhase::Parked)
+            && demo.typing.is_some()
+        {
             // A scene already playing starts over, waiting for the button.
-            self.typing_from = None;
+            demo.typing = None;
+            demo.sent_seen = 0;
             self.auto_due_at = None;
             self.sfx.clear();
         }
@@ -604,7 +587,6 @@ impl Onboard {
         self.manual_override = true;
         self.sfx.clear();
         self.practice.focused = false;
-        self.live_hold_from = None;
         self.ensure_download(false);
     }
 
@@ -627,20 +609,16 @@ impl Onboard {
         self.auto_due_at = None;
         self.sfx.clear();
         self.ensure_download(true);
-        self.take_from = None;
-        self.hud_from = Some(self.now);
         self.partial = "";
-        self.live_hold_from = None;
         self.practice = TextEdit::default();
         self.practice.focused = self.interactive_try();
         self.dictated.reset();
-        self.game = None;
         self.played = true;
         if let Some(rehearsal) = self.rehearsal.as_mut() {
             *rehearsal = Rehearsal::new(rehearsal.streams);
             rehearsal.from = self.now;
         }
-        self.step = Step::Try;
+        self.beat = Beat::Practice(Box::new(PracticeBeat::new(self.now)));
         if !self.interactive_try() {
             self.auto_due_at = Some(self.now + 1.2);
         }
@@ -658,7 +636,7 @@ impl Onboard {
     /// shows a while before the game.
     pub(crate) fn jump_to_download_wait(&mut self) {
         self.jump_to_download();
-        self.step = Step::Waiting;
+        self.beat = Beat::Waiting;
         self.sfx.clear();
         self.sfx.on_almost_ready(self.now);
         self.auto_due_at = Some(self.now);
@@ -667,8 +645,9 @@ impl Onboard {
     pub(super) fn jump_to_waiting(&mut self) {
         self.manual_override = true;
         self.sfx.clear();
+        self.practice.focused = false;
         self.ensure_download(false);
-        self.step = Step::Waiting;
+        self.beat = Beat::Waiting;
         self.auto_due_at = Some(self.now);
     }
 
@@ -676,17 +655,16 @@ impl Onboard {
         self.manual_override = true;
         self.auto_due_at = None;
         self.practice.focused = false;
-        self.live_hold_from = None;
         self.ensure_download(true);
-        self.step = Step::Ready;
-        self.ready_from = Some(self.now);
+        self.beat = Beat::Ready { from: self.now };
         self.sfx.on_ready(self.now, self.reduced.get());
     }
 
     /// Seconds since `"Hex is ready"` appeared; a scene opened on it shows
     /// it settled.
     pub(crate) fn ready_age(&self) -> f64 {
-        self.ready_from
+        self.beat
+            .ready_from()
             .map_or(f64::INFINITY, |from| self.now - from)
     }
 
@@ -695,10 +673,10 @@ impl Onboard {
     }
 
     pub(crate) fn listening_peak(&self) -> Option<f32> {
-        if self.live_hold_from.is_some() {
+        if self.live_hold_from().is_some() {
             return Some(crate::audio::input_level::recent().unwrap_or(0.0));
         }
-        matches!(self.step, Step::Hearing | Step::TryHearing).then_some(self.meter.1)
+        matches!(self.step(), Step::Hearing | Step::TryHearing).then_some(self.meter.1)
     }
 
     pub(crate) fn demo_hears(&self) -> bool {
@@ -944,13 +922,12 @@ fn view(s: &Onboard, cx: &mut Cx<Onboard>) -> El {
 
 fn play(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
     // A story opened on `"Hex is ready"` plays that page again.
-    let on_ready = s.step == Step::Ready;
+    let on_ready = s.step() == Step::Ready;
     s.now = play.now();
-    s.ready_from = None;
+    s.beat = Beat::Pick;
     s.manual_override = false;
     s.auto_due_at = None;
     s.practice.focused = false;
-    s.live_hold_from = None;
     s.sfx.clear();
     s.examples_from = Some(play.now());
     if s.rehearsal.is_some() && !s.autoplay {
@@ -982,9 +959,7 @@ fn start_first_run(s: &mut Onboard, play: &mut Play<'_, Onboard>) {
 
 /// `"Without Hex"`, waiting for the Launch Room's row.
 fn park(s: &mut Onboard, now: f64) {
-    s.step = Step::Parked;
-    s.parked_from = Some(now);
-    s.typing_from = None;
+    s.beat = Beat::Demo(DemoBeat::parked(now));
     s.sfx.on_parked(now, s.had_model);
 }
 
@@ -1028,7 +1003,7 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
     if s.flow == Flow::FirstRun {
         return first_run_next(s, now);
     }
-    match s.step {
+    match s.step() {
         Step::Pick => {
             s.pick(s.wants);
             s.sfx.on_download_start(now);
@@ -1039,41 +1014,44 @@ fn next_beat(s: &mut Onboard, now: f64) -> Option<f64> {
             None
         }
         Step::Started => {
-            s.step = Step::Parked;
-            s.parked_from = Some(now);
+            s.beat = Beat::Demo(DemoBeat::parked(now));
             Some(0.5)
         }
-        Step::Parked if s.typing_from.is_none() => None,
+        Step::Parked if s.beat.demo().is_none_or(|d| d.typing.is_none()) => None,
         Step::Parked if s.can_hear() => {
-            s.step = Step::YourTurn;
-            s.voice_from = Some(now);
-            s.hud_from = Some(now);
+            if let Some(demo) = s.beat.demo_mut() {
+                demo.enter_your_turn(now);
+            }
             s.sfx.on_rewind(now);
             Some(versus::BEFORE_KEY)
         }
         Step::Parked => Some(WAIT),
         Step::YourTurn => {
-            s.step = Step::Hearing;
             hear(s, now);
             Some(Script::chosen().take().release + 0.1)
         }
         Step::Hearing if s.flow == Flow::Versus => {
-            s.step = Step::Heard;
+            if let Some(demo) = s.beat.demo_mut() {
+                demo.enter_heard();
+            }
             Some(versus::reply_secs(s))
         }
         Step::Hearing => {
-            s.step = Step::Heard;
+            if let Some(demo) = s.beat.demo_mut() {
+                demo.enter_heard();
+            }
             Some(1.2)
         }
         Step::Heard if s.downloaded() => {
-            s.step = Step::Done;
+            if let Some(demo) = s.beat.demo_mut() {
+                demo.enter_done();
+            }
             s.sfx.on_score(now);
             Some(SCORE_HOLD)
         }
         Step::Heard => Some(WAIT),
         Step::Done => {
-            s.step = Step::Ready;
-            s.ready_from = Some(now);
+            s.beat = Beat::Ready { from: now };
             s.sfx.on_ready(now, s.reduced.get());
             None
         }
@@ -1088,7 +1066,9 @@ const SCORE_HOLD: f64 = 4.5;
 /// `"With Hex"`: the shortcut goes down and Jay's answer is spoken.
 fn hear(s: &mut Onboard, now: f64) {
     s.take = Script::chosen().take();
-    s.take_from = Some(now);
+    if let Some(demo) = s.beat.demo_mut() {
+        demo.enter_hearing(now);
+    }
     s.sfx.on_voice_take(now, s.take);
     s.sfx.on_words(
         versus::launches(s.streams()).into_iter().map(|at| now + at),
@@ -1104,7 +1084,7 @@ fn hear(s: &mut Onboard, now: f64) {
 /// `"Hex is ready"`.
 pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
     const WAIT: f64 = 0.25;
-    match s.step {
+    match s.step() {
         // The real permissions wait for macOS, then hold their checks a beat.
         Step::Microphone
             if s.live
@@ -1125,7 +1105,7 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             first_run_next(s, now)
         }
         // The conversation is there as the download flies up.
-        Step::Parked if s.typing_from.is_none() => {
+        Step::Parked if s.beat.demo().is_none_or(|d| d.typing.is_none()) => {
             s.open_scene();
             Some(s.scene.lead_in() + s.scene.duration() + COMEDY_HOLD)
         }
@@ -1133,30 +1113,33 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
         // `"With Hex"` shows how it goes, with nothing asked of the user
         // yet.
         Step::Parked => {
-            let from = s.typing_from?;
+            let from = s.beat.demo()?.typing_from()?;
             let left = from + s.scene.duration() + COMEDY_HOLD - now;
             if left > 1e-3 {
                 return Some(left);
             }
-            s.step = Step::YourTurn;
-            s.voice_from = Some(now);
-            s.hud_from = Some(now);
+            if let Some(demo) = s.beat.demo_mut() {
+                demo.enter_your_turn(now);
+            }
             s.sfx.on_rewind(now);
             Some(versus::BEFORE_KEY)
         }
         Step::YourTurn => {
-            s.step = Step::Hearing;
             hear(s, now);
             Some(Script::chosen().take().release + 0.1)
         }
         Step::Hearing => {
-            s.step = Step::Heard;
+            if let Some(demo) = s.beat.demo_mut() {
+                demo.enter_heard();
+            }
             Some(versus::reply_secs(s))
         }
         // The happy ending holds a beat before the permissions come in.
         Step::Heard => {
             let done = s
-                .take_from
+                .beat
+                .demo()
+                .and_then(DemoBeat::take_from)
                 .map_or(now, |from| from + versus::hex_done_secs(s));
             let left = done + ENDING_HOLD - now;
             if left > 1e-3 {
@@ -1169,14 +1152,21 @@ pub(super) fn first_run_next(s: &mut Onboard, now: f64) -> Option<f64> {
             if s.interactive_try() {
                 return None;
             }
-            s.step = Step::TryHearing;
+            if let Some(practice) = s.beat.practice_mut() {
+                practice.phase = PracticePhase::Hearing { take_from: now };
+            }
             s.take = &ANSWER_TRY;
-            s.take_from = Some(now);
             s.sfx.on_voice_take(now, &ANSWER_TRY);
             Some(ANSWER_TRY.release + 0.1)
         }
         Step::TryHearing => {
-            s.step = Step::TryHeard;
+            if let Some(practice) = s.beat.practice_mut()
+                && let PracticePhase::Hearing { take_from } = practice.phase
+            {
+                practice.phase = PracticePhase::Heard {
+                    take_from: Some(take_from),
+                };
+            }
             Some(2.2)
         }
         Step::TryHeard => {
@@ -1223,8 +1213,11 @@ fn leave_comedy(s: &mut Onboard, now: f64) -> Option<f64> {
 }
 
 fn to_microphone(s: &mut Onboard, now: f64) -> Option<f64> {
-    s.step = Step::Microphone;
-    s.permissions_from = Some(now);
+    s.practice.focused = false;
+    s.beat = Beat::Permission {
+        kind: PermissionKind::Microphone,
+        from: now,
+    };
     if s.live.is_some() {
         return Some(PERMISSIONS_WAIT);
     }
@@ -1233,8 +1226,11 @@ fn to_microphone(s: &mut Onboard, now: f64) -> Option<f64> {
 }
 
 fn to_accessibility(s: &mut Onboard, now: f64) -> Option<f64> {
-    s.step = Step::Accessibility;
-    s.permissions_from = Some(now);
+    s.practice.focused = false;
+    s.beat = Beat::Permission {
+        kind: PermissionKind::Accessibility,
+        from: now,
+    };
     if s.live.is_some() {
         return Some(PERMISSIONS_WAIT);
     }
@@ -1251,25 +1247,23 @@ fn to_practice(s: &mut Onboard, now: f64) -> Option<f64> {
         return to_accessibility(s, now);
     }
     if !s.can_hear() {
-        if s.step != Step::Waiting {
-            s.step = Step::Waiting;
+        if s.step() != Step::Waiting {
+            s.beat = Beat::Waiting;
             s.sfx.on_almost_ready(now);
         }
         return Some(WAIT);
     }
     // A sketch playing goes on to its next stop first.
-    if s.step == Step::Waiting
+    if s.step() == Step::Waiting
         && let Some(left) = super::sketches::hold(s, now)
     {
         return Some(left);
     }
-    if s.step == Step::Waiting && s.closed < 1.0 {
+    if s.step() == Step::Waiting && s.closed < 1.0 {
         return Some(0.9);
     }
-    s.step = Step::Try;
+    s.beat = Beat::Practice(Box::new(PracticeBeat::new(now)));
     s.played = true;
-    s.take_from = None;
-    s.hud_from = Some(now);
     s.partial = "";
     s.practice = TextEdit::default();
     s.dictated.reset();
@@ -1328,20 +1322,26 @@ fn poll(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
 /// Moves the story to `now`; true while anything on it still moves.
 pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     s.now = now;
-    tx.trace_channel("onboarding.step", "phase", s.step as u32 as f32);
+    tx.trace_channel("onboarding.step", "phase", s.step() as u32 as f32);
     tx.trace_channel("onboarding.mic", "level", s.listening_peak().unwrap_or(0.0));
-    // A sent `"Without Hex"` reply lifts out of the field into its bubble.
-    let sent = versus::sent_count(s);
-    for i in s.sent_seen..sent {
-        tx.launch("typed/line0", format!("sent-bubble-{i}"));
+    if let Some(demo) = s.beat.demo() {
+        let sent_seen = demo.sent_seen;
+        let hex_seen = demo.hex_seen;
+        // A sent `"Without Hex"` reply lifts out of the field into its bubble.
+        let sent = versus::sent_count(s);
+        for i in sent_seen..sent {
+            tx.launch("typed/line0", format!("sent-bubble-{i}"));
+        }
+        // `"With Hex"`'s answer lifts out of the field from its first word.
+        let hex_sent = versus::hex_sent(s);
+        if hex_sent && !hex_seen {
+            tx.launch("w0", "hex-bubble");
+        }
+        if let Some(demo) = s.beat.demo_mut() {
+            demo.sent_seen = sent;
+            demo.hex_seen = hex_sent;
+        }
     }
-    s.sent_seen = sent;
-    // `"With Hex"`'s answer lifts out of the field from its first word.
-    let hex_sent = versus::hex_sent(s);
-    if hex_sent && !s.hex_seen {
-        tx.launch("w0", "hex-bubble");
-    }
-    s.hex_seen = hex_sent;
     super::sketches::advance(s, now, tx);
     if s.manual_override
         && let Some(due) = s.auto_due_at
@@ -1350,7 +1350,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         s.auto_due_at = next_beat(s, now).map(|secs| now + secs);
     }
 
-    let trying = s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard);
+    let trying = s.interactive_try() && matches!(s.step(), Step::Try | Step::TryHeard);
     if trying && super::game::step(s, now) {
         s.hud.clear();
     } else if trying {
@@ -1361,15 +1361,15 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
             None => s.live.as_ref().map(|live| live.listening),
         };
         let held = real.unwrap_or_else(|| physical_shortcut_held(&s.caps));
-        match (s.live_hold_from, held) {
+        match (s.live_hold_from(), held) {
             (None, true) => {
-                s.live_hold_from = Some(now);
+                s.set_live_hold_from(Some(now));
                 if real.is_none() {
                     s.sfx.on_live_shortcut_down(now);
                 }
             }
             (Some(_), false) => {
-                s.live_hold_from = None;
+                s.set_live_hold_from(None);
                 if real.is_none() {
                     s.sfx.on_live_shortcut_up(now);
                 }
@@ -1394,17 +1394,23 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
             s.on_practice_change(tx);
         }
         s.dictated.settle(now);
-        let landed = std::mem::take(&mut s.hud_landed);
+        let landed = s
+            .beat
+            .practice_mut()
+            .is_some_and(|p| std::mem::take(&mut p.hud_landed));
+        let holding = s.live_hold_from().is_some();
         s.hud.step(
             now,
-            s.live_hold_from.is_some(),
+            holding,
             crate::audio::input_level::recent(),
             landed,
             s.reduced.get(),
         );
     } else {
-        s.game = None;
-        s.live_hold_from = None;
+        if let Some(practice) = s.beat.practice_mut() {
+            practice.game = None;
+            practice.live_hold_from = None;
+        }
         s.hud.clear();
     }
 
@@ -1426,15 +1432,19 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
     }
     s.polled = now;
     s.sfx.advance_to(now);
-    if s.ready_from.is_some_and(|from| now - from >= BUILD_SECS) {
+    if s.beat
+        .ready_from()
+        .is_some_and(|from| now - from >= BUILD_SECS)
+    {
         s.sfx.flush_offline_if_requested(now + 1.5);
     }
+    let step = s.step();
     let mut moving = s.sfx.has_pending(now)
         || s.auto_due_at.is_some()
-        || s.live_hold_from.is_some()
-        || (s.interactive_try() && matches!(s.step, Step::Try | Step::TryHeard))
-        || (s.examples_from.is_some() && (s.step < Step::Ready || !s.reduced.get()))
-        || (s.step == Step::Ready && !s.reduced.get() && s.ready_age() < BUILD_SECS);
+        || s.live_hold_from().is_some()
+        || (s.interactive_try() && matches!(step, Step::Try | Step::TryHeard))
+        || (s.examples_from.is_some() && (step < Step::Ready || !s.reduced.get()))
+        || (step == Step::Ready && !s.reduced.get() && s.ready_age() < BUILD_SECS);
     moving |= s.dictated.moving();
 
     // The real first run's download comes from Hex (`live::poll`).
@@ -1461,7 +1471,7 @@ pub(super) fn advance_to(s: &mut Onboard, now: f64, tx: &mut Tx) -> bool {
         };
         moving |= s.closed < 1.0;
     }
-    match s.take_from {
+    match s.beat.active_take_from() {
         Some(from) => {
             let elapsed = now - from;
             let done = s.take.finished(elapsed);
@@ -1505,7 +1515,7 @@ mod tests {
             s.mic_granted = mic;
             s.granted = granted;
             s.resume_setup();
-            s.step
+            s.step()
         };
         assert_eq!(resumed(false, false), Step::Microphone);
         assert_eq!(resumed(true, false), Step::Accessibility);
@@ -1542,7 +1552,11 @@ mod tests {
         let mut s = run(Flow::Shout, Speech::AfterDownload);
         s.pick(Language::Other);
         assert!(!s.streams());
-        s.take_from = Some(0.0);
+        park(&mut s, 0.0);
+        if let Some(demo) = s.beat.demo_mut() {
+            demo.enter_your_turn(0.0);
+        }
+        hear(&mut s, 0.0);
         let mut tx = Tx::default();
         poll(&mut s, 0.8, &mut tx);
         assert_eq!(s.partial, "");
@@ -1565,13 +1579,13 @@ mod tests {
     fn live_try_pauses_and_completes_when_real_words_paste_in() {
         let mut s = Onboard::new(Flow::FirstRun);
         s.jump_to_try();
-        assert_eq!(s.step, Step::Try);
+        assert_eq!(s.step(), Step::Try);
         s.practice.text = "Testing live dictation in Hex.".into();
         let mut tx = Tx::default();
         s.on_practice_change(&mut tx);
-        assert_eq!(s.step, Step::TryHeard);
+        assert_eq!(s.step(), Step::TryHeard);
         s.press_continue();
-        assert_eq!(s.step, Step::Accessibility);
+        assert_eq!(s.step(), Step::Accessibility);
     }
 
     #[test]
@@ -1582,7 +1596,7 @@ mod tests {
         s.practice.text = "Testing live dictation in Hex.".into();
         s.on_practice_change(&mut Tx::default());
         s.press_continue();
-        assert_eq!(s.step, Step::Ready);
+        assert_eq!(s.step(), Step::Ready);
     }
 
     #[test]
@@ -1593,10 +1607,10 @@ mod tests {
         s.begin_live(0.0);
         let mut tx = Tx::default();
         poll(&mut s, 0.0, &mut tx);
-        assert_eq!(s.step, Step::Parked);
+        assert_eq!(s.step(), Step::Parked);
         assert!(!versus::waiting_to_start(&s), "no row to click");
         let opened = s.scene.lead_in();
-        assert_eq!(s.typing_from, Some(opened));
+        assert_eq!(s.typing_from(), Some(opened));
         // Empty as it comes on, then Jay's question lands in it, each line
         // with its sound, and he types again.
         assert_eq!(s.scene.shown(-opened), 0);
@@ -1612,9 +1626,9 @@ mod tests {
         assert_eq!(incoming, 2);
         let end = opened + s.scene.duration();
         poll(&mut s, end - 0.05, &mut tx);
-        assert_eq!(s.step, Step::Parked);
+        assert_eq!(s.step(), Step::Parked);
         poll(&mut s, end + COMEDY_HOLD + 0.01, &mut tx);
-        assert_eq!(s.step, Step::YourTurn);
+        assert_eq!(s.step(), Step::YourTurn);
     }
 
     #[test]
@@ -1627,14 +1641,14 @@ mod tests {
         poll(&mut s, 30.0, &mut tx);
         let mut now = 30.0;
         let mut shortcut = None;
-        let mut steps = vec![s.step];
-        while now < 120.0 && s.step != Step::Microphone {
+        let mut steps = vec![s.step()];
+        while now < 120.0 && s.step() != Step::Microphone {
             poll(&mut s, now, &mut tx);
-            if s.step == Step::Hearing {
+            if s.step() == Step::Hearing {
                 shortcut.get_or_insert(now);
             }
-            if steps.last() != Some(&s.step) {
-                steps.push(s.step);
+            if steps.last() != Some(&s.step()) {
+                steps.push(s.step());
             }
             now += 0.05;
         }
@@ -1675,12 +1689,12 @@ mod tests {
         s.scripted_try = true;
         s.begin_live(0.0);
         let mut tx = Tx::default();
-        let mut steps = vec![s.step];
+        let mut steps = vec![s.step()];
         let mut now = 0.0;
-        while now < 120.0 && s.step != Step::Ready {
+        while now < 120.0 && s.step() != Step::Ready {
             poll(&mut s, now, &mut tx);
-            if steps.last() != Some(&s.step) {
-                steps.push(s.step);
+            if steps.last() != Some(&s.step()) {
+                steps.push(s.step());
             }
             now += 0.05;
         }
@@ -1711,13 +1725,13 @@ mod tests {
         let mut tx = Tx::default();
         let mut now = 0.0;
         let mut played = false;
-        while now < 150.0 && s.step != Step::Ready {
+        while now < 150.0 && s.step() != Step::Ready {
             poll(&mut s, now, &mut tx);
-            played |= s.game.is_some();
+            played |= s.game().is_some();
             now += 1.0 / 60.0;
         }
         assert!(played);
-        assert_eq!(s.step, Step::Ready);
+        assert_eq!(s.step(), Step::Ready);
         assert!(now < 120.0, "{now}");
         let triumphs = s
             .sfx
@@ -1748,9 +1762,9 @@ mod tests {
         let mut tx = Tx::default();
         let mut now = 0.0;
         let (mut waiting, mut sketch, mut done, mut tried) = (None, None, None, None);
-        while now < 200.0 && s.step != Step::Ready {
+        while now < 200.0 && s.step() != Step::Ready {
             poll(&mut s, now, &mut tx);
-            if s.step == Step::Waiting {
+            if s.step() == Step::Waiting {
                 waiting.get_or_insert(now);
             }
             if super::super::sketches::playing(&s) {
@@ -1759,7 +1773,7 @@ mod tests {
             if s.download.is_some_and(|d| d.done()) {
                 done.get_or_insert(now);
             }
-            if s.step == Step::Try {
+            if s.step() == Step::Try {
                 tried.get_or_insert(now);
             }
             now += 1.0 / 60.0;
@@ -1767,7 +1781,7 @@ mod tests {
         assert!(waiting.is_some(), "Almost ready waits for the model");
         let (sketch, done, tried) = (sketch.unwrap(), done.unwrap(), tried.unwrap());
         assert!(sketch < done && done < tried, "the model lands mid-sketch");
-        assert_eq!(s.step, Step::Ready);
+        assert_eq!(s.step(), Step::Ready);
         // Every beat keeps its sound, the sketch's hand-off to the game too.
         use crate::feedback::{OnboardingTone, Tone};
         let fired = s.sfx.fired_cues();
@@ -1820,7 +1834,7 @@ mod tests {
         assert!(versus::skippable(&s));
         assert!(s.skip_scene());
         assert!(matches!(
-            s.step,
+            s.step(),
             Step::Microphone | Step::Accessibility | Step::Waiting | Step::Try
         ));
     }
@@ -1833,13 +1847,13 @@ mod tests {
         let mut tx = Tx::default();
         poll(&mut s, 30.0, &mut tx);
         let mut now = 30.0;
-        while now < 120.0 && s.step != Step::Heard {
+        while now < 120.0 && s.step() != Step::Heard {
             poll(&mut s, now, &mut tx);
             now += 0.05;
         }
         assert!(versus::skippable(&s));
         assert!(s.skip_scene());
-        assert_eq!(s.step, Step::Microphone);
+        assert_eq!(s.step(), Step::Microphone);
     }
 
     #[test]
@@ -1861,12 +1875,12 @@ mod tests {
             s.begin_live(0.0);
             let mut tx = Tx::default();
             let mut now = 0.0;
-            while now < 90.0 && s.step != Step::Ready {
+            while now < 90.0 && s.step() != Step::Ready {
                 poll(&mut s, now, &mut tx);
                 now += 0.05;
             }
             poll(&mut s, now + 0.3, &mut tx);
-            assert_eq!(s.step, Step::Ready);
+            assert_eq!(s.step(), Step::Ready);
             s.sfx.fired_cues().to_vec()
         };
         let full = simulate(false);
@@ -1901,5 +1915,47 @@ mod tests {
             "expected full sound track, got {}",
             full.len()
         );
+    }
+
+    #[test]
+    fn jumping_between_beats_drops_previous_beat_clocks_and_flags() {
+        let mut s = Onboard::new(Flow::FirstRun);
+        s.had_model = true;
+        s.now = 10.0;
+        s.jump_to_demo();
+        s.open_scene();
+        if let Some(demo) = s.beat.demo_mut() {
+            demo.enter_your_turn(12.0);
+            demo.enter_hearing(13.0);
+            demo.sent_seen = 3;
+            demo.hex_seen = true;
+        }
+        assert!(s.typing_from().is_some());
+        assert!(s.beat.active_take_from().is_some());
+
+        // Jumping to Download drops demo clocks and take_from.
+        s.now = 14.0;
+        s.back_to_download();
+        assert_eq!(s.step(), Step::Started);
+        assert!(s.demo().is_none());
+        assert!(s.typing_from().is_none());
+        assert!(s.beat.active_take_from().is_none());
+
+        // Jumping to Practice gives a clean Try beat with no leaked demo take.
+        s.now = 15.0;
+        s.jump_to_try();
+        assert_eq!(s.step(), Step::Try);
+        assert_eq!(s.practice_take_from(), None);
+        assert_eq!(s.hud_from(), Some(15.0));
+        s.set_live_hold_from(Some(16.0));
+
+        // Jumping to Ready drops practice hold, game, and hud_from.
+        s.now = 17.0;
+        s.jump_to_ready();
+        assert_eq!(s.step(), Step::Ready);
+        assert_eq!(s.live_hold_from(), None);
+        assert!(s.game().is_none());
+        assert_eq!(s.hud_from(), None);
+        assert_eq!(s.ready_age(), 0.0);
     }
 }

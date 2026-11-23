@@ -694,14 +694,25 @@ fn a_late_first_frame_keeps_its_backoff_and_its_hud() {
 }
 
 /// A blocked show only stops Hex from creating one; it never takes down a HUD a
-/// late frame put up. A start cleared `shown` first, so its blocked show still
-/// runs the cheap hide (#2175).
+/// late frame put up. A fresh start tears down whatever an older recording left,
+/// while building nothing (#2175).
 #[test]
 fn a_blocked_show_keeps_a_hud_that_is_up() {
-    assert!(!blocked_show_hides(true), "a late frame keeps its HUD");
     assert!(
-        blocked_show_hides(false),
-        "a blocked start hides what nothing shows"
+        !blocked_show_hides(false, true),
+        "a late frame keeps its HUD"
+    );
+    assert!(
+        blocked_show_hides(false, false),
+        "nothing is up, so hide is harmless"
+    );
+    assert!(
+        blocked_show_hides(true, true),
+        "a blocked fresh start tears down what an older recording left"
+    );
+    assert!(
+        blocked_show_hides(true, false),
+        "a blocked fresh start hides what nothing shows"
     );
 }
 
@@ -863,22 +874,30 @@ fn a_recording_asks_again_only_when_its_frames_stop() {
 }
 
 /// A HUD as `install` builds it, without its overlay: the state `handle`
-/// touches, and no GPU or Rune. `shown` is what `Hud::show` records once Rune
+/// touches, and no GPU or Rune. `shown` is what `Hud::reveal` records once Rune
 /// took the show; a HUD with no overlay can't ask it.
 fn hud(shown: bool) -> Hud {
+    let presence = if shown {
+        HudPresence::Shown {
+            #[cfg(target_os = "macos")]
+            placed: None,
+            #[cfg(not(target_os = "macos"))]
+            edge_placed: None,
+        }
+    } else {
+        HudPresence::Hidden
+    };
     Hud {
         model: IndicatorModel::new(dot_scope::lab(), Instant::now()),
         drawn: None,
         layout: Layout::default(),
         position: IndicatorPosition::Top,
         this: None,
+        presence,
+        #[cfg(target_os = "macos")]
         shown: Arc::new(AtomicBool::new(shown)),
         reduce: false,
         animating: Arc::new(AtomicBool::new(false)),
-        #[cfg(target_os = "macos")]
-        placed: None,
-        #[cfg(not(target_os = "macos"))]
-        edge_placed: None,
         #[cfg(not(target_os = "macos"))]
         followed: None,
         #[cfg(not(target_os = "macos"))]
@@ -942,8 +961,6 @@ fn the_timer_arms_from_a_start_and_stops_when_frames_stop() {
         hud.last_drawn.is_some_and(|at| at.elapsed() < RESHOW_AFTER),
         "the start is the first reference"
     );
-    // `Hud::show` records the show once Rune takes it; this HUD has no overlay.
-    hud.shown.store(true, Ordering::Release);
     windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
     assert!(hud.armed, "the start's frame asks for the next");
 
@@ -954,19 +971,135 @@ fn the_timer_arms_from_a_start_and_stops_when_frames_stop() {
 
     // Hidden, even a fresh reference arms nothing.
     hud.last_drawn = Some(Instant::now());
-    hud.shown.store(false, Ordering::Release);
+    hud.set_presence(HudPresence::Hidden);
     windows_pacing::poll(&mut hud, 0.0, &mut rune::Tx::default());
     assert!(!hud.armed);
 }
 
-/// Every start asks Rune for the HUD again, macOS included: `handle` clears
-/// `shown` before `show` asks, so a start isn't gated to the OSes whose own
-/// recovery needed it. Re-adding that gate would strand a HUD Rune hid itself.
+/// Every start clears cached placement on every OS (and `reveal` calls
+/// `overlay.show()` unconditionally), so a start isn't gated to the OSes whose
+/// own recovery needed it and never leaves a stale placement standing (#873).
 #[test]
-fn a_start_clears_shown_on_every_os() {
+fn a_start_clears_placement_on_every_os() {
     let mut hud = hud(true);
+    #[cfg(target_os = "macos")]
+    {
+        hud.set_placed(place_on(&studio_display(), Tuning::default()));
+        assert!(hud.placed().is_some());
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        if let HudPresence::Shown { edge_placed } = &mut hud.presence {
+            *edge_placed = Some(IndicatorPosition::Top);
+        }
+    }
     hud.handle(HudEvent::Started);
-    assert!(!hud.shown.load(Ordering::Acquire));
+    #[cfg(target_os = "macos")]
+    assert!(hud.placed().is_none());
+    #[cfg(not(target_os = "macos"))]
+    assert!(matches!(
+        hud.presence,
+        HudPresence::Shown { edge_placed: None }
+    ));
+}
+
+/// Explicit 4-state lifecycle of `FirstFrame`: Idle -> Waiting -> Presented,
+/// Waiting -> Failed (with backoff and single hide) -> Waiting (carrying prior
+/// failure count and reason) -> Presented (clearing prior failure).
+#[test]
+fn first_frame_state_machine_transitions() {
+    let t0 = Instant::now();
+    let mut ff = FirstFrame::default();
+    assert!(matches!(ff, FirstFrame::Idle));
+    assert!(!ff.failed());
+    assert!(!ff.backing_off(t0));
+    assert_eq!(ff.failed_attempts(), 0);
+    let idle_poll = ff.poll(t0, 0, None, None);
+    assert!(idle_poll.hide.is_none());
+    assert!(idle_poll.backoff.is_none());
+    assert!(idle_poll.reason.is_none());
+
+    // Idle -> Waiting (attempt 1)
+    assert!(ff.start(t0, 10));
+    assert!(matches!(
+        ff,
+        FirstFrame::Waiting {
+            attempt: 1,
+            presents: 10,
+            prior: None,
+            ..
+        }
+    ));
+
+    // Waiting -> Presented (attempt 1)
+    let ok = ff.poll(t0 + FIRST_FRAME, 11, None, None);
+    assert!(ok.hide.is_none());
+    assert!(ok.backoff.is_none());
+    assert!(ok.reason.is_none());
+    assert!(matches!(ff, FirstFrame::Presented { attempt: 1 }));
+    assert!(!ff.failed());
+    assert_eq!(ff.failed_attempts(), 0);
+
+    // Presented -> Waiting (attempt 2) -> Failed (attempt 2)
+    let t1 = t0 + FIRST_FRAME;
+    assert!(ff.start(t1, 11));
+    assert!(matches!(ff, FirstFrame::Waiting { attempt: 2, .. }));
+    let fail = ff.poll(t1 + FIRST_FRAME, 11, None, Some("dx12"));
+    let hide = fail
+        .hide
+        .expect("Waiting -> Failed emits one recovery hide");
+    assert_eq!(hide.attempt, 2);
+    assert_eq!(fail.backoff, Some(HUD_BACKOFF));
+    assert!(matches!(
+        ff,
+        FirstFrame::Failed {
+            attempt: 2,
+            failures: 1,
+            ..
+        }
+    ));
+    assert!(ff.should_apply_hide(hide, 11));
+
+    // Failed during backoff refuses start and stays Failed
+    let t_during = t1 + FIRST_FRAME + Duration::from_secs(5);
+    assert!(!ff.start(t_during, 11));
+    assert!(matches!(
+        ff,
+        FirstFrame::Failed {
+            attempt: 2,
+            failures: 1,
+            ..
+        }
+    ));
+
+    // Failed after backoff -> Waiting (attempt 3), carrying prior failure
+    let t2 = t1 + FIRST_FRAME + HUD_BACKOFF;
+    assert!(ff.start(t2, 11));
+    assert!(matches!(
+        ff,
+        FirstFrame::Waiting {
+            attempt: 3,
+            prior: Some(_),
+            ..
+        }
+    ));
+    assert!(!ff.failed());
+    assert_eq!(ff.failed_attempts(), 1);
+    assert!(
+        !ff.should_apply_hide(hide, 11),
+        "new attempt invalidates prior hide"
+    );
+    // Prior reason stays visible while attempt 3 waits, without hiding.
+    let mid = ff.poll(t2 + Duration::from_millis(100), 11, None, None);
+    assert!(mid.hide.is_none());
+    assert!(mid.reason.is_some());
+
+    // Waiting (with prior) -> Presented clears consecutive failures & reason.
+    let recovered = ff.poll(t2 + FIRST_FRAME, 12, None, None);
+    assert!(recovered.hide.is_none());
+    assert!(recovered.reason.is_none());
+    assert!(matches!(ff, FirstFrame::Presented { attempt: 3 }));
+    assert_eq!(ff.failed_attempts(), 0);
 }
 
 /// Rune runs a poll before the frame's render, so a stall longer than

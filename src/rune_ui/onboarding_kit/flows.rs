@@ -124,12 +124,12 @@ fn hold(p: Paint, s: &Onboard, rest: &str) -> El {
         .center_y()
         .transition(Transition::opacity())
         .child(text("Hold").key("hold").font(LEAD).color(p.muted()))
-        .child(keys(p, "keys", &s.caps, s.step == Step::Hearing))
+        .child(keys(p, "keys", &s.caps, s.step() == Step::Hearing))
         .child(text(rest).key("rest").font(LEAD).color(p.muted()))
 }
 
 fn jay_reply<'a>(s: &'a Onboard, hint: &'a str) -> Reply<'a> {
-    match s.step {
+    match s.step() {
         Step::YourTurn => Reply::Ask {
             keys: &s.caps,
             hint,
@@ -152,7 +152,7 @@ fn example(s: &Onboard, index: usize) -> Reply<'_> {
 }
 
 fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
-    if s.step == Step::Ready {
+    if s.step() == Step::Ready {
         return vec![
             top_bar()
                 .justify_center()
@@ -169,7 +169,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
             )),
         ];
     }
-    let parked = s.step >= Step::Parked;
+    let parked = s.step() >= Step::Parked;
     let top = top_bar().justify_end().child(if parked {
         pill(p, download(s), s.closed)
     } else {
@@ -199,7 +199,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
     } else {
         "Hex starts listening once the speech model has downloaded."
     };
-    let (key, title, lead) = match s.step {
+    let (key, title, lead) = match s.step() {
         Step::Pick | Step::Started => ("intro", "Talk instead of typing", words),
         Step::Parked if !s.can_hear() => ("wait", "Almost ready", words),
         Step::Heard | Step::Done => (
@@ -209,7 +209,7 @@ fn pill_flow(p: Paint, s: &Onboard) -> Vec<El> {
         ),
         _ => ("turn", "Your turn", "Answer Jay with your voice."),
     };
-    let act = match s.step {
+    let act = match s.step() {
         Step::Pick => language_pick(p, Onboard::pick),
         Step::Started => pill(p, download(s), s.closed),
         Step::Done => continue_button(p, s),
@@ -237,7 +237,7 @@ fn arriving(card: El, index: usize) -> El {
 }
 
 fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
-    if s.step == Step::Pick {
+    if s.step() == Step::Pick {
         return vec![
             top_bar(),
             middle()
@@ -253,7 +253,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
                 .child(action(language_pick(p, Onboard::pick))),
         ];
     }
-    if s.step == Step::Ready {
+    if s.step() == Step::Ready {
         return vec![
             top_bar(),
             middle().pb(TOP_BAR).child(ready(
@@ -269,7 +269,7 @@ fn fill_flow(p: Paint, s: &Onboard) -> Vec<El> {
         ];
     }
     let d = download(s);
-    let hearing = s.step == Step::Hearing;
+    let hearing = s.step() == Step::Hearing;
     let card = |n: &Notice, index: usize, reply: Reply<'_>| {
         let dim = hearing && n.key != JAY.key;
         arriving(
@@ -354,13 +354,13 @@ fn sentence(p: Paint, s: &Onboard, finished: bool) -> El {
 }
 
 fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
-    let parked = s.step >= Step::Parked;
+    let parked = s.step() >= Step::Parked;
     let top = top_bar().justify_end().child(if parked {
         pill(p, download(s), s.closed)
     } else {
         slot()
     });
-    let stage = match s.step {
+    let stage = match s.step() {
         Step::Pick | Step::Started => el().key("empty"),
         Step::Parked | Step::YourTurn => {
             mic_level(p, "mic", 56.0, s.meter.0, s.meter.1, false).transition(arrives())
@@ -374,7 +374,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
             .child(mic_level(p, "mic", 20.0, s.meter.0, s.meter.1, true)),
         _ => sentence(p, s, true),
     };
-    let below = match s.step {
+    let below = match s.step() {
         Step::Ready => ready(
             p,
             &s.caps,
@@ -405,7 +405,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
         ),
         _ => heading(p, "turn", "Say anything", "It doesn't have to be good."),
     };
-    let act = match s.step {
+    let act = match s.step() {
         Step::Pick => language_pick(p, Onboard::pick),
         Step::Started => pill(p, download(s), s.closed),
         Step::Parked if !s.can_hear() => el().key("none"),
@@ -427,7 +427,7 @@ fn shout_flow(p: Paint, s: &Onboard) -> Vec<El> {
                     .child(action(act))
                     .child(mic_line(
                         p,
-                        parked && s.can_hear() && s.step < Step::Ready,
+                        parked && s.can_hear() && s.step() < Step::Ready,
                         s.listening_peak(),
                     )),
             ),

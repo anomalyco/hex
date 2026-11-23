@@ -101,7 +101,7 @@ impl Onboard {
 
     /// The start of the beat before this one.
     pub(crate) fn back_one_beat(&mut self) {
-        match self.step {
+        match self.step() {
             Step::YourTurn | Step::Hearing | Step::Heard => self.opener(),
             Step::Microphone
             | Step::Accessibility
@@ -137,10 +137,14 @@ impl Onboard {
     fn with_hex(&mut self) {
         self.jump_to_demo();
         let now = self.now;
-        self.typing_from = Some(now - self.scene.duration() - COMEDY_HOLD);
-        self.step = Step::YourTurn;
-        self.voice_from = Some(now);
-        self.hud_from = Some(now);
+        let typing_from = now - self.scene.duration() - COMEDY_HOLD;
+        if let Some(demo) = self.beat.demo_mut() {
+            demo.typing = Some(TypingRun {
+                from: typing_from,
+                in_place: false,
+            });
+            demo.enter_your_turn(now);
+        }
         self.sfx.on_rewind(now);
         self.auto_due_at = Some(now + versus::BEFORE_KEY);
     }
@@ -238,10 +242,10 @@ mod tests {
         let mut s = Onboard::new(Flow::FirstRun);
         s.now = 5.0;
         s.with_hex();
-        assert_eq!(s.step, Step::YourTurn);
+        assert_eq!(s.step(), Step::YourTurn);
         s.back_one_beat();
-        assert_eq!(s.step, Step::Parked);
-        assert_eq!(s.typing_from, None);
+        assert_eq!(s.step(), Step::Parked);
+        assert_eq!(s.typing_from(), None);
         assert_eq!(s.auto_due_at, Some(5.0));
     }
 }

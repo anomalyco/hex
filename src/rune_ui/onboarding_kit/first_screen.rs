@@ -38,7 +38,7 @@ pub(super) fn note(p: Paint, s: &Onboard) -> Option<El> {
     if failed(s) {
         return None;
     }
-    match s.step {
+    match s.step() {
         Step::Pick | Step::Started | Step::Microphone => Some(foot(
             "first-note",
             marked(

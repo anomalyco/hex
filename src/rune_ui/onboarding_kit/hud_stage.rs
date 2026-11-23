@@ -361,7 +361,7 @@ pub(crate) fn voice_or_idle_slot(
     let reduce = s.reduced.get();
     if let Some(from) = take_from {
         let elapsed = now - from;
-        let idle = s.hud_from.map_or(0.0, |shown| from - shown);
+        let idle = s.hud_from().map_or(0.0, |shown| from - shown);
         if let Some(frame) = voice_frame_at(idle, Some((take, elapsed)), reduce) {
             let heat = (frame.pose.opacity * if elapsed < take.release { 1.0 } else { 0.45 })
                 .clamp(0.0, 1.0);
@@ -373,7 +373,7 @@ pub(crate) fn voice_or_idle_slot(
     }
     // A scene that opens mid-wait shows the plate already settled.
     let idle = s
-        .hud_from
+        .hud_from()
         .map_or(IDLE_SETTLED + now.rem_euclid(IDLE_LOOP), |shown| {
             now - shown
         });

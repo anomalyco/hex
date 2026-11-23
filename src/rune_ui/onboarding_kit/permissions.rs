@@ -138,7 +138,7 @@ fn lerp(a: f32, b: f32, t: f32) -> f32 {
 }
 
 pub(super) fn page(p: Paint, s: &Onboard) -> El {
-    let which = if s.step == Step::Accessibility {
+    let which = if s.step() == Step::Accessibility {
         Perm::Accessibility
     } else {
         Perm::Microphone
@@ -146,7 +146,7 @@ pub(super) fn page(p: Paint, s: &Onboard) -> El {
     if let Some(live) = &s.live {
         return live_page(p, live, s, which);
     }
-    let e = s.permissions_from.map_or(0.0, |from| s.now - from);
+    let e = s.permissions_from().map_or(0.0, |from| s.now - from);
     let reduced = s.reduced.get();
     let (stage, continue_at) = match which {
         Perm::Microphone => (

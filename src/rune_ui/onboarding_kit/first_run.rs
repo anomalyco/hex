@@ -24,7 +24,7 @@ use super::flows::continue_button;
 use super::hex_meter::hex_meter;
 use super::hud_stage::{flow_box, frame_slot, voice_or_idle_slot};
 use super::landing::{LEAD, arrives, keys, ready, title_font};
-use super::live::{Live, ModelStep};
+use super::live::Live;
 use super::login::{self, Login, LoginCopy, login_ask};
 use super::mic_line::mic_capsule;
 use super::pill::{CAPSULE, FLY, PILL, after_flight, language_capsule, pill, slot};
@@ -81,7 +81,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
     } else {
         top
     };
-    let page = match s.step {
+    let page = match s.step() {
         Step::Pick | Step::Started => download_page(p, s, false),
         Step::Waiting if sketch => sketch_page(p, s),
         Step::Waiting => download_page(p, s, true),
@@ -114,7 +114,7 @@ pub(super) fn view(p: Paint, s: &Onboard) -> Vec<El> {
 /// demo and the practice. It passes over that part to the next step setup
 /// still needs, and never past permissions or the model.
 fn skip(p: Paint, s: &Onboard) -> Option<El> {
-    s.live.as_ref().filter(|_| s.step.optional()).map(|_| {
+    s.live.as_ref().filter(|_| s.step().optional()).map(|_| {
         let label = tr("Skip");
         let quiet = p.muted();
         row()
@@ -140,7 +140,7 @@ fn corner_skip(p: Paint, s: &Onboard) -> Option<El> {
     let on = s.live.is_none()
         && Layout::chosen().corner_skip()
         && matches!(
-            s.step,
+            s.step(),
             Step::Parked | Step::YourTurn | Step::Hearing | Step::Heard
         )
         && versus::skippable(s);
@@ -160,7 +160,7 @@ fn corner_skip(p: Paint, s: &Onboard) -> Option<El> {
 /// again: one line at the top with Reopen Hex. The practice shows it in
 /// place of its invitation to press the shortcut instead.
 fn reopen(p: Paint, s: &Onboard) -> Option<El> {
-    let practice = matches!(s.step, Step::Try | Step::TryHearing | Step::TryHeard);
+    let practice = matches!(s.step(), Step::Try | Step::TryHearing | Step::TryHeard);
     s.live
         .as_ref()
         .filter(|live| live.reopen && !practice)
@@ -181,9 +181,9 @@ fn back(p: Paint, s: &Onboard) -> Option<El> {
     let chosen = s
         .live
         .as_ref()
-        .is_some_and(|live| live.model_step == ModelStep::Chosen);
+        .is_some_and(|live| live.model_step.is_chosen());
     let after = matches!(
-        s.step,
+        s.step(),
         Step::Parked
             | Step::YourTurn
             | Step::Hearing
@@ -442,7 +442,7 @@ fn download_page(p: Paint, s: &Onboard, waiting: bool) -> El {
     if let Some(live) = s
         .live
         .as_ref()
-        .filter(|live| !waiting && live.model_step != ModelStep::None)
+        .filter(|live| !waiting && live.model_step.shows_list())
     {
         return models_page(p, s, live);
     }
@@ -656,7 +656,7 @@ fn demo_page(p: Paint, s: &Onboard) -> El {
     if layout.corner_skip() {
         return page;
     }
-    page.child(action(if s.step == Step::Done {
+    page.child(action(if s.step() == Step::Done {
         continue_button(p, s)
     } else if versus::skippable(s) {
         super::flows::skip_button(p, s)
@@ -695,7 +695,7 @@ fn try_text_origin() -> [f32; 2] {
 }
 
 fn try_flights(s: &Onboard) -> Vec<(Flight, super::field_text::Slot<'static>)> {
-    let Some(from) = s.take_from.filter(|_| s.step >= Step::TryHearing) else {
+    let Some(from) = s.practice_take_from() else {
         return Vec::new();
     };
     let origin = try_text_origin();
@@ -715,10 +715,10 @@ fn try_flights(s: &Onboard) -> Vec<(Flight, super::field_text::Slot<'static>)> {
 }
 
 fn try_page(p: Paint, s: &Onboard) -> El {
-    let holding = s.step == Step::TryHearing || s.live_hold_from.is_some();
+    let holding = s.step() == Step::TryHearing || s.live_hold_from().is_some();
     let warming = s.live.as_ref().is_some_and(|live| live.warming);
     let reopen = s.live.as_ref().is_some_and(|live| live.reopen);
-    let head = match s.step {
+    let head = match s.step() {
         _ if reopen => heading(p, s, "try", tr("Your turn"), live::recovery(p)),
         Step::TryHeard => heading(
             p,
@@ -762,7 +762,7 @@ fn try_page(p: Paint, s: &Onboard) -> El {
                     .key("try-foot")
                     .gap(14.0)
                     .items_center()
-                    .child(action(if s.step == Step::TryHeard {
+                    .child(action(if s.step() == Step::TryHeard {
                         continue_button(p, s)
                     } else {
                         none()
@@ -775,7 +775,7 @@ fn try_page(p: Paint, s: &Onboard) -> El {
 }
 
 fn instrument_bar(p: Paint, s: &Onboard) -> El {
-    let down = s.step == Step::TryHearing || s.live_hold_from.is_some();
+    let down = s.step() == Step::TryHearing || s.live_hold_from().is_some();
     row()
         .key("instrument-bar")
         .gap(8.0)
@@ -904,7 +904,7 @@ fn practice_stage(p: Paint) -> Stage {
 
 fn try_stage(p: Paint, s: &Onboard) -> El {
     let reduced = s.reduced.get();
-    let hearing = s.step == Step::TryHearing;
+    let hearing = s.step() == Step::TryHearing;
     let flights = try_flights(s);
     let (knock, flash) = if reduced {
         ([0.0, 0.0], 0.0)
@@ -925,9 +925,9 @@ fn try_stage(p: Paint, s: &Onboard) -> El {
         "try-dot-hud",
         TRY_HUD,
         1.14,
-        s.step == Step::Try,
+        s.step() == Step::Try,
         &ANSWER_TRY,
-        s.take_from.filter(|_| s.step >= Step::TryHearing),
+        s.practice_take_from(),
         s,
     )
     .0;
@@ -1015,7 +1015,7 @@ fn try_words(
             out = out.child(flying(p, &format!("f{i}"), slot.word, weight, pose));
         }
     }
-    if matches!(s.step, Step::Try | Step::TryHearing) {
+    if matches!(s.step(), Step::Try | Step::TryHearing) {
         let x = if reduced {
             targets.last().map_or(0.0, |t| t.1)
         } else {
