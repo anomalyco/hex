@@ -11,6 +11,10 @@
 # --channel  the channel branch (default android-preview). The APK is built to read this branch's latest.json.
 # --notes    what changed, one short line each: the app shows them above Update, and the release body lists them.
 # --builder  the ferry machine with the Android SDK, NDK and JDK 21 (default anomastudio; android/README.md).
+# --dry-run  do everything up to publishing (the checks, the build, its certificate, app id and version, and the
+#            latest.json, README.md and release notes it would publish, in android/build/preview/<build>), then stop.
+#            Nothing is created on GitHub. A later run without --dry-run for the same commit publishes that same
+#            checked APK, without building again.
 #
 # Build numbers are the count of commits up to the built commit (git rev-list --count), so they only grow along
 # dev; a build whose tag exists, or that isn't newer than the channel's, is refused. Tags are never moved or reused.
@@ -21,7 +25,7 @@ set -euo pipefail
 retry() { for _ in 1 2 3 4; do "$@" && return 0; sleep 5; done; "$@"; }
 
 
-repo=anomalyco/hex channel=android-preview commit="" notes="" builder=anomastudio
+repo=anomalyco/hex channel=android-preview commit="" notes="" builder=anomastudio dry=no
 while [ $# -gt 0 ]; do
   case "$1" in
     --repo) repo=$2; shift 2 ;;
@@ -29,6 +33,7 @@ while [ $# -gt 0 ]; do
     --commit) commit=$2; shift 2 ;;
     --notes) notes=$2; shift 2 ;;
     --builder) builder=$2; shift 2 ;;
+    --dry-run) dry=yes; shift ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
@@ -58,6 +63,17 @@ current=$(curl -fsSL "https://api.github.com/repos/$repo/contents/latest.json?re
   | python3 -c 'import json,sys; print(json.load(sys.stdin)["versionCode"])' 2>/dev/null || echo 0)
 [ "$build" -gt "$current" ] || { echo "build $build is not newer than the channel's $current" >&2; exit 1; }
 
+apk=HexPreview-$name.apk
+out=$root/android/build/preview/$build; mkdir -p "$out"
+# A dry run that checked this commit's APK leaves checked.txt (the commit, the channel address and the APK's SHA-256).
+reuse=no
+if [ "$dry" = no ] && [ -f "$out/checked.txt" ] && [ -f "$out/$apk" ] &&
+   [ "$(cat "$out/checked.txt")" = "$commit $raw $(shasum -a 256 "$out/$apk" | cut -d' ' -f1)" ]; then
+  reuse=yes; echo "publishing the APK the dry run built and checked"
+fi
+
+if [ "$reuse" = no ]; then
+rm -f "$out/checked.txt"
 # Build on the builder from exactly that commit's android/ folder.
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 git -C "$root" archive "$commit" android | tar -x -C "$work"
@@ -77,16 +93,16 @@ for _ in $(seq 1 240); do ferry sh "$builder" "test -f ~/$remote/build.exit" 2>/
 if [ "$(retry ferry sh "$builder" "cat ~/$remote/build.exit")" != 0 ]; then
   ferry sh "$builder" "tail -40 ~/$remote/build.log" >&2; echo "the build failed on $builder" >&2; exit 1
 fi
-apk=HexPreview-$name.apk
-out=$root/android/build/preview/$build; mkdir -p "$out"
 retry ferry cp "$builder:$remote/android/app/build/outputs/apk/preview/app-preview.apk" "$out/$apk" >/dev/null
 
 # Check what was built before anything is published.
 tools=$(retry ferry sh "$builder" 'ls -d ~/Library/Android/sdk/build-tools/36.0.0')
 signer=$(retry ferry sh "$builder" "$jdk $tools/apksigner verify --print-certs ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | sed -n 's/.*SHA-256 digest: //p' | tr a-f A-F)
-badging=$(retry ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk" | head -1)
+badging=$(retry ferry sh "$builder" "$tools/aapt2 dump badging ~/$remote/android/app/build/outputs/apk/preview/app-preview.apk | head -1")
 [ "$signer" = "$fingerprint" ] || { echo "APK is signed with $signer, not the Hex Preview key" >&2; exit 1; }
 case "$badging" in *"name='ly.anoma.hex.preview' versionCode='$build' versionName='$name'"*) ;; *) echo "unexpected APK: $badging" >&2; exit 1 ;; esac
+echo "checked: signed with the Hex Preview key, ly.anoma.hex.preview, version code $build, version $name"
+fi
 sha=$(shasum -a 256 "$out/$apk" | cut -d' ' -f1); size=$(stat -f %z "$out/$apk")
 echo "$sha  $apk" > "$out/$apk.sha256"
 url=https://github.com/$repo/releases/download/$tag/$apk
@@ -103,20 +119,8 @@ body = "\n".join("- " + n for n in notes) + "\n\nHex Preview for Android, built 
 open(sys.argv[2] + "/release.md", "w").write(body)
 PY
 
-gh release create "$tag" --repo "$repo" --target "$commit" --prerelease --latest=false \
-  --title "Hex Preview $version (build $build)" --notes-file "$out/release.md" "$out/$apk" "$out/$apk.sha256"
-# The asset must serve exactly what was checked before the channel points at it.
-curl -fsSL "$url" | shasum -a 256 | grep -q "^$sha " || { echo "the published APK doesn't match; channel left as it was" >&2; exit 1; }
-
-# Point the channel at it: one commit on the channel branch, fast-forward only.
-ch=$(mktemp -d)
-git -C "$ch" init -q
-git -C "$ch" remote add origin "https://github.com/$repo.git"
-if git -C "$ch" fetch -q --depth 1 origin "$channel" 2>/dev/null; then git -C "$ch" checkout -q -b "$channel" FETCH_HEAD
-else git -C "$ch" checkout -q --orphan "$channel"; fi
-cp "$out/latest.json" "$ch/latest.json"
 fp=$(echo "$fingerprint" | sed 's/../&:/g; s/:$//')
-cat > "$ch/README.md" <<MD
+cat > "$out/README.md" <<MD
 # Hex Preview for Android
 
 **[Download Hex Preview $version (build $build)]($url)** · $(( size / 1000000 )) MB · Android 12 or later · $(date -u +%Y-%m-%d)
@@ -144,6 +148,27 @@ $(sed '/^[[:space:]]*$/d; s/^/- /' "$notes")
 
 Earlier builds are on the [releases page](https://github.com/$repo/releases?q=android-preview) (tags \`android-preview-<build>\`). Typing and dictation stay on the phone; the update check asks GitHub for this file and carries nothing about you.
 MD
+
+if [ "$dry" = yes ]; then
+  echo "$commit $raw $sha" > "$out/checked.txt"
+  echo "dry run: nothing published. Would create $tag on $repo at $commit with $apk ($size bytes, SHA-256 $sha),"
+  echo "then point $channel at it. To publish: rerun this command without --dry-run. Review:"
+  echo "  $out/latest.json"; echo "  $out/README.md"; echo "  $out/release.md"
+  exit 0
+fi
+
+gh release create "$tag" --repo "$repo" --target "$commit" --prerelease --latest=false \
+  --title "Hex Preview $version (build $build)" --notes-file "$out/release.md" "$out/$apk" "$out/$apk.sha256"
+# The asset must serve exactly what was checked before the channel points at it.
+curl -fsSL "$url" | shasum -a 256 | grep -q "^$sha " || { echo "the published APK doesn't match; channel left as it was" >&2; exit 1; }
+
+# Point the channel at it: one commit on the channel branch, fast-forward only.
+ch=$(mktemp -d)
+git -C "$ch" init -q
+git -C "$ch" remote add origin "https://github.com/$repo.git"
+if git -C "$ch" fetch -q --depth 1 origin "$channel" 2>/dev/null; then git -C "$ch" checkout -q -b "$channel" FETCH_HEAD
+else git -C "$ch" checkout -q --orphan "$channel"; fi
+cp "$out/latest.json" "$out/README.md" "$ch/"
 git -C "$ch" add latest.json README.md
 git -C "$ch" -c user.name="$(git -C "$root" config user.name)" -c user.email="$(git -C "$root" config user.email)" \
   commit -q -m "Hex Preview $name (${commit:0:12})"
