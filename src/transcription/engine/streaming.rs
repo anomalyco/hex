@@ -8,6 +8,8 @@ pub(super) trait StreamFeed {
     fn feed(&mut self, samples: &[f32]) -> Result<(), String>;
     fn finalize(&mut self) -> Result<String, String>;
     fn partial(&self) -> Partial;
+    /// Raises the clip samples the opening check ignores. Only ever increases.
+    fn raise_ignored_head(&mut self, _head: usize) {}
     /// Where the stream's text starts in the audio it heard, in milliseconds,
     /// once it has finalized; `None` when the model gives no timing.
     fn text_start_ms(&self) -> Option<u64> {
@@ -322,6 +324,10 @@ impl<'a, S: StreamFeed> PauseCap<'a, S> {
 }
 
 impl<S: StreamFeed> StreamFeed for PauseCap<'_, S> {
+    fn raise_ignored_head(&mut self, head: usize) {
+        self.head_ignored = self.head_ignored.max(head);
+    }
+
     fn feed(&mut self, mut samples: &[f32]) -> Result<(), String> {
         let mut out = Vec::with_capacity(samples.len() + self.tail.len());
         while !samples.is_empty() {
@@ -576,6 +582,12 @@ pub(super) fn drive_stream(
                 }
             }
             Command::Feed { .. } => {}
+            // The capture learned that Hex's own output suppression took
+            // effect after the stream began; ignore the audio it covered.
+            Command::IgnoreHead { stream: s, head } if s == id => {
+                stream.raise_ignored_head(head);
+            }
+            Command::IgnoreHead { .. } => {}
             // Background work never interrupts a capture.
             Command::Background { work, .. } => work(None),
             // Nor does foreground work; it runs once the stream ends.
@@ -640,6 +652,8 @@ pub(super) fn drive_yielding(
                 }
             },
             Command::Feed { .. } => {}
+            // Only a dictation stream reads an ignored head.
+            Command::IgnoreHead { .. } => {}
             Command::Background { work, .. } => work(None),
             foreground @ Command::Foreground { .. } => deferred.push_back(foreground),
             Command::Cancel { stream: s } if s == id => return None,

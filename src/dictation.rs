@@ -16,6 +16,8 @@ pub(crate) mod correction_terms;
 pub(crate) mod correction_watch;
 #[cfg(target_os = "macos")]
 pub(crate) mod diagnostics;
+#[cfg(target_os = "macos")]
+mod environment;
 pub(crate) mod filler_words;
 pub(crate) mod indicator;
 pub(crate) mod live_text;
@@ -24,6 +26,7 @@ pub(crate) mod modes;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod neutral_voice;
 mod numbers;
+mod opening_head;
 pub(crate) mod paste_last;
 #[cfg_attr(not(any(target_os = "windows", test)), allow(dead_code))]
 pub(crate) mod paste_target;
@@ -45,6 +48,8 @@ pub(crate) mod voice_prompt;
 pub(crate) mod yolo_mode;
 
 use std::collections::VecDeque;
+#[cfg(target_os = "macos")]
+use std::sync::mpsc;
 use std::time::Duration;
 
 use rubato::audioadapter_buffers::direct::InterleavedSlice;
@@ -58,9 +63,9 @@ pub use release_tail::ReleaseTail;
 pub use release_tail::ReleaseWait;
 
 #[cfg(target_os = "macos")]
-use crate::audio::recording_environment::{
-    RecordingEnvironmentController, RecordingEnvironmentSession,
-};
+use crate::audio::recording_environment::RecordingEnvironmentController;
+#[cfg(target_os = "macos")]
+use environment::RecordingEnvironmentState;
 
 const TIMELINE_BUFFER_DURATION: Duration = Duration::from_secs(10);
 /// Upper bound on warm-ring retention when an old pending input timestamp
@@ -809,6 +814,10 @@ struct Recording {
     recorded_through: Option<CaptureInstant>,
     /// How much of the recording precedes the press.
     pre_press: Duration,
+    /// Clip samples through which Hex's output suppression has actually
+    /// reached the microphone, as the environment reported it. Zero when
+    /// nothing was suppressed or the report has not arrived.
+    output_suppression_through: usize,
     /// Source samples still to arrive that precede the pre-roll, dropped as
     /// they come (a press ahead of the newest audio).
     skip_samples: usize,
@@ -834,32 +843,17 @@ struct Recording {
     live_text: Option<crate::dictation::live_text::Publisher>,
     #[cfg(target_os = "macos")]
     environment: RecordingEnvironmentState,
+    /// Moments "While dictating" actually changed the environment, from its
+    /// own thread. Kept after the environment ends, so a report that lands
+    /// during the release tail still reaches the finish.
+    #[cfg(target_os = "macos")]
+    suppression_reports: Option<mpsc::Receiver<CaptureInstant>>,
     #[cfg(target_os = "macos")]
     capture: Option<crate::audio::recording_environment::CaptureMarker>,
     /// Filters Hex Microphone from the hold threshold until the recording
     /// ends (macOS follows its recording environment instead).
     #[cfg(target_os = "linux")]
     voice_filter: Option<crate::audio::hex_microphone::Dictation>,
-}
-
-#[cfg(target_os = "macos")]
-enum RecordingEnvironmentState {
-    Disabled,
-    Pending(RecordingEnvironmentController),
-    Active {
-        _session: RecordingEnvironmentSession,
-    },
-}
-
-#[cfg(target_os = "macos")]
-impl RecordingEnvironmentState {
-    fn activate(&mut self) {
-        if let Self::Pending(controller) = self {
-            *self = Self::Active {
-                _session: controller.begin(),
-            };
-        }
-    }
 }
 
 impl Recording {
@@ -895,6 +889,7 @@ impl Recording {
             source_rate,
             recorded_through: None,
             pre_press: Duration::ZERO,
+            output_suppression_through: 0,
             skip_samples: 0,
             press_lead_ms: None,
             max_chunk_gap: Duration::ZERO,
@@ -908,6 +903,8 @@ impl Recording {
             live_text: None,
             #[cfg(target_os = "macos")]
             environment: RecordingEnvironmentState::Disabled,
+            #[cfg(target_os = "macos")]
+            suppression_reports: None,
             #[cfg(target_os = "macos")]
             capture: None,
             #[cfg(target_os = "linux")]
@@ -959,20 +956,45 @@ impl Recording {
         self.voice.extend(fresh);
     }
 
-    /// Clip samples of Hex's own sounds at the capture's head: the pre-roll
-    /// (a retracted double-tap first tone, an earlier dictation's stop tone)
-    /// through the press, then the start tone and the margin after it (the
-    /// grace before a provisional tone sounds, plus a little latency). A
-    /// stream that hears them has not lost any speech.
+    /// Clip samples recorded so far, past the resampler's output delay.
+    fn recorded_samples(&self) -> usize {
+        let delay = self.resampler.as_ref().map_or(0, Fft::output_delay);
+        self.samples.len().saturating_sub(delay)
+    }
+
+    /// Counts this recording as intentional, starting the environment that
+    /// may report output suppression later.
+    fn become_intentional(&mut self) -> bool {
+        if self.intentional {
+            return false;
+        }
+        self.intentional = true;
+        #[cfg(target_os = "macos")]
+        self.environment.activate(&mut self.suppression_reports);
+        #[cfg(target_os = "linux")]
+        {
+            self.voice_filter = Some(crate::audio::hex_microphone::Dictation::begin());
+        }
+        true
+    }
+
+    /// Raises the head for the moment output suppression actually took
+    /// effect, mapped onto the recorded timeline. Returns the head a stream
+    /// should now ignore, or `None` when the report does not move it.
+    fn note_suppression_through(&mut self, at: CaptureInstant) -> Option<usize> {
+        let through =
+            opening_head::effective_through(self.recorded_samples(), self.recorded_through, at);
+        if through <= self.output_suppression_through {
+            return None;
+        }
+        self.output_suppression_through = through;
+        Some(self.head_ignored())
+    }
+
+    /// Clip samples of Hex's own audio at the capture's head, which a stream
+    /// that hears it has not lost any speech over.
     fn head_ignored(&self) -> usize {
-        let tone = crate::feedback::start_tone_length();
-        let after_press = if tone.is_zero() {
-            Duration::ZERO
-        } else {
-            tone + STOP_TONE_MARGIN
-        };
-        samples_for(self.pre_press, PARAKEET_SAMPLE_RATE)
-            + samples_for(after_press, PARAKEET_SAMPLE_RATE)
+        opening_head::ignored_head(self.pre_press, self.output_suppression_through)
     }
 
     /// The 20 ms clip frame `at` falls in.
@@ -1096,6 +1118,16 @@ impl DictationCapture {
         self.recording.is_some()
     }
 
+    /// Applies a report that "While dictating" output suppression actually
+    /// took effect, raising the live stream's ignored head if it already
+    /// opened. macOS only: the recording environment is there.
+    #[cfg(target_os = "macos")]
+    pub fn apply_suppression_report(&mut self) {
+        if let Some(recording) = &mut self.recording {
+            recording.apply_suppression_report();
+        }
+    }
+
     #[cfg(any(test, target_os = "linux"))]
     pub fn start(&mut self, now: CaptureInstant) {
         self.start_with_pre_roll(now, PRE_ROLL_DURATION, false);
@@ -1173,13 +1205,20 @@ impl DictationCapture {
         }
         #[cfg(target_os = "macos")]
         {
-            recording.environment = match &self.recording_environment {
-                Some(controller) if intentional => RecordingEnvironmentState::Active {
-                    _session: controller.begin(),
-                },
-                Some(controller) => RecordingEnvironmentState::Pending(controller.clone()),
-                None => RecordingEnvironmentState::Disabled,
+            let (environment, reports) = match &self.recording_environment {
+                Some(controller) if intentional => {
+                    let (report, reports) = mpsc::channel();
+                    let session = controller.begin_reporting(report);
+                    (
+                        RecordingEnvironmentState::Active { _session: session },
+                        Some(reports),
+                    )
+                }
+                Some(controller) => (RecordingEnvironmentState::Pending(controller.clone()), None),
+                None => (RecordingEnvironmentState::Disabled, None),
             };
+            recording.environment = environment;
+            recording.suppression_reports = reports;
             recording.capture = self
                 .recording_environment
                 .is_some()
@@ -1238,30 +1277,18 @@ impl DictationCapture {
         let Some(recording) = &mut self.recording else {
             return false;
         };
-        let became_intentional = !recording.intentional
-            && now.duration_since(recording.started_at) >= MINIMUM_HOLD_DURATION;
-        recording.intentional |= became_intentional;
-        #[cfg(target_os = "macos")]
-        if became_intentional {
-            recording.environment.activate();
+        if now.duration_since(recording.started_at) < MINIMUM_HOLD_DURATION {
+            return false;
         }
-        #[cfg(target_os = "linux")]
-        if became_intentional {
-            recording.voice_filter = Some(crate::audio::hex_microphone::Dictation::begin());
-        }
-        became_intentional
+        recording.become_intentional()
     }
 
     /// Counts the active recording as intentional now, whatever its length.
     pub fn mark_intentional(&mut self) -> bool {
-        let Some(started_at) = self
-            .recording
-            .as_ref()
-            .map(|recording| recording.started_at)
-        else {
+        let Some(recording) = &mut self.recording else {
             return false;
         };
-        self.become_intentional(started_at + MINIMUM_HOLD_DURATION)
+        recording.become_intentional()
     }
 
     /// Ends the active recording's environment (mute, paused media, idle-sleep
@@ -2030,6 +2057,33 @@ mod tests {
             assert_eq!(clip.press_samples, kept, "{behavior:?}");
             assert_eq!(clip.samples.len(), kept + 4_800, "{behavior:?}");
         }
+    }
+
+    #[test]
+    fn a_reported_effect_raises_the_head_from_the_recorded_timeline() {
+        let origin = capture_time();
+        let mut capture = DictationCapture::new(16_000);
+        capture.start_hotkey_at(origin, Duration::ZERO);
+        capture.ingest(&[0.0; 8_000], origin + Duration::from_millis(500));
+        let recording = capture.recording.as_mut().unwrap();
+
+        // The effect landed 400 ms into the clip: 6,400 samples plus the
+        // 40 ms speaker-to-microphone margin.
+        let head = recording
+            .note_suppression_through(origin + Duration::from_millis(400))
+            .expect("the head grows");
+        assert_eq!(recording.output_suppression_through, 7_040);
+        assert_eq!(head, opening_head::ignored_head(Duration::ZERO, 7_040));
+        // A report at or behind it changes nothing.
+        assert_eq!(
+            recording.note_suppression_through(origin + Duration::from_millis(400)),
+            None
+        );
+        // A report handled before its audio arrived projects forward (bounded).
+        assert_eq!(
+            recording.note_suppression_through(origin + Duration::from_millis(600)),
+            Some(opening_head::ignored_head(Duration::ZERO, 10_240))
+        );
     }
 
     #[test]
