@@ -195,6 +195,9 @@ internal class KeyboardEngine(
     /** Labs › Keyboard › Keyboard tools changed: the strip follows at once. */
     fun keyboardToolsChanged() { surface?.toolsChanged() }
 
+    /** The clipboard changed: the strip's Paste tool comes or goes at once. */
+    fun clipboardChanged() { surface?.toolsChanged() }
+
     /** Android's personal dictionary changed: every loaded language reads it again, off the main thread. */
     fun personalWordsChanged() { for (decoder in models.values) loadPersonal(decoder) }
     private fun loadPersonal(decoder: SpatialDecoder) {
@@ -578,10 +581,11 @@ internal class KeyboardEngine(
     /** The strip's Undo tool: the last autocorrection goes back to exactly what was typed, as Delete
      * right after it does, and what was typed shows as the literal chip. */
     fun undoAutocorrection() {
-        val last = undo ?: return
         if (!canUndoAutocorrection) return
-        clearSpaces(); undo = null
-        if (!revert(last)) return
+        edited(); clearSpaces()
+        val last = undo ?: return
+        undo = null
+        if (!revert(last)) { surface?.toolsChanged(); return }
         surface?.suggestions(listOf(Suggestion(last.original.substringAfterLast(' '), Suggestion.Kind.Typed)))
     }
     /** Puts back what an autocorrection replaced, with its space, if it is still right before the cursor. */

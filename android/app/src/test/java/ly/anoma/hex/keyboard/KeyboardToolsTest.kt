@@ -7,7 +7,8 @@ import org.junit.Test
 class KeyboardToolsTest {
     private fun tools(enabled: Boolean = true, secure: Boolean = false, busy: Boolean = false,
                       hasClip: Boolean = true, canUndo: Boolean = true) =
-        KeyboardTools.tools(enabled = enabled, secure = secure, busy = busy, canUndo = { canUndo }, clipboard = { hasClip })
+        KeyboardTools.tools(enabled = enabled, busy = busy, secure = { secure }, canUndo = { canUndo },
+            clipboard = { hasClip })
 
     @Test fun withTheLabOffThereAreNoTools() {
         assertEquals(emptyList<StripTool>(), tools(enabled = false))
@@ -39,15 +40,18 @@ class KeyboardToolsTest {
         assertEquals(emptyList<StripTool>(), tools(busy = true))
     }
 
-    @Test fun theClipboardAndTheEditorAreOnlyAskedWhenTheToolsCouldShow() {
+    @Test fun nothingIsReadWithTheLabOffOrWhileTheStripIsBusy() {
         var asked = 0
+        val secure = { asked++; false }
         val clipboard = { asked++; true }
         val canUndo = { asked++; true }
-        KeyboardTools.tools(enabled = false, secure = false, busy = false, canUndo = canUndo, clipboard = clipboard)
-        KeyboardTools.tools(enabled = true, secure = true, busy = false, canUndo = canUndo, clipboard = clipboard)
-        KeyboardTools.tools(enabled = true, secure = false, busy = true, canUndo = canUndo, clipboard = clipboard)
+        KeyboardTools.tools(enabled = false, busy = false, secure = secure, canUndo = canUndo, clipboard = clipboard)
+        KeyboardTools.tools(enabled = true, busy = true, secure = secure, canUndo = canUndo, clipboard = clipboard)
         assertEquals(0, asked)
-        KeyboardTools.tools(enabled = true, secure = false, busy = false, canUndo = canUndo, clipboard = clipboard)
-        assertEquals(2, asked)
+        // A password field needs only the field, not the clipboard or the editor.
+        KeyboardTools.tools(enabled = true, busy = false, secure = { asked++; true }, canUndo = canUndo, clipboard = clipboard)
+        assertEquals(1, asked)
+        KeyboardTools.tools(enabled = true, busy = false, secure = secure, canUndo = canUndo, clipboard = clipboard)
+        assertEquals(4, asked)
     }
 }

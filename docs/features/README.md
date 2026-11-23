@@ -3217,13 +3217,15 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
 │   Android CI.
 └── Labs > Keyboard > Keyboard tools (off) -> while the strip has nothing else to show (no
     suggestion chips, Undo dictation, notice or dictation) and the field is not a password,
-    PIN or other secure field, the "Hold Hex to talk" hint becomes four icon buttons without
-    making the keyboard taller: Emoji (the bottom row's emoji key), Paste (the editor's own
-    `performContextMenuAction(android.R.id.paste)`, so Hex never reads the clipboard; shown
-    only while `clipboard.hasPrimaryClip()`), Settings (opens Hex on its Keyboard page through
-    an intent extra MainActivity reads, NEW_TASK | CLEAR_TOP) and Undo (the last autocorrection
-    reverted exactly as the Delete right after it does, shared through
-    `KeyboardEngine.revert`; shown only while that correction is still right before the cursor).
+    PIN or other secure field, the "Hold Hex to talk" hint becomes up to four icon buttons
+    without making the keyboard taller: Emoji (the bottom row's emoji key), Paste (the
+    editor's own `performContextMenuAction(android.R.id.paste)`, so Hex never reads the
+    clipboard; shown only while `clipboard.hasPrimaryClip()`), Settings (reopens Hex on its
+    Keyboard page through an intent extra MainActivity reads, NEW_TASK | CLEAR_TOP, replacing
+    whatever Hex screen was open) and Undo (the last autocorrection reverted exactly as the
+    Delete right after it does, shared through `KeyboardEngine.revert`; shown only while that
+    correction is still right before the cursor, and only when no next-word suggestions fill
+    the strip, though the Delete right after an autocorrection still undoes it when they do).
     Changing the toggle redraws a visible strip at once; off, the strip is unchanged.
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no

@@ -146,7 +146,7 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
         toolsRow.gravity = Gravity.CENTER_VERTICAL
         listOf(toolEmoji, toolPaste, toolSettings, toolUndo).forEach {
-            toolsRow.addView(it, LinearLayout.LayoutParams(0, -1, 1f))
+            toolsRow.addView(it, LinearLayout.LayoutParams(dp(40), -1))
         }
         toolsRow.visibility = GONE
         idleRow.addView(toolsRow, LinearLayout.LayoutParams(0, -1, 1f))
@@ -302,8 +302,8 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         val noted = idle && !choosing && notice != null
         val undo = idle && !choosing && undoing && !noted
         val show = idle && !choosing && !undo && !noted && offered.any { it != null }
-        val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools, secure = ime.engine.secure,
-            busy = !idle || choosing || show || undo || noted || hint != holdHint,
+        val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
+            busy = !idle || choosing || show || undo || noted || hint != holdHint, secure = { ime.engine.secure },
             canUndo = { ime.engine.canUndoAutocorrection }, clipboard = { clipboard.hasPrimaryClip() })
         noticeRow.visibility = if (noted) VISIBLE else GONE
         (undoChip.parent as View).visibility = if (undo) VISIBLE else GONE
@@ -392,11 +392,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         }
     }
 
-    /** One of the strip's tools: its icon on the strip's line, with room to be tapped. */
+    /** One of the strip's tools: its icon on the strip's line, with the cancel key's round press. */
     private fun toolButton(res: Int, label: Int, action: () -> Unit) = FrameLayout(context).apply {
         isFocusable = true; contentDescription = context.getString(label)
         addView(View(context).apply { isDuplicateParentStateEnabled = true; background = pressable(android.graphics.Color.TRANSPARENT) },
-            LayoutParams(dp(40), dp(30), Gravity.CENTER))
+            LayoutParams(pill, pill, Gravity.CENTER))
         addView(icon(res), LayoutParams(dp(19), dp(19), Gravity.CENTER))
         setOnClickListener { action() }
     }
