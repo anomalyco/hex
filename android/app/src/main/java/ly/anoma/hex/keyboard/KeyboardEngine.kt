@@ -99,6 +99,8 @@ internal class KeyboardEngine(
     private var more = false
     // A number, phone or date field's pad, or the number pad the symbol page's 1234 key opens.
     private var pad: Pad? = null
+    // Whether the keys' emoji key is on the page the strip's Emoji tool mirrors (the letters).
+    private var emojiKeyShown = true
     private var selStart = -1
     private var selEnd = -1
     // Spaces, each remembered with the text before the cursor it left, so anything else in between
@@ -173,7 +175,7 @@ internal class KeyboardEngine(
             }
             refreshCaps()
             // The strip's Undo tool follows the autocorrection still being right before the cursor.
-            if (undo != null) surface?.toolsChanged()
+            if (feedback.keyboardTools && undo != null) surface?.toolsChanged()
         }
     }
 
@@ -221,6 +223,12 @@ internal class KeyboardEngine(
     private fun showPlane() {
         surface?.showPage(KeyboardPage(layoutLanguage(), symbols, more, shift.uppercase, shift.locked, EnterKey.from(editor),
             FieldKind.of(editor?.inputType ?: 0), pad, feedback.numberRow))
+        // The strip's Emoji tool follows the page (Labs › Keyboard › Keyboard tools): the keys' emoji key is
+        // on the letters only, never on a symbol page or a pad.
+        val emoji = emojiAvailable
+        val changed = emoji != emojiKeyShown
+        emojiKeyShown = emoji
+        if (changed && feedback.keyboardTools) surface?.toolsChanged()
     }
     /** Shift went down: it acts at once, so a held shift and a letter type a capital. */
     fun shiftDown() {
@@ -343,6 +351,10 @@ internal class KeyboardEngine(
     }
     /** Shift as the keys show it: letters type capitals while it is on or held. */
     val uppercase get() = shift.uppercase
+
+    /** Whether the keys' emoji key is there to open the panel: on the letters page only, never on the
+     * symbol pages or a number, phone or date pad, where it is the pad key or absent. */
+    val emojiAvailable get() = pad == null && !symbols
 
     fun letter(text: String, x: Double, y: Double, grid: KeyGrid, explicit: Boolean = false) {
         if (!target.connected) return
@@ -581,7 +593,7 @@ internal class KeyboardEngine(
     /** The strip's Undo tool: the last autocorrection goes back to exactly what was typed, as Delete
      * right after it does, and what was typed shows as the literal chip. */
     fun undoAutocorrection() {
-        if (!canUndoAutocorrection) return
+        if (!canUndoAutocorrection) { surface?.toolsChanged(); return }
         edited(); clearSpaces()
         val last = undo ?: return
         undo = null

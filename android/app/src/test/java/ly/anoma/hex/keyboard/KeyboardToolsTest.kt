@@ -6,9 +6,9 @@ import org.junit.Test
 
 class KeyboardToolsTest {
     private fun tools(enabled: Boolean = true, secure: Boolean = false, busy: Boolean = false,
-                      hasClip: Boolean = true, canUndo: Boolean = true) =
-        KeyboardTools.tools(enabled = enabled, busy = busy, secure = { secure }, canUndo = { canUndo },
-            clipboard = { hasClip })
+                      emoji: Boolean = true, hasClip: Boolean = true, canUndo: Boolean = true) =
+        KeyboardTools.tools(enabled = enabled, busy = busy, secure = { secure }, emoji = { emoji },
+            canUndo = { canUndo }, clipboard = { hasClip })
 
     @Test fun withTheLabOffThereAreNoTools() {
         assertEquals(emptyList<StripTool>(), tools(enabled = false))
@@ -18,8 +18,12 @@ class KeyboardToolsTest {
         assertEquals(listOf(StripTool.Emoji, StripTool.Paste, StripTool.Settings, StripTool.Undo), tools())
     }
 
-    @Test fun emojiAndSettingsAreAlwaysThere() {
+    @Test fun emojiAndSettingsShowWithoutAClipOrUndo() {
         assertEquals(listOf(StripTool.Emoji, StripTool.Settings), tools(hasClip = false, canUndo = false))
+    }
+
+    @Test fun emojiNeedsTheLettersPage() {
+        assertEquals(listOf(StripTool.Paste, StripTool.Settings, StripTool.Undo), tools(emoji = false))
     }
 
     @Test fun pasteNeedsAClip() {
@@ -43,15 +47,17 @@ class KeyboardToolsTest {
     @Test fun nothingIsReadWithTheLabOffOrWhileTheStripIsBusy() {
         var asked = 0
         val secure = { asked++; false }
+        val emoji = { asked++; true }
         val clipboard = { asked++; true }
         val canUndo = { asked++; true }
-        KeyboardTools.tools(enabled = false, busy = false, secure = secure, canUndo = canUndo, clipboard = clipboard)
-        KeyboardTools.tools(enabled = true, busy = true, secure = secure, canUndo = canUndo, clipboard = clipboard)
+        KeyboardTools.tools(enabled = false, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
+        KeyboardTools.tools(enabled = true, busy = true, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
         assertEquals(0, asked)
-        // A password field needs only the field, not the clipboard or the editor.
-        KeyboardTools.tools(enabled = true, busy = false, secure = { asked++; true }, canUndo = canUndo, clipboard = clipboard)
+        // A password field needs only the field, not its page, the clipboard or the editor.
+        KeyboardTools.tools(enabled = true, busy = false, secure = { asked++; true }, emoji = emoji, canUndo = canUndo,
+            clipboard = clipboard)
         assertEquals(1, asked)
-        KeyboardTools.tools(enabled = true, busy = false, secure = secure, canUndo = canUndo, clipboard = clipboard)
-        assertEquals(4, asked)
+        KeyboardTools.tools(enabled = true, busy = false, secure = secure, emoji = emoji, canUndo = canUndo, clipboard = clipboard)
+        assertEquals(5, asked)
     }
 }

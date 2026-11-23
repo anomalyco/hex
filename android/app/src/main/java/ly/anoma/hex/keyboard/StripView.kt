@@ -304,11 +304,13 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         val show = idle && !choosing && !undo && !noted && offered.any { it != null }
         val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
             busy = !idle || choosing || show || undo || noted || hint != holdHint, secure = { ime.engine.secure },
-            canUndo = { ime.engine.canUndoAutocorrection }, clipboard = { clipboard.hasPrimaryClip() })
+            emoji = { ime.engine.emojiAvailable }, canUndo = { ime.engine.canUndoAutocorrection },
+            clipboard = { clipboard.hasPrimaryClip() })
         noticeRow.visibility = if (noted) VISIBLE else GONE
         (undoChip.parent as View).visibility = if (undo) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
+        toolEmoji.visibility = if (StripTool.Emoji in tools) VISIBLE else GONE
         toolPaste.visibility = if (StripTool.Paste in tools) VISIBLE else GONE
         toolUndo.visibility = if (StripTool.Undo in tools) VISIBLE else GONE
         statusText.visibility = if (idle && !show && !undo && !noted && tools.isEmpty()) VISIBLE else GONE

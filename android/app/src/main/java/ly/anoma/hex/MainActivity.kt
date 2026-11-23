@@ -80,6 +80,10 @@ class MainActivity : ComponentActivity() {
             update = { next, reason -> phase = next; notice = speechNote(reason) },
             meter = {}, insert = { text, _ -> transcript = text })
         page = prefs.getInt("page", 0).coerceIn(0, 3)
+        // The keyboard's Settings tool opens Hex on its Keyboard page once; a later Recents relaunch is
+        // Hex's own, so the extra goes with the launch that carried it.
+        val startPage = intent.getStringExtra(EXTRA_PAGE)
+        intent.removeExtra(EXTRA_PAGE)
         // Debug builds only: am start --ez feedback_drop_first_response true loses Send feedback's first answer, to
         // show that the retry, with the same Idempotency-Key, gets the same issue back.
         if (BuildConfig.DEBUG) ly.anoma.hex.feedback.Feedback.dropFirstResponse = intent.getBooleanExtra("feedback_drop_first_response", false)
@@ -94,7 +98,7 @@ class MainActivity : ComponentActivity() {
                 if (page == 3) HexSettings(setup, speech, typing, model, { ModelStore.download(this) },
                     phase, transcript, notice, ::dictate, capture::cancel, { transcript = "" }, { go(it) },
                     { startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
-                    startPage = intent.getStringExtra(EXTRA_PAGE))
+                    startPage = startPage)
                 else SetupScreen(page, setup, ::go, ::askForMic,
                     enable = { enabling = true; startActivity(Intent(Settings.ACTION_INPUT_METHOD_SETTINGS)) },
                     choose = { imm.showInputMethodPicker() }, model = model,
