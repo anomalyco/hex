@@ -107,7 +107,13 @@ What the simulator proves and what only a physical iPhone can.
   QWERTZ rows and held vowels, typing through them in a `FullKeyboardView`, and its accent
   fixes are unit tests too (`testHungariansRowsAndHoldMatchItsLayout`,
   `testHungarianTypesAndSwitches`, `testHungarianRestoresMissingDiacritics`); no
-  simulator or iPhone typed on its keys for this change. Checked live in
+  simulator or iPhone typed on its keys for this change. Türkçe's three layouts were read from
+  Apple's on iOS 26.5 and 27.2 simulators with the capture tool (rows, sizes, every held key)
+  and checked against Hex's installed keyboard there; its rows, holds, the two i's in shift,
+  caps lock, swipe, text replacements, vocabulary, dictation styles and Lowercase are unit
+  tests (`testTurkishLayoutsMatchApples`, `testTurkishKeepsItsTwoIsAndEnglishKeepsItsOne`,
+  `testTurkishTypesAsTypedAndCasesByTurkishRules`, `testTurkishStylesAndLowercaseUseTurkishCase`).
+  Checked live in
   Messages in the simulator (English, Français, Русский). Memory (Release, iPhone 17 Pro
   simulator, iOS 27.2, Full Access, three runs, `footprint` after typing a sentence): Français
   alone 28.7–28.8 MB, with English beside it 29.7–29.9 MB; English alone 28.9–29.9 MB, with

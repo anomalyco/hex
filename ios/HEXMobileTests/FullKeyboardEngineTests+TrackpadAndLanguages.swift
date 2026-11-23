@@ -596,6 +596,65 @@ extension FullKeyboardEngineTests {
         XCTAssertEqual(view.engine.layout.key(.character("y"))?.row, 0, "English is QWERTY again")
     }
 
+    /// Settings › Keyboard › Languages with English and Türkçe: the keys are Apple's Türkçe - Q,
+    /// and while Turkish types, shift and caps lock follow Turkish's case (i is İ, ı is I, as
+    /// keycaps and as typed), as does a swiped word's capital; English beside it keeps English's
+    /// (i is I). Switch dictation too dictates tr-TR.
+    func testTurkishKeepsItsTwoIsAndEnglishKeepsItsOne() {
+        let settings = LanguageSettings(defaults: defaults)
+        settings.keyboardLanguages = [.english, .turkish]
+        settings.dictationFollowsKeyboard = true
+        settings.supportedDictationLanguages = ["en-US", "tr-TR"]
+        let field = FixtureTextTarget()
+        field.autocapitalizationType = UITextAutocapitalizationType.none
+        let view = FullKeyboardView(model: KeyboardViewModel(), target: field)
+        view.languageSettings = settings
+        view.frame = CGRect(x: 0, y: 0, width: 414, height: 262)
+        view.layoutIfNeeded()
+        view.engine.autocorrect.isEnabled = false
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .turkish)
+        XCTAssertEqual(view.plane.spaceLabel, "Türkçe")
+        XCTAssertEqual(settings.keyboardDictationLanguage(), "tr-TR")
+        var id = 900
+        func tap(_ kind: KeyKind) {
+            let key = view.engine.layout.key(kind)!
+            let centre = CGPoint(x: key.frame.midX, y: key.frame.midY)
+            id += 1
+            view.engine.touchBegan(id: id, at: centre)
+            view.engine.touchEnded(id: id, at: centre)
+        }
+        func type(_ keys: String) {
+            for character in keys { tap(character == " " ? .space : .character(String(character))) }
+        }
+        tap(.shift)
+        XCTAssertEqual(view.engine.keycapLabel(for: view.engine.layout.key(.character("i"))!), "İ")
+        XCTAssertEqual(view.engine.keycapLabel(for: view.engine.layout.key(.character("ı"))!), "I")
+        type("i")
+        type("yi ")
+        tap(.shift)
+        type("ılık ")
+        XCTAssertEqual(field.text, "İyi Ilık ")
+        tap(.shift)
+        tap(.shift)
+        XCTAssertEqual(view.engine.shift.state, .locked)
+        type("istanbul ılık")
+        tap(.shift)
+        XCTAssertEqual(field.text, "İyi Ilık İSTANBUL ILIK")
+        XCTAssertEqual(field.text.unicodeScalars.count, field.text.count, "İ precomposed, no combining dot")
+        XCTAssertEqual(view.engine.swipeCased("istanbul", capital: true), "İstanbul")
+        XCTAssertEqual(view.engine.swipeCased("ılık", capital: true), "Ilık")
+        view.switchLanguage(by: 1)
+        XCTAssertEqual(view.engine.language, .english)
+        XCTAssertNil(view.engine.layout.key(.character("ı")), "English has no ı key")
+        type(" ")
+        tap(.shift)
+        XCTAssertEqual(view.engine.keycapLabel(for: view.engine.layout.key(.character("i"))!), "I")
+        type("i")
+        XCTAssertTrue(field.text.hasSuffix(" I"), field.text)
+        XCTAssertEqual(view.engine.swipeCased("istanbul", capital: true), "Istanbul")
+    }
+
     /// Settings › Keyboard › Languages with English, French and Russian: the space bar names
     /// the keyboard's language, switching changes the letters (AZERTY, ЙЦУКЕН), the accents and
     /// autocorrect (French with English beside it, Russian alone), and the keyboard comes back

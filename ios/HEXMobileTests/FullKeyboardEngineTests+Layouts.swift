@@ -369,11 +369,13 @@ extension FullKeyboardEngineTests {
             }
             // Serbian's and Romanian's e hold nothing, as on the system keyboard; Serbian's c
             // holds č and ć, Romanian's s ș. Czech's e opens with ě before e, so its r (ř).
+            // Turkish's e holds nothing either; its o does (ô).
             let held: String = switch language {
             case .ukrainian: "ʼ"
             case .russian: "е"
             case .serbianLatin: "c"
             case .romanian: "s"
+            case .turkish: "o"
             case .czech: "r"
             case .greek: "ε"
             case .korean: "ㅂ"

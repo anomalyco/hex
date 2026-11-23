@@ -23,6 +23,8 @@ import Foundation
 /// letter before them (`CzechTyping`) and every other Czech letter on a held key. Hungarian is
 /// the standard QWERTZ (its own layout, with QWERTY offered) with its nine accented vowels held
 /// on a e i o u (á é í ó ö ő ú ü ű) and the iPhone's hu dictionary behind its autocorrect.
+/// Turkish is Apple's "Türkçe - Q" (its own keys for ğ ü ş i ı ö ç), with "Türkçe - F" and
+/// "QWERTY – Türkçe" offered, and Turkish case rules (`caseLocale`: i and İ, ı and I).
 /// Korean is the standard two-set (Dubeolsik, 두벌식) layout, whose syllables `HangulComposer`
 /// composes as the jamo are typed; it is offered only while Settings › Experiments › Korean
 /// keyboard is on.
@@ -39,6 +41,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     case polish = "pl"
     case czech = "cs"
     case hungarian = "hu"
+    case turkish = "tr"
     case romanian = "ro"
     case russian = "ru"
     case ukrainian = "uk"
@@ -61,6 +64,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .polish: "Polski"
         case .czech: "Čeština"
         case .hungarian: "Magyar"
+        case .turkish: "Türkçe"
         case .romanian: "Română"
         case .russian: "Русский"
         case .ukrainian: "Українська"
@@ -102,6 +106,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .polish: "pl-PL"
         case .czech: "cs-CZ"
         case .hungarian: "hu-HU"
+        case .turkish: "tr-TR"
         case .romanian: "ro-RO"
         case .russian: "ru-RU"
         case .ukrainian: "uk-UA"
@@ -115,6 +120,28 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// (bilingual autocorrect). Russian's and Ukrainian's are Cyrillic, Greek's Greek, and
     /// Korean's Hangul.
     var isLatin: Bool { self != .russian && self != .ukrainian && self != .greek && self != .korean }
+
+    /// The locale this language's letters change case in: Turkish's, where i and İ, and ı and I,
+    /// are each one letter (Swift's own rules give "i" → "I" and "İ" → "i̇"). Nil keeps Swift's
+    /// rules, unchanged, for every other language, English beside Turkish included.
+    var caseLocale: Locale? { self == .turkish ? Self.turkishCase : nil }
+    private static let turkishCase = Locale(identifier: "tr")
+
+    /// `text` in capitals, by `caseLocale`.
+    func uppercased(_ text: some StringProtocol) -> String {
+        caseLocale.map { text.uppercased(with: $0) } ?? text.uppercased()
+    }
+
+    /// `text` in lower case, by `caseLocale`.
+    func lowercased(_ text: some StringProtocol) -> String {
+        caseLocale.map { text.lowercased(with: $0) } ?? text.lowercased()
+    }
+
+    /// `word` with its first letter a capital and the rest as it is.
+    func capitalizingFirst(_ word: some StringProtocol) -> String {
+        guard let first = word.first else { return String(word) }
+        return uppercased(String(first)) + word.dropFirst()
+    }
 
     /// Apple's three French keyboards: France (and Belgium), Canada and Switzerland.
     var isFrench: Bool { self == .french || self == .frenchCanadian || self == .frenchSwiss }
@@ -195,6 +222,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .azerty where self == .french: ownLetterRows
         case .azerty: ["azertyuiop", "qsdfghjklm", "wxcvbn"]
         case .dvorak: ["pyfgcrl", "aoeuidhtns", "qjkxbmwvz"]
+        // Apple's "Türkçe - F", the Turkish F layout, in the rows Apple's shows (iOS 26.5 and 27.2
+        // simulators): twelve, eleven and nine keys, as Türkçe - Q's. Only Turkish offers it.
+        case .turkishF: ["fgğıodrnhpqw", "uieaütkmlyş", "jövcçzsbx"]
         }
         return rows.map { $0.map(String.init) }
     }
@@ -223,6 +253,9 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // Hungarian's own QWERTZ (the standard Hungarian layout) and QWERTY, both keeping every
         // accented vowel on a held key.
         case .hungarian: [.own, .qwerty]
+        // Apple's "Türkçe - Q" (its default), "Türkçe - F" and "QWERTY – Türkçe" (iOS 26.5 and 27.2
+        // simulators: `SWLayouts`, Turkish-Q, Turkish-F, QWERTY-Turkish), in Apple's order.
+        case .turkish: [.own, .turkishF, .qwerty]
         // Apple lists QWERTY first for Serbian (Latin) and adds it as QWERTY; Hex keeps the
         // QWERTZ it always typed on as the default.
         case .serbianLatin: [.qwertz, .qwerty, .azerty]
@@ -243,7 +276,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// own layout with letters of its own, its arrangement and the language ("QWERTZ – Deutsch").
     func layoutName(_ letters: KeyboardLetterLayout) -> String {
         switch letters {
-        case .qwerty where self == .czech || self == .hungarian: "QWERTY – \(displayName)"
+        case .qwerty where self == .czech || self == .hungarian || self == .turkish: "QWERTY – \(displayName)"
+        case .turkishF: "Türkçe - F"
         case .qwerty: "QWERTY"
         case .qwertz: "QWERTZ"
         case .azerty: "AZERTY"
@@ -251,6 +285,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .own:
             switch self {
             case .german, .czech, .hungarian: "QWERTZ – \(displayName)"
+            case .turkish: "Türkçe - Q"
             case .spanish, .norwegian: "QWERTY – \(displayName)"
             default: displayName
             }
@@ -293,6 +328,11 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         // The standard Hungarian QWERTZ, its accented vowels all on held keys (letterHolds), so
         // no key of its own and shift and delete keep their English sizes.
         case .hungarian: ["qwertzuiop", "asdfghjkl", "yxcvbnm"]
+        // Apple's "Türkçe - Q", the Turkish Q layout, in the rows Apple's shows (iOS 26.5 and 27.2
+        // simulators, 17 Pro and 11): ı ğ ü after the ten QWERTY letters of row 1 (twelve keys),
+        // ş and i after L on row 2 (eleven, centred), ö and ç after M on row 3 (nine), so shift
+        // and delete narrow to fit, as Russian's do.
+        case .turkish: ["qwertyuıopğü", "asdfghjklşi", "zxcvbnmöç"]
         // Standard Dubeolsik (두벌식): the iPhone Korean keyboard's rows. Shift doubles the five
         // consonants (ㅂㅈㄷㄱㅅ) and ㅐㅔ (`HangulComposer.shifted`); each syllable is composed as
         // it is typed, not typed as a jamo.
@@ -453,6 +493,19 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "o": ["o", "ó", "ö", "ő", "ô", "ò", "õ", "œ", "ø", "ō"],
                 "u": ["u", "ú", "ü", "ű", "û", "ù", "ū"],
             ]
+        case .turkish:
+            // Apple's Türkçe - Q and - F (iOS 27.2 simulator, the capture tool's menus; the same
+            // options on both): ğ ü ş ı ö ç have keys of their own, so A holds â, I î ï ì í į ī,
+            // O ô œ ò ó õ ø ō, U û ù ú ū, S ß ś š and C ć č. On QWERTY – Türkçe each of those
+            // letters is held right after its base, ı on I (`letterHolds(on:)`).
+            [
+                "u": ["u", "û", "ù", "ú", "ū"],
+                "i": ["i", "î", "ï", "ì", "í", "į", "ī"],
+                "o": ["o", "ô", "œ", "ò", "ó", "õ", "ø", "ō"],
+                "a": ["a", "â"],
+                "s": ["s", "ß", "ś", "š"],
+                "c": ["c", "ć", "č"],
+            ]
         case .romanian:
             // Romanian's own letters right after the base: ă and â on A, î on I, ș on S and ț on
             // T (comma-below, never the cedilla ş ţ); every other letter holds nothing. Its held
@@ -552,12 +605,14 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
     /// `letterHolds` on `letters`. A plain layout leaves out the keys the language's own has
     /// for its letters (German's ä ö ü, Spanish's ñ), and Apple's keyboard then holds each right
     /// after its base letter (iOS 27.0 simulator, German QWERTZ and QWERTY: A Ä À Á…, O Ö Ô…,
-    /// U Ü Û…; Spanish QWERTY: N Ñ Ń), so Hex's does too. Every other hold stays the language's.
+    /// U Ü Û…; Spanish QWERTY: N Ñ Ń), so Hex's does too. Turkish's dotless ı, which has no base
+    /// letter in Unicode, is held on I there (QWERTY – Türkçe: I ı î ï…). Every other hold stays
+    /// the language's.
     func letterHolds(on letters: KeyboardLetterLayout) -> [String: [String]] {
         var holds = letterHolds
         let shown = Set(letterRows(letters).joined())
         for letter in ownLetterRows.joined().map(String.init) where !shown.contains(letter) {
-            let base = String(letter.decomposedStringWithCanonicalMapping.unicodeScalars.prefix(1).map(Character.init))
+            let base = letter == "ı" ? "i" : String(letter.decomposedStringWithCanonicalMapping.unicodeScalars.prefix(1).map(Character.init))
             guard base != letter, shown.contains(base) else { continue }
             var list = holds[base] ?? [base]
             list.removeAll { $0 == letter }
@@ -624,6 +679,12 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
             [
                 "€": ["€", "$", "£", "¥", "₩", "₽"],
             ]
+        case .turkish:
+            // Its 123 page keeps $, held for $ ₺ ¢ € £ ¥ ₩ ₽, the lira second; every other held
+            // symbol is English's (iOS 27.2 simulator, all three Turkish layouts).
+            [
+                "$": ["$", "₺", "¢", "€", "£", "¥", "₩", "₽"],
+            ]
         case .romanian:
             // Its currency key is €, held for € $ £ ¥ ₩ ₽ as Polish's is, and a held " offers
             // Romanian's order.
@@ -663,6 +724,10 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .portuguese: ["pt_BR", "pt", "pt_PT"]
         case .polish: ["pl", "pl_PL"]
         case .czech: ["cs", "cs_CZ"]
+        // None: the iOS 26.5 and 27.2 simulators' tr_TR takes "merhaba", "kitap" and "teşekkür"
+        // for typos ("kitap" → "kitar") while it rejects gibberish, so it would change correct
+        // Turkish; Turkish types as typed until Hex has a Turkish word list.
+        case .turkish: []
         case .hungarian: ["hu", "hu_HU"]
         case .romanian: ["ro", "ro_RO"]
         case .russian: ["ru", "ru_RU"]
@@ -688,6 +753,8 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         if let code = matching(identifier)?.spellCheckLanguage(available: available) {
             return code
         }
+        // Turkish keeps none, the iPhone's tr_TR included (`spellCheckCandidates`).
+        if matching(identifier) == .turkish { return nil }
         let underscored = identifier.replacingOccurrences(of: "-", with: "_")
         let base = underscored.split(separator: "_").first.map(String.init) ?? underscored
         return [underscored, base].first { available.contains($0) }
@@ -714,7 +781,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case .hungarian:
             ["az", "és", "is", "de", "ha", "ez", "el", "ki", "be", "rá", "én", "te", "mi", "ne", "se"]
         case .norwegian, .german, .french, .frenchCanadian, .frenchSwiss, .portuguese, .polish,
-             .czech, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
+             .czech, .turkish, .romanian, .russian, .ukrainian, .greek, .serbianLatin, .korean:
             []
         }
     }
@@ -743,7 +810,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
                 "giovedi": "giovedì", "venerdi": "venerdì",
             ]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .hungarian, .romanian, .russian, .ukrainian, .greek,
+             .portuguese, .polish, .czech, .hungarian, .turkish, .romanian, .russian, .ukrainian, .greek,
              .serbianLatin, .korean:
             [:]
         }
@@ -756,7 +823,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         switch self {
         case .italian: ["e": "è", "ce": "c'è"]
         case .english, .norwegian, .spanish, .german, .french, .frenchCanadian, .frenchSwiss,
-             .portuguese, .polish, .czech, .hungarian, .romanian, .russian, .ukrainian, .greek,
+             .portuguese, .polish, .czech, .hungarian, .turkish, .romanian, .russian, .ukrainian, .greek,
              .serbianLatin, .korean:
             [:]
         }
@@ -819,6 +886,7 @@ nonisolated enum KeyboardLanguage: String, CaseIterable, Sendable {
         case "pl": return .polish
         case "cs": return .czech
         case "hu": return .hungarian
+        case "tr": return .turkish
         case "ro": return .romanian
         case "ru": return .russian
         case "uk": return .ukrainian
@@ -884,6 +952,8 @@ nonisolated enum KeyboardLetterLayout: String, CaseIterable, Sendable {
     /// Apple's iPhone Dvorak (English): P Y F G C R L and delete, A O E U I D H T N S edge to
     /// edge, shift and Q J K X B M W V Z, on keys a little narrower so that row fits.
     case dvorak
+    /// Apple's "Türkçe - F" (Turkish): the Turkish F layout, offered only by Türkçe.
+    case turkishF
 }
 
 /// Settings › Keyboard › Languages as the keys use it: the languages the space bar switches

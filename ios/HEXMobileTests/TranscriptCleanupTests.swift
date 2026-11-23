@@ -1487,6 +1487,23 @@ final class SpokenCleanupRulesTests: XCTestCase {
         XCTAssertEqual(pipeline.format("Єнот, Ґанок і Їжак", language: "uk-UA"), "єнот, ґанок і їжак.")
     }
 
+    /// Turkish: a Turkish dictation's capitals and Lowercase follow Turkish's i and İ, ı and I
+    /// (Polished "iyi" starts "İyi", Notes the same, Casual's "İstanbul" starts "istanbul",
+    /// Lowercase "IŞIK" is "ışık"); English's keep Swift's rules ("istanbul" starts "Istanbul").
+    func testTurkishStylesAndLowercaseUseTurkishCase() {
+        XCTAssertEqual(TranscriptFormatter.format("iyi günler. ılık bir gün", style: .polished, language: "tr-TR"), "İyi günler. Ilık bir gün.")
+        XCTAssertEqual(TranscriptFormatter.format("istanbul is big", style: .polished, language: "en-US"), "Istanbul is big.")
+        XCTAssertEqual(TranscriptFormatter.format("İstanbul güzel. Işık var.", style: .casual, language: "tr-TR"), "istanbul güzel. ışık var")
+        XCTAssertEqual(TranscriptFormatter.format("iyi günler", style: .notes, language: "tr-TR"), "İyi günler")
+        var turkish = DictationPipeline(style: .polished, language: "tr-TR", vocabulary: [])
+        turkish.lowercase = true
+        XCTAssertEqual(turkish.format("İSTANBUL'DA IŞIK", language: "tr-TR"), "istanbul'da ışık.")
+        var english = DictationPipeline(style: .polished, language: "en-US", vocabulary: [])
+        english.lowercase = true
+        XCTAssertEqual(english.format("ISTANBUL", language: "en-US"), "istanbul.")
+        XCTAssertNil(KeyboardLanguage.spellCheckLanguage(forDictation: "tr-TR", available: ["tr_TR", "en_US"]), "never the iPhone's tr_TR")
+    }
+
     /// Polish as `DictationTranscriber` writes it (macOS 27.2, Zosia voice: diacritics kept, no
     /// punctuation, numbers as digits): Polished capitalizes and ends it, Casual starts each
     /// sentence lowercase, Lowercase lowers Ą Ć Ę Ł Ń Ó Ś Ź Ż, and English's "i" rules never

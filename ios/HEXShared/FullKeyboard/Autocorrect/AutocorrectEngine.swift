@@ -340,11 +340,11 @@ final class AutocorrectEngine {
     /// all caps ("BRB") gets the replacement as stored, and stored capitals always stay
     /// ("mip" and "MIP" both give "My iPhone").
     private func shortcut(for token: String) -> String? {
-        guard let stored = lexiconShortcuts[token.lowercased()] else { return nil }
+        guard let stored = lexiconShortcuts[language.lowercased(token)] else { return nil }
         let letters = token.filter(\.isLetter)
-        let leadingCapital = token.first?.isUppercase == true && (letters.count < 2 || letters != letters.uppercased())
+        let leadingCapital = token.first?.isUppercase == true && (letters.count < 2 || letters != language.uppercased(letters))
         guard leadingCapital, let first = stored.first, first.isLowercase else { return stored }
-        return first.uppercased() + stored.dropFirst()
+        return language.capitalizingFirst(stored)
     }
 
     /// Your text replacement whose shortcut ends `before`, as Apple's keyboard finds one
@@ -567,7 +567,7 @@ final class AutocorrectEngine {
         case .ukrainian: ["я", "це", "ми"]
         case .greek: ["θα", "δεν", "το"]
         case .serbianLatin: ["ja", "to", "da"]
-        case .korean: []
+        case .korean, .turkish: []
         }
     }
 
@@ -592,7 +592,7 @@ final class AutocorrectEngine {
         case .ukrainian: ["і", "але", "що"]
         case .greek: ["και", "αλλά", "που"]
         case .serbianLatin: ["i", "ali", "da"]
-        case .korean: []
+        case .korean, .turkish: []
         }
     }
 
@@ -614,7 +614,7 @@ final class AutocorrectEngine {
         case .ukrainian: ["і", "в", "не", "на", "що", "я"]
         case .greek: ["και", "να", "το", "θα", "δεν", "η"]
         case .serbianLatin: ["i", "je", "da", "u", "se", "na"]
-        case .korean: []
+        case .korean, .turkish: []
         }
     }
 
@@ -624,7 +624,7 @@ final class AutocorrectEngine {
         var out: [KeyboardSuggestion] = []
         for word in words where out.count < 3 {
             guard previous.map({ word.lowercased() != $0 }) ?? true, mayOffer(word, after: previous) else { continue }
-            let text = capitalized && addsCapitals ? word.prefix(1).uppercased() + word.dropFirst() : word
+            let text = capitalized && addsCapitals ? language.capitalizingFirst(word) : word
             guard !out.contains(where: { $0.replacement.caseInsensitiveCompare(text) == .orderedSame }) else { continue }
             out.append(KeyboardSuggestion(displayText: text, replacement: text, kind: .nextWord))
         }
@@ -753,7 +753,7 @@ final class AutocorrectEngine {
                 // A learned fix space won't apply (the typo is a real word, or you kept it) is still offered.
                 pool.append(cased(learned, typed: token))
             } else if language.usesEnglishFixes, let suggested = Self.suggestOnlyContractions[lower] {
-                pool.append(Self.matchCase(of: token, onto: suggested))
+                pool.append(matchCase(of: token, onto: suggested))
             } else if !suppressedInSession.contains(lower), !learning.rejected.contains(lower),
                       !learnedWords.contains(lower), let accented = language.accentSuggestions[lower] {
                 // Offered, never put in by space: the plain spelling is a word of its own
@@ -770,7 +770,7 @@ final class AutocorrectEngine {
         if pool.count < end, token.count <= 3, let model, model.language == language.rawValue {
             let previous = Self.previousWord(beforeInput ?? "", token: token)
             predictions = model.completions(of: lower, after: previous, allowing: { mayOffer($0, after: previous) })
-                .map { Self.matchCase(of: token, onto: $0) }
+                .map { matchCase(of: token, onto: $0) }
             if autoFix == nil, let first = predictions.first(where: { !has($0) }) { pool.append(first) }
         }
 
@@ -875,7 +875,7 @@ final class AutocorrectEngine {
         }
         if let term = vocabularyTerm(for: token) {
             lastFixLanguage = nil
-            return Self.vocabularySpelling(of: token, as: term)
+            return Self.vocabularySpelling(of: token, as: term, language: language)
         }
         // This language's own accented spelling decides before any partner logic: the table
         // only holds plain spellings that are no word of this language ("perche" -> "perché"),
@@ -932,9 +932,9 @@ final class AutocorrectEngine {
     /// Whether this language's dictionary knows `word` only with a capital, and German's noun
     /// list doesn't call it a noun: a name.
     private func isName(_ word: String) -> Bool {
-        let lower = word.lowercased()
-        guard lower.count >= 2, let first = lower.first else { return false }
-        guard checker.isWordValid(first.uppercased() + lower.dropFirst()), !checker.isWordValid(lower) else { return false }
+        let lower = language.lowercased(word)
+        guard lower.count >= 2 else { return false }
+        guard checker.isWordValid(language.capitalizingFirst(lower)), !checker.isWordValid(lower) else { return false }
         return !(language == .german && germanNouns?.capitalises(lower, after: nil) == true)
     }
 
@@ -971,7 +971,7 @@ final class AutocorrectEngine {
               partner.knowsAsTyped(word), next.count >= 2, languageLean(partner, before: next, commonFrom: 2) < 0 else { return nil }
         let rest = before.hasSuffix(word) ? String(before.dropLast(word.count)) : before
         guard languageLean(partner, before: rest) == 0, mayOffer(fixed, after: Self.previousWord(before, token: word)) else { return nil }
-        return withoutAddedCapitals(Self.matchCase(of: word, onto: fixed), typed: word)
+        return withoutAddedCapitals(matchCase(of: word, onto: fixed), typed: word)
     }
 
     /// Whether `token` is a word in this language as typed: the dictionary's, one of your
@@ -1056,7 +1056,7 @@ final class AutocorrectEngine {
         }
         // Leave ALL-CAPS acronyms (`API`, `PR`, `NYC`) alone unless matched in `UILexicon` above,
         // except unambiguous all-caps contractions/typos of 3+ letters (`DONT` -> `DON'T`, `TEH` -> `THE`).
-        let isAllCaps = token.count >= 2 && token == token.uppercased() && token != token.lowercased()
+        let isAllCaps = token.count >= 2 && token == language.uppercased(token) && token != language.lowercased(token)
         // Leave camelCase / PascalCase identifiers (`HexKey`, `iOS`) alone.
         let hasInternalCaps = token.dropFirst().contains(where: \.isUppercase) && !isAllCaps
         if hasInternalCaps { return nil }
@@ -1075,7 +1075,7 @@ final class AutocorrectEngine {
         // Norwegian "i" means "in" and must not become "I").
         if language.usesEnglishFixes, let fixed = Self.unambiguousFixes[lower] {
             if isAllCaps && token.count < 3 { return nil }
-            return withoutAddedCapitals(Self.matchCase(of: token, onto: fixed), typed: token)
+            return withoutAddedCapitals(matchCase(of: token, onto: fixed), typed: token)
         }
 
         if isAllCaps { return nil }
@@ -1109,7 +1109,7 @@ final class AutocorrectEngine {
         // ("tk" -> "to", Spanish "nl" -> "no"); `UITextChecker` guesses skip two letters.
         if token.count == 2, !token.contains("'"), let fix = commonTwoLetterFix(for: lower),
            !checker.isWordValid(token) {
-            return Self.matchCase(of: token, onto: fix)
+            return matchCase(of: token, onto: fix)
         }
 
         // 4. A word typed without its accent where the plain spelling is no word of the
@@ -1148,9 +1148,9 @@ final class AutocorrectEngine {
     /// as the dictionary path leaves them, and the table only holds non-words of this
     /// language, so it may decide before a bilingual partner's dictionary does.
     private func accentRestoration(for token: String) -> String? {
-        let isAllCaps = token.count >= 2 && token == token.uppercased() && token != token.lowercased()
+        let isAllCaps = token.count >= 2 && token == language.uppercased(token) && token != language.lowercased(token)
         guard !isAllCaps, !token.dropFirst().contains(where: \.isUppercase) else { return nil }
-        let lower = token.lowercased()
+        let lower = language.lowercased(token)
         guard let accented = language.accentRestorations[lower], mayOffer(accented, replacing: token) else {
             return nil
         }
@@ -1160,7 +1160,7 @@ final class AutocorrectEngine {
     /// `candidate` cased as `token` was typed (`matchCase`), less a capital it only has
     /// from where it was learned (`withoutStrayCapital`).
     private func cased(_ candidate: String, typed token: String) -> String {
-        withoutStrayCapital(Self.matchCase(of: token, onto: candidate), typed: token)
+        withoutStrayCapital(matchCase(of: token, onto: candidate), typed: token)
     }
 
     /// `fix` for `token` as autocorrect puts it in: with `addsCapitals` off and nothing
@@ -1239,8 +1239,8 @@ final class AutocorrectEngine {
     /// (a name, day or place: "mary" -> "Mary", "monday" -> "Monday"; a German noun:
     /// "haus" -> "Haus"), else nil.
     private func properNoun(for token: String) -> String? {
-        guard token.count >= 2, token == token.lowercased(), let first = token.first else { return nil }
-        let capitalised = first.uppercased() + token.dropFirst()
+        guard token.count >= 2, token == language.lowercased(token) else { return nil }
+        let capitalised = language.capitalizingFirst(token)
         guard checker.isWordValid(capitalised), !checker.isWordValid(token) else { return nil }
         return capitalised
     }
@@ -1400,7 +1400,7 @@ final class AutocorrectEngine {
             first: first, firstTaps: firstTaps, space: space, second: second, secondTaps: taps,
             previous: previous, firstIsValid: knowsAsTyped(first), secondIsValid: knowsAsTyped(second), keys: keys
         ), mayOffer(merged, after: previous) else { return nil }
-        return withoutAddedCapitals(Self.matchCase(of: first, onto: merged), typed: first + second)
+        return withoutAddedCapitals(matchCase(of: first, onto: merged), typed: first + second)
     }
 
     /// Your own words for Swipe typing: Contacts names and other `UILexicon` terms, one-word

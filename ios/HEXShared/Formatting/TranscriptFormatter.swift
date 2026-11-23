@@ -74,6 +74,8 @@ nonisolated enum TranscriptFormatter {
         let fillers = fillerPattern(for: language)
         let english = SpeechLanguagePicker.isEnglish(language)
         let unspaced = writesWithoutSpaces(language)
+        // Turkish's case rules for a Turkish dictation's capitals ("iyi" -> "İyi"), else Swift's.
+        let caseLocale = KeyboardLanguage.matching(language ?? "")?.caseLocale
         func cleaned() -> String {
             let stripped = stripStandaloneFillers(in: trimmed, fillers: fillers)
             return spoken(unspaced ? closingUnspacedGaps(in: stripped) : stripped, lists, punctuation, language)
@@ -84,13 +86,13 @@ nonisolated enum TranscriptFormatter {
             return collapseHorizontalSpaces(in: trimmed)
 
         case .polished:
-            return polishSentences(cleaned(), english: english, unspaced: unspaced)
+            return polishSentences(cleaned(), english: english, unspaced: unspaced, caseLocale: caseLocale)
 
         case .casual:
-            return casualMessage(cleaned(), english: english)
+            return casualMessage(cleaned(), english: english, caseLocale: caseLocale)
 
         case .notes:
-            return formatNotes(cleaned(), english: english)
+            return formatNotes(cleaned(), english: english, caseLocale: caseLocale)
         }
     }
 
@@ -297,13 +299,13 @@ nonisolated enum TranscriptFormatter {
         return collapseHorizontalSpaces(in: stripped)
     }
 
-    private static func polishSentences(_ text: String, english: Bool, unspaced: Bool) -> String {
+    private static func polishSentences(_ text: String, english: Bool, unspaced: Bool, caseLocale: Locale? = nil) -> String {
         guard !text.isEmpty else { return "" }
         var normalized = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
         if english {
             normalized = expandingInformalContractions(in: normalized)
         }
-        normalized = capitalizeSentenceStarts(in: normalized)
+        normalized = capitalizeSentenceStarts(in: normalized, locale: caseLocale)
         if english {
             normalized = capitalizingPronounI(in: normalized)
         }
@@ -449,12 +451,12 @@ nonisolated enum TranscriptFormatter {
         "so", "well", "sure", "alright", "cool", "thanks",
     ]
 
-    private static func casualMessage(_ text: String, english: Bool) -> String {
+    private static func casualMessage(_ text: String, english: Bool, caseLocale: Locale? = nil) -> String {
         var message = fixSpacingBeforePunctuation(in: collapseHorizontalSpaces(in: text))
         if english {
             message = droppingInterjectionCommas(in: message)
         }
-        message = lowercasingSentenceStarts(in: message)
+        message = lowercasingSentenceStarts(in: message, caseLocale: caseLocale)
         if english {
             message = recasingPronounI(in: message, from: "I", to: "i")
         }
@@ -487,7 +489,7 @@ nonisolated enum TranscriptFormatter {
     /// Lowercases the first letter of each sentence, as people text. Keeps acronyms ("NASA",
     /// though "OK" becomes "ok"), words with capitals inside ("iPhone", "McDonald's"), and
     /// addresses.
-    private static func lowercasingSentenceStarts(in text: String) -> String {
+    private static func lowercasingSentenceStarts(in text: String, caseLocale: Locale? = nil) -> String {
         var chars = Array(text)
         var atStart = true
         var index = 0
@@ -506,7 +508,7 @@ nonisolated enum TranscriptFormatter {
                 }
                 let word = String(chars[index..<end])
                 if !keepsCapital(word), !isAddress(chars, at: index) {
-                    let lowered = Array(word == "OK" ? "ok" : word.prefix(1).lowercased() + word.dropFirst())
+                    let lowered = Array(word == "OK" ? "ok" : String(word.prefix(1)).lowercased(with: caseLocale) + word.dropFirst())
                     chars.replaceSubrange(index..<end, with: lowered)
                     end = index + lowered.count
                 }
@@ -552,7 +554,7 @@ nonisolated enum TranscriptFormatter {
 
     // MARK: Notes
 
-    private static func formatNotes(_ text: String, english: Bool) -> String {
+    private static func formatNotes(_ text: String, english: Bool, caseLocale: Locale? = nil) -> String {
         guard !text.isEmpty else { return "" }
         var working = text
         let replacements: [(String, String)] = [
@@ -582,10 +584,10 @@ nonisolated enum TranscriptFormatter {
                 let trimmedLine = collapseHorizontalSpaces(in: line)
                 if trimmedLine.hasPrefix("- ") {
                     let body = String(trimmedLine.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                    let note = conciseNote(body, english: english)
+                    let note = conciseNote(body, english: english, caseLocale: caseLocale)
                     return note.isEmpty ? "" : "- " + note
                 }
-                return conciseNote(trimmedLine, english: english)
+                return conciseNote(trimmedLine, english: english, caseLocale: caseLocale)
             }
             .joined(separator: "\n")
             .trimmingCharacters(in: .whitespacesAndNewlines)
@@ -593,7 +595,7 @@ nonisolated enum TranscriptFormatter {
 
     /// One note: no opening "so," "okay," "and" or "then" (English), no final full stop, and
     /// a capital first letter.
-    private static func conciseNote(_ line: String, english: Bool) -> String {
+    private static func conciseNote(_ line: String, english: Bool, caseLocale: Locale? = nil) -> String {
         var note = fixSpacingBeforePunctuation(in: line)
         if english {
             note = droppingConnectives(from: note)
@@ -601,7 +603,7 @@ nonisolated enum TranscriptFormatter {
         if let last = note.last, last == "." || last == "。", !note.hasSuffix("...") {
             note.removeLast()
         }
-        return capitalizeFirstLetter(note.trimmingCharacters(in: .whitespaces))
+        return capitalizeFirstLetter(note.trimmingCharacters(in: .whitespaces), locale: caseLocale)
     }
 
     /// Words that open a spoken note but add nothing to a written one.
@@ -721,7 +723,7 @@ nonisolated enum TranscriptFormatter {
     /// Capitalizes the first letter of each sentence: at the start, after a line break, or
     /// after ".", "!" or "?" and a space. A full stop inside a word ("gmail.com", "e.g.")
     /// starts nothing, and an address keeps its case.
-    private static func capitalizeSentenceStarts(in text: String) -> String {
+    private static func capitalizeSentenceStarts(in text: String, locale: Locale? = nil) -> String {
         var chars = Array(text)
         var capitalizeNext = true
         var endedSentence = false
@@ -729,7 +731,7 @@ nonisolated enum TranscriptFormatter {
             let ch = chars[index]
             if capitalizeNext && ch.isLetter {
                 if !isAddress(chars, at: index) {
-                    for upper in String(ch).uppercased() {
+                    for upper in String(ch).uppercased(with: locale) {
                         chars[index] = upper
                         break
                     }
@@ -756,11 +758,11 @@ nonisolated enum TranscriptFormatter {
         return String(chars)
     }
 
-    private static func capitalizeFirstLetter(_ text: String) -> String {
+    private static func capitalizeFirstLetter(_ text: String, locale: Locale? = nil) -> String {
         guard let index = text.firstIndex(where: \.isLetter),
               !isAddress(Array(text), at: text.distance(from: text.startIndex, to: index)) else { return text }
         var result = text
-        let upper = String(result[index]).uppercased()
+        let upper = String(result[index]).uppercased(with: locale)
         result.replaceSubrange(index...index, with: upper)
         return result
     }

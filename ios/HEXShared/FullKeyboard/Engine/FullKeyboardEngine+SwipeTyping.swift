@@ -164,13 +164,13 @@ extension FullKeyboardEngine {
     /// With Auto-capitalization off, no capital you didn't ask for ("i'm", "monday"), but
     /// your own spellings keep theirs.
     func swipeCased(_ word: String, capital: Bool) -> String {
-        if shift.state == .locked { return word.uppercased() }
-        guard let first = word.first else { return word }
-        if capital { return first.uppercased() + word.dropFirst() }
+        if shift.state == .locked { return language.uppercased(word) }
+        guard !word.isEmpty else { return word }
+        if capital { return language.capitalizingFirst(word) }
         if !autoCapitalizes {
-            return autocorrect.isOwnSpelling(word) ? word : word.lowercased()
+            return autocorrect.isOwnSpelling(word) ? word : language.lowercased(word)
         }
-        if swipeReadsAsName(word) { return first.uppercased() + word.dropFirst() }
+        if swipeReadsAsName(word) { return language.capitalizingFirst(word) }
         return autocorrect.withoutStrayCapital(word, typed: "")
     }
 
@@ -181,7 +181,7 @@ extension FullKeyboardEngine {
     func swipeAlternatives(_ readings: [String], capital: Bool) -> [String] {
         func replacement(_ reading: String) -> String? {
             guard target.autocorrectionType != .no else { return nil }
-            let typed = capital ? reading.prefix(1).uppercased() + reading.dropFirst() : reading
+            let typed = capital ? language.capitalizingFirst(reading) : reading
             guard let replaced = autocorrect.textReplacement(before: typed), replaced.typed.count == typed.count else { return nil }
             return replaced.replacement
         }
@@ -197,8 +197,8 @@ extension FullKeyboardEngine {
     /// Whether a swipe's reading, as the model spells it (lowercase), is a word the dictionary
     /// knows only with a capital: a name, day or place ("monday"), or an abbreviation.
     func swipeReadsAsName(_ word: String) -> Bool {
-        guard autocorrect.hasDictionary, word == word.lowercased(), word.count >= 2, let first = word.first else { return false }
-        return autocorrect.checker.isWordValid(first.uppercased() + word.dropFirst()) && !autocorrect.checker.isWordValid(word)
+        guard autocorrect.hasDictionary, word == language.lowercased(word), word.count >= 2 else { return false }
+        return autocorrect.checker.isWordValid(language.capitalizingFirst(word)) && !autocorrect.checker.isWordValid(word)
     }
 
     /// What goes against a swiped word, as on Apple's keyboard: closing punctuation and

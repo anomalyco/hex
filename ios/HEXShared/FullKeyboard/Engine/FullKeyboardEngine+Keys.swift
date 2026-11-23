@@ -70,7 +70,7 @@ extension FullKeyboardEngine {
         if typesFrenchApostrophe(character) { return SmartPunctuation.apostrophe }
         guard isUppercase, layerState.layer == .letters else { return character }
         if let shifted = key.shifted, layout.metrics.pad?.isDocked != true, shift.isUserShift { return shifted }
-        return layout.language == .korean ? HangulComposer.shifted(character) : character.uppercased()
+        return layout.language == .korean ? HangulComposer.shifted(character) : layout.language.uppercased(character)
     }
 
     /// Whether the letter keys read as capitals: as `isUppercase`, except while a press that
@@ -83,7 +83,7 @@ extension FullKeyboardEngine {
         if typesFrenchApostrophe(character) { return SmartPunctuation.apostrophe }
         guard keycapsUppercase else { return character }
         if let shifted = key.shifted, layout.metrics.pad?.isDocked != true, shift.isUserShift { return shifted }
-        return layout.language == .korean ? HangulComposer.shifted(character) : character.uppercased()
+        return layout.language == .korean ? HangulComposer.shifted(character) : layout.language.uppercased(character)
     }
 
     /// The key a touch going down at `point` presses: the one under it, or a neighbouring

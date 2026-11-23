@@ -11,7 +11,7 @@ extension FullKeyboardView {
         // A capital only the sentence's start gave it ("Kubectl" opening a message) isn't its own.
         if let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
            AutocorrectEngine.startsSentence(before: engine.target.documentContextBeforeInput ?? "", token: word) {
-            word = first.lowercased() + word.dropFirst()
+            word = engine.language.lowercased(String(first)) + word.dropFirst()
         }
         guard suggestion.kind == .keepLiteral, engine.autocorrect.vocabularyTerm(for: word) == nil,
               VocabularySpelling.normalizedKey(word).count >= 2 else { return }

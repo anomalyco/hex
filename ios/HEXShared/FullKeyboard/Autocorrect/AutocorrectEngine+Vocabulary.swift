@@ -29,8 +29,8 @@ extension AutocorrectEngine {
 
     /// What space puts in for `token`, a vocabulary word: your spelling, with a capital you
     /// typed first ("github" -> "GitHub", "Kubectl" stays); nil when that is what you typed.
-    static func vocabularySpelling(of token: String, as term: String) -> String? {
-        let spelled = matchCase(of: token, onto: term)
+    static func vocabularySpelling(of token: String, as term: String, language: KeyboardLanguage = .english) -> String? {
+        let spelled = matchCase(of: token, onto: term, language: language)
         return spelled == token ? nil : spelled
     }
 
@@ -38,8 +38,8 @@ extension AutocorrectEngine {
     /// longer, cased as `token` starts.
     func vocabularyCompletion(for token: String) -> String? {
         guard token.count >= 2, !vocabulary.isEmpty else { return nil }
-        let lower = token.lowercased()
-        guard let term = vocabulary.first(where: { $0.count > token.count && $0.lowercased().hasPrefix(lower) }) else { return nil }
-        return Self.matchCase(of: token, onto: term)
+        let lower = language.lowercased(token)
+        guard let term = vocabulary.first(where: { $0.count > token.count && language.lowercased($0).hasPrefix(lower) }) else { return nil }
+        return matchCase(of: token, onto: term)
     }
 }

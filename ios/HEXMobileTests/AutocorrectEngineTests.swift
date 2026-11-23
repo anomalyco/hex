@@ -462,6 +462,31 @@ final class AutocorrectEngineTests: XCTestCase {
         XCTAssertEqual(target.text, "teh On my way! ", "your own text replacements still apply")
     }
 
+    /// Türkçe has no dictionary (the iOS 26.5 and 27.2 simulators' tr_TR calls "kitap" and
+    /// "merhaba" typos), so nothing typed changes; your text replacements still apply, by
+    /// Turkish's case: "İst" is a sentence's "ist" and takes "İstanbul", while "Ist" is "ıst" and
+    /// isn't the shortcut. In English "Ist" is "ist" capitalised. Case matching follows the
+    /// language: "İZ" makes "İZMİR" in Turkish.
+    func testTurkishTypesAsTypedAndCasesByTurkishRules() {
+        engine.autocorrect.loadLexiconEntries([("ist", "istanbul")])
+        engine.autocorrect.setLanguage(.turkish, available: ["tr_TR", "en_US"])
+        XCTAssertFalse(engine.autocorrect.hasDictionary, "never the iPhone's tr_TR")
+        func replaced(_ typed: String) -> String? {
+            engine.autocorrect.replacementOnSpace(beforeInput: typed, field: .text, autocorrectionType: .default)?.replacement
+        }
+        XCTAssertNil(replaced("kitap"))
+        XCTAssertNil(replaced("kitp"), "no guesses without a dictionary")
+        XCTAssertEqual(replaced("ist"), "istanbul")
+        XCTAssertEqual(replaced("İst"), "İstanbul")
+        XCTAssertNil(replaced("Ist"), "Turkish's Ist is ıst")
+        XCTAssertEqual(AutocorrectEngine.matchCase(of: "İZ", onto: "izmir", language: .turkish), "İZMİR")
+        XCTAssertEqual(AutocorrectEngine.matchCase(of: "Il", onto: "ılık", language: .turkish), "Ilık")
+        XCTAssertEqual(AutocorrectEngine.vocabularySpelling(of: "İzmir", as: "izmir", language: .turkish), nil)
+        engine.autocorrect.setLanguage(.english, available: ["en_US"])
+        XCTAssertEqual(replaced("Ist"), "Istanbul")
+        XCTAssertEqual(AutocorrectEngine.matchCase(of: "IZ", onto: "izmir"), "IZMIR")
+    }
+
     func testEnglishFixesStayOffInOtherLanguages() {
         engine.autocorrect.setLanguage(.norwegian, available: ["nb", "en_US"])
         XCTAssertTrue(engine.autocorrect.hasDictionary)
