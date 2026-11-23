@@ -1,3 +1,4 @@
+import HexKeyboardCore
 import UIKit
 
 /// Narrow seam over `UITextChecker` so unit tests can run deterministically or against UIKit's dictionary.
@@ -107,5 +108,51 @@ final class SystemTextChecker: TextChecking {
         let range = NSRange(location: 0, length: ns.length)
         guard range.length > 0 else { return [] }
         return activeChecker.completions(forPartialWordRange: range, in: prefix, language: language) ?? []
+    }
+}
+
+/// A `TextChecking` as autocorrect's core asks it (`HkTextChecker`): on the main thread,
+/// during the core call that needs it, in the order the Swift engine asked. The core holds it
+/// until it releases it.
+nonisolated enum KeyboardCoreChecker {
+    private final class Box: @unchecked Sendable {
+        let checker: any TextChecking
+
+        init(_ checker: any TextChecking) {
+            self.checker = checker
+        }
+
+        static func of(_ context: UnsafeMutableRawPointer?) -> Box {
+            Unmanaged<Box>.fromOpaque(context!).takeUnretainedValue()
+        }
+    }
+
+    @MainActor static func make(_ checker: any TextChecking) -> HkTextChecker {
+        HkTextChecker(
+            context: Unmanaged.passRetained(Box(checker)).toOpaque(),
+            is_word_valid: { context, word in
+                let (box, word) = (Box.of(context), String(cString: word!))
+                return MainActor.assumeIsolated { box.checker.isWordValid(word) } ? 1 : 0
+            },
+            guesses: { context, word, out in
+                let (box, word) = (Box.of(context), String(cString: word!))
+                for guess in MainActor.assumeIsolated({ box.checker.guesses(for: word) }) {
+                    hk_strings_push(out, guess)
+                }
+            },
+            completions: { context, prefix, out in
+                let (box, prefix) = (Box.of(context), String(cString: prefix!))
+                for completion in MainActor.assumeIsolated({ box.checker.completions(for: prefix) }) {
+                    hk_strings_push(out, completion)
+                }
+            },
+            use_language: { context, code in
+                let (box, code) = (Box.of(context), String(cString: code!))
+                MainActor.assumeIsolated { box.checker.useLanguage(code) }
+            },
+            release: { context in
+                Unmanaged<Box>.fromOpaque(context!).release()
+            }
+        )
     }
 }

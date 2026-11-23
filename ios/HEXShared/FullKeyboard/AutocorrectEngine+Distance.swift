@@ -1,227 +1,59 @@
 import Foundation
+import HexKeyboardCore
 
-/// Case matching (with the strip's and a fix's capitals, and the word before a token) and the
-/// keyboard-distance cost of a one-edit typo: what cautious autocorrect, bilingual choices,
-/// and the strip's spelling guesses measure a slip by. Kept beside the engine so its own file
-/// stays under the cap.
+/// What autocorrect answers from text and the keys alone, without an engine: the keyboard
+/// core's (`hk_text*`, `hk_edit_cost`, `hk_adjacent_keys`, `hk_language_words`).
 @MainActor
 extension AutocorrectEngine {
-    // MARK: - Case matching & QWERTY distance
-
-    static func matchCase(of typed: String, onto target: String) -> String {
-        guard !typed.isEmpty, !target.isEmpty else { return target }
-        if typed.count >= 2 && typed == typed.uppercased() && typed != typed.lowercased() {
-            return target.uppercased()
-        }
-        // Preserve intentional casing in `I`, `I'm`, `iPhone`, etc. unless `typed` started capitalized.
-        if target != target.lowercased() {
-            if typed.first?.isUppercase == true, let first = target.first, first.isLowercase {
-                return first.uppercased() + target.dropFirst()
-            }
-            return target
-        }
-        if typed.first?.isUppercase == true, let first = target.first {
-            return first.uppercased() + target.dropFirst()
-        }
-        return target
-    }
-
-    /// Whether `word`, one of your own words with capitals after its first letter ("DONT",
-    /// "McQuorv"), is read for `typed`, which has none: the strip offers it, but neither space
-    /// nor a swipe puts it in. Record typing logs showed a word from someone's own list in
-    /// capitals put in for "don't" and for swiped common words. Words typed in capitals, your
-    /// own lowercase words and names, and your vocabulary's spellings ("GitHub") are as before.
-    func isOwnCapitals(_ word: String, typed: String) -> Bool {
-        word.dropFirst().contains(where: \.isUppercase) && !typed.dropFirst().contains(where: \.isUppercase)
-            && !isVocabularySpelling(word)
-    }
-
-    /// Spatial autocorrect's decision for `token`, putting in no `isOwnCapitals` reading:
-    /// space takes the next reading that clears the margin, if any, and the strip keeps them all.
-    func decisionOfferingOwnCapitals(
-        _ decoder: TypingDecoder, taps: [CGPoint], typed token: String, previous: String?, valid: Bool, keys: TypingDecoder.Keys
-    ) -> TypingDecoder.Decision? {
-        let lower = token.lowercased()
-        var decision = decoder.decide(taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys)
-        guard let replacement = decision?.replacement, isOwnCapitals(replacement, typed: token),
-              let readings = decision?.readings else { return decision }
-        decision?.replacement = readings.lazy.map(\.text).first {
-            !self.isOwnCapitals($0, typed: token)
-                && decoder.replaces(with: $0, taps: taps, typed: lower, previous: previous, literalIsValid: valid, keys: keys) == true
-        }
-        return decision
-    }
-
-    /// A swipe's readings, best first, putting in no `isOwnCapitals` one unless caps lock is
-    /// on: the model's word of the same letters in lowercase ("in" for "IN", which takes its
-    /// place in the decoder), else the first ordinary reading, goes first; the strip offers yours.
-    func readingsOfferingOwnCapitals(_ readings: [String], capsLock: Bool, model: TypingDecoderModel) -> [String] {
-        guard !capsLock, let first = readings.first, isOwnCapitals(first, typed: "") else { return readings }
-        if model.index(of: first.lowercased()) != nil { return [first.lowercased()] + readings }
-        guard let index = readings.firstIndex(where: { !isOwnCapitals($0, typed: "") }) else { return readings }
-        var ordered = readings
-        ordered.insert(ordered.remove(at: index), at: 0)
-        return ordered
-    }
-
-    /// `word` without a capital first letter it only has from where it was learned: a fix
-    /// you picked at the start of a sentence ("Helli" to "Hello"), a guess iOS knows
-    /// capitalised, a Contacts name that is also a common word ("Bell", "Will"). When `typed`
-    /// starts in lowercase and the dictionary knows the word in lowercase, it is written in
-    /// lowercase, as Apple's keyboard writes "bell" mid-sentence beside a contact Kate Bell
-    /// (black box, iOS 27.2). Names the dictionary knows only capitalised ("Taylor"), "I" and
-    /// its contractions, words with more capitals ("iPhone"), a word in your vocabulary spelled
-    /// as you added it ("Swift") and German, whose nouns take capitals, keep theirs.
-    func withoutStrayCapital(_ word: String, typed: String) -> String {
-        guard language != .german, hasDictionary, typed.first?.isUppercase != true, word.count >= 2,
-              let first = word.first, first.isUppercase, !word.dropFirst().contains(where: \.isUppercase),
-              !word.contains(" "), !isVocabularySpelling(word) else { return word }
-        let lower = first.lowercased() + word.dropFirst()
-        if language.usesEnglishFixes, lower.hasPrefix("i'") || lower.hasPrefix("i\u{2019}") { return word }
-        return checker.isWordValid(lower) ? lower : word
-    }
-
-    /// The word before `token` in `before`, lowercased, when only spaces separate them
-    /// (nil at the start of a sentence or after punctuation).
-    static func previousWord(_ before: String, token: String) -> String? {
-        var rest = before.hasSuffix(token) ? before.dropLast(token.count) : Substring(before)
-        guard rest.last == " " else { return nil }
-        while rest.last == " " { rest = rest.dropLast() }
-        var word = ""
-        while let c = rest.last, c.isLetter || c == "'" {
-            word.insert(c, at: word.startIndex)
-            rest = rest.dropLast()
-        }
-        return word.isEmpty ? nil : word.lowercased()
-    }
-
-    /// The strip's words for `token` with Auto-capitalization off: no capital you didn't type,
-    /// as space puts none in ("Mandy" and "I'd" come "mandy" and "i'd"), except your own
-    /// spellings; a word that is then what you typed, or twice there, goes.
-    func withoutAddedCapitals(_ pool: [String], typed token: String) -> [String] {
-        guard !addsCapitals, !token.contains(where: \.isUppercase) else { return pool }
-        return pool.map { isOwnSpelling($0) ? $0 : $0.lowercased() }.reduce(into: []) { kept, item in
-            if item != token, !kept.contains(item) { kept.append(item) }
-        }
-    }
-
-    /// Returns a weighted cost if `source` and `target` are within 1 Damerau-Levenshtein edit; `nil` otherwise.
+    /// The keyboard cost of a slip from `source` to `target` within one Damerau-Levenshtein
+    /// edit on `language`'s keys in `letters`' arrangement; nil when they're further apart.
     static func singleEditKeyboardCost(
         from source: String,
         to target: String,
         language: KeyboardLanguage = .english,
         letters: KeyboardLetterLayout? = nil
     ) -> Double? {
-        if source == target { return 0 }
-        let s = Array(source)
-        let t = Array(target)
-        // Polish: diacritics you didn't add, however many ("zolw" -> "żółw", "maly" -> "mały"),
-        // are as cheap as one missing Spanish accent, a little more for each further one. Greek
-        // likewise: a tonos or diaeresis left out ("καλημερα" -> "καλημέρα", "αυπνια" ->
-        // "αϋπνία"), or σ where the word ends in ς ("λογοσ" -> "λόγος"). Czech too: háčky and
-        // čárky left out ("cesky" -> "český", "prilis" -> "příliš"), and Hungarian: its accented
-        // vowels left out ("koszonom" -> "köszönöm", "kesobb" -> "később", "szivesen" ->
-        // "szívesen"), ő and ű included, as o and u with the combining double acute.
-        if language == .polish || language == .greek || language == .czech || language == .hungarian,
-           s.count == t.count {
-            func same(_ a: Character, _ b: Character) -> Bool {
-                switch language {
-                case .greek: Self.sameGreekLetterIgnoringAccents(a, b)
-                case .hungarian: Self.sameLetterIgnoringAccents(a, b)
-                default: Self.samePolishLetterIgnoringDiacritics(a, b)
-                }
-            }
-            let missed = zip(s, t).filter { $0 != $1 }
-            if !missed.isEmpty, missed.allSatisfy({ same($0, $1) }) {
-                return 0.15 + 0.05 * Double(missed.count - 1)
-            }
+        var cost = Double.nan
+        let status = grid(language, letters).withUnsafeBufferPointer { cells in
+            hk_edit_cost(source, target, language.rawValue, cells.baseAddress, cells.count, &cost)
         }
-        let ds = s.count - t.count
-        guard abs(ds) <= 1 else { return nil }
-
-        if ds == 0 {
-            var diffs: [Int] = []
-            for i in 0..<s.count where s[i] != t[i] {
-                diffs.append(i)
-                if diffs.count > 2 { return nil }
-            }
-            if diffs.count == 1 {
-                let i = diffs[0]
-                // An accent or tilde you didn't add ("aqui" -> "aquí", "manana" -> "mañana")
-                // is the cheapest fix there is, not a far-away key.
-                if sameLetterIgnoringAccents(s[i], t[i]) { return 0.15 }
-                return areAdjacentKeys(s[i], t[i], language: language, letters: letters) ? 0.65 : 1.15
-            }
-            if diffs.count == 2, diffs[1] == diffs[0] + 1,
-               s[diffs[0]] == t[diffs[1]], s[diffs[1]] == t[diffs[0]] {
-                return 0.60
-            }
-            return nil
-        }
-
-        // Single insertion or deletion.
-        let (shorter, longer) = s.count < t.count ? (s, t) : (t, s)
-        var i = 0
-        var j = 0
-        var skippedIndex: Int?
-        while i < shorter.count && j < longer.count {
-            if shorter[i] == longer[j] {
-                i += 1
-                j += 1
-            } else if skippedIndex == nil {
-                skippedIndex = j
-                j += 1
-            } else {
-                return nil
-            }
-        }
-        let extraIdx = skippedIndex ?? (longer.count - 1)
-        let extraChar = longer[extraIdx]
-        let leftAdj = extraIdx > 0 && areAdjacentKeys(extraChar, longer[extraIdx - 1], language: language, letters: letters)
-        let rightAdj = extraIdx + 1 < longer.count && areAdjacentKeys(extraChar, longer[extraIdx + 1], language: language, letters: letters)
-        return (leftAdj || rightAdj) ? 0.70 : 0.90
+        return status == 0 && !cost.isNaN ? cost : nil
     }
 
-    /// Whether two letters differ only by an accent, diaeresis or tilde (e/é, u/ü, n/ñ).
-    static func sameLetterIgnoringAccents(_ a: Character, _ b: Character) -> Bool {
-        guard a != b else { return false }
-        let base: (Character) -> Unicode.Scalar? = { String($0).decomposedStringWithCanonicalMapping.unicodeScalars.first }
-        return base(a) == base(b)
-    }
-
-    /// Whether two lowercase letters are one Polish letter with or without its diacritic (a/ą,
-    /// z/ż, l/ł: ł has no decomposition, so it is named).
-    static func samePolishLetterIgnoringDiacritics(_ a: Character, _ b: Character) -> Bool {
-        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["l", "ł"]
-    }
-
-    /// Whether two lowercase letters are one Greek letter with or without its tonos or
-    /// diaeresis (α/ά, ι/ϊ/ΐ), or σ and its word-final form ς.
-    static func sameGreekLetterIgnoringAccents(_ a: Character, _ b: Character) -> Bool {
-        sameLetterIgnoringAccents(a, b) || Set([a, b]) == ["σ", "ς"]
-    }
-
-    private struct LayoutKey: Hashable {
-        let language: KeyboardLanguage
-        let letters: KeyboardLetterLayout
-    }
-
-    private static let keyCoordinates: [LayoutKey: [Character: (Double, Double)]] = Dictionary(
-        uniqueKeysWithValues: KeyboardLanguage.allCases.flatMap { language in
-            language.letterLayouts.map { (LayoutKey(language: language, letters: $0), language.keyCoordinates($0)) }
-        }
-    )
-
+    /// Whether the keys of `a` and `b` neighbour on `language`'s keys in `letters`' arrangement.
     static func areAdjacentKeys(
         _ a: Character,
         _ b: Character,
         language: KeyboardLanguage = .english,
         letters: KeyboardLetterLayout? = nil
     ) -> Bool {
-        let key = LayoutKey(language: language, letters: language.offered(letters))
-        guard let keys = keyCoordinates[key], let pa = keys[a], let pb = keys[b] else { return false }
-        let dx = pa.1 - pb.1
-        let dy = pa.0 - pb.0
-        return (dx * dx + dy * dy).squareRoot() <= 1.6
+        grid(language, letters).withUnsafeBufferPointer { cells in
+            hk_adjacent_keys(String(a), String(b), cells.baseAddress, cells.count) == 1
+        }
     }
+
+    /// The letter grid a layout shows, made once per layout.
+    private static func grid(_ language: KeyboardLanguage, _ letters: KeyboardLetterLayout?) -> [HkKeyCentre] {
+        let key = "\(language.rawValue)/\(language.offered(letters))"
+        if let cells = grids[key] { return cells }
+        let cells = KeyboardCoreAutocorrect.cells(language, letters)
+        grids[key] = cells
+        return cells
+    }
+
+    private static var grids: [String: [HkKeyCentre]] = [:]
+
+    /// The word before `token` at the end of `before`, lowercased, when only spaces separate
+    /// them; nil at the start or after punctuation.
+    static func previousWord(_ before: String, token: String) -> String? {
+        KeyboardCoreText.text(1, before, token)
+    }
+
+    /// Whether `token`, before a period, is an abbreviation the period doesn't correct ("etc").
+    static func isAbbreviation(_ token: String) -> Bool {
+        hk_text_is(3, token, nil, nil) == 1
+    }
+
+    /// The English contractions Hex corrects to or offers, for Swipe typing's extra words.
+    static let englishContractions: [String] = KeyboardCoreText.languageWords(KeyboardLanguage.english.rawValue, 3)
 }

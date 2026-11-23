@@ -138,6 +138,11 @@ extension AutocorrectEngine {
     /// Gives this engine's spelling dictionary the decoder model's language's own words, when the
     /// keyboard ships a list for it, or takes them away. Called whenever `decoder` changes.
     func useOwnWords(_ model: TypingDecoderModel?) {
+        Self.useOwnWords(model, in: checker)
+    }
+
+    /// `useOwnWords` for `checker`, this engine's or its bilingual partner's (`Partner.decoder`).
+    static func useOwnWords(_ model: TypingDecoderModel?, in checker: TextChecking) {
         guard let system = checker as? SystemTextChecker else { return }
         system.ownWords = model.flatMap { model in
             HexWordList.bundled(model.language).map {

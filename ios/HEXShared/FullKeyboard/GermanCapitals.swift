@@ -1,4 +1,5 @@
 import Foundation
+import HexKeyboardCore
 
 /// German nouns' share of capitalised uses, read from `HEXKeyboard/TypingModel/de.capitals`
 /// beside the German typing model. One `word<TAB>percent` line per word (lowercase, sorted,
@@ -16,12 +17,15 @@ nonisolated struct GermanCapitals: Sendable {
     /// shares the spelling elsewhere ("zu leben", "ich frage").
     static let sometimesShare = 50
 
-    /// The share for a lowercase word: from the mapped list (`HexWordList`, read in place), or the
-    /// table tests give.
-    private let share: @Sendable (String) -> UInt8?
+    /// The list as the keyboard core reads it (`hk_german_capitals_*`).
+    let core: KeyboardCoreGermanCapitals
 
+    /// A list of these shares, for tests: as the sidecar's lines.
     init(percentages: [String: UInt8]) {
-        share = { percentages[$0] }
+        let lines = percentages.sorted { Array($0.key.utf8).lexicographicallyPrecedes(Array($1.key.utf8)) }
+            .map { "\($0.key)\t\($0.value)\n" }.joined()
+        // A list of no words is an empty file, which isn't one: it knows no word either way.
+        core = KeyboardCoreGermanCapitals(bytes: Array(lines.utf8)) ?? KeyboardCoreGermanCapitals(bytes: Array("\n".utf8))!
     }
 
     /// The sidecar beside the German model (`HEXKeyboard/TypingModel/de.capitals`), read once
@@ -42,53 +46,30 @@ nonisolated struct GermanCapitals: Sendable {
     @MainActor private static var loaded: GermanCapitals?
     @MainActor private static var didRead = false
 
-    /// The list memory-mapped and searched in place (`HexWordList`), as every language's
-    /// `.capitals` is: no table of its 55,000 words in memory.
+    /// The list memory-mapped and searched in place, as every language's `.capitals` is: no
+    /// table of its 55,000 words in memory.
     init?(url: URL) {
-        guard let list = HexWordList(url: url) else { return nil }
-        share = { word in
-            // The builder writes every word lowercase, from a lowercase-only model.
-            guard let percent = list.value(of: word), (Self.sometimesShare...100).contains(percent) else { return nil }
-            return UInt8(percent)
-        }
+        guard let core = KeyboardCoreGermanCapitals(url: url) else { return nil }
+        self.core = core
     }
 
     /// The share of the word's corpus occurrences written with a capital (50–100), or nil when
     /// the list doesn't know the word.
     func percent(of word: String) -> UInt8? {
-        share(word.lowercased())
+        let percent = hk_german_capitals_percent(core.pointer, word)
+        return percent > 0 ? UInt8(percent) : nil
     }
 
     /// Whether `word`, all lowercase, takes a capital: a noun written with one at least
     /// `alwaysShare` percent of the time anywhere, or `sometimesShare` percent of the time
-    /// after an article or determiner. Nil when the list doesn't know the word and false when
-    /// it knows it but no determiner stands before it, so autocorrect asks the dictionary for
-    /// both as before.
+    /// after an article or determiner (the core's list of them). Nil when the list doesn't
+    /// know the word and false when it knows it but no determiner stands before it, so
+    /// autocorrect asks the dictionary for both as before.
     func capitalises(_ word: String, after previous: String?) -> Bool? {
-        guard word.count >= 2, word == word.lowercased(),
-              let share = percent(of: word), share >= Self.sometimesShare else { return nil }
-        if share >= Self.alwaysShare { return true }
-        return previous.map { Self.determiners.contains($0) } ?? false
+        switch hk_german_capitals_capitalises(core.pointer, word, previous) {
+        case 1: true
+        case 0: false
+        default: nil
+        }
     }
-
-    /// Articles, determiners, their contractions and possessives, after which German writes
-    /// the noun with a capital ("das haus", "im haus", "mein haus"), so a word the books write
-    /// both ways is a noun here ("das leben", never "zu leben"). "in" is in: "in Ruhe", "in
-    /// Frage", and a verb rarely follows it. "ihr" is left out: it is the possessive
-    /// "her/their", but as the pronoun "you" (plural) it comes before a verb far more often
-    /// ("wollt ihr essen"). "ohne" is out too: "ohne essen" is a verb, "without eating".
-    static let determiners: Set<String> = [
-        "der", "die", "das", "den", "dem", "des",
-        "ein", "eine", "einen", "einem", "einer", "eines",
-        "kein", "keine", "keinen", "keinem", "keiner", "keines",
-        "mein", "meine", "meinen", "meinem", "meiner", "meines",
-        "dein", "deine", "deinen", "deinem", "deiner", "deines",
-        "sein", "seine", "seinen", "seinem", "seiner", "seines",
-        "ihre", "ihren", "ihrem", "ihrer", "ihres",
-        "unser", "unsere", "unseren", "unserem", "unserer", "unseres",
-        "euer", "eure", "euren", "eurem", "eurer", "eures",
-        "dies", "dieser", "diese", "dieses", "diesem", "diesen",
-        "jeder", "jede", "jedes", "jedem", "jeden",
-        "im", "in", "am", "zum", "zur", "vom", "beim", "ins", "ans",
-    ]
 }
