@@ -21,8 +21,8 @@ case "${CI_TAG:-}" in
     ;;
 esac
 scripts/fetch-cleanup-model.sh
-# Send feedback's Bellhop report key, from Xcode Cloud's BELLHOP_REPORT_KEY secret (never in
-# source); without it the build simply has no Send feedback row.
+# Send feedback's Bellhop report key is set in HEXMobile/Feedback.xcconfig. An Xcode Cloud
+# BELLHOP_REPORT_KEY secret, if one is ever set (say, mid-rotation), overrides it.
 if [ -n "${BELLHOP_REPORT_KEY:-}" ]; then
   printf 'BELLHOP_REPORT_KEY = %s\n' "$BELLHOP_REPORT_KEY" > HEXMobile/Feedback.local.xcconfig
 fi

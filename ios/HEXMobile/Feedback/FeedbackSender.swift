@@ -37,6 +37,7 @@ final class FeedbackSender {
                 if status == 201, let number = json?["number"] as? Int {
                     progress = 1
                     let email = json?["email"] as? String
+                    log.notice("feedback sent as #\(number, privacy: .public)")
                     return .sent(number: number, emailPending: email == "pending")
                 }
                 code = (json?["error"] as? [String: Any])?["code"] as? String

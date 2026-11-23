@@ -114,12 +114,16 @@ Send feedback (row)
 - **Pictures** (`FeedbackImage`): re-encoded as JPEG at 80% with the longest side at most
   2048 px (HEIC included). Limits are checked before sending: message 20,000 characters,
   subject 200, 5 pictures, 10 MiB each, 20 MiB in all.
-- **Report key**: `BELLHOP_REPORT_KEY` in `HEXMobile/Feedback.xcconfig` (empty in git),
-  set by a gitignored `HEXMobile/Feedback.local.xcconfig` locally and by
-  `ci_scripts/ci_post_clone.sh` from Xcode Cloud's `BELLHOP_REPORT_KEY` secret; it reaches
-  the app as Info.plist's `BellhopReportKey`. Without one, no row shows. To rotate it, make a
-  new key and revoke the old one in Bellhop › Settings › Report keys, update the Xcode Cloud
-  secret, and ship a build: builds with the old key then say feedback is unavailable.
+- **Report key**: `BELLHOP_REPORT_KEY` in `HEXMobile/Feedback.xcconfig`, committed: a
+  Bellhop report key is publishable and safe to ship (Android keeps its own in
+  `android/gradle.properties`). It reaches the app as Info.plist's `BellhopReportKey`; no Swift
+  file holds it. A gitignored `HEXMobile/Feedback.local.xcconfig`, included after it, overrides
+  it: written locally, or by `ci_scripts/ci_post_clone.sh` from an Xcode Cloud
+  `BELLHOP_REPORT_KEY` secret if one is set. An empty key means no Send feedback row. To rotate
+  it, make a new key and revoke the old one in Bellhop › Settings › Report keys, change the
+  xcconfig (or set the override), and ship a build: builds with the old key then say feedback
+  is unavailable. Each send that works logs `feedback sent as #<number>` (subsystem
+  `anomaly.hex.mobile`, category `feedback`).
 - **Simulator proof** (debug builds only): `--feedback-log-request` writes each request
   (headers without the key, the payload, each picture's bytes and pixel size) and each answer
   to Documents/feedback-requests; `--feedback-key <key>` and `--feedback-endpoint <url>`
