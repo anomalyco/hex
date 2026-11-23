@@ -9,19 +9,34 @@ import XCTest
 /// operations, from the fixture alone, answered and asked of the dictionary as recorded. The
 /// fixture was recorded from dev's Swift engine with iOS's own never-suggest list (`out`) and
 /// with the shared one iOS ships now (`shared`, where they differ); the engine reads the shared one.
+///
+/// When a change is meant to change autocorrect's answers, write the fixture again from the
+/// shipped engine with `TEST_RUNNER_HEX_AUTOCORRECT_PARITY_REWRITE=<path>`: the same cases, the
+/// engine's answers as `out`, and the never-suggest list iOS ships as `iosNeverSuggest`.
 @MainActor
 final class AutocorrectParityGolden: XCTestCase {
     func testTheShippedAutocorrectAnswersAsRecorded() throws {
         let repo = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
             .deletingLastPathComponent().deletingLastPathComponent().path
         let text = try String(contentsOfFile: repo + "/crates/keyboard/core/tests/fixtures/autocorrect-parity.jsonl", encoding: .utf8)
+        let rewrite = ProcessInfo.processInfo.environment["HEX_AUTOCORRECT_PARITY_REWRITE"]
+        var rewritten: [String] = []
+        func keep(_ object: [String: Any]) throws {
+            let data = try JSONSerialization.data(withJSONObject: object, options: [.sortedKeys, .withoutEscapingSlashes])
+            rewritten.append(String(decoding: data, as: UTF8.self))
+        }
         var runner: ACWrapperRunner?
         var keysets: [Int: TypingDecoder.Keys] = [:]
         var cases = 0, differ = 0
         for line in text.split(separator: "\n") {
-            let v = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
+            var v = try XCTUnwrap(JSONSerialization.jsonObject(with: Data(line.utf8)) as? [String: Any])
             switch v["kind"] as? String {
             case "setup":
+                if rewrite != nil {
+                    let shipped = Bundle.main.url(forResource: "never-suggest", withExtension: "tsv")
+                    v["iosNeverSuggest"] = try shipped.map { try String(contentsOf: $0, encoding: .utf8) } ?? ""
+                    try keep(v)
+                }
                 var models: [String: TypingDecoderModel] = [:]
                 for code in v["models"] as! [String] {
                     let url = URL(fileURLWithPath: repo + "/ios/HEXKeyboard/TypingModel/\(code).hextm")
@@ -30,6 +45,7 @@ final class AutocorrectParityGolden: XCTestCase {
                 runner = ACWrapperRunner(dictionaries: ACStub.dictionaries(setup: v, models: models), models: models, keysets: [:])
             case "keys":
                 keysets[v["id"] as! Int] = ACWrapperRunner.keys(v["keys"] as! [String: Any])
+                if rewrite != nil { rewritten.append(String(line)) }
             case "case":
                 guard var runner else { return XCTFail("a setup line first") }
                 runner.keysets = keysets
@@ -37,6 +53,14 @@ final class AutocorrectParityGolden: XCTestCase {
                 let result = runner.run(v["ops"] as! [[String: Any]], initialLearned: v["learned"] as! [String])
                 let expected = (v["shared"] ?? v["out"]) as! [Any]
                 let calls = (v["sharedCalls"] ?? v["calls"]) as! String
+                if rewrite != nil {
+                    for key in ["today", "tie", "foundation", "shared", "sharedCalls"] { v[key] = nil }
+                    v["out"] = result.outputs
+                    v["calls"] = String(result.hash, radix: 16)
+                    v["ncalls"] = result.calls
+                    try keep(v)
+                    continue
+                }
                 if !ACWrapperRunner.same(result.outputs, expected) || String(result.hash, radix: 16) != calls {
                     differ += 1
                     if differ <= 3 {
@@ -44,8 +68,12 @@ final class AutocorrectParityGolden: XCTestCase {
                     }
                 }
             default:
-                break
+                if rewrite != nil { rewritten.append(String(line)) }
             }
+        }
+        if let rewrite {
+            try (rewritten.joined(separator: "\n") + "\n").write(toFile: rewrite, atomically: true, encoding: .utf8)
+            return
         }
         XCTAssertGreaterThan(cases, 300)
         XCTAssertEqual(differ, 0, "of \(cases) cases")

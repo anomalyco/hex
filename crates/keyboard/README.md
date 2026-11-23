@@ -146,7 +146,18 @@ field come in as data. `autocorrect::text` replicates the Swift and Foundation s
 the decisions read by (grapheme clusters, canonical equivalence, `caseInsensitiveCompare`,
 diacritic folding).
 
-`tests/autocorrect_parity` replays `tests/fixtures/autocorrect-parity.jsonl`, cases the Swift
-oracle (`ios/HEXMobileTests/AutocorrectParity`) wrote with a deterministic dictionary, and must
-give the same answers, the same engine state and the same dictionary calls in the same order;
-it says how to write the fixture again, or a larger set for `HEX_AUTOCORRECT_PARITY=/path`.
+`tests/autocorrect_parity` replays `tests/fixtures/autocorrect-parity.jsonl`, cases dev
+06ac30af's Swift engine answered with a deterministic dictionary, and must give the same
+answers, the same engine state and the same dictionary calls in the same order; iOS's
+`AutocorrectParityGolden` (`ios/HEXMobileTests/AutocorrectParity`) replays the same cases on the
+shipped `AutocorrectEngine`, which runs on this core. The fixture also holds what Swift
+answered otherwise (its own-words order, its decoder's ties, Foundation's
+`caseInsensitiveCompare`, iOS's old never-suggest list), so those decided changes stay
+counted. `tests/autocorrect_parity/main.rs` says how to write it again from the shipped engine.
+
+A language is its BCP 47 tag across the C and JNI interfaces. Its facts are one manifest each
+in `languages/<tag>.json`, compiled in by `core/build.rs` (no JSON is parsed while the keyboard
+runs): the dictionaries to try, the typing model it reads, its accents, two-letter words,
+starters and rules. `words_from` reads another manifest's fields, one level deep (fr-CA and
+fr-CH read fr's, all but `model`: a model is read by the language it was built for). The host
+hands over the letter grid it shows (`hk_autocorrect_set_keys`).

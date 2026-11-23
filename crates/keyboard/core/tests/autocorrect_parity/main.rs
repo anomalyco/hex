@@ -1,23 +1,25 @@
-//! Autocorrect against the Swift it replaces: every case in `tests/fixtures/autocorrect-parity.jsonl`
-//! (written by the iOS test `AutocorrectParityExport` with the oracle
-//! `ios/HEXMobileTests/AutocorrectParity/ACOracle*.swift`, a renamed copy of
-//! `AutocorrectEngine*.swift`) replayed here with the same operations and the same deterministic
-//! dictionary (`stub.rs`) must give the oracle's answers, the engine's state after each one, and
-//! the same dictionary calls in the same order.
+//! Autocorrect against the Swift it replaced: every case in `tests/fixtures/autocorrect-parity.jsonl`
+//! replayed here with the same operations and the same deterministic dictionary (`stub.rs`) must
+//! give the recorded answers, the engine's state after each one, and the same dictionary calls in
+//! the same order. The fixture was recorded from dev 06ac30af's `AutocorrectEngine*.swift` (a
+//! renamed copy, the oracle, removed once iOS ran on this port), and iOS's
+//! `AutocorrectParityGolden` replays it on the shipped engine too.
 //!
 //! The fixture's `out` is the oracle with your own words in the port's order (by shortcut and
-//! typo) and the decoder's fixed tie order; `today` (where it differs) is Swift's dictionary
-//! order, `tie` marks a case Swift's own decoder walk would answer otherwise, and `shared` the
-//! answers with the shared never-suggest list read by base language, which the port reads when
-//! handed it. A larger set runs with `HEX_AUTOCORRECT_PARITY=/path/to/set.jsonl`.
+//! typo), the decoder's fixed tie order, Unicode case folding and iOS's own never-suggest list
+//! then (the setup's `iosNeverSuggest`); `today` (where it differs) is Swift's dictionary order,
+//! `tie` marks a case Swift's own decoder walk would answer otherwise, `foundation` the answers
+//! with Foundation's `caseInsensitiveCompare`, and `shared` those with the shared never-suggest
+//! list read by base language, which iOS ships now. A larger set the oracle wrote runs with
+//! `HEX_AUTOCORRECT_PARITY=/path/to/set.jsonl`.
 //!
-//! Regenerate the fixture (from `ios/`, after `xcodegen generate`):
+//! When a change is meant to change the answers, write the fixture again from the shipped
+//! engine (from `ios/`, after `xcodegen generate`) and review the difference before committing:
 //!
 //! ```sh
-//! TEST_RUNNER_HEX_AUTOCORRECT_PARITY_OUT=$PWD/../crates/keyboard/core/tests/fixtures/autocorrect-parity.jsonl \
-//! TEST_RUNNER_HEX_AUTOCORRECT_PARITY_COUNT=200 xcodebuild test -project HEXMobile.xcodeproj \
-//!   -scheme HEXMobile -destination "id=<SIM_UDID>" SWIFT_OPTIMIZATION_LEVEL=-O \
-//!   -only-testing:HEXMobileTests/AutocorrectParityExport
+//! TEST_RUNNER_HEX_AUTOCORRECT_PARITY_REWRITE=$PWD/../crates/keyboard/core/tests/fixtures/autocorrect-parity.jsonl \
+//! xcodebuild test -project HEXMobile.xcodeproj -scheme HEXMobile -destination "id=<SIM_UDID>" \
+//!   -only-testing:HEXMobileTests/AutocorrectParityGolden
 //! ```
 
 mod chars;

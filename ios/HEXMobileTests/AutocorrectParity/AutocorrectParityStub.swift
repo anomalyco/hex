@@ -164,7 +164,7 @@ enum ACStub {
 
 /// One engine's dictionary (`TextChecking`), tagged for the call log.
 @MainActor
-final class ACStubChecker: ACOChecking, TextChecking {
+final class ACStubChecker: TextChecking {
     let tag: String
     let log: ACCallLog
     let dictionaries: [String: ACStubDictionary]

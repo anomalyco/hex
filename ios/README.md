@@ -756,9 +756,12 @@ never at a launch by itself.
     keyboard, the strip and autocorrect never offer slurs, and offer swear words only
     with Suggest swear words on (off by default; App Store rating 4+). The list
     (`HEXShared/FullKeyboard/never-suggest.tsv`: layout, `slur` or `swear`, spelling or
-    two-word expression; `*` lines apply to every layout) is LDNOOBW as curated for Hex
-    for Android, entry for entry the same as `android/app/src/main/assets/typing/never-suggest.tsv`
-    (see Acknowledgements below); change both together. `OffensiveWords` is checked when a
+    two-word expression; `*` lines apply to every layout, and a layout reads its base
+    language's, so French (Canada) and French (Switzerland) read `fr`) is LDNOOBW as curated
+    for Hex for Android, the same file as `android/app/src/main/assets/typing/never-suggest.tsv`
+    (see Acknowledgements below); change both together. The keyboard's Rust core reads it
+    (`crates/keyboard`, as it decides all of autocorrect: `AutocorrectEngine` is its Swift
+    face). `OffensiveWords` is checked when a
     suggestion is looked up: `UITextChecker`'s guesses and completions, learned fixes, and
     Spatial autocorrect's readings (`TypingDecoder.NeverSuggest`, so the models still score
     them as words). An expression is blocked only as the pair ("blow job"), never its words
