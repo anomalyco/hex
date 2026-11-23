@@ -183,13 +183,9 @@ nonisolated enum EmojiSuggester {
         guard !library.stopwords.contains(word) else { return [] }
         for (form, factor) in forms(of: word, language: library.language) {
             guard let hits = library.hits(forWord: form) else { continue }
-            // The index counts a word several emoji share for less (`build-emoji-data.py`'s
-            // spread); an emoji whose whole name it is, in the keyboard's language or English,
-            // still counts in full ("fuego" names 🔥 and is a keyword of ❤️‍🔥 and 🐦‍🔥).
-            let spread = 1 + 0.5 * log2(max(1, Float(hits.count) / 2))
             var picked: [Int] = []
             var families: Set<Int32> = []
-            for hit in hits where hit.weight * spread * factor >= strongWeight - 0.005 && picked.count < limit {
+            for hit in hits where hit.weight * factor >= strongWeight && picked.count < limit {
                 let entry = Int(hit.entry)
                 let family = library.family(of: entry)
                 guard family < 0 || families.insert(family).inserted else { continue }

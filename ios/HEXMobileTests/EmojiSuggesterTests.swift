@@ -135,6 +135,11 @@ final class EmojiSuggesterTests: XCTestCase {
         XCTAssertEqual(strip("at 7 "), [])
         // A word several emoji only describe offers none.
         XCTAssertEqual(strip("face "), [])
+        // Hex's chat words, best first; an emoji only part of the word's names (🚒 "fire
+        // engine", ❤️‍🔥 "heart on fire") never joins them.
+        XCTAssertEqual(strip("heart "), ["❤️", "💕", "💖"])
+        XCTAssertEqual(strip("fire "), ["🔥"])
+        XCTAssertEqual(strip("smile "), ["😊", "😄"])
     }
 
     func testTheWordBeingTypedHasTheFinishedWordsEmoji() throws {
@@ -150,6 +155,8 @@ final class EmojiSuggesterTests: XCTestCase {
         XCTAssertEqual(try word("fuego", "es"), ["🔥"], "an emoji's whole name in the keyboard's language, though other emoji share it")
         XCTAssertEqual(try word("katze", "de"), ["🐈"])
         XCTAssertEqual(try word("sun"), ["☀️"])
+        XCTAssertEqual(try word("heart"), ["❤️"], "a chat word, though 45 emoji share it")
+        XCTAssertEqual(try word("heart", "de"), ["❤️"], "English chat words on every layout")
     }
 
     /// X and TestFlight: Apple's keyboard offers the emoji as you type its name; Hex offered it
