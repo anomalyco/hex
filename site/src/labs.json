@@ -901,6 +901,17 @@
       ],
       "summary": "Record dictation through Apple's voice processing so Mic Mode can turn on Voice Isolation and cut background noise.",
       "title": "Voice isolation"
+    },
+    {
+      "added": "2026-11-23",
+      "group": "meetings",
+      "groupTitle": "Meetings",
+      "id": "stop-any-call-recording",
+      "oses": [
+        "macos"
+      ],
+      "summary": "Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off (macOS)",
+      "title": "Stop every call recording when the call ends"
     }
   ]
 }

@@ -16,16 +16,18 @@ use crate::calendar::{CalendarMeeting, ReminderScheduler, ReminderUpdate};
 use crate::dictation::context::ContextSnapshot;
 use crate::meeting::detection::{
     AutoStop, BrowserPageMemory, CallPresence, CallSwitch, Detection, MeetingCandidate,
-    MeetingDetector, OfferId, candidate_from_microphone,
+    MeetingDetector, MeetingSource, OfferId, candidate_from_microphone,
 };
 use crate::meeting::recovery::PendingFinals;
 use crate::meeting::{self, MeetingCalendar, MeetingRequest, MeetingStart, TrackWarning};
 use crate::microphone_activity::{ActiveMicrophoneApplication, active_microphone_applications};
 
+use call_end::{CallEndStop, stops_when_call_ends};
 use call_switch::{
     disarm_call_stop_unless_watching, watching_call_switch, withdraw_call_switch_stop,
 };
 
+mod call_end;
 mod call_switch;
 mod publication;
 
@@ -486,16 +488,26 @@ struct Start {
     /// naming it, when this recording was detected in its place: it is kept,
     /// so the page still naming it never ends this one.
     switched_from: Option<String>,
+    /// The call app a recording started by hand watches, with its label
+    /// (Labs › Stop every call recording when the call ends). Its own title,
+    /// app, and capture stay the recording's.
+    watched: Option<(String, String)>,
 }
 
 impl Start {
     fn from_candidate(candidate: &MeetingCandidate) -> Self {
+        // A detected call already knows its app; a recording started by hand
+        // watches the one call app on the microphone when it starts.
+        let watched = (candidate.source == MeetingSource::Manual)
+            .then(call_end::manual_call_app)
+            .flatten();
         Self {
             meeting: candidate.recording_start(),
             title: candidate.title.clone(),
             app_label: candidate.source.label().into(),
             call: candidate.call.clone(),
             switched_from: None,
+            watched,
         }
     }
 }
@@ -519,6 +531,7 @@ fn calendar_start(meeting: &CalendarMeeting) -> Start {
             .into(),
         call: None,
         switched_from: None,
+        watched: None,
     }
 }
 
@@ -888,7 +901,12 @@ fn start_recording(
     let worker_stop = stop.clone();
     // Stop can send six updates before the controller next drains them.
     let (update_sender, updates) = mpsc::sync_channel(16);
-    let application = start.meeting.application.clone();
+    // A recording started by hand watches the call app it found on the
+    // microphone instead of one it detected.
+    let (application, app_label) = match start.watched {
+        Some((application, label)) => (Some(application), label),
+        None => (start.meeting.application.clone(), start.app_label.clone()),
+    };
     let call_switch = CallSwitch::with_kept(start.call, start.switched_from);
     let meeting_start = start.meeting;
     let worker =
@@ -897,7 +915,7 @@ fn start_recording(
     *recording = Some(ActiveRecording {
         title: start.title,
         application,
-        app_label: start.app_label,
+        app_label,
         automatic,
         presence: CallPresence::default(),
         auto_stop: AutoStop::default(),
@@ -995,8 +1013,9 @@ fn poll_recording(
     {
         // A failed query must not end the controller while it owns a recording.
         let auto_stop = stops_when_call_ends(
-            active.automatic,
+            CallEndStop::of(active.automatic, active.application.as_deref()),
             crate::app_settings::meeting_stop_when_call_ends(),
+            crate::labs::stop_any_call_recording(),
         );
         let applications = active_microphone_applications();
         let on_microphone = match &applications {
@@ -1126,13 +1145,6 @@ fn withdraw_stop(
         let _ = events.send(ControllerEvent::CallEndedWithdrawn);
     }
     true
-}
-
-/// Whether a recording stops on its own once its call ends: only one Hex
-/// started automatically (Always record), and only with Stop when
-/// the call ends on. Manual and offered recordings never do.
-fn stops_when_call_ends(automatic: bool, lab_on: bool) -> bool {
-    automatic && lab_on
 }
 
 /// Whether the call app still plays audio; a failed read counts as playing,
@@ -1563,13 +1575,28 @@ mod tests {
     }
 
     #[test]
+    fn a_by_hand_recording_watches_no_call_app_while_its_lab_is_off() {
+        let start = Start::from_candidate(&MeetingCandidate::manual());
+        assert_eq!(start.watched, None);
+        assert_eq!(start.meeting.application, None);
+    }
+
+    #[test]
     fn only_automatic_recordings_stop_when_the_call_ends_and_only_with_the_lab_on() {
-        assert!(stops_when_call_ends(true, true));
-        // Manual, offered, and calendar recordings never stop on their own.
-        assert!(!stops_when_call_ends(false, true));
+        use CallEndStop::*;
+        assert!(stops_when_call_ends(Automatic, true, false));
+        // Manual, offered, and calendar recordings never stop on their own...
+        assert!(!stops_when_call_ends(OnRequest, true, false));
+        // ...until Labs › Stop every call recording when the call ends, which
+        // leaves Always record to its own setting.
+        assert!(stops_when_call_ends(OnRequest, true, true));
+        assert!(stops_when_call_ends(OnRequest, false, true));
+        assert!(!stops_when_call_ends(Automatic, false, true));
+        // A by-hand recording of no call has nothing to watch, ever.
+        assert!(!stops_when_call_ends(Unwatched, false, true));
         // The toggle off leaves every recording running until Stop.
-        assert!(!stops_when_call_ends(true, false));
-        assert!(!stops_when_call_ends(false, false));
+        assert!(!stops_when_call_ends(Automatic, false, false));
+        assert!(!stops_when_call_ends(OnRequest, false, false));
     }
 
     #[test]

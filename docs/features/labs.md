@@ -274,6 +274,14 @@ Feature             Pane  Toggle (settings.json, hex settings)   On: what it doe
 ├── Import audio    no    labs.meeting_import           (macOS)   Meetings offers Import audio…: a WAV, M4A, MP3, AIFF, or CAF
 │                                        file is decoded locally, transcribed with the selected model, saved as a normal
 │                                        meeting (Speaker turns), exported as Markdown, and given notes as a finished recording
+├── Stop every call recording when the call ends no labs.stop_any_call_recording (macOS, with Meetings on) an offered,
+│                                        calendar, or by-hand call recording stops 30 s after its call app leaves the
+│                                        microphone, even with Stop when the call ends off; a recording started by hand
+│                                        watches the one native call app holding the microphone when it starts
+│                                        // checks: the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record,
+│                                        // a_recording_kind_knows_whether_it_watches_a_call_app,
+│                                        // one_native_call_app_is_watched_and_a_browser_or_two_are_not
+│                                        // (meeting/watcher/call_end.rs); not observed on a real Mac
 ├── Restore clipboard on GNOME no labs.gnome_clipboard_restore (Linux) on a Wayland desktop without data-control (GNOME), a paste snapshots and restores
 │                                        the clipboard through XWayland, only while this user's Xwayland already runs; never starts it (#1111)
 ├── Transform typed text no labs.typed_text + typed_text_hotkey (Linux) Settings › Output shows a Typed text section whose shortcut is unbound by
@@ -4138,6 +4146,32 @@ vocabulary list itself (rewriting and search), and Linux's Terminal paste.
 - Meetings (beta): see [Meetings](meetings.md). Its toggle is
   `meetings.enabled`; on, Meetings is a top-level sidebar item (debug builds
   keep it available regardless).
+- Stop every call recording when the call ends (macOS, with Meetings on): the
+  recorders Hex did not start on its own stop the way Always record's do
+  under Stop when the call ends. Its toggle is
+  `labs.stop_any_call_recording` (off by default), and it needs nothing from
+  `meetings.stop_when_call_ends`: that switch keeps governing Always record,
+  and this one governs everything else. On, a recording accepted from a
+  detection offer and a recording started from a calendar reminder stop 30 s
+  after the call app it watches leaves the microphone and goes quiet, with the
+  same 3 s absence, Keep recording, and call-comes-back logic
+  ([Meetings › Stop Other Call Recordings](meetings.md#stop-other-call-recordings-labs)).
+  A recording started by hand (Meetings' Start recording, the menu bar, `hex
+  meetings record`) takes its call app from the microphone at start: the one
+  native call app holding it right then, by the canonical bundles detection
+  uses, with browsers left out so no page is read and none or several leaving
+  the recording unwatched. The recording keeps its own title, app, and
+  capture; only its stop is associated. The absence rule is all it adds: a
+  browser that never releases the microphone between calls (Arc) is still
+  ended only for a recording Hex started itself. Turning the lab off while a
+  stop counts drops it. Checks:
+  `the_lab_stops_on_request_recordings_and_the_setting_keeps_always_record`,
+  `a_recording_kind_knows_whether_it_watches_a_call_app`, and
+  `one_native_call_app_is_watched_and_a_browser_or_two_are_not`
+  ([meeting/watcher/call_end.rs](../../src/meeting/watcher/call_end.rs));
+  `only_an_automatic_browser_call_with_a_code_keeps_reading_its_page`
+  ([meeting/watcher.rs](../../src/meeting/watcher.rs)). Not observed on a real
+  Mac or a real Slack huddle.
 - Import audio (macOS): Meetings offers **Import audio…** beside Start
   recording. A local WAV, M4A, MP3, AIFF, or CAF file is decoded to 16 kHz
   mono float WAV by the AVFoundation bridge, then transcribed with the
