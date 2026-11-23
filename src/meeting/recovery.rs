@@ -108,17 +108,12 @@ impl PendingFinals {
                         Ok(Some(manifest))
                             if manifest.status == MeetingStatus::Complete =>
                         {
-                            // The final pass succeeded but heard nothing: it goes
-                            // to the Trash with its Markdown, and no notes run.
-                            match super::discard_if_empty(&manifest) {
-                                Ok(true) => continue,
-                                Ok(false) => {}
-                                Err(error) => {
-                                    tracing::warn!(%error, meeting = id, "could not discard a recovered meeting with no speech");
-                                }
+                            // A kept final pass gets notes; an empty one went to
+                            // the Trash with its Markdown.
+                            if !super::keep_or_discard(&manifest) {
+                                continue;
                             }
                             tracing::info!(meeting = id, "finished a meeting left unfinished");
-                            super::finished_events::publish(&manifest.id);
                             if super::notes_wanted() {
                                 start_notes(manifest.id, &events);
                             }

@@ -303,20 +303,25 @@ pub(crate) fn controller_loop(
     crate::desktop::process_exit::begin_quitting();
     if let Some(active) = recording {
         active.stop.store(true, Ordering::Relaxed);
-        active
+        let manifest = active
             .worker
             .join()
             .map_err(|_| eyre!("meeting recorder panicked"))??;
+        // The drain publishes a kept final pass exactly as the running
+        // controller would; it starts no notes.
+        meeting::keep_or_discard(&manifest);
     }
     if let Some(importing) = importing {
         // A failed import during shutdown is reported, not propagated: it
         // must not skip joining the pending finals below.
         match importing.worker.join() {
             Ok(Ok(manifest)) => {
-                tracing::info!(
-                    meeting = manifest.id,
-                    "audio import finished while shutting down"
-                );
+                if meeting::keep_or_discard(&manifest) {
+                    tracing::info!(
+                        meeting = manifest.id,
+                        "audio import finished while shutting down"
+                    );
+                }
             }
             Ok(Err(error)) => {
                 tracing::warn!(%error, "audio import did not finish before shutdown");
@@ -828,20 +833,13 @@ fn poll_import(importing: &mut Option<ImportWorker>, events: &SyncSender<Control
         Ok(Ok(manifest)) if manifest.status == meeting::MeetingStatus::Complete => {
             // An imported file with no speech leaves nothing to keep, exactly
             // as an empty recording does; notes never run for it.
-            match meeting::discard_if_empty(&manifest) {
-                Ok(true) => {
-                    let _ = events.send(ControllerEvent::ImportFailed {
-                        error: format!("No speech was found in {file}."),
-                    });
-                    return;
-                }
-                Ok(false) => {}
-                Err(error) => {
-                    tracing::warn!(%error, meeting = manifest.id, "could not discard an imported meeting with no speech");
-                }
+            if !meeting::keep_or_discard(&manifest) {
+                let _ = events.send(ControllerEvent::ImportFailed {
+                    error: format!("No speech was found in {file}."),
+                });
+                return;
             }
             tracing::info!(meeting = manifest.id, "imported audio was transcribed");
-            meeting::finished_events::publish(&manifest.id);
             if meeting::notes_wanted() {
                 start_notes(manifest.id, events);
             }

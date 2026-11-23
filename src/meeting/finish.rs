@@ -53,6 +53,24 @@ pub(super) fn discard_if_empty_in(
     Ok(true)
 }
 
+/// A completed meeting's fate at the end of its final pass: an empty one goes
+/// to the Trash, and a kept one publishes its finished event. Returns whether
+/// it was kept, so a caller can show that result. A meeting that is not
+/// Complete is left alone and not announced. Notes are the caller's business.
+pub(crate) fn keep_or_discard(manifest: &MeetingManifest) -> bool {
+    match discard_if_empty(manifest) {
+        Ok(true) => return false,
+        Ok(false) => {}
+        Err(error) => {
+            tracing::warn!(%error, meeting = manifest.id, "could not discard a meeting with no speech");
+        }
+    }
+    if manifest.status == MeetingStatus::Complete {
+        super::finished_events::publish(&manifest.id);
+    }
+    true
+}
+
 /// Transcribes a meeting whose audio is complete, with the folder's lock
 /// held. A failure while quitting keeps `final.pending` and
 /// leaves it Interrupted for the next launch; any other failure keeps the

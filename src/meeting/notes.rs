@@ -971,8 +971,8 @@ fn summarize_with(
             write_manifest(directory, &manifest)?;
             Ok(manifest)
         }
-        // The excerpt can come out empty even with entries (a tiny budget):
-        // nothing to summarize is not a notes failure.
+        // Defensive fallback: `has_speech` returned above for a transcript
+        // with no lines, and `excerpt` yields "[…]" for any line.
         Ok(None) => {
             manifest.notes_error = None;
             write_manifest(directory, &manifest)?;

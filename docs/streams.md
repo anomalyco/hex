@@ -248,8 +248,8 @@ start a new one. `hex-quitting` means Hex quit.
 
 Not part of `/streams`, but on the same local API with the same discovery
 and bearer token. Code: `src/local_api/meeting_events.rs`
-(route) and `src/meeting/finished_events.rs` (the hub the recorder publishes
-to).
+(route) and `src/meeting/finished_events.rs` (the hub). The watcher, import,
+and recovery paths publish once a Complete meeting is kept.
 
 Server-sent events with `: keep-alive` comments every 15 s. Once per meeting,
 after its final transcript and Markdown are written and its manifest reads
