@@ -13,7 +13,7 @@ pub(super) enum ModelSlot {
     #[allow(dead_code)]
     Empty,
     /// A model is loaded on the worker thread.
-    Loaded { model: Model, streams: bool },
+    Loaded { model: Box<Model>, streams: bool },
     /// Unloaded for idleness (Labs › Free memory when idle) or about to reload
     /// in place: still counts as held so callers never load a second copy, and
     /// reloads before the next command that needs it.
@@ -32,7 +32,10 @@ pub(super) enum ModelSlot {
 impl ModelSlot {
     pub(super) fn loaded(model: Model) -> Self {
         let streams = model.stream_options().is_some();
-        Self::Loaded { model, streams }
+        Self::Loaded {
+            model: Box::new(model),
+            streams,
+        }
     }
 
     pub(super) fn parked(selection: TranscriptionSelection) -> Self {
@@ -42,14 +45,14 @@ impl ModelSlot {
 
     pub(super) fn model(&self) -> Option<&Model> {
         match self {
-            Self::Loaded { model, .. } => Some(model),
+            Self::Loaded { model, .. } => Some(model.as_ref()),
             Self::Empty | Self::Parked { .. } | Self::ReloadFailed { .. } => None,
         }
     }
 
     pub(super) fn model_mut(&mut self) -> Option<&mut Model> {
         match self {
-            Self::Loaded { model, .. } => Some(model),
+            Self::Loaded { model, .. } => Some(model.as_mut()),
             Self::Empty | Self::Parked { .. } | Self::ReloadFailed { .. } => None,
         }
     }

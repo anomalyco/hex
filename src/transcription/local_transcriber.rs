@@ -969,7 +969,7 @@ enum SwapState {
     /// idle so it can swap in.
     Ready {
         selection: TranscriptionSelection,
-        transcriber: LocalTranscriber,
+        transcriber: Box<LocalTranscriber>,
     },
     /// Loading beside the running model found the GPU full: waiting for the
     /// listener to go idle so the engine can drop its model and reload
@@ -1069,7 +1069,7 @@ impl ModelSwap {
         } else {
             self.state = SwapState::Ready {
                 selection,
-                transcriber,
+                transcriber: Box::new(transcriber),
             };
         }
     }
@@ -1263,7 +1263,7 @@ impl ModelSwap {
         };
         self.loaded = selection;
         self.device = transcriber.preference;
-        Some(transcriber)
+        Some(*transcriber)
     }
 
     /// Starts an in-place engine reload when the GPU had no room for two
