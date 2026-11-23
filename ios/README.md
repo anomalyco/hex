@@ -986,10 +986,11 @@ never at a launch by itself.
     letters), Two-language dictation,
     Clean up with Apple Intelligence, Adaptive touch (its status and Reset touch learning
     below the switch), German spatial autocorrect, Swipe typing in more languages, Korean
-    keyboard (두벌식), Dvorak punctuation keys, Comma and period keys, Quick accents, Emoji
-    shortcodes, ABC under the emoji key, Keyboard themes (its Theme menu below the switch
-    while it's on), Two-thumb selection, Delete swiped words letter by letter, Hide word
-    suggestions, Join the keyboard when unfolded, and Multilingual model (Parakeet).
+    keyboard (두벌식), Arabic keyboard (العربية), Dvorak punctuation keys, Comma and period
+    keys, Quick accents, Emoji shortcodes, ABC under the emoji key, Keyboard themes (its Theme
+    menu below the switch while it's on), Two-thumb selection, Delete swiped words letter by
+    letter, Hide word suggestions, Join the keyboard when unfolded, and Multilingual model
+    (Parakeet).
 
   Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
   added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -1330,6 +1331,30 @@ never at a launch by itself.
   the experiment off the language isn't listed, Automatic never picks it, and a stored "ko" is
   ignored. Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,
   `KoreanKeyboardGatingTests`): no CI compiles the iOS targets and no device run checks it.
+  **العربية (Arabic):** Settings › Experiments › Arabic keyboard (off by default,
+  `experiments.arabicKeyboard`) adds العربية to the same list, read from Apple's own iPhone
+  and iPad keyboards (iOS 26.5 simulator, `AppleKeyboards ar@sw=Arabic`). On iPhone the rows
+  are ض ص ث ق ف غ ع ه خ ح ج / ش س ي ب ل ا ت ن م ك ة / ء ظ ط ذ د ز ر و ى, drawn left to
+  right as Apple shows them, with no shift key: Arabic writes without letter case, so nothing
+  auto-capitalizes and a period starts no capital. Row 3's nine letters keep their width and
+  leave Apple's gap before delete. iPad uses the same top two rows and the nine letters plus
+  the Arabic comma, with no shift. Holds match Apple's callouts: ا → أ إ آ, ي and ى → ئ,
+  و → ؤ, ه → ة, ء → أ إ ؤ ئ, and ل → لا. A harakat key sits between space and return on both
+  device classes' letters pages: tapping types fathatan, and its callout offers ً ٌ ٍ َ ُ ِ ّ ْ
+  ٖ ٰ ٓ. Hex presents them in its normal accent bubble above the key, while Apple draws a
+  full-width strip of dotted circles; the marks are the same. The 123 page types the Eastern
+  Arabic digits ١٢٣٤٥٦٧٨٩٠ with ، ؟ ! ’ and ؛; the iPhone #+= page keeps Latin , and ? and ends
+  in ’. iPad's 123 rows are ! @ # $ % ^ & * ( ) ؟ and . | / = + … : ؛ ،, and its #+= rows are
+  [ ] € £ ~ _ { } < > ? and % • \ , ’ ’ ” ; ,. Its page keys read ١٢٣ and أبج. Remaining
+  differences: Hex's bottom row keeps its globe, Hex, emoji and hide keys where Apple shows
+  dictation and a second page key, and Hex's iPad accent callouts use its own bubble and cell
+  geometry. It reports input language `ar-SA`, has no spelling dictionary, autocorrect,
+  suggestions, typing model or bilingual partner, and no accent restorations or accent
+  suggestions; the apostrophe and quotation keys keep Hex's default English curly quotes, which
+  Arabic letters never see. With the experiment off, العربية is not listed, Automatic never
+  picks it (an Arabic dictation language falls back to English), and a stored "ar" is ignored.
+  Unit tests only (`ArabicKeyboardTests`): no CI compiles the iOS targets and no device run
+  checks it.
 - **Layout per language (Settings › Keyboard › Languages › Layout):** each language the keys
   show (every chosen one, Automatic's while none is, and only the first of English and
   Español together) gets a menu of the layouts Apple's Keyboard Layout list offers for it
@@ -1735,10 +1760,13 @@ never at a launch by itself.
   40 pt) and moves by the offset to the nearest position, a 👍🏽 in one step. The field shares
   only the cursor's sentence or line and a little before it, so at that text's edge the cursor
   waits for the host to show more, and past its first or last line it steps just past it in
-  one move, which the host makes only if there's text there. The keys blank to keycaps 60%
-  of the way to the backdrop, as Apple's, with no haptic while it moves. Apple's second-finger
-  tap to select text has no host counterpart: `UITextDocumentProxy` (iOS 27.2 SDK) can read the
-  selection but not make one. Off (the default), a second finger does nothing. Settings ›
+  one move, which the host makes only if there's text there. In an Arabic run its UTF-16
+  offsets are logical, so the cursor steps through the run's characters in writing order
+  rather than its right-to-left display order: a known limit, not a bidi-aware cursor. The
+  keys blank to keycaps 60% of the way to the backdrop, as Apple's, with no haptic while it
+  moves. Apple's second-finger tap to select text has no host counterpart:
+  `UITextDocumentProxy` (iOS 27.2 SDK) can read the selection but not make one. Off (the
+  default), a second finger does nothing. Settings ›
   Experiments › Two-thumb selection (off by default, `experiments.twoThumbSelection`, App Group)
   gives it one: while the space bar is the trackpad, a second finger starts a selection from
   the cursor, and the finger further left moves the start of the range, the other the end, each
@@ -2219,6 +2247,7 @@ dataset's download and its `convert.py` command.
   space-bar label, pairing, migration, the dictation pick, English & Spanish's keys,
   dictation following the keyboard, Spanish's Americas variants and the iPhone's Region),
   `HangulComposerTests` the two-set composer and the keyboard typing through it,
+  `ArabicKeyboardTests` العربية's rows, holds, punctuation and experiment gating,
   `FullKeyboardEngineTests` the swipe against the
   hold-then-slide trackpad and switching in a `FullKeyboardView` (English & Spanish too,
   and a picked Spanish variant surviving the swipe away and back), and

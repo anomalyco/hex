@@ -2910,11 +2910,11 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   `AppleSpeechAssetReservationsTests`); no physical iPhone run checks either deadline.
 ├── Experiments: Full keyboard, Apple Intelligence cleanup, Custom vocabulary,
 │   Hinglish, Greeklish, Two-language dictation, Adaptive touch, German spatial autocorrect,
-│   Swipe typing in more languages, Korean keyboard (두벌식), Dvorak punctuation keys, Comma
-│   and period keys, Quick accents, Emoji shortcodes, ABC under the emoji key, Keyboard
-│   themes (Black, White, Navy, Forest, Ember), Two-thumb selection, Delete swiped words
-│   letter by letter, Hide word suggestions, Join the keyboard when unfolded, Learn each
-│   language separately
+│   Swipe typing in more languages, Korean keyboard (두벌식), Arabic keyboard (العربية),
+│   Dvorak punctuation keys, Comma and period keys, Quick accents, Emoji shortcodes, ABC
+│   under the emoji key, Keyboard themes (Black, White, Navy, Forest, Ember), Two-thumb
+│   selection, Delete swiped words letter by letter, Hide word suggestions, Join the
+│   keyboard when unfolded, Learn each language separately
 ├── Full keyboard's languages (Settings › Keyboard › Languages, with Full chosen): one or
 │   more layouts, the space bar names the current one and a slide switches letters, accents
 │   and autocorrect, and the input mode reports the language typing
@@ -2950,6 +2950,30 @@ iOS prototype (`HEXMobile`) -> Record/transcribe/copy and keyboard handoff
 │   Unit tests only (`HangulComposerTests`, `HangulKeyboardTests`,
 │   `KoreanKeyboardGatingTests`): no CI compiles the iOS targets, and no physical iPhone run
 │   checks it
+├── Arabic keyboard (العربية) (off by default, `experiments.arabicKeyboard`): Settings ›
+│   Experiments adds العربية to Settings › Keyboard › Languages, typed on Apple's own
+│   keyboards (read on the iOS 26.5 simulator with `AppleKeyboards ar@sw=Arabic`). On iPhone
+│   the rows are ض ص ث ق ف غ ع ه خ ح ج / ش س ي ب ل ا ت ن م ك ة / ء ظ ط ذ د ز ر و ى, drawn
+│   left to right as Apple shows them, with no shift key: Arabic has no letter case, so
+│   nothing auto-capitalizes and a period starts no capital. Row 3's nine letters keep their
+│   width and leave Apple's gap before delete. The iPad rows are the same top two and the same
+│   nine letters plus the Arabic comma, with no shift. Holds match Apple's callouts: ا → أ إ آ,
+│   ي and ى → ئ, و → ؤ, ه → ة, ء → أ إ ؤ ئ, and ل → لا. A harakat key sits between space and
+│   return (iPhone and iPad letters pages): tapping types fathatan, and its callout offers the
+│   eleven marks ً ٌ ٍ َ ُ ِ ّ ْ ٖ ٰ ٓ. Hex opens its normal accent bubble for them, while
+│   Apple draws a full-width strip of dotted circles: the marks are the same, the presentation
+│   differs. The 123 page types the Eastern Arabic digits ١٢٣٤٥٦٧٨٩٠ and uses ، ؟ ! ’ and ؛
+│   (its ’ and ” are Apple's curly marks); the iPhone #+= page keeps Latin , and ? and ends in ’.
+│   The iPad's 123 rows are ! @ # $ % ^ & * ( ) ؟ and . | / = + … : ؛ ،, and its #+= rows are
+│   [ ] € £ ~ _ { } < > ? and % • \ , ’ ’ ” ; ,. Its page keys read ١٢٣ and أبج. Hex's iPad
+│   bottom row keeps its globe, Hex, emoji and hide keys where Apple has its dictation and
+│   second page key, and the docked iPad's page rows use Hex's key geometry. It reports input
+│   language ar-SA, has no spelling dictionary, autocorrect, suggestions or typing model, and no
+│   bilingual partner. While the experiment is off it is not listed, Automatic never picks it
+│   (an Arabic dictation language falls back to English), and a stored "ar" is ignored. Known
+│   limit: the space bar's trackpad moves the cursor by logical character order, not visual
+│   bidi order, in Arabic runs. Unit tests only (`ArabicKeyboardTests`): no CI compiles the iOS
+│   targets, and no physical iPhone run checks it
 ├── German spatial autocorrect (off by default, `experiments.germanSpatialAutocorrect`):
 │   with Spatial autocorrect on too, the Deutsch layout reads taps with the German
 │   model Android ships (`ios/HEXKeyboard/TypingModel/de.hextm`, the same v3 file

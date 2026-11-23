@@ -440,8 +440,9 @@ final class AccentCalloutView: UIView {
                 context.restoreGState()
             }
             let attributes: [NSAttributedString.Key: Any] = [.font: Self.font, .foregroundColor: palette.textBase]
-            let size = (option as NSString).size(withAttributes: attributes)
-            (option as NSString).draw(
+            let display = KeyboardLanguage.calloutDisplay(option)
+            let size = (display as NSString).size(withAttributes: attributes)
+            (display as NSString).draw(
                 at: CGPoint(x: cell.midX - size.width / 2, y: cell.midY - size.height / 2),
                 withAttributes: attributes
             )
@@ -490,8 +491,9 @@ final class AccentCalloutView: UIView {
                 .font: UIFont.systemFont(ofSize: optionFontSize, weight: isSelected ? .medium : .regular),
                 .foregroundColor: isSelected ? UIColor.white : palette.textBase,
             ]
-            let size = (option as NSString).size(withAttributes: attributes)
-            (option as NSString).draw(
+            let display = KeyboardLanguage.calloutDisplay(option)
+            let size = (display as NSString).size(withAttributes: attributes)
+            (display as NSString).draw(
                 at: CGPoint(x: cell.midX - size.width / 2, y: cell.midY - size.height / 2),
                 withAttributes: attributes
             )
