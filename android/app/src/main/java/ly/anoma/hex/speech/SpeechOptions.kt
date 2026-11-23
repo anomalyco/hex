@@ -45,6 +45,11 @@ internal enum class DictationLanguage(val code: String, val label: String, val l
     }
 }
 
+/** The layout whose typing model the keyboard reads: the one pinned in Keyboard › Keyboard layout, else the
+ * dictation language's own. Null when the keys are only English's stand-in for a language with no layout
+ * (Português, Nederlands, Polski, Русский): English's next words and autocorrections are not that language's. */
+internal fun typingLayout(pinned: Spoken?, spoken: DictationLanguage): Spoken? = pinned ?: spoken.layout
+
 internal data class SpeechOptions(val style: Style, val spoken: DictationLanguage, val clean: Boolean, val translate: Boolean,
                                    val lowercase: Boolean = false, val endWithPeriod: Boolean = true,
                                    val formatLists: Boolean = false, val spokenPunctuation: Boolean = false,

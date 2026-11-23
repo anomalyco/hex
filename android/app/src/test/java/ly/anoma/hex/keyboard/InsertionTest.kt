@@ -23,6 +23,7 @@ import ly.anoma.hex.speech.SpokenPunctuation
 import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.speech.SpeechOptions
 import ly.anoma.hex.speech.Style
+import ly.anoma.hex.speech.typingLayout
 
 class InsertionTest {
     @Test fun replacesASelectedWordWithoutJoiningItsNeighbours() {
@@ -534,6 +535,19 @@ class InsertionTest {
         assertEquals("Warszawa jest", SpokenText.continuing("Warszawa jest", "i", "pl"))
         assertEquals("это мой", SpokenText.continuing("Это мой", "и", "ru"))
         assertEquals("Москва большая", SpokenText.continuing("Москва большая", "и", "ru"))
+    }
+    @Test fun aDictationLanguageWithoutItsOwnLayoutHasNoTypingModel() {
+        // Português keeps English's keys and accents, but its typing model would be English's: until a
+        // layout is pinned, English's word list only stands in for the keys' geometry and your own words.
+        assertEquals(null, typingLayout(null, DictationLanguage.Portuguese))
+        assertEquals(null, typingLayout(null, DictationLanguage.Dutch))
+        assertEquals(null, typingLayout(null, DictationLanguage.Polish))
+        assertEquals(null, typingLayout(null, DictationLanguage.Russian))
+        // A pinned Keyboard › Keyboard layout has its own model whatever is dictated.
+        assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Portuguese))
+        assertEquals(Spoken.English, typingLayout(Spoken.English, DictationLanguage.Dutch))
+        assertEquals(Spoken.Spanish, typingLayout(null, DictationLanguage.Spanish))
+        assertEquals(Spoken.French, typingLayout(Spoken.French, DictationLanguage.Spanish))
     }
     // Batch 3 (Rollover, holds, field kinds). These belong in a KeyboardTouchTest once new test files are agreed.
     @Test fun overlappingKeysTypeInTheOrderTheyWentDown() {
