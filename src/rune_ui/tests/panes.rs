@@ -2873,6 +2873,49 @@ fn the_labs_store_filters_by_tab_chip_and_search() {
     assert!(rt.find("lab-card-live-text").is_none());
 }
 
+/// Turning a lab on grows the Turned on tab's count. The tabs must keep their
+/// size and place anyway: they sit at the header's end, so a tab that widened
+/// would slide the whole control left, out from under the pointer that just
+/// pressed a switch. Digits differ in width, so a two-digit count needs the
+/// room of the widest one.
+#[test]
+fn the_labs_tabs_keep_their_place_as_the_count_grows() {
+    let mut rt = runtime("mac-labs", true, (980.0, 4000.0));
+    let tabs = |rt: &Runtime<Ui>| element(rt, "labs-tab").rect;
+    let count = |rt: &Runtime<Ui>| {
+        let label = element(rt, "labs-tab/segment1/label").text.clone().unwrap();
+        label
+            .chars()
+            .rev()
+            .take_while(char::is_ascii_digit)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect::<String>()
+            .parse::<usize>()
+            .unwrap()
+    };
+    let place = tabs(&rt);
+    let mut counts = vec![count(&rt)];
+    for feature in crate::labs::Feature::ALL {
+        if counts.last().copied().unwrap_or_default() >= 12 {
+            break;
+        }
+        rt.update(|ui, _| feature.set(&mut ui.settings, true));
+        refresh(&mut rt);
+        let now = count(&rt);
+        if counts.last() == Some(&now) {
+            continue; // a lab this build does not list
+        }
+        counts.push(now);
+        assert_eq!(tabs(&rt), place, "the count going to {now} moved the tabs");
+    }
+    assert!(
+        counts.iter().any(|count| *count >= 12),
+        "the fixture turns twelve labs on: {counts:?}"
+    );
+}
+
 #[test]
 fn the_labs_search_clear_button_empties_the_field_and_brings_every_card_back() {
     let mut rt = runtime("mac-labs", true, (980.0, 4000.0));

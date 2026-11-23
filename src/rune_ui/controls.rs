@@ -629,6 +629,44 @@ pub(super) fn segmented_tx(
         .role("segmented")
 }
 
+/// The inset either side of a segment's label, as `SegmentedControl` pads it.
+const SEGMENT_PX: f32 = 12.0;
+
+/// How wide a segment's label draws: its text at the segment's font, the
+/// kit's UI text (a line height takes no width).
+pub(super) fn segment_label_width(p: Paint, label: &str) -> f32 {
+    rune::text::measure(label, &[], p.k.ty.ui, None).0
+}
+
+/// A [`segmented_tx`] that keeps the room the widest label a segment may ever
+/// show needs: `reserved` holds one such label per segment. A control whose
+/// labels count something (`Turned on · 3`) then stays the same size as the
+/// count changes, so it never moves and a tab never slides out from under the
+/// pointer that is about to press it.
+pub(super) fn segmented_reserved_tx(
+    p: Paint,
+    key: &str,
+    labels: &[&str],
+    reserved: &[&str],
+    selected: usize,
+    pick: impl Fn(&mut Ui, usize, &mut Tx) + Clone + 'static,
+) -> El {
+    debug_assert_eq!(labels.len(), reserved.len(), "one reservation per segment");
+    let widest = labels
+        .iter()
+        .zip(reserved)
+        .map(|(label, reserve)| segment_label_width(p, label).max(segment_label_width(p, reserve)))
+        .fold(0.0_f32, f32::max);
+    let segments = labels.len().max(1) as f32;
+    SegmentedControl::new(labels, Some(selected))
+        // Rounded up, so the kit's own layout never has to truncate a label.
+        .width(Some((widest + 2.0 * SEGMENT_PX).ceil() * segments))
+        .on_pick(pick)
+        .build(p.k)
+        .key(key)
+        .role("segmented")
+}
+
 /// One choice of a [`select`].
 pub(super) struct Choice {
     pub(super) label: String,
