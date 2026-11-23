@@ -575,12 +575,24 @@ fn a_section_holds_its_chapters_turns_as_markdown() {
     assert_eq!(chapter_entries(&entries, &chapters, 1).len(), 2);
     assert!(chapter_entries(&entries, &chapters, 2).is_empty());
     assert_eq!(
-        section_markdown(&chapters[0], &chapter_entries(&entries, &chapters, 0)),
+        section_markdown(
+            &chapters[0],
+            &chapter_entries(&entries, &chapters, 0),
+            false
+        ),
         "## Image storage\n\nWhere images live.\n\n**Them** · 00:00\nWhere do images live?\n\n**You** · 01:00\nIn the bucket."
     );
     assert_eq!(
-        section_markdown(&chapters[1], &chapter_entries(&entries, &chapters, 1)),
+        section_markdown(
+            &chapters[1],
+            &chapter_entries(&entries, &chapters, 1),
+            false
+        ),
         "## Motion lint\n\n**Them** · 03:20\nNow the lint rules.\n\n**You** · 03:50\nThey flag snaps."
+    );
+    assert_eq!(
+        section_markdown(&chapters[1], &chapter_entries(&entries, &chapters, 1), true),
+        "## Motion lint\n\n**Speaker** · 03:20\nNow the lint rules.\n\n**Speaker** · 03:50\nThey flag snaps."
     );
 }
 

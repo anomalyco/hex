@@ -409,7 +409,7 @@ fn meeting_live_replay() {
     // Readers treat the transcript as published once both files exist.
     fs::write(
         directory.join("transcript.md"),
-        transcript_markdown(&final_entries),
+        live_transcript_markdown(&final_entries),
     )
     .unwrap();
     let through = seconds * 1_000;
@@ -465,13 +465,17 @@ fn meeting_live_replay() {
     fs::write(report.join("summary.txt"), &summary).unwrap();
     fs::write(
         report.join("mid-copy-all.md"),
-        transcript_markdown(&mid_all),
+        live_transcript_markdown(&mid_all),
     )
     .unwrap();
-    fs::write(report.join("final.md"), transcript_markdown(&final_entries)).unwrap();
+    fs::write(
+        report.join("final.md"),
+        live_transcript_markdown(&final_entries),
+    )
+    .unwrap();
     fs::write(
         report.join("reference.md"),
-        transcript_markdown(
+        live_transcript_markdown(
             &reference
                 .iter()
                 .filter(|entry| entry.end_ms <= through)

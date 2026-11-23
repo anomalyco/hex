@@ -1,7 +1,8 @@
 use super::*;
 
-/// Returns the Markdown transcript for `manifest`, preferring its exported
-/// Markdown when present and falling back to internal or live speaker turns.
+/// Returns the full Markdown document for `manifest`, reading the exported
+/// or internal Markdown file when present and otherwise rendering the same
+/// document shape from raw entries.
 pub fn transcript_markdown_for_manifest(manifest: &MeetingManifest) -> Result<String> {
     if let Some(path) = manifest.export_path.as_ref().filter(|path| path.exists()) {
         return fs::read_to_string(path)
@@ -14,18 +15,18 @@ pub fn transcript_markdown_for_manifest(manifest: &MeetingManifest) -> Result<St
     }
     let entries = TranscriptReader::default().read(&manifest.id)?;
     if !entries.is_empty() {
-        return Ok(transcript_markdown(&entries));
+        return Ok(markdown::render_document(manifest, &entries));
     }
     Err(eyre!("no meeting transcript is available"))
 }
 
 /// Returns the speaker-turn Markdown for `manifest` (without file headers),
-/// falling back to exported Markdown if raw entries are unavailable.
+/// falling back to the full Markdown document if raw entries are unavailable.
 pub fn speaker_turns_markdown_for_manifest(manifest: &MeetingManifest) -> Result<String> {
     if let Ok(entries) = TranscriptReader::default().read(&manifest.id)
         && !entries.is_empty()
     {
-        return Ok(transcript_markdown(&entries));
+        return Ok(transcript_markdown(manifest, &entries));
     }
     transcript_markdown_for_manifest(manifest)
 }

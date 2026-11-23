@@ -436,7 +436,7 @@ impl Capsule {
     fn copy_all(&mut self, tx: &mut Tx) {
         let markdown = match &self.kind {
             Some(Kind::Recording(_)) if self.live.entries.is_empty() => return,
-            Some(Kind::Recording(_)) => meeting::transcript_markdown(&self.live.entries),
+            Some(Kind::Recording(_)) => meeting::live_transcript_markdown(&self.live.entries),
             Some(Kind::Ready(manifest)) => {
                 match meeting::transcript_markdown_for_manifest(manifest) {
                     Ok(markdown) => markdown,

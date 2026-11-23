@@ -151,6 +151,12 @@ impl ActiveRecording {
     }
 }
 
+fn flush_withdrawn_offers(detector: &mut MeetingDetector, events: &SyncSender<ControllerEvent>) {
+    for id in detector.take_withdrawn_offers() {
+        let _ = events.send(ControllerEvent::OfferWithdrawn(id));
+    }
+}
+
 /// The meeting state mirrored into the menu bar.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MeetingMenuState {
@@ -202,7 +208,6 @@ pub(crate) fn controller_loop(
 
     while !shutdown.load(Ordering::Relaxed) {
         let enabled = crate::app_settings::meetings_enabled();
-        let previous_offer = detector.open_offer();
         poll_import(&mut importing, &events);
         let requested_commands = meeting_requests
             .try_iter()
@@ -249,10 +254,12 @@ pub(crate) fn controller_loop(
                 crate::app_settings::meeting_default_policy(),
             ) {
                 Err(()) => {
+                    flush_withdrawn_offers(&mut detector, &events);
                     thread::sleep(Duration::from_secs(2));
                     continue;
                 }
                 Ok(Some(Detection::Offer(candidate))) => {
+                    flush_withdrawn_offers(&mut detector, &events);
                     // Offers record by hand, which never watches a page: the
                     // call whose page named this one is not kept for it.
                     detector.take_switched_from();
@@ -261,6 +268,7 @@ pub(crate) fn controller_loop(
                     }
                 }
                 Ok(Some(Detection::Record(candidate))) => {
+                    flush_withdrawn_offers(&mut detector, &events);
                     let mut start = reminders.start_for(&candidate);
                     // Detected while the page still named the stopped call:
                     // this recording keeps that code, so the page naming it
@@ -282,11 +290,7 @@ pub(crate) fn controller_loop(
         if !enabled || recording.is_some() {
             detector.withdraw_offer();
         }
-        if let Some(id) = previous_offer
-            && detector.open_offer() != Some(id)
-        {
-            let _ = events.send(ControllerEvent::OfferWithdrawn(id));
-        }
+        flush_withdrawn_offers(&mut detector, &events);
         thread::sleep(Duration::from_millis(500));
     }
 

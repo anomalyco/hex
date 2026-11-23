@@ -15,7 +15,6 @@ use crate::desktop::events::now_ms;
 use crate::durable::{lock_contended, sync_directory, sync_file};
 
 const SAMPLE_RATE: u32 = 16_000;
-const TRANSCRIPT_TURN_GAP_MS: u64 = 3_000;
 /// Beside the manifest of a meeting Hex quit while recording or during its
 /// final transcription: its audio is
 /// saved and its final transcript runs at the next launch.
@@ -60,6 +59,7 @@ pub(crate) mod generator;
 pub(crate) mod import;
 #[cfg(any(target_os = "windows", test))]
 mod loopback_route;
+mod markdown;
 pub(crate) mod mcp;
 mod notes;
 mod notes_file;
@@ -72,6 +72,7 @@ pub(crate) mod runtime;
 pub(crate) mod seen_calls;
 pub(crate) mod sweep;
 mod transcript;
+mod turn;
 mod warning;
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
 pub(crate) mod watcher;
@@ -85,6 +86,10 @@ pub use chapters::{Chapter, chapter_entries, section_markdown};
 pub use delete::DeleteRefusal;
 pub use delete::{DeleteError, TrashedMeeting, delete, trash};
 pub use delta::*;
+pub use markdown::{
+    live_transcript_markdown, render_turns_markdown, speaker_label, transcript_markdown,
+    transcript_markdown_with,
+};
 pub use notes::{MeetingNotes, display_title, notes_in_progress, notes_wanted, spawn_summary};
 #[cfg(all(debug_assertions, target_os = "macos"))]
 pub use notes::{summarize, summarize_file};
@@ -93,6 +98,7 @@ pub use recording::recording;
 pub use retention::audio_expired;
 pub use retention::{expire, expire_audio, list, retention_for};
 pub use transcript::TranscriptReader;
+pub use turn::coalesce_transcript;
 pub use warning::TrackWarning;
 
 /// What the recorder knows about a meeting when it starts.
@@ -260,11 +266,7 @@ impl MeetingManifest {
     /// What a transcript line's source is called in the user's Markdown: an
     /// imported meeting has one track, so every turn is just Speaker.
     pub fn speaker_label(&self, source: MeetingSource) -> &'static str {
-        if self.imported {
-            "Speaker"
-        } else {
-            source.label()
-        }
+        markdown::speaker_label(source, self.imported)
     }
 
     /// Where `title` came from, inferred for manifests that predate the field.
@@ -358,27 +360,6 @@ pub struct TranscriptEntry {
     pub start_ms: u64,
     pub end_ms: u64,
     pub text: String,
-}
-
-pub fn coalesce_transcript(
-    entries: impl IntoIterator<Item = TranscriptEntry>,
-) -> Vec<TranscriptEntry> {
-    let mut turns: Vec<TranscriptEntry> = Vec::new();
-    for entry in entries {
-        if let Some(turn) = turns.last_mut()
-            && turn.source == entry.source
-            && entry.start_ms.saturating_sub(turn.end_ms) <= TRANSCRIPT_TURN_GAP_MS
-        {
-            if !turn.text.ends_with(char::is_whitespace) {
-                turn.text.push(' ');
-            }
-            turn.text.push_str(entry.text.trim());
-            turn.end_ms = turn.end_ms.max(entry.end_ms);
-        } else {
-            turns.push(entry);
-        }
-    }
-    turns
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
@@ -1131,22 +1112,6 @@ pub fn notes_markdown(notes: &MeetingNotes) -> String {
         .join("\n")
         .trim()
         .to_string()
-}
-
-/// Speaker turns as Markdown, for copying.
-pub fn transcript_markdown(entries: &[TranscriptEntry]) -> String {
-    coalesce_transcript(entries.iter().cloned())
-        .into_iter()
-        .map(|turn| {
-            format!(
-                "**{}** · {}\n{}",
-                turn.source.label(),
-                format_duration(turn.start_ms),
-                turn.text.trim()
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
 }
 
 /// The exported Markdown while it is still on disk: the file the pane's
