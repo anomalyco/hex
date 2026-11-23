@@ -590,9 +590,14 @@ second time in a row (within 6 h, no model in place since) "Open Hex to download
 English.": Dictate and the Hex key then open Hex, which downloads it, until a model
 installs (in either process; Hex checks again each time it comes to the front), a
 language is chosen, or a day passes (`SpeechModelNeedsHex`,
-`settings.dictationLanguage.keyboardNeedsHex`); a move to another language keeps its
-own sentence. Coming back to Hex after it was in the background starts over a check
-that failed or never answered, and a check that gives up bumps its generation so a
+`settings.dictationLanguage.keyboardNeedsHex`). Only a language Hex itself set aside keeps
+its sentence in the keyboard ("Russian isn't available on this iPhone yet. Try English."): the
+keyboard sets nothing aside, and through TestFlight build 147 its own failed install of a
+language picked by hand on an English iPhone (Hebrew, Norwegian, German) said it wasn't
+available at every dictation and never went to Hex, which could download it. Every other
+failure is Hex's to download, Hebrew included (`SpeechModelNeedsHex.keyboardError`).
+Coming back to Hex after it was in the background starts over a check that failed or
+never answered, and a check that gives up bumps its generation so a
 late answer can't reopen the row (`KeyboardSpeechPreparation`). Reservations make room
 under `AssetInventory.maximumReservedLocales` by releasing others first. Only
 Hex's own error text reaches the app or keyboard (`HexDescribedError`); Apple's
