@@ -9,7 +9,9 @@ use rune::{El, Tx, col, el, row, text};
 use rune_kit::{Button, ButtonVariant, ControlSize, Switch, TextInput};
 
 use super::super::Ui;
-use super::super::controls::{DESCRIPTION, METRICS, Paint, PushSize, segmented_tx};
+use super::super::controls::{
+    DESCRIPTION, METRICS, Paint, PushSize, segment_label_width, segmented_reserved_tx,
+};
 use super::super::list_detail::{FOLDED, UNFOLDED};
 use super::super::lists::{Tone, tone_tag};
 use super::{Row, Tab, extras, flip, group, row_key, shown};
@@ -41,23 +43,43 @@ const GAP: f32 = 8.0;
 
 /// Discover and Turned on, at the title bar's end.
 pub(in crate::rune_ui) fn tabs(ui: &Ui, p: Paint) -> El {
-    let on = shown(ui).iter().filter(|row| row.on).count();
+    let rows = shown(ui);
+    let on = rows.iter().filter(|row| row.on).count();
     let turned_on = tr_fill("Turned on · {}", &on.to_string());
+    // Room for every count this build can reach, with its digits as wide as the
+    // widest one, so turning a lab on leaves the tabs where they are instead of
+    // pulling the tab out from under the pointer.
+    let reserved_count = tr_fill("Turned on · {}", &widest_count(p, rows.len()));
     let labels = [tr("Discover"), turned_on.as_str()];
+    let reserved = [tr("Discover"), reserved_count.as_str()];
     let selected = match ui.lab_store.tab {
         Tab::Discover => 0,
         Tab::On => 1,
     };
-    segmented_tx(
+    segmented_reserved_tx(
         p,
         "labs-tab",
         &labels,
+        &reserved,
         selected,
         |ui: &mut Ui, index: usize, tx: &mut Tx| {
             tx.settle();
             ui.lab_store.tab = if index == 0 { Tab::Discover } else { Tab::On };
         },
     )
+}
+
+/// The widest count `most` labs can show: as many digits as `most` has, each
+/// the widest digit the font draws, since digits differ in width.
+fn widest_count(p: Paint, most: usize) -> String {
+    let width = |digit: char| {
+        let mut buffer = [0; 4];
+        segment_label_width(p, digit.encode_utf8(&mut buffer))
+    };
+    let widest = ('0'..='9')
+        .max_by(|a, b| width(*a).total_cmp(&width(*b)))
+        .unwrap_or('0');
+    widest.to_string().repeat(most.to_string().len().max(1))
 }
 
 /// The page under the title bar: the chips, then the scrolling cards.
