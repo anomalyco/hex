@@ -1491,6 +1491,8 @@ const TRANSLATIONS: &[(&str, &str)] = &[
     ("A file could not be chosen.", "Impossible de choisir un fichier."),
     ("Agent tools for captures", "Outils d'agent pour les captures"),
     ("Adds hex annotate zoom, inspect, frames, and skill so coding agents can read a capture closely", "Ajoute hex annotate zoom, inspect, frames et skill pour que les agents de code lisent une capture de près"),
+    ("Stop every call recording when the call ends", "Arrêter chaque enregistrement d'appel à la fin de l'appel"),
+    ("Also stop an offered, calendar, or by-hand call recording 30 s after its call app leaves the microphone, even with Stop when the call ends off (macOS)", "Arrête aussi un enregistrement lancé depuis une proposition, le calendrier ou à la main 30 s après que son app d'appel libère le micro, même avec « Arrêter à la fin de l'appel » désactivé (macOS)"),
 ];
 
 #[cfg(test)]

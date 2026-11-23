@@ -34,6 +34,13 @@ pub fn live_chapters() -> bool {
     feature_on(Feature::LiveChapters)
 }
 
+/// Stop an offered, calendar, or by-hand call recording once its call app
+/// leaves the microphone (macOS; read as each recording's start and every
+/// controller pass while it runs).
+pub fn stop_any_call_recording() -> bool {
+    feature_on(Feature::StopAnyCallRecording)
+}
+
 /// The playground in the window.
 pub fn playground() -> bool {
     feature_on(Feature::Playground)

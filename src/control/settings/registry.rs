@@ -360,6 +360,14 @@ pub(super) const KEYS: &[Key] = &[
         "Labs: chapter meeting transcripts while recording",
     ),
     key(
+        "labs.stop_any_call_recording",
+        Kind::Bool,
+        "Labs: an offered, calendar, or by-hand call recording stops 30 s after its call app \
+         leaves the microphone and goes quiet, without Stop when the call ends, which keeps \
+         governing Always record; a recording started by hand watches the one call app on the \
+         microphone when it starts (macOS)",
+    ),
+    key(
         "labs.playground",
         Kind::Bool,
         "Labs: the scene and story browser in the window",
@@ -1068,6 +1076,7 @@ pub(super) const NEEDS: &[(&str, &str)] = &[
     ("meetings.calendar.", "calendar"),
     ("meetings.", "meetings"),
     ("labs.live_chapters", "meetings"),
+    ("labs.stop_any_call_recording", "meetings"),
     ("experimental.hex_microphone", "fun"),
     ("typed_text_hotkey", "typed_text"),
     ("show_dock_icon", "dock_icon"),

@@ -251,6 +251,10 @@ pub struct LabsSettings {
     pub copy_capture_zip: bool,
     /// Meetings offers Import audio…: a local audio file becomes a meeting (macOS).
     pub meeting_import: bool,
+    /// Meetings stops an offered, calendar, or by-hand call recording 30 s
+    /// after its call app leaves the microphone, as Always record's Stop when
+    /// the call ends does (macOS).
+    pub stop_any_call_recording: bool,
     /// With `labs.annotate_replay` on, keeps a rolling 15 s display buffer via `SCClipBufferingOutput` (macOS 27+).
     pub annotate_replay: bool,
     /// An OpenCode service running in the default WSL distribution is used
@@ -558,6 +562,7 @@ impl Default for LabsSettings {
             screenshots: false,
             copy_capture_zip: false,
             meeting_import: false,
+            stop_any_call_recording: false,
             groups: std::collections::BTreeMap::new(),
             stop_when_call_ends: None,
             meeting_descriptive_filenames: None,
