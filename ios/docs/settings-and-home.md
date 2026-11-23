@@ -11,7 +11,8 @@ Home fits one screen: the
 Hex header, one status line ("Ready" with a check, or "Finish setup · 1 step ›"),
 Dictate, and four rows that each open a short page, then **iOS Settings ↗**
 (Hex's page in iOS Settings) and **Run setup again**, and last **Privacy
-policy**, **Support** and **Acknowledgements**. Privacy policy (App Review
+policy**, **Support**, **Send feedback** (only in a build with a report key; see
+[Send feedback](#send-feedback)) and **Acknowledgements**. Privacy policy (App Review
 5.1.1(i)) and Support open in Safari inside Hex (`HexLinks`, one base URL:
 `https://dev.anoma.ly/hex` until the production site serves
 `anoma.ly/hex/privacy`). Each row has a one-line description at most. While Home or its
@@ -50,7 +51,8 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   which asks first); and a field to try the keyboard in.
 - **Privacy:** "Everything stays on this iPhone", Learn how I type (what it
   learned below the switch), and under **Advanced**, Record typing logs (off
-  by default) with its Typing logs viewer while it's on.
+  by default) with its Typing logs viewer while it's on; last, under **Feedback**, what
+  Send feedback sends and when (only in a build with a report key).
 - **Experiments**, in four groups: **Dictation**: Multilingual model (Parakeet),
   Two-language dictation, Voice isolation and Clean up with Apple Intelligence;
   **Languages**: Hinglish (Hindi in Latin letters), Greeklish (Greek in Latin letters),
@@ -62,6 +64,7 @@ list starts at the top. The pages, one file each in `HEXMobile/Settings/`
   **Typing**: Adaptive touch (its status and Reset touch learning below the switch),
   Two-thumb selection, Delete swiped words letter by letter, Hide word suggestions, Emoji
   shortcodes and Learn each language separately. 21 switches, 20 on an iPhone that doesn't fold.
+  Last, **Send feedback**, for testers to say how an experiment went (only with a report key).
 
 Simulator scenes: `--snap-state settings-home` (ready), `setup` (keyboard
 added, Full Access not confirmed yet), `setup-sheet`, `setup-sheet-microphone`
@@ -77,3 +80,48 @@ Keyboard themes on, and `--keyboard-theme automatic|black|white|navy|forest|embe
 picks the theme the full keyboard draws;
 the dictation bar keeps the system look, and iOS draws its own strip above or below
 a third-party keyboard, which a theme can't color.
+
+## Send feedback (`HEXMobile/Feedback/`)
+
+A form that sends one report to Bellhop, Anomaly's feedback inbox
+(`POST https://api.blhp.app/v1/feedback`, https://blhp.app/docs/feedback), from Home's
+**Send feedback** row (`metadata.screen` "Home") and the row at the end of Settings ›
+Experiments ("Settings › Experiments"). Only the app has it: the keyboard target has no
+feedback code or key and still makes no network request.
+
+```ts
+Send feedback (row)
+├─ draws Hex's key window (never the screen) → the form's first picture, JPEG
+└─ the form: Problem · Idea · Question · Other, subject, message, pictures (✕ removes;
+   Add opens the system photo picker, no permission, up to 5 in all), email, Send anonymously,
+   and what is sent in plain words
+   └─ Send → Idempotency-Key made now → multipart (payload JSON + screenshot parts), progress bar
+      ├─ 201 → Thanks; email "pending" → "you'll get an email if they reply, confirm once"
+      ├─ no connection / 5xx → retried (4 tries, 1 s, 2 s, 4 s), same body and key → offline words
+      ├─ 409 request_pending, 429 → after Retry-After (≤ 60 s), same key
+      ├─ 413, 415, 429 → kind words; 401, 403 feedback_disabled → "unavailable", logged as a fault
+      └─ other 4xx → not retried
+```
+
+- **Payload** (`FeedbackRequest.payload`): message, subject and category when set, app
+  (name, version, build), device (platform, os, model identifier, locale), metadata (screen,
+  dictation_language, speech_model: internal ids for the team, never shown), email when
+  given, and install_id (a random UUID in Hex's `UserDefaults`, `feedback.installID`).
+  Anonymous sends `anonymous: true` and no email or install_id. Never `user` (no accounts)
+  or `logs`, and nothing Hex keeps (typing logs, dictations, vocabulary, learned words,
+  recordings).
+- **Pictures** (`FeedbackImage`): re-encoded as JPEG at 80% with the longest side at most
+  2048 px (HEIC included). Limits are checked before sending: message 20,000 characters,
+  subject 200, 5 pictures, 10 MiB each, 20 MiB in all.
+- **Report key**: `BELLHOP_REPORT_KEY` in `HEXMobile/Feedback.xcconfig` (empty in git),
+  set by a gitignored `HEXMobile/Feedback.local.xcconfig` locally and by
+  `ci_scripts/ci_post_clone.sh` from Xcode Cloud's `BELLHOP_REPORT_KEY` secret; it reaches
+  the app as Info.plist's `BellhopReportKey`. Without one, no row shows. To rotate it, make a
+  new key and revoke the old one in Bellhop › Settings › Report keys, update the Xcode Cloud
+  secret, and ship a build: builds with the old key then say feedback is unavailable.
+- **Simulator proof** (debug builds only): `--feedback-log-request` writes each request
+  (headers without the key, the payload, each picture's bytes and pixel size) and each answer
+  to Documents/feedback-requests; `--feedback-key <key>` and `--feedback-endpoint <url>`
+  replace the key or address; `--feedback-drop-first-response` loses the first answer as a
+  dropped connection would; `--feedback-broken-image` cuts the last picture in half.
+- No unit test covers it: none of `HEXMobileTests`' files is about the app's networking.

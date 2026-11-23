@@ -1,0 +1,7 @@
+// Send feedback's Bellhop report key (https://blhp.app/docs/feedback): publishable, it can only
+// send feedback to Hex. It never goes in source: Feedback.local.xcconfig (gitignored) sets it for
+// a local build, and ci_scripts/ci_post_clone.sh writes that file on Xcode Cloud from the
+// BELLHOP_REPORT_KEY secret. Empty, Hex shows no Send feedback row. It reaches the app as
+// Info.plist's BellhopReportKey (Feedback.reportKey).
+BELLHOP_REPORT_KEY =
+#include? "Feedback.local.xcconfig"
