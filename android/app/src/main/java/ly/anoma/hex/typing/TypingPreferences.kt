@@ -28,6 +28,10 @@ internal class TypingPreferences(context: Context) {
     var haptics: Boolean
         get() = prefs.getBoolean("haptics", true)
         set(value) { prefs.edit().putBoolean("haptics", value).apply() }
+    /** Labs › Keyboard › Symbols on letter keys: a held second or third row key offers its symbol first. */
+    var letterSymbols: Boolean
+        get() = prefs.getBoolean("letterSymbols", false)
+        set(value) { prefs.edit().putBoolean("letterSymbols", value).apply() }
 
     // Remember only explicit rejection of this exact pair in this language; never save typed text.
     private fun pair(language: String, original: String, replacement: String): String {

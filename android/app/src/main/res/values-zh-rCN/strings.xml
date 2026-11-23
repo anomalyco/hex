@@ -101,8 +101,11 @@
     <string name="settings_licences">开源许可</string>
     <string name="settings_labs">实验室</string>
     <string name="labs_output">输出</string>
+    <string name="labs_keyboard">键盘</string>
     <string name="signature">签名</string>
     <string name="signature_detail">在每次听写末尾添加一行，例如“Sent from Hex”</string>
     <string name="signature_one_line">请使用一行</string>
     <string name="signature_too_long">请使用不超过 200 个字符</string>
+    <string name="letter_symbols">字母键上的符号</string>
+    <string name="letter_symbols_detail">长按字母输入符号，例如长按 m 输入 /</string>
 </resources>
