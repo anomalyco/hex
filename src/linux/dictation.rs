@@ -400,9 +400,6 @@ pub(crate) fn run(
     let mut capture_host =
         crate::capture_host::CaptureHost::start(Some(engine.clone()), &environment);
     let capture_controls = crate::capture_host::listen_for_controls();
-    // The draw shortcut started a recording: drawing turns on once its
-    // engine takes input.
-    let mut draw_pending = false;
 
     let mut events = EventLog::create(event_path)?;
     let mut audio_ready = input.is_open();
@@ -582,21 +579,10 @@ pub(crate) fn run(
             &environment,
             &timeline,
         );
-        if draw_pending && crate::capture_host::wants_input() {
-            draw_pending = false;
-            crate::capture_host::set_pen(true);
-        } else if draw_pending
-            && capture_host
-                .as_mut()
-                .is_none_or(|host| host.recording_since(&timeline).is_none())
-        {
-            // The recording never started.
-            draw_pending = false;
-        }
         while let Ok(control) = capture_controls.try_recv() {
             let reply = match (&mut capture_host, control) {
                 (Some(host), crate::capture_host::CaptureControl::Draw) => {
-                    draw_pending = host.draw_shortcut(&timeline);
+                    host.draw_shortcut(&timeline);
                     crate::control::ControlReply::done("drawing")
                 }
                 (Some(host), crate::capture_host::CaptureControl::Scrawl(action)) => {

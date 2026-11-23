@@ -40,10 +40,15 @@ struct Overlays {
 }
 
 static OVERLAYS: OnceLock<Overlays> = OnceLock::new();
-/// While the picker shows, the tap hands it Escape and Space.
-static PICKER: Mutex<picker::Picker> = Mutex::new(picker::Picker::new());
+/// Single owner of which Screenshots overlay (picker or recording toolbar) is
+/// asking for permission, loading, or shown on screen.
+static FRONT: Mutex<picker::Front> = Mutex::new(picker::Front::new());
 /// The picker's window, left out of the shot; 0 before it's made.
 static PICKER_WINDOW: AtomicU32 = AtomicU32::new(0);
+
+fn front() -> std::sync::MutexGuard<'static, picker::Front> {
+    FRONT.lock().unwrap_or_else(|error| error.into_inner())
+}
 /// The folder the last shot, recording, or editor save couldn't be written
 /// to and why, which Labs › Screenshots' card names until a save works or
 /// another folder is chosen. It keeps its own folder: the setting may have
@@ -144,11 +149,17 @@ fn open_as(record: bool, window: bool) -> bool {
     if !crate::labs::screenshots() || OVERLAYS.get().is_none() {
         return false;
     }
-    let Some(id) = PICKER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .begin(record, window)
-    else {
+    let purpose = if record {
+        picker::Purpose::Record
+    } else {
+        picker::Purpose::Shot
+    };
+    let mode = if window {
+        picker::PickMode::Window
+    } else {
+        picker::PickMode::Area
+    };
+    let Some(id) = front().begin_picker(purpose, mode) else {
         return false;
     };
     // Off the tap's thread: a fresh Screen Recording read may take a moment.
@@ -157,34 +168,36 @@ fn open_as(record: bool, window: bool) -> bool {
         .spawn(move || {
             let allowed =
                 crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_none();
-            let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
-            if !picker.permission(id, allowed) {
-                return;
+            let mut state = front();
+            match state.picker_permission(id, allowed) {
+                picker::PermissionOutcome::Stale => {}
+                picker::PermissionOutcome::Denied => {
+                    drop(state);
+                    tracing::info!("screenshot needs Screen Recording");
+                    // The helper returns here, to the picker, once it's granted:
+                    // never to Annotate's whole-screen recording.
+                    crate::capture_host::report_screenshot_permission(
+                        CaptureNeed::ScreenRecording,
+                        record,
+                    );
+                }
+                picker::PermissionOutcome::Allowed(intent) => {
+                    if let Some(overlays) = OVERLAYS.get() {
+                        overlays.picker.set_screen_label(match intent.purpose {
+                            picker::Purpose::Record => {
+                                crate::desktop::i18n::tr("Full screen · Click to record")
+                            }
+                            picker::Purpose::Shot => {
+                                crate::desktop::i18n::tr("Full screen · Click to capture")
+                            }
+                        });
+                    }
+                    show(id, Some(intent.mode.into_mode()));
+                }
             }
-            if !allowed {
-                tracing::info!("screenshot needs Screen Recording");
-                // The helper returns here, to the picker, once it's granted:
-                // never to Annotate's whole-screen recording.
-                crate::capture_host::report_screenshot_permission(
-                    CaptureNeed::ScreenRecording,
-                    record,
-                );
-                return;
-            }
-            if let Some(overlays) = OVERLAYS.get() {
-                overlays.picker.set_screen_label(if record {
-                    crate::desktop::i18n::tr("Full screen · Click to record")
-                } else {
-                    crate::desktop::i18n::tr("Full screen · Click to capture")
-                });
-            }
-            show(id, Some(if window { Mode::Window } else { Mode::Area }));
         });
     if spawned.is_err() {
-        PICKER
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .permission(id, false);
+        front().picker_permission(id, false);
     }
     spawned.is_ok()
 }
@@ -206,42 +219,26 @@ pub(crate) fn can_restore() -> bool {
 
 /// Closes the picker without a shot.
 pub(crate) fn cancel() {
-    let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(pick) = picker.active.take() {
-        show(pick.id, None);
+    let mut state = front();
+    if let Some(id) = state.cancel_picker() {
+        show(id, None);
     }
 }
 
 /// Switches the open picker between an area and a window.
 fn toggle() {
-    let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
-    if let Some(pick) = picker.active.as_mut().filter(|pick| pick.ready) {
-        pick.window = !pick.window;
-        show(
-            pick.id,
-            Some(if pick.window {
-                Mode::Window
-            } else {
-                Mode::Area
-            }),
-        );
+    let mut state = front();
+    if let Some((id, mode)) = state.picker_toggle() {
+        show(id, Some(mode.into_mode()));
     }
-}
-
-pub(crate) fn picking() -> bool {
-    PICKER
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .active
-        .is_some()
 }
 
 fn show(id: u64, mode: Option<Mode>) {
     if let Some(overlays) = OVERLAYS.get() {
         overlays.picker.set_if(mode, move || {
-            let picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
+            let state = front();
             if mode.is_some() {
-                picker.current(id)
+                state.picker_current(id)
             } else {
                 // Hide is enqueued under the same lock as every show, before
                 // a later opening can queue its show (even while it waits for permission).
@@ -257,16 +254,15 @@ fn picked(action: Action) {
     let Action::Start(target) = action else {
         return;
     };
-    let record = {
-        let mut picker = PICKER.lock().unwrap_or_else(|e| e.into_inner());
-        if !picker.active.as_ref().is_some_and(|pick| pick.ready) {
+    let purpose = {
+        let mut state = front();
+        let Some((id, purpose)) = state.picker_take() else {
             return;
-        }
-        let pick = picker.active.take().unwrap();
-        show(pick.id, None);
-        pick.record
+        };
+        show(id, None);
+        purpose
     };
-    if record {
+    if purpose == picker::Purpose::Record {
         dim::expect(target);
         let clip = crate::capture_host::CaptureControl::Command(
             crate::capture_host::CaptureCommand::Clip(target),
@@ -628,16 +624,7 @@ fn card_key(code: u16, flags: u64) -> Option<CardKey> {
     }
 }
 
-/// What's open that takes keys: the picker, the recording toolbar, or
-/// neither. While one of the toolbar's menus is open, Escape and Return are
-/// the menu's.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Open {
-    Nothing,
-    Picker,
-    Toolbar,
-    ToolbarMenu,
-}
+use picker::Open;
 
 /// The keys this took the press of, so their releases go too.
 #[derive(Default)]
@@ -674,15 +661,29 @@ impl Taken {
         let (shot, record) = (pressed(shortcuts.shot), pressed(shortcuts.record));
         let alone = key.flags & MODIFIERS == 0;
         let effect = match key.code {
-            _ if (shot || record) && open == Open::Picker => Effect::None,
-            _ if record && matches!(open, Open::Toolbar | Open::ToolbarMenu) => {
+            _ if (shot || record) && matches!(open, Open::PickerAsking | Open::Picker) => {
+                Effect::None
+            }
+            _ if record
+                && matches!(
+                    open,
+                    Open::ToolbarLoading | Open::Toolbar | Open::ToolbarMenu
+                ) =>
+            {
                 Effect::CloseToolbar
             }
-            _ if shot && matches!(open, Open::Toolbar | Open::ToolbarMenu) => Effect::None,
+            _ if shot
+                && matches!(
+                    open,
+                    Open::ToolbarLoading | Open::Toolbar | Open::ToolbarMenu
+                ) =>
+            {
+                Effect::None
+            }
             _ if shot => Effect::Begin,
             _ if record => Effect::Record,
-            ESCAPE if open == Open::Picker => Effect::Cancel,
-            ESCAPE if open == Open::Toolbar => Effect::CloseToolbar,
+            ESCAPE if matches!(open, Open::PickerAsking | Open::Picker) => Effect::Cancel,
+            ESCAPE if matches!(open, Open::ToolbarLoading | Open::Toolbar) => Effect::CloseToolbar,
             RETURN if open == Open::Toolbar && alone => Effect::RecordNow,
             SPACE if open == Open::Picker => Effect::Toggle,
             code if card && open == Open::Nothing => match card_key(code, key.flags) {
@@ -711,17 +712,7 @@ pub(crate) struct Key {
 pub(crate) fn key(key: Key) -> Take {
     static TAKEN: std::sync::Mutex<Taken> = std::sync::Mutex::new(Taken(0));
     let mut taken = TAKEN.lock().unwrap_or_else(|error| error.into_inner());
-    let open = if picking() {
-        Open::Picker
-    } else if toolbar::is_open() {
-        if crate::rune_ui::capture_capsule::toolbar::menu_open() {
-            Open::ToolbarMenu
-        } else {
-            Open::Toolbar
-        }
-    } else {
-        Open::Nothing
-    };
+    let open = front().open(crate::rune_ui::capture_capsule::toolbar::menu_open);
     if taken.0 == 0 && open == Open::Nothing && !crate::labs::screenshots() {
         return Take::No;
     }
@@ -1044,6 +1035,68 @@ mod tests {
                 false
             ),
             (Take::AfterListener, Effect::Record)
+        );
+    }
+
+    #[test]
+    fn loading_toolbar_refuses_return_and_asking_picker_refuses_space() {
+        let mut taken = Taken::default();
+        let shortcuts = Shortcuts {
+            shot: Some(HotkeyBinding::screenshot_default().runtime()),
+            record: Some(HotkeyBinding::screenshot_record_default().runtime()),
+        };
+
+        // While the toolbar is still reading permission/devices, Return must
+        // pass through rather than driving a stale overlay.
+        assert_eq!(
+            taken.decide(
+                press(RETURN, 0),
+                shortcuts,
+                Open::ToolbarLoading,
+                false,
+                false
+            ),
+            (Take::No, Effect::None)
+        );
+        // Escape and the record shortcut still cancel the in-flight open.
+        assert_eq!(
+            taken.decide(
+                press(ESCAPE, 0),
+                shortcuts,
+                Open::ToolbarLoading,
+                false,
+                false
+            ),
+            (Take::Only, Effect::CloseToolbar)
+        );
+        taken.decide(release(ESCAPE), shortcuts, Open::Nothing, false, false);
+        assert_eq!(
+            taken.decide(
+                press(23, COMMAND_SHIFT),
+                shortcuts,
+                Open::ToolbarLoading,
+                false,
+                false
+            ),
+            (Take::AfterListener, Effect::CloseToolbar)
+        );
+        taken.decide(release(23), shortcuts, Open::Nothing, false, false);
+
+        // While the picker is awaiting Screen Recording permission, Space
+        // passes through instead of toggling an invisible picker; Escape cancels.
+        assert_eq!(
+            taken.decide(press(SPACE, 0), shortcuts, Open::PickerAsking, false, false),
+            (Take::No, Effect::None)
+        );
+        assert_eq!(
+            taken.decide(
+                press(ESCAPE, 0),
+                shortcuts,
+                Open::PickerAsking,
+                false,
+                false
+            ),
+            (Take::Only, Effect::Cancel)
         );
     }
 }

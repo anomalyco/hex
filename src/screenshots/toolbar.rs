@@ -3,10 +3,10 @@
 //! starts what Record asks for.
 
 use std::sync::OnceLock;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use rune::OverlayHandle;
 
+use super::picker::ToolbarClose;
 use crate::app_settings::RecordKind;
 use crate::capture_host::{CaptureNeed, CaptureTarget};
 use crate::rune_ui::capture_capsule::toolbar::{
@@ -14,39 +14,41 @@ use crate::rune_ui::capture_capsule::toolbar::{
 };
 
 static OVERLAY: OnceLock<OverlayHandle<Toolbar>> = OnceLock::new();
-static OPEN: AtomicBool = AtomicBool::new(false);
 
 pub(super) fn install<S: 'static>(app: &mut rune::App<S>) {
     let _ = OVERLAY.set(toolbar::install(app));
 }
 
-/// Whether the toolbar shows, so the session tap gives it Escape and Return.
+/// Whether the toolbar has passed permission, been populated, and shows on
+/// screen. False while permission or devices are still loading.
 pub(super) fn is_open() -> bool {
-    OPEN.load(Ordering::Acquire)
+    super::front().toolbar_shown()
 }
 
-/// Opens the toolbar, unless it's open or Screen Recording is missing (then
-/// Annotate's permission helper shows, and returns to the picker once it's
-/// granted). Safe from any thread; true when it opens.
+/// Opens the toolbar, unless a picker or toolbar is already open/loading or
+/// Screen Recording is missing (then Annotate's permission helper shows, and
+/// returns to the picker once it's granted). Safe from any thread; true when
+/// opening starts.
 pub(super) fn open() -> bool {
     let Some(overlay) = OVERLAY.get() else {
         return false;
     };
-    if OPEN.swap(true, Ordering::AcqRel) {
+    let Some(id) = super::front().begin_toolbar() else {
         return false;
-    }
+    };
     toolbar::forget_menu();
     // Off the tap's thread: the permission and the microphones take a moment.
     let spawned = std::thread::Builder::new()
         .name("hex-record-toolbar".into())
         .spawn(move || {
             if crate::capture_host::permission_state(CaptureNeed::ScreenRecording, true).is_some() {
-                OPEN.store(false, Ordering::Release);
-                tracing::info!("recording needs Screen Recording");
-                crate::capture_host::report_screenshot_permission(
-                    CaptureNeed::ScreenRecording,
-                    true,
-                );
+                if super::front().toolbar_permission_denied(id) {
+                    tracing::info!("recording needs Screen Recording");
+                    crate::capture_host::report_screenshot_permission(
+                        CaptureNeed::ScreenRecording,
+                        true,
+                    );
+                }
                 return;
             }
             let settings = crate::app_settings::screenshot_settings();
@@ -55,7 +57,7 @@ pub(super) fn open() -> bool {
             let (displays, under) = displays();
             let handle = overlay.clone();
             overlay.update(move |s, tx| {
-                if !is_open() {
+                if !super::front().toolbar_show(id) {
                     return;
                 }
                 let names = display_names();
@@ -98,27 +100,31 @@ pub(super) fn open() -> bool {
                 }
                 handle.show();
                 tx.animated();
+                super::toolbar_level::start(handle.clone(), metered);
             });
-            super::toolbar_level::start(overlay.clone(), metered);
         });
     if spawned.is_err() {
-        OPEN.store(false, Ordering::Release);
+        super::front().toolbar_permission_denied(id);
     }
     spawned.is_ok()
 }
 
-/// Closes the toolbar. Safe from any thread.
+/// Closes the toolbar (or cancels an in-flight open). Safe from any thread.
 pub(super) fn close() {
     super::toolbar_level::stop();
-    if OPEN.swap(false, Ordering::AcqRel)
+    if super::front().close_toolbar() == ToolbarClose::ClosedShown
         && let Some(overlay) = OVERLAY.get()
     {
         overlay.hide();
     }
 }
 
-/// Return: records what the toolbar shows. Safe from any thread.
+/// Return: records what the toolbar shows once it is actually shown. Safe from
+/// any thread.
 pub(super) fn record() {
+    if !is_open() {
+        return;
+    }
     if let Some(overlay) = OVERLAY.get() {
         overlay.update(|s, _| {
             if is_open() {
