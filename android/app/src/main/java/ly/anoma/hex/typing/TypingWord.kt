@@ -198,9 +198,12 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         // An elision typed without its apostrophe ("laltro", "dellanno"): Italian and French write the
         // article against the word, so the strip offers the two joined up, as English's contractions are.
         // A whole-word decoder fix already reads the token ("diro" -> "dirò"), so the elision would only
-        // be a second guess at it; a fix that splits the token in two ("l ho") is no such reading.
-        if (autocorrect && !standIn && '\'' !in lower && (fix == null || ' ' in fix))
-            elided(lower)?.let { add(matchCase(token, it)) }
+        // be a second guess at it. A fix that splits the token must be the elision's own two words
+        // ("l ho" for "l'ho", "lho"); another reading of the letters ("non c'è" for "nonce", "la e" for
+        // "lae") is no elision at all.
+        val elision = if (autocorrect && !standIn && '\'' !in lower) elided(lower) else null
+        if (elision != null && (fix == null || fix.equals(elision.replace('\'', ' '), ignoreCase = true)))
+            add(matchCase(token, elision))
         // Your own word, completed once two letters match, before the dictionary's: a word you added is
         // likelier what you mean than a reading's runner-up ("zor" offers "Zorbex" beside the fix "or").
         if (token.length >= 2) decoder.personal?.completions(lookup(token))?.firstOrNull()?.let { add(yours(it)) }
@@ -520,13 +523,13 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
         fun previousWord(before: String) = before.trimEnd().takeLastWhile { it.isLetter() || it == '\'' || it == '\u2019' }
             .lowercase().replace('\u2019', '\'').trimEnd('\'')
         // The remainder of an elision must be one of the model's reasonably common words: its unigram
-        // cost in eighths of a nat at most this. Every remainder the junk report names ("ol", "om",
-        // "aco", "ae", "hy", "hun", "hopper", "hack", "ope", "hh") costs 99 or more; "uva" (93) and
-        // "insalata" (98) still fit.
-        private const val ELISION_REST_COST = 100
+        // cost in eighths of a nat at most this. "uva" (93) and "insalata" (98) fit; the junk report's
+        // "om" (99), "ae" (100), "ol" (104) and the rest (114 to 120) do not.
+        private const val ELISION_REST_COST = 98
         // A run-together spelling the books list ("laltro", "lanno") is read as an elision only when the
-        // word after it is much likelier: at least this many nats (about 3,600 times). It sits between
-        // the lowest wanted case ("lanno", 8.55 nats) and the highest unwanted one ("noh", 8.05).
+        // word after it is much likelier: at least this many nats, about 1,450 times, since a books cost
+        // already includes a 0.92-nat backoff. It sits between the lowest wanted case ("lanno", 8.55
+        // nats) and the highest unwanted one ("noh", 8.05).
         private const val ELISION_MARGIN = 8.2
         // The only Italian words whose h an elision takes.
         private val ITALIAN_AVERE = setOf("ho", "hai", "ha", "hanno")

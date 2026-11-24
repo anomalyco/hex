@@ -114,6 +114,24 @@ class ElisionSuggestionTest {
                 "noh" to "n'oh", "dok" to "d'ok")) fr.assertNoneOf(frKeys, typed, fake)
     }
 
+    // A split fix is only the elision's own two words ("l ho" for "l'ho"), never another reading of the
+    // same letters: "nonce" (fix "non c'è") gets no "n'once", and "lae" (fix "la e") no "l'ae".
+    @Test fun aSplitFixOffersOnlyItsOwnElision() {
+        val keys = layout("it")
+        val w = word("it")
+        w.type(keys, "nonce")
+        assertFalse("nonce -> " + w.strip(), "n'once" in w.slots())
+        assertTrue("nonce -> " + w.strip(), "non c'è" in w.slots())
+        w.type(keys, "nonche")
+        assertTrue("nonche -> " + w.strip(), "nonché" in w.slots())
+        w.type(keys, "lae")
+        assertFalse("lae -> " + w.strip(), "l'ae" in w.slots())
+        for ((typed, offered) in listOf("lho" to "l'ho", "lha" to "l'ha", "lhai" to "l'hai", "lhanno" to "l'hanno")) {
+            w.type(keys, typed)
+            assertTrue(typed + " -> " + w.strip(), offered in w.slots())
+        }
+    }
+
     // Italian elides the h of the avere forms alone; French elides its h generally.
     @Test fun italianHTakesOnlyTheAvereForms() {
         val keys = layout("it")

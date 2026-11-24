@@ -3202,26 +3202,28 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
 ├── Type a listed word in full -> keep its spelling on space or tap its literal chip
 ├── An Italian or French elision typed without its apostrophe -> while Autocorrect is on, in a word
 │   field with the it or fr model, and with no whole-word fix already reading the token ("diro" ->
-│   "dirò", so no "d'iro"), the strip offers the article and the word after it joined up: "laltro" ->
-│   "l'altro", "dellanno" -> "dell'anno", "unaltra" -> "un'altra", "lho" -> "l'ho", "lheure" ->
-│   "l'heure", "daccord" -> "d'accord". The longest elision the language has wins ("dell'anno",
-│   never "d'ellanno"), and the word after it must be one of the model's own starting with a vowel
-│   (accents and ligatures included) or an h, with a unigram cost of at most 100 eighths of a nat,
-│   about the books' 20,000 commonest words (the reported "ol", "om", "aco", "hy", "hack" and
-│   "ope" cost 99 to 120 and are no elision). Italian elides the h of ho, hai, ha and hanno alone
-│   (l'ho, l'hai, l'ha, l'hanno, never l'hotel); French elides its h generally (l'homme, l'heure).
-│   A word of the model's own list is no elision ("lago", "della", "dove", "sanno"), and a spelling
-│   only the books have as typed ("laltro", "lanno", "larte", "lheure") is read as one only when
-│   the word after it is likelier by at least 8.2 nats, about 3,600 times: "allodio" ("all'odio"),
+│   "dirò", so no "d'iro"; a fix that splits the token counts only when it is the elision's own two
+│   words, "l ho" for "l'ho", never "non c'è" for "nonce" or "la e" for "lae"), the strip offers the
+│   article and the word after it joined up: "laltro" -> "l'altro", "dellanno" -> "dell'anno",
+│   "unaltra" -> "un'altra", "lho" -> "l'ho", "lheure" -> "l'heure", "daccord" -> "d'accord". The
+│   longest elision the language has wins ("dell'anno", never "d'ellanno"), and the word after it
+│   must be one of the model's own starting with a vowel (accents and ligatures included) or an h,
+│   with a unigram cost of at most 98 eighths of a nat ("insalata" 98 and "uva" 93 fit; "om" 99,
+│   "ae" 100, "ol" 104 and the rest of the reported junk 114 to 120 do not). Italian elides the h
+│   of ho, hai, ha and hanno alone (l'ho, l'hai, l'ha, l'hanno, never l'hotel); French elides its h
+│   generally (l'homme, l'heure). A word of the model's own list is no elision ("lago", "della",
+│   "dove", "sanno"), and a spelling only the books have as typed ("laltro", "lanno", "larte",
+│   "lheure") is read as one only when the word after it is likelier by at least 8.2 nats (about
+│   1,450 times, since a books cost already includes a 0.92-nat backoff): "allodio" ("all'odio"),
 │   "sensei", "couvres", "terrance", "quantico", "noh" and "dok" are not, while a run-together
 │   spelling the books lack ("lestate", "lospedale") is read as one by the commonness rule alone.
 │   A suggestion only, never a fix of its own: space leaves the word as typed, and a decoder fix of
 │   its own ("dell'anno", "un'altra") is unchanged. With Labs > Keyboard > Smart quotes on, the
 │   strip shows the ’ and a pick inserts it.
-│   Checks: `ElisionSuggestionTest` (9: both languages' elisions, the longest prefix, the model's
-│   own words, the books' words, an accentless word the decoder fixes, junk remainders, the Italian
-│   h, English unchanged and a picked elision left as it is) and
-│   `./gradlew :app:testDebugUnitTest -x prepareSpeechModel`: 204 tests pass on 2026-11-24 on
+│   Checks: `ElisionSuggestionTest` (10: both languages' elisions, the longest prefix, the model's
+│   own words, the books' words, an accentless word the decoder fixes, junk remainders, a split fix
+│   that is not the elision, the Italian h, English unchanged and a picked elision left as it is)
+│   and `./gradlew :app:testDebugUnitTest -x prepareSpeechModel`: 205 tests pass on 2026-11-24 on
 │   OpenJDK 21 and Android SDK 36 (platform 36, build-tools 35.0.0, NDK 27.2.12479018). A throwaway
 │   scan of the shipped lists reads 63 of the 80,990 Italian and 127 of the 108,519 French
 │   .valid-only words as an elision, where the first cut read 1,809 and 2,869; the rest are mostly
@@ -3355,7 +3357,7 @@ Android keyboard -> English, Spanish, German, Bokmål, French and Italian typing
     ("laltro" -> "l’altro") show and go in with ’ too. A quote key's held alternates still type
     exactly the character they show. Off, keys, picks and dictation insert the straight characters
     they did before, and existing ’ and ” are treated like ' and " for word boundaries, spacing and
-    lookups. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 204
+    lookups. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with 205
     tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on OpenJDK 21 and Android SDK 36
     (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and nothing was
     tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
