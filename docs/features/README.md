@@ -3239,21 +3239,19 @@ Android keyboard -> English, Spanish, German and Bokmål typing assistance
     Checks: `./gradlew :app:testDebugUnitTest :app:compileDebugKotlin` (includes
     `KeyboardToolsTest`) and `python3 scripts/code-shape.py --check`; the repo has no
     Android CI. Not tried on a device or emulator.
-└── Labs > Keyboard > Smart quotes (off) -> the ' and " keys type ’ ‘ “ ” by the text before
-    the cursor: ’ after a letter, digit or closing quote, and ‘ at the field's start, after a
-    space, or after an opening bracket or quote; “ opens the same way, and ” closes after
-    anything else. A word a suggestion, autocorrection or swipe commits goes in with ’ for its
-    straight apostrophe ("don't" becomes "don’t"), and a dictation's straight quotes are placed
-    by the same rules, so pairs become “this”, ‘this’ and ‘nested “quotes”’. A quote key's held
-    alternates still type exactly the character they show, and the space a pick holds, next-word
-    suggestions, autocorrection and swipe spacing read ’ and ” as they do ' and ". Off, every
-    key, pick and dictation inserts exactly what it did before. Checks: `SmartQuotesTest` (11
-    tests: contractions, possessives, leading and closing quotes, quote pairs, nested quotes,
-    brackets, empty and already-curly text) compiled and passed with JUnit 4.13.2 on Kotlin
-    2.1.20 from the Gradle caches; `python3 scripts/code-shape.py --check`. `./gradlew
-    testDebugUnitTest` did not run here: there is no Android SDK, and the only JDK (26) is newer
-    than the wrapper's Gradle 8.11.1 supports. The repo has no Android CI; not tried on a device
-    or emulator.
+└── Labs > Keyboard > Smart quotes (off) -> in a plain-text field (not a password, email or URL
+    field, or a TYPE_NULL field such as a terminal), the ' and " keys type ’ ‘ “ ”: an opening
+    quote — ‘ or “ — at the start, after whitespace, or after an opening bracket or quote, and
+    the closing quote or apostrophe — ’ or ” — after anything else. A word a suggestion,
+    autocorrection or swipe commits goes in with ’ for its straight apostrophe ("don't" becomes
+    "don’t"), and a dictation's straight quotes are placed by the same rules, after its spacing
+    is decided, in the same plain-text fields as the keys. A quote key's held alternates still
+    type exactly the character they show. Off, keys and picks insert the straight characters
+    they did before; a long-pressed ’ or ” now joins the word before it like ' and ", and ”
+    ends a word as " does. Checks: `./gradlew :app:compileDebugKotlin :app:testDebugUnitTest` passed with
+    148 tests (including `SmartQuotesTest`'s 12) on 2026-11-24, on Temurin JDK 21 and Android
+    SDK 36 (platform 36, build-tools 35/36, NDK 27.2.12479018); the repo has no Android CI, and
+    nothing was tried on a device or emulator. `python3 scripts/code-shape.py --check` passes.
 Unmerged Windows / deferred features -> Not part of this map
 ```
 

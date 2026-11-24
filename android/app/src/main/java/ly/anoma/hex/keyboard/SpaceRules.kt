@@ -10,8 +10,9 @@ internal object SpaceRules {
     const val CLAUSE_MARKS = ",.!?;:)"
 
     /** What goes against the word before rather than after a space a pick held (iPhone Hex's joiners).
-     * The typographic quotes (Labs › Keyboard › Smart quotes) join as their straight forms do. */
-    const val JOINERS = ",.!?;:)]}'-/\"»…’”‘“"
+     * The closing typographic quote and apostrophe (Labs › Keyboard › Smart quotes) join as their
+     * straight forms do; the opening forms never do, so a long-pressed “ keeps the space before it. */
+    const val JOINERS = ",.!?;:)]}'-/\"»…’”"
 
     /** Whether ". " may replace the space that ends [before]: it follows a letter or a digit. */
     fun periodFits(before: String) = before.length >= 2 && before.last() == ' ' &&

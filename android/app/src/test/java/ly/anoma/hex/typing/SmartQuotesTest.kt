@@ -51,6 +51,14 @@ class SmartQuotesTest {
         assertEquals("\"don’t\"", SmartQuotes.word("\"don't\""))
     }
 
+    @Test fun quotesAfterTheSpacingADictationAddsStillOpen() {
+        // Dictation spaces its text before the quotes are converted, so the leading space is what the
+        // first quote follows.
+        assertEquals(" “this”", SmartQuotes.text(" \"this\"", 'a'))
+        assertEquals("\n“this”", SmartQuotes.text("\n\"this\"", 'a'))
+        assertEquals(" don’t", SmartQuotes.text(" don't", 'a'))
+    }
+
     @Test fun aWholeWordGetsOnlyApostrophes() {
         assertEquals("don’t", SmartQuotes.word("don't"))
         assertEquals("’em", SmartQuotes.word("'em"))

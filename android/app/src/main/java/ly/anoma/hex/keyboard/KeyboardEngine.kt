@@ -12,6 +12,7 @@ import ly.anoma.hex.speech.SpokenText
 import ly.anoma.hex.typing.KeyGrid
 import ly.anoma.hex.typing.KeyPoint
 import ly.anoma.hex.typing.PersonalWords
+import ly.anoma.hex.typing.SmartQuotes
 import ly.anoma.hex.typing.SpatialDecoder
 import ly.anoma.hex.typing.Suggestion
 import ly.anoma.hex.typing.SwipeReader
@@ -422,7 +423,16 @@ internal class KeyboardEngine(
 
     /** A word a pick, autocorrection or swipe commits: with Labs › Keyboard › Smart quotes on, its
      * straight apostrophes go in as ’ ("don't" becomes "don’t"). Off, it is exactly the text offered. */
-    private fun smartWord(text: String) = if (feedback.smartQuotes) SmartQuotes.word(text) else text
+    private fun smartWord(text: String) = if (smartQuotesHere()) SmartQuotes.word(text) else text
+
+    /** Whether Labs › Keyboard › Smart quotes applies at the cursor: its toggle on, in a plain text
+     * field, and not in a password, email, URL or TYPE_NULL field (a terminal), whose text must keep
+     * the straight quotes it has always taken. */
+    private fun smartQuotesHere(): Boolean {
+        if (!feedback.smartQuotes || secure) return false
+        val type = editor?.inputType ?: 0
+        return (type and InputType.TYPE_MASK_CLASS) == InputType.TYPE_CLASS_TEXT && FieldKind.of(type) == FieldKind.Text
+    }
 
     /** The space bar, tapped at [point] in [grid]'s coordinates (null off the letters page). */
     fun space(point: KeyPoint? = null, grid: KeyGrid? = null) {
@@ -449,15 +459,13 @@ internal class KeyboardEngine(
             val swap = w.textReplacement(b)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + " ")) { resetTyping(); afterSpace(now); return }
             if (feedback.autocorrect && old.isNotEmpty() && endsWith(prefix + old)) {
-                val fix = w.finish(' ', point, grid)
-                if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement)) {
-                    val fixed = smartWord(fix.replacement)
-                    if (replace(fix.original, fixed + " ")) {
-                        cancelChip()
-                        undo = Undo(lang, fix.original, fixed)
-                        if (expectedCaret >= 0) expectedCaret += fixed.length + 1 - fix.original.length
-                        w.reset(); afterSpace(now); return
-                    }
+                val fix = w.finish(' ', point, grid, ::smartWord)
+                if (fix != null && !feedback.blocked(lang, fix.original, fix.replacement) &&
+                    replace(fix.original, fix.replacement + " ")) {
+                    cancelChip()
+                    undo = Undo(lang, fix.original, fix.replacement)
+                    if (expectedCaret >= 0) expectedCaret += fix.replacement.length + 1 - fix.original.length
+                    w.reset(); afterSpace(now); return
                 }
             }
         }
@@ -475,8 +483,7 @@ internal class KeyboardEngine(
      * they type what they show. */
     fun quote(value: Char) {
         if (!target.connected) return
-        val smart = feedback.smartQuotes && !secure && FieldKind.of(editor?.inputType ?: 0) == FieldKind.Text
-        val placed = if (smart) SmartQuotes.typed(value, before().lastOrNull()) else value
+        val placed = if (smartQuotesHere()) SmartQuotes.typed(value, before().lastOrNull()) else value
         type(placed.toString())
     }
 
@@ -500,9 +507,9 @@ internal class KeyboardEngine(
             val swap = w.textReplacement(text)
             if (swap != null && replace(swap.original, smartWord(swap.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             if (feedback.autocorrect && w.token.isNotEmpty() && endsWith(prefix + w.token)) {
-                val fix = w.finish(value[0])
+                val fix = w.finish(value[0], commit = ::smartWord)
                 if (fix != null && !feedback.blocked(w.decoder.model.language, fix.original, fix.replacement) &&
-                    replace(fix.original, smartWord(fix.replacement) + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
+                    replace(fix.original, fix.replacement + value)) { resetTyping(); showPredictions(before()); inputDone(); return }
             }
         }
         resetTyping(); target.commit(value); showPredictions(if (w != null) before() else null)
@@ -599,9 +606,10 @@ internal class KeyboardEngine(
             if (model == null) SpokenText.continuing(text, before, language)
             else SpokenText.continuing(text, before, language) { model.index(it) >= 0 && (model.capitals?.percent(it) ?: -1) < 50 }
         }
-        // The same smart quotes as the keys and the strip: “this”, don’t, and ‘nested “quotes”’.
-        val dictated = if (feedback.smartQuotes) SmartQuotes.text(shaped, before?.lastOrNull()) else shaped
-        val result = dictationInsertion(dictated, before, target.after(1)?.firstOrNull(), standalone)
+        // Spacing is decided on the straight quotes, as it always was, so a dictation's spacing is
+        // unchanged: the same smart quotes as the keys and the strip then go in with their spacing.
+        val spaced = dictationInsertion(shaped, before, target.after(1)?.firstOrNull(), standalone)
+        val result = if (smartQuotesHere()) SmartQuotes.text(spaced, before?.lastOrNull()) else spaced
         if (result.isNotEmpty() && target.commit(result)) {
             continuation.record(if (signature) result else null)
             if (!secure) offerUndo(Dictated(result, target.after(16).orEmpty()))

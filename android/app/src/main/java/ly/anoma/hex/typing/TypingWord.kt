@@ -325,8 +325,11 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
      * the word before revised now that this one follows ("well see" -> "we'll see"), or both words
      * joined when the space between them was tapped for a letter ("deli ate" -> "delicate"). Null
      * leaves the text as typed. [space] is where the space bar was tapped, in [grid]'s coordinates.
+     * [commit] spells a replacement as it will actually go in (Labs › Keyboard › Smart quotes turns
+     * its apostrophes into ’), so the word kept for the next word's revision is the one inserted.
      * Call it once per space or mark, then `reset` with the text after it. */
-    fun finish(ending: Char = ' ', space: KeyPoint? = null, grid: KeyGrid? = null): Correction? {
+    fun finish(ending: Char = ' ', space: KeyPoint? = null, grid: KeyGrid? = null,
+               commit: (String) -> String = { it }): Correction? {
         val word = finished
         finished = null; pending = null
         if (standIn || token.isEmpty() || (ending == '.' && token.lowercase() in abbreviations)) return null
@@ -346,6 +349,7 @@ internal class TypingWord(val decoder: SpatialDecoder, val spatial: Boolean) {
             if (fix != null || revised != null)
                 result = Correction((if (revised != null) word!!.text + " " else "") + token, (revised?.let { "$it " } ?: "") + now)
         }
+        result = result?.let { Correction(it.original, commit(it.replacement)) }
         if (ending == ' ') remember(result, space, grid)
         return result
     }

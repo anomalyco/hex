@@ -125,5 +125,5 @@
     <string name="keyboard_tools">Keyboard tools</string>
     <string name="keyboard_tools_detail">Emoji, paste, settings and undo in the suggestion strip</string>
     <string name="smart_quotes">Smart quotes</string>
-    <string name="smart_quotes_detail">Type ’ ‘ “ ” instead of \' and ", in your writing and dictation</string>
+    <string name="smart_quotes_detail">Types ’ ‘ “ ” for \' and \"</string>
 </resources>
