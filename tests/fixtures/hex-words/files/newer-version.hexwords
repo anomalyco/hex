@@ -1,0 +1,25 @@
+{
+  "format": "hex.words",
+  "version": 2,
+  "madeBy": {
+    "app": "Hex for Mac",
+    "version": "9.0.0",
+    "build": "900"
+  },
+  "vocabulary": [
+    {
+      "term": "Hex",
+      "weight": 3
+    }
+  ],
+  "replacements": [
+    {
+      "heard": "jet hub",
+      "write": "GitHub",
+      "scope": "mail"
+    }
+  ],
+  "colors": [
+    "red"
+  ]
+}
