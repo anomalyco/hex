@@ -6,16 +6,27 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.database.ContentObserver
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.UserDictionary
 import java.util.concurrent.Executors
 import android.inputmethodservice.InputMethodService
+import android.util.Size
+import android.util.TypedValue
 import android.view.View
 import android.view.inputmethod.EditorInfo
+import android.view.inputmethod.InlineSuggestionsRequest
+import android.view.inputmethod.InlineSuggestionsResponse
 import android.view.inputmethod.InputMethodManager
 import android.view.inputmethod.InputMethodSubtype
+import android.widget.inline.InlinePresentationSpec
+import androidx.autofill.inline.UiVersions
+import androidx.autofill.inline.common.TextViewStyle
+import androidx.autofill.inline.v1.InlineSuggestionUi
+import kotlin.math.roundToInt
 import ly.anoma.hex.MainActivity
 import ly.anoma.hex.R
 import ly.anoma.hex.speech.LocalSpeech
@@ -92,6 +103,7 @@ class HexKeyboard : InputMethodService() {
         if (key == TypingPreferences.EMOJI_SUGGESTIONS) engine.emojiSuggestionsChanged()
         if (key == TypingPreferences.KEYBOARD_TOOLS) { engine.keyboardToolsChanged(); watchClipboard() }
         if (key == TypingPreferences.VOICE_ONLY) modeChanged()
+        if (key == TypingPreferences.PASSWORD_MANAGER_SUGGESTIONS) clearInline()
     }
     // The strip's Paste tool comes and goes with the clipboard (Labs › Keyboard › Keyboard tools): the
     // listener exists only while the lab is on and the input view is shown.
@@ -167,6 +179,8 @@ class HexKeyboard : InputMethodService() {
         super.onStartInput(attribute, restarting)
         typeChanged = restarting && fieldType != attribute.inputType to attribute.imeOptions
         fieldType = attribute.inputType to attribute.imeOptions
+        // The new field's own answer has not come yet (one for the old field must not keep its chips).
+        if (!restarting) inlineAnswered = false
         nextEnglish = null
         capture.cancel() // Even a different field in the same app must not receive an old result.
         engine.startInput(attribute)
@@ -185,6 +199,9 @@ class HexKeyboard : InputMethodService() {
             return
         }
         view?.cancelGestures()
+        // A new field starts with no chips: Android asks its service again if it has any for it.
+        // A response for the field may arrive before its view starts, and those chips stay.
+        if (!restarting && !inlineAnswered) clearInline()
         // Another type in the same box: back to its keys, as a new field opens (configureTyping draws them).
         if (typeChanged) view?.closeMenu(configure = false)
         engine.configureTyping()
@@ -198,6 +215,66 @@ class HexKeyboard : InputMethodService() {
                                    candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd, candidatesStart, candidatesEnd)
         engine.updateSelection(oldSelStart, oldSelEnd, newSelStart, newSelEnd)
+    }
+
+    // Android 11's inline autofill suggestions (Labs › Keyboard › Password manager suggestions): the
+    // service builds the chips and fills the field when one is tapped; Hex asks for them and lays
+    // them out, and never reads one. Off, no request is made, so the system's own autofill dropdown
+    // is exactly as before.
+    /** A response's inflation still running when the strip moves on is dropped, not shown late. */
+    private var inlineGeneration = 0
+    /** The strip's inline chips go: a new field, the keyboard hiding, or the lab turning off. */
+    private fun clearInline() {
+        inlineGeneration++
+        view?.inlineSuggestions(emptyList())
+    }
+    override fun onCreateInlineSuggestionsRequest(uiExtras: Bundle): InlineSuggestionsRequest? {
+        if (!InlineAutofill.requests(feedback.passwordManagerSuggestions)) return null
+        val density = resources.displayMetrics.density
+        val strip = (if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+            KeyboardMetrics.STRIP_LANDSCAPE else KeyboardMetrics.STRIP) * density
+        val height = InlineAutofill.chipHeight(strip.roundToInt(), density)
+        val widths = InlineAutofill.chipWidths(density)
+        // Password managers draw their own chip only when the style bundle carries the androidx
+        // UiVersions they know; its text follows the strip's.
+        val style = InlineSuggestionUi.newStyleBuilder()
+            .setTitleStyle(TextViewStyle.Builder().setTextColor(getColor(R.color.ink))
+                .setTextSize(TypedValue.COMPLEX_UNIT_SP, 14f).build())
+            .setSubtitleStyle(TextViewStyle.Builder().setTextColor(getColor(R.color.quiet))
+                .setTextSize(TypedValue.COMPLEX_UNIT_SP, 12f).build())
+            .build()
+        val spec = InlinePresentationSpec.Builder(Size(widths.first, height), Size(widths.last, height))
+            .setStyle(UiVersions.newStylesBuilder().addStyle(style).build())
+            .build()
+        return InlineSuggestionsRequest.Builder(listOf(spec))
+            .setMaxSuggestionCount(InlineAutofill.MAX)
+            .build()
+    }
+    /** The field has had Android's answer, so chips seen when its view starts are its own. */
+    private var inlineAnswered = false
+    /** The service's answer, shown in its order with pinned ones last. A tap lets Android fill the
+     * field; Hex never reads a login, a code or a card, and an empty answer clears the row. */
+    override fun onInlineSuggestionsResponse(response: InlineSuggestionsResponse): Boolean {
+        if (!InlineAutofill.requests(feedback.passwordManagerSuggestions)) return false
+        inlineAnswered = true
+        val strip = view ?: return false
+        val suggestions = response.inlineSuggestions
+        val ordered = InlineAutofill.ordered(suggestions.map { it.info.isPinned })
+        if (ordered.isEmpty()) { clearInline(); return true }
+        val generation = ++inlineGeneration
+        // Inflated in Android's order, then placed where the order puts them; a suggestion the
+        // service can't draw arrives as null and is left out.
+        val views = arrayOfNulls<View>(ordered.size)
+        var waiting = ordered.size
+        for ((at, index) in ordered.withIndex()) {
+            val suggestion = suggestions[index]
+            suggestion.inflate(this, suggestion.info.inlinePresentationSpec.maxSize, mainExecutor) { content ->
+                if (generation != inlineGeneration || view !== strip) return@inflate
+                views[at] = content
+                if (--waiting == 0) strip.inlineSuggestions(views.filterNotNull())
+            }
+        }
+        return true
     }
 
     /** The strip's Paste tool: the editor's own paste, so Hex never reads the clipboard itself. */
@@ -314,7 +391,7 @@ class HexKeyboard : InputMethodService() {
     private fun leaveEditor() {
         bar?.removeCallbacks(pendingLeave)
         viewing = false; watchClipboard()
-        view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
+        clearInline(); view?.reset(); view?.cancelGestures(); engine.leave(); nextEnglish = null; capture.cancel()
     }
     override fun onFinishInputView(finishingInput: Boolean) { leaveEditor(); super.onFinishInputView(finishingInput) }
     override fun onFinishInput() { leaveEditor(); super.onFinishInput() }

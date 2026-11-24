@@ -16,6 +16,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.animation.DecelerateInterpolator
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
@@ -51,6 +52,10 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
     private val idleRow = LinearLayout(context)
     private val statusText = TextView(context)
     private val slotRow = LinearLayout(context)
+    // Android's inline autofill suggestions (Labs › Keyboard › Password manager suggestions), in the
+    // slots' place while the service has any: its own chips, which Hex lays out and never reads.
+    private val inlineRow = HorizontalScrollView(context)
+    private val inlineChips = LinearLayout(context)
     private val slotViews = List(3) { FrameLayout(context) }
     private val words = List(3) { Word(context) }
     private val measurePaint = TextPaint()
@@ -147,6 +152,11 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
             slotRow.addView(slotViews[i], LinearLayout.LayoutParams(0, -1, 1f))
         }
         idleRow.addView(slotRow, LinearLayout.LayoutParams(0, -1, 1f))
+        inlineChips.gravity = Gravity.CENTER_VERTICAL
+        inlineRow.isHorizontalScrollBarEnabled = false
+        inlineRow.addView(inlineChips, FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT, -1))
+        inlineRow.visibility = GONE
+        idleRow.addView(inlineRow, LinearLayout.LayoutParams(0, -1, 1f))
         toolsRow.gravity = Gravity.CENTER_VERTICAL
         listOf(toolEmoji, toolPaste, toolSettings, toolUndo).forEach {
             toolsRow.addView(it, LinearLayout.LayoutParams(dp(40), -1))
@@ -302,15 +312,27 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         noticeClose.contentDescription = notice?.dismissLabel
         update()
     }
+    /** Android's inline autofill suggestions in the slots' place: the service's own views, in its
+     * order, which Hex lays out and never reads. An empty list brings the slots and their words
+     * back. A note or notice still has the line to itself, and the chips return after it. */
+    fun inlineSuggestions(views: List<View>) {
+        inlineChips.removeAllViews()
+        for (view in views) inlineChips.addView(view,
+            LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(30)).apply { marginEnd = dp(6) })
+        update()
+    }
     fun update() {
         // A dictation's note wins over the notice (Hex Preview's update line), which returns with the idle hint:
         // after typing, a tap or the next dictation.
         val spoken = idle && !choosing && noting
         val noted = idle && !choosing && notice != null && !spoken
         val undo = idle && !choosing && undoing && !noted
-        val show = idle && !choosing && !undo && !noted && offered.any { it != null }
+        // The service's own chips take the slots' place while it has any, and the strip shows nothing
+        // else beside them.
+        val chips = idle && !choosing && !spoken && !noted && !undo && inlineChips.childCount > 0
+        val show = idle && !choosing && !chips && !undo && !noted && offered.any { it != null }
         val tools = KeyboardTools.tools(enabled = ime.feedback.keyboardTools,
-            busy = !idle || choosing || show || undo || noted || hint != holdHint, secure = { ime.engine.secure },
+            busy = !idle || choosing || show || chips || undo || noted || hint != holdHint, secure = { ime.engine.secure },
             emoji = { ime.engine.emojiAvailable }, canUndo = { ime.engine.canUndoAutocorrection },
             clipboard = { clipboard.hasPrimaryClip() })
         noticeRow.visibility = if (noted) VISIBLE else GONE
@@ -321,13 +343,18 @@ internal class StripView(context: Context, private val ime: HexKeyboard, private
         (undoBox.layoutParams as LinearLayout.LayoutParams).apply {
             if ((weight == 0f) != shared) { width = if (shared) LinearLayout.LayoutParams.WRAP_CONTENT else 0; weight = if (shared) 0f else 1f; undoBox.layoutParams = this }
         }
+        inlineRow.visibility = if (chips) VISIBLE else GONE
         slotRow.visibility = if (show) VISIBLE else GONE
         toolsRow.visibility = if (tools.isNotEmpty()) VISIBLE else GONE
         toolEmoji.visibility = if (StripTool.Emoji in tools) VISIBLE else GONE
         toolPaste.visibility = if (StripTool.Paste in tools) VISIBLE else GONE
         toolUndo.visibility = if (StripTool.Undo in tools) VISIBLE else GONE
-        statusText.visibility = if (idle && !show && (!undo || spoken) && !noted && tools.isEmpty()) VISIBLE else GONE
-        menuKey.text = context.getString(when { choosing -> R.string.keyboard_menu_done; show || shared -> R.string.keyboard_menu_more; else -> R.string.keyboard_menu_open })
+        statusText.visibility = if (idle && !show && !chips && (!undo || spoken) && !noted && tools.isEmpty()) VISIBLE else GONE
+        menuKey.text = context.getString(when {
+            choosing -> R.string.keyboard_menu_done
+            show || shared || chips -> R.string.keyboard_menu_more
+            else -> R.string.keyboard_menu_open
+        })
         menuKey.contentDescription = context.getString(if (choosing) R.string.keyboard_menu_done else R.string.keyboard_menu)
     }
     /** The menu opened: the hint line shows its page's title and goes back a page when tapped. */

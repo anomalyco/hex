@@ -194,6 +194,8 @@ tasks.named("preBuild").configure { dependsOn(prepareSpeechModel, verifyInter, v
 
 dependencies {
     implementation("androidx.activity:activity-compose:1.10.1")
+    // The style bundle Android's password managers require to render inline suggestions in the strip.
+    implementation("androidx.autofill:autofill:1.1.0")
     implementation(platform("androidx.compose:compose-bom:2025.05.01"))
     implementation("androidx.compose.material3:material3")
     // The keyboard's emoji panel (Apache 2.0): categories, recents and skin tones, all kept on the device.
