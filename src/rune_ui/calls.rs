@@ -10,8 +10,8 @@
 use std::sync::mpsc::{Receiver, sync_channel};
 
 use super::controls::{
-    ButtonKind, CardRow, METRICS, Paint, button, card, icon_row, modal_sheet, note, setting_row,
-    toggle_row,
+    ButtonKind, CardRow, METRICS, ModalWidth, Paint, button, card, icon_row, modal_panel,
+    modal_sheet, note, setting_row, toggle_row,
 };
 use super::{Menu, Modal, Pane, Ui, icons};
 use crate::app_settings::{MeetingPolicy, MeetingProviderChoice};
@@ -21,8 +21,6 @@ use crate::desktop::i18n::{tr, tr_fill, tr_named};
 use crate::meeting::seen_calls::{self, SeenCall};
 use rune::{El, col, el, row, text};
 
-const MODAL_WIDTH: f32 = 560.0;
-const PADDING: f32 = 18.0;
 const ICON: f32 = 20.0;
 /// Minimum width of the answer column so last-seen dates align while leaving
 /// a clean gap beside the dropdown.
@@ -438,7 +436,6 @@ fn call_row(
 
 /// The sheet's scrim and panel, then the menus its rows opened.
 pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
-    let c = &p.k.c;
     let mut menus = Vec::new();
     let now_ms = ui
         .calls
@@ -462,45 +459,26 @@ pub(super) fn modal(ui: &Ui, p: Paint) -> Vec<El> {
             tr("Apps and websites show up here after Hex sees a call in them."),
             p.muted(),
         )
-        .mx(METRICS.row_px)
     } else {
         section("seen", tr("Apps and websites"), card(p, "card", table))
     };
-    let footer = row().key("footer").justify_end().child(
-        button(
-            p,
-            "close-calls",
-            tr("Done"),
-            ButtonKind::Secondary,
-            |ui: &mut Ui, _| close(ui),
-        )
-        .default_button(),
+    let panel = modal_panel(
+        p,
+        "calls-sheet",
+        tr("Calls"),
+        ModalWidth::Medium,
+        vec![card(p, "default", default_rows(ui, p, &mut menus)), list],
+        vec![
+            button(
+                p,
+                "close-calls",
+                tr("Done"),
+                ButtonKind::Secondary,
+                |ui: &mut Ui, _| close(ui),
+            )
+            .default_button(),
+        ],
     );
-    let panel = col()
-        .key("calls-sheet")
-        .role("dialog")
-        .label(tr("Calls"))
-        .w(MODAL_WIDTH)
-        .pt(PADDING)
-        .px(PADDING)
-        .pb(14.0)
-        .gap(16.0)
-        .radius(p.k.radius.xl)
-        .fill(c.bg_base)
-        .border(p.hair, c.border_weak)
-        // Presses inside the panel stay inside.
-        .on_press(|_: &mut Ui| {})
-        .child(
-            // On the cards' text rail, over the words below it.
-            text(tr("Calls"))
-                .key("title")
-                .font(p.k.ty.body_medium)
-                .color(p.text())
-                .mx(METRICS.row_px),
-        )
-        .child(card(p, "default", default_rows(ui, p, &mut menus)))
-        .child(list)
-        .child(footer);
     let mut layers = Vec::from(modal_sheet(p, "calls", panel, close));
     // A row's menu opens above the sheet.
     layers.extend(menus);

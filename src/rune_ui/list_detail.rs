@@ -14,7 +14,7 @@ use super::controls::{DESCRIPTION, METRICS, Paint, raised};
 /// text inside them lands on the title's edge.
 pub(super) const HANG: f32 = METRICS.gutter - METRICS.row_px;
 /// The list column's width, its hanging edge included.
-const LIST_W: f32 = 316.0;
+const LIST_W: f32 = METRICS.list_w;
 /// How far a list fades as rows slide under the search field.
 const LIST_FADE: (f32, f32) = (18.0, 28.0);
 /// The pane bar's thumb: 8 pt at rest and 10 under the pointer, inside the
@@ -39,11 +39,11 @@ pub(super) fn body(p: Paint, key: &str, list: El, detail: El) -> El {
             .grow(1.0)
             .shrink()
             .min_w(0.0)
-            .ml(12.0)
+            .ml(METRICS.split_gap)
             .mr(HANG)
             .mb(HANG)
-            .px(24.0)
-            .pt(20.0)
+            .px(METRICS.detail_pad)
+            .pt(METRICS.detail_pad)
             .clip_soft(0.0)
             .child(detail),
     )
@@ -75,19 +75,17 @@ pub(super) fn notices(children: Vec<El>) -> El {
         .children(children)
 }
 
-/// A group heading inside a list (a task, a day), on the rows' text edge,
-/// `indent` further in when the rows lead with an icon, so it shares their
-/// words' rail.
-pub(super) fn group(p: Paint, key: &str, label: &str, first: bool, indent: f32) -> El {
+/// A group heading inside a list (a task, a day), on the rows' text rail
+/// over any leading icons, as section labels sit over settings rows.
+pub(super) fn group(p: Paint, key: &str, label: &str, first: bool) -> El {
     text(label)
         .key(key)
         .role("heading")
         .level(3)
         .font(p.k.ty.small_medium)
         .color(p.faint())
-        .pl(METRICS.row_px + indent)
-        .pr(METRICS.row_px)
-        .pt(if first { 0.0 } else { 18.0 })
+        .px(METRICS.row_px)
+        .pt(if first { 0.0 } else { 16.0 })
         .pb(6.0)
 }
 
@@ -120,13 +118,9 @@ pub(super) struct Item {
     pub(super) selected: bool,
 }
 
-/// The size of a row's leading icon, about the meta line's height.
-const LEADING_ICON: f32 = 14.0;
-/// Between a row's leading icon and its words.
-const LEADING_GAP: f32 = 10.0;
-/// Where a list's group headings start when its rows lead with an icon: on
-/// the words' edge, past the icon column.
-pub(super) const LEADING_INDENT: f32 = LEADING_ICON + LEADING_GAP;
+/// Leading icon size and gap, matching settings rows' `METRICS.icon_lead`.
+const LEADING_ICON: f32 = METRICS.icon;
+const LEADING_GAP: f32 = METRICS.icon_lead - METRICS.icon;
 
 /// One selectable list row with a small faint icon before its title when
 /// `leading` is set; assistive technology hears the title alone.
@@ -169,7 +163,7 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
     .join(" · ");
     let time = text(item.time)
         .key("time")
-        .font(p.k.ty.small)
+        .font(p.tabular(p.meta()))
         .color(p.faint())
         .align(Align::End)
         .a11y_hidden();
@@ -232,8 +226,9 @@ pub(super) fn item_body(p: Paint, item: Item, leading: Option<&'static Icon>) ->
         .role("listitem")
         .label(item.title)
         .description(described)
+        .min_h(METRICS.item_h)
         .px(METRICS.row_px)
-        .py(9.0)
+        .py(8.0)
         .gap(LEADING_GAP)
         .items_start()
         .radius(p.k.radius.md)
@@ -270,7 +265,7 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
                 .key("title")
                 .grow(1.0)
                 .shrink()
-                .gap(3.0)
+                .gap(4.0)
                 .child(title)
                 .child(row().key("meta").gap(8.0).center_y().children(meta)),
         )
@@ -286,7 +281,7 @@ pub(super) fn card_header(title: El, meta: Vec<El>, actions: Vec<El>) -> El {
 }
 
 /// The detail card's heading, a clear step above the 14 pt body.
-pub(super) const CARD_HEADING: rune::TextStyle = rune::TextStyle::new(18.0, 600.0).lh(24.0);
+pub(super) const CARD_HEADING: rune::TextStyle = super::controls::DISPLAY;
 
 /// [`card_title`] at [`CARD_HEADING`], for the meeting's card.
 pub(super) fn card_heading(p: Paint, title: &str) -> El {
@@ -294,7 +289,7 @@ pub(super) fn card_heading(p: Paint, title: &str) -> El {
         .key("detail-title")
         .role("heading")
         .level(2)
-        .font(CARD_HEADING)
+        .font(p.display())
         .color(p.text())
         .wrap()
 }
@@ -305,7 +300,7 @@ pub(super) fn card_rule(p: Paint) -> El {
     el().key("detail-rule")
         .h(p.hair)
         .mt(16.0)
-        .mx(-24.0)
+        .mx(-METRICS.detail_pad)
         .fill(p.k.c.border_weak)
         .a11y_hidden()
 }
@@ -427,7 +422,7 @@ pub(super) fn empty_state(
                 .color(p.muted())
                 .align(Align::Center)
                 .wrap()
-                .w(300.0)
+                .w(METRICS.copy_w)
         }))
 }
 
@@ -446,14 +441,14 @@ pub(super) fn facts(p: Paint, facts: Vec<(&str, String)>) -> El {
         list = list.child(
             row()
                 .key(format!("fact{index}"))
-                .py(9.0)
+                .py(8.0)
                 .gap(16.0)
                 .child(
                     text(label)
                         .key("label")
                         .font(DESCRIPTION)
                         .color(p.muted())
-                        .w(112.0),
+                        .w(METRICS.fact_label_w),
                 )
                 .child(
                     text(value)

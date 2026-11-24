@@ -189,12 +189,12 @@ impl Pane {
 const SIDEBAR_TOP: f32 = if cfg!(target_os = "macos") {
     40.0
 } else {
-    12.0
+    20.0
 };
 
 /// Sidebar rows follow OpenCode Desktop's settings navigation: 28 pt rows
 /// with a 4 pt gap, so each row's highlight stays its own.
-pub(super) const NAV_ROW_HEIGHT: f32 = 28.0;
+pub(super) const NAV_ROW_HEIGHT: f32 = METRICS.row_h_compact;
 pub(super) const NAV_ROW_GAP: f32 = 4.0;
 
 /// On macOS the sidebar and the pane header stand in for the title bar the
@@ -213,7 +213,7 @@ pub(super) fn title_bar(element: El) -> El {
 pub(super) fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Vec<El>) -> El {
     title_bar(row())
         .key("pane-header")
-        .h(52.0)
+        .h(METRICS.header_h)
         .px(METRICS.gutter)
         .gap(8.0)
         .center_y()
@@ -222,7 +222,7 @@ pub(super) fn pane_header(p: Paint, title: &str, switch: Option<El>, actions: Ve
                 .key("pane-title")
                 .role("heading")
                 .level(1)
-                .font(p.k.ty.body_medium)
+                .font(p.title())
                 .color(p.text())
                 .shrink()
                 .truncate(),
@@ -260,8 +260,7 @@ pub(super) fn sidebar(ui: &Ui, p: Paint) -> El {
         .h_full()
         .pt(SIDEBAR_TOP - NAV_ROW_GAP / 2.0)
         .pb(12.0)
-        .pl(10.0)
-        .pr(6.0)
+        .px(8.0)
         .child(nav.grow(1.0))
         .child(footer(ui, p))
 }
@@ -461,7 +460,7 @@ fn version_line(ui: &Ui, p: Paint, version: El) -> El {
                 .px(6.0)
                 .gap(4.0)
                 .center_y()
-                .radius(8.0)
+                .radius(p.k.radius.lg)
                 .border(p.hair.max(0.5), c.border_muted)
                 .child(
                     controls::status_dot(c.text_faint)
