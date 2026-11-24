@@ -45,3 +45,12 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
         "Диктуйте, пока идёт запись: текст вставится как обычно, а запись продолжится",
     ),
 ];
+
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Dictate while annotating", "Diktálás Annotate közben"),
+    (
+        "Dictate while a capture records: the text pastes as usual, and the capture keeps going",
+        "Diktálj, miközben egy rögzítés készül: a szöveg a szokásos módon beillesztődik, a rögzítés pedig folytatódik",
+    ),
+];

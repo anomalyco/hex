@@ -1,6 +1,6 @@
 //! Labs › Screenshots' recording strings, kept beside [`super::TRANSLATIONS`]
-//! and the French, Portuguese, and Russian tables so those stay under the
-//! source cap.
+//! and the French, Hungarian, Portuguese, and Russian tables so those stay
+//! under the source cap.
 
 use std::collections::HashMap;
 
@@ -9,6 +9,7 @@ use std::collections::HashMap;
 #[derive(Clone, Copy)]
 pub(super) enum Language {
     French,
+    Hungarian,
     Portuguese,
     Russian,
 }
@@ -32,6 +33,19 @@ pub(super) fn merged(
             super::transcript_edits::FRENCH,
             super::routing::FRENCH,
             super::meeting_mute::FRENCH,
+        ],
+        Language::Hungarian => &[
+            HUNGARIAN,
+            super::agents::HUNGARIAN,
+            super::signature::HUNGARIAN,
+            super::style::HUNGARIAN,
+            super::hud_height::HUNGARIAN,
+            super::voice_isolation::HUNGARIAN,
+            super::annotate_dictation::HUNGARIAN,
+            super::calls::HUNGARIAN,
+            super::transcript_edits::HUNGARIAN,
+            super::routing::HUNGARIAN,
+            super::meeting_mute::HUNGARIAN,
         ],
         Language::Portuguese => &[
             PORTUGUESE,
@@ -169,4 +183,29 @@ pub(super) const RUSSIAN: &[(&str, &str)] = &[
     ("Display {}", "Дисплей {}"),
     ("Export size", "Размер экспорта"),
     ("Pause", "Пауза"),
+];
+
+#[rustfmt::skip]
+pub(super) const HUNGARIAN: &[(&str, &str)] = &[
+    ("Scale Retina to 1x", "Retina méretezése 1x-re"),
+    ("Max resolution", "Max. felbontás"),
+    ("Frame rate", "Képsebesség"),
+    ("Quality", "Minőség"),
+    ("30 fps", "30 fps"),
+    ("60 fps", "60 fps"),
+    ("High", "Magas"),
+    ("Medium", "Közepes"),
+    ("Low", "Alacsony"),
+    ("1440p", "1440p"),
+    ("1080p", "1080p"),
+    ("720p", "720p"),
+    ("Full screen", "Teljes képernyő"),
+    ("No microphone", "Nincs mikrofon"),
+    ("Computer audio", "Számítógép hangja"),
+    ("Options", "Opciók"),
+    ("Same as dictation", "Ugyanaz, mint a diktálásnál"),
+    ("Record computer audio", "Számítógép hangjának felvétele"),
+    ("Display {}", "Kijelző {}"),
+    ("Export size", "Exportálási méret"),
+    ("Pause", "Szünet"),
 ];

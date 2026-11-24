@@ -61,14 +61,15 @@ number, negation, or protected number run, link, path, code, or quote that
 does not survive verbatim keeps the corrected transcript.
 General › Advanced › Interface language offers Português (Brasil), and Hex
 uses it for any Portuguese system language (#867); it also offers Français,
-used for any French system language (#892), and Русский, used for any
-Russian system language (#1317). None of these has had a native speaker's
-review yet. It offers 简体中文 (`zh`) and 繁體中文 (`zh-Hant`, #944);
-Traditional Chinese is drafted from the Simplified strings by a character and
-Taiwan-usage phrase converter (`desktop/i18n/traditional_chinese.rs`), not yet
-reviewed by a native speaker. Meeting times in the Meetings pane, the macOS
-calendar card, and the exported transcript and notes are 12-hour ("2:30 PM")
-in English and 24-hour ("14:30") in every other interface language.
+used for any French system language (#892), Русский, used for any Russian
+system language (#1317), and Magyar, used for any Hungarian system language.
+None of these has had a native speaker's review yet. It offers 简体中文 (`zh`)
+and 繁體中文 (`zh-Hant`, #944); Traditional Chinese is drafted from the
+Simplified strings by a character and Taiwan-usage phrase converter
+(`desktop/i18n/traditional_chinese.rs`), not yet reviewed by a native
+speaker. Meeting times in the Meetings pane, the macOS calendar card, and
+the exported transcript and notes are 12-hour ("2:30 PM") in English and
+24-hour ("14:30") in every other interface language.
 The [vocabulary](vocabulary.md) biases transcription toward names you list; its
 Labs › Vocabulary files toggle (off by default, every OS) imports terms from a
 CSV file into the Vocabulary sheet and exports the list as one.
